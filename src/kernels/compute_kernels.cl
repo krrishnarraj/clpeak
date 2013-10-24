@@ -1,7 +1,8 @@
 MSTRINGIFY(
 
-// Blank
-__kernel
+__kernel void compute()
+{
+}
 
 
 

@@ -1,5 +1,6 @@
 
 cmake_minimum_required(VERSION 2.6)
+project(clPeak)
 
 # Determine machine bitness
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -12,8 +13,8 @@ endif()
 find_path( OPENCL_INCLUDES
 	NAMES CL/cl.h OpenCL/cl.h
     HINTS
-		$ENV{INTELOCLSDKROOT}/include
         $ENV{AMDAPPSDKROOT}/include
+        $ENV{INTELOCLSDKROOT}/include
         $ENV{CUDA_PATH}/include
         $ENV{OPENCL_ROOT}/include
 	PATHS
@@ -26,8 +27,8 @@ if(BITNESS EQUAL 64)
     find_library( OPENCL_LIBS
         NAMES OpenCL
         HINTS
-            $ENV{INTELOCLSDKROOT}/lib
             $ENV{AMDAPPSDKROOT}/lib
+            $ENV{INTELOCLSDKROOT}/lib
             $ENV{CUDA_PATH}/lib
             $ENV{OPENCL_ROOT}/lib
         PATH_SUFFIXES x86_64 x64
@@ -54,11 +55,16 @@ if( (NOT OPENCL_INCLUDES) OR (NOT OPENCL_LIBS) )
     message( FATAL_ERROR "Could not find OpenCL include/libs. Sepcify env variable OPENCL_ROOT" )
 endif()
 
-project(clPeak)
 include_directories(${OPENCL_INCLUDES} "src/include" "src/kernels")
 
+if(CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(" -std=gnu++11 ")
+endif()
+
 set(SOURCE_FILES
+    src/common.cpp
     src/clPeak.cpp
+    src/main.cpp
     )
 
 add_executable(clPeak ${SOURCE_FILES})
