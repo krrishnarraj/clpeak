@@ -3,29 +3,28 @@
 
 #define __CL_ENABLE_EXCEPTIONS
 
-#define ITEMS_PER_CU    4096
-#define PROFILE_ITERS   100
+#define PROFILE_ITERS   20
 
 #include <iostream>
 #include <stdio.h>
+#include <iomanip>
 #include <string.h>
 #include <CL/cl.hpp>
 #include <common.h>
 
 using namespace std;
-using namespace cl;
 
 class clPeak
 {
-    public:
+public:
 
-        bool verbose;
+    bool verbose;
 
-        int parseArgs(int argc, char **argv);
+    int parseArgs(int argc, char **argv);
         
-        int runBandwidthTest(CommandQueue &queue, Program &prog, device_info_t &devInfo); 
+    int runBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo); 
 
-        int runAll();
+    int runAll();
 };
 
 #endif  // CLPEAK_HPP

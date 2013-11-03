@@ -8,25 +8,34 @@
 #define NEWLINE         "\n"
 #define uint            unsigned int
 
-// Initialize timer
-#define INIT_TIMER(timer_id)                            \
-    auto timer_id = chrono::high_resolution_clock::now()
 
-// Return elapsed time in micro-seconds
-#define ELAPSED_TIME(timer_id)                          \
-    (chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - timer_id).count()) 
+class Timer
+{
+public:
 
+    std::chrono::high_resolution_clock::time_point tick, tock;
+
+    void start();
+
+    // Stop and return time in micro-seconds
+    float stopAndTime();
+};
+    
 
 typedef struct {
     uint numCUs;
     uint maxWGSize;
+    uint maxAllocSize;
+    uint maxGlobalSize;
     
 } device_info_t;
 
 device_info_t getDeviceInfo(cl::Device &d);
 
-int populate(float *ptr, uint N);
-int populate(double *ptr, uint N);
+uint roundToPowOf2(uint number);
+
+void populate(float *ptr, uint N);
+void populate(double *ptr, uint N);
 
 #endif  // COMMON_H
 
