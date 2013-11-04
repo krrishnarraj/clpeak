@@ -36,7 +36,8 @@ void populate(float *ptr, uint N)
 
     for(int i=0; i<(int)N; i++)
     {
-        ptr[i] = (float)rand();
+        //ptr[i] = (float)rand();
+        ptr[i] = (float)i;
     }
 }
 
@@ -46,7 +47,8 @@ void populate(double *ptr, uint N)
 
     for(int i=0; i<(int)N; i++)
     {
-        ptr[i] = (double)rand();
+        //ptr[i] = (double)rand();
+        ptr[i] = (double)i;
     }
 }
 

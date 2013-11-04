@@ -79,7 +79,7 @@ endif()
 
 set(SOURCE_FILES
     src/common.cpp
-    src/clPeak.cpp
+    src/clpeak.cpp
     src/main.cpp
     )
 
