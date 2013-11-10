@@ -27,6 +27,8 @@ public:
     int runBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     
     int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+    
+    int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
     int runAll();
 };

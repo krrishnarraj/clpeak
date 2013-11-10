@@ -1,6 +1,8 @@
 
 #include <common.h>
 #include <math.h>
+#include <iostream>
+#include <string>
 
 using namespace std;
 
@@ -12,6 +14,11 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.maxWGSize = d.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
     devInfo.maxAllocSize = d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
     devInfo.maxGlobalSize = d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+    devInfo.doubleSupported = false;
+    
+    std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
+    if((extns.find("cl_khr_fp64") != std::string::npos) || (extns.find("cl_amd_fp64") != std::string::npos))
+        devInfo.doubleSupported = true;
     
     return devInfo;
 }
@@ -52,10 +59,12 @@ void populate(double *ptr, uint N)
     }
 }
 
+#define MAX_POWER   25
 uint roundToPowOf2(uint number)
 {
-    float logd = log2(number);
+    float logd = log(number) / log(2);
     logd = floor(logd);
+    logd = MIN(logd, MAX_POWER);
     
     return pow(2, (int)logd);
 }

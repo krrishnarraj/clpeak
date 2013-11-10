@@ -8,6 +8,12 @@
 #define NEWLINE         "\n"
 #define uint            unsigned int
 
+#define MAX(X, Y)       \
+    (X > Y)? X: Y;
+    
+#define MIN(X, Y)       \
+    (X < Y)? X: Y;
+
 
 class Timer
 {
@@ -27,6 +33,7 @@ typedef struct {
     uint maxWGSize;
     uint maxAllocSize;
     uint maxGlobalSize;
+    bool doubleSupported;
     
 } device_info_t;
 

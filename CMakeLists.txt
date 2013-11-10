@@ -80,6 +80,9 @@ endif()
 set(SOURCE_FILES
     src/common.cpp
     src/clpeak.cpp
+    src/bandwidth.cpp
+    src/compute_sp.cpp
+    src/compute_dp.cpp
     src/main.cpp
     )
 
