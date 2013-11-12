@@ -1,14 +1,18 @@
 MSTRINGIFY(
 
-#if defined(cl_khr_fp64)
-    #pragma OPENCL EXTENSION cl_khr_fp64 : enable
-    #define DOUBLE_AVAILABLE
-#elif defined(cl_amd_fp64)
-    #pragma OPENCL EXTENSION cl_amd_fp64 : enable
-    #define DOUBLE_AVAILABLE
-#endif
+// Stringifying requires a new line after hash defines 
 
-#ifdef DOUBLE_AVAILABLE
+\n#if defined(cl_khr_fp64)
+\n  #pragma OPENCL EXTENSION cl_khr_fp64 : enable
+\n  #define DOUBLE_AVAILABLE
+\n#elif defined(cl_amd_fp64)
+\n  #pragma OPENCL EXTENSION cl_amd_fp64 : enable
+\n  #define DOUBLE_AVAILABLE
+\n#endif
+\n
+\n#ifdef DOUBLE_AVAILABLE
+\n
+
 
 __kernel void compute_dp_v1(__global double *ptr, double _A, double _B)
 {
@@ -17,7 +21,8 @@ __kernel void compute_dp_v1(__global double *ptr, double _A, double _B)
     double x;
     double y;
     
-    x = mad(A, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
+    x = mad(A, B, (A + (double)get_global_id(0)));
+    y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
@@ -61,7 +66,8 @@ __kernel void compute_dp_v2(__global double2 *ptr, double _A, double _B)
     double2 x;
     double2 y;
     
-    x = mad(A, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
+    x = mad(A, B, (A + (double2)get_global_id(0)));
+    y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
@@ -88,7 +94,8 @@ __kernel void compute_dp_v4(__global double4 *ptr, double _A, double _B)
     double4 x;
     double4 y;
     
-    x = mad(A, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
+    x = mad(A, B, (A + (double4)get_global_id(0)));
+    y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
@@ -116,7 +123,8 @@ __kernel void compute_dp_v8(__global double8 *ptr, double _A, double _B)
     double8 x;
     double8 y;
     
-    x = mad(A, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
+    x = mad(A, B, (A + (double8)get_global_id(0)));
+    y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
@@ -135,7 +143,8 @@ __kernel void compute_dp_v16(__global double16 *ptr, double _A, double _B)
     double16 x;
     double16 y;
     
-    x = mad(A, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
+    x = mad(A, B, (A + (double16)get_global_id(0)));
+    y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
     x = mad(y, B, A);   y = mad(A, x, B);   x = mad(y, A, B);   y = mad(x, B, A);
@@ -143,7 +152,9 @@ __kernel void compute_dp_v16(__global double16 *ptr, double _A, double _B)
     ptr[get_global_id(0)] = y;
 }
 
-#endif      // DOUBLE_AVAILABLE
+\n
+\n#endif      // DOUBLE_AVAILABLE
+\n
 
 )
 
