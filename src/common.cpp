@@ -12,6 +12,10 @@ device_info_t getDeviceInfo(cl::Device &d)
     
     devInfo.numCUs = d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
     devInfo.maxWGSize = d.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+    // Limiting max work-group size to 256
+    #define MAX_WG_SIZE 256
+    devInfo.maxWGSize = MIN(devInfo.maxWGSize, MAX_WG_SIZE);
+    
     devInfo.maxAllocSize = d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
     devInfo.maxGlobalSize = d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
     devInfo.doubleSupported = false;
@@ -22,19 +26,6 @@ device_info_t getDeviceInfo(cl::Device &d)
     
     return devInfo;
 }
-
-
-void Timer::start()
-{
-    tick = chrono::high_resolution_clock::now();
-}
-
-float Timer::stopAndTime()
-{
-    tock = chrono::high_resolution_clock::now();
-    return (chrono::duration_cast<chrono::microseconds>(tock - tick).count());
-}
-
 
 
 void populate(float *ptr, uint N)

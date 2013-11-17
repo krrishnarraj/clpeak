@@ -57,25 +57,12 @@ elseif(BITNESS EQUAL 32)
 endif()
 
 if( (NOT OPENCL_INCLUDES) OR (NOT OPENCL_LIBS) )
-    message( FATAL_ERROR "Could not find OpenCL include/libs. Download AMD APP SDK "
+    message( FATAL_ERROR "Could not find OpenCL include/libs. Set OPENCL_ROOT to your OpenCL SDK. Download AMD APP SDK "
             "http://developer.amd.com/tools-and-sdks/heterogeneous-computing/amd-accelerated-parallel-processing-app-sdk/ for x86/x64 "
             "or pocl http://pocl.sourceforge.net/ for ARM systems" )
 endif()
 
 include_directories(${OPENCL_INCLUDES} "src/include" "src/kernels")
-
-
-if(CMAKE_COMPILER_IS_GNUCXX)
-    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion OUTPUT_VARIABLE GCC_VERSION)
-    if(GCC_VERSION VERSION_GREATER 4.7 OR GCC_VERSION VERSION_EQUAL 4.7)
-        add_definitions("-std=gnu++11")
-    elseif(GCC_VERSION VERSION_GREATER 4.3 OR GCC_VERSION VERSION_EQUAL 4.3)
-        add_definitions("-std=gnu++0x")
-    else()
-        message(FATAL_ERROR "C++11 needed. Therefore a gcc compiler with a version higher than 4.3 is needed.")   
-    endif()
-endif()
-
 
 set(SOURCE_FILES
     src/common.cpp

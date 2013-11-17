@@ -1,8 +1,13 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <CL/cl.hpp>
-#include <chrono>
+#if defined(__APPLE__) || defined(__MACOSX)
+    #include <OpenCL/cl.hpp>
+#else
+    #include <CL/cl.hpp>
+#endif
+
+#include <stdlib.h>
 
 #define TAB             "  "
 #define NEWLINE         "\n"
@@ -14,19 +19,6 @@
 #define MIN(X, Y)       \
     (X < Y)? X: Y;
 
-
-class Timer
-{
-public:
-
-    std::chrono::high_resolution_clock::time_point tick, tock;
-
-    void start();
-
-    // Stop and return time in micro-seconds
-    float stopAndTime();
-};
-    
 
 typedef struct {
     uint numCUs;

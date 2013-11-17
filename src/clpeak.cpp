@@ -1,15 +1,57 @@
 #include <clpeak.h>
 
-#define MSTRINGIFY(A) #A
+#define MSTRINGIFY(A...) #A
 
-static const char* stringifiedKernels = 
+static const char *stringifiedKernels = 
 #include "bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_dp_kernels.cl"
 ;
 
+static const char *helpStr = 
+"\n clpeak [-p, --platform num] [-d, --device num]"
+"\n -p, --platform num          choose platform (num starts with 0)"
+"\n -d, --device num            choose device   (num starts with 0)"
+"\n -h, --help                  display help message"
+"\n"
+;
+
+
+clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1)
+{}
+
 int clPeak::parseArgs(int argc, char **argv)
 {
+    for(int i=1; i<argc; i++)
+    {
+        if((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))
+        {
+            cout << helpStr << endl;
+            exit(0);
+        } else
+        if((strcmp(argv[i], "-p") == 0) || (strcmp(argv[i], "--platform") == 0))
+        {
+            if((i+1) < argc)
+            {
+                forcePlatform = true;
+                specifiedPlatform = atoi(argv[i+1]);
+                i++;
+            }
+        } else
+        if((strcmp(argv[i], "-d") == 0) || (strcmp(argv[i], "--device") == 0))
+        {
+            if((i+1) < argc)
+            {
+                forceDevice = true;
+                specifiedDevice = atoi(argv[i+1]);
+                i++;
+            }
+        } else
+        {
+            cout << helpStr << endl;
+            exit(-1);
+        }
+    }
     return 0;
 }
 
@@ -23,6 +65,9 @@ int clPeak::runAll()
 
         for(int p=0; p < (int)platforms.size(); p++)
         {
+            if(forcePlatform && (p != specifiedPlatform))
+                continue;
+            
             cout << NEWLINE "Platform: " << platforms[p].getInfo<CL_PLATFORM_NAME>() << endl;
             
             cl_context_properties cps[3] = { 
@@ -46,11 +91,14 @@ int clPeak::runAll()
             
             for(int d=0; d < (int)devices.size(); d++)
             {
+                if(forceDevice && (d != specifiedDevice))
+                    continue;
+                
                 cout << TAB "Device: " << devices[d].getInfo<CL_DEVICE_NAME>() << endl;
                 cout << TAB TAB "Driver version: " << devices[d].getInfo<CL_DRIVER_VERSION>() << endl;
                 
                 device_info_t devInfo = getDeviceInfo(devices[d]);
-                cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d]);
+                cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
                 
                 runBandwidthTest(queue, prog, devInfo);
                 runComputeSP(queue, prog, devInfo);

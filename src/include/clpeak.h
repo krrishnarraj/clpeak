@@ -5,13 +5,18 @@
 
 #define WGS_PER_CU                  2048
 #define PROFILE_ITERS_BANDWIDTH     20
-#define PROFILE_ITERS_COMPUTE       100
+#define PROFILE_ITERS_COMPUTE       50
+
+#if defined(__APPLE__) || defined(__MACOSX)
+    #include <OpenCL/cl.hpp>
+#else
+    #include <CL/cl.hpp>
+#endif
 
 #include <iostream>
 #include <stdio.h>
 #include <iomanip>
 #include <string.h>
-#include <CL/cl.hpp>
 #include <common.h>
 
 using namespace std;
@@ -20,7 +25,10 @@ class clPeak
 {
 public:
 
-    bool verbose;
+    bool forcePlatform, forceDevice;
+    int specifiedPlatform, specifiedDevice;
+    
+    clPeak();
 
     int parseArgs(int argc, char **argv);
         
