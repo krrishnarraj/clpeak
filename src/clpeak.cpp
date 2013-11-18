@@ -1,6 +1,6 @@
 #include <clpeak.h>
 
-#define MSTRINGIFY(A...) #A
+#define MSTRINGIFY(...) #__VA_ARGS__
 
 static const char *stringifiedKernels = 
 #include "bandwidth_kernels.cl"

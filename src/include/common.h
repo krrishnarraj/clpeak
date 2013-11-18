@@ -8,6 +8,7 @@
 #endif
 
 #include <stdlib.h>
+#include <time.h>
 
 #define TAB             "  "
 #define NEWLINE         "\n"

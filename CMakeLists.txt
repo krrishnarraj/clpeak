@@ -60,6 +60,9 @@ if( (NOT OPENCL_INCLUDES) OR (NOT OPENCL_LIBS) )
     message( FATAL_ERROR "Could not find OpenCL include/libs. Set OPENCL_ROOT to your OpenCL SDK. Download AMD APP SDK "
             "http://developer.amd.com/tools-and-sdks/heterogeneous-computing/amd-accelerated-parallel-processing-app-sdk/ for x86/x64 "
             "or pocl http://pocl.sourceforge.net/ for ARM systems" )
+else()
+    message(STATUS "Selected OpenCL includes from ${OPENCL_INCLUDES}")
+    message(STATUS "Selected OpenCL lib ${OPENCL_LIBS}")
 endif()
 
 include_directories(${OPENCL_INCLUDES} "src/include" "src/kernels")

@@ -56,13 +56,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     {
         queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
         queue.finish();
-        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>();
-        timed += (end - start) / 1e3;
+        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1e3;
+        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1e3;
+        timed += (end - start);
     }
     timed /= PROFILE_ITERS_COMPUTE;
 
-    gflops = (globalWIs * workPerWI) / timed / 1e3;
+    gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
     cout << TAB TAB TAB "float   : " << gflops << endl;
     ///////////////////////////////////////////////////////////////////////////
     
@@ -78,13 +78,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     {
         queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
         queue.finish();
-        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>();
-        timed += (end - start) / 1e3;
+        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1e3;
+        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1e3;
+        timed += (end - start);
     }
     timed /= PROFILE_ITERS_COMPUTE;
 
-    gflops = (globalWIs * workPerWI) / timed / 1e3;
+    gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
     cout << TAB TAB TAB "float2  : " << gflops << endl;
     ///////////////////////////////////////////////////////////////////////////
     
@@ -100,13 +100,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     {
         queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
         queue.finish();
-        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>();
-        timed += (end - start) / 1e3;
+        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1e3;
+        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1e3;
+        timed += (end - start);
     }
     timed /= PROFILE_ITERS_COMPUTE;
 
-    gflops = (globalWIs * workPerWI) / timed / 1e3;
+    gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
     cout << TAB TAB TAB "float4  : " << gflops << endl;
     ///////////////////////////////////////////////////////////////////////////
     
@@ -122,13 +122,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     {
         queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
         queue.finish();
-        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>();
-        timed += (end - start) / 1e3;
+        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1e3;
+        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1e3;
+        timed += (end - start);
     }
     timed /= PROFILE_ITERS_COMPUTE;
 
-    gflops = (globalWIs * workPerWI) / timed / 1e3;
+    gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
     cout << TAB TAB TAB "float8  : " << gflops << endl;
     ///////////////////////////////////////////////////////////////////////////
     
@@ -144,13 +144,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     {
         queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
         queue.finish();
-        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>();
-        timed += (end - start) / 1e3;
+        cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1e3;
+        cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1e3;
+        timed += (end - start);
     }
     timed /= PROFILE_ITERS_COMPUTE;
 
-    gflops = (globalWIs * workPerWI) / timed / 1e3;
+    gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
     cout << TAB TAB TAB "float16 : " << gflops << endl;
     ///////////////////////////////////////////////////////////////////////////
 
