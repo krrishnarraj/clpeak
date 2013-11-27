@@ -3,10 +3,6 @@
 
 #define __CL_ENABLE_EXCEPTIONS
 
-#define WGS_PER_CU                  2048
-#define PROFILE_ITERS_BANDWIDTH     20
-#define PROFILE_ITERS_COMPUTE       50
-
 #if defined(__APPLE__) || defined(__MACOSX)
     #include <OpenCL/cl.hpp>
 #else
@@ -32,11 +28,15 @@ public:
 
     int parseArgs(int argc, char **argv);
         
-    int runBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+    int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     
     int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     
     int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+    
+    int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+    
+    int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
     int runAll();
 };

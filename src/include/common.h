@@ -19,6 +19,26 @@
     
 #define MIN(X, Y)       \
     (X < Y)? X: Y;
+    
+#if defined(__APPLE__) || defined(__MACOSX)
+    #define OS_NAME         "Macintosh"
+#elif defined(__ANDROID__)
+    #define OS_NAME         "Android"
+#elif defined(_WIN32)
+    #if defined(__WIN64)
+        #define OS_NAME     "Win64"
+    #else
+        #define OS_NAME     "Win32"
+    #endif
+#elif defined(__linux__)
+    #if defined(__x86_64__)
+        #define OS_NAME     "Linux x64"
+    #elif defined(__i386__)
+        #define OS_NAME     "Linux x86"
+    #elif defined(__arm__)
+        #define OS_NAME     "Linux ARM"
+    #endif
+#endif
 
 
 typedef struct {
@@ -27,6 +47,13 @@ typedef struct {
     uint maxAllocSize;
     uint maxGlobalSize;
     bool doubleSupported;
+    cl_device_type  deviceType;
+    
+    // Test specific options
+    int gloalBWIters;
+    int computeWgsPerCU;
+    int computeIters;
+    int transferBWIters;
     
 } device_info_t;
 

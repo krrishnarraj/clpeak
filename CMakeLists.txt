@@ -70,9 +70,10 @@ include_directories(${OPENCL_INCLUDES} "src/include" "src/kernels")
 set(SOURCE_FILES
     src/common.cpp
     src/clpeak.cpp
-    src/bandwidth.cpp
+    src/global_bandwidth.cpp
     src/compute_sp.cpp
     src/compute_dp.cpp
+    src/transfer_bandwidth.cpp
     src/main.cpp
     )
 

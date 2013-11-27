@@ -23,6 +23,20 @@ device_info_t getDeviceInfo(cl::Device &d)
     std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
     if((extns.find("cl_khr_fp64") != std::string::npos) || (extns.find("cl_amd_fp64") != std::string::npos))
         devInfo.doubleSupported = true;
+        
+    devInfo.deviceType = d.getInfo<CL_DEVICE_TYPE>();
+    
+    if(devInfo.deviceType == CL_DEVICE_TYPE_CPU) {
+        devInfo.gloalBWIters = 20;
+        devInfo.computeWgsPerCU = 1024;
+        devInfo.computeIters = 20;
+        devInfo.transferBWIters = 20;
+    } else {            // GPU
+        devInfo.gloalBWIters = 50;
+        devInfo.computeWgsPerCU = 4096;
+        devInfo.computeIters = 50;
+        devInfo.transferBWIters = 20;
+    }
     
     return devInfo;
 }
@@ -50,7 +64,7 @@ void populate(double *ptr, uint N)
     }
 }
 
-#define MAX_POWER   25
+#define MAX_POWER   26
 uint roundToPowOf2(uint number)
 {
     float logd = log(number) / log(2);

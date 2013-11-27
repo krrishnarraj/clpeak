@@ -84,7 +84,7 @@ int clPeak::runAll()
             try {
                 prog.build(devices);
             }
-            catch (cl::Error error){
+            catch (cl::Error error) {
                 cerr << TAB "Build Log: " << prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << endl;
                 throw error;
             }
@@ -95,14 +95,16 @@ int clPeak::runAll()
                     continue;
                 
                 cout << TAB "Device: " << devices[d].getInfo<CL_DEVICE_NAME>() << endl;
-                cout << TAB TAB "Driver version: " << devices[d].getInfo<CL_DRIVER_VERSION>() << endl;
+                cout << TAB TAB "Driver version: " << devices[d].getInfo<CL_DRIVER_VERSION>() << " (" << OS_NAME << ")" << endl;
                 
                 device_info_t devInfo = getDeviceInfo(devices[d]);
                 cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
                 
-                runBandwidthTest(queue, prog, devInfo);
+                runGlobalBandwidthTest(queue, prog, devInfo);
                 runComputeSP(queue, prog, devInfo);
                 runComputeDP(queue, prog, devInfo);
+                runTransferBandwidthTest(queue, prog, devInfo);
+                runKernelLatency(queue, prog, devInfo);
                 
                 cout << NEWLINE;
             }
