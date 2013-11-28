@@ -6,9 +6,11 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     float timed, gflops;
     cl_uint workPerWI;
     cl::NDRange globalSize, localSize;
-    cl::Event timeEvent;
     cl_float A = 1.3f, B = 1.4f;
     int iters = devInfo.computeIters;
+    
+    if(!isComputeSP)
+        return 0;
     
     try
     {
@@ -57,6 +59,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -79,6 +82,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -101,6 +105,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -123,6 +128,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -145,6 +151,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;

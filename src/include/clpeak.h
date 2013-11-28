@@ -22,6 +22,7 @@ class clPeak
 public:
 
     bool forcePlatform, forceDevice;
+    bool isGlobalBW, isComputeSP, isComputeDP, isTransferBW, isKernelLatency;
     int specifiedPlatform, specifiedDevice;
     
     clPeak();

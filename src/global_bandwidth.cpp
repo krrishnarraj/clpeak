@@ -5,7 +5,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 {
     float timed, gbps;
     cl::NDRange globalSize, localSize;
-    cl::Event timeEvent;
+    
+    if(!isGlobalBW)
+        return 0;
     
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl_uint numItems = roundToPowOf2(devInfo.maxAllocSize / sizeof(float));
@@ -37,7 +39,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         localSize = devInfo.maxWGSize;
         
-        cout << TAB TAB "Memory bandwidth (GBPS)" << endl;
+        cout << TAB TAB "Global memory bandwidth (GBPS)" << endl;
         cout << setprecision(2) << fixed;
         
         ///////////////////////////////////////////////////////////////////////////
@@ -54,6 +56,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -76,6 +79,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -98,6 +102,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -120,6 +125,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -142,6 +148,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         timed = 0;
         for(int i=0; i<iters; i++)
         {
+            cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -160,11 +167,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         {
             cout << TAB TAB TAB "Out of resources! Skipped" << endl;
         } else {
+            if(arr)     delete [] arr;
             throw error;
         }
     }
 
-    delete [] arr;
+    if(arr)     delete [] arr;
     return 0;
 }
 

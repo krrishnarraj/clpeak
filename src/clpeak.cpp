@@ -9,16 +9,26 @@ static const char *stringifiedKernels =
 ;
 
 static const char *helpStr = 
-"\n clpeak [-p, --platform num] [-d, --device num]"
-"\n -p, --platform num          choose platform (num starts with 0)"
-"\n -d, --device num            choose device   (num starts with 0)"
-"\n -h, --help                  display help message"
+"\n clpeak [OPTIONS]"
+"\n"
+"\n OPTIONS:"
+"\n  -p, --platform num          choose platform (num starts with 0)"
+"\n  -d, --device num            choose device   (num starts with 0)"
+"\n  --global-bandwidth          Selectively run global bandwidth test"
+"\n  --compute-sp                Selectively run single precision compute test"
+"\n  --compute-dp                Selectively run double precision compute test"
+"\n  --transfer-bandwidth        Selectively run transfer bandwidth test"
+"\n  --kernel-latency            Selectively run kernel latency test"
+"\n  --all-tests                 Run all above tests [default]"
+"\n  -h, --help                  display help message"
 "\n"
 ;
 
 
-clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1)
-{}
+clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1),
+       isGlobalBW(true), isComputeSP(true), isComputeDP(true), isTransferBW(true), isKernelLatency(true)
+{
+}
 
 int clPeak::parseArgs(int argc, char **argv)
 {
@@ -46,6 +56,34 @@ int clPeak::parseArgs(int argc, char **argv)
                 specifiedDevice = atoi(argv[i+1]);
                 i++;
             }
+        } else
+        if((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--compute-sp") == 0)
+                || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0)
+                ||  (strcmp(argv[i], "--kernel-latency") == 0) )
+        {
+            // Disable all and enable only selected ones
+            isGlobalBW = isComputeSP = isComputeDP = isTransferBW = isKernelLatency = false;
+            
+            if(strcmp(argv[i], "--global-bandwidth") == 0) {
+                isGlobalBW = true;
+            } else
+            if(strcmp(argv[i], "--compute-sp") == 0) {
+                isComputeSP = true;
+            } else
+            if(strcmp(argv[i], "--compute-dp") == 0) {
+                isComputeDP = true;
+            } else
+            if(strcmp(argv[i], "--transfer-bandwidth") == 0) {
+                isTransferBW = true;
+            } else
+            if(strcmp(argv[i], "--kernel-latency") == 0) {
+                isKernelLatency = true;
+            }
+            
+        } else
+        if(strcmp(argv[i], "-all-tests") == 0)
+        {
+            isGlobalBW = isComputeSP = isComputeDP = isTransferBW = isKernelLatency = true;
         } else
         {
             cout << helpStr << endl;

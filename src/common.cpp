@@ -30,13 +30,13 @@ device_info_t getDeviceInfo(cl::Device &d)
         devInfo.gloalBWIters = 20;
         devInfo.computeWgsPerCU = 1024;
         devInfo.computeIters = 20;
-        devInfo.transferBWIters = 20;
     } else {            // GPU
         devInfo.gloalBWIters = 50;
         devInfo.computeWgsPerCU = 4096;
         devInfo.computeIters = 50;
-        devInfo.transferBWIters = 20;
     }
+    devInfo.transferBWIters = 20;
+    devInfo.kernelLatencyIters = 500;
     
     return devInfo;
 }

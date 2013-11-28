@@ -54,6 +54,7 @@ typedef struct {
     int computeWgsPerCU;
     int computeIters;
     int transferBWIters;
+    int kernelLatencyIters;
     
 } device_info_t;
 
