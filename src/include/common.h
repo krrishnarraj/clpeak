@@ -8,7 +8,7 @@
 #endif
 
 #include <stdlib.h>
-#include <time.h>
+#include <chrono>
 
 #define TAB             "  "
 #define NEWLINE         "\n"
@@ -25,7 +25,7 @@
 #elif defined(__ANDROID__)
     #define OS_NAME         "Android"
 #elif defined(_WIN32)
-    #if defined(__WIN64)
+    #if defined(_WIN64)
         #define OS_NAME     "Win64"
     #else
         #define OS_NAME     "Win32"
@@ -58,7 +58,22 @@ typedef struct {
     
 } device_info_t;
 
+class Timer
+{
+public:
+
+    std::chrono::high_resolution_clock::time_point tick, tock;
+
+    void start();
+
+    // Stop and return time in micro-seconds
+    float stopAndTime();
+};
+
 device_info_t getDeviceInfo(cl::Device &d);
+
+// Return time in us for the given event
+float timeInUS(cl::Event &timeEvent);
 
 uint roundToPowOf2(uint number);
 

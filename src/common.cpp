@@ -28,17 +28,39 @@ device_info_t getDeviceInfo(cl::Device &d)
     
     if(devInfo.deviceType == CL_DEVICE_TYPE_CPU) {
         devInfo.gloalBWIters = 20;
-        devInfo.computeWgsPerCU = 1024;
-        devInfo.computeIters = 20;
+        devInfo.computeWgsPerCU = 512;
+        devInfo.computeIters = 10;
     } else {            // GPU
         devInfo.gloalBWIters = 50;
-        devInfo.computeWgsPerCU = 4096;
-        devInfo.computeIters = 50;
+        devInfo.computeWgsPerCU = 2048;
+        devInfo.computeIters = 30;
     }
     devInfo.transferBWIters = 20;
-    devInfo.kernelLatencyIters = 500;
+    devInfo.kernelLatencyIters = 1000;
     
     return devInfo;
+}
+
+
+float timeInUS(cl::Event &timeEvent)
+{
+    cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
+    cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
+    
+    return (float)(end - start);
+}
+
+
+void Timer::start()
+{
+    tick = chrono::high_resolution_clock::now();
+}
+
+
+float Timer::stopAndTime()
+{
+    tock = chrono::high_resolution_clock::now();
+    return (chrono::duration_cast<chrono::microseconds>(tock - tick).count());
 }
 
 

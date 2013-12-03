@@ -6,7 +6,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     float timed, gflops;
     cl_uint workPerWI;
     cl::NDRange globalSize, localSize;
-    cl_float A = 1.3f, B = 1.4f;
+    cl_float A = 1.3f;
     int iters = devInfo.computeIters;
     
     if(!isComputeSP)
@@ -27,19 +27,19 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         localSize = devInfo.maxWGSize;
         
         cl::Kernel kernel_v1(prog, "compute_sp_v1");
-        kernel_v1.setArg(0, outputBuf), kernel_v1.setArg(1, A), kernel_v1.setArg(2, B);
+        kernel_v1.setArg(0, outputBuf), kernel_v1.setArg(1, A);
 
         cl::Kernel kernel_v2(prog, "compute_sp_v2");
-        kernel_v2.setArg(0, outputBuf), kernel_v2.setArg(1, A), kernel_v2.setArg(2, B);
+        kernel_v2.setArg(0, outputBuf), kernel_v2.setArg(1, A);
 
         cl::Kernel kernel_v4(prog, "compute_sp_v4");
-        kernel_v4.setArg(0, outputBuf), kernel_v4.setArg(1, A), kernel_v4.setArg(2, B);
+        kernel_v4.setArg(0, outputBuf), kernel_v4.setArg(1, A);
 
         cl::Kernel kernel_v8(prog, "compute_sp_v8");
-        kernel_v8.setArg(0, outputBuf), kernel_v8.setArg(1, A), kernel_v8.setArg(2, B);
+        kernel_v8.setArg(0, outputBuf), kernel_v8.setArg(1, A);
 
         cl::Kernel kernel_v16(prog, "compute_sp_v16");
-        kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A), kernel_v16.setArg(2, B);
+        kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
         
         cout << TAB TAB "Single-precision compute (GFLOPS)" << endl;
         cout << setprecision(2) << fixed;
@@ -47,7 +47,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
         
-        workPerWI = 1024;      // Indicates flops executed per work-item
+        workPerWI = 4096;      // Indicates flops executed per work-item
             
         // Dummy calls
         queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
@@ -62,9 +62,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
-            cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
-            cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
-            timed += (end - start);
+            timed += timeInUS(timeEvent);
         }
         timed /= iters;
 
@@ -73,7 +71,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 2
-        workPerWI = 1024;
+        workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
         queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
@@ -85,9 +83,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
-            cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
-            cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
-            timed += (end - start);
+            timed += timeInUS(timeEvent);
         }
         timed /= iters;
 
@@ -96,7 +92,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 4
-        workPerWI = 1024;
+        workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
         queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
@@ -108,9 +104,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
-            cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
-            cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
-            timed += (end - start);
+            timed += timeInUS(timeEvent);
         }
         timed /= iters;
 
@@ -119,7 +113,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 8
-        workPerWI = 1024;
+        workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
         queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
@@ -131,9 +125,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
-            cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
-            cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
-            timed += (end - start);
+            timed += timeInUS(timeEvent);
         }
         timed /= iters;
 
@@ -142,7 +134,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 16
-        workPerWI = 1024;
+        workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
         queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
@@ -154,9 +146,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             cl::Event timeEvent;
             queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
-            cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
-            cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
-            timed += (end - start);
+            timed += timeInUS(timeEvent);
         }
         timed /= iters;
 
