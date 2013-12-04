@@ -13,6 +13,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     cl_uint numItems = roundToPowOf2(devInfo.maxAllocSize / sizeof(float));
     int iters = devInfo.computeIters;
     
+    float *arr = new float[numItems];
+    populate(arr, numItems);
+    
     try
     {
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
@@ -153,10 +156,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         {
             cout << TAB TAB TAB "Out of resources! Skipped" << endl;
         } else {
+            if(arr)     delete [] arr;
             throw error;
         }
     }
 
+    if(arr)     delete [] arr;
     return 0;
 }
 

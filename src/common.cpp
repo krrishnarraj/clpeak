@@ -60,7 +60,7 @@ void Timer::start()
 float Timer::stopAndTime()
 {
     tock = chrono::high_resolution_clock::now();
-    return (chrono::duration_cast<chrono::microseconds>(tock - tick).count());
+    return (float)(chrono::duration_cast<chrono::microseconds>(tock - tick).count());
 }
 
 
@@ -89,7 +89,7 @@ void populate(double *ptr, uint N)
 #define MAX_POWER   26
 uint roundToPowOf2(uint number)
 {
-    float logd = log(number) / log(2);
+    double logd = log(number) / log(2);
     logd = floor(logd);
     logd = MIN(logd, MAX_POWER);
     
