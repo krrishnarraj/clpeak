@@ -38,7 +38,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         latency /= iters;
         
         cout << setprecision(2) << fixed;
-        cout << TAB TAB "Kernel launch latency : " << latency << " us" << endl;
+        cout << NEWLINE TAB TAB "Kernel launch latency : " << latency << " us" << endl;
     }
     catch(cl::Error error)
     {

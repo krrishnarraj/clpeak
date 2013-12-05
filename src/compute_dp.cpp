@@ -14,7 +14,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
     if(!devInfo.doubleSupported)
     {
-        cout << TAB TAB "Double precision is not supported! Skipped" << endl;
+        cout << NEWLINE TAB TAB "No double precision support! Skipped" << endl;
         return 0;
     }
         
@@ -46,7 +46,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         cl::Kernel kernel_v16(prog, "compute_dp_v16");
         kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
         
-        cout << TAB TAB "Double-precision compute (GFLOPS)" << endl;
+        cout << NEWLINE TAB TAB "Double-precision compute (GFLOPS)" << endl;
         cout << setprecision(2) << fixed;
         
         ///////////////////////////////////////////////////////////////////////////

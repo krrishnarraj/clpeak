@@ -14,11 +14,13 @@
 #define NEWLINE         "\n"
 #define uint            unsigned int
 
+
 #define MAX(X, Y)       \
     (X > Y)? X: Y;
     
 #define MIN(X, Y)       \
     (X < Y)? X: Y;
+
     
 #if defined(__APPLE__) || defined(__MACOSX)
     #define OS_NAME         "Macintosh"

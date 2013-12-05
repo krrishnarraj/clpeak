@@ -15,6 +15,9 @@
 #include <string.h>
 #include <common.h>
 
+#define BUILD_OPTIONS           " -cl-mad-enable "
+#define BANDWIDTH_UPPER_LIMIT   10000
+
 using namespace std;
 
 class clPeak

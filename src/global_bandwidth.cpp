@@ -20,6 +20,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     {
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         cl::Buffer inputBuf2 = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
+        queue.enqueueWriteBuffer(inputBuf, CL_TRUE, 0, (numItems * sizeof(float)), arr);
         
         cl::Kernel kernel_v1(prog, "bandwidth_v1");
         kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, inputBuf2);
@@ -38,7 +39,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         localSize = devInfo.maxWGSize;
         
-        cout << TAB TAB "Global memory bandwidth (GBPS)" << endl;
+        cout << NEWLINE TAB TAB "Global memory bandwidth (GBPS)" << endl;
         cout << setprecision(2) << fixed;
         
         ///////////////////////////////////////////////////////////////////////////

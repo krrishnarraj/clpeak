@@ -41,7 +41,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         cl::Kernel kernel_v16(prog, "compute_sp_v16");
         kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
         
-        cout << TAB TAB "Single-precision compute (GFLOPS)" << endl;
+        cout << NEWLINE TAB TAB "Single-precision compute (GFLOPS)" << endl;
         cout << setprecision(2) << fixed;
         
         ///////////////////////////////////////////////////////////////////////////

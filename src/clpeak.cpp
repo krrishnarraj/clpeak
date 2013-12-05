@@ -120,7 +120,7 @@ int clPeak::runAll()
             cl::Program prog = cl::Program(ctx, source);
             
             try {
-                prog.build(devices);
+                prog.build(devices, BUILD_OPTIONS);
             }
             catch (cl::Error error) {
                 cerr << TAB "Build Log: " << prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << endl;

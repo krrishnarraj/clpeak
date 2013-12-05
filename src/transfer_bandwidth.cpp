@@ -19,7 +19,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
         cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
         
-        cout << TAB TAB "Transfer bandwidth (GBPS)" << endl;
+        cout << NEWLINE TAB TAB "Transfer bandwidth (GBPS)" << endl;
         cout << setprecision(2) << fixed;
         
         ///////////////////////////////////////////////////////////////////////////
@@ -79,13 +79,13 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             timed += timeInUS(timeEvent);
         }
         timed /= iters;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         
-        if(timed < 2.0f)
+        if(gbps > BANDWIDTH_UPPER_LIMIT)
         {
             cout << "Zero copy" << endl;
         }   else
         {
-            gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
             cout << gbps << endl;
         }
         ///////////////////////////////////////////////////////////////////////////
@@ -135,19 +135,19 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             timed += timeInUS(timeEvent);
         }
         timed /= iters;
-
-        if(timed < 2.0f)
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        
+        if(gbps > BANDWIDTH_UPPER_LIMIT)
         {
             cout << "Zero copy" << endl;
         }   else
         {
-            gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
             cout << gbps << endl;
         }
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy to mapped ptr
-        cout << TAB TAB TAB TAB "memcpy to mapped ptr     : ";
+        cout << TAB TAB TAB TAB "memset on mapped ptr     : ";
         queue.finish();
         
         timed = 0;
@@ -160,7 +160,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             queue.finish();
             
             timer.start();
-            memcpy(mapPtr, arr, (numItems * sizeof(float)));
+            memset(mapPtr, 0x1F, (numItems * sizeof(float)));
             timed += timer.stopAndTime();
             
             queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, NULL);
