@@ -36,7 +36,7 @@ device_info_t getDeviceInfo(cl::Device &d)
         devInfo.computeIters = 30;
     }
     devInfo.transferBWIters = 20;
-    devInfo.kernelLatencyIters = 1000;
+    devInfo.kernelLatencyIters = 5000;
     
     return devInfo;
 }
@@ -86,7 +86,7 @@ void populate(double *ptr, uint N)
     }
 }
 
-#define MAX_POWER   26
+#define MAX_POWER   25
 uint roundToPowOf2(uint number)
 {
     double logd = log(number) / log(2);

@@ -112,7 +112,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         }
         timed /= iters;
         
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        // Count read & write bytes
+        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
 
         ///////////////////////////////////////////////////////////////////////////
