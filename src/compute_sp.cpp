@@ -46,6 +46,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
+        cout << TAB TAB TAB "float   : ";   cout.flush();
         
         workPerWI = 4096;      // Indicates flops executed per work-item
             
@@ -67,10 +68,12 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed /= iters;
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
-        cout << TAB TAB TAB "float   : " << gflops << endl;
+        cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 2
+        cout << TAB TAB TAB "float2  : ";   cout.flush();
+        
         workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
@@ -88,10 +91,12 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed /= iters;
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
-        cout << TAB TAB TAB "float2  : " << gflops << endl;
+        cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 4
+        cout << TAB TAB TAB "float4  : ";   cout.flush();
+        
         workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
@@ -109,10 +114,12 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed /= iters;
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
-        cout << TAB TAB TAB "float4  : " << gflops << endl;
+        cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 8
+        cout << TAB TAB TAB "float8  : ";   cout.flush();
+        
         workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
@@ -130,10 +137,12 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed /= iters;
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
-        cout << TAB TAB TAB "float8  : " << gflops << endl;
+        cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
         // Vector width 16
+        cout << TAB TAB TAB "float16 : ";   cout.flush();
+        
         workPerWI = 4096;
             
         queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
@@ -151,14 +160,14 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         timed /= iters;
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
-        cout << TAB TAB TAB "float16 : " << gflops << endl;
+        cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)
     {
         if(error.err() == CL_OUT_OF_RESOURCES)
         {
-            cout << TAB TAB TAB "Out of resources! Skipped" << endl;
+            cout << "Out of resources! Skipped" << endl;
         } else {
             throw error;
         }

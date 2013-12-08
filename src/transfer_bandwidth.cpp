@@ -24,6 +24,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         
         ///////////////////////////////////////////////////////////////////////////
         // enqueueWriteBuffer
+        cout << TAB TAB TAB "enqueueWriteBuffer         : ";    cout.flush();
         
         // Dummy warm-up
         queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
@@ -40,9 +41,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
-        cout << TAB TAB TAB "enqueueWriteBuffer         : " << gbps << endl;
+        cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         // enqueueReadBuffer
+        cout << TAB TAB TAB "enqueueReadBuffer          : ";    cout.flush();
         
         // Dummy warm-up
         queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
@@ -59,10 +61,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
-        cout << TAB TAB TAB "enqueueReadBuffer          : " << gbps << endl;
+        cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         // enqueueMapBuffer
-        cout << TAB TAB TAB "enqueueMapBuffer(for read) : ";
+        cout << TAB TAB TAB "enqueueMapBuffer(for read) : ";    cout.flush();
         
         queue.finish();
         
@@ -91,7 +93,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy from mapped ptr
-        cout << TAB TAB TAB TAB "memcpy from mapped ptr   : ";
+        cout << TAB TAB TAB TAB "memcpy from mapped ptr   : ";  cout.flush();
         queue.finish();
         
         timed = 0;
@@ -119,7 +121,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         ///////////////////////////////////////////////////////////////////////////
         
         // enqueueUnmap
-        cout << TAB TAB TAB "enqueueUnmap(after write)  : ";
+        cout << TAB TAB TAB "enqueueUnmap(after write)  : ";    cout.flush();
         
         queue.finish();
         
@@ -148,7 +150,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy to mapped ptr
-        cout << TAB TAB TAB TAB "memset on mapped ptr     : ";
+        cout << TAB TAB TAB TAB "memset on mapped ptr     : ";  cout.flush();
         queue.finish();
         
         timed = 0;
@@ -180,7 +182,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
         if(error.err() == CL_OUT_OF_RESOURCES)
         {
-            cout << TAB TAB TAB "Out of resources! Skipped" << endl;
+            cout << "Out of resources! Skipped" << endl;
         } else {
             if(arr)     delete [] arr;
             throw error;

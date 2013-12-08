@@ -36,7 +36,7 @@ device_info_t getDeviceInfo(cl::Device &d)
         devInfo.computeIters = 30;
     }
     devInfo.transferBWIters = 20;
-    devInfo.kernelLatencyIters = 5000;
+    devInfo.kernelLatencyIters = 20000;
     
     return devInfo;
 }

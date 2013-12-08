@@ -14,6 +14,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 
     try
     {
+        cout << NEWLINE TAB TAB "Kernel launch latency : "; cout.flush();
+        
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         cl::Buffer inputBuf2 = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         
@@ -38,13 +40,13 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         latency /= iters;
         
         cout << setprecision(2) << fixed;
-        cout << NEWLINE TAB TAB "Kernel launch latency : " << latency << " us" << endl;
+        cout << latency << " us" << endl;
     }
     catch(cl::Error error)
     {
         if(error.err() == CL_OUT_OF_RESOURCES)
         {
-            cout << TAB TAB TAB "Out of resources! Skipped" << endl;
+            cout << "Out of resources! Skipped" << endl;
         } else {
             throw error;
         }
