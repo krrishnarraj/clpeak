@@ -114,8 +114,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         }
         timed /= iters;
         
-        // Count read & write bytes
-        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
 
         ///////////////////////////////////////////////////////////////////////////
@@ -150,7 +149,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy to mapped ptr
-        cout << TAB TAB TAB TAB "memset on mapped ptr     : ";  cout.flush();
+        cout << TAB TAB TAB TAB "memcpy on mapped ptr     : ";  cout.flush();
         queue.finish();
         
         timed = 0;
@@ -163,7 +162,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             queue.finish();
             
             timer.start();
-            memset(mapPtr, 0x1F, (numItems * sizeof(float)));
+            memcpy(mapPtr, arr, (numItems * sizeof(float)));
             timed += timer.stopAndTime();
             
             queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, NULL);
