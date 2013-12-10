@@ -149,7 +149,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy to mapped ptr
-        cout << TAB TAB TAB TAB "memcpy on mapped ptr     : ";  cout.flush();
+        cout << TAB TAB TAB TAB "memcpy to mapped ptr     : ";  cout.flush();
         queue.finish();
         
         timed = 0;
