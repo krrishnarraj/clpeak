@@ -16,7 +16,7 @@
 #include <common.h>
 
 #define BUILD_OPTIONS           " -cl-mad-enable "
-#define BANDWIDTH_UPPER_LIMIT   10000
+#define BANDWIDTH_UPPER_LIMIT   2000
 
 using namespace std;
 
