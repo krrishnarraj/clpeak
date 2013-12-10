@@ -1,5 +1,7 @@
 #include <clpeak.h>
 
+#define FETCH_PER_WI        16
+
 
 int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
@@ -7,8 +9,9 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         return 0;
         
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-    cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs);
-    cl::NDRange globalSize = numItems, localSize = devInfo.maxWGSize;
+    cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
+    cl::NDRange globalSize = (numItems / FETCH_PER_WI);
+    cl::NDRange localSize = devInfo.maxWGSize;
     int iters = devInfo.kernelLatencyIters;
     float latency;
 
@@ -17,10 +20,10 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         cout << NEWLINE TAB TAB "Kernel launch latency : "; cout.flush();
         
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
-        cl::Buffer inputBuf2 = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
+        cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
         
         cl::Kernel kernel_v1(prog, "bandwidth_v1");
-        kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, inputBuf2);
+        kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, outputBuf);
         
         // Dummy calls
         queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
