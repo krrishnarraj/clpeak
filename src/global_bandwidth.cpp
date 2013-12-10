@@ -67,7 +67,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         }
         timed /= iters;
 
-        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -90,7 +90,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         }
         timed /= iters;
 
-        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -113,7 +113,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         }
         timed /= iters;
 
-        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -136,7 +136,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         }
         timed /= iters;
 
-        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -159,7 +159,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         }
         timed /= iters;
 
-        gbps = ((float)numItems * 2 * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
     }
