@@ -50,22 +50,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
         workPerWI = 4096;      // Indicates flops executed per work-item
             
-        // Dummy calls
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
         cout << gflops << endl;
@@ -76,19 +61,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
         workPerWI = 4096;
             
-        queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
         cout << gflops << endl;
@@ -99,19 +72,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
         workPerWI = 4096;
             
-        queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
         cout << gflops << endl;
@@ -122,19 +83,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
         workPerWI = 4096;
             
-        queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
         cout << gflops << endl;
@@ -145,19 +94,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         
         workPerWI = 4096;
             
-        queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
         cout << gflops << endl;

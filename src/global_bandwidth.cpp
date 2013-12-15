@@ -50,23 +50,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         globalSize = numItems / FETCH_PER_WI;
         
-        // Dummy calls
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
-
+        timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+        
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
@@ -76,19 +61,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         globalSize = (numItems / 2 / FETCH_PER_WI);
         
-        queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v2, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
@@ -99,19 +72,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         globalSize = (numItems / 4 / FETCH_PER_WI);
         
-        queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v4, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
@@ -122,19 +83,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         globalSize = (numItems / 8 / FETCH_PER_WI);
         
-        queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v8, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;
@@ -145,19 +94,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         globalSize = (numItems / 16 / FETCH_PER_WI);
         
-        queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
-        queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize);
-        queue.finish();
-
-        timed = 0;
-        for(int i=0; i<iters; i++)
-        {
-            cl::Event timeEvent;
-            queue.enqueueNDRangeKernel(kernel_v16, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
-        }
-        timed /= iters;
+        timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         cout << gbps << endl;

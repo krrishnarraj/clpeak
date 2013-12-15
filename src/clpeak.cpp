@@ -14,6 +14,8 @@ static const char *helpStr =
 "\n OPTIONS:"
 "\n  -p, --platform num          choose platform (num starts with 0)"
 "\n  -d, --device num            choose device   (num starts with 0)"
+"\n  --use-event-timer           Time using cl events instead of std chrono timer"
+"\n                              Hides driver latencies and measures exact time (default: No)"
 "\n  --global-bandwidth          Selectively run global bandwidth test"
 "\n  --compute-sp                Selectively run single precision compute test"
 "\n  --compute-dp                Selectively run double precision compute test"
@@ -25,7 +27,7 @@ static const char *helpStr =
 ;
 
 
-clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1),
+clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1), useEventTimer(false),
        isGlobalBW(true), isComputeSP(true), isComputeDP(true), isTransferBW(true), isKernelLatency(true)
 {
 }
@@ -56,6 +58,10 @@ int clPeak::parseArgs(int argc, char **argv)
                 specifiedDevice = atoi(argv[i+1]);
                 i++;
             }
+        } else
+        if(strcmp(argv[i], "--use-event-timer") == 0)
+        {
+            useEventTimer = true;
         } else
         if((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--compute-sp") == 0)
                 || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0)
@@ -156,4 +162,41 @@ int clPeak::runAll()
     
     return 0;
 }
+
+
+float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters)
+{
+    float timed = 0;
+    
+    // Dummy calls
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+    queue.finish();
+    
+    if(useEventTimer)
+    {
+        for(int i=0; i<iters; i++)
+        {
+            cl::Event timeEvent;
+            
+            queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
+            queue.finish();
+            timed += timeInUS(timeEvent);
+        }
+    } else      // std timer
+    {
+        Timer timer;
+        
+        timer.start();
+        for(int i=0; i<iters; i++)
+        {
+            queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+        }
+        queue.finish();
+        timed = timer.stopAndTime();
+    }
+    
+    return (timed / iters);
+}    
+
 

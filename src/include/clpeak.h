@@ -16,7 +16,6 @@
 #include <common.h>
 
 #define BUILD_OPTIONS           " -cl-mad-enable "
-#define BANDWIDTH_UPPER_LIMIT   2000
 
 using namespace std;
 
@@ -24,13 +23,16 @@ class clPeak
 {
 public:
 
-    bool forcePlatform, forceDevice;
+    bool forcePlatform, forceDevice, useEventTimer;
     bool isGlobalBW, isComputeSP, isComputeDP, isTransferBW, isKernelLatency;
     int specifiedPlatform, specifiedDevice;
     
     clPeak();
 
     int parseArgs(int argc, char **argv);
+    
+    // Return avg time in us
+    float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters);
         
     int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     

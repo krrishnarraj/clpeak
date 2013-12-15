@@ -31,12 +31,27 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
         
         timed = 0;
-        for(int i=0; i<iters; i++)
+        
+        if(useEventTimer)
         {
-            cl::Event timeEvent;
-            queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
+            for(int i=0; i<iters; i++)
+            {
+                cl::Event timeEvent;
+                queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
+                queue.finish();
+                timed += timeInUS(timeEvent);
+            }
+        } else
+        {
+            Timer timer;
+
+            timer.start();
+            for(int i=0; i<iters; i++)
+            {
+                queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
+            }
             queue.finish();
-            timed += timeInUS(timeEvent);
+            timed = timer.stopAndTime();
         }
         timed /= iters;
 
@@ -51,12 +66,26 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
         
         timed = 0;
-        for(int i=0; i<iters; i++)
+        if(useEventTimer)
         {
-            cl::Event timeEvent;
-            queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
+            for(int i=0; i<iters; i++)
+            {
+                cl::Event timeEvent;
+                queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
+                queue.finish();
+                timed += timeInUS(timeEvent);
+            }
+        } else
+        {
+            Timer timer;
+
+            timer.start();
+            for(int i=0; i<iters; i++)
+            {
+                queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
+            }
             queue.finish();
-            timed += timeInUS(timeEvent);
+            timed = timer.stopAndTime();
         }
         timed /= iters;
 
@@ -69,27 +98,39 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
         
         timed = 0;
-        for(int i=0; i<iters; i++)
+        if(useEventTimer)
         {
-            cl::Event timeEvent;
-            void *mapPtr;
-            
-            mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)), NULL, &timeEvent);
-            queue.finish();
-            queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, NULL);
-            queue.finish();
-            timed += timeInUS(timeEvent);
+            for(int i=0; i<iters; i++)
+            {
+                cl::Event timeEvent;
+                void *mapPtr;
+                
+                mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)), NULL, &timeEvent);
+                queue.finish();
+                queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+                queue.finish();
+                timed += timeInUS(timeEvent);
+            }
+        } else
+        {
+            for(int i=0; i<iters; i++)
+            {
+                Timer timer;
+                void *mapPtr;
+                
+                timer.start();
+                mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)));
+                queue.finish();
+                timed += timer.stopAndTime();
+                
+                queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+                queue.finish();
+            }
         }
         timed /= iters;
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         
-        if(gbps > BANDWIDTH_UPPER_LIMIT)
-        {
-            cout << "Zero copy" << endl;
-        }   else
-        {
-            cout << gbps << endl;
-        }
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy from mapped ptr
@@ -109,7 +150,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             memcpy(arr, mapPtr, (numItems * sizeof(float)));
             timed += timer.stopAndTime();
             
-            queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, NULL);
+            queue.enqueueUnmapMemObject(clBuffer, mapPtr);
             queue.finish();
         }
         timed /= iters;
@@ -125,27 +166,39 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
         
         timed = 0;
-        for(int i=0; i<iters; i++)
+        if(useEventTimer)
         {
-            cl::Event timeEvent;
-            void *mapPtr;
-            
-            mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
-            queue.finish();
-            queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, &timeEvent);
-            queue.finish();
-            timed += timeInUS(timeEvent);
+            for(int i=0; i<iters; i++)
+            {
+                cl::Event timeEvent;
+                void *mapPtr;
+                
+                mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
+                queue.finish();
+                queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, &timeEvent);
+                queue.finish();
+                timed += timeInUS(timeEvent);
+            }
+        } else
+        {
+            for(int i=0; i<iters; i++)
+            {
+                Timer timer;
+                void *mapPtr;
+                
+                mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
+                queue.finish();
+                
+                timer.start();
+                queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+                queue.finish();
+                timed += timer.stopAndTime();
+            }
         }
         timed /= iters;
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
         
-        if(gbps > BANDWIDTH_UPPER_LIMIT)
-        {
-            cout << "Zero copy" << endl;
-        }   else
-        {
-            cout << gbps << endl;
-        }
+        cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
         // memcpy to mapped ptr
@@ -165,7 +218,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             memcpy(mapPtr, arr, (numItems * sizeof(float)));
             timed += timer.stopAndTime();
             
-            queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, NULL);
+            queue.enqueueUnmapMemObject(clBuffer, mapPtr);
             queue.finish();
         }
         timed /= iters;
