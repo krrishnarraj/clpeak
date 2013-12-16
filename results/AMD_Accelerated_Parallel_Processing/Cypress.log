@@ -1,0 +1,36 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Cypress
+    Driver version: 1348.4 (Linux x64)
+
+    Global memory bandwidth (GBPS)
+      float   : 128.45
+      float2  : 125.64
+      float4  : 94.01
+      float8  : 64.46
+      float16 : 34.17
+
+    Single-precision compute (GFLOPS)
+      float   : 542.51
+      float2  : 1077.24
+      float4  : 2139.21
+      float8  : 2068.34
+      float16 : 2164.21
+
+    Double-precision compute (GFLOPS)
+      double   : 538.38
+      double2  : 539.59
+      double4  : 536.97
+      double8  : 538.58
+      double16 : 535.83
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 3.32
+      enqueueReadBuffer          : 4.14
+      enqueueMapBuffer(for read) : 1188.29
+        memcpy from mapped ptr   : 4.11
+      enqueueUnmap(after write)  : 2072.86
+        memcpy to mapped ptr     : 4.10
+
+    Kernel launch latency : 38738161173528576.00 us
+

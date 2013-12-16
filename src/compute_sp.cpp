@@ -52,7 +52,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             
         timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
-        gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
+        gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
         cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -63,7 +63,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             
         timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-        gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
+        gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
         cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -74,7 +74,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             
         timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-        gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
+        gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
         cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -85,7 +85,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             
         timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-        gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
+        gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
         cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -96,7 +96,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
             
         timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-        gflops = ((float)globalWIs * workPerWI) / timed / 1e3;
+        gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
         cout << gflops << endl;
         ///////////////////////////////////////////////////////////////////////////
     }

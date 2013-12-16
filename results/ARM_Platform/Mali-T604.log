@@ -1,0 +1,31 @@
+
+Platform: ARM Platform
+  Device: Mali-T604
+    Driver version: 1.1 (Linux ARM)
+
+    Global memory bandwidth (GBPS)
+      float   : 1.58
+      float2  : 4.44
+      float4  : 5.76
+      float8  : Out of resources! Skipped
+
+    Single-precision compute (GFLOPS)
+      float   : 2.50
+      float2  : 15.27
+      float4  : 7.80
+      float8  : 17.47
+      float16 : 13.30
+
+    No double precision support! Skipped
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 5.89
+      enqueueReadBuffer          : 2.63
+      enqueueMapBuffer(for read) : 1270.40
+        memcpy from mapped ptr   : 2.90
+      enqueueUnmap(after write)  : 1199.44
+        memcpy to mapped ptr     : 2.97
+
+    Kernel launch latency : 152.58 us
+
+

@@ -52,7 +52,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
         
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -63,7 +63,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -74,7 +74,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -85,7 +85,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
         
@@ -96,7 +96,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         
         timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-        gbps = ((float)numItems * sizeof(float)) / timed / 1e3;
+        gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         cout << gbps << endl;
         ///////////////////////////////////////////////////////////////////////////
     }
