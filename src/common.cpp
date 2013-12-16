@@ -1,4 +1,3 @@
-
 #include <common.h>
 #include <math.h>
 #include <iostream>
@@ -16,8 +15,8 @@ device_info_t getDeviceInfo(cl::Device &d)
     #define MAX_WG_SIZE 256
     devInfo.maxWGSize = MIN(devInfo.maxWGSize, MAX_WG_SIZE);
     
-    devInfo.maxAllocSize = d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
-    devInfo.maxGlobalSize = d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+    devInfo.maxAllocSize = (unsigned int)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
+    devInfo.maxGlobalSize = (unsigned int)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
     devInfo.doubleSupported = false;
     
     std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
@@ -47,7 +46,7 @@ float timeInUS(cl::Event &timeEvent)
     cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
     cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
     
-    return ((float)end - (float)start);
+    return (float)(end - start);
 }
 
 
@@ -66,7 +65,7 @@ float Timer::stopAndTime()
 
 void populate(float *ptr, uint N)
 {
-    srand(time(NULL));
+    srand((unsigned int)time(NULL));
 
     for(int i=0; i<(int)N; i++)
     {
@@ -77,7 +76,7 @@ void populate(float *ptr, uint N)
 
 void populate(double *ptr, uint N)
 {
-    srand(time(NULL));
+    srand((unsigned int)time(NULL));
 
     for(int i=0; i<(int)N; i++)
     {
@@ -93,6 +92,6 @@ uint roundToPowOf2(uint number)
     logd = floor(logd);
     logd = MIN(logd, MAX_POWER);
     
-    return pow(2, (int)logd);
+    return (uint)pow(2, (int)logd);
 }
 
