@@ -4,33 +4,33 @@ Platform: AMD Accelerated Parallel Processing
     Driver version: 1348.4 (Linux x64)
 
     Global memory bandwidth (GBPS)
-      float   : 128.45
-      float2  : 125.64
-      float4  : 94.01
-      float8  : 64.46
-      float16 : 34.17
+      float   : 91.48
+      float2  : 124.28
+      float4  : 93.35
+      float8  : 64.41
+      float16 : 33.98
 
     Single-precision compute (GFLOPS)
-      float   : 542.51
-      float2  : 1077.24
-      float4  : 2139.21
-      float8  : 2068.34
-      float16 : 2164.21
+      float   : 542.26
+      float2  : 1077.85
+      float4  : 2139.41
+      float8  : 2130.85
+      float16 : 2133.98
 
     Double-precision compute (GFLOPS)
-      double   : 538.38
-      double2  : 539.59
-      double4  : 536.97
-      double8  : 538.58
-      double16 : 535.83
+      double   : 540.76
+      double2  : 539.13
+      double4  : 535.31
+      double8  : 537.66
+      double16 : 534.95
 
     Transfer bandwidth (GBPS)
-      enqueueWriteBuffer         : 3.32
-      enqueueReadBuffer          : 4.14
-      enqueueMapBuffer(for read) : 1188.29
-        memcpy from mapped ptr   : 4.11
-      enqueueUnmap(after write)  : 2072.86
-        memcpy to mapped ptr     : 4.10
+      enqueueWriteBuffer         : 3.61
+      enqueueReadBuffer          : 3.36
+      enqueueMapBuffer(for read) : 206.81
+        memcpy from mapped ptr   : 3.41
+      enqueueUnmap(after write)  : 584.32
+        memcpy to mapped ptr     : 3.32
 
-    Kernel launch latency : 38738161173528576.00 us
+    Kernel launch latency : 117.88 us
 

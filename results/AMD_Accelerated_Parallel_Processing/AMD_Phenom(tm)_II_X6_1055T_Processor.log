@@ -1,0 +1,36 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: AMD Phenom(tm) II X6 1055T Processor
+    Driver version: 1348.4 (sse2) (Linux x64)
+
+    Global memory bandwidth (GBPS)
+      float   : 9.47
+      float2  : 11.25
+      float4  : 11.74
+      float8  : 11.94
+      float16 : 7.21
+
+    Single-precision compute (GFLOPS)
+      float   : 3.98
+      float2  : 7.90
+      float4  : 15.66
+      float8  : 30.78
+      float16 : 26.63
+
+    Double-precision compute (GFLOPS)
+      double   : 3.99
+      double2  : 7.99
+      double4  : 15.12
+      double8  : 26.45
+      double16 : 6.23
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 4.03
+      enqueueReadBuffer          : 3.85
+      enqueueMapBuffer(for read) : 3612.86
+        memcpy from mapped ptr   : 3.84
+      enqueueUnmap(after write)  : 7669.58
+        memcpy to mapped ptr     : 3.83
+
+    Kernel launch latency : 22.18 us
+
