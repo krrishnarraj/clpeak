@@ -38,7 +38,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
             queue.finish();
             cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_QUEUED>() / 1000;
             cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
-            latency += (float)(end - start);
+            latency += (float)((int)end - (int)start);
         }
         latency /= iters;
         
