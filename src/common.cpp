@@ -46,7 +46,7 @@ float timeInUS(cl::Event &timeEvent)
     cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
     cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
     
-    return (float)(end - start);
+    return (float)((int)end - (int)start);
 }
 
 
