@@ -1,0 +1,36 @@
+
+Platform: Intel(R) OpenCL
+  Device: Intel(R) Core(TM) i3 CPU         550  @ 3.20GHz
+    Driver version: 1.2.0.76921 (Linux x64)
+
+    Global memory bandwidth (GBPS)
+      float   : 8.28
+      float2  : 8.15
+      float4  : 7.34
+      float8  : 7.63
+      float16 : 7.48
+
+    Single-precision compute (GFLOPS)
+      float   : 14.56
+      float2  : 29.07
+      float4  : 46.65
+      float8  : 28.68
+      float16 : 45.49
+
+    Double-precision compute (GFLOPS)
+      double   : 12.56
+      double2  : 22.47
+      double4  : 8.55
+      double8  : 21.26
+      double16 : 10.25
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 1.40
+      enqueueReadBuffer          : 4.13
+      enqueueMapBuffer(for read) : 1355.73
+        memcpy from mapped ptr   : 4.13
+      enqueueUnmap(after write)  : 1682.98
+        memcpy to mapped ptr     : 4.26
+
+    Kernel launch latency : 5.33 us
+

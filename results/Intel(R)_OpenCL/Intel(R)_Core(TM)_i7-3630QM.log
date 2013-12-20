@@ -1,0 +1,36 @@
+
+Platform: Intel(R) OpenCL
+  Device:       Intel(R) Core(TM) i7-3630QM CPU @ 2.40GHz
+    Driver version: 1.2 (Win32)
+
+    Global memory bandwidth (GBPS)
+      float   : 20.64
+      float2  : 18.90
+      float4  : 19.73
+      float8  : 20.03
+      float16 : 19.73
+
+    Single-precision compute (GFLOPS)
+      float   : 25.44
+      float2  : 50.81
+      float4  : 51.61
+      float8  : 52.55
+      float16 : 51.92
+
+    Double-precision compute (GFLOPS)
+      double   : 25.45
+      double2  : 25.47
+      double4  : 25.71
+      double8  : 26.23
+      double16 : 27.16
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 2.30
+      enqueueReadBuffer          : 6.47
+      enqueueMapBuffer(for read) : 1.#J
+        memcpy from mapped ptr   : 8.39
+      enqueueUnmap(after write)  : 1.#J
+        memcpy to mapped ptr     : 8.13
+
+    Kernel launch latency : 2.28 us
+

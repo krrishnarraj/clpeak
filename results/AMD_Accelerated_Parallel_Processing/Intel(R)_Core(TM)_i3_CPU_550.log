@@ -1,0 +1,36 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Intel(R) Core(TM) i3 CPU         550  @ 3.20GHz
+    Driver version: 1214.3 (sse2) (Linux x64)
+
+    Global memory bandwidth (GBPS)
+      float   : 7.58
+      float2  : 8.63
+      float4  : 7.67
+      float8  : 7.82
+      float16 : 7.51
+
+    Single-precision compute (GFLOPS)
+      float   : 3.64
+      float2  : 7.26
+      float4  : 14.45
+      float8  : 28.50
+      float16 : 18.31
+
+    Double-precision compute (GFLOPS)
+      double   : 3.19
+      double2  : 6.37
+      double4  : 12.65
+      double8  : 21.19
+      double16 : 4.88
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.59
+      enqueueReadBuffer          : 4.16
+      enqueueMapBuffer(for read) : 8159.13
+        memcpy from mapped ptr   : 4.17
+      enqueueUnmap(after write)  : 8801.16
+        memcpy to mapped ptr     : 4.31
+
+    Kernel launch latency : 11.36 us
+

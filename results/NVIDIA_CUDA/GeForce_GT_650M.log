@@ -1,0 +1,64 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GT 650M
+    Driver version: 331.82 (Win32)
+
+    Global memory bandwidth (GBPS)
+      float   : 25.16
+      float2  : 26.84
+      float4  : 26.84
+      float8  : 13.42
+      float16 : 12.39
+
+    Single-precision compute (GFLOPS)
+      float   : 486.09
+      float2  : 644.06
+      float4  : 613.40
+      float8  : 613.40
+      float16 : 613.40
+
+    Double-precision compute (GFLOPS)
+      double   : 30.38
+      double2  : 30.34
+      double4  : 30.27
+      double8  : 30.13
+      double16 : 29.92
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 4.36
+      enqueueReadBuffer          : 4.29
+      enqueueMapBuffer(for read) : 2.95
+        memcpy from mapped ptr   : 8.01
+      enqueueUnmap(after write)  : 4.33
+        memcpy to mapped ptr     : 8.26
+
+    Kernel launch latency : 25.48 us
+  Device: Intel(R) HD Graphics 4000
+    Driver version: 9.18.10.3165 (Win32)
+
+    Global memory bandwidth (GBPS)
+      float   : 17.50
+      float2  : 19.17
+      float4  : 17.89
+      float8  : 17.89
+      float16 : 9.47
+
+    Single-precision compute (GFLOPS)
+      float   : 207.34
+      float2  : 214.91
+      float4  : 229.51
+      float8  : 240.49
+      float16 : 201.47
+
+    No double precision support! Skipped
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 5.77
+      enqueueReadBuffer          : 2.66
+      enqueueMapBuffer(for read) : 1.#J
+        memcpy from mapped ptr   : 8.39
+      enqueueUnmap(after write)  : 1.#J
+        memcpy to mapped ptr     : 8.39
+
+    Kernel launch latency : 35.30 us
+
