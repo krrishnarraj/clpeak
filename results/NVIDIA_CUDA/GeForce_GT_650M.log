@@ -33,32 +33,4 @@ Platform: NVIDIA CUDA
         memcpy to mapped ptr     : 8.26
 
     Kernel launch latency : 25.48 us
-  Device: Intel(R) HD Graphics 4000
-    Driver version: 9.18.10.3165 (Win32)
-
-    Global memory bandwidth (GBPS)
-      float   : 17.50
-      float2  : 19.17
-      float4  : 17.89
-      float8  : 17.89
-      float16 : 9.47
-
-    Single-precision compute (GFLOPS)
-      float   : 207.34
-      float2  : 214.91
-      float4  : 229.51
-      float8  : 240.49
-      float16 : 201.47
-
-    No double precision support! Skipped
-
-    Transfer bandwidth (GBPS)
-      enqueueWriteBuffer         : 5.77
-      enqueueReadBuffer          : 2.66
-      enqueueMapBuffer(for read) : 1.#J
-        memcpy from mapped ptr   : 8.39
-      enqueueUnmap(after write)  : 1.#J
-        memcpy to mapped ptr     : 8.39
-
-    Kernel launch latency : 35.30 us
 
