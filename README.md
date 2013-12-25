@@ -76,3 +76,5 @@ Platform: ARM Platform
 
     Kernel launch latency : 149.46 us
 
+
+Send in results of your device to krrishnarraj@gmail.com
