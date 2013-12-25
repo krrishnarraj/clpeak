@@ -7,7 +7,9 @@ eg:
 
 1.
 Platform: AMD Accelerated Parallel Processing
+
   Device: Cayman
+  
     Driver version: 1348.4 (Linux x64)
 
     Global memory bandwidth (GBPS)
@@ -41,9 +43,12 @@ Platform: AMD Accelerated Parallel Processing
 
     Kernel launch latency : 44.22 us
 
+
 2.
 Platform: ARM Platform
+
   Device: Mali-T604
+  
     Driver version: 1.1 (Linux ARM)
 
     Global memory bandwidth (GBPS)
