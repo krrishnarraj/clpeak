@@ -25,7 +25,7 @@ device_info_t getDeviceInfo(cl::Device &d)
         
     devInfo.deviceType = d.getInfo<CL_DEVICE_TYPE>();
     
-    if(devInfo.deviceType == CL_DEVICE_TYPE_CPU) {
+    if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
         devInfo.gloalBWIters = 20;
         devInfo.computeWgsPerCU = 512;
         devInfo.computeIters = 10;

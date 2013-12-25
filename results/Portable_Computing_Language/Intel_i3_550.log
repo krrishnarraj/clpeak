@@ -1,0 +1,36 @@
+
+Platform: Portable Computing Language
+  Device: pthread-Intel(R) Core(TM) i3 CPU         550  @ 3.20GHz
+    Driver version: 0.9 (Linux x64)
+
+    Global memory bandwidth (GBPS)
+      float   : 7.73
+      float2  : 8.70
+      float4  : 7.67
+      float8  : 7.81
+      float16 : 7.64
+
+    Single-precision compute (GFLOPS)
+      float   : 3.64
+      float2  : 7.30
+      float4  : 14.58
+      float8  : 28.51
+      float16 : 49.67
+
+    Double-precision compute (GFLOPS)
+      double   : 3.19
+      double2  : 6.39
+      double4  : 12.70
+      double8  : 19.98
+      double16 : 6.73
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.60
+      enqueueReadBuffer          : 4.05
+      enqueueMapBuffer(for read) : 28256.36
+        memcpy from mapped ptr   : 4.05
+      enqueueUnmap(after write)  : 51622.20
+        memcpy to mapped ptr     : 4.24
+
+    Kernel launch latency : 5.12 us
+

@@ -34,6 +34,8 @@ clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1),
 
 int clPeak::parseArgs(int argc, char **argv)
 {
+    bool forcedTests = false;
+
     for(int i=1; i<argc; i++)
     {
         if((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))
@@ -68,7 +70,10 @@ int clPeak::parseArgs(int argc, char **argv)
                 ||  (strcmp(argv[i], "--kernel-latency") == 0) )
         {
             // Disable all and enable only selected ones
-            isGlobalBW = isComputeSP = isComputeDP = isTransferBW = isKernelLatency = false;
+            if(!forcedTests) {
+                isGlobalBW = isComputeSP = isComputeDP = isTransferBW = isKernelLatency = false;
+                forcedTests = true;
+            }
             
             if(strcmp(argv[i], "--global-bandwidth") == 0) {
                 isGlobalBW = true;
