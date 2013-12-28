@@ -1,5 +1,5 @@
 Known issues:
 
-1. On sandybridge cpu, intel driver optimizes out vector sp & dp kernels. This is observed only on win64 systems. As a result, this utility shows flops higher than hardware's peak. Need to follow-up on intel forum
+1. When --use-event-timer option is used on some AMD GPUs, platform returns zero time on event. As a result, inf is displayed sometimes
 
-2. When --use-event-timer option is used on some AMD GPUs, platform returns zero time on event. As a result, inf is displayed sometimes
+2. Not yet tested on mac. There might be some minor compilation issues
