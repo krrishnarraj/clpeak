@@ -1,5 +1,6 @@
 Known issues:
 
-1. When --use-event-timer option is used on some AMD GPUs, platform returns zero time on event. As a result, inf is displayed sometimes
+1. When --use-event-timer option is used on some AMD GPUs, platform returns zero time on event.
+   As a result, inf is displayed sometimes
 
 2. Not yet tested on mac. There might be some minor compilation issues
