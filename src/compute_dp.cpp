@@ -106,12 +106,9 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     }
     catch(cl::Error error)
     {
-        if(error.err() == CL_OUT_OF_RESOURCES)
-        {
-            cout << "Out of resources! Skipped" << endl;
-        } else {
-            throw error;
-        }
+        cerr << error.what() << "(" << error.err() << ")" << endl;
+        cerr << TAB TAB TAB "Tests skipped" << endl;
+        return -1;
     }
 
     return 0;

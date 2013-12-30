@@ -232,13 +232,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
     catch(cl::Error error)
     {
-        if(error.err() == CL_OUT_OF_RESOURCES)
-        {
-            cout << "Out of resources! Skipped" << endl;
-        } else {
-            if(arr)     delete [] arr;
-            throw error;
-        }
+        cerr << error.what() << "(" << error.err() << ")" << endl;
+        cerr << TAB TAB TAB "Tests skipped" << endl;
+        
+        if(arr)     delete [] arr;
+        return -1;
     }
 
     if(arr)     delete [] arr;

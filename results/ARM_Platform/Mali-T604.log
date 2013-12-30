@@ -7,7 +7,8 @@ Platform: ARM Platform
       float   : 1.56
       float2  : 4.41
       float4  : 5.75
-      float8  : Out of resources! Skipped
+      float8  : clEnqueueNDRangeKernel(-5)
+      Tests skipped
 
     Single-precision compute (GFLOPS)
       float   : 2.38
