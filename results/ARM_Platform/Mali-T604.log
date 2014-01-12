@@ -2,6 +2,7 @@
 Platform: ARM Platform
   Device: Mali-T604
     Driver version: 1.1 (Linux ARM)
+    Compute units  : 4
 
     Global memory bandwidth (GBPS)
       float   : 1.56
@@ -18,6 +19,14 @@ Platform: ARM Platform
       float16 : 16.37
 
     No double precision support! Skipped
+    
+    Integer compute (GIOPS)
+      int   : 8.44
+      int2  : 7.38
+      int4  : 10.44
+      int8  : 9.50
+      int16 : clEnqueueNDRangeKernel(-5)
+      Tests skipped
 
     Transfer bandwidth (GBPS)
       enqueueWriteBuffer         : 5.84

@@ -9,8 +9,12 @@ device_info_t getDeviceInfo(cl::Device &d)
 {
     device_info_t devInfo;
     
+    devInfo.deviceName = d.getInfo<CL_DEVICE_NAME>();
+    devInfo.driverVersion = d.getInfo<CL_DRIVER_VERSION>();
+    
     devInfo.numCUs = (uint)d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
     devInfo.maxWGSize = (uint)d.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+    
     // Limiting max work-group size to 256
     #define MAX_WG_SIZE 256
     devInfo.maxWGSize = MIN(devInfo.maxWGSize, MAX_WG_SIZE);

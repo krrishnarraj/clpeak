@@ -24,7 +24,7 @@ class clPeak
 public:
 
     bool forcePlatform, forceDevice, useEventTimer;
-    bool isGlobalBW, isComputeSP, isComputeDP, isTransferBW, isKernelLatency;
+    bool isGlobalBW, isComputeSP, isComputeDP, isComputeInt, isTransferBW, isKernelLatency;
     int specifiedPlatform, specifiedDevice;
     
     clPeak();
@@ -39,6 +39,8 @@ public:
     int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     
     int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+    
+    int runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     
     int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
     

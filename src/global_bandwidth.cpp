@@ -13,7 +13,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl_uint numItems = roundToPowOf2(devInfo.maxAllocSize / sizeof(float));
-    int iters = devInfo.computeIters;
+    int iters = devInfo.gloalBWIters;
     
     float *arr = new float[numItems];
     populate(arr, numItems);
@@ -24,19 +24,19 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
         queue.enqueueWriteBuffer(inputBuf, CL_TRUE, 0, (numItems * sizeof(float)), arr);
         
-        cl::Kernel kernel_v1(prog, "bandwidth_v1");
+        cl::Kernel kernel_v1(prog, "global_bandwidth_v1");
         kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, outputBuf);
         
-        cl::Kernel kernel_v2(prog, "bandwidth_v2");
+        cl::Kernel kernel_v2(prog, "global_bandwidth_v2");
         kernel_v2.setArg(0, inputBuf), kernel_v2.setArg(1, outputBuf);
         
-        cl::Kernel kernel_v4(prog, "bandwidth_v4");
+        cl::Kernel kernel_v4(prog, "global_bandwidth_v4");
         kernel_v4.setArg(0, inputBuf), kernel_v4.setArg(1, outputBuf);
         
-        cl::Kernel kernel_v8(prog, "bandwidth_v8");
+        cl::Kernel kernel_v8(prog, "global_bandwidth_v8");
         kernel_v8.setArg(0, inputBuf), kernel_v8.setArg(1, outputBuf);
         
-        cl::Kernel kernel_v16(prog, "bandwidth_v16");
+        cl::Kernel kernel_v16(prog, "global_bandwidth_v16");
         kernel_v16.setArg(0, inputBuf), kernel_v16.setArg(1, outputBuf);
         
         localSize = devInfo.maxWGSize;

@@ -3,9 +3,10 @@
 #define MSTRINGIFY(...) #__VA_ARGS__
 
 static const char *stringifiedKernels = 
-#include "bandwidth_kernels.cl"
+#include "global_bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_dp_kernels.cl"
+#include "compute_integer_kernels.cl"
 ;
 
 static const char *helpStr = 
@@ -19,6 +20,7 @@ static const char *helpStr =
 "\n  --global-bandwidth          selectively run global bandwidth test"
 "\n  --compute-sp                selectively run single precision compute test"
 "\n  --compute-dp                selectively run double precision compute test"
+"\n  --compute-integer           selectively run integer compute test"
 "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
 "\n  --kernel-latency            selectively run kernel latency test"
 "\n  --all-tests                 run all above tests [default]"
@@ -28,7 +30,7 @@ static const char *helpStr =
 
 
 clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1), useEventTimer(false),
-       isGlobalBW(true), isComputeSP(true), isComputeDP(true), isTransferBW(true), isKernelLatency(true)
+       isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeInt(true), isTransferBW(true), isKernelLatency(true)
 {
 }
 
@@ -65,13 +67,13 @@ int clPeak::parseArgs(int argc, char **argv)
         {
             useEventTimer = true;
         } else
-        if((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--compute-sp") == 0)
-                || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0)
-                ||  (strcmp(argv[i], "--kernel-latency") == 0) )
+        if((strcmp(argv[i], "--global-bandwidth") == 0)   || (strcmp(argv[i], "--compute-sp") == 0)
+                || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0)
+                || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0))
         {
             // Disable all and enable only selected ones
             if(!forcedTests) {
-                isGlobalBW = isComputeSP = isComputeDP = isTransferBW = isKernelLatency = false;
+                isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = false;
                 forcedTests = true;
             }
             
@@ -84,6 +86,9 @@ int clPeak::parseArgs(int argc, char **argv)
             if(strcmp(argv[i], "--compute-dp") == 0) {
                 isComputeDP = true;
             } else
+            if(strcmp(argv[i], "--compute-integer") == 0) {
+                isComputeInt = true;
+            } else
             if(strcmp(argv[i], "--transfer-bandwidth") == 0) {
                 isTransferBW = true;
             } else
@@ -94,7 +99,7 @@ int clPeak::parseArgs(int argc, char **argv)
         } else
         if(strcmp(argv[i], "-all-tests") == 0)
         {
-            isGlobalBW = isComputeSP = isComputeDP = isTransferBW = isKernelLatency = true;
+            isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = true;
         } else
         {
             cout << helpStr << endl;
@@ -143,15 +148,18 @@ int clPeak::runAll()
                 if(forceDevice && (d != specifiedDevice))
                     continue;
                 
-                cout << TAB "Device: " << devices[d].getInfo<CL_DEVICE_NAME>() << endl;
-                cout << TAB TAB "Driver version: " << devices[d].getInfo<CL_DRIVER_VERSION>() << " (" << OS_NAME << ")" << endl;
-                
                 device_info_t devInfo = getDeviceInfo(devices[d]);
+                
+                cout << TAB "Device: " << devInfo.deviceName << endl;
+                cout << TAB TAB "Driver version : " << devInfo.driverVersion << " (" << OS_NAME << ")" << endl;
+                cout << TAB TAB "Compute units  : " << devInfo.numCUs << endl;
+                
                 cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
                 
                 runGlobalBandwidthTest(queue, prog, devInfo);
                 runComputeSP(queue, prog, devInfo);
                 runComputeDP(queue, prog, devInfo);
+                runComputeInteger(queue, prog, devInfo);
                 runTransferBandwidthTest(queue, prog, devInfo);
                 runKernelLatency(queue, prog, devInfo);
                 

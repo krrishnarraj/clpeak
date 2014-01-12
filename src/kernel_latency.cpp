@@ -22,7 +22,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
         
-        cl::Kernel kernel_v1(prog, "bandwidth_v1");
+        cl::Kernel kernel_v1(prog, "global_bandwidth_v1");
         kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, outputBuf);
         
         // Dummy calls

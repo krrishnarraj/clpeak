@@ -86,6 +86,7 @@ set(SOURCE_FILES
     src/global_bandwidth.cpp
     src/compute_sp.cpp
     src/compute_dp.cpp
+    src/compute_integer.cpp
     src/transfer_bandwidth.cpp
     src/kernel_latency.cpp
     src/main.cpp

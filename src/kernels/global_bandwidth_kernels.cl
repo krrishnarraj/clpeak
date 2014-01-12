@@ -1,6 +1,8 @@
 MSTRINGIFY(
 
-
+\n#undef FETCH_2
+\n#undef FETCH_8
+\n
 \n#define FETCH_2(sum, id, A)      sum += A[id];   id += get_local_size(0);   sum += A[id];   id += get_local_size(0);
 \n#define FETCH_8(sum, id, A)      FETCH_2(sum, id, A);   FETCH_2(sum, id, A);   FETCH_2(sum, id, A);   FETCH_2(sum, id, A);
 \n
@@ -8,7 +10,7 @@ MSTRINGIFY(
 \n#define FETCH_PER_WI  16
 \n
 
-__kernel void bandwidth_v1(__global float *A, __global float *B)
+__kernel void global_bandwidth_v1(__global float *A, __global float *B)
 {
     int id = (get_group_id(0) * get_local_size(0) * FETCH_PER_WI) + get_local_id(0);
     float sum = 0;
@@ -20,7 +22,7 @@ __kernel void bandwidth_v1(__global float *A, __global float *B)
 }
 
 
-__kernel void bandwidth_v2(__global float2 *A, __global float *B)
+__kernel void global_bandwidth_v2(__global float2 *A, __global float *B)
 {   
     int id = (get_group_id(0) * get_local_size(0) * FETCH_PER_WI) + get_local_id(0);
     float2 sum = 0;
@@ -32,7 +34,7 @@ __kernel void bandwidth_v2(__global float2 *A, __global float *B)
 }
 
 
-__kernel void bandwidth_v4(__global float4 *A, __global float *B)
+__kernel void global_bandwidth_v4(__global float4 *A, __global float *B)
 {    
     int id = (get_group_id(0) * get_local_size(0) * FETCH_PER_WI) + get_local_id(0);
     float4 sum = 0;
@@ -44,7 +46,7 @@ __kernel void bandwidth_v4(__global float4 *A, __global float *B)
 }
 
 
-__kernel void bandwidth_v8(__global float8 *A, __global float *B)
+__kernel void global_bandwidth_v8(__global float8 *A, __global float *B)
 {
     int id = (get_group_id(0) * get_local_size(0) * FETCH_PER_WI) + get_local_id(0);
     float8 sum = 0;
@@ -55,7 +57,7 @@ __kernel void bandwidth_v8(__global float8 *A, __global float *B)
     B[get_global_id(0)] = (sum.S0) + (sum.S1) + (sum.S2) + (sum.S3) + (sum.S4) + (sum.S5) + (sum.S6) + (sum.S7);
 }
 
-__kernel void bandwidth_v16(__global float16 *A, __global float *B)
+__kernel void global_bandwidth_v16(__global float16 *A, __global float *B)
 {
     int id = (get_group_id(0) * get_local_size(0) * FETCH_PER_WI) + get_local_id(0);
     float16 sum = 0;

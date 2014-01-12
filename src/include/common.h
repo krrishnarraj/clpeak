@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 #include <chrono>
+#include <string>
 
 #define TAB             "  "
 #define NEWLINE         "\n"
@@ -44,10 +45,14 @@
 
 
 typedef struct {
+    std::string deviceName;
+    std::string driverVersion;
+    
     uint numCUs;
     uint maxWGSize;
     uint maxAllocSize;
     uint maxGlobalSize;
+    
     bool doubleSupported;
     cl_device_type  deviceType;
     
