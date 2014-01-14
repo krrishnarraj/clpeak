@@ -7,7 +7,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 {
     if(!isKernelLatency)
         return 0;
-        
+
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
     cl::NDRange globalSize = (numItems / FETCH_PER_WI);
@@ -18,18 +18,18 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     try
     {
         cout << NEWLINE TAB TAB "Kernel launch latency : "; cout.flush();
-        
+
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
-        
+
         cl::Kernel kernel_v1(prog, "global_bandwidth_v1");
         kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, outputBuf);
-        
+
         // Dummy calls
         queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
         queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize);
         queue.finish();
-        
+
         latency = 0;
         for(int i=0; i<iters; i++)
         {
@@ -41,7 +41,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
             latency += (float)((int)end - (int)start);
         }
         latency /= iters;
-        
+
         cout << setprecision(2) << fixed;
         cout << latency << " us" << endl;
     }
@@ -50,8 +50,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         cerr << error.what() << "(" << error.err() << ")" << endl;
         cerr << TAB TAB "Tests skipped" << endl;
         return -1;
-    }       
-        
+    }
+
     return 0;
 }
 

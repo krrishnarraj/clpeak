@@ -19,7 +19,7 @@ Platform: ARM Platform
       float16 : 16.37
 
     No double precision support! Skipped
-    
+
     Integer compute (GIOPS)
       int   : 8.44
       int2  : 7.38

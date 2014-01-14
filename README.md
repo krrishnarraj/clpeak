@@ -9,7 +9,7 @@ eg:
 Platform: AMD Accelerated Parallel Processing
 
   Device: Cayman
-  
+
     Driver version: 1348.4 (Linux x64)
 
     Global memory bandwidth (GBPS)
@@ -48,7 +48,7 @@ Platform: AMD Accelerated Parallel Processing
 Platform: ARM Platform
 
   Device: Mali-T604
-  
+
     Driver version: 1.1 (Linux ARM)
 
     Global memory bandwidth (GBPS)

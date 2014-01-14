@@ -4,3 +4,13 @@ Known issues:
    As a result, inf is displayed sometimes
 
 2. Not yet tested on mac. There might be some minor compilation issues
+
+-------------------------------------------------------------------------------------------------
+
+TODO:
+
+1. Integer compute tests are implemented. Currently there is some problem in compiling kernels
+    on intel platform. So this test has been disabled
+
+2. Need to implement local memory bandwidth test
+

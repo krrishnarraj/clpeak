@@ -1,6 +1,6 @@
 MSTRINGIFY(
 
-// Stringifying requires a new line after hash defines 
+// Stringifying requires a new line after hash defines
 
 \n#if defined(cl_khr_fp64)
 \n  #pragma OPENCL EXTENSION cl_khr_fp64 : enable
@@ -28,7 +28,7 @@ __kernel void compute_dp_v1(__global double *ptr, double _A)
 {
     double x = _A;
     double y = (double)get_local_id(0);
-    
+
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
@@ -37,7 +37,7 @@ __kernel void compute_dp_v1(__global double *ptr, double _A)
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
-    
+
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
@@ -55,7 +55,7 @@ __kernel void compute_dp_v2(__global double *ptr, double _A)
 {
     double2 x = (double2)(_A, (_A+1));
     double2 y = (double2)get_local_id(0);
-    
+
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
@@ -72,7 +72,7 @@ __kernel void compute_dp_v4(__global double *ptr, double _A)
 {
     double4 x = (double4)(_A, (_A+1), (_A+2), (_A+3));
     double4 y = (double4)get_local_id(0);
-    
+
     MAD_64(x, y);
     MAD_64(x, y);
     MAD_64(x, y);
@@ -81,7 +81,7 @@ __kernel void compute_dp_v4(__global double *ptr, double _A)
     MAD_64(x, y);
     MAD_64(x, y);
     MAD_64(x, y);
-    
+
     ptr[get_global_id(0)] = (y.S0) + (y.S1) + (y.S2) + (y.S3);
 }
 
@@ -90,7 +90,7 @@ __kernel void compute_dp_v8(__global double *ptr, double _A)
 {
     double8 x = (double8)(_A, (_A+1), (_A+2), (_A+3), (_A+4), (_A+5), (_A+6), (_A+7));
     double8 y = (double8)get_local_id(0);
-    
+
     MAD_64(x, y);
     MAD_64(x, y);
     MAD_64(x, y);

@@ -18,11 +18,11 @@
 
 #define MAX(X, Y)       \
     (X > Y)? X: Y;
-    
+
 #define MIN(X, Y)       \
     (X < Y)? X: Y;
 
-    
+
 #if defined(__APPLE__) || defined(__MACOSX)
     #define OS_NAME         "Macintosh"
 #elif defined(__ANDROID__)
@@ -47,22 +47,22 @@
 typedef struct {
     std::string deviceName;
     std::string driverVersion;
-    
+
     uint numCUs;
     uint maxWGSize;
     uint maxAllocSize;
     uint maxGlobalSize;
-    
+
     bool doubleSupported;
     cl_device_type  deviceType;
-    
+
     // Test specific options
     int gloalBWIters;
     int computeWgsPerCU;
     int computeIters;
     int transferBWIters;
     int kernelLatencyIters;
-    
+
 } device_info_t;
 
 class Timer

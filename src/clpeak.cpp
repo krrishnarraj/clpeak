@@ -2,14 +2,14 @@
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
-static const char *stringifiedKernels = 
+static const char *stringifiedKernels =
 #include "global_bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_dp_kernels.cl"
-#include "compute_integer_kernels.cl"
 ;
+//#include "compute_integer_kernels.cl"
 
-static const char *helpStr = 
+static const char *helpStr =
 "\n clpeak [OPTIONS]"
 "\n"
 "\n OPTIONS:"
@@ -20,13 +20,13 @@ static const char *helpStr =
 "\n  --global-bandwidth          selectively run global bandwidth test"
 "\n  --compute-sp                selectively run single precision compute test"
 "\n  --compute-dp                selectively run double precision compute test"
-"\n  --compute-integer           selectively run integer compute test"
 "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
 "\n  --kernel-latency            selectively run kernel latency test"
 "\n  --all-tests                 run all above tests [default]"
 "\n  -h, --help                  display help message"
 "\n"
 ;
+//"\n  --compute-integer           selectively run integer compute test"
 
 
 clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1), useEventTimer(false),
@@ -76,7 +76,7 @@ int clPeak::parseArgs(int argc, char **argv)
                 isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = false;
                 forcedTests = true;
             }
-            
+
             if(strcmp(argv[i], "--global-bandwidth") == 0) {
                 isGlobalBW = true;
             } else
@@ -95,7 +95,7 @@ int clPeak::parseArgs(int argc, char **argv)
             if(strcmp(argv[i], "--kernel-latency") == 0) {
                 isKernelLatency = true;
             }
-            
+
         } else
         if(strcmp(argv[i], "-all-tests") == 0)
         {
@@ -121,20 +121,20 @@ int clPeak::runAll()
         {
             if(forcePlatform && (p != specifiedPlatform))
                 continue;
-            
+
             cout << NEWLINE "Platform: " << platforms[p].getInfo<CL_PLATFORM_NAME>() << endl;
-            
-            cl_context_properties cps[3] = { 
-                    CL_CONTEXT_PLATFORM, 
-                    (cl_context_properties)(platforms[p])(), 
-                    0 
+
+            cl_context_properties cps[3] = {
+                    CL_CONTEXT_PLATFORM,
+                    (cl_context_properties)(platforms[p])(),
+                    0
                 };
             cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
             vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-            
+
             cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
             cl::Program prog = cl::Program(ctx, source);
-            
+
             try {
                 prog.build(devices, BUILD_OPTIONS);
             }
@@ -142,27 +142,27 @@ int clPeak::runAll()
                 cerr << TAB "Build Log: " << prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << endl;
                 throw error;
             }
-            
+
             for(int d=0; d < (int)devices.size(); d++)
             {
                 if(forceDevice && (d != specifiedDevice))
                     continue;
-                
+
                 device_info_t devInfo = getDeviceInfo(devices[d]);
-                
+
                 cout << TAB "Device: " << devInfo.deviceName << endl;
                 cout << TAB TAB "Driver version : " << devInfo.driverVersion << " (" << OS_NAME << ")" << endl;
                 cout << TAB TAB "Compute units  : " << devInfo.numCUs << endl;
-                
+
                 cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
-                
+
                 runGlobalBandwidthTest(queue, prog, devInfo);
                 runComputeSP(queue, prog, devInfo);
                 runComputeDP(queue, prog, devInfo);
-                runComputeInteger(queue, prog, devInfo);
+ //               runComputeInteger(queue, prog, devInfo);
                 runTransferBandwidthTest(queue, prog, devInfo);
                 runKernelLatency(queue, prog, devInfo);
-                
+
                 cout << NEWLINE;
             }
         }
@@ -172,7 +172,7 @@ int clPeak::runAll()
         cerr << error.what() << "( " << error.err() << " )" << endl;
         return -1;
     }
-    
+
     return 0;
 }
 
@@ -180,18 +180,18 @@ int clPeak::runAll()
 float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters)
 {
     float timed = 0;
-    
+
     // Dummy calls
     queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
     queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
     queue.finish();
-    
+
     if(useEventTimer)
     {
         for(int i=0; i<iters; i++)
         {
             cl::Event timeEvent;
-            
+
             queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
             queue.finish();
             timed += timeInUS(timeEvent);
@@ -199,7 +199,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
     } else      // std timer
     {
         Timer timer;
-        
+
         timer.start();
         for(int i=0; i<iters; i++)
         {
@@ -208,8 +208,8 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
         queue.finish();
         timed = timer.stopAndTime();
     }
-    
+
     return (timed / iters);
-}    
+}
 
 

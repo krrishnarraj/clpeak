@@ -15,7 +15,7 @@ __kernel void compute_sp_v1(__global float *ptr, float _A)
 {
     float x = _A;
     float y = (float)get_local_id(0);
-    
+
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
@@ -24,7 +24,7 @@ __kernel void compute_sp_v1(__global float *ptr, float _A)
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
-    
+
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
@@ -42,7 +42,7 @@ __kernel void compute_sp_v2(__global float *ptr, float _A)
 {
     float2 x = (float2)(_A, (_A+1));
     float2 y = (float2)get_local_id(0);
-    
+
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
     MAD_64(x, y);   MAD_64(x, y);
@@ -59,7 +59,7 @@ __kernel void compute_sp_v4(__global float *ptr, float _A)
 {
     float4 x = (float4)(_A, (_A+1), (_A+2), (_A+3));
     float4 y = (float4)get_local_id(0);
-    
+
     MAD_64(x, y);
     MAD_64(x, y);
     MAD_64(x, y);
@@ -68,7 +68,7 @@ __kernel void compute_sp_v4(__global float *ptr, float _A)
     MAD_64(x, y);
     MAD_64(x, y);
     MAD_64(x, y);
-    
+
     ptr[get_global_id(0)] = (y.S0) + (y.S1) + (y.S2) + (y.S3);
 }
 
@@ -77,7 +77,7 @@ __kernel void compute_sp_v8(__global float *ptr, float _A)
 {
     float8 x = (float8)(_A, (_A+1), (_A+2), (_A+3), (_A+4), (_A+5), (_A+6), (_A+7));
     float8 y = (float8)get_local_id(0);
-    
+
     MAD_64(x, y);
     MAD_64(x, y);
     MAD_64(x, y);

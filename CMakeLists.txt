@@ -73,7 +73,7 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     elseif(GCC_VERSION VERSION_GREATER 4.3 OR GCC_VERSION VERSION_EQUAL 4.3)
         add_definitions("-std=gnu++0x")
     else()
-        message(FATAL_ERROR "C++11 needed. Therefore a gcc compiler with a version higher than 4.3 is needed.")   
+        message(FATAL_ERROR "C++11 needed. Therefore a gcc compiler with a version higher than 4.3 is needed.")
     endif()
 endif()
 
