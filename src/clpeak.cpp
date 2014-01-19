@@ -6,8 +6,14 @@ static const char *stringifiedKernels =
 #include "global_bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_dp_kernels.cl"
+#include "compute_integer_kernels.cl"
 ;
-//#include "compute_integer_kernels.cl"
+
+static const char *stringifiedKernelsNoInt =
+#include "global_bandwidth_kernels.cl"
+#include "compute_sp_kernels.cl"
+#include "compute_dp_kernels.cl"
+;
 
 static const char *helpStr =
 "\n clpeak [OPTIONS]"
@@ -20,13 +26,13 @@ static const char *helpStr =
 "\n  --global-bandwidth          selectively run global bandwidth test"
 "\n  --compute-sp                selectively run single precision compute test"
 "\n  --compute-dp                selectively run double precision compute test"
+"\n  --compute-integer           selectively run integer compute test"
 "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
 "\n  --kernel-latency            selectively run kernel latency test"
 "\n  --all-tests                 run all above tests [default]"
 "\n  -h, --help                  display help message"
 "\n"
 ;
-//"\n  --compute-integer           selectively run integer compute test"
 
 
 clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1), useEventTimer(false),
@@ -132,8 +138,21 @@ int clPeak::runAll()
             cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
             vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
 
-            cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
-            cl::Program prog = cl::Program(ctx, source);
+            string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
+            bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
+
+            cl::Program prog;
+
+            // FIXME Disabling integer compute tests on intel platform
+            // Kernel build is taking much much longer time
+            if(isIntel) {
+                cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
+                isComputeInt = false;
+                prog = cl::Program(ctx, source);
+            } else {
+                cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
+                prog = cl::Program(ctx, source);
+            }
 
             try {
                 prog.build(devices, BUILD_OPTIONS);
@@ -159,7 +178,7 @@ int clPeak::runAll()
                 runGlobalBandwidthTest(queue, prog, devInfo);
                 runComputeSP(queue, prog, devInfo);
                 runComputeDP(queue, prog, devInfo);
- //               runComputeInteger(queue, prog, devInfo);
+                runComputeInteger(queue, prog, devInfo);
                 runTransferBandwidthTest(queue, prog, devInfo);
                 runKernelLatency(queue, prog, devInfo);
 

@@ -89,12 +89,16 @@ void populate(double *ptr, uint N)
     }
 }
 
-#define MAX_POWER   25
-uint roundToPowOf2(uint number)
+
+uint roundToPowOf2(uint number, int maxPower)
 {
     double logd = log(number) / log(2);
     logd = floor(logd);
-    logd = MIN(logd, MAX_POWER);
+
+    // If maximum power limit was specified
+    if(maxPower > 0) {
+        logd = MIN(logd, ((double)maxPower));
+    }
 
     return (uint)pow(2, (int)logd);
 }
