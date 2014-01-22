@@ -21,10 +21,10 @@ Platform: ARM Platform
     No double precision support! Skipped
 
     Integer compute (GIOPS)
-      int   : 8.44
-      int2  : 7.38
+      int   : 8.46
+      int2  : 12.61
       int4  : 10.44
-      int8  : 9.50
+      int8  : 12.60
       int16 : clEnqueueNDRangeKernel(-5)
       Tests skipped
 
@@ -34,7 +34,7 @@ Platform: ARM Platform
       enqueueMapBuffer(for read) : 934.99
         memcpy from mapped ptr   : 2.83
       enqueueUnmap(after write)  : 1813.75
-        memcpy to mapped ptr     : 2.85
+        memcpy to mapped ptr     : 3.02
 
     Kernel launch latency : 149.46 us
 

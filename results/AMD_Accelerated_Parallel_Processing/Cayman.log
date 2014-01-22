@@ -1,14 +1,15 @@
 
 Platform: AMD Accelerated Parallel Processing
   Device: Cayman
-    Driver version: 1348.4 (Linux x64)
+    Driver version : 1348.4 (Linux x64)
+    Compute units  : 24
 
     Global memory bandwidth (GBPS)
-      float   : 130.97
-      float2  : 131.36
-      float4  : 90.50
-      float8  : 69.91
-      float16 : 35.27
+      float   : 154.77
+      float2  : 141.49
+      float4  : 82.39
+      float8  : 70.60
+      float16 : 39.35
 
     Single-precision compute (GFLOPS)
       float   : 674.44
@@ -23,6 +24,13 @@ Platform: AMD Accelerated Parallel Processing
       double4  : 670.93
       double8  : 669.51
       double16 : 666.50
+
+    Integer compute (GIOPS)
+      int   : 337.36
+      int2  : 448.62
+      int4  : 537.68
+      int8  : 536.19
+      int16 : 533.12
 
     Transfer bandwidth (GBPS)
       enqueueWriteBuffer         : 3.53
