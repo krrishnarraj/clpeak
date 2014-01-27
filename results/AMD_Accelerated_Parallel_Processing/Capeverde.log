@@ -1,0 +1,45 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Capeverde
+    Driver version : 1214.3 (VM) (Linux x86)
+    Compute units  : 8
+
+    Global memory bandwidth (GBPS)
+      float   : 60.35
+      float2  : 63.30
+      float4  : 63.32
+      float8  : 33.13
+      float16 : 16.93
+
+    Single-precision compute (GFLOPS)
+      float   : 835.89
+      float2  : 835.08
+      float4  : 832.62
+      float8  : 828.40
+      float16 : 819.06
+
+    Double-precision compute (GFLOPS)
+      double   : 52.20
+      double2  : 52.43
+      double4  : 52.37
+      double8  : 52.26
+      double16 : 52.03
+
+    Integer compute (GIOPS)
+      int   : 167.80
+      int2  : 167.78
+      int4  : 167.74
+      int8  : 166.86
+      int16 : 167.55
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 2.81
+      enqueueReadBuffer          : 2.90
+      enqueueMapBuffer(for read) : 16.34
+        memcpy from mapped ptr   : 1.17
+      enqueueUnmap(after write)  : 2.81
+        memcpy to mapped ptr     : 1.03
+
+    Kernel launch latency : 120.57 us
+
+ 

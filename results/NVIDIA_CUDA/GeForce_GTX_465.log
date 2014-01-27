@@ -1,0 +1,44 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GTX 465
+    Driver version : 325.15 (Linux x86)
+    Compute units  : 11
+
+    Global memory bandwidth (GBPS)
+      float   : 85.28
+      float2  : 86.04
+      float4  : 87.34
+      float8  : 45.51
+      float16 : 22.70
+
+    Single-precision compute (GFLOPS)
+      float   : 843.19
+      float2  : 835.39
+      float4  : 836.46
+      float8  : 831.69
+      float16 : 827.41
+
+    Double-precision compute (GFLOPS)
+      double   : 106.75
+      double2  : 106.66
+      double4  : 106.41
+      double8  : 106.04
+      double16 : 105.21
+
+    Integer compute (GIOPS)
+      int   : 426.07
+      int2  : 425.49
+      int4  : 426.23
+      int8  : 426.26
+      int16 : 426.24
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 0.69
+      enqueueReadBuffer          : 0.47
+      enqueueMapBuffer(for read) : 0.35
+        memcpy from mapped ptr   : 0.53
+      enqueueUnmap(after write)  : 1.57
+        memcpy to mapped ptr     : 0.49
+
+    Kernel launch latency : 15.87 us
+
