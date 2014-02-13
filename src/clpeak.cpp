@@ -154,14 +154,6 @@ int clPeak::runAll()
                 prog = cl::Program(ctx, source);
             }
 
-            try {
-                prog.build(devices, BUILD_OPTIONS);
-            }
-            catch (cl::Error error) {
-                cerr << TAB "Build Log: " << prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << endl;
-                throw error;
-            }
-
             for(int d=0; d < (int)devices.size(); d++)
             {
                 if(forceDevice && (d != specifiedDevice))
@@ -170,8 +162,20 @@ int clPeak::runAll()
                 device_info_t devInfo = getDeviceInfo(devices[d]);
 
                 cout << TAB "Device: " << devInfo.deviceName << endl;
-                cout << TAB TAB "Driver version : " << devInfo.driverVersion << " (" << OS_NAME << ")" << endl;
-                cout << TAB TAB "Compute units  : " << devInfo.numCUs << endl;
+                cout << TAB TAB "Driver version  : " << devInfo.driverVersion << " (" << OS_NAME << ")" << endl;
+                cout << TAB TAB "Compute units   : " << devInfo.numCUs << endl;
+                cout << TAB TAB "Clock frequency : " << devInfo.maxClockFreq << " MHz" << endl;
+
+                try {
+                    vector<cl::Device> dev = {devices[d]};
+                    prog.build(dev, BUILD_OPTIONS);
+                }
+                catch (cl::Error error)
+                {
+                    cerr << TAB TAB "Build Log: " << prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]) << endl;
+                    cout << NEWLINE;
+                    continue;
+                }
 
                 cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
 

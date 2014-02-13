@@ -13,7 +13,9 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.driverVersion = d.getInfo<CL_DRIVER_VERSION>();
 
     devInfo.numCUs = (uint)d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
-    devInfo.maxWGSize = (uint)d.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+    vector<size_t> maxWIPerDim;
+    maxWIPerDim = d.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>();
+    devInfo.maxWGSize = (uint)maxWIPerDim[0];
 
     // Limiting max work-group size to 256
     #define MAX_WG_SIZE 256
@@ -21,6 +23,7 @@ device_info_t getDeviceInfo(cl::Device &d)
 
     devInfo.maxAllocSize = (uint)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
     devInfo.maxGlobalSize = (uint)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+    devInfo.maxClockFreq = (uint)d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>();
     devInfo.doubleSupported = false;
 
     std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();

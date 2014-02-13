@@ -1,0 +1,44 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GTX 660
+    Driver version : 331.20 (Linux x86)
+    Compute units  : 5
+
+    Global memory bandwidth (GBPS)
+      float   : 107.96
+      float2  : 111.36
+      float4  : 113.08
+      float8  : 57.77
+      float16 : 37.33
+
+    Single-precision compute (GFLOPS)
+      float   : 1412.18
+      float2  : 1862.79
+      float4  : 1785.61
+      float8  : 1832.08
+      float16 : 1784.82
+
+    Double-precision compute (GFLOPS)
+      double   : 89.72
+      double2  : 89.60
+      double4  : 89.42
+      double8  : 89.10
+      double16 : 88.38
+
+    Integer compute (GIOPS)
+      int   : 358.32
+      int2  : 358.40
+      int4  : 358.11
+      int8  : 358.62
+      int16 : 358.41
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.53
+      enqueueReadBuffer          : 6.58
+      enqueueMapBuffer(for read) : 2.07
+        memcpy from mapped ptr   : 10.12
+      enqueueUnmap(after write)  : 3.78
+        memcpy to mapped ptr     : 10.29
+
+    Kernel launch latency : 6.89 us
+
