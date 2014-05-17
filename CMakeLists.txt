@@ -40,6 +40,7 @@ if(BITNESS EQUAL 64)
         PATHS
             /usr/lib64
             /usr/lib
+            /usr/local/lib
     )
 elseif(BITNESS EQUAL 32)
     find_library( OPENCL_LIBS
@@ -53,6 +54,7 @@ elseif(BITNESS EQUAL 32)
         PATHS
             /usr/lib32
             /usr/lib
+            /usr/local/lib
     )
 endif()
 
@@ -77,6 +79,11 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     endif()
 endif()
 
+# Override cl.hpp for ARM systems
+if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm.*|ARM.*")
+    message(STATUS "Using cl.hpp from src/include/override/CL")
+    include_directories("src/include/override")
+endif()
 
 include_directories(${OPENCL_INCLUDES} "src/include" "src/kernels")
 

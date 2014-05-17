@@ -140,6 +140,7 @@ int clPeak::runAll()
 
             string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
             bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
+            bool isPocl = (plaformName.find("Portable Computing Language") != std::string::npos)? true: false;
 
             cl::Program prog;
 
@@ -152,6 +153,14 @@ int clPeak::runAll()
             } else {
                 cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
                 prog = cl::Program(ctx, source);
+            }
+
+            // FIXME Disable compute-dp & comute-integer tests for pocl
+            // DP test segfaults & integer test takes infinite time in llc step
+            if(isPocl)
+            {
+                isComputeDP = false;
+                isComputeInt = false;
             }
 
             try {

@@ -1,0 +1,44 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: AMD FX(tm)-8350 Eight-Core Processor
+    Driver version  : 1445.5 (sse2,avx,fma4) (Linux x64)
+    Compute units   : 8
+    Clock frequency : 4000 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 12.57
+      float2  : 13.49
+      float4  : 14.22
+      float8  : 14.57
+      float16 : 15.01
+
+    Single-precision compute (GFLOPS)
+      float   : 6.56
+      float2  : 13.07
+      float4  : 25.70
+      float8  : 51.85
+      float16 : 94.51
+
+    Double-precision compute (GFLOPS)
+      double   : 6.56
+      double2  : 13.23
+      double4  : 26.04
+      double8  : 50.57
+      double16 : 6.81
+
+    Integer compute (GIOPS)
+      int   : 13.12
+      int2  : 8.65
+      int4  : 29.33
+      int8  : 57.58
+      int16 : 64.80
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 8.68
+      enqueueReadBuffer          : 5.32
+      enqueueMapBuffer(for read) : 11570.49
+        memcpy from mapped ptr   : 4.00
+      enqueueUnmap(after write)  : 22652.78
+        memcpy to mapped ptr     : 3.92
+
+    Kernel launch latency : 11.59 us
