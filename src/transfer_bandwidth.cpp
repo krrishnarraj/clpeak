@@ -28,12 +28,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
         cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
 
-        cout << NEWLINE TAB TAB "Transfer bandwidth (GBPS)" << endl;
-        cout << setprecision(2) << fixed;
+        log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
 
         ///////////////////////////////////////////////////////////////////////////
         // enqueueWriteBuffer
-        cout << TAB TAB TAB "enqueueWriteBuffer         : ";    cout.flush();
+        log->print(TAB TAB TAB "enqueueWriteBuffer         : ");
 
         // Dummy warm-up
         queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
@@ -65,10 +64,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_enqueuewritebuffer", gbps);
         ///////////////////////////////////////////////////////////////////////////
         // enqueueReadBuffer
-        cout << TAB TAB TAB "enqueueReadBuffer          : ";    cout.flush();
+        log->print(TAB TAB TAB "enqueueReadBuffer          : ");
 
         // Dummy warm-up
         queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
@@ -99,10 +99,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_enqueuereadbuffer", gbps);
         ///////////////////////////////////////////////////////////////////////////
         // enqueueMapBuffer
-        cout << TAB TAB TAB "enqueueMapBuffer(for read) : ";    cout.flush();
+        log->print(TAB TAB TAB "enqueueMapBuffer(for read) : ");
 
         queue.finish();
 
@@ -139,11 +140,12 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_enqueuemapbuffer", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // memcpy from mapped ptr
-        cout << TAB TAB TAB TAB "memcpy from mapped ptr   : ";  cout.flush();
+        log->print(TAB TAB TAB TAB "memcpy from mapped ptr   : ");
         queue.finish();
 
         timed = 0;
@@ -165,12 +167,13 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_memcpy_from_mapped_ptr", gbps);
 
         ///////////////////////////////////////////////////////////////////////////
 
         // enqueueUnmap
-        cout << TAB TAB TAB "enqueueUnmap(after write)  : ";    cout.flush();
+        log->print(TAB TAB TAB "enqueueUnmap(after write)  : ");
 
         queue.finish();
 
@@ -207,11 +210,12 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-        cout << gbps << endl;
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_enqueueunmap", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // memcpy to mapped ptr
-        cout << TAB TAB TAB TAB "memcpy to mapped ptr     : ";  cout.flush();
+        log->print(TAB TAB TAB TAB "memcpy to mapped ptr     : ");
         queue.finish();
 
         timed = 0;
@@ -233,7 +237,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed /= iters;
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_memcpy_to_mapped_ptr", gbps);
 
         ///////////////////////////////////////////////////////////////////////////
 
@@ -241,8 +246,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
     catch(cl::Error error)
     {
-        cerr << error.what() << "(" << error.err() << ")" << endl;
-        cerr << TAB TAB TAB "Tests skipped" << endl;
+        log->print(error.err() + NEWLINE);
+        log->print(TAB TAB TAB "Tests skipped" NEWLINE);
 
         if(arr)     delete [] arr;
         return -1;

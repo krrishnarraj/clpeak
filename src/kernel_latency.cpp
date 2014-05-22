@@ -17,7 +17,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 
     try
     {
-        cout << NEWLINE TAB TAB "Kernel launch latency : "; cout.flush();
+        log->print(NEWLINE TAB TAB "Kernel launch latency : ");
 
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
@@ -42,13 +42,13 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         }
         latency /= iters;
 
-        cout << setprecision(2) << fixed;
-        cout << latency << " us" << endl;
+        log->print(latency);    log->print(" us" NEWLINE);
+        log->record("latency_kernel_launch", latency);
     }
     catch(cl::Error error)
     {
-        cerr << error.what() << "(" << error.err() << ")" << endl;
-        cerr << TAB TAB "Tests skipped" << endl;
+        log->print(error.err() + NEWLINE);
+        log->print(TAB TAB "Tests skipped" NEWLINE);
         return -1;
     }
 

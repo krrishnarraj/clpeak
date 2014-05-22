@@ -41,69 +41,78 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         cl::Kernel kernel_v16(prog, "compute_integer_v16");
         kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
 
-        cout << NEWLINE TAB TAB "Integer compute (GIOPS)" << endl;
-        cout << setprecision(2) << fixed;
+        log->print(NEWLINE TAB TAB "Integer compute (GIOPS)" NEWLINE);
 
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
-        cout << TAB TAB TAB "int   : ";   cout.flush();
+        log->print(TAB TAB TAB "int   : ");
 
         workPerWI = 4096;      // Indicates integer operations executed per work-item
 
         timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_int", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
-        cout << TAB TAB TAB "int2  : ";   cout.flush();
+        log->print(TAB TAB TAB "int2  : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_int2", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
-        cout << TAB TAB TAB "int4  : ";   cout.flush();
+        log->print(TAB TAB TAB "int4  : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_int4", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
-        cout << TAB TAB TAB "int8  : ";   cout.flush();
+        log->print(TAB TAB TAB "int8  : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_int8", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
-        cout << TAB TAB TAB "int16 : ";   cout.flush();
+        log->print(TAB TAB TAB "int16 : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_int16", gflops);
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)
     {
-        cerr << error.what() << "(" << error.err() << ")" << endl;
-        cerr << TAB TAB TAB "Tests skipped" << endl;
+        log->print(error.err() + NEWLINE);
+        log->print(TAB TAB TAB "Tests skipped" NEWLINE);
         return -1;
     }
 

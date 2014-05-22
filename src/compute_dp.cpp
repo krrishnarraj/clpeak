@@ -14,7 +14,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     if(!devInfo.doubleSupported)
     {
-        cout << NEWLINE TAB TAB "No double precision support! Skipped" << endl;
+        log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
         return 0;
     }
 
@@ -46,68 +46,77 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         cl::Kernel kernel_v16(prog, "compute_dp_v16");
         kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
 
-        cout << NEWLINE TAB TAB "Double-precision compute (GFLOPS)" << endl;
-        cout << setprecision(2) << fixed;
+        log->print(NEWLINE TAB TAB "Double-precision compute (GFLOPS)" NEWLINE);
 
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
-        cout << TAB TAB TAB "double   : ";  cout.flush();
+        log->print(TAB TAB TAB "double   : ");
 
         workPerWI = 4096;      // Indicates flops executed per work-item
 
         timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_double", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
-        cout << TAB TAB TAB "double2  : ";  cout.flush();
+        log->print(TAB TAB TAB "double2  : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_double2", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
-        cout << TAB TAB TAB "double4  : ";  cout.flush();
+        log->print(TAB TAB TAB "double4  : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_double4", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
-        cout << TAB TAB TAB "double8  : ";  cout.flush();
+        log->print(TAB TAB TAB "double8  : ");
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_double8", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
-        cout << TAB TAB TAB "double16 : ";  cout.flush();
+        log->print(TAB TAB TAB "double16 : ");
 
         workPerWI = 4096;
 
         timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
-        cout << gflops << endl;
+
+        log->print(gflops);     log->print(NEWLINE);
+        log->record("compute_double16", gflops);
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)
     {
-        cerr << error.what() << "(" << error.err() << ")" << endl;
-        cerr << TAB TAB TAB "Tests skipped" << endl;
+        log->print(error.err() + NEWLINE);
+        log->print(TAB TAB TAB "Tests skipped" NEWLINE);
         return -1;
     }
 

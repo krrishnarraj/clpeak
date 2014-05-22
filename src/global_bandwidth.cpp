@@ -50,69 +50,77 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
         localSize = devInfo.maxWGSize;
 
-        cout << NEWLINE TAB TAB "Global memory bandwidth (GBPS)" << endl;
-        cout << setprecision(2) << fixed;
+        log->print(NEWLINE TAB TAB "Global memory bandwidth (GBPS)" NEWLINE);
 
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
-        cout << TAB TAB TAB "float   : ";   cout.flush();
+        log->print(TAB TAB TAB "float   : ");
 
         globalSize = numItems / FETCH_PER_WI;
 
         timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_float", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
-        cout << TAB TAB TAB "float2  : ";   cout.flush();
+        log->print(TAB TAB TAB "float2  : ");
 
         globalSize = (numItems / 2 / FETCH_PER_WI);
 
         timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_float2", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
-        cout << TAB TAB TAB "float4  : ";   cout.flush();
+        log->print(TAB TAB TAB "float4  : ");
 
         globalSize = (numItems / 4 / FETCH_PER_WI);
 
         timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_float4", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
-        cout << TAB TAB TAB "float8  : ";   cout.flush();
+        log->print(TAB TAB TAB "float8  : ");
 
         globalSize = (numItems / 8 / FETCH_PER_WI);
 
         timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_float8", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
-        cout << TAB TAB TAB "float16 : ";   cout.flush();
-
+        log->print(TAB TAB TAB "float16 : ");
         globalSize = (numItems / 16 / FETCH_PER_WI);
 
         timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-        cout << gbps << endl;
+
+        log->print(gbps);   log->print(NEWLINE);
+        log->record("bandwidth_float16", gbps);
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)
     {
-        cerr << error.what() << "(" << error.err() << ")" << endl;
-        cerr << TAB TAB TAB "Tests skipped" << endl;
+        log->print(error.err() + NEWLINE);
+        log->print(TAB TAB TAB "Tests skipped" NEWLINE);
 
         if(arr)     delete [] arr;
         return -1;

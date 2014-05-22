@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <string.h>
 #include <common.h>
+#include <logger.h>
 
 #define BUILD_OPTIONS           " -cl-mad-enable "
 
@@ -26,6 +27,7 @@ public:
     bool forcePlatform, forceDevice, useEventTimer;
     bool isGlobalBW, isComputeSP, isComputeDP, isComputeInt, isTransferBW, isKernelLatency;
     int specifiedPlatform, specifiedDevice;
+    logger *log;
 
     clPeak();
 
