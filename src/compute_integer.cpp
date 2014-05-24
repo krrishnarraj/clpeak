@@ -14,6 +14,10 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     try
     {
+        log->print(NEWLINE TAB TAB "Integer compute (GIOPS)" NEWLINE);
+        log->xmlOpenTag("integer_compute");
+        log->xmlAppendAttribs("unit", "gflops");
+
         cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
         uint globalWIs = (devInfo.numCUs) * (devInfo.computeWgsPerCU) * (devInfo.maxWGSize);
@@ -41,8 +45,6 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         cl::Kernel kernel_v16(prog, "compute_integer_v16");
         kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
 
-        log->print(NEWLINE TAB TAB "Integer compute (GIOPS)" NEWLINE);
-
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
         log->print(TAB TAB TAB "int   : ");
@@ -54,7 +56,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_int", gflops);
+        log->xmlRecord("int", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
@@ -67,7 +69,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_int2", gflops);
+        log->xmlRecord("int2", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
@@ -80,7 +82,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_int4", gflops);
+        log->xmlRecord("int4", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
@@ -93,7 +95,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_int8", gflops);
+        log->xmlRecord("int8", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
@@ -106,8 +108,9 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_int16", gflops);
+        log->xmlRecord("int16", gflops);
         ///////////////////////////////////////////////////////////////////////////
+        log->xmlCloseTag();     // integer_compute
     }
     catch(cl::Error error)
     {

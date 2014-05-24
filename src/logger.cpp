@@ -75,6 +75,27 @@ void logger::xmlAppendAttribs(string key, string value)
 	}
 }
 
+void logger::xmlSetContent(string value)
+{
+	if(enableXml)
+	{
+		xw->content(value.c_str());
+		xmlFile.flush();
+	}
+}
+
+void logger::xmlSetContent(float value)
+{
+	if(enableXml)
+	{
+		stringstream ss;
+		ss << value;
+
+		xw->content(ss.str().c_str());
+		xmlFile.flush();
+	}
+}
+
 void logger::xmlCloseTag()
 {
 	if(enableXml)
@@ -85,20 +106,6 @@ void logger::xmlCloseTag()
 }
 
 void logger::xmlRecord(string tag, string value)
-{
-	if(enableXml)
-	{
-		stringstream ss;
-		ss << value;
-
-		xw->openElt(tag.c_str());
-		xw->content(ss.str().c_str());
-		xw->closeElt();
-		xmlFile.flush();
-	}
-}
-
-void logger::xmlRecord(string tag, double value)
 {
 	if(enableXml)
 	{

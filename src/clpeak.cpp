@@ -33,6 +33,8 @@ int clPeak::runAll()
         vector<cl::Platform> platforms;
         cl::Platform::get(&platforms);
 
+        log->xmlOpenTag("clpeak");
+        log->xmlAppendAttribs("os", OS_NAME);
         for(int p=0; p < (int)platforms.size(); p++)
         {
             if(forcePlatform && (p != specifiedPlatform))
@@ -111,10 +113,11 @@ int clPeak::runAll()
                 runKernelLatency(queue, prog, devInfo);
 
                 log->print(NEWLINE);
-                log->xmlCloseTag();
+                log->xmlCloseTag();       // device
             }
-            log->xmlCloseTag();
+            log->xmlCloseTag();           // platform
         }
+        log->xmlCloseTag();               // clpeak
     }
     catch(cl::Error error)
     {

@@ -20,6 +20,10 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     try
     {
+        log->print(NEWLINE TAB TAB "Double-precision compute (GFLOPS)" NEWLINE);
+        log->xmlOpenTag("double_precision_compute");
+        log->xmlAppendAttribs("unit", "gflops");
+
         cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
         uint globalWIs = (devInfo.numCUs) * (devInfo.computeWgsPerCU) * (devInfo.maxWGSize);
@@ -46,8 +50,6 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         cl::Kernel kernel_v16(prog, "compute_dp_v16");
         kernel_v16.setArg(0, outputBuf), kernel_v16.setArg(1, A);
 
-        log->print(NEWLINE TAB TAB "Double-precision compute (GFLOPS)" NEWLINE);
-
         ///////////////////////////////////////////////////////////////////////////
         // Vector width 1
         log->print(TAB TAB TAB "double   : ");
@@ -59,7 +61,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_double", gflops);
+        log->xmlRecord("double", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
@@ -72,7 +74,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_double2", gflops);
+        log->xmlRecord("double2", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
@@ -85,7 +87,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_double4", gflops);
+        log->xmlRecord("double4", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
@@ -97,7 +99,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_double8", gflops);
+        log->xmlRecord("double8", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
@@ -110,8 +112,9 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->xmlRecord("compute_double16", gflops);
+        log->xmlRecord("double16", gflops);
         ///////////////////////////////////////////////////////////////////////////
+        log->xmlCloseTag();     // double_precision_compute
     }
     catch(cl::Error error)
     {

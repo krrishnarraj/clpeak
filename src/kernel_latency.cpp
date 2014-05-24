@@ -18,11 +18,13 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     try
     {
         log->print(NEWLINE TAB TAB "Kernel launch latency : ");
+        log->xmlOpenTag("kernel_launch_latency");
+        log->xmlAppendAttribs("unit", "us");
 
         cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
         cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
 
-        cl::Kernel kernel_v1(prog, "global_bandwidth_v1");
+        cl::Kernel kernel_v1(prog, "global_bandwidth_v1_local_offset");
         kernel_v1.setArg(0, inputBuf), kernel_v1.setArg(1, outputBuf);
 
         // Dummy calls
@@ -43,7 +45,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         latency /= iters;
 
         log->print(latency);    log->print(" us" NEWLINE);
-        log->xmlRecord("latency_kernel_launch", latency);
+        log->xmlSetContent(latency);
+        log->xmlCloseTag();
     }
     catch(cl::Error error)
     {

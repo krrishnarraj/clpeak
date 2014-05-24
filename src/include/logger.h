@@ -30,10 +30,11 @@ public:
 	// Functions to record metrics into xml file
 	void xmlOpenTag(string tag);
 	void xmlAppendAttribs(string key, string value);
+	void xmlSetContent(string value);
+	void xmlSetContent(float value);
 	void xmlCloseTag();
 
 	void xmlRecord(string tag, string value);
-	void xmlRecord(string tag, double value);
 	void xmlRecord(string tag, float value);
 };
 

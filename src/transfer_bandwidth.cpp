@@ -29,6 +29,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
 
         log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
+        log->xmlOpenTag("transfer_bandwidth");
+        log->xmlAppendAttribs("unit", "gbps");
 
         ///////////////////////////////////////////////////////////////////////////
         // enqueueWriteBuffer
@@ -65,7 +67,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         log->print(gbps);   log->print(NEWLINE);
-        log->xmlRecord("bandwidth_enqueuewritebuffer", gbps);
+        log->xmlRecord("enqueuewritebuffer", gbps);
         ///////////////////////////////////////////////////////////////////////////
         // enqueueReadBuffer
         log->print(TAB TAB TAB "enqueueReadBuffer          : ");
@@ -100,7 +102,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         log->print(gbps);   log->print(NEWLINE);
-        log->xmlRecord("bandwidth_enqueuereadbuffer", gbps);
+        log->xmlRecord("enqueuereadbuffer", gbps);
         ///////////////////////////////////////////////////////////////////////////
         // enqueueMapBuffer
         log->print(TAB TAB TAB "enqueueMapBuffer(for read) : ");
@@ -141,7 +143,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         log->print(gbps);   log->print(NEWLINE);
-        log->xmlRecord("bandwidth_enqueuemapbuffer", gbps);
+        log->xmlRecord("enqueuemapbuffer", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // memcpy from mapped ptr
@@ -168,7 +170,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         log->print(gbps);   log->print(NEWLINE);
-        log->xmlRecord("bandwidth_memcpy_from_mapped_ptr", gbps);
+        log->xmlRecord("memcpy_from_mapped_ptr", gbps);
 
         ///////////////////////////////////////////////////////////////////////////
 
@@ -211,7 +213,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
         log->print(gbps);   log->print(NEWLINE);
-        log->xmlRecord("bandwidth_enqueueunmap", gbps);
+        log->xmlRecord("enqueueunmap", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // memcpy to mapped ptr
@@ -238,9 +240,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
         log->print(gbps);   log->print(NEWLINE);
-        log->xmlRecord("bandwidth_memcpy_to_mapped_ptr", gbps);
+        log->xmlRecord("memcpy_to_mapped_ptr", gbps);
 
         ///////////////////////////////////////////////////////////////////////////
+        log->xmlCloseTag();     // transfer_bandwidth
 
 
     }

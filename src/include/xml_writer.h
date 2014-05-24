@@ -50,6 +50,7 @@ public:
   xmlWriter& closeAll() {
     while (elt_stack.size())
       this->closeElt();
+    return *this;
   }
 
   xmlWriter& attr(const char* key, const char* val) {
