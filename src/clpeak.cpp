@@ -21,6 +21,11 @@ clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1),
 {
 }
 
+clPeak::~clPeak()
+{
+    if(log) delete log;
+}
+
 int clPeak::runAll()
 {
     try
@@ -34,6 +39,8 @@ int clPeak::runAll()
                 continue;
 
             log->print(NEWLINE "Platform: " + platforms[p].getInfo<CL_PLATFORM_NAME>() + NEWLINE);
+            log->xmlOpenTag("platform");
+            log->xmlAppendAttribs("name", platforms[p].getInfo<CL_PLATFORM_NAME>());
 
             cl_context_properties cps[3] = {
                     CL_CONTEXT_PLATFORM,
@@ -90,6 +97,9 @@ int clPeak::runAll()
                 log->print(devInfo.numCUs);         log->print(NEWLINE);
                 log->print(TAB TAB "Clock frequency : ");
                 log->print(devInfo.maxClockFreq);   log->print(" MHz" NEWLINE);
+                log->xmlOpenTag("device");
+                log->xmlAppendAttribs("name", devInfo.deviceName);
+                log->xmlAppendAttribs("driver_version", devInfo.driverVersion);
 
                 cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
 
@@ -101,7 +111,9 @@ int clPeak::runAll()
                 runKernelLatency(queue, prog, devInfo);
 
                 log->print(NEWLINE);
+                log->xmlCloseTag();
             }
+            log->xmlCloseTag();
         }
     }
     catch(cl::Error error)

@@ -43,7 +43,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
         latency /= iters;
 
         log->print(latency);    log->print(" us" NEWLINE);
-        log->record("latency_kernel_launch", latency);
+        log->xmlRecord("latency_kernel_launch", latency);
     }
     catch(cl::Error error)
     {

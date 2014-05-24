@@ -30,6 +30,7 @@ public:
     logger *log;
 
     clPeak();
+    ~clPeak();
 
     int parseArgs(int argc, char **argv);
 

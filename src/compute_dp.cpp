@@ -59,7 +59,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_double", gflops);
+        log->xmlRecord("compute_double", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
@@ -72,7 +72,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_double2", gflops);
+        log->xmlRecord("compute_double2", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
@@ -85,7 +85,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_double4", gflops);
+        log->xmlRecord("compute_double4", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
@@ -97,7 +97,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_double8", gflops);
+        log->xmlRecord("compute_double8", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
@@ -110,7 +110,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_double16", gflops);
+        log->xmlRecord("compute_double16", gflops);
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)

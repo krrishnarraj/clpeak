@@ -1,67 +1,127 @@
 #include <logger.h>
 #include <iomanip>
+#include <sstream>
 
-logger::logger(bool _enableXml, string _xmlFile):
-			enableXml(_enableXml), xmlFile(_xmlFile)
+logger::logger(bool _enableXml, string _xmlFileName):
+			enableXml(_enableXml), xmlFileName(_xmlFileName)
 {
+	if(enableXml)
+	{
+		xmlFile.open(xmlFileName);
+		xw = new xmlWriter(xmlFile);
+		xmlFile.flush();
+	}
 }
 
 
 logger::~logger()
 {
+	if(enableXml)
+	{
+		xw->closeAll();
+		delete xw;
+		xmlFile.close();
+	}
 }
 
-int logger::print(string str)
+void logger::print(string str)
 {
 	cout << str;
 	cout.flush();
 }
 
-int logger::print(double val)
+void logger::print(double val)
 {
 	cout << setprecision(2) << fixed;
 	cout << val;
 	cout.flush();
 }
 
-int logger::print(float val)
+void logger::print(float val)
 {
 	cout << setprecision(2) << fixed;
 	cout << val;
 	cout.flush();
 }
 
-int logger::print(int val)
+void logger::print(int val)
 {
 	cout << val;
 	cout.flush();
 }
 
-int logger::print(unsigned int val)
+void logger::print(unsigned int val)
 {
 	cout << val;
 	cout.flush();
 }
 
 
-// FIXME xml dump TO BE IMPLEMEMTED
-int logger::record(string key, string value)
+void logger::xmlOpenTag(string tag)
 {
+	if(enableXml)
+	{
+		xw->openElt(tag.c_str());
+		xmlFile.flush();
+	}
 }
 
-int logger::record(string key, double value)
+void logger::xmlAppendAttribs(string key, string value)
 {
+	if(enableXml)
+	{
+		xw->attr(key.c_str(), value.c_str());
+		xmlFile.flush();
+	}
 }
 
-int logger::record(string key, float value)
+void logger::xmlCloseTag()
 {
+	if(enableXml)
+	{
+		xw->closeElt();
+		xmlFile.flush();
+	}
 }
 
-int logger::record(string key, int value)
+void logger::xmlRecord(string tag, string value)
 {
+	if(enableXml)
+	{
+		stringstream ss;
+		ss << value;
+
+		xw->openElt(tag.c_str());
+		xw->content(ss.str().c_str());
+		xw->closeElt();
+		xmlFile.flush();
+	}
 }
 
-int logger::record(string key, unsigned int value)
+void logger::xmlRecord(string tag, double value)
 {
+	if(enableXml)
+	{
+		stringstream ss;
+		ss << value;
+
+		xw->openElt(tag.c_str());
+		xw->content(ss.str().c_str());
+		xw->closeElt();
+		xmlFile.flush();
+	}
 }
 
+void logger::xmlRecord(string tag, float value)
+{
+	if(enableXml)
+	{
+		stringstream ss;
+		ss << value;
+
+		xw->openElt(tag.c_str());
+		xw->content(ss.str().c_str());
+		xw->closeElt();
+		xmlFile.flush();
+	}
+}

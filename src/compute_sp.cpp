@@ -54,7 +54,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_float", gflops);
+        log->xmlRecord("compute_float", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
@@ -67,7 +67,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_float2", gflops);
+        log->xmlRecord("compute_float2", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
@@ -80,7 +80,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_float4", gflops);
+        log->xmlRecord("compute_float4", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
@@ -93,7 +93,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_float8", gflops);
+        log->xmlRecord("compute_float8", gflops);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
@@ -106,7 +106,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
         gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
 
         log->print(gflops);     log->print(NEWLINE);
-        log->record("compute_float16", gflops);
+        log->xmlRecord("compute_float16", gflops);
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)

@@ -63,7 +63,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
         log->print(gbps);   log->print(NEWLINE);
-        log->record("bandwidth_float", gbps);
+        log->xmlRecord("bandwidth_float", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 2
@@ -76,7 +76,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
         log->print(gbps);   log->print(NEWLINE);
-        log->record("bandwidth_float2", gbps);
+        log->xmlRecord("bandwidth_float2", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 4
@@ -89,7 +89,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
         log->print(gbps);   log->print(NEWLINE);
-        log->record("bandwidth_float4", gbps);
+        log->xmlRecord("bandwidth_float4", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 8
@@ -102,7 +102,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
         log->print(gbps);   log->print(NEWLINE);
-        log->record("bandwidth_float8", gbps);
+        log->xmlRecord("bandwidth_float8", gbps);
         ///////////////////////////////////////////////////////////////////////////
 
         // Vector width 16
@@ -114,7 +114,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
         log->print(gbps);   log->print(NEWLINE);
-        log->record("bandwidth_float16", gbps);
+        log->xmlRecord("bandwidth_float16", gbps);
         ///////////////////////////////////////////////////////////////////////////
     }
     catch(cl::Error error)
