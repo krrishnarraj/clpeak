@@ -1,10 +1,18 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 
+/*
+ * ANDROID_LOGGER -- defined only incase of android ndk build
+ */
+
 #include <iostream>
 #include <string>
 #include <fstream>
 #include <xml_writer.h>
+
+#ifdef ANDROID_LOGGER
+	#include <jni.h>
+#endif
 
 using namespace std;
 
@@ -13,9 +21,14 @@ class logger
 {
 public:
 	bool enableXml;
-	string xmlFileName;
 	ofstream xmlFile;
 	xmlWriter *xw;
+
+#ifdef ANDROID_LOGGER
+	JNIEnv *jEnv;
+	jobject *jObj;
+	jmethodID printCallback;
+#endif
 
 	logger(bool _enableXml=false, string _xmlFileName="");
 	~logger();

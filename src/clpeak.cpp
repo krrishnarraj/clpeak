@@ -15,6 +15,13 @@ static const char *stringifiedKernelsNoInt =
 #include "compute_dp_kernels.cl"
 ;
 
+#ifdef USE_STUB_OPENCL
+// Prototype
+extern "C" {
+void stubOpenclReset();
+}
+#endif
+
 
 clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1), useEventTimer(false),
        isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeInt(true), isTransferBW(true), isKernelLatency(true)
@@ -30,6 +37,10 @@ int clPeak::runAll()
 {
     try
     {
+
+#ifdef USE_STUB_OPENCL
+        stubOpenclReset();
+#endif
         vector<cl::Platform> platforms;
         cl::Platform::get(&platforms);
 

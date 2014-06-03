@@ -3,11 +3,11 @@
 #include <sstream>
 
 logger::logger(bool _enableXml, string _xmlFileName):
-			enableXml(_enableXml), xmlFileName(_xmlFileName)
+			enableXml(_enableXml)
 {
 	if(enableXml)
 	{
-		xmlFile.open(xmlFileName);
+		xmlFile.open(_xmlFileName);
 		xw = new xmlWriter(xmlFile);
 		xmlFile.flush();
 	}
