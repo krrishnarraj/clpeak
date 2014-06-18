@@ -3,6 +3,7 @@
 
 #if defined(__APPLE__) || defined(__MACOSX)
     #include <OpenCL/cl.hpp>
+    #include <sys/types.h>
 #else
     #include <CL/cl.hpp>
 #endif
@@ -14,7 +15,6 @@
 #define TAB             "  "
 #define NEWLINE         "\n"
 #define uint            unsigned int
-
 
 #define MAX(X, Y)       \
     (X > Y)? X: Y;
