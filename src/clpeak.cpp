@@ -140,12 +140,15 @@ int clPeak::runAll()
 
             string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
             bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
+            bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
 
             cl::Program prog;
 
             // FIXME Disabling integer compute tests on intel platform
             // Kernel build is taking much much longer time
-            if(isIntel) {
+            // FIXME Disabling integer compute tests on apple platform
+            // Causes Segmentation fault: 11
+            if(isIntel || isApple) {
                 cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
                 isComputeInt = false;
                 prog = cl::Program(ctx, source);
