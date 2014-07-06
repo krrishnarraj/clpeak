@@ -50,8 +50,10 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     }
     catch(cl::Error error)
     {
-        log->print(error.err() + NEWLINE);
-        log->print(TAB TAB "Tests skipped" NEWLINE);
+        stringstream ss;
+        ss << error.what() << " (" << error.err() << ")" NEWLINE
+                                << TAB TAB TAB "Tests skipped" NEWLINE;
+        log->print(ss.str());
         return -1;
     }
 
