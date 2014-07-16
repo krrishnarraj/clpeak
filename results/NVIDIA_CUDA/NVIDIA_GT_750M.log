@@ -1,0 +1,38 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GT 750M
+    Driver version  : 335.23 (Win32)
+    Compute units   : 2
+    Clock frequency : 1085 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 24.51
+      float2  : 25.27
+      float4  : 25.68
+      float8  : 13.01
+      float16 : 12.34
+
+    Single-precision compute (GFLOPS)
+      float   : 580.07
+      float2  : 765.75
+      float4  : 739.55
+      float8  : 757.51
+      float16 : 740.08
+
+    Double-precision compute (GFLOPS)
+      double   : 37.16
+      double2  : 37.11
+      double4  : 37.05
+      double8  : 36.90
+      double16 : 36.61
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 2.52
+      enqueueReadBuffer          : 2.39
+      enqueueMapBuffer(for read) : 2.48
+        memcpy from mapped ptr   : 2.65
+      enqueueUnmap(after write)  : 2.40
+        memcpy to mapped ptr     : 2.79
+
+    Kernel launch latency : 100.45 us
+

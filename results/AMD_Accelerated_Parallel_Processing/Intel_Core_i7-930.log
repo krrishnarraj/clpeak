@@ -1,0 +1,44 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Intel(R) Core(TM) i7 CPU         930  @ 2.80GHz
+    Driver version  : 1445.5 (sse2) (Win32)
+    Compute units   : 8
+    Clock frequency : 2806 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 10.12
+      float2  : 11.47
+      float4  : 11.47
+      float8  : 13.24
+      float16 : 13.24
+
+    Single-precision compute (GFLOPS)
+      float   : 6.36
+      float2  : 6.72
+      float4  : 26.73
+      float8  : 26.73
+      float16 : 23.73
+
+    Double-precision compute (GFLOPS)
+      double   : 5.90
+      double2  : 11.42
+      double4  : 7.32
+      double8  : 11.92
+      double16 : 8.07
+
+    Integer compute (GIOPS)
+      int   : 11.72
+      int2  : 5.63
+      int4  : 8.00
+      int8  : 8.50
+      int16 : 8.42
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 5.46
+      enqueueReadBuffer          : 5.38
+      enqueueMapBuffer(for read) : inf
+        memcpy from mapped ptr   : 4.25
+      enqueueUnmap(after write)  : inf
+        memcpy to mapped ptr     : 4.00
+
+    Kernel launch latency : 9.77 us

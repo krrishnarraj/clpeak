@@ -1,0 +1,38 @@
+
+Platform: Intel(R) OpenCL
+  Device: Intel(R) Core(TM) i7-4700HQ CPU @ 2.40GHz
+    Driver version  : 3.0.1.10123 (Win32)
+    Compute units   : 8
+    Clock frequency : 2399 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 15.46
+      float2  : 12.90
+      float4  : 19.30
+      float8  : 18.96
+      float16 : 18.69
+
+    Single-precision compute (GFLOPS)
+      float   : 51.96
+      float2  : 68.73
+      float4  : 73.62
+      float8  : 76.17
+      float16 : 74.77
+
+    Double-precision compute (GFLOPS)
+      double   : 36.07
+      double2  : 36.25
+      double4  : 36.70
+      double8  : 38.12
+      double16 : 39.74
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 0.59
+      enqueueReadBuffer          : 2.86
+      enqueueMapBuffer(for read) : 5368.71
+        memcpy from mapped ptr   : 2.96
+      enqueueUnmap(after write)  : inf
+        memcpy to mapped ptr     : 3.80
+
+    Kernel launch latency : 4.12 us
+

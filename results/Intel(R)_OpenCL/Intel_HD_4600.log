@@ -1,0 +1,33 @@
+
+Platform: Intel(R) OpenCL
+  Device: Intel(R) HD Graphics 4600
+    Driver version  : 10.18.10.3308 (Win32)
+    Compute units   : 20
+    Clock frequency : 400 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 19.87
+      float2  : 21.16
+      float4  : 21.29
+      float8  : 20.44
+      float16 : 15.78
+
+    Single-precision compute (GFLOPS)
+      float   : 211.73
+      float2  : 345.66
+      float4  : 343.99
+      float8  : 375.94
+      float16 : 373.48
+
+    No double precision support! Skipped
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 3.76
+      enqueueReadBuffer          : 2.32
+      enqueueMapBuffer(for read) : inf
+        memcpy from mapped ptr   : 2.87
+      enqueueUnmap(after write)  : inf
+        memcpy to mapped ptr     : 3.74
+
+    Kernel launch latency : 166.24 us
+
