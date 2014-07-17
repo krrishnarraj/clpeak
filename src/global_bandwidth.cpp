@@ -150,8 +150,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     }
     catch(cl::Error error)
     {
-        log->print(error.err() + NEWLINE);
-        log->print(TAB TAB TAB "Tests skipped" NEWLINE);
+        stringstream ss;
+        ss << error.what() << " (" << error.err() << ")" NEWLINE
+                                << TAB TAB TAB "Tests skipped" NEWLINE;
+        log->print(ss.str());
 
         if(arr)     delete [] arr;
         return -1;

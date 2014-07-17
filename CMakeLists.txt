@@ -99,7 +99,7 @@ set(SOURCE_FILES
     src/compute_integer.cpp
     src/transfer_bandwidth.cpp
     src/kernel_latency.cpp
-    src/main.cpp
+    src/entry.cpp
     )
 
 add_executable(clpeak ${SOURCE_FILES})

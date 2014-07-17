@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <iomanip>
 #include <string.h>
+#include <sstream>
 #include <common.h>
 #include <logger.h>
 

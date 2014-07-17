@@ -89,7 +89,7 @@ int clPeak::parseArgs(int argc, char **argv)
             }
 
         } else
-        if(strcmp(argv[i], "-all-tests") == 0)
+        if(strcmp(argv[i], "--all-tests") == 0)
         {
             isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = true;
         } else

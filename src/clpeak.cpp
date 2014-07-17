@@ -15,6 +15,13 @@ static const char *stringifiedKernelsNoInt =
 #include "compute_dp_kernels.cl"
 ;
 
+#ifdef USE_STUB_OPENCL
+// Prototype
+extern "C" {
+void stubOpenclReset();
+}
+#endif
+
 
 clPeak::clPeak():forcePlatform(false),forceDevice(false), specifiedPlatform(-1), specifiedDevice(-1), useEventTimer(false),
        isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeInt(true), isTransferBW(true), isKernelLatency(true)
@@ -30,6 +37,10 @@ int clPeak::runAll()
 {
     try
     {
+
+#ifdef USE_STUB_OPENCL
+        stubOpenclReset();
+#endif
         vector<cl::Platform> platforms;
         cl::Platform::get(&platforms);
 
@@ -80,14 +91,6 @@ int clPeak::runAll()
                 isComputeInt = false;
             }
 
-            try {
-                prog.build(devices, BUILD_OPTIONS);
-            }
-            catch (cl::Error error)
-            {
-                log->print(TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) + NEWLINE NEWLINE);
-            }
-
             for(int d=0; d < (int)devices.size(); d++)
             {
                 if(forceDevice && (d != specifiedDevice))
@@ -105,6 +108,17 @@ int clPeak::runAll()
                 log->xmlOpenTag("device");
                 log->xmlAppendAttribs("name", devInfo.deviceName);
                 log->xmlAppendAttribs("driver_version", devInfo.driverVersion);
+
+                try {
+                    vector<cl::Device> dev = {devices[d]};
+                    prog.build(dev, BUILD_OPTIONS);
+                 }
+                 catch (cl::Error error)
+                 {
+                    log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d])
+                                        + NEWLINE NEWLINE);
+                    continue;
+                 }
 
                 cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
 
@@ -124,7 +138,10 @@ int clPeak::runAll()
     }
     catch(cl::Error error)
     {
-        log->print(error.err() + NEWLINE);
+        stringstream ss;
+        ss << error.what() << " (" << error.err() << ")" NEWLINE;
+
+        log->print(ss.str());
         return -1;
     }
 

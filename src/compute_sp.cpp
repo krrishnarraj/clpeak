@@ -114,8 +114,10 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     }
     catch(cl::Error error)
     {
-        log->print(error.err() + NEWLINE);
-        log->print(TAB TAB TAB "Tests skipped" NEWLINE);
+        stringstream ss;
+        ss << error.what() << " (" << error.err() << ")" NEWLINE
+                                << TAB TAB TAB "Tests skipped" NEWLINE;
+        log->print(ss.str());
         return -1;
     }
 

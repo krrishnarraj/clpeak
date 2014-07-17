@@ -1,0 +1,19 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/RelativeLayout1"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    android:background="#F0F0F0" >
+
+    <TextView
+        android:id="@+id/textView_about"
+        android:layout_width="wrap_content"
+        android:layout_height="fill_parent"
+        android:layout_alignParentLeft="true"
+        android:layout_alignParentTop="true"
+        android:autoLink="web"
+        android:gravity="center|top"
+        android:paddingTop="15dp"
+        android:text="@string/about_clpeak"
+        android:textAppearance="?android:attr/textAppearanceMedium" />
+
+</RelativeLayout>
