@@ -85,7 +85,7 @@ private:
   }
 
   inline void indent() {
-    for (int i = 0; i < elt_stack.size(); i++)
+    for (int i = 0; i < (int)elt_stack.size(); i++)
       os << (INDENT);
   }
 
