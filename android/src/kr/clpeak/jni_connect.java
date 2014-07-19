@@ -13,10 +13,6 @@ public class jni_connect extends AsyncTask<Integer, String, Integer>
 	
 	public native int launchClpeak(int argc, String[] argv);
 	
-	static {
-        System.loadLibrary("clpeak");
-    }
-	
 	jni_connect(Activity _activity)
 	{
 		rootActivity = _activity;

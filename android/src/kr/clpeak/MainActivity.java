@@ -20,11 +20,17 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
+
 import kr.clpeak.jni_connect;
-import libcore.io.*;
  
 public class MainActivity extends Activity {
 	
+	public native void setenv(String key, String value);
+
+	static {
+        System.loadLibrary("clpeak");
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
     	super.onCreate(savedInstanceState);
@@ -132,7 +138,7 @@ public class MainActivity extends Activity {
 						return;
 					}
 				}
-				Libcore.os.setenv("LIBOPENCL_SO_PATH", libopenclSoPaths.get(arg2), true);
+				setenv("LIBOPENCL_SO_PATH", libopenclSoPaths.get(arg2));
 			}
 
 			@Override

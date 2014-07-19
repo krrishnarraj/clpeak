@@ -19,3 +19,22 @@ JNIEXPORT jint JNICALL Java_kr_clpeak_jni_1connect_launchClpeak
 }
 #endif
 #endif
+
+
+#ifndef _Included_kr_clpeak_MainActivity
+#define _Included_kr_clpeak_MainActivity
+#ifdef __cplusplus
+extern "C" {
+#endif
+/*
+ * Class:     kr_clpeak_MainActivity
+ * Method:    setenv
+ * Signature: (Ljava/lang/String;Ljava/lang/String;)V
+ */
+JNIEXPORT void JNICALL Java_kr_clpeak_MainActivity_setenv
+  (JNIEnv *, jobject, jstring, jstring);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

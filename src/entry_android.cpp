@@ -28,3 +28,11 @@ jint JNICALL Java_kr_clpeak_jni_1connect_launchClpeak(JNIEnv *_jniEnv,
 
 	return clObj.runAll();
 }
+
+
+void Java_kr_clpeak_MainActivity_setenv(JNIEnv *jniEnv,
+						jobject _jObj, jstring key, jstring value)
+{
+	setenv((char*) jniEnv->GetStringUTFChars(key, 0),
+			(char*) jniEnv->GetStringUTFChars(value, 0), 1);
+}
