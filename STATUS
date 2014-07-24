@@ -3,14 +3,20 @@ Known issues:
 1. When --use-event-timer option is used on some AMD GPUs, platform returns zero time on event.
    As a result, inf is displayed sometimes
 
-2. Not yet tested on mac. There might be some minor compilation issues
+2. Disabled integer compute tests on intel platform. It takes forever to compile integer-compute kernel
+
+3. Disabled integer compute tests on apple platform. Causes "Segmentation Fault: 11"
+
+4. Disabled integer & DP compute tests on pocl. Seg-faults for some reason
+
+5. In qualcomm platform, limit max-workgroup size to 128. Kernel launch fails for workgroup size 256(CL_DEVICE_MAX_WORK_ITEM_SIZES)
 
 -------------------------------------------------------------------------------------------------
 
 TODO:
 
-1. Integer compute tests are implemented. Currently there is some problem in compiling kernels
-    on intel platform. So this test has been disabled
+1. Implement flops/watt metric calculation, atleast for linux mobile devices
 
 2. Need to implement local memory bandwidth test
+
 

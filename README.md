@@ -51,5 +51,7 @@ eg:
         Kernel launch latency : 38.14 us
 
 
+Android version is published at https://play.google.com/store/apps/details?id=kr.clpeak
+
 
 Send in results of your device to krrishnarraj@gmail.com
