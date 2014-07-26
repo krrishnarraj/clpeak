@@ -1,0 +1,30 @@
+
+Platform: Portable Computing Language
+  Device: pthread-ARMv7 Processor rev 3 (v7l)
+    Driver version  : 0.10-pre (Android)
+    Compute units   : 4
+    Clock frequency : 1190 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 0.91
+      float2  : 1.16
+      float4  : 1.25
+      float8  : 1.37
+      float16 : 1.30
+
+    Single-precision compute (GFLOPS)
+      float   : 1.18
+      float2  : 2.33
+      float4  : 4.63
+      float8  : 4.65
+      float16 : 4.65
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 2.55
+      enqueueReadBuffer          : 1.28
+      enqueueMapBuffer(for read) : 8772.40
+        memcpy from mapped ptr   : 1.26
+      enqueueUnmap(after write)  : 11773.49
+        memcpy to mapped ptr     : 1.26
+
+    Kernel launch latency : 4.87 us
