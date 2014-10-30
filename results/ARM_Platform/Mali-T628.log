@@ -1,0 +1,44 @@
+
+Platform: ARM Platform
+  Device: Mali-T628
+    Driver version  : 1.1 (Linux ARM)
+    Compute units   : 4
+    Clock frequency : 600 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 4.32
+      float2  : 6.29
+      float4  : 6.61
+      float8  : 6.33
+      float16 : 5.07
+
+    Single-precision compute (GFLOPS)
+      float   : 2.61
+      float2  : 5.84
+      float4  : 6.20
+      float8  : 7.23
+      float16 : 7.20
+
+    Double-precision compute (GFLOPS)
+      double   : 3.73
+      double2  : 12.91
+      double4  : 9.40
+      double8  : 16.53
+      double16 : 16.00
+
+    Integer compute (GIOPS)
+      int   : 2.10
+      int2  : 5.89
+      int4  : 5.87
+      int8  : 7.35
+      int16 : 34.14
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 4.72
+      enqueueReadBuffer          : 2.73
+      enqueueMapBuffer(for read) : 556.23
+        memcpy from mapped ptr   : 2.15
+      enqueueUnmap(after write)  : 724.13
+        memcpy to mapped ptr     : 2.24
+
+    Kernel launch latency : 179.17 us
