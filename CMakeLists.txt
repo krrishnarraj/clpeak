@@ -77,7 +77,10 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     else()
         message(FATAL_ERROR "C++11 needed. Therefore a gcc compiler with a version higher than 4.3 is needed.")
     endif()
-    add_definitions("-march=native")
+
+    if(NOT CMAKE_CROSSCOMPILING)
+        add_definitions("-march=native")
+    endif()
 endif()
 
 # Override cl.hpp for ARM systems
