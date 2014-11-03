@@ -104,14 +104,12 @@ void populate(double *ptr, uint N)
 
 uint roundToPowOf2(uint number, int maxPower)
 {
-    int i;
+    int lead_zero;
 
     if (maxPower && (number > (1 << maxPower)))
 	    return 1 << maxPower;
 
-    for (i=1 ; i < 8*sizeof(int) ; i++)
-	    if ((1 << i) > number)
-		    break;
+    lead_zero = __builtin_clz(number);
 
-    return 1 << (i-1);
+    return 1 << (( 8 * sizeof(number) - lead_zero) - 1);
 }
