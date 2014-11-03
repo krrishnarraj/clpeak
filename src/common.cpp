@@ -104,14 +104,14 @@ void populate(double *ptr, uint N)
 
 uint roundToPowOf2(uint number, int maxPower)
 {
-    double logd = log(number) / log(2);
-    logd = floor(logd);
+    int i;
 
-    // If maximum power limit was specified
-    if(maxPower > 0) {
-        logd = MIN(logd, ((double)maxPower));
-    }
+    if (maxPower && (number > (1 << maxPower)))
+	    return 1 << maxPower;
 
-    return (uint)pow(2, (int)logd);
+    for (i=1 ; i < 8*sizeof(int) ; i++)
+	    if ((1 << i) > number)
+		    break;
+
+    return 1 << (i-1);
 }
-
