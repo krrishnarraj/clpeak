@@ -75,6 +75,18 @@ void logger::xmlAppendAttribs(string key, string value)
 	}
 }
 
+void logger::xmlAppendAttribs(string key, uint value)
+{
+	if(enableXml)
+	{
+		stringstream ss;
+		ss << value;
+
+		xw->attr(key.c_str(), ss.str().c_str());
+		xmlFile.flush();
+	}
+}
+
 void logger::xmlSetContent(string value)
 {
 	if(enableXml)
