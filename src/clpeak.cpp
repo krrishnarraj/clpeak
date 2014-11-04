@@ -108,6 +108,9 @@ int clPeak::runAll()
                 log->xmlOpenTag("device");
                 log->xmlAppendAttribs("name", devInfo.deviceName);
                 log->xmlAppendAttribs("driver_version", devInfo.driverVersion);
+                log->xmlAppendAttribs("compute_units", devInfo.numCUs);
+                log->xmlAppendAttribs("clock_frequency", devInfo.maxClockFreq);
+                log->xmlAppendAttribs("clock_frequency_unit", "MHz");
 
                 try {
                     vector<cl::Device> dev = {devices[d]};

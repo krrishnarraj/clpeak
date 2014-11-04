@@ -43,6 +43,7 @@ public:
 	// Functions to record metrics into xml file
 	void xmlOpenTag(string tag);
 	void xmlAppendAttribs(string key, string value);
+	void xmlAppendAttribs(string key, uint value);
 	void xmlSetContent(string value);
 	void xmlSetContent(float value);
 	void xmlCloseTag();
