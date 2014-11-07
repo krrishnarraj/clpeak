@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="kr.clpeak"
-    android:versionCode="1"
-    android:versionName="1.0 beta" android:installLocation="auto">
+    android:versionCode="2"
+    android:versionName="1.0" android:installLocation="auto">
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <uses-sdk
-        android:minSdkVersion="14"
-        android:targetSdkVersion="19" />
+        android:minSdkVersion="17"
+        android:targetSdkVersion="21" />
 
     <application
         android:allowBackup="true"
