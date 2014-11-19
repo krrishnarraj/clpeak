@@ -1,0 +1,33 @@
+
+Platform: Intel(R) OpenCL
+  Device:       Intel(R) Celeron(R) CPU  N2930  @ 1.83GHz
+    Driver version  : 1.2.0.92 (Linux x64)
+    Compute units   : 4
+    Clock frequency : 1830 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 7.18
+      float2  : 7.21
+      float4  : 7.14
+      float8  : 6.78
+      float16 : 7.01
+
+    Single-precision compute (GFLOPS)
+      float   : 8.61
+      float2  : 8.61
+      float4  : 8.57
+      float8  : 8.57
+      float16 : 8.55
+
+    No double precision support! Skipped
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 0.76
+      enqueueReadBuffer          : 2.07
+      enqueueMapBuffer(for read) : 2321.10
+        memcpy from mapped ptr   : 2.07
+      enqueueUnmap(after write)  : 1245.06
+        memcpy to mapped ptr     : 2.04
+
+    Kernel launch latency : 10.49 us
+
