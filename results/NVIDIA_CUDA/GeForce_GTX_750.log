@@ -26,6 +26,13 @@ Platform: NVIDIA CUDA
       double8  : 37.82
       double16 : 37.55
 
+    Integer compute (GIOPS)
+      int   : 273.43
+      int2  : 305.58
+      int4  : 333.16
+      int8  : 332.69
+      int16 : 340.65
+
     Transfer bandwidth (GBPS)
       enqueueWriteBuffer         : 7.97
       enqueueReadBuffer          : 4.65

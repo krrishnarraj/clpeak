@@ -26,6 +26,13 @@ Platform: AMD Accelerated Parallel Processing
       double8  : 45.81
       double16 : 45.61
 
+    Integer compute (GIOPS)
+      int   : 146.82
+      int2  : 146.91
+      int4  : 146.03
+      int8  : 145.64
+      int16 : 146.70
+
     Transfer bandwidth (GBPS)
       enqueueWriteBuffer         : 8.42
       enqueueReadBuffer          : 5.40
@@ -61,6 +68,13 @@ Platform: AMD Accelerated Parallel Processing
       double4  : 11.28
       double8  : 23.00
       double16 : 28.83
+
+    Integer compute (GIOPS)
+      int   : 6.16
+      int2  : 4.10
+      int4  : 13.76
+      int8  : 26.61
+      int16 : 30.75
 
     Transfer bandwidth (GBPS)
       enqueueWriteBuffer         : 8.31

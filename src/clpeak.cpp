@@ -46,10 +46,15 @@ int clPeak::runAll()
 
         log->xmlOpenTag("clpeak");
         log->xmlAppendAttribs("os", OS_NAME);
+        bool isComputeInt_saved = isComputeInt;
+        bool isComputeDP_saved = isComputeDP;
         for(int p=0; p < (int)platforms.size(); p++)
         {
             if(forcePlatform && (p != specifiedPlatform))
                 continue;
+
+            isComputeInt = isComputeInt_saved;
+            isComputeDP = isComputeDP_saved;
 
             log->print(NEWLINE "Platform: " + platforms[p].getInfo<CL_PLATFORM_NAME>() + NEWLINE);
             log->xmlOpenTag("platform");
