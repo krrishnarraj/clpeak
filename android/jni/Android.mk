@@ -1,9 +1,11 @@
 LOCAL_PATH := $(call my-dir)
+
 include $(CLEAR_VARS)
-LOCAL_LDLIBS := -ldl -llog
 LOCAL_MODULE := clpeak
-LOCAL_CFLAGS += -DANDROID_LOGGER -DUSE_STUB_OPENCL
-LOCAL_CXXFLAGS += -fexceptions -std=c++11
+LOCAL_CFLAGS += -fPIC -O2 -DANDROID_LOGGER -DUSE_STUB_OPENCL
+LOCAL_CXXFLAGS += -fPIC -O2 -fexceptions -std=c++11
+LOCAL_STATIC_LIBRARIES := OpenCL
+LOCAL_LDLIBS := -ldl -llog
 
 SRC_FOLDER := ../../src
 
@@ -22,8 +24,9 @@ LOCAL_SRC_FILES :=                              \
     $(SRC_FOLDER)/transfer_bandwidth.cpp        \
     $(SRC_FOLDER)/kernel_latency.cpp            \
     $(SRC_FOLDER)/entry_android.cpp             \
-	$(SRC_FOLDER)/options.cpp 			        \
-	$(SRC_FOLDER)/logger_android.cpp 		    \
-    libopencl-stub/libopencl.c
+    $(SRC_FOLDER)/options.cpp 	                \
+    $(SRC_FOLDER)/logger_android.cpp
 
 include $(BUILD_SHARED_LIBRARY)
+
+include $(LOCAL_PATH)/libopencl-stub/Android.mk
