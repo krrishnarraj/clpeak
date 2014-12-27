@@ -106,7 +106,7 @@ uint roundToPowOf2(uint number, int maxPower)
 {
     int i;
 
-    if (maxPower && (number > (1 << maxPower)))
+    if ((maxPower > 0) && (number > (1 << maxPower)))
 	    return 1 << maxPower;
 
     for (i=1 ; i < 8*sizeof(int) ; i++)

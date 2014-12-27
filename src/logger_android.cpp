@@ -53,6 +53,9 @@ void logger::xmlOpenTag(string tag)
 void logger::xmlAppendAttribs(string key, string value)
 {}
 
+void logger::xmlAppendAttribs(string key, uint value)
+{}
+
 void logger::xmlSetContent(string value)
 {}
 
