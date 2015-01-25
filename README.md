@@ -1,7 +1,7 @@
 clpeak
 ======
 
-A synthetic benchmarking tool to measure peak capabilities of a opencl device. It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
+A synthetic benchmarking tool to measure peak capabilities of opencl devices. It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
 
 
 eg:
