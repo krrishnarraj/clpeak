@@ -11,6 +11,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     int iters = devInfo.transferBWIters;
     Timer timer;
+    float *arr = NULL;
 
     cl_uint maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
     cl_uint numItems;
@@ -22,10 +23,9 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         numItems = roundToPowOf2(maxItems);
     }
 
-    float *arr = new float[numItems];
-
     try
     {
+        arr = new float[numItems];
         cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
 
         log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
@@ -245,7 +245,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         ///////////////////////////////////////////////////////////////////////////
         log->xmlCloseTag();     // transfer_bandwidth
 
-
+        if(arr)     delete [] arr;
     }
     catch(cl::Error error)
     {
@@ -258,7 +258,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         return -1;
     }
 
-    if(arr)     delete [] arr;
     return 0;
 }
 

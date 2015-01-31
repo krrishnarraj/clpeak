@@ -7,6 +7,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 {
     float timed_lo, timed_go, timed, gbps;
     cl::NDRange globalSize, localSize;
+    float *arr = NULL;
 
     if(!isGlobalBW)
         return 0;
@@ -24,11 +25,11 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         numItems = roundToPowOf2(maxItems);
     }
 
-    float *arr = new float[numItems];
-    populate(arr, numItems);
-
     try
     {
+        arr = new float[numItems];
+        populate(arr, numItems);
+
         log->print(NEWLINE TAB TAB "Global memory bandwidth (GBPS)" NEWLINE);
         log->xmlOpenTag("global_memory_bandwidth");
         log->xmlAppendAttribs("unit", "gbps");
@@ -147,6 +148,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         log->xmlRecord("float16", gbps);
         ///////////////////////////////////////////////////////////////////////////
         log->xmlCloseTag();     // global_memory_bandwidth
+
+        if(arr)     delete [] arr;
     }
     catch(cl::Error error)
     {
@@ -159,7 +162,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
         return -1;
     }
 
-    if(arr)     delete [] arr;
     return 0;
 }
 
