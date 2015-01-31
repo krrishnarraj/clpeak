@@ -1,0 +1,45 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Hawaii
+    Driver version  : 1411.4 (VM) (Linux x64)
+    Compute units   : 44
+    Clock frequency : 1040 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 268.69
+      float2  : 270.56
+      float4  : 265.80
+      float8  : 154.00
+      float16 : 77.25
+
+    Single-precision compute (GFLOPS)
+      float   : 5690.91
+      float2  : 5651.26
+      float4  : 5629.61
+      float8  : 5604.63
+      float16 : 5553.12
+
+    Double-precision compute (GFLOPS)
+      double   : 723.28
+      double2  : 722.58
+      double4  : 721.07
+      double8  : 718.02
+      double16 : 711.83
+
+    Integer compute (GIOPS)
+      int   : 1918.14
+      int2  : 1920.57
+      int4  : 1919.29
+      int8  : 1917.07
+      int16 : 1912.38
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 3.22
+      enqueueReadBuffer          : 2.06
+      enqueueMapBuffer(for read) : 596.19
+        memcpy from mapped ptr   : 1.50
+      enqueueUnmap(after write)  : 82595.53
+        memcpy to mapped ptr     : 1.38
+
+    Kernel launch latency : 98.17 us
+
