@@ -1,0 +1,45 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Hawaii (R9 390)
+    Driver version  : 1800.5 (VM) (Linux x64)
+    Compute units   : 40
+    Clock frequency : 1000 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 325.28
+      float2  : 335.50
+      float4  : 326.06
+      float8  : 185.19
+      float16 : 92.65
+
+    Single-precision compute (GFLOPS)
+      float   : 5079.23
+      float2  : 5074.38
+      float4  : 5060.63
+      float8  : 5033.64
+      float16 : 4978.18
+
+    Double-precision compute (GFLOPS)
+      double   : 638.55
+      double2  : 637.93
+      double4  : 636.60
+      double8  : 633.93
+      double16 : 628.44
+
+    Integer compute (GIOPS)
+      int   : 1701.12
+      int2  : 1700.71
+      int4  : 1699.93
+      int8  : 1699.02
+      int16 : 1697.04
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 8.66
+      enqueueReadBuffer          : 5.75
+      enqueueMapBuffer(for read) : 36584.05
+        memcpy from mapped ptr   : 3.93
+      enqueueUnmap(after write)  : 429496.75
+        memcpy to mapped ptr     : 3.71
+
+    Kernel launch latency : 34.63 us
+
