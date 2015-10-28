@@ -1,0 +1,31 @@
+
+Platform: Portable Computing Language
+  Device: pthread
+    Driver version  : 0.12-pre (Linux ARM)
+    Compute units   : 4
+    Clock frequency : 900 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 0.85
+      float2  : 0.87
+      float4  : 0.76
+      float8  : 0.75
+      float16 : 0.81
+
+    Single-precision compute (GFLOPS)
+      float   : 0.03
+      float2  : 0.03
+      float4  : 0.03
+      float8  : 0.03
+      float16 : 0.03
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 0.79
+      enqueueReadBuffer          : 0.69
+      enqueueMapBuffer(for read) : 12427.57
+        memcpy from mapped ptr   : 0.69
+      enqueueUnmap(after write)  : 18970.70
+        memcpy to mapped ptr     : 0.70
+
+    Kernel launch latency : 190270.91 us
+
