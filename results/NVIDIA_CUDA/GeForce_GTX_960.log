@@ -1,0 +1,45 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GTX 960
+    Driver version  : 355.11 (Linux x64)
+    Compute units   : 8
+    Clock frequency : 1329 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 82.67
+      float2  : 85.63
+      float4  : 87.22
+      float8  : 81.16
+      float16 : 83.39
+
+    Single-precision compute (GFLOPS)
+      float   : 2550.71
+      float2  : 2747.97
+      float4  : 2793.35
+      float8  : 2728.88
+      float16 : 2760.22
+
+    Double-precision compute (GFLOPS)
+      double   : 89.67
+      double2  : 89.63
+      double4  : 89.46
+      double8  : 89.10
+      double16 : 88.42
+
+    Integer compute (GIOPS)
+      int   : 761.99
+      int2  : 803.24
+      int4  : 816.24
+      int8  : 815.58
+      int16 : 826.16
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.58
+      enqueueReadBuffer          : 6.56
+      enqueueMapBuffer(for read) : 6.27
+        memcpy from mapped ptr   : 7.07
+      enqueueUnmap(after write)  : 6.76
+        memcpy to mapped ptr     : 7.12
+
+    Kernel launch latency : 5.16 us
+
