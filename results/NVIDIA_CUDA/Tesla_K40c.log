@@ -1,0 +1,43 @@
+Platform: NVIDIA CUDA
+  Device: Tesla K40c
+    Driver version  : 355.11 (Linux x64)
+    Compute units   : 15
+    Clock frequency : 745 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 207.57
+      float2  : 213.87
+      float4  : 218.45
+      float8  : 178.41
+      float16 : 127.86
+
+    Single-precision compute (GFLOPS)
+      float   : 2798.13
+      float2  : 3495.13
+      float4  : 3340.98
+      float8  : 3481.63
+      float16 : 3168.49
+
+    Double-precision compute (GFLOPS)
+      double   : 1427.69
+      double2  : 1426.97
+      double4  : 1423.42
+      double8  : 1418.63
+      double16 : 1408.26
+
+    Integer compute (GIOPS)
+      int   : 715.75
+      int2  : 715.52
+      int4  : 715.50
+      int8  : 715.39
+      int16 : 715.43
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 5.93
+      enqueueReadBuffer          : 5.86
+      enqueueMapBuffer(for read) : 5.85
+        memcpy from mapped ptr   : 4.80
+      enqueueUnmap(after write)  : 6.16
+        memcpy to mapped ptr     : 4.84
+
+    Kernel launch latency : 9.27 us
