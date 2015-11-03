@@ -1,0 +1,45 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: Bonaire
+    Driver version  : 1800.5 (VM) (Linux x64)
+    Compute units   : 14
+    Clock frequency : 1175 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 79.62
+      float2  : 81.41
+      float4  : 76.34
+      float8  : 42.10
+      float16 : 21.99
+
+    Single-precision compute (GFLOPS)
+      float   : 1963.97
+      float2  : 1895.67
+      float4  : 1884.74
+      float8  : 1881.41
+      float16 : 1855.49
+
+    Double-precision compute (GFLOPS)
+      double   : 129.25
+      double2  : 129.34
+      double4  : 129.19
+      double8  : 128.86
+      double16 : 128.31
+
+    Integer compute (GIOPS)
+      int   : 401.20
+      int2  : 401.35
+      int4  : 401.02
+      int8  : 400.10
+      int16 : 400.08
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 0.18
+      enqueueReadBuffer          : 0.21
+      enqueueMapBuffer(for read) : 4.14
+        memcpy from mapped ptr   : 0.81
+      enqueueUnmap(after write)  : 0.18
+        memcpy to mapped ptr     : 0.80
+
+    Kernel launch latency : 118.09 us
+
