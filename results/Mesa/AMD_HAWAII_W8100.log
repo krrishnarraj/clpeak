@@ -1,0 +1,44 @@
+Platform: Clover
+  Device: AMD HAWAII (DRM 2.42.0, LLVM 3.8.0)
+    Driver version  : 11.1.0-devel (padoka PPA) (Linux x64)
+    Compute units   : 40
+    Clock frequency : 824 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 147.70
+      float2  : 167.50
+      float4  : 167.23
+      float8  : 89.24
+      float16 : 84.52
+
+    Single-precision compute (GFLOPS)
+      float   : 2613.95
+      float2  : 2255.64
+      float4  : 2613.53
+      float8  : 2251.89
+      float16 : 2393.01
+
+    Double-precision compute (GFLOPS)
+      double   : 1985.94
+      double2  : 1601.71
+      double4  : 1981.17
+      double8  : 1968.08
+      double16 : 1946.94
+
+    Integer compute (GIOPS)
+      int   : 1243.11
+      int2  : 1243.65
+      int4  : 1156.54
+      int8  : 1155.25
+      int16 : 1235.36
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.86
+      enqueueReadBuffer          : 6.21
+      enqueueMapBuffer(for read) : 1748.77
+        memcpy from mapped ptr   : 6.51
+      enqueueUnmap(after write)  : 2583.59
+        memcpy to mapped ptr     : 6.64
+
+    Kernel launch latency : 79.15 us
+
