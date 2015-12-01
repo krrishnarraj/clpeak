@@ -1,0 +1,45 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GTX 480
+    Driver version  : 352.41 (Linux x64)
+    Compute units   : 15
+    Clock frequency : 1550 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 155.74
+      float2  : 157.30
+      float4  : 159.18
+      float8  : 128.67
+      float16 : 71.69
+
+    Single-precision compute (GFLOPS)
+      float   : 1475.08
+      float2  : 1472.89
+      float4  : 1471.08
+      float8  : 1463.67
+      float16 : 1450.65
+
+    Double-precision compute (GFLOPS)
+      double   : 185.74
+      double2  : 185.88
+      double4  : 185.43
+      double8  : 184.61
+      double16 : 183.21
+
+    Integer compute (GIOPS)
+      int   : 742.88
+      int2  : 743.32
+      int4  : 743.42
+      int8  : 743.26
+      int16 : 743.20
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 0.61
+      enqueueReadBuffer          : 0.58
+      enqueueMapBuffer(for read) : 1.67
+        memcpy from mapped ptr   : 0.56
+      enqueueUnmap(after write)  : 2.40
+        memcpy to mapped ptr     : 0.56
+
+    Kernel launch latency : 7.56 us
+
