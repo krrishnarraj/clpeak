@@ -1,11 +1,9 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#if defined(__APPLE__) || defined(__MACOSX)
-#include <OpenCL/cl.hpp>
-#include <sys/types.h>
-#else
 #include <CL/cl.hpp>
+#if defined(__APPLE__) || defined(__MACOSX)
+#include <sys/types.h>
 #endif
 
 #include <stdlib.h>
