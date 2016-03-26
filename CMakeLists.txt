@@ -86,11 +86,8 @@ if(CMAKE_COMPILER_IS_GNUCXX  OR CMAKE_COMPILER_IS_CLANGXX)
   endif()
 endif()
 
-# Override cl.hpp for ARM systems
-if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm.*|ARM.*")
-  message(STATUS "Using cl.hpp from include/override/CL")
-  include_directories("include/override")
-endif()
+# override cl.hp from deps. Its buggy or not present in come systems
+include_directories("deps/OpenCL-CLHPP/include/")
 
 include_directories(${OPENCL_INCLUDES} "include" "src/kernels")
 
