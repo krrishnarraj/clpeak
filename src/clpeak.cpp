@@ -39,7 +39,6 @@ int clPeak::runAll()
 {
   try
   {
-
 #ifdef USE_STUB_OPENCL
     stubOpenclReset();
 #endif
@@ -48,15 +47,10 @@ int clPeak::runAll()
 
     log->xmlOpenTag("clpeak");
     log->xmlAppendAttribs("os", OS_NAME);
-    bool isComputeInt_saved = isComputeInt;
-    bool isComputeDP_saved = isComputeDP;
     for(int p=0; p < (int)platforms.size(); p++)
     {
       if(forcePlatform && (p != specifiedPlatform))
         continue;
-
-      isComputeInt = isComputeInt_saved;
-      isComputeDP = isComputeDP_saved;
 
       log->print(NEWLINE "Platform: " + platforms[p].getInfo<CL_PLATFORM_NAME>() + NEWLINE);
       log->xmlOpenTag("platform");
@@ -72,7 +66,6 @@ int clPeak::runAll()
 
       string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
       bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
-      bool isPocl = (plaformName.find("Portable Computing Language") != std::string::npos)? true: false;
       bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
 
       cl::Program prog;
@@ -91,14 +84,6 @@ int clPeak::runAll()
       {
         cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
         prog = cl::Program(ctx, source);
-      }
-
-      // FIXME Disable compute-dp & comute-integer tests for pocl
-      // DP test segfaults & integer test takes infinite time in llc step
-      if(isPocl)
-      {
-        isComputeDP = false;
-        isComputeInt = false;
       }
 
       for(int d=0; d < (int)devices.size(); d++)
