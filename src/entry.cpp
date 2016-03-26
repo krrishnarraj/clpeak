@@ -2,9 +2,9 @@
 
 int main(int argc, char ** argv)
 {
-    clPeak clObj;
+  clPeak clObj;
 
-    clObj.parseArgs(argc, argv);
+  clObj.parseArgs(argc, argv);
 
-    return clObj.runAll();
+  return clObj.runAll();
 }

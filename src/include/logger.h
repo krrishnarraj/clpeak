@@ -11,7 +11,7 @@
 #include <xml_writer.h>
 
 #ifdef ANDROID_LOGGER
-	#include <jni.h>
+#include <jni.h>
 #endif
 
 using namespace std;
@@ -20,36 +20,36 @@ using namespace std;
 class logger
 {
 public:
-	bool enableXml;
-	ofstream xmlFile;
-	xmlWriter *xw;
+  bool enableXml;
+  ofstream xmlFile;
+  xmlWriter *xw;
 
 #ifdef ANDROID_LOGGER
-	JNIEnv *jEnv;
-	jobject *jObj;
-	jmethodID printCallback;
+  JNIEnv *jEnv;
+  jobject *jObj;
+  jmethodID printCallback;
 #endif
 
-	logger(bool _enableXml=false, string _xmlFileName="");
-	~logger();
+  logger(bool _enableXml=false, string _xmlFileName="");
+  ~logger();
 
-	// Overloaded function to print on stdout/android activity
-	void print(string str);
-	void print(double val);
-	void print(float val);
-	void print(int val);
-	void print(unsigned int val);
+  // Overloaded function to print on stdout/android activity
+  void print(string str);
+  void print(double val);
+  void print(float val);
+  void print(int val);
+  void print(unsigned int val);
 
-	// Functions to record metrics into xml file
-	void xmlOpenTag(string tag);
-	void xmlAppendAttribs(string key, string value);
-	void xmlAppendAttribs(string key, uint value);
-	void xmlSetContent(string value);
-	void xmlSetContent(float value);
-	void xmlCloseTag();
+  // Functions to record metrics into xml file
+  void xmlOpenTag(string tag);
+  void xmlAppendAttribs(string key, string value);
+  void xmlAppendAttribs(string key, uint value);
+  void xmlSetContent(string value);
+  void xmlSetContent(float value);
+  void xmlCloseTag();
 
-	void xmlRecord(string tag, string value);
-	void xmlRecord(string tag, float value);
+  void xmlRecord(string tag, string value);
+  void xmlRecord(string tag, float value);
 };
 
 #endif  // LOGGER_HPP

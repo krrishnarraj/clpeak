@@ -1,6 +1,6 @@
 /*
  * Courtesy: https://gist.github.com/sebclaeys/1227644
- */ 
+ */
 
 
 #ifndef XML_WRITER_H
@@ -38,10 +38,10 @@ public:
     std::string elt = elt_stack.top();
     this->elt_stack.pop();
     if (new_line)
-      {
-        os << NEWLINE;
-        this->indent();
-      }
+    {
+      os << NEWLINE;
+      this->indent();
+    }
     new_line = true;
     this->os << "</" << elt << ">";
     return *this;
@@ -78,10 +78,10 @@ private:
 
   inline void closeTag() {
     if (tag_open)
-      {
-        this->os << ">";
-        tag_open = false;
-      }
+    {
+      this->os << ">";
+      tag_open = false;
+    }
   }
 
   inline void indent() {

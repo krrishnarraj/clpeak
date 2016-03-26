@@ -4,9 +4,9 @@
 #define __CL_ENABLE_EXCEPTIONS
 
 #if defined(__APPLE__) || defined(__MACOSX)
-    #include <OpenCL/cl.hpp>
+#include <OpenCL/cl.hpp>
 #else
-    #include <CL/cl.hpp>
+#include <CL/cl.hpp>
 #endif
 
 #include <iostream>
@@ -25,32 +25,32 @@ class clPeak
 {
 public:
 
-    bool forcePlatform, forceDevice, useEventTimer;
-    bool isGlobalBW, isComputeSP, isComputeDP, isComputeInt, isTransferBW, isKernelLatency;
-    int specifiedPlatform, specifiedDevice;
-    logger *log;
+  bool forcePlatform, forceDevice, useEventTimer;
+  bool isGlobalBW, isComputeSP, isComputeDP, isComputeInt, isTransferBW, isKernelLatency;
+  int specifiedPlatform, specifiedDevice;
+  logger *log;
 
-    clPeak();
-    ~clPeak();
+  clPeak();
+  ~clPeak();
 
-    int parseArgs(int argc, char **argv);
+  int parseArgs(int argc, char **argv);
 
-    // Return avg time in us
-    float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters);
+  // Return avg time in us
+  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters);
 
-    int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
-    int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
-    int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
-    int runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
-    int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
-    int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
-    int runAll();
+  int runAll();
 };
 
 #endif  // CLPEAK_HPP

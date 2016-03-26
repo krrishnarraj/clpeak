@@ -13,7 +13,7 @@ extern "C" {
  * Signature: (I[Ljava/lang/String;)I
  */
 JNIEXPORT jint JNICALL Java_kr_clpeak_jni_1connect_launchClpeak
-  (JNIEnv *, jobject, jint, jobjectArray);
+(JNIEnv *, jobject, jint, jobjectArray);
 
 #ifdef __cplusplus
 }
@@ -32,7 +32,7 @@ extern "C" {
  * Signature: (Ljava/lang/String;Ljava/lang/String;)V
  */
 JNIEXPORT void JNICALL Java_kr_clpeak_MainActivity_setenv
-  (JNIEnv *, jobject, jstring, jstring);
+(JNIEnv *, jobject, jstring, jstring);
 
 #ifdef __cplusplus
 }
