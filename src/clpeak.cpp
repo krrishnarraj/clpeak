@@ -9,6 +9,12 @@ static const char *stringifiedKernels =
     #include "compute_integer_kernels.cl"
     ;
 
+static const char *stringifiedKernelsNoInt =
+    #include "global_bandwidth_kernels.cl"
+    #include "compute_sp_kernels.cl"
+    #include "compute_dp_kernels.cl"
+    ;
+
 #ifdef USE_STUB_OPENCL
 // Prototype
 extern "C" {
@@ -33,6 +39,7 @@ int clPeak::runAll()
 {
   try
   {
+
 #ifdef USE_STUB_OPENCL
     stubOpenclReset();
 #endif
@@ -41,10 +48,15 @@ int clPeak::runAll()
 
     log->xmlOpenTag("clpeak");
     log->xmlAppendAttribs("os", OS_NAME);
+    bool isComputeInt_saved = isComputeInt;
+    bool isComputeDP_saved = isComputeDP;
     for(int p=0; p < (int)platforms.size(); p++)
     {
       if(forcePlatform && (p != specifiedPlatform))
         continue;
+
+      isComputeInt = isComputeInt_saved;
+      isComputeDP = isComputeDP_saved;
 
       log->print(NEWLINE "Platform: " + platforms[p].getInfo<CL_PLATFORM_NAME>() + NEWLINE);
       log->xmlOpenTag("platform");
@@ -59,9 +71,35 @@ int clPeak::runAll()
       vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
 
       string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
+      bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
+      bool isPocl = (plaformName.find("Portable Computing Language") != std::string::npos)? true: false;
+      bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
 
-      cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
-      cl::Program prog = cl::Program(ctx, source);
+      cl::Program prog;
+
+      // FIXME Disabling integer compute tests on intel platform
+      // Kernel build is taking much much longer time
+      // FIXME Disabling integer compute tests on apple platform
+      // Causes Segmentation fault: 11
+      if(isIntel || isApple)
+      {
+        cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
+        isComputeInt = false;
+        prog = cl::Program(ctx, source);
+      }
+      else
+      {
+        cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
+        prog = cl::Program(ctx, source);
+      }
+
+      // FIXME Disable compute-dp & comute-integer tests for pocl
+      // DP test segfaults & integer test takes infinite time in llc step
+      if(isPocl)
+      {
+        isComputeDP = false;
+        isComputeInt = false;
+      }
 
       for(int d=0; d < (int)devices.size(); d++)
       {
@@ -159,4 +197,5 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 
   return (timed / iters);
 }
+
 
