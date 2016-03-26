@@ -1,7 +1,7 @@
 #include <clpeak.h>
 #include <jni_entry.h>
 
-#define PRINT_CALLBACK 	"print_callback_from_c"
+#define PRINT_CALLBACK   "print_callback_from_c"
 
 jint JNICALL Java_kr_clpeak_jni_1connect_launchClpeak(JNIEnv *_jniEnv,
                                                       jobject _jObject, jint argc, jobjectArray _argv)
@@ -19,7 +19,7 @@ jint JNICALL Java_kr_clpeak_jni_1connect_launchClpeak(JNIEnv *_jniEnv,
   }
   clObj.parseArgs(argc, argv);
 
-  if(argv)	free(argv);
+  if(argv)  free(argv);
 
   clObj.log->jEnv = _jniEnv;
   clObj.log->jObj = &(_jObject);
