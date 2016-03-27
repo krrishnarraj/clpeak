@@ -9,13 +9,13 @@
 #include <string>
 #include <fstream>
 #include <xml_writer.h>
+#include "common.h"
 
 #ifdef ANDROID_LOGGER
 #include <jni.h>
 #endif
 
 using namespace std;
-
 
 class logger
 {
