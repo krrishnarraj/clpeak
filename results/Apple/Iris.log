@@ -1,0 +1,33 @@
+
+Platform: Apple
+  Device: Iris
+    Driver version  : 1.2(Feb 26 2016 23:23:55) (Macintosh)
+    Compute units   : 40
+    Clock frequency : 1200 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 16.82
+      float2  : 18.80
+      float4  : 19.07
+      float8  : 16.11
+      float16 : 9.84
+
+    Single-precision compute (GFLOPS)
+      float   : 465.36
+      float2  : 670.77
+      float4  : 667.87
+      float8  : 655.40
+      float16 : 643.45
+
+    No double precision support! Skipped
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.47
+      enqueueReadBuffer          : 6.32
+      enqueueMapBuffer(for read) : 1000.88
+        memcpy from mapped ptr   : 6.54
+      enqueueUnmap(after write)  : 7374.60
+        memcpy to mapped ptr     : 7.55
+
+    Kernel launch latency : 36.65 us
+
