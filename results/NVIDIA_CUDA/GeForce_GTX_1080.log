@@ -1,0 +1,45 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce GTX 1080
+    Driver version  : 367.27 (Linux x64)
+    Compute units   : 20
+    Clock frequency : 1733 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 224.25
+      float2  : 227.78
+      float4  : 236.81
+      float8  : 216.52
+      float16 : 179.27
+
+    Single-precision compute (GFLOPS)
+      float   : 8549.33
+      float2  : 9216.67
+      float4  : 9262.55
+      float8  : 9164.55
+      float16 : 9158.85
+
+    Double-precision compute (GFLOPS)
+      double   : 303.79
+      double2  : 303.89
+      double4  : 303.46
+      double8  : 302.27
+      double16 : 299.86
+
+    Integer compute (GIOPS)
+      int   : 2458.08
+      int2  : 2620.93
+      int4  : 2582.49
+      int8  : 2621.57
+      int16 : 2602.94
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 1.77
+      enqueueReadBuffer          : 12.85
+      enqueueMapBuffer(for read) : 10.95
+        memcpy from mapped ptr   : 10.30
+      enqueueUnmap(after write)  : 12.15
+        memcpy to mapped ptr     : 10.21
+
+    Kernel launch latency : 4.35 us
+
