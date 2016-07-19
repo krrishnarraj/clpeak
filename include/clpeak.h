@@ -38,6 +38,8 @@ public:
 
   int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
+  int runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+
   int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
   int runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);

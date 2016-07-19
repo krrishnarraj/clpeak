@@ -52,6 +52,7 @@ typedef struct {
   uint maxGlobalSize;
   uint maxClockFreq;
 
+  bool halfSupported;
   bool doubleSupported;
   cl_device_type  deviceType;
 
