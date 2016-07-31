@@ -18,7 +18,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/platform_checked_text"
-            android:textAppearance="@android:style/TextAppearance.Material.Medium" />
+            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Medium" />
 
         <Spinner
             android:id="@+id/spinner_platform_list"
@@ -35,13 +35,18 @@
         android:layout_above="@+id/bottom_relative_layout"
         android:layout_below="@+id/top_linear_layout"
         android:scrollbarStyle="insideInset"
-        android:scrollbars="vertical" >
+        android:scrollbars="vertical"
+        style="@android:style/Widget.DeviceDefault.Light.ScrollView" >
 
         <TextView
             android:id="@+id/clpeak_result_textview"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textIsSelectable="true" />
+            android:textIsSelectable="true"
+            android:paddingBottom="8dp"
+            android:paddingTop="8dp"
+            android:textAppearance="?android:attr/textAppearance"
+            android:textColor="#25383C" />
     </ScrollView>
 
     <RelativeLayout
@@ -61,7 +66,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_alignParentTop="true"
-            android:text="Run" />
+            android:text="@string/run_button_text" />
 
     </RelativeLayout>
 
