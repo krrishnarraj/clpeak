@@ -36,6 +36,10 @@ device_info_t getDeviceInfo(cl::Device &d)
   devInfo.doubleSupported = false;
 
   std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
+
+  if((extns.find("cl_khr_fp16") != std::string::npos))
+    devInfo.halfSupported = true;
+
   if((extns.find("cl_khr_fp64") != std::string::npos) || (extns.find("cl_amd_fp64") != std::string::npos))
     devInfo.doubleSupported = true;
 

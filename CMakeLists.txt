@@ -104,6 +104,7 @@ set(SOURCE_FILES
   src/logger.cpp
   src/global_bandwidth.cpp
   src/compute_sp.cpp
+  src/compute_hp.cpp
   src/compute_dp.cpp
   src/compute_integer.cpp
   src/transfer_bandwidth.cpp
