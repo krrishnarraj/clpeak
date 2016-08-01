@@ -95,7 +95,7 @@ public class MainActivity extends AppCompatActivity {
         ));
 
         // Don't search for "default" & "pocl"
-        for (int i = (libopenclSoPaths.size() - 2); i > 0; i--) {
+        for (int i = (libopenclSoPaths.size() - 3); i >= 0; i--) {
             if (!(new File(libopenclSoPaths.get(i)).exists())) {
                 libopenclSoPaths.remove(i);
                 libopenclPlatforms.remove(i);
