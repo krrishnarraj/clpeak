@@ -20,6 +20,7 @@ LOCAL_SRC_FILES :=                              \
     $(SRC_FOLDER)/clpeak.cpp                    \
     $(SRC_FOLDER)/global_bandwidth.cpp          \
     $(SRC_FOLDER)/compute_sp.cpp                \
+    $(SRC_FOLDER)/compute_hp.cpp                \
     $(SRC_FOLDER)/compute_dp.cpp                \
     $(SRC_FOLDER)/compute_integer.cpp           \
     $(SRC_FOLDER)/transfer_bandwidth.cpp        \
