@@ -58,17 +58,22 @@ int clPeak::runAll()
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platforms[p].getInfo<CL_PLATFORM_NAME>());
 
+      string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
+      bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
+      bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
+      bool isSnapdragon = (plaformName.find("Snapdragon") != std::string::npos) ? true : false;
+
       cl_context_properties cps[3] = {
         CL_CONTEXT_PLATFORM,
         (cl_context_properties)(platforms[p])(),
         0
       };
-      cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
-      vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
 
-      string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
-      bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
-      bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
+      // Use only gpus in snapdragon, it would crash otherwise!
+      cl_device_type device_type = (isSnapdragon)? CL_DEVICE_TYPE_GPU: CL_DEVICE_TYPE_ALL;
+
+      cl::Context ctx(device_type, cps);
+      vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
 
       cl::Program prog;
 
