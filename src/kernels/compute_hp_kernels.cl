@@ -21,8 +21,9 @@ MSTRINGIFY(
 \n
 
 
-__kernel void compute_hp_v1(__global half *ptr, half _A)
+__kernel void compute_hp_v1(__global half *ptr, float _B)
 {
+    half _A = (half)_B;
     half x = _A;
     half y = (half)get_local_id(0);
 
@@ -48,8 +49,9 @@ __kernel void compute_hp_v1(__global half *ptr, half _A)
 }
 
 
-__kernel void compute_hp_v2(__global half *ptr, half _A)
+__kernel void compute_hp_v2(__global half *ptr, float _B)
 {
+    half _A = (half)_B;
     half2 x = (half2)(_A, (_A+1));
     half2 y = (half2)get_local_id(0);
 
@@ -65,8 +67,9 @@ __kernel void compute_hp_v2(__global half *ptr, half _A)
     ptr[get_global_id(0)] = (y.S0) + (y.S1);
 }
 
-__kernel void compute_hp_v4(__global half *ptr, half _A)
+__kernel void compute_hp_v4(__global half *ptr, float _B)
 {
+    half _A = (half)_B;
     half4 x = (half4)(_A, (_A+1), (_A+2), (_A+3));
     half4 y = (half4)get_local_id(0);
 
@@ -83,8 +86,9 @@ __kernel void compute_hp_v4(__global half *ptr, half _A)
 }
 
 
-__kernel void compute_hp_v8(__global half *ptr, half _A)
+__kernel void compute_hp_v8(__global half *ptr, float _B)
 {
+    half _A = (half)_B;
     half8 x = (half8)(_A, (_A+1), (_A+2), (_A+3), (_A+4), (_A+5), (_A+6), (_A+7));
     half8 y = (half8)get_local_id(0);
 
@@ -96,8 +100,9 @@ __kernel void compute_hp_v8(__global half *ptr, half _A)
     ptr[get_global_id(0)] = (y.S0) + (y.S1) + (y.S2) + (y.S3) + (y.S4) + (y.S5) + (y.S6) + (y.S7);
 }
 
-__kernel void compute_hp_v16(__global half *ptr, half _A)
+__kernel void compute_hp_v16(__global half *ptr, float _B)
 {
+    half _A = (half)_B;
     half16 x = (half16)(_A, (_A+1), (_A+2), (_A+3), (_A+4), (_A+5), (_A+6), (_A+7),
                     (_A+8), (_A+9), (_A+10), (_A+11), (_A+12), (_A+13), (_A+14), (_A+15));
     half16 y = (half16)get_local_id(0);
