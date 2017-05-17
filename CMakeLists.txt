@@ -89,7 +89,7 @@ if(CMAKE_COMPILER_IS_GNUCXX  OR CMAKE_COMPILER_IS_CLANGXX)
     add_definitions("-march=native")
   endif()
 
-  add_definitions("-fPIC -Wall -Wextra -Wno-deprecated-declarations -Wno-unused-parameter")
+  add_definitions("-fPIC -Wall -Wextra -Wno-deprecated-declarations -Wno-unused-parameter -Wno-ignored-attributes")
 endif()
 
 # override cl.hp from deps. Its buggy or not present in come systems
