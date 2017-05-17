@@ -6,7 +6,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
   float timed, gflops;
   cl_uint workPerWI;
   cl::NDRange globalSize, localSize;
-  cl_half A = 0x1234;
+  cl_float A = 1.3f;
   int iters = devInfo.computeIters;
 
   if(!isComputeDP)

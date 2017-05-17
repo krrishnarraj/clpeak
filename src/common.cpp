@@ -34,6 +34,7 @@ device_info_t getDeviceInfo(cl::Device &d)
   devInfo.maxGlobalSize = (uint)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
   devInfo.maxClockFreq = (uint)d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>();
   devInfo.doubleSupported = false;
+  devInfo.halfSupported = false;
 
   std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
 
