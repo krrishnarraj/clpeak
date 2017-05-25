@@ -2,7 +2,7 @@
 #define COMMON_H
 
 #include <CL/cl.hpp>
-#if defined(__APPLE__) || defined(__MACOSX)
+#if defined(__APPLE__) || defined(__MACOSX) || defined(__FreeBSD__)
 #include <sys/types.h>
 #endif
 
@@ -12,7 +12,9 @@
 
 #define TAB             "  "
 #define NEWLINE         "\n"
+#ifndef __FreeBSD__
 #define uint            unsigned int
+#endif
 
 #define MAX(X, Y)       \
   (X > Y)? X: Y;
@@ -39,6 +41,8 @@
 #elif defined(__arm__)
 #define OS_NAME     "Linux ARM"
 #endif
+#elif defined(__FreeBSD__)
+#define OS_NAME     "FreeBSD"
 #endif
 
 
