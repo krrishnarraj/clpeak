@@ -1,0 +1,40 @@
+
+Platform: Intel(R) OpenCL
+  Device: AMD Ryzen 5 1600 Six-Core Processor            
+    Driver version  : 1.2.0.117 (Linux x64)
+    Compute units   : 12
+    Clock frequency : 0 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 20.89
+      float2  : 24.43
+      float4  : 27.57
+      float8  : 28.70
+      float16 : 27.78
+
+    Single-precision compute (GFLOPS)
+      float   : 129.95
+      float2  : 257.70
+      float4  : 318.98
+      float8  : 129.56
+      float16 : 234.57
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 129.01
+      double2  : 161.40
+      double4  : 83.06
+      double8  : 125.26
+      double16 : 153.76
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 3.56
+      enqueueReadBuffer          : 13.11
+      enqueueMapBuffer(for read) : 19810.73
+        memcpy from mapped ptr   : 13.37
+      enqueueUnmap(after write)  : 26710.00
+        memcpy to mapped ptr     : 13.21
+
+    Kernel launch latency : 2.77 us
+
