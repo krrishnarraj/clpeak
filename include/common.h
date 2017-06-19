@@ -28,21 +28,27 @@
 #elif defined(__ANDROID__)
 #define OS_NAME         "Android"
 #elif defined(_WIN32)
-#if defined(_WIN64)
-#define OS_NAME     "Win64"
-#else
-#define OS_NAME     "Win32"
-#endif
+  #if defined(_WIN64)
+  #define OS_NAME     "Win64"
+  #else
+  #define OS_NAME     "Win32"
+  #endif
 #elif defined(__linux__)
-#if defined(__x86_64__)
-#define OS_NAME     "Linux x64"
-#elif defined(__i386__)
-#define OS_NAME     "Linux x86"
-#elif defined(__arm__)
-#define OS_NAME     "Linux ARM"
-#endif
+  #if defined(__x86_64__)
+  #define OS_NAME     "Linux x64"
+  #elif defined(__i386__)
+  #define OS_NAME     "Linux x86"
+  #elif defined(__arm__)
+  #define OS_NAME     "Linux ARM"
+  #elif defined(__aarch64__)
+  #define OS_NAME     "Linux ARM64"
+  #else
+  #define OS_NAME     "Linux unknown"
+  #endif
 #elif defined(__FreeBSD__)
 #define OS_NAME     "FreeBSD"
+#else
+#define OS_NAME     "Unknown"
 #endif
 
 
