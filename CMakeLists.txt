@@ -85,10 +85,6 @@ if(CMAKE_COMPILER_IS_GNUCXX  OR CMAKE_COMPILER_IS_CLANGXX)
     message(FATAL_ERROR "C++11 needed. Therefore a gcc compiler with a version higher than 4.3 is needed.")
   endif()
 
-  if(NOT CMAKE_CROSSCOMPILING)
-    add_definitions("-march=native")
-  endif()
-
   add_definitions("-fPIC -Wall -Wextra -Wno-deprecated-declarations -Wno-unused-parameter -Wno-ignored-attributes")
 endif()
 
