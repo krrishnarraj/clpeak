@@ -22,7 +22,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     uint globalWIs = (devInfo.numCUs) * (devInfo.computeWgsPerCU) * (devInfo.maxWGSize);
     uint t = MIN((globalWIs * sizeof(cl_float)), devInfo.maxAllocSize);
-    t = roundToPowOf2(t);
+    t = roundToMultipleOf(t, devInfo.maxWGSize);
     globalWIs = t / sizeof(cl_float);
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));

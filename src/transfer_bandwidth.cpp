@@ -18,9 +18,9 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
   // Set an upper-limit for cpu devies
   if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
-    numItems = roundToPowOf2(maxItems, 26);
+    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, 1 << 26);
   } else {
-    numItems = roundToPowOf2(maxItems);
+    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize);
   }
 
   try

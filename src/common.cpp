@@ -109,18 +109,12 @@ void populate(double *ptr, uint N)
 }
 
 
-uint roundToPowOf2(uint number, int maxPower)
+uint roundToMultipleOf(uint number, const uint base, int maxValue)
 {
-  int i;
+  if(maxValue > 0 && number > static_cast<uint>(maxValue))
+    return (maxValue / base) * base;
 
-  if ((maxPower > 0) && (number > ((uint)1 << maxPower)))
-    return (1 << maxPower);
-
-  for (i=1 ; i < (int)(8*sizeof(int)) ; i++)
-    if (((uint)1 << i) > number)
-      break;
-
-  return (1 << (i-1));
+  return (number / base) * base;
 }
 
 void trimString(std::string &str)
