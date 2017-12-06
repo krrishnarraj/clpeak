@@ -1,14 +1,10 @@
 #ifndef CLPEAK_HPP
 #define CLPEAK_HPP
 
-#define __CL_ENABLE_EXCEPTIONS
-
-#include <CL/cl.hpp>
-
 #include <iostream>
 #include <stdio.h>
 #include <iomanip>
-#include <string.h>
+#include <string>
 #include <sstream>
 #include <common.h>
 #include <logger.h>

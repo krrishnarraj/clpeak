@@ -2,7 +2,7 @@
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
-static const char *stringifiedKernels =
+static const std::string stringifiedKernels =
     #include "global_bandwidth_kernels.cl"
     #include "compute_sp_kernels.cl"
     #include "compute_hp_kernels.cl"
@@ -10,7 +10,7 @@ static const char *stringifiedKernels =
     #include "compute_integer_kernels.cl"
     ;
 
-static const char *stringifiedKernelsNoInt =
+static const std::string stringifiedKernelsNoInt =
     #include "global_bandwidth_kernels.cl"
     #include "compute_sp_kernels.cl"
     #include "compute_hp_kernels.cl"
@@ -83,13 +83,13 @@ int clPeak::runAll()
       // Causes Segmentation fault: 11
       if(isIntel || isApple)
       {
-        cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
+        cl::Program::Sources source(1, stringifiedKernelsNoInt);
         isComputeInt = false;
         prog = cl::Program(ctx, source);
       }
       else
       {
-        cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
+        cl::Program::Sources source(1, stringifiedKernels);
         prog = cl::Program(ctx, source);
       }
 
@@ -190,5 +190,3 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 
   return (timed / iters);
 }
-
-

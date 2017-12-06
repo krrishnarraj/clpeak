@@ -1,7 +1,11 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <CL/cl.hpp>
+#define CL_HPP_ENABLE_EXCEPTIONS
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#define CL_HPP_TARGET_OPENCL_VERSION 120
+#include <CL/cl2.hpp>
+
 #if defined(__APPLE__) || defined(__MACOSX) || defined(__FreeBSD__)
 #include <sys/types.h>
 #endif
@@ -99,4 +103,3 @@ void populate(float *ptr, uint N);
 void populate(double *ptr, uint N);
 
 #endif  // COMMON_H
-
