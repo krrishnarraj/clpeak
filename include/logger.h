@@ -35,14 +35,17 @@ public:
 
   // Overloaded function to print on stdout/android activity
   void print(string str);
+  void print(std::pair<microsecondsT, occurence> val, microsecondsT range);
   void print(double val);
   void print(float val);
+  void print(size_t val);
   void print(int val);
   void print(unsigned int val);
 
   // Functions to record metrics into xml file
   void xmlOpenTag(string tag);
   void xmlAppendAttribs(string key, string value);
+  void xmlAppendAttribs(string key, size_t value);
   void xmlAppendAttribs(string key, uint value);
   void xmlSetContent(string value);
   void xmlSetContent(float value);
@@ -50,6 +53,9 @@ public:
 
   void xmlRecord(string tag, string value);
   void xmlRecord(string tag, float value);
+  void xmlRecord(string tag, double value);
+  void xmlRecord(string tag, size_t value);
+  void xmlRecord(string tag, std::pair<microsecondsT, occurence> mode, microsecondsT range);
 };
 
 #endif  // LOGGER_HPP

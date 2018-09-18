@@ -16,6 +16,8 @@ static const char *helpStr =
     "\n  --compute-integer           selectively run integer compute test"
     "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
     "\n  --kernel-latency            selectively run kernel latency test"
+    "\n  --runtime-overhead-tests    run all runtime overhead tests"
+    "\n  --verbose                   print all performance statistics"
     "\n  --all-tests                 run all above tests [default]"
     "\n  --enable-xml-dump           Dump results to xml file"
     "\n  -f, --xml-file file_name    specify file name for xml dump"
@@ -28,6 +30,7 @@ int clPeak::parseArgs(int argc, char **argv)
 {
   bool forcedTests = false;
   bool enableXml = false;
+  isVerbose = false;
   string xmlFileName;
 
   for(int i=1; i<argc; i++)
@@ -59,9 +62,14 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       useEventTimer = true;
     }
+    else if(strcmp(argv[i], "--verbose") == 0)
+    {
+      isVerbose = true;
+    }
     else if((strcmp(argv[i], "--global-bandwidth") == 0)   || (strcmp(argv[i], "--compute-sp") == 0)
             || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0)
-            || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0))
+            || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0)
+            || (strcmp(argv[i], "--runtime-overhead-tests") == 0))
     {
       // Disable all and enable only selected ones
       if(!forcedTests)
@@ -94,11 +102,15 @@ int clPeak::parseArgs(int argc, char **argv)
       {
         isKernelLatency = true;
       }
+      else if (strcmp(argv[i], "--runtime-overhead-tests") == 0)
+      {
+        isRuntimeOverheadTest = true;
+      }
 
     }
     else if(strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = true;
+      isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = isRuntimeOverheadTest = true;
     }
     else if(strcmp(argv[i], "--enable-xml-dump") == 0)
     {
