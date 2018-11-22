@@ -1,0 +1,47 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce RTX 2080
+    Driver version  : 410.73 (Linux x64)
+    Compute units   : 46
+    Clock frequency : 1815 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 362.93
+      float2  : 382.42
+      float4  : 391.26
+      float8  : 400.79
+      float16 : 364.98
+
+    Single-precision compute (GFLOPS)
+      float   : 11258.41
+      float2  : 11248.28
+      float4  : 11228.37
+      float8  : 11166.76
+      float16 : 11064.75
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 354.32
+      double2  : 353.24
+      double4  : 351.23
+      double8  : 349.27
+      double16 : 346.67
+
+    Integer compute (GIOPS)
+      int   : 11085.63
+      int2  : 11005.45
+      int4  : 11002.92
+      int8  : 10991.37
+      int16 : 10955.21
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 5.88
+      enqueueReadBuffer          : 6.49
+      enqueueMapBuffer(for read) : 5.96
+        memcpy from mapped ptr   : 14.68
+      enqueueUnmap(after write)  : 6.18
+        memcpy to mapped ptr     : 14.82
+
+    Kernel launch latency : 3.85 us
+
