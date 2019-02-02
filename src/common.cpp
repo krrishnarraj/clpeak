@@ -30,8 +30,8 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.maxWGSize = MIN(devInfo.maxWGSize, 128);
   }
 
-  devInfo.maxAllocSize = (uint)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
-  devInfo.maxGlobalSize = (uint)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+  devInfo.maxAllocSize = (ulong)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
+  devInfo.maxGlobalSize = (ulong)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
   devInfo.maxClockFreq = (uint)d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>();
   devInfo.doubleSupported = false;
   devInfo.halfSupported = false;

@@ -15,6 +15,7 @@
 #ifndef __FreeBSD__
 #define uint            unsigned int
 #endif
+#define ulong           unsigned long int
 
 #define MAX(X, Y)       \
   (X > Y)? X: Y;
@@ -58,8 +59,8 @@ typedef struct {
 
   uint numCUs;
   uint maxWGSize;
-  uint maxAllocSize;
-  uint maxGlobalSize;
+  ulong maxAllocSize;
+  ulong maxGlobalSize;
   uint maxClockFreq;
 
   bool halfSupported;
