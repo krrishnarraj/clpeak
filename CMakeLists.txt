@@ -1,4 +1,3 @@
-
 cmake_minimum_required(VERSION 3.1)
 project(clpeak)
 
@@ -38,14 +37,11 @@ set(SOURCE_FILES
 
 add_executable(clpeak ${SOURCE_FILES})
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
-
-# override cl.hp from deps. Its buggy or not present in some systems
-target_include_directories(clpeak PRIVATE "deps/OpenCL-CLHPP/include/")
 target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} "include" "src/kernels")
-
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"   OR
    CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
   target_compile_options(clpeak PRIVATE -fPIC -Wall -Wextra -Wno-deprecated-declarations -Wno-unused-parameter -Wno-ignored-attributes)
 endif()
+
