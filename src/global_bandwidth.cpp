@@ -151,7 +151,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     if(arr)     delete [] arr;
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE

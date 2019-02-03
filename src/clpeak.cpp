@@ -119,7 +119,7 @@ int clPeak::runAll()
           vector<cl::Device> dev = {devices[d]};
           prog.build(dev, BUILD_OPTIONS);
         }
-        catch (cl::Error error)
+        catch (cl::Error &error)
         {
           log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d])
                      + NEWLINE NEWLINE);
@@ -143,7 +143,7 @@ int clPeak::runAll()
     }
     log->xmlCloseTag();               // clpeak
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE;

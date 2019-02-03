@@ -116,7 +116,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag();     // half_precision_compute
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE

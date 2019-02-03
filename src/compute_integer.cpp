@@ -112,7 +112,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag();     // integer_compute
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
