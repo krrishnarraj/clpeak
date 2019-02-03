@@ -7,16 +7,10 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-# FindOpenCL.cmake doesn't use OPENCL_ROOT so force it to copy OPENCL_ROOT to
-# AMDAPPSDKROOT which it does use
-if(OPENCL_ROOT)
-  set(ENV{AMDAPPSDKROOT} ${OPENCL_ROOT})
-endif()
-
-find_package(OpenCL)
+find_package(OpenCL REQUIRED)
 
 if(NOT OpenCL_FOUND)
-  message( FATAL_ERROR "Could not find OpenCL include/libs. Set OPENCL_ROOT to your OpenCL SDK. Download AMD APP SDK "
+  message( FATAL_ERROR "Could not find OpenCL include/libs. Set OCL_ROOT to your OpenCL SDK. Download AMD APP SDK "
       "http://developer.amd.com/tools-and-sdks/heterogeneous-computing/amd-accelerated-parallel-processing-app-sdk/ for x86/x64 "
       "or pocl http://pocl.sourceforge.net/ for ARM systems" )
 else()
@@ -43,7 +37,6 @@ set(SOURCE_FILES
 )
 
 add_executable(clpeak ${SOURCE_FILES})
-
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
 
 # override cl.hp from deps. Its buggy or not present in some systems
