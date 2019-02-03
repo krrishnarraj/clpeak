@@ -22,7 +22,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     uint globalWIs = (devInfo.numCUs) * (devInfo.computeWgsPerCU) * (devInfo.maxWGSize);
     uint t = MIN((globalWIs * sizeof(cl_int)), devInfo.maxAllocSize);
-    t = roundToPowOf2(t);
+    t = roundToMultipleOf(t, devInfo.maxWGSize);
     globalWIs = t / sizeof(cl_int);
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_int)));
@@ -49,7 +49,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     // Vector width 1
     log->print(TAB TAB TAB "int   : ");
 
-    workPerWI = 4096;      // Indicates integer operations executed per work-item
+    workPerWI = 2048;      // Indicates integer operations executed per work-item
 
     timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
@@ -62,7 +62,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     // Vector width 2
     log->print(TAB TAB TAB "int2  : ");
 
-    workPerWI = 4096;
+    workPerWI = 2048;
 
     timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
@@ -75,7 +75,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     // Vector width 4
     log->print(TAB TAB TAB "int4  : ");
 
-    workPerWI = 4096;
+    workPerWI = 2048;
 
     timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
@@ -88,7 +88,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     // Vector width 8
     log->print(TAB TAB TAB "int8  : ");
 
-    workPerWI = 4096;
+    workPerWI = 2048;
 
     timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
@@ -101,7 +101,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     // Vector width 16
     log->print(TAB TAB TAB "int16 : ");
 
-    workPerWI = 4096;
+    workPerWI = 2048;
 
     timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
@@ -112,7 +112,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag();     // integer_compute
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE

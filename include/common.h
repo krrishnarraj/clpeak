@@ -18,6 +18,7 @@
 #ifndef __FreeBSD__
 #define uint            unsigned int
 #endif
+#define ulong           unsigned long int
 
 #define MAX(X, Y)       \
   (X > Y)? X: Y;
@@ -61,8 +62,8 @@ typedef struct {
 
   uint numCUs;
   uint maxWGSize;
-  uint maxAllocSize;
-  uint maxGlobalSize;
+  ulong maxAllocSize;
+  ulong maxGlobalSize;
   uint maxClockFreq;
 
   bool halfSupported;
@@ -123,11 +124,13 @@ device_info_t getDeviceInfo(cl::Device &d);
 // Return time in us for the given event
 float timeInUS(cl::Event &timeEvent);
 
-// Round to nearest power of 2, or set a maximum power of 2 limit
-uint roundToPowOf2(uint number, int maxPower=-1);
+// Round down to next multiple of the given base with an optional maximum value
+uint roundToMultipleOf(uint number, const uint base, int maxValue = -1);
 
 void populate(float *ptr, uint N);
 void populate(double *ptr, uint N);
+
+void trimString(std::string &str);
 
 inline microsecondsT getMininimumTime(const std::vector<microsecondsT> &sortedVector) {
   return sortedVector[0];
@@ -262,4 +265,3 @@ void checkBoundaries()
 }
 
 #endif  // COMMON_H
-

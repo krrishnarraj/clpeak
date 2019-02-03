@@ -11,6 +11,8 @@ device_info_t getDeviceInfo(cl::Device &d)
 
   devInfo.deviceName = d.getInfo<CL_DEVICE_NAME>();
   devInfo.driverVersion = d.getInfo<CL_DRIVER_VERSION>();
+  trimString(devInfo.deviceName);
+  trimString(devInfo.driverVersion);
 
   devInfo.numCUs = (uint)d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
   vector<size_t> maxWIPerDim;
@@ -30,8 +32,8 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.maxWGSize = MIN(devInfo.maxWGSize, 128);
   }
 
-  devInfo.maxAllocSize = (uint)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
-  devInfo.maxGlobalSize = (uint)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+  devInfo.maxAllocSize = (ulong)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
+  devInfo.maxGlobalSize = (ulong)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
   devInfo.maxClockFreq = (uint)d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>();
   devInfo.doubleSupported = false;
   devInfo.halfSupported = false;
@@ -125,16 +127,15 @@ void populate(double *ptr, uint N)
 }
 
 
-uint roundToPowOf2(uint number, int maxPower)
+uint roundToMultipleOf(uint number, const uint base, int maxValue)
 {
-  int i;
+  if(maxValue > 0 && number > static_cast<uint>(maxValue))
+    return (maxValue / base) * base;
 
-  if ((maxPower > 0) && (number > ((uint)1 << maxPower)))
-    return (1 << maxPower);
+  return (number / base) * base;
+}
 
-  for (i=1 ; i < (int)(8*sizeof(int)) ; i++)
-    if (((uint)1 << i) > number)
-      break;
-
-  return (1 << (i-1));
+void trimString(std::string &str)
+{
+  str.erase(str.find('\0'));
 }

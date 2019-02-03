@@ -20,9 +20,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   // Set an upper-limit for cpu devies
   if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
-    numItems = roundToPowOf2(maxItems, 25);
+    numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), 1 << 25);
   } else {
-    numItems = roundToPowOf2(maxItems);
+    numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16));
   }
 
   try
@@ -151,7 +151,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     if(arr)     delete [] arr;
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE

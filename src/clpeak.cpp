@@ -56,14 +56,15 @@ int clPeak::runAll()
       if(forcePlatform && (p != specifiedPlatform))
         continue;
 
-      log->print(NEWLINE "Platform: " + platforms[p].getInfo<CL_PLATFORM_NAME>() + NEWLINE);
-      log->xmlOpenTag("platform");
-      log->xmlAppendAttribs("name", platforms[p].getInfo<CL_PLATFORM_NAME>());
+      std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
+      trimString(platformName);
 
-      string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
-      bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
-      bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
-      bool isSnapdragon = (plaformName.find("Snapdragon") != std::string::npos) ? true : false;
+      log->print(NEWLINE "Platform: " + platformName + NEWLINE);
+      log->xmlOpenTag("platform");
+      log->xmlAppendAttribs("name", platformName);
+
+      bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
+      bool isSnapdragon = (platformName.find("Snapdragon") != std::string::npos) ? true : false;
 
       cl_context_properties cps[3] = {
         CL_CONTEXT_PLATFORM,
@@ -79,11 +80,9 @@ int clPeak::runAll()
 
       cl::Program prog;
 
-      // FIXME Disabling integer compute tests on intel platform
-      // Kernel build is taking much much longer time
       // FIXME Disabling integer compute tests on apple platform
       // Causes Segmentation fault: 11
-      if(isIntel || isApple)
+      if(isApple)
       {
         cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
         isComputeInt = false;
@@ -121,7 +120,7 @@ int clPeak::runAll()
           vector<cl::Device> dev = {devices[d]};
           prog.build(dev, BUILD_OPTIONS);
         }
-        catch (cl::Error error)
+        catch (cl::Error &error)
         {
           log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d])
                      + NEWLINE NEWLINE);
@@ -149,7 +148,7 @@ int clPeak::runAll()
     }
     log->xmlCloseTag();               // clpeak
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE;

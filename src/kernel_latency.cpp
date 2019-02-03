@@ -48,7 +48,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     log->xmlSetContent(latency);
     log->xmlCloseTag();
   }
-  catch(cl::Error error)
+  catch(cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
