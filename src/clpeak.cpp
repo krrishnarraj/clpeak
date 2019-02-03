@@ -61,6 +61,7 @@ int clPeak::runAll()
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platformName);
 
+      bool isIntel = (platformName.find("Intel") != std::string::npos)? true: false;
       bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
       bool isSnapdragon = (platformName.find("Snapdragon") != std::string::npos) ? true : false;
 
@@ -78,9 +79,11 @@ int clPeak::runAll()
 
       cl::Program prog;
 
+      // FIXME Disabling integer compute tests on intel platform
+      // Kernel build is taking much much longer time
       // FIXME Disabling integer compute tests on apple platform
       // Causes Segmentation fault: 11
-      if(isApple)
+      if(isIntel || isApple)
       {
         cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
         isComputeInt = false;
