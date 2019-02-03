@@ -20,9 +20,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   // Set an upper-limit for cpu devies
   if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
-    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, 1 << 25);
+    numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), 1 << 25);
   } else {
-    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize);
+    numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16));
   }
 
   try
