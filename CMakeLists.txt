@@ -38,6 +38,7 @@ set(SOURCE_FILES
 add_executable(clpeak ${SOURCE_FILES})
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
 target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} "include" "src/kernels")
+target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=120)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"   OR
