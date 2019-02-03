@@ -11,6 +11,8 @@ device_info_t getDeviceInfo(cl::Device &d)
 
   devInfo.deviceName = d.getInfo<CL_DEVICE_NAME>();
   devInfo.driverVersion = d.getInfo<CL_DRIVER_VERSION>();
+  trimString(devInfo.deviceName);
+  trimString(devInfo.driverVersion);
 
   devInfo.numCUs = (uint)d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
   vector<size_t> maxWIPerDim;
@@ -119,4 +121,9 @@ uint roundToPowOf2(uint number, int maxPower)
       break;
 
   return (1 << (i-1));
+}
+
+void trimString(std::string &str)
+{
+  str.erase(str.find('\0'));
 }

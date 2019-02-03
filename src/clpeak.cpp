@@ -54,14 +54,16 @@ int clPeak::runAll()
       if(forcePlatform && (p != specifiedPlatform))
         continue;
 
-      log->print(NEWLINE "Platform: " + platforms[p].getInfo<CL_PLATFORM_NAME>() + NEWLINE);
-      log->xmlOpenTag("platform");
-      log->xmlAppendAttribs("name", platforms[p].getInfo<CL_PLATFORM_NAME>());
+      std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
+      trimString(platformName);
 
-      string plaformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
-      bool isIntel = (plaformName.find("Intel") != std::string::npos)? true: false;
-      bool isApple = (plaformName.find("Apple") != std::string::npos)? true: false;
-      bool isSnapdragon = (plaformName.find("Snapdragon") != std::string::npos) ? true : false;
+      log->print(NEWLINE "Platform: " + platformName + NEWLINE);
+      log->xmlOpenTag("platform");
+      log->xmlAppendAttribs("name", platformName);
+
+      bool isIntel = (platformName.find("Intel") != std::string::npos)? true: false;
+      bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
+      bool isSnapdragon = (platformName.find("Snapdragon") != std::string::npos) ? true : false;
 
       cl_context_properties cps[3] = {
         CL_CONTEXT_PLATFORM,

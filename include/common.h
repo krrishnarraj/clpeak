@@ -99,5 +99,7 @@ uint roundToPowOf2(uint number, int maxPower=-1);
 void populate(float *ptr, uint N);
 void populate(double *ptr, uint N);
 
+void trimString(std::string &str);
+
 #endif  // COMMON_H
 
