@@ -190,6 +190,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
     for(int i=0; i<iters; i++)
     {
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+      queue.flush();
     }
     queue.finish();
     timed = timer.stopAndTime();
