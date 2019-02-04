@@ -74,6 +74,7 @@ typedef struct {
 
   // Test specific options
   uint gloalBWIters;
+  uint64_t globalBWMaxSize;
   uint computeWgsPerCU;
   uint computeDPWgsPerCU;
   uint computeIters;
