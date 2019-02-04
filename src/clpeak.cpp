@@ -128,6 +128,7 @@ int clPeak::runAll()
         }
         catch (cl::Error &error)
         {
+          UNUSED(error);
           log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d])
                      + NEWLINE NEWLINE);
           continue;

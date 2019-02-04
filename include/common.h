@@ -23,6 +23,10 @@
 #define MIN(X, Y)       \
   (X < Y)? X: Y;
 
+#ifdef UNUSED
+#undef UNUSED
+#endif
+#define UNUSED(expr) do { (void)(expr); } while (0)
 
 #if defined(__APPLE__) || defined(__MACOSX)
 #define OS_NAME         "Macintosh"
