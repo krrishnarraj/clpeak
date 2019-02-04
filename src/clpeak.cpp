@@ -61,7 +61,12 @@ int clPeak::runAll()
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platformName);
 
-      bool isIntel = (platformName.find("Intel") != std::string::npos)? true: false;
+      // Disable intel integer kernel only on windows
+      bool isIntel = false;
+      #if defined(_WIN32)
+        isIntel = (platformName.find("Intel") != std::string::npos)? true: false;
+      #endif
+
       bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
       bool isSnapdragon = (platformName.find("Snapdragon") != std::string::npos) ? true : false;
 
