@@ -44,5 +44,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"   OR
    CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
   target_compile_options(clpeak PRIVATE -fPIC -Wall -Wextra -Wno-deprecated-declarations -Wno-unused-parameter -Wno-ignored-attributes)
+elseif(MSVC)
+  target_compile_options(clpeak PRIVATE /wd4996)
 endif()
 
