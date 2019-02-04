@@ -80,7 +80,7 @@ typedef struct {
   uint computeIters;
   uint transferBWIters;
   uint kernelLatencyIters;
-
+  uint64_t transferBWMaxSize;
 } device_info_t;
 
 class Timer

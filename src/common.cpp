@@ -54,12 +54,14 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.computeWgsPerCU = 512;
     devInfo.computeDPWgsPerCU = 256;
     devInfo.computeIters = 10;
+    devInfo.transferBWMaxSize = 1 << 27;
   } else {            // GPU
     devInfo.gloalBWIters = 50;
     devInfo.globalBWMaxSize = 1 << 29;
     devInfo.computeWgsPerCU = 2048;
     devInfo.computeDPWgsPerCU = 512;
     devInfo.computeIters = 30;
+    devInfo.transferBWMaxSize = 1 << 29;
   }
   devInfo.transferBWIters = 20;
   devInfo.kernelLatencyIters = 20000;

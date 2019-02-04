@@ -14,14 +14,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   float *arr = NULL;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  uint64_t numItems;
-
-  // Set an upper-limit for cpu devies
-  if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
-    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, 1 << 26);
-  } else {
-    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize);
-  }
+  uint64_t numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, devInfo.transferBWMaxSize);
 
   try
   {
