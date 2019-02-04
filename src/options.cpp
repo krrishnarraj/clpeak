@@ -42,7 +42,7 @@ int clPeak::parseArgs(int argc, char **argv)
       if((i+1) < argc)
       {
         forcePlatform = true;
-        specifiedPlatform = atoi(argv[i+1]);
+        specifiedPlatform = strtoul(argv[i+1], NULL, 0);
         i++;
       }
     }
@@ -51,7 +51,7 @@ int clPeak::parseArgs(int argc, char **argv)
       if((i+1) < argc)
       {
         forceDevice = true;
-        specifiedDevice = atoi(argv[i+1]);
+        specifiedDevice = strtoul(argv[i+1], NULL, 0);
         i++;
       }
     }

@@ -23,7 +23,7 @@ public:
 
   bool forcePlatform, forceDevice, useEventTimer;
   bool isGlobalBW, isComputeSP, isComputeDP, isComputeInt, isTransferBW, isKernelLatency;
-  int specifiedPlatform, specifiedDevice;
+  ulong specifiedPlatform, specifiedDevice;
   logger *log;
 
   clPeak();
@@ -32,7 +32,7 @@ public:
   int parseArgs(int argc, char **argv);
 
   // Return avg time in us
-  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters);
+  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters);
 
   int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 

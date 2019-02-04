@@ -9,19 +9,20 @@
 #include <stdlib.h>
 #include <chrono>
 #include <string>
+#include <cstdint>
 
 #define TAB             "  "
 #define NEWLINE         "\n"
 #ifndef __FreeBSD__
 #define uint            unsigned int
 #endif
-#define ulong           unsigned long int
+#define ulong           unsigned long
 
 #define MAX(X, Y)       \
-  (X > Y)? X: Y;
+  (X > Y)? X: Y
 
 #define MIN(X, Y)       \
-  (X < Y)? X: Y;
+  (X < Y)? X: Y
 
 #ifdef UNUSED
 #undef UNUSED
@@ -63,8 +64,8 @@ typedef struct {
 
   uint numCUs;
   uint maxWGSize;
-  ulong maxAllocSize;
-  ulong maxGlobalSize;
+  uint64_t maxAllocSize;
+  uint64_t maxGlobalSize;
   uint maxClockFreq;
 
   bool halfSupported;
@@ -72,11 +73,11 @@ typedef struct {
   cl_device_type  deviceType;
 
   // Test specific options
-  int gloalBWIters;
-  int computeWgsPerCU;
-  int computeIters;
-  int transferBWIters;
-  int kernelLatencyIters;
+  uint gloalBWIters;
+  uint computeWgsPerCU;
+  uint computeIters;
+  uint transferBWIters;
+  uint kernelLatencyIters;
 
 } device_info_t;
 
@@ -98,10 +99,10 @@ device_info_t getDeviceInfo(cl::Device &d);
 float timeInUS(cl::Event &timeEvent);
 
 // Round down to next multiple of the given base with an optional maximum value
-uint roundToMultipleOf(uint number, const uint base, int maxValue = -1);
+uint64_t roundToMultipleOf(uint64_t number, uint64_t base, uint64_t maxValue = UINT64_MAX);
 
-void populate(float *ptr, uint N);
-void populate(double *ptr, uint N);
+void populate(float *ptr, uint64_t N);
+void populate(double *ptr, uint64_t N);
 
 void trimString(std::string &str);
 

@@ -28,7 +28,7 @@ void stubOpenclReset();
 clPeak::clPeak(): forcePlatform(false), forceDevice(false), useEventTimer(false),
     isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeInt(true),
     isTransferBW(true), isKernelLatency(true),
-    specifiedPlatform(-1), specifiedDevice(-1)
+    specifiedPlatform(0), specifiedDevice(0)
 {
 }
 
@@ -49,7 +49,7 @@ int clPeak::runAll()
 
     log->xmlOpenTag("clpeak");
     log->xmlAppendAttribs("os", OS_NAME);
-    for(int p=0; p < (int)platforms.size(); p++)
+    for(size_t p=0; p < platforms.size(); p++)
     {
       if(forcePlatform && (p != specifiedPlatform))
         continue;
@@ -100,7 +100,7 @@ int clPeak::runAll()
         prog = cl::Program(ctx, source);
       }
 
-      for(int d=0; d < (int)devices.size(); d++)
+      for(size_t d=0; d < devices.size(); d++)
       {
         if(forceDevice && (d != specifiedDevice))
           continue;
@@ -164,7 +164,7 @@ int clPeak::runAll()
 }
 
 
-float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters)
+float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters)
 {
   float timed = 0;
 
@@ -175,7 +175,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 
   if(useEventTimer)
   {
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       cl::Event timeEvent;
 
@@ -188,7 +188,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
     Timer timer;
 
     timer.start();
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
       queue.flush();
