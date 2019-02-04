@@ -164,4 +164,3 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   return 0;
 }
-

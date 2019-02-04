@@ -42,7 +42,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
       cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
       latency += (float)((int)end - (int)start);
     }
-    latency /= iters;
+    latency /= static_cast<float>(iters);
 
     log->print(latency);    log->print(" us" NEWLINE);
     log->xmlSetContent(latency);

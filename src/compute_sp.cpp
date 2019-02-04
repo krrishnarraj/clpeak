@@ -52,7 +52,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("float", gflops);
@@ -65,7 +65,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("float2", gflops);
@@ -78,7 +78,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("float4", gflops);
@@ -91,7 +91,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("float8", gflops);
@@ -104,7 +104,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("float16", gflops);
@@ -122,4 +122,3 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
   return 0;
 }
-

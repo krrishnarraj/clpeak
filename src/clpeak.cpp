@@ -197,7 +197,5 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
     timed = timer.stopAndTime();
   }
 
-  return (timed / iters);
+  return (timed / static_cast<float>(iters));
 }
-
-

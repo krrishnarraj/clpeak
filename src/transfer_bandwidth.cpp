@@ -63,7 +63,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       queue.finish();
       timed = timer.stopAndTime();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -98,7 +98,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       queue.finish();
       timed = timer.stopAndTime();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -139,7 +139,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
       }
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -166,7 +166,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       queue.enqueueUnmapMemObject(clBuffer, mapPtr);
       queue.finish();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -209,7 +209,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed += timer.stopAndTime();
       }
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
     log->print(gbps);   log->print(NEWLINE);
@@ -236,7 +236,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       queue.enqueueUnmapMemObject(clBuffer, mapPtr);
       queue.finish();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);

@@ -58,7 +58,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("half", gflops);
@@ -71,7 +71,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("half2", gflops);
@@ -84,7 +84,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("half4", gflops);
@@ -96,7 +96,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("half8", gflops);
@@ -109,7 +109,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-    gflops = ((float)globalWIs * workPerWI) / timed / 1e3f;
+    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
     log->print(gflops);     log->print(NEWLINE);
     log->xmlRecord("half16", gflops);
@@ -127,4 +127,3 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
   return 0;
 }
-
