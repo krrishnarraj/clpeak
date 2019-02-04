@@ -75,6 +75,7 @@ typedef struct {
   // Test specific options
   uint gloalBWIters;
   uint computeWgsPerCU;
+  uint computeDPWgsPerCU;
   uint computeIters;
   uint transferBWIters;
   uint kernelLatencyIters;

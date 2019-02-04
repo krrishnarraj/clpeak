@@ -51,10 +51,12 @@ device_info_t getDeviceInfo(cl::Device &d)
   if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
     devInfo.gloalBWIters = 20;
     devInfo.computeWgsPerCU = 512;
+    devInfo.computeDPWgsPerCU = 256;
     devInfo.computeIters = 10;
   } else {            // GPU
     devInfo.gloalBWIters = 50;
     devInfo.computeWgsPerCU = 2048;
+    devInfo.computeDPWgsPerCU = 512;
     devInfo.computeIters = 30;
   }
   devInfo.transferBWIters = 20;
