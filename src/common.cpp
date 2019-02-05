@@ -123,5 +123,10 @@ uint64_t roundToMultipleOf(uint64_t number, uint64_t base, uint64_t maxValue)
 
 void trimString(std::string &str)
 {
-  str.erase(str.find('\0'));
+  size_t pos = str.find('\0');
+
+  if(pos != std::string::npos)
+  {
+    str.erase(pos);
+  }
 }
