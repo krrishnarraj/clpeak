@@ -68,7 +68,6 @@ int clPeak::runAll()
       #endif
 
       bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
-      bool isSnapdragon = (platformName.find("Snapdragon") != std::string::npos) ? true : false;
 
       cl_context_properties cps[3] = {
         CL_CONTEXT_PLATFORM,
@@ -76,10 +75,7 @@ int clPeak::runAll()
         0
       };
 
-      // Use only gpus in snapdragon, it would crash otherwise!
-      cl_device_type device_type = (isSnapdragon)? CL_DEVICE_TYPE_GPU: CL_DEVICE_TYPE_ALL;
-
-      cl::Context ctx(device_type, cps);
+      cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
       vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
 
       cl::Program prog;
