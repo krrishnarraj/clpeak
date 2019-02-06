@@ -48,3 +48,5 @@ elseif(MSVC)
   target_compile_options(clpeak PRIVATE /wd4996)
 endif()
 
+install(TARGETS clpeak RUNTIME DESTINATION bin)
+
