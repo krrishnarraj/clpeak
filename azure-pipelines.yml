@@ -17,7 +17,7 @@ steps:
 
 - task: CMake@1
   env:
-    OCL_ROOT: '%TEMP%/ocl_sdk'
+    OCL_ROOT: '$(%TEMP%/ocl_sdk)'
   inputs:
     workingDirectory: 'build'
     cmakeArgs: '..'
