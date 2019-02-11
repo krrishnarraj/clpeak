@@ -22,4 +22,4 @@ steps:
     cmakeArgs: '..'
   displayName: 'cmake'
   env:
-    OCL_ROOT: '$(%TEMP%/ocl_sdk)'
+    OCL_ROOT: '%TEMP%\\ocl_sdk'
