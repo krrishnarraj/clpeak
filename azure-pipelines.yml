@@ -16,7 +16,7 @@ steps:
 - task: PowerShell@2
   inputs:
     targetType: 'inline'
-    script: 'New-Item -ItemType Directory -Force -Path $env:temp/ocl_sdk; wget https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/files/1406216/lightOCLSDK.zip -outfile $env:temp/ocl_sdk.zip; Expand-Archive $env:temp/ocl_sdk.zip -DestinationPath $env:temp/ocl_sdk/'
+    script: 'New-Item -ItemType Directory -Force -Path $env:temp/ocl_sdk; echo "step 1"; wget https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/files/1406216/lightOCLSDK.zip -outfile $env:temp/ocl_sdk.zip; echo "step 2"; Expand-Archive $env:temp/ocl_sdk.zip -DestinationPath $env:temp/ocl_sdk/'; echo "step 3"
     filePath: ''
 
 - task: CMake@1
