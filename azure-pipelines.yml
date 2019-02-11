@@ -19,7 +19,6 @@ steps:
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '..'
+    cmakeArgs: '-DOpenCL_INCLUDE_DIR=%TEMP%\\ocl_sdk\\include -DOpenCL_LIBRARY=%TEMP%\\ocl_sdk\\lib\\x86_64\\OpenCL.lib ..'
   displayName: 'cmake'
-  env:
-    OCL_ROOT: '%TEMP%\\ocl_sdk'
+
