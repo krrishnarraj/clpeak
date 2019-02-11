@@ -7,10 +7,17 @@ trigger:
 - master
 
 pool:
-  vmImage: 'Ubuntu-16.04'
+  vmImage: 'vs2017-win2016'
 
 steps:
-- task: CMake@1
+- task: PowerShell@1
+  inputs:
+    targetType: 'inline'
+    script: 'New-Item -ItemType Directory -Force -Path $env:temp/ocl_sdk; wget https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/files/1406216/lightOCLSDK.zip -outfile $env:temp/ocl_sdk.zip; Expand-Archive $env:temp/ocl_sdk.zip -DestinationPath $env:temp/ocl_sdk/'
+
+- task: CMake@2
+  env:
+    OCL_ROOT: '%TEMP%/ocl_sdk'
   inputs:
     workingDirectory: 'build'
     cmakeArgs: '..'
