@@ -1,63 +1,38 @@
-apply plugin: 'com.android.model.application'
+apply plugin: 'com.android.application'
 
-import org.apache.tools.ant.taskdefs.condition.Os
-
-model {
-    android {
-        compileSdkVersion 24
-        buildToolsVersion "24.0.0"
-
-        defaultConfig {
-            applicationId "kr.clpeak"
-            minSdkVersion.apiLevel 19
-            targetSdkVersion.apiLevel 24
-            versionCode 5
-            versionName "1.0"
-        }
-        buildTypes {
-            release {
-                minifyEnabled false
-                proguardFiles.add(file('proguard-android.txt'))
-            }
-        }
-        ndk {
-            moduleName "clpeak"
-        }
-        sources {
-            main {
-                jniLibs {
-                    source {
-                        srcDir 'src/main/libs'
-                    }
-                }
+android {
+    compileSdkVersion 28
+    defaultConfig {
+        applicationId "kr.clpeak"
+        minSdkVersion 23
+        targetSdkVersion 28
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++11"
             }
         }
     }
-}
-
-task ndkBuild(type: Exec) {
-    if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-        commandLine 'ndk-build.cmd', '-C', file('src/main').absolutePath
-    } else {
-        commandLine 'ndk-build', '-C', file('src/main').absolutePath
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
     }
-}
-
-tasks.all {
-    task ->
-        if (task.name.startsWith('compile') && task.name.contains('MainC')) {
-            task.enabled = false
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
         }
-        if (task.name.startsWith('link')) {
-            task.enabled = false
-        }
-        if (task.name.endsWith('SharedLibrary') ) {
-            task.dependsOn ndkBuild
-        }
+    }
 }
 
 dependencies {
-    compile fileTree(dir: 'libs', include: ['*.jar'])
-    testCompile 'junit:junit:4.12'
-    compile 'com.android.support:appcompat-v7:24.0.0'
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.android.support.constraint:constraint-layout:1.1.3'
+    testImplementation 'junit:junit:4.12'
+    androidTestImplementation 'com.android.support.test:runner:1.0.2'
+    androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
 }

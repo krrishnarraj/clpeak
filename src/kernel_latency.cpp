@@ -12,7 +12,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
   cl::NDRange globalSize = (numItems / FETCH_PER_WI);
   cl::NDRange localSize = devInfo.maxWGSize;
-  int iters = devInfo.kernelLatencyIters;
+  uint iters = devInfo.kernelLatencyIters;
   float latency;
 
   try
@@ -33,7 +33,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     queue.finish();
 
     latency = 0;
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       cl::Event timeEvent;
       queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
@@ -42,7 +42,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
       cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
       latency += (float)((int)end - (int)start);
     }
-    latency /= iters;
+    latency /= static_cast<float>(iters);
 
     log->print(latency);    log->print(" us" NEWLINE);
     log->xmlSetContent(latency);

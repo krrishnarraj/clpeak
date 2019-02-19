@@ -32,9 +32,9 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.maxWGSize = MIN(devInfo.maxWGSize, 128);
   }
 
-  devInfo.maxAllocSize = (ulong)d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
-  devInfo.maxGlobalSize = (ulong)d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
-  devInfo.maxClockFreq = (uint)d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>();
+  devInfo.maxAllocSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>());
+  devInfo.maxGlobalSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
+  devInfo.maxClockFreq = static_cast<uint>(d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>());
   devInfo.doubleSupported = false;
   devInfo.halfSupported = false;
 
@@ -50,12 +50,18 @@ device_info_t getDeviceInfo(cl::Device &d)
 
   if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
     devInfo.gloalBWIters = 20;
+    devInfo.globalBWMaxSize = 1 << 27;
     devInfo.computeWgsPerCU = 512;
+    devInfo.computeDPWgsPerCU = 256;
     devInfo.computeIters = 10;
+    devInfo.transferBWMaxSize = 1 << 27;
   } else {            // GPU
     devInfo.gloalBWIters = 50;
+    devInfo.globalBWMaxSize = 1 << 29;
     devInfo.computeWgsPerCU = 2048;
+    devInfo.computeDPWgsPerCU = 512;
     devInfo.computeIters = 30;
+    devInfo.transferBWMaxSize = 1 << 29;
   }
   devInfo.transferBWIters = 20;
   devInfo.kernelLatencyIters = 20000;
@@ -104,22 +110,22 @@ float Timer::stopAndTime()
 }
 
 
-void populate(float *ptr, uint N)
+void populate(float *ptr, uint64_t N)
 {
   srand((unsigned int)time(NULL));
 
-  for(int i=0; i<(int)N; i++)
+  for(uint64_t i=0; i<N; i++)
   {
     //ptr[i] = (float)rand();
     ptr[i] = (float)i;
   }
 }
 
-void populate(double *ptr, uint N)
+void populate(double *ptr, uint64_t N)
 {
   srand((unsigned int)time(NULL));
 
-  for(int i=0; i<(int)N; i++)
+  for(uint64_t i=0; i<N; i++)
   {
     //ptr[i] = (double)rand();
     ptr[i] = (double)i;
@@ -127,15 +133,18 @@ void populate(double *ptr, uint N)
 }
 
 
-uint roundToMultipleOf(uint number, const uint base, int maxValue)
+uint64_t roundToMultipleOf(uint64_t number, uint64_t base, uint64_t maxValue)
 {
-  if(maxValue > 0 && number > static_cast<uint>(maxValue))
-    return (maxValue / base) * base;
-
-  return (number / base) * base;
+  uint64_t n = (number > maxValue)? maxValue: number;
+  return (n / base) * base;
 }
 
 void trimString(std::string &str)
 {
-  str.erase(str.find('\0'));
+  size_t pos = str.find('\0');
+
+  if(pos != std::string::npos)
+  {
+    str.erase(pos);
+  }
 }

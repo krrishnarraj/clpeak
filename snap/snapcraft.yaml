@@ -1,0 +1,26 @@
+name: clpeak
+base: core18
+version: '1.0'
+summary: Benchmarking tool to measure peak capabilities of opencl devices
+description: |
+  A synthetic benchmarking tool to measure peak capabilities of opencl devices.
+  It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
+
+grade: stable
+confinement: classic
+
+apps:
+  clpeak:
+    command: bin/clpeak
+
+parts:
+  clpeak:
+    source: .
+    plugin: cmake
+    build-packages:
+      - build-essential
+      - opencl-clhpp-headers
+      - ocl-icd-opencl-dev
+    stage-packages:
+      - ocl-icd-libopencl1
+

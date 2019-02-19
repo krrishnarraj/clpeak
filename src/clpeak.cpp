@@ -30,7 +30,7 @@ void stubOpenclReset();
 clPeak::clPeak(): forcePlatform(false), forceDevice(false), useEventTimer(false),
     isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeInt(true),
     isTransferBW(true), isKernelLatency(true),
-    specifiedPlatform(-1), specifiedDevice(-1)
+    specifiedPlatform(0), specifiedDevice(0)
 {
 }
 
@@ -51,7 +51,7 @@ int clPeak::runAll()
 
     log->xmlOpenTag("clpeak");
     log->xmlAppendAttribs("os", OS_NAME);
-    for(int p=0; p < (int)platforms.size(); p++)
+    for(size_t p=0; p < platforms.size(); p++)
     {
       if(forcePlatform && (p != specifiedPlatform))
         continue;
@@ -63,8 +63,13 @@ int clPeak::runAll()
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platformName);
 
+      // Disable intel integer kernel only on windows
+      bool isIntel = false;
+      #if defined(_WIN32)
+        isIntel = (platformName.find("Intel") != std::string::npos)? true: false;
+      #endif
+
       bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
-      bool isSnapdragon = (platformName.find("Snapdragon") != std::string::npos) ? true : false;
 
       cl_context_properties cps[3] = {
         CL_CONTEXT_PLATFORM,
@@ -72,17 +77,16 @@ int clPeak::runAll()
         0
       };
 
-      // Use only gpus in snapdragon, it would crash otherwise!
-      cl_device_type device_type = (isSnapdragon)? CL_DEVICE_TYPE_GPU: CL_DEVICE_TYPE_ALL;
-
-      cl::Context ctx(device_type, cps);
+      cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
       vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
 
       cl::Program prog;
 
+      // FIXME Disabling integer compute tests on intel platform
+      // Kernel build is taking much much longer time
       // FIXME Disabling integer compute tests on apple platform
       // Causes Segmentation fault: 11
-      if(isApple)
+      if(isIntel || isApple)
       {
         cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
         isComputeInt = false;
@@ -94,7 +98,7 @@ int clPeak::runAll()
         prog = cl::Program(ctx, source);
       }
 
-      for(int d=0; d < (int)devices.size(); d++)
+      for(size_t d=0; d < devices.size(); d++)
       {
         if(forceDevice && (d != specifiedDevice))
           continue;
@@ -122,6 +126,7 @@ int clPeak::runAll()
         }
         catch (cl::Error &error)
         {
+          UNUSED(error);
           log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d])
                      + NEWLINE NEWLINE);
           continue;
@@ -161,7 +166,7 @@ int clPeak::runAll()
 }
 
 
-float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, int iters)
+float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters)
 {
   float timed = 0;
 
@@ -172,7 +177,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 
   if(useEventTimer)
   {
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       cl::Event timeEvent;
 
@@ -185,15 +190,16 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
     Timer timer;
 
     timer.start();
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+      queue.flush();
     }
     queue.finish();
     timed = timer.stopAndTime();
   }
 
-  return (timed / iters);
+  return (timed / static_cast<float>(iters));
 }
 
 microsecondsT clPeak::flushQueue(cl::CommandQueue &queue)

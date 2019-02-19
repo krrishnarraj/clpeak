@@ -13,17 +13,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  int iters = devInfo.gloalBWIters;
+  uint iters = devInfo.gloalBWIters;
 
-  cl_uint maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  cl_uint numItems;
-
-  // Set an upper-limit for cpu devies
-  if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
-    numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), 1 << 25);
-  } else {
-    numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16));
-  }
+  uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
+  uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), devInfo.globalBWMaxSize);
 
   try
   {
@@ -164,4 +157,3 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   return 0;
 }
-

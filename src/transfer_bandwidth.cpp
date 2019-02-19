@@ -9,19 +9,12 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   float timed, gbps;
   cl::NDRange globalSize, localSize;
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  int iters = devInfo.transferBWIters;
+  uint iters = devInfo.transferBWIters;
   Timer timer;
   float *arr = NULL;
 
-  cl_uint maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  cl_uint numItems;
-
-  // Set an upper-limit for cpu devies
-  if(devInfo.deviceType & CL_DEVICE_TYPE_CPU) {
-    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, 1 << 26);
-  } else {
-    numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize);
-  }
+  uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
+  uint64_t numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, devInfo.transferBWMaxSize);
 
   try
   {
@@ -44,7 +37,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     if(useEventTimer)
     {
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         cl::Event timeEvent;
         queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
@@ -56,14 +49,14 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       Timer timer;
 
       timer.start();
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
       }
       queue.finish();
       timed = timer.stopAndTime();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -79,7 +72,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed = 0;
     if(useEventTimer)
     {
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         cl::Event timeEvent;
         queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
@@ -91,14 +84,14 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       Timer timer;
 
       timer.start();
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
       }
       queue.finish();
       timed = timer.stopAndTime();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -112,7 +105,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed = 0;
     if(useEventTimer)
     {
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         cl::Event timeEvent;
         void *mapPtr;
@@ -125,7 +118,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     } else
     {
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         Timer timer;
         void *mapPtr;
@@ -139,7 +132,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
       }
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -151,7 +144,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       cl::Event timeEvent;
       void *mapPtr;
@@ -166,7 +159,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       queue.enqueueUnmapMemObject(clBuffer, mapPtr);
       queue.finish();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);
@@ -182,7 +175,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed = 0;
     if(useEventTimer)
     {
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         cl::Event timeEvent;
         void *mapPtr;
@@ -195,7 +188,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     } else
     {
-      for(int i=0; i<iters; i++)
+      for(uint i=0; i<iters; i++)
       {
         Timer timer;
         void *mapPtr;
@@ -209,7 +202,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         timed += timer.stopAndTime();
       }
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
     log->print(gbps);   log->print(NEWLINE);
@@ -221,7 +214,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    for(int i=0; i<iters; i++)
+    for(uint i=0; i<iters; i++)
     {
       cl::Event timeEvent;
       void *mapPtr;
@@ -236,7 +229,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       queue.enqueueUnmapMemObject(clBuffer, mapPtr);
       queue.finish();
     }
-    timed /= iters;
+    timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);   log->print(NEWLINE);

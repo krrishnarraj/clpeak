@@ -6,3 +6,7 @@
 .DS_Store
 /build
 /captures
+.idea/
+app/.externalNativeBuild/
+app/src/main/cpp/libopencl-stub/
+

@@ -1,0 +1,47 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce RTX 2080 Ti
+    Driver version  : 415.27 (Linux x64)
+    Compute units   : 68
+    Clock frequency : 1650 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 506.69
+      float2  : 532.16
+      float4  : 548.03
+      float8  : 556.57
+      float16 : 492.17
+
+    Single-precision compute (GFLOPS)
+      float   : 16909.53
+      float2  : 16894.22
+      float4  : 16866.23
+      float8  : 16798.47
+      float16 : 16672.67
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 529.92
+      double2  : 529.30
+      double4  : 527.99
+      double8  : 525.44
+      double16 : 519.98
+
+    Integer compute (GIOPS)
+      int   : 15480.90
+      int2  : 15398.06
+      int4  : 15411.76
+      int8  : 15226.44
+      int16 : 15304.72
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 9.61
+      enqueueReadBuffer          : 8.49
+      enqueueMapBuffer(for read) : 10.79
+        memcpy from mapped ptr   : 11.37
+      enqueueUnmap(after write)  : 12.27
+        memcpy to mapped ptr     : 11.84
+
+    Kernel launch latency : 3.81 us
+
