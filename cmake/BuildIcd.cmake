@@ -55,6 +55,6 @@ set(ENV{OCL_ROOT} "${ICD_ROOT}")
 
 if(UNIX)
   set(ENV{AMDAPPSDKROOT} "${ICD_ROOT}")
-elif(WIN32)
+elseif(WIN32)
   set(ENV{AMDAPPSDKROOT} "${ICD_ROOT}/lib")
 endif()
