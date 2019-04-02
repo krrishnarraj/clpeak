@@ -13,6 +13,8 @@ if(NOT OpenCL_FOUND)
   find_package(OpenCL REQUIRED)
   if(UNIX)
     set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} pthread dl)
+  elif(WIN32)
+    set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib)
   endif()
 endif()
 

@@ -52,5 +52,9 @@ execute_process(WORKING_DIRECTORY "${DEPS_BUILD}" COMMAND ${CMAKE_COMMAND} -G ${
 execute_process(WORKING_DIRECTORY "${DEPS_BUILD}" COMMAND ${CMAKE_COMMAND} --build .)
 
 set(ENV{OCL_ROOT} "${ICD_ROOT}")
-set(ENV{AMDAPPSDKROOT} "${ICD_ROOT}")
 
+if(UNIX)
+  set(ENV{AMDAPPSDKROOT} "${ICD_ROOT}")
+elif(WIN32)
+  set(ENV{AMDAPPSDKROOT} "${ICD_ROOT}/lib")
+endif()
