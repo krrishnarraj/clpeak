@@ -1,57 +1,64 @@
-clpeak
-======
+[![Build Status](https://travis-ci.com/krrishnarraj/clpeak.svg?branch=master)](https://travis-ci.com/krrishnarraj/clpeak)
+
+# clpeak
 
 A synthetic benchmarking tool to measure peak capabilities of opencl devices. It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
 
+## Building
 
-eg:
+```console
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
 
-    Platform: AMD Accelerated Parallel Processing
-      Device: Tahiti
-        Driver version  : 1445.5 (VM) (Linux x64)
-        Compute units   : 32
-        Clock frequency : 1000 MHz
+## Sample
 
-        Global memory bandwidth (GBPS)
-          float   : 211.27
-          float2  : 220.40
-          float4  : 217.36
-          float8  : 116.76
-          float16 : 59.32
+```
+Platform: NVIDIA CUDA
+  Device: Tesla V100-SXM2-16GB
+    Driver version  : 390.77 (Linux x64)
+    Compute units   : 80
+    Clock frequency : 1530 MHz
 
-        Single-precision compute (GFLOPS)
-          float   : 3700.45
-          float2  : 3548.87
-          float4  : 3531.60
-          float8  : 3528.15
-          float16 : 3518.72
+    Global memory bandwidth (GBPS)
+      float   : 767.48
+      float2  : 810.81
+      float4  : 843.06
+      float8  : 726.12
+      float16 : 735.98
 
-        Double-precision compute (GFLOPS)
-          double   : 864.44
-          double2  : 860.07
-          double4  : 859.88
-          double8  : 850.53
-          double16 : 830.28
+    Single-precision compute (GFLOPS)
+      float   : 15680.96
+      float2  : 15674.50
+      float4  : 15645.58
+      float8  : 15583.27
+      float16 : 15466.50
 
-        Integer compute (GIOPS)
-          int   : 783.14
-          int2  : 783.54
-          int4  : 776.09
-          int8  : 753.42
-          int16 : 753.52
+    No half precision support! Skipped
 
-        Transfer bandwidth (GBPS)
-          enqueueWriteBuffer         : 8.86
-          enqueueReadBuffer          : 5.29
-          enqueueMapBuffer(for read) : 22093.45
-            memcpy from mapped ptr   : 3.99
-          enqueueUnmap(after write)  : 43471.33
-            memcpy to mapped ptr     : 3.92
+    Double-precision compute (GFLOPS)
+      double   : 7859.49
+      double2  : 7849.96
+      double4  : 7832.96
+      double8  : 7799.82
+      double16 : 7740.88
 
-        Kernel launch latency : 38.14 us
+    Integer compute (GIOPS)
+      int   : 15653.47
+      int2  : 15654.40
+      int4  : 15655.21
+      int8  : 15659.04
+      int16 : 15608.65
 
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 10.64
+      enqueueReadBuffer          : 11.92
+      enqueueMapBuffer(for read) : 9.97
+        memcpy from mapped ptr   : 8.62
+      enqueueUnmap(after write)  : 11.04
+        memcpy to mapped ptr     : 9.16
 
-Android version is published at https://play.google.com/store/apps/details?id=kr.clpeak
-
-
-Send in results of your device to krrishnarraj@gmail.com
+    Kernel launch latency : 7.22 us
+```
