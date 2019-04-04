@@ -1,11 +1,23 @@
 language: cpp
 
-os:
-  - windows
-  - linux
-  - osx
-
-dist: xenial
+matrix:
+  include:
+    - name: "Windows x64"
+      os: windows
+      env: TARGET=x86_64-pc-windows-msvc
+    - name: "Linux x64"
+      os: linux
+      dist: xenial
+    - name: "Linux armv7"
+      os: linux
+      dist: xenial
+      env: ARCH=armv7
+    - name: "Linux armv8"
+      os: linux
+      dist: xenial
+      env: ARCH=armv8
+    - name: "OSX"
+      os: osx
 
 addons:
   apt:
