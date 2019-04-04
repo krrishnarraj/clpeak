@@ -2,27 +2,17 @@ language: cpp
 
 matrix:
   include:
-    - name: "Windows x64"
+    - name: "Windows"
       os: windows
-      env: TARGET=x86_64-pc-windows-msvc
-    - name: "Linux x64"
+    - name: "Linux"
       os: linux
       dist: xenial
-    - name: "Linux armv7"
-      os: linux
-      dist: xenial
-      env: ARCH=armv7
-    - name: "Linux armv8"
-      os: linux
-      dist: xenial
-      env: ARCH=armv8
+      addons:
+        apt:
+          packages:
+            - ocl-icd-opencl-dev
     - name: "OSX"
       os: osx
-
-addons:
-  apt:
-    packages:
-    - ocl-icd-opencl-dev
 
 before_script:
   - mkdir build
