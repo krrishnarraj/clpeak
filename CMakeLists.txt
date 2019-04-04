@@ -66,4 +66,5 @@ elseif(MSVC)
 endif()
 
 install(TARGETS clpeak RUNTIME DESTINATION bin)
+install(FILES LICENSE DESTINATION share/clpeak)
 
