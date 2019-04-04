@@ -5,10 +5,11 @@ os:
   - linux
   - osx
 
+dist: xenial
+
 addons:
   apt:
     packages:
-    - opencl-clhpp-headers
     - ocl-icd-opencl-dev
 
 before_script:
@@ -19,12 +20,10 @@ script:
   - cmake ..
   - cmake --build .
 
-install:
-  - cmake --build . --target install
-
 branches:
   only:
     - master
 
 notifications:
   email: false
+
