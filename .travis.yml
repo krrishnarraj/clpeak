@@ -4,6 +4,7 @@ matrix:
   include:
     - name: "Windows"
       os: windows
+      env: CMAKE_GENERATOR_PLATFORM="x64"
     - name: "Linux"
       os: linux
       dist: xenial
