@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.1)
 project(clpeak)
 
+set(VERSION_MAJOR 1)
+set(VERSION_MINOR 1)
+set(VERSION_PATCH 0)
+
 if (NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to Release")
   set(CMAKE_BUILD_TYPE "Release")
@@ -26,9 +30,7 @@ if(NOT HPP_FOUND)
 endif()
 
 if(NOT OpenCL_FOUND)
-  message( FATAL_ERROR "Could not find OpenCL include/libs. Set OCL_ROOT to your OpenCL SDK. Download AMD APP SDK "
-      "http://developer.amd.com/tools-and-sdks/heterogeneous-computing/amd-accelerated-parallel-processing-app-sdk/ for x86/x64 "
-      "or pocl http://pocl.sourceforge.net/ for ARM systems" )
+  message(FATAL_ERROR "Could not find OpenCL include/libs. Set OCL_ROOT to your OpenCL SDK")
 else()
   message(STATUS "Selected OpenCL includes from ${OpenCL_INCLUDE_DIRS}")
   message(STATUS "Selected OpenCL lib ${OpenCL_LIBRARIES}")
@@ -36,6 +38,10 @@ endif()
 
 set(CMAKE_CXX_STANDARD "11")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_definitions("-DVERSION_MAJOR=${VERSION_MAJOR}")
+add_definitions("-DVERSION_MINOR=${VERSION_MINOR}")
+add_definitions("-DVERSION_PATCH=${VERSION_PATCH}")
 
 set(SOURCE_FILES
     src/common.cpp

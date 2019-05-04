@@ -19,6 +19,7 @@ static const char *helpStr =
     "\n  --all-tests                 run all above tests [default]"
     "\n  --enable-xml-dump           Dump results to xml file"
     "\n  -f, --xml-file file_name    specify file name for xml dump"
+    "\n  -v, --version               display version"
     "\n  -h, --help                  display help message"
     "\n"
     ;
@@ -35,6 +36,14 @@ int clPeak::parseArgs(int argc, char **argv)
     if((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))
     {
       log->print(helpStr);    log->print(NEWLINE);
+      exit(0);
+    }
+    else if((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
+    {
+      stringstream versionStr;
+      versionStr << "clpeak version " << VERSION_MAJOR << "." << VERSION_MINOR << "." << VERSION_PATCH;
+
+      log->print(versionStr.str().c_str());    log->print(NEWLINE);
       exit(0);
     }
     else if((strcmp(argv[i], "-p") == 0) || (strcmp(argv[i], "--platform") == 0))
