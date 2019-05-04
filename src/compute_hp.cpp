@@ -20,7 +20,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
   try
   {
-    log->print(NEWLINE TAB TAB "half-precision compute (GFLOPS)" NEWLINE);
+    log->print(NEWLINE TAB TAB "Half-precision compute (GFLOPS)" NEWLINE);
     log->xmlOpenTag("half_precision_compute");
     log->xmlAppendAttribs("unit", "gflops");
 
