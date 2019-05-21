@@ -56,6 +56,7 @@ set(SOURCE_FILES
     src/transfer_bandwidth.cpp
     src/kernel_latency.cpp
     src/entry.cpp
+    src/runtime_overhead.cpp
 )
 
 add_executable(clpeak ${SOURCE_FILES})

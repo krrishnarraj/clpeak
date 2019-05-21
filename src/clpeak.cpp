@@ -8,6 +8,7 @@ static const char *stringifiedKernels =
     #include "compute_hp_kernels.cl"
     #include "compute_dp_kernels.cl"
     #include "compute_integer_kernels.cl"
+    #include "runtime_overhead_sp_kernel.cl"
     ;
 
 static const char *stringifiedKernelsNoInt =
@@ -15,6 +16,7 @@ static const char *stringifiedKernelsNoInt =
     #include "compute_sp_kernels.cl"
     #include "compute_hp_kernels.cl"
     #include "compute_dp_kernels.cl"
+    #include "runtime_overhead_sp_kernel.cl"
     ;
 
 #ifdef USE_STUB_OPENCL
@@ -140,6 +142,10 @@ int clPeak::runAll()
         runTransferBandwidthTest(queue, prog, devInfo);
         runKernelLatency(queue, prog, devInfo);
 
+        if (isRuntimeOverheadTest) {
+          runRuntimeOverheadTests(ctx, devices[d], prog);
+        }
+
         log->print(NEWLINE);
         log->xmlCloseTag();       // device
       }
@@ -194,4 +200,26 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
   }
 
   return (timed / static_cast<float>(iters));
+}
+
+microsecondsT clPeak::flushQueue(cl::CommandQueue &queue)
+{
+  Timer time;
+
+  time.start();
+  queue.flush();
+  time.stop();
+
+  return time.duration();
+}
+
+microsecondsT clPeak::runKernel(cl::CommandQueue &queue, cl::Kernel &kernel, const cl::NDRange &globalOffsetSize, const cl::NDRange &globalSize, const cl::NDRange &localSize)
+{
+  Timer time;
+
+  time.start();
+  queue.enqueueNDRangeKernel(kernel, globalOffsetSize, globalSize, localSize);
+  time.stop();
+
+  return time.duration();
 }

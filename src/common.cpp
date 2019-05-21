@@ -85,6 +85,24 @@ void Timer::start()
 }
 
 
+void Timer::stop()
+{
+  tock = chrono::high_resolution_clock::now();
+}
+
+
+microsecondsT Timer::duration()
+{
+  return roundValue(std::chrono::duration_cast<std::chrono::nanoseconds>(tock - tick).count());
+}
+
+
+microsecondsT Timer::roundValue(long long val)
+{
+  return static_cast<microsecondsT>(static_cast<microsecondsT>(val) / static_cast<microsecondsT>(nanoToMicrosecondsResolution));
+}
+
+
 float Timer::stopAndTime()
 {
   tock = chrono::high_resolution_clock::now();

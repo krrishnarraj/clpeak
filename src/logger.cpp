@@ -30,6 +30,13 @@ void logger::print(string str)
   cout.flush();
 }
 
+void logger::print(std::pair<microsecondsT, occurence> val, microsecondsT range)
+{
+  cout << setprecision(2) << fixed;
+  cout << "[" << val.first - range << ", " << val.first + range << "] " << " occurence = " << val.second;
+  cout.flush();
+}
+
 void logger::print(double val)
 {
   cout << setprecision(2) << fixed;
@@ -40,6 +47,12 @@ void logger::print(double val)
 void logger::print(float val)
 {
   cout << setprecision(2) << fixed;
+  cout << val;
+  cout.flush();
+}
+
+void logger::print(size_t val)
+{
   cout << val;
   cout.flush();
 }
@@ -71,6 +84,18 @@ void logger::xmlAppendAttribs(string key, string value)
   if(enableXml)
   {
     xw->attr(key.c_str(), value.c_str());
+    xmlFile.flush();
+  }
+}
+
+void logger::xmlAppendAttribs(string key, size_t value)
+{
+  if(enableXml)
+  {
+    stringstream ss;
+    ss << value;
+
+    xw->attr(key.c_str(), ss.str().c_str());
     xmlFile.flush();
   }
 }
@@ -137,6 +162,48 @@ void logger::xmlRecord(string tag, float value)
   {
     stringstream ss;
     ss << value;
+
+    xw->openElt(tag.c_str());
+    xw->content(ss.str().c_str());
+    xw->closeElt();
+    xmlFile.flush();
+  }
+}
+
+void logger::xmlRecord(string tag, double value)
+{
+  if(enableXml)
+  {
+    stringstream ss;
+    ss << value;
+
+    xw->openElt(tag.c_str());
+    xw->content(ss.str().c_str());
+    xw->closeElt();
+    xmlFile.flush();
+  }
+}
+
+void logger::xmlRecord(string tag, size_t value)
+{
+  if(enableXml)
+  {
+    stringstream ss;
+    ss << value;
+
+    xw->openElt(tag.c_str());
+    xw->content(ss.str().c_str());
+    xw->closeElt();
+    xmlFile.flush();
+  }
+}
+
+void logger::xmlRecord(string tag, std::pair<microsecondsT, occurence> mode, microsecondsT range)
+{
+  if(enableXml)
+  {
+    stringstream ss;
+    ss << "[" << mode.first - range << ", " << mode.first + range << "] " << " occurence = " << mode.second;
 
     xw->openElt(tag.c_str());
     xw->content(ss.str().c_str());
