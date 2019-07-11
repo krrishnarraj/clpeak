@@ -1,4 +1,6 @@
 [![Build Status](https://travis-ci.com/krrishnarraj/clpeak.svg?branch=master)](https://travis-ci.com/krrishnarraj/clpeak)
+[![Snap Status](https://build.snapcraft.io/badge/krrishnarraj/clpeak.svg)](https://build.snapcraft.io/user/krrishnarraj/clpeak)
+
 
 # clpeak
 
