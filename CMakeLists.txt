@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.1)
 project(clpeak)
 
+include(GNUInstallDirs)
+
 set(VERSION_MAJOR 1)
 set(VERSION_MINOR 1)
 set(VERSION_PATCH 0)
@@ -72,5 +74,5 @@ elseif(MSVC)
 endif()
 
 install(TARGETS clpeak RUNTIME DESTINATION bin)
-install(FILES LICENSE DESTINATION share/clpeak)
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
 
