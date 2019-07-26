@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(clpeak)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common.cmake)
+include(GNUInstallDirs)
 
 if (NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to Release")
@@ -65,7 +66,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
 endif()
 
 install(TARGETS clpeak RUNTIME DESTINATION bin)
-install(FILES LICENSE DESTINATION share/clpeak)
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
 
 enable_testing()
 add_test(clpeak_test_run clpeak)
