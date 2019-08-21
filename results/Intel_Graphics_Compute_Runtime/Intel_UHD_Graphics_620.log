@@ -1,0 +1,50 @@
+Platform: Intel(R) OpenCL HD Graphics
+  Device: Intel(R) Gen9 HD Graphics NEO
+    Driver version  : 19.32.13826 (Linux x64)
+    Compute units   : 24
+    Clock frequency : 1150 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 27.14
+      float2  : 28.12
+      float4  : 29.73
+      float8  : 29.09
+      float16 : 26.09
+
+    Single-precision compute (GFLOPS)
+      float   : 436.49
+      float2  : 436.33
+      float4  : 435.70
+      float8  : 434.78
+      float16 : 428.94
+
+    Half-precision compute (GFLOPS)
+      half   : 738.24
+      half2  : 737.71
+      half4  : 733.78
+      half8  : 726.11
+      half16 : 716.82
+
+    Double-precision compute (GFLOPS)
+      double   : 109.50
+      double2  : 109.38
+      double4  : 109.01
+      double8  : 108.46
+      double16 : 107.54
+
+    Integer compute (GIOPS)
+      int   : 145.81
+      int2  : 145.74
+      int4  : 145.74
+      int8  : 145.92
+      int16 : 139.77
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 32.52
+      enqueueReadBuffer          : 11.09
+      enqueueMapBuffer(for read) : 681739.50
+        memcpy from mapped ptr   : 11.07
+      enqueueUnmap(after write)  : 1073739.75
+        memcpy to mapped ptr     : 12.51
+
+    Kernel launch latency : 34.59 us
