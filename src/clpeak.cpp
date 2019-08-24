@@ -61,12 +61,6 @@ int clPeak::runAll()
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platformName);
 
-      // Disable intel integer kernel only on windows
-      bool isIntel = false;
-      #if defined(_WIN32)
-        isIntel = (platformName.find("Intel") != std::string::npos)? true: false;
-      #endif
-
       bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
 
       cl_context_properties cps[3] = {
@@ -80,11 +74,9 @@ int clPeak::runAll()
 
       cl::Program prog;
 
-      // FIXME Disabling integer compute tests on intel platform
-      // Kernel build is taking much much longer time
       // FIXME Disabling integer compute tests on apple platform
       // Causes Segmentation fault: 11
-      if(isIntel || isApple)
+      if(isApple)
       {
         cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
         isComputeInt = false;
