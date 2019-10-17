@@ -22,6 +22,7 @@ script:
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cmake -G "Visual Studio 15 2017 Win64" .. ; fi
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then cmake .. ; fi
   - cmake --build .
+  - ctest -VV
 
 branches:
   only:
