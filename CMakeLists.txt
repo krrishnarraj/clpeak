@@ -15,11 +15,13 @@ if(NOT OpenCL_FOUND)
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
   include(BuildIcd)
   find_package(OpenCL REQUIRED)
-  if(UNIX)
-    set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} pthread dl)
-  elseif(WIN32)
-    set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib)
-  endif()
+endif()
+
+# extra libs for static library
+if(UNIX AND ${OpenCL_LIBRARIES} MATCHES "libOpenCL.a")
+  set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} pthread dl)
+elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
+  set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib)
 endif()
 
 FIND_PATH(HPP_FOUND CL/cl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
