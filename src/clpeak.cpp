@@ -1,4 +1,5 @@
 #include <clpeak.h>
+#include <cstring>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
@@ -145,7 +146,16 @@ int clPeak::runAll()
     ss << error.what() << " (" << error.err() << ")" NEWLINE;
 
     log->print(ss.str());
-    return -1;
+
+    // skip error for no platform
+    if(strcmp(error.what(), "clGetPlatformIDs") == 0)
+    {
+        log->print("no platforms found" NEWLINE);
+    }
+    else
+    {
+        return -1;
+    }
   }
 
   return 0;
