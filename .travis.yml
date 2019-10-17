@@ -6,7 +6,15 @@ matrix:
       os: windows
     - name: "Linux"
       os: linux
-      dist: xenial
+      dist: bionic
+      addons:
+        apt:
+          packages:
+            - ocl-icd-opencl-dev
+    - name: "Linux arm64"
+      os: linux
+      arch: arm64
+      dist: bionic
       addons:
         apt:
           packages:
