@@ -74,3 +74,6 @@ endif()
 install(TARGETS clpeak RUNTIME DESTINATION bin)
 install(FILES LICENSE DESTINATION share/clpeak)
 
+enable_testing()
+add_test(clpeak_test_run clpeak)
+
