@@ -11,13 +11,6 @@ static const char *stringifiedKernels =
     #include "compute_integer_kernels.cl"
     ;
 
-static const char *stringifiedKernelsNoInt =
-    #include "global_bandwidth_kernels.cl"
-    #include "compute_sp_kernels.cl"
-    #include "compute_hp_kernels.cl"
-    #include "compute_dp_kernels.cl"
-    ;
-
 #ifdef USE_STUB_OPENCL
 // Prototype
 extern "C" {
@@ -62,8 +55,6 @@ int clPeak::runAll()
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platformName);
 
-      bool isApple = (platformName.find("Apple") != std::string::npos)? true: false;
-
       cl_context_properties cps[3] = {
         CL_CONTEXT_PLATFORM,
         (cl_context_properties)(platforms[p])(),
@@ -72,22 +63,8 @@ int clPeak::runAll()
 
       cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
       vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-
-      cl::Program prog;
-
-      // FIXME Disabling integer compute tests on apple platform
-      // Causes Segmentation fault: 11
-      if(isApple)
-      {
-        cl::Program::Sources source(1, make_pair(stringifiedKernelsNoInt, (strlen(stringifiedKernelsNoInt)+1)));
-        isComputeInt = false;
-        prog = cl::Program(ctx, source);
-      }
-      else
-      {
-        cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
-        prog = cl::Program(ctx, source);
-      }
+      cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels)+1)));
+      cl::Program prog = cl::Program(ctx, source);
 
       for(size_t d=0; d < devices.size(); d++)
       {
