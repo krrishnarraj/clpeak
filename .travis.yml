@@ -31,7 +31,7 @@ script:
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then cmake .. ; fi
   - cmake --build . --config Release
   - ctest -VV
-  - cpack -G ZIP
+  - cpack -G ZIP -C Release
 
 branches:
   only:
