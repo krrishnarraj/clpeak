@@ -41,7 +41,7 @@ int clPeak::parseArgs(int argc, char **argv)
     else if((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
     {
       stringstream versionStr;
-      versionStr << "clpeak version " << VERSION_MAJOR << "." << VERSION_MINOR << "." << VERSION_PATCH;
+      versionStr << "clpeak version: " << VERSION_STR;
 
       log->print(versionStr.str().c_str());    log->print(NEWLINE);
       exit(0);

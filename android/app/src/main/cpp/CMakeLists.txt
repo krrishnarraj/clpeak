@@ -6,13 +6,12 @@ add_subdirectory(libopencl-stub)
 set(VERSION_MAJOR 1)
 set(VERSION_MINOR 1)
 set(VERSION_PATCH 0)
+set(VERSION_SUFFIX "-pre")
 
 set(ROOT_FOLDER "../../../../..")
 set(SRC_FOLDER "${ROOT_FOLDER}/src")
 
-add_definitions("-DVERSION_MAJOR=${VERSION_MAJOR}")
-add_definitions("-DVERSION_MINOR=${VERSION_MINOR}")
-add_definitions("-DVERSION_PATCH=${VERSION_PATCH}")
+add_definitions('-DVERSION_STR="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}"')
 
 add_library(clpeak SHARED
         ${SRC_FOLDER}/common.cpp

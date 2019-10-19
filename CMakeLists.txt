@@ -4,6 +4,7 @@ project(clpeak)
 set(VERSION_MAJOR 1)
 set(VERSION_MINOR 1)
 set(VERSION_PATCH 0)
+set(VERSION_SUFFIX "-pre")
 
 if (NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to Release")
@@ -41,9 +42,7 @@ endif()
 set(CMAKE_CXX_STANDARD "11")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions("-DVERSION_MAJOR=${VERSION_MAJOR}")
-add_definitions("-DVERSION_MINOR=${VERSION_MINOR}")
-add_definitions("-DVERSION_PATCH=${VERSION_PATCH}")
+add_definitions('-DVERSION_STR="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}"')
 
 set(SOURCE_FILES
     src/common.cpp
