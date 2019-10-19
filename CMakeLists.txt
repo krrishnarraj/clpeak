@@ -43,7 +43,7 @@ endif()
 set(CMAKE_CXX_STANDARD "11")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions('-DVERSION_STR="${VERSION_STR}"')
+add_definitions("-DVERSION_STR=\"${VERSION_STR}\"")
 
 set(SOURCE_FILES
     src/common.cpp
