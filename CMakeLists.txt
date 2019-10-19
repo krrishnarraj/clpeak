@@ -5,6 +5,7 @@ set(VERSION_MAJOR 1)
 set(VERSION_MINOR 1)
 set(VERSION_PATCH 0)
 set(VERSION_SUFFIX "-pre")
+set(VERSION_STR "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}")
 
 if (NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to Release")
@@ -42,7 +43,7 @@ endif()
 set(CMAKE_CXX_STANDARD "11")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions('-DVERSION_STR="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}"')
+add_definitions('-DVERSION_STR="${VERSION_STR}"')
 
 set(SOURCE_FILES
     src/common.cpp
@@ -77,4 +78,7 @@ install(FILES LICENSE DESTINATION share/clpeak)
 
 enable_testing()
 add_test(clpeak_test_run clpeak)
+
+set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${VERSION_STR}")
+include (CPack)
 
