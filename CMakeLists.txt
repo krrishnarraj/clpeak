@@ -80,5 +80,5 @@ enable_testing()
 add_test(clpeak_test_run clpeak)
 
 set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${VERSION_STR}")
+set(CPACK_GENERATOR "ZIP")
 include (CPack)
-
