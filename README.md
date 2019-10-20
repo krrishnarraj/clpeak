@@ -1,14 +1,14 @@
+# clpeak
+
 [![Build Status](https://travis-ci.com/krrishnarraj/clpeak.svg?branch=master)](https://travis-ci.com/krrishnarraj/clpeak)
 [![Snap Status](https://build.snapcraft.io/badge/krrishnarraj/clpeak.svg)](https://build.snapcraft.io/user/krrishnarraj/clpeak)
-
-
-# clpeak
 
 A synthetic benchmarking tool to measure peak capabilities of opencl devices. It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
 
 ## Building
 
 ```console
+git submodule update --init --recursive --remote
 mkdir build
 cd build
 cmake ..
@@ -17,7 +17,7 @@ cmake --build .
 
 ## Sample
 
-```
+```text
 Platform: NVIDIA CUDA
   Device: Tesla V100-SXM2-16GB
     Driver version  : 390.77 (Linux x64)

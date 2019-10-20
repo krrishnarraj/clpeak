@@ -23,6 +23,7 @@ matrix:
       os: osx
 
 before_script:
+  - git submodule update --init --recursive --remote
   - mkdir build
   - cd build
 

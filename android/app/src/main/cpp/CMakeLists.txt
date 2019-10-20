@@ -1,18 +1,12 @@
 cmake_minimum_required(VERSION 3.4.1)
 
-# Buidl stub
+# Build stub
 add_subdirectory(libopencl-stub)
 
-set(VERSION_MAJOR 1)
-set(VERSION_MINOR 1)
-set(VERSION_PATCH 0)
-set(VERSION_SUFFIX "-pre")
-
 set(ROOT_FOLDER "../../../../..")
+include(${ROOT_FOLDER}/cmake/common.cmake)
+
 set(SRC_FOLDER "${ROOT_FOLDER}/src")
-
-add_definitions('-DVERSION_STR="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}"')
-
 add_library(clpeak SHARED
         ${SRC_FOLDER}/common.cpp
         ${SRC_FOLDER}/clpeak.cpp
@@ -37,4 +31,3 @@ target_include_directories(clpeak PRIVATE
 target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL)
 target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions)
 target_link_libraries(clpeak log atomic dl OpenCL)
-

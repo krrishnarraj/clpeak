@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 project(clpeak)
 
-set(VERSION_MAJOR 1)
-set(VERSION_MINOR 1)
-set(VERSION_PATCH 0)
-set(VERSION_SUFFIX "-pre")
-set(VERSION_STR "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}")
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common.cmake)
 
 if (NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to Release")
@@ -43,9 +39,7 @@ endif()
 set(CMAKE_CXX_STANDARD "11")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions("-DVERSION_STR=\"${VERSION_STR}\"")
-
-set(SOURCE_FILES
+set(CLPEAK_SOURCE_FILES
     src/common.cpp
     src/clpeak.cpp
     src/options.cpp
@@ -60,7 +54,7 @@ set(SOURCE_FILES
     src/entry.cpp
 )
 
-add_executable(clpeak ${SOURCE_FILES})
+add_executable(clpeak ${CLPEAK_SOURCE_FILES})
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
 target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} "include" "src/kernels")
 target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=120)

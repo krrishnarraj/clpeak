@@ -11,6 +11,7 @@
         android:layout_alignParentLeft="true"
         android:layout_alignParentTop="true"
         android:autoLink="web"
+        android:fontFamily="@font/ubuntu_medium"
         android:gravity="center|top"
         android:paddingTop="15dp"
         android:text="@string/about_clpeak"
