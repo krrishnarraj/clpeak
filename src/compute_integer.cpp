@@ -1,6 +1,5 @@
 #include <clpeak.h>
 
-
 int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
   float timed, gflops;
@@ -9,7 +8,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
   cl_int A = 4;
   uint iters = devInfo.computeIters;
 
-  if(!isComputeInt)
+  if (!isComputeInt)
     return 0;
 
   try
@@ -48,13 +47,14 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     // Vector width 1
     log->print(TAB TAB TAB "int   : ");
 
-    workPerWI = 2048;      // Indicates integer operations executed per work-item
+    workPerWI = 2048; // Indicates integer operations executed per work-item
 
     timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("int", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -67,7 +67,8 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("int2", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -80,7 +81,8 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("int4", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -93,7 +95,8 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("int8", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -106,12 +109,13 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("int16", gflops);
     ///////////////////////////////////////////////////////////////////////////
-    log->xmlCloseTag();     // integer_compute
+    log->xmlCloseTag(); // integer_compute
   }
-  catch(cl::Error &error)
+  catch (cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE

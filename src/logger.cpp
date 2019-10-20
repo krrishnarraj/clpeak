@@ -2,10 +2,9 @@
 #include <iomanip>
 #include <sstream>
 
-logger::logger(bool _enableXml, string _xmlFileName):
-  enableXml(_enableXml)
+logger::logger(bool _enableXml, string _xmlFileName) : enableXml(_enableXml)
 {
-  if(enableXml)
+  if (enableXml)
   {
     xmlFile.open(_xmlFileName);
     xw = new xmlWriter(xmlFile);
@@ -13,10 +12,9 @@ logger::logger(bool _enableXml, string _xmlFileName):
   }
 }
 
-
 logger::~logger()
 {
-  if(enableXml)
+  if (enableXml)
   {
     xw->closeAll();
     delete xw;
@@ -56,10 +54,9 @@ void logger::print(unsigned int val)
   cout.flush();
 }
 
-
 void logger::xmlOpenTag(string tag)
 {
-  if(enableXml)
+  if (enableXml)
   {
     xw->openElt(tag.c_str());
     xmlFile.flush();
@@ -68,7 +65,7 @@ void logger::xmlOpenTag(string tag)
 
 void logger::xmlAppendAttribs(string key, string value)
 {
-  if(enableXml)
+  if (enableXml)
   {
     xw->attr(key.c_str(), value.c_str());
     xmlFile.flush();
@@ -77,7 +74,7 @@ void logger::xmlAppendAttribs(string key, string value)
 
 void logger::xmlAppendAttribs(string key, uint value)
 {
-  if(enableXml)
+  if (enableXml)
   {
     stringstream ss;
     ss << value;
@@ -89,7 +86,7 @@ void logger::xmlAppendAttribs(string key, uint value)
 
 void logger::xmlSetContent(string value)
 {
-  if(enableXml)
+  if (enableXml)
   {
     xw->content(value.c_str());
     xmlFile.flush();
@@ -98,7 +95,7 @@ void logger::xmlSetContent(string value)
 
 void logger::xmlSetContent(float value)
 {
-  if(enableXml)
+  if (enableXml)
   {
     stringstream ss;
     ss << value;
@@ -110,7 +107,7 @@ void logger::xmlSetContent(float value)
 
 void logger::xmlCloseTag()
 {
-  if(enableXml)
+  if (enableXml)
   {
     xw->closeElt();
     xmlFile.flush();
@@ -119,7 +116,7 @@ void logger::xmlCloseTag()
 
 void logger::xmlRecord(string tag, string value)
 {
-  if(enableXml)
+  if (enableXml)
   {
     stringstream ss;
     ss << value;
@@ -133,7 +130,7 @@ void logger::xmlRecord(string tag, string value)
 
 void logger::xmlRecord(string tag, float value)
 {
-  if(enableXml)
+  if (enableXml)
   {
     stringstream ss;
     ss << value;

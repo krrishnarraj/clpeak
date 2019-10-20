@@ -1,7 +1,6 @@
 #include <clpeak.h>
 
-#define FETCH_PER_WI        16
-
+#define FETCH_PER_WI 16
 
 int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
@@ -9,7 +8,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   cl::NDRange globalSize, localSize;
   float *arr = NULL;
 
-  if(!isGlobalBW)
+  if (!isGlobalBW)
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -74,11 +73,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     // go -- global_size offset
     timed_lo = run_kernel(queue, kernel_v1_lo, globalSize, localSize, iters);
     timed_go = run_kernel(queue, kernel_v1_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go)? timed_lo: timed_go;
+    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("float", gbps);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -89,11 +89,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     timed_lo = run_kernel(queue, kernel_v2_lo, globalSize, localSize, iters);
     timed_go = run_kernel(queue, kernel_v2_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go)? timed_lo: timed_go;
+    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("float2", gbps);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -104,11 +105,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     timed_lo = run_kernel(queue, kernel_v4_lo, globalSize, localSize, iters);
     timed_go = run_kernel(queue, kernel_v4_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go)? timed_lo: timed_go;
+    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("float4", gbps);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -119,11 +121,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     timed_lo = run_kernel(queue, kernel_v8_lo, globalSize, localSize, iters);
     timed_go = run_kernel(queue, kernel_v8_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go)? timed_lo: timed_go;
+    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("float8", gbps);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -133,25 +136,32 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     timed_lo = run_kernel(queue, kernel_v16_lo, globalSize, localSize, iters);
     timed_go = run_kernel(queue, kernel_v16_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go)? timed_lo: timed_go;
+    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("float16", gbps);
     ///////////////////////////////////////////////////////////////////////////
-    log->xmlCloseTag();     // global_memory_bandwidth
+    log->xmlCloseTag(); // global_memory_bandwidth
 
-    if(arr)     delete [] arr;
+    if (arr)
+    {
+      delete[] arr;
+    }
   }
-  catch(cl::Error &error)
+  catch (cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
-    if(arr)     delete [] arr;
+    if (arr)
+    {
+      delete[] arr;
+    }
     return -1;
   }
 

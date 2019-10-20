@@ -1,6 +1,5 @@
 #include <clpeak.h>
 
-
 int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
   float timed, gflops;
@@ -9,10 +8,10 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
   cl_double A = 1.3f;
   uint iters = devInfo.computeIters;
 
-  if(!isComputeDP)
+  if (!isComputeDP)
     return 0;
 
-  if(!devInfo.doubleSupported)
+  if (!devInfo.doubleSupported)
   {
     log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
     return 0;
@@ -54,13 +53,14 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     // Vector width 1
     log->print(TAB TAB TAB "double   : ");
 
-    workPerWI = 4096;      // Indicates flops executed per work-item
+    workPerWI = 4096; // Indicates flops executed per work-item
 
     timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("double", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -73,7 +73,8 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("double2", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -86,7 +87,8 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("double4", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -98,7 +100,8 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("double8", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -111,12 +114,13 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("double16", gflops);
     ///////////////////////////////////////////////////////////////////////////
-    log->xmlCloseTag();     // double_precision_compute
+    log->xmlCloseTag(); // double_precision_compute
   }
-  catch(cl::Error &error)
+  catch (cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE

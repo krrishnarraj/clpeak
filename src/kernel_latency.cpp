@@ -1,11 +1,10 @@
 #include <clpeak.h>
 
-#define FETCH_PER_WI        16
-
+#define FETCH_PER_WI 16
 
 int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
-  if(!isKernelLatency)
+  if (!isKernelLatency)
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -33,7 +32,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     queue.finish();
 
     latency = 0;
-    for(uint i=0; i<iters; i++)
+    for (uint i = 0; i < iters; i++)
     {
       cl::Event timeEvent;
       queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
@@ -44,11 +43,12 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     }
     latency /= static_cast<float>(iters);
 
-    log->print(latency);    log->print(" us" NEWLINE);
+    log->print(latency);
+    log->print(" us" NEWLINE);
     log->xmlSetContent(latency);
     log->xmlCloseTag();
   }
-  catch(cl::Error &error)
+  catch (cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
@@ -59,4 +59,3 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 
   return 0;
 }
-

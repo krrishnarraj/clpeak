@@ -1,9 +1,8 @@
 #include <clpeak.h>
 
-
 int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
-  if(!isTransferBW)
+  if (!isTransferBW)
     return 0;
 
   float timed, gbps;
@@ -35,21 +34,22 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     timed = 0;
 
-    if(useEventTimer)
+    if (useEventTimer)
     {
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         cl::Event timeEvent;
         queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
         queue.finish();
         timed += timeInUS(timeEvent);
       }
-    } else
+    }
+    else
     {
       Timer timer;
 
       timer.start();
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
       }
@@ -59,7 +59,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("enqueuewritebuffer", gbps);
     ///////////////////////////////////////////////////////////////////////////
     // enqueueReadBuffer
@@ -70,21 +71,22 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    if(useEventTimer)
+    if (useEventTimer)
     {
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         cl::Event timeEvent;
         queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
         queue.finish();
         timed += timeInUS(timeEvent);
       }
-    } else
+    }
+    else
     {
       Timer timer;
 
       timer.start();
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
       }
@@ -94,7 +96,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("enqueuereadbuffer", gbps);
     ///////////////////////////////////////////////////////////////////////////
     // enqueueMapBuffer
@@ -103,9 +106,9 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    if(useEventTimer)
+    if (useEventTimer)
     {
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         cl::Event timeEvent;
         void *mapPtr;
@@ -116,9 +119,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
         timed += timeInUS(timeEvent);
       }
-    } else
+    }
+    else
     {
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         Timer timer;
         void *mapPtr;
@@ -135,7 +139,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("enqueuemapbuffer", gbps);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -144,7 +149,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    for(uint i=0; i<iters; i++)
+    for (uint i = 0; i < iters; i++)
     {
       cl::Event timeEvent;
       void *mapPtr;
@@ -162,7 +167,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("memcpy_from_mapped_ptr", gbps);
 
     ///////////////////////////////////////////////////////////////////////////
@@ -173,9 +179,9 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    if(useEventTimer)
+    if (useEventTimer)
     {
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         cl::Event timeEvent;
         void *mapPtr;
@@ -186,9 +192,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         queue.finish();
         timed += timeInUS(timeEvent);
       }
-    } else
+    }
+    else
     {
-      for(uint i=0; i<iters; i++)
+      for (uint i = 0; i < iters; i++)
       {
         Timer timer;
         void *mapPtr;
@@ -205,7 +212,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed /= static_cast<float>(iters);
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("enqueueunmap", gbps);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -214,7 +222,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     queue.finish();
 
     timed = 0;
-    for(uint i=0; i<iters; i++)
+    for (uint i = 0; i < iters; i++)
     {
       cl::Event timeEvent;
       void *mapPtr;
@@ -232,25 +240,29 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     timed /= static_cast<float>(iters);
 
     gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    log->print(gbps);   log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     log->xmlRecord("memcpy_to_mapped_ptr", gbps);
 
     ///////////////////////////////////////////////////////////////////////////
-    log->xmlCloseTag();     // transfer_bandwidth
+    log->xmlCloseTag(); // transfer_bandwidth
 
-    if(arr)     delete [] arr;
+    if (arr)
+      delete[] arr;
   }
-  catch(cl::Error &error)
+  catch (cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
-    if(arr)     delete [] arr;
+    if (arr)
+    {
+      delete[] arr;
+    }
     return -1;
   }
 
   return 0;
 }
-

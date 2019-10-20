@@ -1,6 +1,5 @@
 #include <clpeak.h>
 
-
 int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
   float timed, gflops;
@@ -9,7 +8,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
   cl_float A = 1.3f;
   uint iters = devInfo.computeIters;
 
-  if(!isComputeSP)
+  if (!isComputeSP)
     return 0;
 
   try
@@ -48,13 +47,14 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     // Vector width 1
     log->print(TAB TAB TAB "float   : ");
 
-    workPerWI = 4096;      // Indicates flops executed per work-item
+    workPerWI = 4096; // Indicates flops executed per work-item
 
     timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("float", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -67,7 +67,8 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("float2", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -80,7 +81,8 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("float4", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -93,7 +95,8 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("float8", gflops);
     ///////////////////////////////////////////////////////////////////////////
 
@@ -106,12 +109,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);     log->print(NEWLINE);
+    log->print(gflops);
+    log->print(NEWLINE);
     log->xmlRecord("float16", gflops);
     ///////////////////////////////////////////////////////////////////////////
-    log->xmlCloseTag();     // single_precision_compute
+    log->xmlCloseTag(); // single_precision_compute
   }
-  catch(cl::Error &error)
+  catch (cl::Error &error)
   {
     stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
