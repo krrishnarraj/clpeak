@@ -1,0 +1,47 @@
+
+Platform: Intel(R) OpenCL
+  Device: AMD Ryzen 7 3700X 8-Core Processor             
+    Driver version  : 1.2.0.117 (Linux x64)
+    Compute units   : 16
+    Clock frequency : 3600-4400 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 32.05
+      float2  : 33.94
+      float4  : 35.38
+      float8  : 35.19
+      float16 : 34.62
+
+    Single-precision compute (GFLOPS)
+      float   : 211.75
+      float2  : 420.53
+      float4  : 758.80
+      float8  : 829.55
+      float16 : 389.33
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 209.74
+      double2  : 379.63
+      double4  : 424.46
+      double8  : 366.40
+      double16 : 364.60
+
+    Integer compute (GIOPS)
+      int   : 207.75
+      int2  : 258.28
+      int4  : 258.76
+      int8  : 238.38
+      int16 : 231.89
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 4.49
+      enqueueReadBuffer          : 18.96
+      enqueueMapBuffer(for read) : 4169.87
+        memcpy from mapped ptr   : 18.94
+      enqueueUnmap(after write)  : 66692.04
+        memcpy to mapped ptr     : 19.61
+
+    Kernel launch latency : 2.25 us
+
