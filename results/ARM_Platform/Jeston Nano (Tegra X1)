@@ -1,0 +1,52 @@
+Platform: Portable Computing Language
+  Device: NVIDIA Tegra X1
+    Driver version  : 1.3 (Linux ARM64)
+    Compute units   : 1
+    Clock frequency : 921 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 17.95
+      float2  : 20.21
+      float4  : 20.92
+      float8  : 19.82
+      float16 : 15.14
+
+    Single-precision compute (GFLOPS)
+      float   : 214.09
+      float2  : 229.80
+      float4  : 230.95
+      float8  : 229.31
+      float16 : 228.80
+
+    Half-precision compute (GFLOPS)
+      half   : 212.93
+      half2  : 228.95
+      half4  : 228.69
+      half8  : 245.39
+      half16 : 238.39
+
+    Double-precision compute (GFLOPS)
+      double   : 7.32
+      double2  : 7.31
+      double4  : 7.30
+      double8  : 7.27
+      double16 : 7.21
+
+    Integer compute (GIOPS)
+      int   : 70.95
+      int2  : 74.95
+      int4  : 76.43
+      int8  : 76.62
+      int16 : 76.78
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 2.94
+      enqueueReadBuffer          : 0.69
+      enqueueMapBuffer(for read) : 2487.73
+        memcpy from mapped ptr   : 0.70
+      enqueueUnmap(after write)  : 0.68
+        memcpy to mapped ptr     : 3.68
+
+    Kernel launch latency : 32.77 us
+
+Note via POCL 1.3
