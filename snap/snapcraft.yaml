@@ -1,7 +1,7 @@
 name: clpeak
 base: core18
 version: '1.0'
-version-script: "echo `grep 'VERSION_MAJOR ' CMakeLists.txt | awk -F'[() ]' '{print $3}'`.`grep 'VERSION_MINOR ' CMakeLists.txt | awk -F'[() ]' '{print $3}'`.`grep 'VERSION_PATCH ' CMakeLists.txt | awk -F'[() ]' '{print $3}'`"
+version-script: "echo `grep 'VERSION_MAJOR ' cmake/common.cmake | awk -F'[() ]' '{print $3}'`.`grep 'VERSION_MINOR ' cmake/common.cmake | awk -F'[() ]' '{print $3}'`.`grep 'VERSION_PATCH ' cmake/common.cmake | awk -F'[() ]' '{print $3}'`"
 summary: Benchmarking tool to measure peak capabilities of opencl devices
 description: |
   A synthetic benchmarking tool to measure peak capabilities of opencl devices.
