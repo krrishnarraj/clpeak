@@ -35,8 +35,8 @@ script:
   - cmake --build . --config Release --target package
 
 branches:
-  only:
-    - master
+  except:
+    - dev
 
 notifications:
   email: false
