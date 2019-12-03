@@ -18,6 +18,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   try
   {
     arr = new float[numItems];
+    memset(arr, 0, numItems * sizeof(float));
     cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
 
     log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
