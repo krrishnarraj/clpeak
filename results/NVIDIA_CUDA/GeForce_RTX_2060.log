@@ -1,0 +1,47 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce RTX 2060
+    Driver version  : 440.33.01 (Linux x64)
+    Compute units   : 30
+    Clock frequency : 1200 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 277.69
+      float2  : 292.44
+      float4  : 299.43
+      float8  : 307.26
+      float16 : 295.93
+
+    Single-precision compute (GFLOPS)
+      float   : 6660.58
+      float2  : 6652.10
+      float4  : 6616.57
+      float8  : 6490.34
+      float16 : 6415.59
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 225.49
+      double2  : 222.73
+      double4  : 223.70
+      double8  : 222.83
+      double16 : 220.67
+
+    Integer compute (GIOPS)
+      int   : 5287.57
+      int2  : 5311.86
+      int4  : 5324.80
+      int8  : 5347.13
+      int16 : 5331.60
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 6.02
+      enqueueReadBuffer          : 6.20
+      enqueueMapBuffer(for read) : 5.98
+        memcpy from mapped ptr   : 13.10
+      enqueueUnmap(after write)  : 6.15
+        memcpy to mapped ptr     : 13.22
+
+    Kernel launch latency : 3.44 us
+
