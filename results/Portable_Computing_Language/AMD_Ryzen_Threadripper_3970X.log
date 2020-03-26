@@ -1,0 +1,45 @@
+Platform: Portable Computing Language
+  Device: pthread-AMD Ryzen Threadripper 3970X 32-Core Processor
+    Driver version  : 1.4 (Linux x64)
+    Compute units   : 64
+    Clock frequency : 3700 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 60.55
+      float2  : 64.76
+      float4  : 66.65
+      float8  : 69.31
+      float16 : 70.19
+
+    Single-precision compute (GFLOPS)
+      float   : 660.02
+      float2  : 168.74
+      float4  : 323.35
+      float8  : 639.75
+      float16 : 1291.47
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 321.48
+      double2  : 163.61
+      double4  : 330.57
+      double8  : 639.99
+      double16 : 1281.35
+
+    Integer compute (GIOPS)
+      int   : 770.53
+      int2  : 252.50
+      int4  : 387.05
+      int8  : 804.23
+      int16 : 985.80
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 19.25
+      enqueueReadBuffer          : 17.37
+      enqueueMapBuffer(for read) : 9122.70
+        memcpy from mapped ptr   : 19.35
+      enqueueUnmap(after write)  : 11496.17
+        memcpy to mapped ptr     : 20.18
+
+    Kernel launch latency : 73.67 us
