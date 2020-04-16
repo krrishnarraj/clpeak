@@ -8,9 +8,9 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
-  cl::NDRange globalSize = (numItems / FETCH_PER_WI);
-  cl::NDRange localSize = devInfo.maxWGSize;
+  cl_uint numItems = FETCH_PER_WI;
+  cl::NDRange globalSize = 1;
+  cl::NDRange localSize = 1;
   uint iters = devInfo.kernelLatencyIters;
   float latency;
 
