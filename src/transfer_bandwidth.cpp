@@ -27,7 +27,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     ///////////////////////////////////////////////////////////////////////////
     // enqueueWriteBuffer
-    log->print(TAB TAB TAB "enqueueWriteBuffer         : ");
+    log->print(TAB TAB TAB "enqueueWriteBuffer              : ");
 
     // Dummy warm-up
     queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
@@ -65,7 +65,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     log->xmlRecord("enqueuewritebuffer", gbps);
     ///////////////////////////////////////////////////////////////////////////
     // enqueueReadBuffer
-    log->print(TAB TAB TAB "enqueueReadBuffer          : ");
+    log->print(TAB TAB TAB "enqueueReadBuffer               : ");
 
     // Dummy warm-up
     queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
@@ -101,8 +101,83 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     log->print(NEWLINE);
     log->xmlRecord("enqueuereadbuffer", gbps);
     ///////////////////////////////////////////////////////////////////////////
+    // enqueueWriteBuffer non-blocking
+    log->print(TAB TAB TAB "enqueueWriteBuffer non-blocking : ");
+
+    // Dummy warm-up
+    queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
+    queue.finish();
+
+    timed = 0;
+
+    if (useEventTimer)
+    {
+      for (uint i = 0; i < iters; i++)
+      {
+        cl::Event timeEvent;
+        queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
+        queue.finish();
+        timed += timeInUS(timeEvent);
+      }
+    }
+    else
+    {
+      Timer timer;
+
+      timer.start();
+      for (uint i = 0; i < iters; i++)
+      {
+        queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
+      }
+      queue.finish();
+      timed = timer.stopAndTime();
+    }
+    timed /= static_cast<float>(iters);
+
+    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->xmlRecord("enqueuewritebuffer_nonblocking", gbps);
+    ///////////////////////////////////////////////////////////////////////////
+    // enqueueReadBuffer non-blocking
+    log->print(TAB TAB TAB "enqueueReadBuffer non-blocking  : ");
+
+    // Dummy warm-up
+    queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
+    queue.finish();
+
+    timed = 0;
+    if (useEventTimer)
+    {
+      for (uint i = 0; i < iters; i++)
+      {
+        cl::Event timeEvent;
+        queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
+        queue.finish();
+        timed += timeInUS(timeEvent);
+      }
+    }
+    else
+    {
+      Timer timer;
+
+      timer.start();
+      for (uint i = 0; i < iters; i++)
+      {
+        queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
+      }
+      queue.finish();
+      timed = timer.stopAndTime();
+    }
+    timed /= static_cast<float>(iters);
+
+    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->xmlRecord("enqueuereadbuffer_nonblocking", gbps);
+    ///////////////////////////////////////////////////////////////////////////
     // enqueueMapBuffer
-    log->print(TAB TAB TAB "enqueueMapBuffer(for read) : ");
+    log->print(TAB TAB TAB "enqueueMapBuffer(for read)      : ");
 
     queue.finish();
 
@@ -146,7 +221,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     ///////////////////////////////////////////////////////////////////////////
 
     // memcpy from mapped ptr
-    log->print(TAB TAB TAB TAB "memcpy from mapped ptr   : ");
+    log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
     queue.finish();
 
     timed = 0;
@@ -175,7 +250,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     ///////////////////////////////////////////////////////////////////////////
 
     // enqueueUnmap
-    log->print(TAB TAB TAB "enqueueUnmap(after write)  : ");
+    log->print(TAB TAB TAB "enqueueUnmap(after write)       : ");
 
     queue.finish();
 
@@ -219,7 +294,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     ///////////////////////////////////////////////////////////////////////////
 
     // memcpy to mapped ptr
-    log->print(TAB TAB TAB TAB "memcpy to mapped ptr     : ");
+    log->print(TAB TAB TAB TAB "memcpy to mapped ptr          : ");
     queue.finish();
 
     timed = 0;
