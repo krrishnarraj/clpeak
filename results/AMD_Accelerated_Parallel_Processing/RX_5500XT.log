@@ -1,0 +1,54 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: gfx1012 (RX 5500XT)
+    Driver version  : 3137.0 (HSA1.1,LC) (Linux x64)
+    Compute units   : 11
+    Clock frequency : 1885 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 190.36
+      float2  : 182.03
+      float4  : 171.64
+      float8  : 157.88
+      float16 : 154.64
+
+    Single-precision compute (GFLOPS)
+      float   : 5046.67
+      float2  : 4936.51
+      float4  : 4887.78
+      float8  : 4871.37
+      float16 : 4796.57
+
+    Half-precision compute (GFLOPS)
+      half   : 2544.83
+      half2  : 9875.69
+      half4  : 9771.45
+      half8  : 9731.20
+      half16 : 9533.27
+
+    Double-precision compute (GFLOPS)
+      double   : 323.84
+      double2  : 323.33
+      double4  : 322.61
+      double8  : 321.09
+      double16 : 318.06
+
+    Integer compute (GIOPS)
+      int   : 1025.25
+      int2  : 1025.22
+      int4  : 1021.86
+      int8  : 1018.56
+      int16 : 1012.24
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 18.83
+      enqueueReadBuffer               : 18.60
+      enqueueWriteBuffer non-blocking : 19.37
+      enqueueReadBuffer non-blocking  : 18.65
+      enqueueMapBuffer(for read)      : 810371.12
+        memcpy from mapped ptr        : 18.65
+      enqueueUnmap(after write)       : 1651910.50
+        memcpy to mapped ptr          : 19.32
+
+    Kernel launch latency : 12.77 us
+
