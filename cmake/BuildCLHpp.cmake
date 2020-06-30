@@ -8,7 +8,7 @@ set(CMAKE_LIST_CONTENT "
   ExternalProject_add(  hpp_headers
     PREFIX              hpp
     GIT_REPOSITORY      https://github.com/KhronosGroup/OpenCL-CLHPP
-    GIT_TAG             master
+    GIT_TAG             opencl21
     GIT_SHALLOW         1
     GIT_PROGRESS        1
     CMAKE_ARGS
