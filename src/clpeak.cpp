@@ -20,7 +20,7 @@ extern "C"
 #endif
 
 clPeak::clPeak() : forcePlatform(false), forceDevice(false), useEventTimer(false),
-                   isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeInt(true),
+                   isGlobalBW(true), isComputeSP(true), isComputeDP(true), isComputeIntFast(true), isComputeInt(true),
                    isTransferBW(true), isKernelLatency(true),
                    specifiedPlatform(0), specifiedDevice(0)
 {
@@ -110,6 +110,7 @@ int clPeak::runAll()
         runComputeSP(queue, prog, devInfo);
         runComputeHP(queue, prog, devInfo);
         runComputeDP(queue, prog, devInfo);
+		runComputeIntFast(queue, prog, devInfo);
         runComputeInteger(queue, prog, devInfo);
         runTransferBandwidthTest(queue, prog, devInfo);
         runKernelLatency(queue, prog, devInfo);

@@ -22,7 +22,7 @@ class clPeak
 public:
 
   bool forcePlatform, forceDevice, useEventTimer;
-  bool isGlobalBW, isComputeSP, isComputeDP, isComputeInt, isTransferBW, isKernelLatency;
+  bool isGlobalBW, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isTransferBW, isKernelLatency;
   ulong specifiedPlatform, specifiedDevice;
   logger *log;
 

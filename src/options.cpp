@@ -14,6 +14,7 @@ static const char *helpStr =
     "\n  --compute-sp                selectively run single precision compute test"
     "\n  --compute-dp                selectively run double precision compute test"
     "\n  --compute-integer           selectively run integer compute test"
+	"\n  --compute-intfast           selectively run integer 24bit compute test"
     "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
     "\n  --kernel-latency            selectively run kernel latency test"
     "\n  --all-tests                 run all above tests [default]"
@@ -68,12 +69,12 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       useEventTimer = true;
     }
-    else if ((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--compute-sp") == 0) || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0))
+    else if ((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--compute-sp") == 0) || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0) || (strcmp(argv[i], "--compute-intfast") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0))
     {
       // Disable all and enable only selected ones
       if (!forcedTests)
       {
-        isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = false;
+        isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isTransferBW = isKernelLatency = false;
         forcedTests = true;
       }
 
@@ -93,6 +94,10 @@ int clPeak::parseArgs(int argc, char **argv)
       {
         isComputeInt = true;
       }
+	  else if (strcmp(argv[i], "--compute-intfast") == 0)
+	  {
+	  	isComputeIntFast = true;
+	  }
       else if (strcmp(argv[i], "--transfer-bandwidth") == 0)
       {
         isTransferBW = true;
@@ -104,7 +109,7 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if (strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isTransferBW = isKernelLatency = true;
+      isGlobalBW = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isTransferBW = isKernelLatency = true;
     }
     else if (strcmp(argv[i], "--enable-xml-dump") == 0)
     {
