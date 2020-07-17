@@ -44,6 +44,8 @@ public:
 
   int runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
+  int runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+
   int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
   int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
