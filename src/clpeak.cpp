@@ -8,6 +8,7 @@ static const char *stringifiedKernels =
 #include "compute_sp_kernels.cl"
 #include "compute_hp_kernels.cl"
 #include "compute_dp_kernels.cl"
+#include "compute_int24_kernels.cl"
 #include "compute_integer_kernels.cl"
     ;
 
