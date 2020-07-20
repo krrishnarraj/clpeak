@@ -15,6 +15,7 @@ add_library(clpeak SHARED
         ${SRC_FOLDER}/compute_hp.cpp
         ${SRC_FOLDER}/compute_dp.cpp
         ${SRC_FOLDER}/compute_integer.cpp
+        ${SRC_FOLDER}/compute_integer_fast.cpp
         ${SRC_FOLDER}/transfer_bandwidth.cpp
         ${SRC_FOLDER}/kernel_latency.cpp
         ${SRC_FOLDER}/entry_android.cpp

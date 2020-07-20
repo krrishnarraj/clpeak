@@ -111,8 +111,8 @@ int clPeak::runAll()
         runComputeSP(queue, prog, devInfo);
         runComputeHP(queue, prog, devInfo);
         runComputeDP(queue, prog, devInfo);
-		runComputeIntFast(queue, prog, devInfo);
         runComputeInteger(queue, prog, devInfo);
+        runComputeIntFast(queue, prog, devInfo);
         runTransferBandwidthTest(queue, prog, devInfo);
         runKernelLatency(queue, prog, devInfo);
 

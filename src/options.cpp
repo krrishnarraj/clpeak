@@ -14,7 +14,7 @@ static const char *helpStr =
     "\n  --compute-sp                selectively run single precision compute test"
     "\n  --compute-dp                selectively run double precision compute test"
     "\n  --compute-integer           selectively run integer compute test"
-	"\n  --compute-intfast           selectively run integer 24bit compute test"
+    "\n  --compute-intfast           selectively run integer 24bit compute test"
     "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
     "\n  --kernel-latency            selectively run kernel latency test"
     "\n  --all-tests                 run all above tests [default]"
@@ -94,10 +94,10 @@ int clPeak::parseArgs(int argc, char **argv)
       {
         isComputeInt = true;
       }
-	  else if (strcmp(argv[i], "--compute-intfast") == 0)
-	  {
-	  	isComputeIntFast = true;
-	  }
+      else if (strcmp(argv[i], "--compute-intfast") == 0)
+      {
+        isComputeIntFast = true;
+      }
       else if (strcmp(argv[i], "--transfer-bandwidth") == 0)
       {
         isTransferBW = true;
