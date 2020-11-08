@@ -10,6 +10,7 @@
 #include <chrono>
 #include <string>
 #include <cstdint>
+#include <algorithm>
 
 #define TAB             "  "
 #define NEWLINE         "\n"
@@ -17,12 +18,6 @@
 #define uint            unsigned int
 #endif
 #define ulong           unsigned long
-
-#define MAX(X, Y)       \
-  (X > Y)? X: Y
-
-#define MIN(X, Y)       \
-  (X < Y)? X: Y
 
 #ifdef UNUSED
 #undef UNUSED

@@ -21,7 +21,7 @@ device_info_t getDeviceInfo(cl::Device &d)
 
   // Limiting max work-group size to 256
 #define MAX_WG_SIZE 256
-  devInfo.maxWGSize = MIN(devInfo.maxWGSize, MAX_WG_SIZE);
+  devInfo.maxWGSize = std::min(devInfo.maxWGSize, (uint)MAX_WG_SIZE);
 
   // FIXME limit max-workgroup size for qualcomm platform to 128
   // Kernel launch fails for workgroup size 256(CL_DEVICE_MAX_WORK_ITEM_SIZES)
@@ -29,7 +29,7 @@ device_info_t getDeviceInfo(cl::Device &d)
   if ((vendor.find("QUALCOMM") != std::string::npos) ||
       (vendor.find("qualcomm") != std::string::npos))
   {
-    devInfo.maxWGSize = MIN(devInfo.maxWGSize, 128);
+    devInfo.maxWGSize = std::min(devInfo.maxWGSize, (uint)128);
   }
 
   devInfo.maxAllocSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>());

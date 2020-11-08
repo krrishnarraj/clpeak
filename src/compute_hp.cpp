@@ -26,7 +26,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
     uint64_t globalWIs = (devInfo.numCUs) * (devInfo.computeWgsPerCU) * (devInfo.maxWGSize);
-    uint64_t t = MIN((globalWIs * sizeof(cl_half)), devInfo.maxAllocSize) / sizeof(cl_half);
+    uint64_t t = std::min((globalWIs * sizeof(cl_half)), devInfo.maxAllocSize) / sizeof(cl_half);
     globalWIs = roundToMultipleOf(t, devInfo.maxWGSize);
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_half)));

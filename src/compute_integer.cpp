@@ -20,7 +20,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
     uint64_t globalWIs = (devInfo.numCUs) * (devInfo.computeWgsPerCU) * (devInfo.maxWGSize);
-    uint64_t t = MIN((globalWIs * sizeof(cl_int)), devInfo.maxAllocSize) / sizeof(cl_int);
+    uint64_t t = std::min((globalWIs * sizeof(cl_int)), devInfo.maxAllocSize) / sizeof(cl_int);
     globalWIs = roundToMultipleOf(t, devInfo.maxWGSize);
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_int)));
