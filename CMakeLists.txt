@@ -22,7 +22,7 @@ elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
   set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib)
 endif()
 
-FIND_PATH(HPP_FOUND CL/cl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
+FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
 if(NOT HPP_FOUND)
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
   include(BuildCLHpp)
@@ -63,9 +63,7 @@ target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=120)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"   OR
    CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-  target_compile_options(clpeak PRIVATE -fPIC -Wall -Wextra -Wconversion -Wno-deprecated-declarations -Wno-unused-parameter -Wno-ignored-attributes)
-elseif(MSVC)
-  target_compile_options(clpeak PRIVATE /wd4996)
+  target_compile_options(clpeak PRIVATE -fPIC -Wall -Wextra -Wno-unused-parameter)
 endif()
 
 install(TARGETS clpeak RUNTIME DESTINATION bin)
