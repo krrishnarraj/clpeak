@@ -1,0 +1,56 @@
+
+Platform: NVIDIA CUDA
+  Device: GeForce MX130
+    Driver version  : 455.38 (Linux x64)
+    Compute units   : 3
+    Clock frequency : 1189 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 32.25
+      float2  : 33.80
+      float4  : 34.93
+      float8  : 35.33
+      float16 : 25.96
+
+    Single-precision compute (GFLOPS)
+      float   : 573.05
+      float2  : 845.75
+      float4  : 862.53
+      float8  : 857.37
+      float16 : 854.60
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 27.64
+      double2  : 27.63
+      double4  : 27.58
+      double8  : 27.49
+      double16 : 27.28
+
+    Integer compute (GIOPS)
+      int   : 261.52
+      int2  : 290.67
+      int4  : 293.02
+      int8  : 278.32
+      int16 : 267.97
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 261.52
+      int2  : 290.59
+      int4  : 293.09
+      int8  : 291.33
+      int16 : 289.98
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 2.81
+      enqueueReadBuffer               : 3.23
+      enqueueWriteBuffer non-blocking : 2.84
+      enqueueReadBuffer non-blocking  : 3.09
+      enqueueMapBuffer(for read)      : 3.12
+        memcpy from mapped ptr        : 7.80
+      enqueueUnmap(after write)       : 3.11
+        memcpy to mapped ptr          : 7.89
+
+    Kernel launch latency : 7.62 us
+

@@ -1,0 +1,61 @@
+
+Platform: Intel(R) OpenCL HD Graphics
+  Device: Intel(R) Graphics Gen9 [0x1912]
+    Driver version  : 20.47.18513 (Linux x64)
+    Compute units   : 23
+    Clock frequency : 950 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 13.74
+      float2  : 14.20
+      float4  : 14.51
+      float8  : 14.82
+      float16 : 15.17
+
+    Single-precision compute (GFLOPS)
+      float   : 327.47
+      float2  : 323.62
+      float4  : 325.96
+      float8  : 323.80
+      float16 : 318.87
+
+    Half-precision compute (GFLOPS)
+      half   : 645.09
+      half2  : 640.47
+      half4  : 644.94
+      half8  : 640.55
+      half16 : 632.08
+
+    Double-precision compute (GFLOPS)
+      double   : 82.26
+      double2  : 81.26
+      double4  : 81.89
+      double8  : 81.28
+      double16 : 79.82
+
+    Integer compute (GIOPS)
+      int   : 109.20
+      int2  : 108.91
+      int4  : 108.98
+      int8  : 108.57
+      int16 : 107.52
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 108.93
+      int2  : 108.83
+      int4  : 109.15
+      int8  : 108.70
+      int16 : 107.40
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 7.07
+      enqueueReadBuffer               : 7.10
+      enqueueWriteBuffer non-blocking : 6.80
+      enqueueReadBuffer non-blocking  : 7.32
+      enqueueMapBuffer(for read)      : 67494.27
+        memcpy from mapped ptr        : 7.09
+      enqueueUnmap(after write)       : 318760.03
+        memcpy to mapped ptr          : 7.10
+
+    Kernel launch latency : 34.17 us
+

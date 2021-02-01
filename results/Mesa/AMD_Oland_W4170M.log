@@ -1,0 +1,51 @@
+
+Platform: Clover
+  Device: AMD OLAND (DRM 2.50.0, 5.9.12-200.fc33.x86_64, LLVM 11.0.0)
+    Driver version  : 20.2.3 (Linux x64)
+    Compute units   : 6
+    Clock frequency : 900 MHz
+'+fp64-fp16-denormals' is not a recognized feature for this target (ignoring feature)
+'-fp32-denormals' is not a recognized feature for this target (ignoring feature)
+'+fp64-fp16-denormals' is not a recognized feature for this target (ignoring feature)
+'-fp32-denormals' is not a recognized feature for this target (ignoring feature)
+
+    Global memory bandwidth (GBPS)
+      float   : 50.72
+      float2  : 52.88
+      float4  : 54.07
+      float8  : 52.86
+      float16 : 41.40
+
+    Single-precision compute (GFLOPS)
+      float   : 86.08
+      float2  : 86.01
+      float4  : 85.87
+      float8  : 85.72
+      float16 : 85.23
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 43.11
+      double2  : 43.07
+      double4  : 43.00
+      double8  : 42.94
+      double16 : 42.74
+
+    Integer compute (GIOPS)
+      int   : 34.46
+      int2  : 34.43
+      int4  : 34.38
+      int8  : 34.27
+      int16 : 34.37
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 9.07
+      enqueueReadBuffer          : 9.21
+      enqueueMapBuffer(for read) : 9199.74
+        memcpy from mapped ptr   : 9.18
+      enqueueUnmap(after write)  : 10205.28
+        memcpy to mapped ptr     : 9.17
+
+    Kernel launch latency : 199.05 us
+

@@ -1,0 +1,61 @@
+
+Platform: AMD Accelerated Parallel Processing
+  Device: gfx906
+    Driver version  : 3204.0 (HSA1.1,LC) (Linux x64)
+    Compute units   : 60
+    Clock frequency : 1725 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 766.24
+      float2  : 756.53
+      float4  : 740.95
+      float8  : 727.71
+      float16 : 685.31
+
+    Single-precision compute (GFLOPS)
+      float   : 12886.15
+      float2  : 12773.94
+      float4  : 12636.76
+      float8  : 12363.97
+      float16 : 12180.00
+
+    Half-precision compute (GFLOPS)
+      half   : 6522.77
+      half2  : 24971.55
+      half4  : 24781.20
+      half8  : 24465.16
+      half16 : 23955.72
+
+    Double-precision compute (GFLOPS)
+      double   : 6350.20
+      double2  : 6319.02
+      double4  : 6291.70
+      double8  : 5880.47
+      double16 : 6143.47
+
+    Integer compute (GIOPS)
+      int   : 4325.27
+      int2  : 4317.88
+      int4  : 4307.68
+      int8  : 4289.82
+      int16 : 4242.46
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 12395.53
+      int2  : 12199.22
+      int4  : 11631.28
+      int8  : 11757.87
+      int16 : 11833.97
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 11.86
+      enqueueReadBuffer               : 11.53
+      enqueueWriteBuffer non-blocking : 11.52
+      enqueueReadBuffer non-blocking  : 11.43
+      enqueueMapBuffer(for read)      : 192599.44
+        memcpy from mapped ptr        : 11.78
+      enqueueUnmap(after write)       : 286331.16
+        memcpy to mapped ptr          : 11.97
+
+    Kernel launch latency : 11.44 us
+

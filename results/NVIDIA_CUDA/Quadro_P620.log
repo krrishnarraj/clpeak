@@ -1,0 +1,56 @@
+
+Platform: NVIDIA CUDA
+  Device: Quadro P620
+    Driver version  : 455.45.01 (Linux x64)
+    Compute units   : 4
+    Clock frequency : 1442 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 79.28
+      float2  : 82.40
+      float4  : 84.20
+      float8  : 82.78
+      float16 : 55.16
+
+    Single-precision compute (GFLOPS)
+      float   : 1357.53
+      float2  : 1400.77
+      float4  : 1397.70
+      float8  : 1390.10
+      float16 : 1385.35
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 45.19
+      double2  : 45.03
+      double4  : 44.97
+      double8  : 44.82
+      double16 : 44.36
+
+    Integer compute (GIOPS)
+      int   : 473.37
+      int2  : 472.65
+      int4  : 473.04
+      int8  : 466.72
+      int16 : 458.70
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 473.50
+      int2  : 473.80
+      int4  : 473.05
+      int8  : 470.43
+      int16 : 468.49
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 11.44
+      enqueueReadBuffer               : 10.75
+      enqueueWriteBuffer non-blocking : 11.12
+      enqueueReadBuffer non-blocking  : 10.50
+      enqueueMapBuffer(for read)      : 11.75
+        memcpy from mapped ptr        : 15.16
+      enqueueUnmap(after write)       : 12.85
+        memcpy to mapped ptr          : 15.27
+
+    Kernel launch latency : 3.50 us
+
