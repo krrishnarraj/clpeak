@@ -1,0 +1,56 @@
+
+Platform: Intel(R) OpenCL
+  Device: Intel(R) Many Integrated Core Acceleration Card
+    Driver version  : 1.2 (Linux x64)
+    Compute units   : 236
+    Clock frequency : 1052 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 62.52
+      float2  : 44.56
+      float4  : 76.55
+      float8  : 84.92
+      float16 : 2.15
+
+    Single-precision compute (GFLOPS)
+      float   : 1778.74
+      float2  : 1889.33
+      float4  : 1884.25
+      float8  : 1877.49
+      float16 : 1850.36
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 967.75
+      double2  : 966.69
+      double4  : 964.23
+      double8  : 958.01
+      double16 : 295.92
+
+    Integer compute (GIOPS)
+      int   : 968.24
+      int2  : 970.23
+      int4  : 968.07
+      int8  : 968.20
+      int16 : 958.80
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 968.37
+      int2  : 969.56
+      int4  : 967.91
+      int8  : 961.61
+      int16 : 950.62
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 1.86
+      enqueueReadBuffer               : 3.45
+      enqueueWriteBuffer non-blocking : 3.34
+      enqueueReadBuffer non-blocking  : 3.46
+      enqueueMapBuffer(for read)      : 137.16
+        memcpy from mapped ptr        : 3.02
+      enqueueUnmap(after write)       : 6.91
+        memcpy to mapped ptr          : 2.97
+
+    Kernel launch latency : 77.33 us
+

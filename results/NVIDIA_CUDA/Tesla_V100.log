@@ -1,0 +1,56 @@
+
+Platform: NVIDIA CUDA
+  Device: Tesla V100-PCIE-32GB
+    Driver version  : 455.23.05 (Linux x64)
+    Compute units   : 80
+    Clock frequency : 1380 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 716.38
+      float2  : 765.67
+      float4  : 810.35
+      float8  : 723.85
+      float16 : 750.17
+
+    Single-precision compute (GFLOPS)
+      float   : 14098.15
+      float2  : 14135.97
+      float4  : 14095.57
+      float8  : 14049.00
+      float16 : 13934.45
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 7075.81
+      double2  : 7065.56
+      double4  : 7046.01
+      double8  : 7013.68
+      double16 : 6951.51
+
+    Integer compute (GIOPS)
+      int   : 14069.94
+      int2  : 14118.04
+      int4  : 14121.60
+      int8  : 14124.16
+      int16 : 14099.04
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 14077.32
+      int2  : 14119.12
+      int4  : 14122.14
+      int8  : 14113.63
+      int16 : 14104.60
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 12.06
+      enqueueReadBuffer               : 10.64
+      enqueueWriteBuffer non-blocking : 10.72
+      enqueueReadBuffer non-blocking  : 8.13
+      enqueueMapBuffer(for read)      : 10.25
+        memcpy from mapped ptr        : 17.55
+      enqueueUnmap(after write)       : 12.59
+        memcpy to mapped ptr          : 18.20
+
+    Kernel launch latency : 7.88 us
+

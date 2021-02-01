@@ -1,0 +1,56 @@
+
+Platform: NVIDIA CUDA
+  Device: Tesla K80
+    Driver version  : 455.32.00 (Linux x64)
+    Compute units   : 13
+    Clock frequency : 823 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 147.19
+      float2  : 148.99
+      float4  : 152.33
+      float8  : 141.67
+      float16 : 68.77
+
+    Single-precision compute (GFLOPS)
+      float   : 2835.78
+      float2  : 2834.16
+      float4  : 3700.81
+      float8  : 3518.41
+      float16 : 3288.67
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 1400.02
+      double2  : 1399.04
+      double4  : 1394.24
+      double8  : 1396.52
+      double16 : 1386.00
+
+    Integer compute (GIOPS)
+      int   : 711.60
+      int2  : 711.39
+      int4  : 711.65
+      int8  : 711.87
+      int16 : 711.75
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 711.52
+      int2  : 711.37
+      int4  : 711.58
+      int8  : 711.36
+      int16 : 709.81
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 9.35
+      enqueueReadBuffer               : 11.89
+      enqueueWriteBuffer non-blocking : 8.42
+      enqueueReadBuffer non-blocking  : 11.13
+      enqueueMapBuffer(for read)      : 9.99
+        memcpy from mapped ptr        : 9.80
+      enqueueUnmap(after write)       : 12.05
+        memcpy to mapped ptr          : 9.57
+
+    Kernel launch latency : 8.20 us
+

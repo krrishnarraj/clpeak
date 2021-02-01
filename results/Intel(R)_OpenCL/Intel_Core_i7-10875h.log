@@ -1,0 +1,56 @@
+
+Platform: Intel(R) CPU Runtime for OpenCL(TM) Applications
+  Device: Intel(R) Core(TM) i7-10875H CPU @ 2.30GHz
+    Driver version  : 18.1.0.0920 (Linux x64)
+    Compute units   : 16
+    Clock frequency : 2300 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 25.86
+      float2  : 26.54
+      float4  : 24.25
+      float8  : 22.53
+      float16 : 22.85
+
+    Single-precision compute (GFLOPS)
+      float   : 160.53
+      float2  : 319.05
+      float4  : 573.63
+      float8  : 593.37
+      float16 : 320.20
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 160.23
+      double2  : 289.43
+      double4  : 295.46
+      double8  : 171.52
+      double16 : 257.58
+
+    Integer compute (GIOPS)
+      int   : 58.06
+      int2  : 112.07
+      int4  : 206.06
+      int8  : 133.53
+      int16 : 257.37
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 49.43
+      int2  : 89.90
+      int4  : 139.45
+      int8  : 151.41
+      int16 : 88.01
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 10.69
+      enqueueReadBuffer               : 10.74
+      enqueueWriteBuffer non-blocking : 10.68
+      enqueueReadBuffer non-blocking  : 10.57
+      enqueueMapBuffer(for read)      : 13801.31
+        memcpy from mapped ptr        : 10.75
+      enqueueUnmap(after write)       : 16698.94
+        memcpy to mapped ptr          : 10.85
+
+    Kernel launch latency : 3.27 us
+

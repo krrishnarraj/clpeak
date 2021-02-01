@@ -1,0 +1,56 @@
+
+Platform: NVIDIA CUDA
+  Device: Quadro GV100
+    Driver version  : 455.23.05 (Linux x64)
+    Compute units   : 80
+    Clock frequency : 1627 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 554.70
+      float2  : 575.69
+      float4  : 258.14
+      float8  : 537.39
+      float16 : 552.97
+
+    Single-precision compute (GFLOPS)
+      float   : 6216.30
+      float2  : 11449.58
+      float4  : 14290.00
+      float8  : 7261.11
+      float16 : 7262.70
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 7212.01
+      double2  : 7191.88
+      double4  : 7168.91
+      double8  : 4505.54
+      double16 : 3124.18
+
+    Integer compute (GIOPS)
+      int   : 6219.71
+      int2  : 9340.54
+      int4  : 14371.73
+      int8  : 14373.41
+      int16 : 14342.93
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 9037.88
+      int2  : 6214.77
+      int4  : 6216.47
+      int8  : 9337.87
+      int16 : 14352.44
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 9.75
+      enqueueReadBuffer               : 12.11
+      enqueueWriteBuffer non-blocking : 9.32
+      enqueueReadBuffer non-blocking  : 11.31
+      enqueueMapBuffer(for read)      : 11.25
+        memcpy from mapped ptr        : 9.54
+      enqueueUnmap(after write)       : 11.26
+        memcpy to mapped ptr          : 9.84
+
+    Kernel launch latency : 19.29 us
+
