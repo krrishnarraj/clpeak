@@ -66,7 +66,7 @@ int clPeak::runAll()
 
       cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
       vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-      cl::Program::Sources source(1, make_pair(stringifiedKernels, (strlen(stringifiedKernels) + 1)));
+      cl::Program::Sources source { std::string(stringifiedKernels) };
       cl::Program prog = cl::Program(ctx, source);
 
       for (size_t d = 0; d < devices.size(); d++)

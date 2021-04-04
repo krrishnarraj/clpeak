@@ -1,0 +1,6 @@
+[submodule "third/OpenCL-CLHPP"]
+	path = third/OpenCL-CLHPP
+	url = https://github.com/KhronosGroup/OpenCL-CLHPP
+[submodule "third/libopencl-stub"]
+	path = third/libopencl-stub
+	url = https://github.com/krrishnarraj/libopencl-stub
