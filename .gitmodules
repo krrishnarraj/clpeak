@@ -1,4 +1,0 @@
-[submodule "libopencl-stub"]
-	path = android/app/src/main/cpp/libopencl-stub
-	url = https://github.com/krrishnarraj/libopencl-stub
-	branch = master
