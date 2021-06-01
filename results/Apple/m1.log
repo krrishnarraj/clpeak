@@ -1,0 +1,49 @@
+Platform: Apple
+  Device: Apple M1
+    Driver version  : 1.2 1.0 (Macintosh)
+    Compute units   : 8
+    Clock frequency : 1000 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 58.16
+      float2  : 59.96
+      float4  : 58.57
+      float8  : 60.68
+      float16 : 34.27
+
+    Single-precision compute (GFLOPS)
+      float   : 1186.82
+      float2  : 1208.45
+      float4  : 1212.35
+      float8  : 999.87
+      float16 : 1268.70
+
+    No half precision support! Skipped
+
+    No double precision support! Skipped
+
+    Integer compute (GIOPS)
+      int   : 652.41
+      int2  : 651.09
+      int4  : 650.97
+      int8  : 648.29
+      int16 : 651.40
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 652.19
+      int2  : 651.32
+      int4  : 651.09
+      int8  : 648.10
+      int16 : 650.90
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 16.86
+      enqueueReadBuffer               : 16.61
+      enqueueWriteBuffer non-blocking : 10.06
+      enqueueReadBuffer non-blocking  : 11.15
+      enqueueMapBuffer(for read)      : 4436.95
+        memcpy from mapped ptr        : 23.59
+      enqueueUnmap(after write)       : 119304.65
+        memcpy to mapped ptr          : 24.74
+
+    Kernel launch latency : 1.45 us
