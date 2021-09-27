@@ -1,0 +1,54 @@
+Platform: clvk
+  Device: Apple M1
+    Driver version  : 1.2 CLVK on Vulkan v1.1.189 driver 10105 (Macintosh)
+    Compute units   : 1
+    Clock frequency : 0 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 55.63
+      float2  : 57.66
+      float4  : 57.50
+      float8  : 57.88
+      float16 : 62.41
+
+    Single-precision compute (GFLOPS)
+      float   : 1267.18
+      float2  : 1502.12
+      float4  : 1525.60
+      float8  : 892.10
+      float16 : 1470.11
+
+    Half-precision compute (GFLOPS)
+      half   : 1333.62
+      half2  : 1508.59
+      half4  : 1591.51
+      half8  : 1525.85
+      half16 : 1423.71
+
+    No double precision support! Skipped
+
+    Integer compute (GIOPS)
+      int   : 472.07
+      int2  : 467.69
+      int4  : 469.41
+      int8  : 476.42
+      int16 : 461.98
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 480.22
+      int2  : 478.74
+      int4  : 437.78
+      int8  : 474.67
+      int16 : 475.28
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 28.62
+      enqueueReadBuffer               : 28.93
+      enqueueWriteBuffer non-blocking : 28.99
+      enqueueReadBuffer non-blocking  : 28.97
+      enqueueMapBuffer(for read)      : 550636.56
+        memcpy from mapped ptr        : 28.75
+      enqueueUnmap(after write)       : 727960.19
+        memcpy to mapped ptr          : 28.96
+
+    Kernel launch latency : 6.92 us
