@@ -22,7 +22,7 @@ before_script:
   - cd build
 
 script:
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cmake -G "Visual Studio 16 2019" -A x64 .. ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cmake -G "Visual Studio 16 2019" -A x64 -DCMAKE_BUILD_TYPE=Release .. ; fi
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then cmake .. ; fi
   - cmake --build . --config Release
   - ctest -VV
