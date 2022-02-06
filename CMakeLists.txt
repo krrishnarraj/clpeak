@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
 project(clpeak)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common.cmake)
@@ -11,8 +11,18 @@ endif()
 find_package(OpenCL)
 if(NOT OpenCL_FOUND)
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-  include(BuildIcd)
+  include(BuildSdk)
   find_package(OpenCL REQUIRED)
+endif()
+
+# find opencl.hpp
+FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS} REQUIRED)
+
+if(NOT OpenCL_FOUND)
+  message(FATAL_ERROR "Could not find OpenCL include/libs. Set OCL_ROOT to your OpenCL SDK")
+else()
+  message(STATUS "Selected OpenCL includes from ${OpenCL_INCLUDE_DIRS}")
+  message(STATUS "Selected OpenCL lib ${OpenCL_LIBRARIES}")
 endif()
 
 # extra libs for static library
@@ -20,20 +30,6 @@ if(UNIX AND ${OpenCL_LIBRARIES} MATCHES "libOpenCL.a")
   set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} pthread dl)
 elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
   set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib)
-endif()
-
-FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
-if(NOT HPP_FOUND)
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-  include(BuildCLHpp)
-  set(OpenCL_INCLUDE_DIRS ${OpenCL_INCLUDE_DIRS} "${CLHPP_ROOT}/include")
-endif()
-
-if(NOT OpenCL_FOUND)
-  message(FATAL_ERROR "Could not find OpenCL include/libs. Set OCL_ROOT to your OpenCL SDK")
-else()
-  message(STATUS "Selected OpenCL includes from ${OpenCL_INCLUDE_DIRS}")
-  message(STATUS "Selected OpenCL lib ${OpenCL_LIBRARIES}")
 endif()
 
 set(CMAKE_CXX_STANDARD "11")
