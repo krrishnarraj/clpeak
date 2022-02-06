@@ -9,14 +9,16 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(OpenCL)
-if(NOT OpenCL_FOUND)
+FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
+if(NOT OpenCL_FOUND OR NOT HPP_FOUND)
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
   include(BuildSdk)
-  find_package(OpenCL REQUIRED)
-endif()
 
-# find opencl.hpp
-FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS} REQUIRED)
+  find_package(OpenCL REQUIRED)
+
+  set(OpenCL_INCLUDE_DIRS ${OpenCL_INCLUDE_DIRS} "${SDK_ROOT}/include")
+  FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS} REQUIRED)
+endif()
 
 if(NOT OpenCL_FOUND)
   message(FATAL_ERROR "Could not find OpenCL include/libs. Set OCL_ROOT to your OpenCL SDK")
