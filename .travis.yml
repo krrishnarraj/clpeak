@@ -4,6 +4,8 @@ matrix:
   include:
     - name: "Windows"
       os: windows
+      install:
+        - choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
     - name: "Linux"
       os: linux
       dist: focal
@@ -20,7 +22,7 @@ before_script:
   - cd build
 
 script:
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cmake -G "Visual Studio 15 2017 Win64" .. ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cmake -G "Visual Studio 16 2019 Win64" .. ; fi
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then cmake .. ; fi
   - cmake --build . --config Release
   - ctest -VV
