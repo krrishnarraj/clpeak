@@ -6,19 +6,11 @@ matrix:
       os: windows
     - name: "Linux"
       os: linux
-      dist: bionic
-      addons:
-        apt:
-          packages:
-            - ocl-icd-opencl-dev
+      dist: focal
     - name: "Linux arm64"
       os: linux
       arch: arm64
-      dist: bionic
-      addons:
-        apt:
-          packages:
-            - ocl-icd-opencl-dev
+      dist: focal
     - name: "OSX"
       os: osx
 
