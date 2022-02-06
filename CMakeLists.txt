@@ -29,7 +29,7 @@ endif()
 if(UNIX AND ${OpenCL_LIBRARIES} MATCHES "libOpenCL.a")
   set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} pthread dl)
 elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
-  set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib)
+  set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib runtimeobject.lib)
 endif()
 
 set(CMAKE_CXX_STANDARD "11")
