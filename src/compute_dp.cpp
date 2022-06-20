@@ -51,6 +51,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
+    if (!forceTest || strcmp(specifiedTestName, "double") == 0) {
     log->print(TAB TAB TAB "double   : ");
 
     workPerWI = 4096; // Indicates flops executed per work-item
@@ -62,9 +63,11 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("double", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
+    if (!forceTest || strcmp(specifiedTestName, "double2") == 0) {
     log->print(TAB TAB TAB "double2  : ");
 
     workPerWI = 4096;
@@ -76,9 +79,11 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("double2", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
+    if (!forceTest || strcmp(specifiedTestName, "double4") == 0) {
     log->print(TAB TAB TAB "double4  : ");
 
     workPerWI = 4096;
@@ -90,9 +95,11 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("double4", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
+    if (!forceTest || strcmp(specifiedTestName, "double8") == 0) {
     log->print(TAB TAB TAB "double8  : ");
     workPerWI = 4096;
 
@@ -103,9 +110,11 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("double8", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
+    if (!forceTest || strcmp(specifiedTestName, "double16") == 0) {
     log->print(TAB TAB TAB "double16 : ");
 
     workPerWI = 4096;
@@ -117,6 +126,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("double16", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // double_precision_compute
   }

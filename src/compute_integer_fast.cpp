@@ -45,6 +45,7 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
+    if (!forceTest || strcmp(specifiedTestName, "int") == 0) {
     log->print(TAB TAB TAB "int   : ");
 
     workPerWI = 2048; // Indicates integer operations executed per work-item
@@ -56,9 +57,11 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("int", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
+    if (!forceTest || strcmp(specifiedTestName, "int2") == 0) {
     log->print(TAB TAB TAB "int2  : ");
 
     workPerWI = 2048;
@@ -70,9 +73,11 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("int2", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
+    if (!forceTest || strcmp(specifiedTestName, "int4") == 0) {
     log->print(TAB TAB TAB "int4  : ");
 
     workPerWI = 2048;
@@ -84,9 +89,11 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("int4", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
+    if (!forceTest || strcmp(specifiedTestName, "int8") == 0) {
     log->print(TAB TAB TAB "int8  : ");
 
     workPerWI = 2048;
@@ -98,9 +105,11 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("int8", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
+    if (!forceTest || strcmp(specifiedTestName, "int16") == 0) {
     log->print(TAB TAB TAB "int16 : ");
 
     workPerWI = 2048;
@@ -112,6 +121,7 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("int16", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // integer_compute
   }

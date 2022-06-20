@@ -8,7 +8,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
   cl_float A = 1.3f;
   uint iters = devInfo.computeIters;
 
-  if (!isComputeDP)
+  if (!isComputeHP)
     return 0;
 
   if (!devInfo.halfSupported)
@@ -51,6 +51,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
+    if (!forceTest || strcmp(specifiedTestName, "half") == 0) {
     log->print(TAB TAB TAB "half   : ");
 
     workPerWI = 4096; // Indicates flops executed per work-item
@@ -62,9 +63,11 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("half", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
+    if (!forceTest || strcmp(specifiedTestName, "half2") == 0) {
     log->print(TAB TAB TAB "half2  : ");
 
     workPerWI = 4096;
@@ -76,9 +79,11 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("half2", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
+    if (!forceTest || strcmp(specifiedTestName, "half4") == 0) {
     log->print(TAB TAB TAB "half4  : ");
 
     workPerWI = 4096;
@@ -90,9 +95,11 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("half4", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
+    if (!forceTest || strcmp(specifiedTestName, "half8") == 0) {
     log->print(TAB TAB TAB "half8  : ");
     workPerWI = 4096;
 
@@ -103,9 +110,11 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("half8", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
+    if (!forceTest || strcmp(specifiedTestName, "half16") == 0) {
     log->print(TAB TAB TAB "half16 : ");
 
     workPerWI = 4096;
@@ -117,6 +126,7 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("half16", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // half_precision_compute
   }
