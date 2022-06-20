@@ -64,6 +64,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
+    if (!forceTest || strcmp(specifiedTestName, "float") == 0) {
     log->print(TAB TAB TAB "float   : ");
 
     globalSize = numItems / FETCH_PER_WI;
@@ -80,9 +81,11 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     log->print(gbps);
     log->print(NEWLINE);
     log->xmlRecord("float", gbps);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
+    if (!forceTest || strcmp(specifiedTestName, "float2") == 0) {
     log->print(TAB TAB TAB "float2  : ");
 
     globalSize = (numItems / 2 / FETCH_PER_WI);
@@ -96,9 +99,11 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     log->print(gbps);
     log->print(NEWLINE);
     log->xmlRecord("float2", gbps);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
+    if (!forceTest || strcmp(specifiedTestName, "float4") == 0) {
     log->print(TAB TAB TAB "float4  : ");
 
     globalSize = (numItems / 4 / FETCH_PER_WI);
@@ -112,9 +117,11 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     log->print(gbps);
     log->print(NEWLINE);
     log->xmlRecord("float4", gbps);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
+    if (!forceTest || strcmp(specifiedTestName, "float8") == 0) {
     log->print(TAB TAB TAB "float8  : ");
 
     globalSize = (numItems / 8 / FETCH_PER_WI);
@@ -128,9 +135,11 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     log->print(gbps);
     log->print(NEWLINE);
     log->xmlRecord("float8", gbps);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
+    if (!forceTest || strcmp(specifiedTestName, "float16") == 0) {
     log->print(TAB TAB TAB "float16 : ");
     globalSize = (numItems / 16 / FETCH_PER_WI);
 
@@ -143,6 +152,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     log->print(gbps);
     log->print(NEWLINE);
     log->xmlRecord("float16", gbps);
+    }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // global_memory_bandwidth
 

@@ -45,6 +45,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
+    if (!forceTest || strcmp(specifiedTestName, "float") == 0) {
     log->print(TAB TAB TAB "float   : ");
 
     workPerWI = 4096; // Indicates flops executed per work-item
@@ -56,9 +57,11 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("float", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
+    if (!forceTest || strcmp(specifiedTestName, "float2") == 0) {
     log->print(TAB TAB TAB "float2  : ");
 
     workPerWI = 4096;
@@ -70,9 +73,11 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("float2", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
+    if (!forceTest || strcmp(specifiedTestName, "float4") == 0) {
     log->print(TAB TAB TAB "float4  : ");
 
     workPerWI = 4096;
@@ -84,9 +89,11 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("float4", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
+    if (!forceTest || strcmp(specifiedTestName, "float8") == 0) {
     log->print(TAB TAB TAB "float8  : ");
 
     workPerWI = 4096;
@@ -98,9 +105,11 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("float8", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
+    if (!forceTest || strcmp(specifiedTestName, "float16") == 0) {
     log->print(TAB TAB TAB "float16 : ");
 
     workPerWI = 4096;
@@ -112,6 +121,7 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
     log->print(gflops);
     log->print(NEWLINE);
     log->xmlRecord("float16", gflops);
+    }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // single_precision_compute
   }

@@ -17,9 +17,12 @@ class clPeak
 {
 public:
 
-  bool forcePlatform, forceDevice, useEventTimer;
-  bool isGlobalBW, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isTransferBW, isKernelLatency;
+  bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, useEventTimer;
+  bool isGlobalBW, isComputeHP, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isTransferBW, isKernelLatency;
   ulong specifiedPlatform, specifiedDevice;
+  char *specifiedPlatformName;
+  char *specifiedDeviceName;
+  char *specifiedTestName;
   logger *log;
 
   clPeak();
