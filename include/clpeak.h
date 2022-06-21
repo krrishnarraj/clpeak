@@ -9,14 +9,13 @@
 #include <common.h>
 #include <logger.h>
 
-#define BUILD_OPTIONS           " -cl-mad-enable "
+#define BUILD_OPTIONS " -cl-mad-enable "
 
 using namespace std;
 
 class clPeak
 {
 public:
-
   bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, useEventTimer;
   bool isGlobalBW, isComputeHP, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isTransferBW, isKernelLatency;
   ulong specifiedPlatform, specifiedDevice;
@@ -52,4 +51,4 @@ public:
   int runAll();
 };
 
-#endif  // CLPEAK_HPP
+#endif // CLPEAK_HPP

@@ -51,81 +51,86 @@ int clPeak::runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
-    if (!forceTest || strcmp(specifiedTestName, "half") == 0) {
-    log->print(TAB TAB TAB "half   : ");
+    if (!forceTest || strcmp(specifiedTestName, "half") == 0)
+    {
+      log->print(TAB TAB TAB "half   : ");
 
-    workPerWI = 4096; // Indicates flops executed per work-item
+      workPerWI = 4096; // Indicates flops executed per work-item
 
-    timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("half", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("half", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
-    if (!forceTest || strcmp(specifiedTestName, "half2") == 0) {
-    log->print(TAB TAB TAB "half2  : ");
+    if (!forceTest || strcmp(specifiedTestName, "half2") == 0)
+    {
+      log->print(TAB TAB TAB "half2  : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("half2", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("half2", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
-    if (!forceTest || strcmp(specifiedTestName, "half4") == 0) {
-    log->print(TAB TAB TAB "half4  : ");
+    if (!forceTest || strcmp(specifiedTestName, "half4") == 0)
+    {
+      log->print(TAB TAB TAB "half4  : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("half4", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("half4", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
-    if (!forceTest || strcmp(specifiedTestName, "half8") == 0) {
-    log->print(TAB TAB TAB "half8  : ");
-    workPerWI = 4096;
+    if (!forceTest || strcmp(specifiedTestName, "half8") == 0)
+    {
+      log->print(TAB TAB TAB "half8  : ");
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("half8", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("half8", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
-    if (!forceTest || strcmp(specifiedTestName, "half16") == 0) {
-    log->print(TAB TAB TAB "half16 : ");
+    if (!forceTest || strcmp(specifiedTestName, "half16") == 0)
+    {
+      log->print(TAB TAB TAB "half16 : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("half16", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("half16", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // half_precision_compute

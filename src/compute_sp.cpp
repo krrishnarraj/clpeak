@@ -45,82 +45,87 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
-    if (!forceTest || strcmp(specifiedTestName, "float") == 0) {
-    log->print(TAB TAB TAB "float   : ");
+    if (!forceTest || strcmp(specifiedTestName, "float") == 0)
+    {
+      log->print(TAB TAB TAB "float   : ");
 
-    workPerWI = 4096; // Indicates flops executed per work-item
+      workPerWI = 4096; // Indicates flops executed per work-item
 
-    timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("float", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("float", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
-    if (!forceTest || strcmp(specifiedTestName, "float2") == 0) {
-    log->print(TAB TAB TAB "float2  : ");
+    if (!forceTest || strcmp(specifiedTestName, "float2") == 0)
+    {
+      log->print(TAB TAB TAB "float2  : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("float2", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("float2", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
-    if (!forceTest || strcmp(specifiedTestName, "float4") == 0) {
-    log->print(TAB TAB TAB "float4  : ");
+    if (!forceTest || strcmp(specifiedTestName, "float4") == 0)
+    {
+      log->print(TAB TAB TAB "float4  : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("float4", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("float4", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
-    if (!forceTest || strcmp(specifiedTestName, "float8") == 0) {
-    log->print(TAB TAB TAB "float8  : ");
+    if (!forceTest || strcmp(specifiedTestName, "float8") == 0)
+    {
+      log->print(TAB TAB TAB "float8  : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("float8", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("float8", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
-    if (!forceTest || strcmp(specifiedTestName, "float16") == 0) {
-    log->print(TAB TAB TAB "float16 : ");
+    if (!forceTest || strcmp(specifiedTestName, "float16") == 0)
+    {
+      log->print(TAB TAB TAB "float16 : ");
 
-    workPerWI = 4096;
+      workPerWI = 4096;
 
-    timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("float16", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("float16", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // single_precision_compute

@@ -64,94 +64,99 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
-    if (!forceTest || strcmp(specifiedTestName, "float") == 0) {
-    log->print(TAB TAB TAB "float   : ");
+    if (!forceTest || strcmp(specifiedTestName, "float") == 0)
+    {
+      log->print(TAB TAB TAB "float   : ");
 
-    globalSize = numItems / FETCH_PER_WI;
+      globalSize = numItems / FETCH_PER_WI;
 
-    // Run 2 kind of bandwidth kernel
-    // lo -- local_size offset - subsequent fetches at local_size offset
-    // go -- global_size offset
-    timed_lo = run_kernel(queue, kernel_v1_lo, globalSize, localSize, iters);
-    timed_go = run_kernel(queue, kernel_v1_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
+      // Run 2 kind of bandwidth kernel
+      // lo -- local_size offset - subsequent fetches at local_size offset
+      // go -- global_size offset
+      timed_lo = run_kernel(queue, kernel_v1_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v1_go, globalSize, localSize, iters);
+      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->xmlRecord("float", gbps);
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord("float", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
-    if (!forceTest || strcmp(specifiedTestName, "float2") == 0) {
-    log->print(TAB TAB TAB "float2  : ");
+    if (!forceTest || strcmp(specifiedTestName, "float2") == 0)
+    {
+      log->print(TAB TAB TAB "float2  : ");
 
-    globalSize = (numItems / 2 / FETCH_PER_WI);
+      globalSize = (numItems / 2 / FETCH_PER_WI);
 
-    timed_lo = run_kernel(queue, kernel_v2_lo, globalSize, localSize, iters);
-    timed_go = run_kernel(queue, kernel_v2_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
+      timed_lo = run_kernel(queue, kernel_v2_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v2_go, globalSize, localSize, iters);
+      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->xmlRecord("float2", gbps);
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord("float2", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
-    if (!forceTest || strcmp(specifiedTestName, "float4") == 0) {
-    log->print(TAB TAB TAB "float4  : ");
+    if (!forceTest || strcmp(specifiedTestName, "float4") == 0)
+    {
+      log->print(TAB TAB TAB "float4  : ");
 
-    globalSize = (numItems / 4 / FETCH_PER_WI);
+      globalSize = (numItems / 4 / FETCH_PER_WI);
 
-    timed_lo = run_kernel(queue, kernel_v4_lo, globalSize, localSize, iters);
-    timed_go = run_kernel(queue, kernel_v4_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
+      timed_lo = run_kernel(queue, kernel_v4_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v4_go, globalSize, localSize, iters);
+      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->xmlRecord("float4", gbps);
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord("float4", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
-    if (!forceTest || strcmp(specifiedTestName, "float8") == 0) {
-    log->print(TAB TAB TAB "float8  : ");
+    if (!forceTest || strcmp(specifiedTestName, "float8") == 0)
+    {
+      log->print(TAB TAB TAB "float8  : ");
 
-    globalSize = (numItems / 8 / FETCH_PER_WI);
+      globalSize = (numItems / 8 / FETCH_PER_WI);
 
-    timed_lo = run_kernel(queue, kernel_v8_lo, globalSize, localSize, iters);
-    timed_go = run_kernel(queue, kernel_v8_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
+      timed_lo = run_kernel(queue, kernel_v8_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v8_go, globalSize, localSize, iters);
+      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->xmlRecord("float8", gbps);
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord("float8", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
-    if (!forceTest || strcmp(specifiedTestName, "float16") == 0) {
-    log->print(TAB TAB TAB "float16 : ");
-    globalSize = (numItems / 16 / FETCH_PER_WI);
+    if (!forceTest || strcmp(specifiedTestName, "float16") == 0)
+    {
+      log->print(TAB TAB TAB "float16 : ");
+      globalSize = (numItems / 16 / FETCH_PER_WI);
 
-    timed_lo = run_kernel(queue, kernel_v16_lo, globalSize, localSize, iters);
-    timed_go = run_kernel(queue, kernel_v16_go, globalSize, localSize, iters);
-    timed = (timed_lo < timed_go) ? timed_lo : timed_go;
+      timed_lo = run_kernel(queue, kernel_v16_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v16_go, globalSize, localSize, iters);
+      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-    gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->xmlRecord("float16", gbps);
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord("float16", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // global_memory_bandwidth

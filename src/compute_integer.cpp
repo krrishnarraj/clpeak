@@ -45,82 +45,87 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
 
     ///////////////////////////////////////////////////////////////////////////
     // Vector width 1
-    if (!forceTest || strcmp(specifiedTestName, "int") == 0) {
-    log->print(TAB TAB TAB "int   : ");
+    if (!forceTest || strcmp(specifiedTestName, "int") == 0)
+    {
+      log->print(TAB TAB TAB "int   : ");
 
-    workPerWI = 2048; // Indicates integer operations executed per work-item
+      workPerWI = 2048; // Indicates integer operations executed per work-item
 
-    timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("int", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("int", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 2
-    if (!forceTest || strcmp(specifiedTestName, "int2") == 0) {
-    log->print(TAB TAB TAB "int2  : ");
+    if (!forceTest || strcmp(specifiedTestName, "int2") == 0)
+    {
+      log->print(TAB TAB TAB "int2  : ");
 
-    workPerWI = 2048;
+      workPerWI = 2048;
 
-    timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("int2", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("int2", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 4
-    if (!forceTest || strcmp(specifiedTestName, "int4") == 0) {
-    log->print(TAB TAB TAB "int4  : ");
+    if (!forceTest || strcmp(specifiedTestName, "int4") == 0)
+    {
+      log->print(TAB TAB TAB "int4  : ");
 
-    workPerWI = 2048;
+      workPerWI = 2048;
 
-    timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("int4", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("int4", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 8
-    if (!forceTest || strcmp(specifiedTestName, "int8") == 0) {
-    log->print(TAB TAB TAB "int8  : ");
+    if (!forceTest || strcmp(specifiedTestName, "int8") == 0)
+    {
+      log->print(TAB TAB TAB "int8  : ");
 
-    workPerWI = 2048;
+      workPerWI = 2048;
 
-    timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("int8", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("int8", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Vector width 16
-    if (!forceTest || strcmp(specifiedTestName, "int16") == 0) {
-    log->print(TAB TAB TAB "int16 : ");
+    if (!forceTest || strcmp(specifiedTestName, "int16") == 0)
+    {
+      log->print(TAB TAB TAB "int16 : ");
 
-    workPerWI = 2048;
+      workPerWI = 2048;
 
-    timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
-    gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-    log->print(gflops);
-    log->print(NEWLINE);
-    log->xmlRecord("int16", gflops);
+      log->print(gflops);
+      log->print(NEWLINE);
+      log->xmlRecord("int16", gflops);
     }
     ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // integer_compute
