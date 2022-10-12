@@ -1,0 +1,270 @@
+Platform: Portable Computing Language
+  Device: pthread-POWER9, altivec supported
+    Driver version  : 3.0-rc2 (Linux unknown)
+    Compute units   : 160
+    Clock frequency : 3800 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 30.30
+      float2  : 59.39
+      float4  : 63.92
+      float8  : 60.26
+      float16 : 57.05
+
+    Single-precision compute (GFLOPS)
+      float   : 73.11
+      float2  : 179.68
+      float4  : 411.74
+      float8  : 739.41
+      float16 : 910.81
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 85.08
+      double2  : 151.08
+      double4  : 275.05
+      double8  : 401.79
+      double16 : 456.30
+
+    Integer compute (GIOPS)
+      int   : 112.89
+      int2  : 189.39
+      int4  : 440.41
+      int8  : 708.03
+      int16 : 748.61
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 149.56
+      int2  : 226.40
+      int4  : 407.09
+      int8  : 721.65
+      int16 : 755.17
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 5.88
+      enqueueReadBuffer               : 5.37
+      enqueueWriteBuffer non-blocking : 5.52
+      enqueueReadBuffer non-blocking  : 5.24
+      enqueueMapBuffer(for read)      : 901.70
+        memcpy from mapped ptr        : 7.58
+      enqueueUnmap(after write)       : 734.74
+        memcpy to mapped ptr          : 11.31
+
+    Kernel launch latency : 76.72 us
+
+  Device: Tesla V100-SXM2-16GB
+    Driver version  : 3.0-rc2 (Linux unknown)
+    Compute units   : 80
+    Clock frequency : 1530 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 765.25
+      float2  : 801.86
+      float4  : 836.36
+      float8  : 774.89
+      float16 : 645.66
+
+    Single-precision compute (GFLOPS)
+      float   : 15565.38
+      float2  : 15600.19
+      float4  : 15576.29
+      float8  : 15519.63
+      float16 : 15397.09
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 7807.99
+      double2  : 7801.33
+      double4  : 7783.04
+      double8  : 7760.49
+      double16 : 7698.18
+
+    Integer compute (GIOPS)
+      int   : 15556.50
+      int2  : 15584.06
+      int4  : 15583.59
+      int8  : 15595.85
+      int16 : 15612.48
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 15599.91
+      int2  : 15625.54
+      int4  : 15624.03
+      int8  : 15637.68
+      int16 : 15612.58
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 11.79
+      enqueueReadBuffer               : 8.04
+      enqueueWriteBuffer non-blocking : 11.82
+      enqueueReadBuffer non-blocking  : 8.05
+      enqueueMapBuffer(for read)      : 51433.80
+        memcpy from mapped ptr        : 8.05
+      enqueueUnmap(after write)       : 14.40
+        memcpy to mapped ptr          : 11.85
+
+    Kernel launch latency : -5189.91 us
+
+  Device: Tesla V100-SXM2-16GB
+    Driver version  : 3.0-rc2 (Linux unknown)
+    Compute units   : 80
+    Clock frequency : 1530 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 765.06
+      float2  : 801.82
+      float4  : 836.53
+      float8  : 774.79
+      float16 : 646.26
+
+    Single-precision compute (GFLOPS)
+      float   : 15618.11
+      float2  : 15653.73
+      float4  : 15630.66
+      float8  : 15570.97
+      float16 : 15449.34
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 7833.29
+      double2  : 7824.87
+      double4  : 7806.29
+      double8  : 7782.29
+      double16 : 7720.92
+
+    Integer compute (GIOPS)
+      int   : 15585.95
+      int2  : 15622.80
+      int4  : 15621.28
+      int8  : 15634.55
+      int16 : 15610.02
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 15597.93
+      int2  : 15623.93
+      int4  : 15621.19
+      int8  : 15635.40
+      int16 : 15611.91
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 13.13
+      enqueueReadBuffer               : 7.61
+      enqueueWriteBuffer non-blocking : 13.12
+      enqueueReadBuffer non-blocking  : 7.62
+      enqueueMapBuffer(for read)      : 35.21
+        memcpy from mapped ptr        : 8.39
+      enqueueUnmap(after write)       : 41.61
+        memcpy to mapped ptr          : 11.96
+
+    Kernel launch latency : -6635.35 us
+
+  Device: Tesla V100-SXM2-16GB
+    Driver version  : 3.0-rc2 (Linux unknown)
+    Compute units   : 80
+    Clock frequency : 1530 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 770.44
+      float2  : 802.01
+      float4  : 836.44
+      float8  : 775.56
+      float16 : 646.04
+
+    Single-precision compute (GFLOPS)
+      float   : 15619.53
+      float2  : 15587.93
+      float4  : 15565.71
+      float8  : 15507.16
+      float16 : 15451.14
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 7835.15
+      double2  : 7828.63
+      double4  : 7808.13
+      double8  : 7784.17
+      double16 : 7722.49
+
+    Integer compute (GIOPS)
+      int   : 15599.63
+      int2  : 15626.78
+      int4  : 15624.69
+      int8  : 15638.92
+      int16 : 15613.33
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 15548.42
+      int2  : 15574.17
+      int4  : 15573.14
+      int8  : 15586.13
+      int16 : 15561.38
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 13.13
+      enqueueReadBuffer               : 7.62
+      enqueueWriteBuffer non-blocking : 13.12
+      enqueueReadBuffer non-blocking  : 7.62
+      enqueueMapBuffer(for read)      : 69.31
+        memcpy from mapped ptr        : 8.00
+      enqueueUnmap(after write)       : 70.45
+        memcpy to mapped ptr          : 12.12
+
+    Kernel launch latency : -8030.76 us
+
+  Device: Tesla V100-SXM2-16GB
+    Driver version  : 3.0-rc2 (Linux unknown)
+    Compute units   : 80
+    Clock frequency : 1530 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 768.67
+      float2  : 802.01
+      float4  : 836.45
+      float8  : 775.67
+      float16 : 646.45
+
+    Single-precision compute (GFLOPS)
+      float   : 15569.47
+      float2  : 15610.50
+      float4  : 15590.76
+      float8  : 15526.32
+      float16 : 15409.06
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 7814.15
+      double2  : 7805.11
+      double4  : 7785.35
+      double8  : 7765.17
+      double16 : 7703.52
+
+    Integer compute (GIOPS)
+      int   : 15576.90
+      int2  : 15601.71
+      int4  : 15555.37
+      int8  : 15533.24
+      int16 : 15613.33
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 15557.44
+      int2  : 15626.78
+      int4  : 15626.21
+      int8  : 15640.24
+      int16 : 15614.84
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 13.14
+      enqueueReadBuffer               : 7.70
+      enqueueWriteBuffer non-blocking : 13.13
+      enqueueReadBuffer non-blocking  : 7.69
+      enqueueMapBuffer(for read)      : 69.99
+        memcpy from mapped ptr        : 8.05
+      enqueueUnmap(after write)       : 70.45
+        memcpy to mapped ptr          : 12.27
+
+    Kernel launch latency : -10064.30 us

@@ -1,0 +1,216 @@
+Platform: NVIDIA CUDA
+  Device: NVIDIA A100-SXM4-40GB
+    Driver version  : 515.48.07 (Linux x64)
+    Compute units   : 108
+    Clock frequency : 1410 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 1292.96
+      float2  : 1377.07
+      float4  : 1419.22
+      float8  : 1443.80
+      float16 : 1464.44
+
+    Single-precision compute (GFLOPS)
+      float   : 19352.89
+      float2  : 19386.64
+      float4  : 19367.97
+      float8  : 19285.78
+      float16 : 19110.61
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 9723.09
+      double2  : 9707.90
+      double4  : 9686.22
+      double8  : 9636.75
+      double16 : 9547.99
+
+    Integer compute (GIOPS)
+      int   : 19278.83
+      int2  : 19335.19
+      int4  : 19273.49
+      int8  : 19357.90
+      int16 : 19346.59
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 19289.10
+      int2  : 19293.80
+      int4  : 19278.51
+      int8  : 19233.96
+      int16 : 19053.93
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 14.54
+      enqueueReadBuffer               : 13.04
+      enqueueWriteBuffer non-blocking : 7.79
+      enqueueReadBuffer non-blocking  : 7.21
+      enqueueMapBuffer(for read)      : 20.03
+        memcpy from mapped ptr        : 20.65
+      enqueueUnmap(after write)       : 26.77
+        memcpy to mapped ptr          : 20.86
+
+    Kernel launch latency : 5.76 us
+
+  Device: NVIDIA A100-SXM4-40GB
+    Driver version  : 515.48.07 (Linux x64)
+    Compute units   : 108
+    Clock frequency : 1410 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 1293.90
+      float2  : 1377.21
+      float4  : 1419.86
+      float8  : 1443.43
+      float16 : 1464.50
+
+    Single-precision compute (GFLOPS)
+      float   : 19349.87
+      float2  : 19381.94
+      float4  : 19362.20
+      float8  : 19280.28
+      float16 : 19105.41
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 9716.58
+      double2  : 9701.24
+      double4  : 9680.46
+      double8  : 9631.46
+      double16 : 9543.48
+
+    Integer compute (GIOPS)
+      int   : 19275.95
+      int2  : 19324.45
+      int4  : 19268.48
+      int8  : 19351.87
+      int16 : 19343.15
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 19283.22
+      int2  : 19287.28
+      int4  : 19272.75
+      int8  : 19230.13
+      int16 : 19047.88
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 14.50
+      enqueueReadBuffer               : 13.05
+      enqueueWriteBuffer non-blocking : 7.71
+      enqueueReadBuffer non-blocking  : 7.27
+      enqueueMapBuffer(for read)      : 19.83
+        memcpy from mapped ptr        : 19.54
+      enqueueUnmap(after write)       : 26.77
+        memcpy to mapped ptr          : 20.55
+
+    Kernel launch latency : 5.65 us
+
+  Device: NVIDIA A100-SXM4-40GB
+    Driver version  : 515.48.07 (Linux x64)
+    Compute units   : 108
+    Clock frequency : 1410 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 1304.11
+      float2  : 1376.87
+      float4  : 1419.82
+      float8  : 1444.07
+      float16 : 1465.06
+
+    Single-precision compute (GFLOPS)
+      float   : 19350.41
+      float2  : 19382.11
+      float4  : 19363.12
+      float8  : 19281.61
+      float16 : 19108.25
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 9719.24
+      double2  : 9704.38
+      double4  : 9682.93
+      double8  : 9633.92
+      double16 : 9544.74
+
+    Integer compute (GIOPS)
+      int   : 19277.98
+      int2  : 19332.19
+      int4  : 19269.01
+      int8  : 19352.73
+      int16 : 19343.15
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 19283.32
+      int2  : 19288.03
+      int4  : 19273.28
+      int8  : 19231.30
+      int16 : 19048.40
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 14.37
+      enqueueReadBuffer               : 13.13
+      enqueueWriteBuffer non-blocking : 7.50
+      enqueueReadBuffer non-blocking  : 6.90
+      enqueueMapBuffer(for read)      : 19.81
+        memcpy from mapped ptr        : 20.73
+      enqueueUnmap(after write)       : 26.77
+        memcpy to mapped ptr          : 20.62
+
+    Kernel launch latency : 5.75 us
+
+  Device: NVIDIA A100-SXM4-40GB
+    Driver version  : 515.48.07 (Linux x64)
+    Compute units   : 108
+    Clock frequency : 1410 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 1303.89
+      float2  : 1376.82
+      float4  : 1419.15
+      float8  : 1444.89
+      float16 : 1465.04
+
+    Single-precision compute (GFLOPS)
+      float   : 19339.44
+      float2  : 19388.10
+      float4  : 19371.42
+      float8  : 19289.58
+      float16 : 19115.54
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 9724.83
+      double2  : 9710.39
+      double4  : 9689.79
+      double8  : 9641.13
+      double16 : 9552.76
+
+    Integer compute (GIOPS)
+      int   : 19285.03
+      int2  : 19313.19
+      int4  : 19286.42
+      int8  : 19361.56
+      int16 : 19347.78
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 19292.73
+      int2  : 19297.12
+      int4  : 19282.58
+      int8  : 19238.22
+      int16 : 19056.33
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 14.48
+      enqueueReadBuffer               : 13.16
+      enqueueWriteBuffer non-blocking : 7.18
+      enqueueReadBuffer non-blocking  : 6.98
+      enqueueMapBuffer(for read)      : 19.99
+        memcpy from mapped ptr        : 19.35
+      enqueueUnmap(after write)       : 26.77
+        memcpy to mapped ptr          : 20.63
+
+    Kernel launch latency : 5.70 us

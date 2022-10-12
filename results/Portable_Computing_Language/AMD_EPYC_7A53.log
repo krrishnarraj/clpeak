@@ -1,0 +1,56 @@
+Platform: Portable Computing Language
+  Device: pthread-AMD EPYC 7A53 64-Core Processor
+    Driver version  : 1.8 (Linux x64)
+    Compute units   : 128
+    Clock frequency : 2000 MHz
+64 warnings generated.
+
+    Global memory bandwidth (GBPS)
+      float   : 30.74
+      float2  : 31.35
+      float4  : 31.11
+      float8  : 33.88
+      float16 : 27.41
+
+    Single-precision compute (GFLOPS)
+      float   : 81.79
+      float2  : 160.46
+      float4  : 308.39
+      float8  : 589.43
+      float16 : 107.23
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 81.46
+      double2  : 159.08
+      double4  : 293.62
+      double8  : 55.83
+      double16 : 78.10
+
+    Integer compute (GIOPS)
+      int   : 198.51
+      int2  : 378.71
+      int4  : 750.36
+      int8  : 1407.42
+      int16 : 2162.47
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 122.67
+      int2  : 176.17
+      int4  : 344.37
+      int8  : 617.54
+      int16 : 113.10
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 16.47
+      enqueueReadBuffer               : 16.79
+      enqueueWriteBuffer non-blocking : 18.28
+      enqueueReadBuffer non-blocking  : 18.62
+      enqueueMapBuffer(for read)      : 5142.44
+        memcpy from mapped ptr        : 15.46
+      enqueueUnmap(after write)       : 6599.52
+        memcpy to mapped ptr          : 20.98
+
+    Kernel launch latency : 107.54 us
+
