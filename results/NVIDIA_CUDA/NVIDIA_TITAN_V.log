@@ -1,0 +1,54 @@
+Platform: NVIDIA CUDA
+  Device: TITAN V
+    Driver version  : 430.14 (Linux x64)
+    Compute units   : 80
+    Clock frequency : 1455 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 561.37
+      float2  : 591.37
+      float4  : 607.71
+      float8  : 516.49
+      float16 : 466.27
+
+    Single-precision compute (GFLOPS)
+      float   : 13651.32
+      float2  : 13688.23
+      float4  : 13648.46
+      float8  : 13606.27
+      float16 : 13502.08
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 6858.92
+      double2  : 6846.90
+      double4  : 6822.64
+      double8  : 6797.12
+      double16 : 6737.34
+
+    Integer compute (GIOPS)
+      int   : 13622.13
+      int2  : 13661.56
+      int4  : 13666.12
+      int8  : 13663.23
+      int16 : 13640.81
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 13622.35
+      int2  : 13662.14
+      int4  : 13666.63
+      int8  : 13658.38
+      int16 : 13647.09
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 6.09
+      enqueueReadBuffer               : 6.45
+      enqueueWriteBuffer non-blocking : 4.58
+      enqueueReadBuffer non-blocking  : 4.93
+      enqueueMapBuffer(for read)      : 6.05
+        memcpy from mapped ptr        : 9.09
+      enqueueUnmap(after write)       : 6.26
+        memcpy to mapped ptr          : 9.42
+
+    Kernel launch latency : 6.51 us

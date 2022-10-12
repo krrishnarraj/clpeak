@@ -1,0 +1,55 @@
+Platform: Portable Computing Language
+  Device: pthread-Intel(R) Xeon(R) CPU E5-2603 v3 @ 1.60GHz
+    Driver version  : 3.0-rc2 (Linux x64)
+    Compute units   : 12
+    Clock frequency : 1600 MHz
+64 warnings generated.
+
+    Global memory bandwidth (GBPS)
+      float   : 22.04
+      float2  : 28.84
+      float4  : 28.94
+      float8  : 29.87
+      float16 : 30.25
+
+    Single-precision compute (GFLOPS)
+      float   : 4.79
+      float2  : 9.66
+      float4  : 19.76
+      float8  : 39.71
+      float16 : 79.75
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 4.79
+      double2  : 9.69
+      double4  : 19.71
+      double8  : 38.85
+      double16 : 75.89
+
+    Integer compute (GIOPS)
+      int   : 9.62
+      int2  : 7.11
+      int4  : 14.41
+      int8  : 30.02
+      int16 : 58.72
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 9.70
+      int2  : 7.05
+      int4  : 14.57
+      int8  : 30.02
+      int16 : 58.73
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 4.41
+      enqueueReadBuffer               : 4.35
+      enqueueWriteBuffer non-blocking : 4.54
+      enqueueReadBuffer non-blocking  : 4.48
+      enqueueMapBuffer(for read)      : 8079.32
+        memcpy from mapped ptr        : 4.47
+      enqueueUnmap(after write)       : 7339.31
+        memcpy to mapped ptr          : 4.54
+
+    Kernel launch latency : 23.77 us

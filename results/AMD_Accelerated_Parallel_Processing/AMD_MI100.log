@@ -1,0 +1,236 @@
+Platform: AMD Accelerated Parallel Processing
+  Device: gfx908:sramecc+:xnack-
+    Driver version  : 3406.0 (HSA1.1,LC) (Linux x64)
+    Compute units   : 120
+    Clock frequency : 1502 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 946.60
+      float2  : 942.59
+      float4  : 931.65
+      float8  : 987.27
+      float16 : 732.10
+
+    Single-precision compute (GFLOPS)
+      float   : 22284.31
+      float2  : 21579.50
+      float4  : 21489.94
+      float8  : 21348.52
+      float16 : 21032.74
+
+    Half-precision compute (GFLOPS)
+      half   : 11191.11
+      half2  : 43951.02
+      half4  : 43740.40
+      half8  : 43416.40
+      half16 : 43042.69
+
+    Double-precision compute (GFLOPS)
+      double   : 11119.62
+      double2  : 11089.45
+      double4  : 11040.92
+      double8  : 10975.65
+      double16 : 10741.24
+
+    Integer compute (GIOPS)
+      int   : 7380.05
+      int2  : 7125.83
+      int4  : 7091.25
+      int8  : 7154.73
+      int16 : 7086.31
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 20832.50
+      int2  : 19661.20
+      int4  : 18393.51
+      int8  : 18919.36
+      int16 : 18626.53
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 16.85
+      enqueueReadBuffer               : 16.55
+      enqueueWriteBuffer non-blocking : 16.85
+      enqueueReadBuffer non-blocking  : 16.55
+      enqueueMapBuffer(for read)      : 177477.98
+        memcpy from mapped ptr        : 17.28
+      enqueueUnmap(after write)       : 325376.31
+        memcpy to mapped ptr          : 17.37
+
+    Kernel launch latency : 11.69 us
+
+  Device: gfx908:sramecc+:xnack-
+    Driver version  : 3406.0 (HSA1.1,LC) (Linux x64)
+    Compute units   : 120
+    Clock frequency : 1502 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 945.47
+      float2  : 940.52
+      float4  : 931.31
+      float8  : 985.60
+      float16 : 731.37
+
+    Single-precision compute (GFLOPS)
+      float   : 22766.39
+      float2  : 21930.19
+      float4  : 21804.63
+      float8  : 21588.35
+      float16 : 21229.40
+
+    Half-precision compute (GFLOPS)
+      half   : 11448.85
+      half2  : 44673.06
+      half4  : 44389.37
+      half8  : 43779.79
+      half16 : 43364.53
+
+    Double-precision compute (GFLOPS)
+      double   : 11328.98
+      double2  : 11190.77
+      double4  : 11041.74
+      double8  : 11017.95
+      double16 : 10726.28
+
+    Integer compute (GIOPS)
+      int   : 7337.42
+      int2  : 7032.87
+      int4  : 6998.89
+      int8  : 7065.90
+      int16 : 7002.87
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 20604.53
+      int2  : 19520.61
+      int4  : 18383.98
+      int8  : 18883.31
+      int16 : 18693.82
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 16.74
+      enqueueReadBuffer               : 16.58
+      enqueueWriteBuffer non-blocking : 16.57
+      enqueueReadBuffer non-blocking  : 16.55
+      enqueueMapBuffer(for read)      : 214748.38
+        memcpy from mapped ptr        : 17.27
+      enqueueUnmap(after write)       : 343597.38
+        memcpy to mapped ptr          : 17.36
+
+    Kernel launch latency : 11.64 us
+
+  Device: gfx908:sramecc+:xnack-
+    Driver version  : 3406.0 (HSA1.1,LC) (Linux x64)
+    Compute units   : 120
+    Clock frequency : 1502 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 944.11
+      float2  : 939.39
+      float4  : 928.42
+      float8  : 984.33
+      float16 : 730.79
+
+    Single-precision compute (GFLOPS)
+      float   : 22816.58
+      float2  : 22092.63
+      float4  : 21986.57
+      float8  : 21809.49
+      float16 : 21506.20
+
+    Half-precision compute (GFLOPS)
+      half   : 11466.75
+      half2  : 44960.66
+      half4  : 44769.55
+      half8  : 44330.82
+      half16 : 43944.03
+
+    Double-precision compute (GFLOPS)
+      double   : 11384.70
+      double2  : 11342.74
+      double4  : 11281.10
+      double8  : 11213.88
+      double16 : 10924.84
+
+    Integer compute (GIOPS)
+      int   : 7584.34
+      int2  : 7256.62
+      int4  : 7209.28
+      int8  : 7247.27
+      int16 : 7167.22
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 21159.21
+      int2  : 20013.83
+      int4  : 18824.73
+      int8  : 19357.07
+      int16 : 19067.46
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 16.55
+      enqueueReadBuffer               : 16.55
+      enqueueWriteBuffer non-blocking : 16.58
+      enqueueReadBuffer non-blocking  : 16.60
+      enqueueMapBuffer(for read)      : 169093.20
+        memcpy from mapped ptr        : 17.24
+      enqueueUnmap(after write)       : 290200.47
+        memcpy to mapped ptr          : 17.33
+
+    Kernel launch latency : 11.75 us
+
+  Device: gfx908:sramecc+:xnack-
+    Driver version  : 3406.0 (HSA1.1,LC) (Linux x64)
+    Compute units   : 120
+    Clock frequency : 1502 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 947.40
+      float2  : 942.69
+      float4  : 930.76
+      float8  : 986.67
+      float16 : 731.70
+
+    Single-precision compute (GFLOPS)
+      float   : 22597.69
+      float2  : 21601.93
+      float4  : 21531.66
+      float8  : 21375.14
+      float16 : 21063.92
+
+    Half-precision compute (GFLOPS)
+      half   : 11287.66
+      half2  : 44227.35
+      half4  : 43823.46
+      half8  : 43463.27
+      half16 : 43087.55
+
+    Double-precision compute (GFLOPS)
+      double   : 11155.44
+      double2  : 11107.10
+      double4  : 11062.91
+      double8  : 10989.63
+      double16 : 10766.67
+
+    Integer compute (GIOPS)
+      int   : 7444.78
+      int2  : 7143.09
+      int4  : 7093.91
+      int8  : 7173.30
+      int16 : 7098.05
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 20952.08
+      int2  : 19759.49
+      int4  : 18686.32
+      int8  : 19090.16
+      int16 : 18893.46
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 16.78
+      enqueueReadBuffer               : 16.51
+      enqueueWriteBuffer non-blocking : 16.74
+      enqueueReadBuffer non-blocking  : 16.51
+      enqueueMapBuffer(for read)      : 189205.59
+        memcpy from mapped ptr        : 17.30
+      enqueueUnmap(after write)       : 357913.94
+        memcpy to mapped ptr          : 17.38
+
+    Kernel launch latency : 11.58 us

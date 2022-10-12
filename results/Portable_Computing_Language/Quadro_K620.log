@@ -1,0 +1,55 @@
+Platform: Portable Computing Language
+  Device: Quadro K620
+    Driver version  : 3.0-rc2 (Linux x64)
+    Compute units   : 3
+    Clock frequency : 1124 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 25.40
+      float2  : 26.21
+      float4  : 26.68
+      float8  : 25.46
+      float16 : 25.53
+
+    Single-precision compute (GFLOPS)
+      float   : 572.16
+      float2  : 849.36
+      float4  : 862.07
+      float8  : 807.75
+      float16 : 840.97
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 27.51
+      double2  : 27.48
+      double4  : 27.44
+      double8  : 27.33
+      double16 : 27.13
+
+    Integer compute (GIOPS)
+      int   : 247.08
+      int2  : 282.05
+      int4  : 289.38
+      int8  : 274.71
+      int16 : 263.76
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 246.85
+      int2  : 282.00
+      int4  : 289.37
+      int8  : 275.08
+      int16 : 264.50
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 5.52
+      enqueueReadBuffer               : 5.38
+      enqueueWriteBuffer non-blocking : 5.52
+      enqueueReadBuffer non-blocking  : 5.38
+      enqueueMapBuffer(for read)      : 13252.01
+        memcpy from mapped ptr        : 4.43
+      enqueueUnmap(after write)       : 4.71
+        memcpy to mapped ptr          : 4.52
+
+    Kernel launch latency : -3968.82 us
+

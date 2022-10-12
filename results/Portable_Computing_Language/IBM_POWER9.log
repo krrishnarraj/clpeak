@@ -1,0 +1,54 @@
+Platform: Portable Computing Language
+  Device: pthread-POWER9, altivec supported
+    Driver version  : 3.0-rc2 (Linux unknown)
+    Compute units   : 160
+    Clock frequency : 3800 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 30.30
+      float2  : 59.39
+      float4  : 63.92
+      float8  : 60.26
+      float16 : 57.05
+
+    Single-precision compute (GFLOPS)
+      float   : 73.11
+      float2  : 179.68
+      float4  : 411.74
+      float8  : 739.41
+      float16 : 910.81
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 85.08
+      double2  : 151.08
+      double4  : 275.05
+      double8  : 401.79
+      double16 : 456.30
+
+    Integer compute (GIOPS)
+      int   : 112.89
+      int2  : 189.39
+      int4  : 440.41
+      int8  : 708.03
+      int16 : 748.61
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 149.56
+      int2  : 226.40
+      int4  : 407.09
+      int8  : 721.65
+      int16 : 755.17
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 5.88
+      enqueueReadBuffer               : 5.37
+      enqueueWriteBuffer non-blocking : 5.52
+      enqueueReadBuffer non-blocking  : 5.24
+      enqueueMapBuffer(for read)      : 901.70
+        memcpy from mapped ptr        : 7.58
+      enqueueUnmap(after write)       : 734.74
+        memcpy to mapped ptr          : 11.31
+
+    Kernel launch latency : 76.72 us

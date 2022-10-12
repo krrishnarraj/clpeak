@@ -1,0 +1,55 @@
+Platform: Portable Computing Language
+  Device: pthread-AMD EPYC 7662 64-Core Processor
+    Driver version  : 1.8 (Linux x64)
+    Compute units   : 128
+    Clock frequency : 2597 MHz
+64 warnings generated.
+
+    Global memory bandwidth (GBPS)
+      float   : 31.03
+      float2  : 30.88
+      float4  : 32.47
+      float8  : 28.72
+      float16 : 30.20
+
+    Single-precision compute (GFLOPS)
+      float   : 82.55
+      float2  : 162.69
+      float4  : 319.53
+      float8  : 526.52
+      float16 : 116.83
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 82.00
+      double2  : 159.28
+      double4  : 270.85
+      double8  : 56.72
+      double16 : 62.36
+
+    Integer compute (GIOPS)
+      int   : 202.45
+      int2  : 333.43
+      int4  : 665.65
+      int8  : 1244.93
+      int16 : 1437.32
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 121.32
+      int2  : 164.70
+      int4  : 318.53
+      int8  : 583.42
+      int16 : 124.19
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 13.87
+      enqueueReadBuffer               : 13.96
+      enqueueWriteBuffer non-blocking : 13.35
+      enqueueReadBuffer non-blocking  : 13.68
+      enqueueMapBuffer(for read)      : 4584.72
+        memcpy from mapped ptr        : 14.06
+      enqueueUnmap(after write)       : 5458.78
+        memcpy to mapped ptr          : 14.11
+
+    Kernel launch latency : 185.79 us

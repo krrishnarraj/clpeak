@@ -1,0 +1,108 @@
+Platform: Portable Computing Language
+  Device: TITAN V
+    Driver version  : 3.0-rc2 (Linux x64)
+    Compute units   : 80
+    Clock frequency : 1455 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 559.25
+      float2  : 582.61
+      float4  : 605.03
+      float8  : 563.36
+      float16 : 466.89
+
+    Single-precision compute (GFLOPS)
+      float   : 13650.31
+      float2  : 13676.21
+      float4  : 13654.21
+      float8  : 13605.12
+      float16 : 13497.45
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 6851.16
+      double2  : 6839.41
+      double4  : 6821.27
+      double8  : 6802.04
+      double16 : 6750.90
+
+    Integer compute (GIOPS)
+      int   : 13622.78
+      int2  : 13650.92
+      int4  : 13649.84
+      int8  : 13652.66
+      int16 : 13646.51
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 13622.20
+      int2  : 13650.49
+      int4  : 13648.90
+      int8  : 13653.82
+      int16 : 13646.95
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 9.75
+      enqueueReadBuffer               : 9.60
+      enqueueWriteBuffer non-blocking : 9.76
+      enqueueReadBuffer non-blocking  : 9.61
+      enqueueMapBuffer(for read)      : 121195.77
+        memcpy from mapped ptr        : 9.11
+      enqueueUnmap(after write)       : 8.42
+        memcpy to mapped ptr          : 9.45
+
+    Kernel launch latency : 27.61 us
+
+  Device: TITAN V
+    Driver version  : 3.0-rc2 (Linux x64)
+    Compute units   : 80
+    Clock frequency : 1455 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 559.64
+      float2  : 582.45
+      float4  : 604.99
+      float8  : 562.63
+      float16 : 469.28
+
+    Single-precision compute (GFLOPS)
+      float   : 13646.88
+      float2  : 13671.93
+      float4  : 13649.91
+      float8  : 13599.42
+      float16 : 13493.17
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 6843.55
+      double2  : 6834.11
+      double4  : 6820.15
+      double8  : 6797.91
+      double16 : 6743.83
+
+    Integer compute (GIOPS)
+      int   : 13618.75
+      int2  : 13618.60
+      int4  : 13639.15
+      int8  : 13639.72
+      int16 : 13633.81
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 13612.85
+      int2  : 13642.47
+      int4  : 13639.65
+      int8  : 13641.46
+      int16 : 13634.24
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 8.94
+      enqueueReadBuffer               : 10.66
+      enqueueWriteBuffer non-blocking : 8.94
+      enqueueReadBuffer non-blocking  : 10.69
+      enqueueMapBuffer(for read)      : 13.16
+        memcpy from mapped ptr        : 8.71
+      enqueueUnmap(after write)       : 12.39
+        memcpy to mapped ptr          : 8.97
+
+    Kernel launch latency : 193.03 us

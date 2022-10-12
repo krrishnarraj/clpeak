@@ -1,0 +1,55 @@
+Platform: Portable Computing Language
+  Device: pthread-Intel(R) Core(TM) i7-7800X CPU @ 3.50GHz
+    Driver version  : 3.0-rc2 (Linux x64)
+    Compute units   : 12
+    Clock frequency : 4000 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 37.83
+      float2  : 44.06
+      float4  : 45.03
+      float8  : 42.84
+      float16 : 40.70
+
+    Single-precision compute (GFLOPS)
+      float   : 11.92
+      float2  : 24.03
+      float4  : 48.38
+      float8  : 92.02
+      float16 : 178.43
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 11.57
+      double2  : 23.87
+      double4  : 44.89
+      double8  : 84.67
+      double16 : 168.24
+
+    Integer compute (GIOPS)
+      int   : 23.88
+      int2  : 17.16
+      int4  : 34.54
+      int8  : 61.04
+      int16 : 116.51
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 23.91
+      int2  : 17.17
+      int4  : 34.58
+      int8  : 68.86
+      int16 : 116.24
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 7.71
+      enqueueReadBuffer               : 7.58
+      enqueueWriteBuffer non-blocking : 9.36
+      enqueueReadBuffer non-blocking  : 9.11
+      enqueueMapBuffer(for read)      : 5675.17
+        memcpy from mapped ptr        : 8.67
+      enqueueUnmap(after write)       : 6869.75
+        memcpy to mapped ptr          : 9.37
+
+    Kernel launch latency : 39.57 us
+
