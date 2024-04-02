@@ -15,7 +15,7 @@ int clPeak::runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device
   {
     log->print(NEWLINE TAB TAB "Integer compute Fast 24bit (GIOPS)" NEWLINE);
     log->xmlOpenTag("integer_compute_fast");
-    log->xmlAppendAttribs("unit", "gflops");
+    log->xmlAppendAttribs("unit", "giops");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 

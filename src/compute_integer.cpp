@@ -15,7 +15,7 @@ int clPeak::runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device
   {
     log->print(NEWLINE TAB TAB "Integer compute (GIOPS)" NEWLINE);
     log->xmlOpenTag("integer_compute");
-    log->xmlAppendAttribs("unit", "gflops");
+    log->xmlAppendAttribs("unit", "giops");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
