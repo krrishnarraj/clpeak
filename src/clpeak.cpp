@@ -10,6 +10,8 @@ static const std::string stringifiedKernels =
 #include "compute_dp_kernels.cl"
 #include "compute_int24_kernels.cl"
 #include "compute_integer_kernels.cl"
+#include "compute_char_kernels.cl"
+#include "compute_short_kernels.cl"
     ;
 
 #ifdef USE_STUB_OPENCL
@@ -22,6 +24,7 @@ extern "C"
 
 clPeak::clPeak() : forcePlatform(false), forceDevice(false), forceTest(false), useEventTimer(false),
                    isGlobalBW(true), isComputeHP(true), isComputeSP(true), isComputeDP(true), isComputeIntFast(true), isComputeInt(true),
+                   isComputeChar(true), isComputeShort(true),
                    isTransferBW(true), isKernelLatency(true),
                    specifiedPlatform(0), specifiedDevice(0),
                    forcePlatformName(false), forceDeviceName(false),
@@ -121,6 +124,8 @@ int clPeak::runAll()
         runComputeDP(queue, prog, devInfo);
         runComputeInteger(queue, prog, devInfo);
         runComputeIntFast(queue, prog, devInfo);
+        runComputeChar(queue, prog, devInfo);
+        runComputeShort(queue, prog, devInfo);
         runTransferBandwidthTest(queue, prog, devInfo);
         runKernelLatency(queue, prog, devInfo);
 
