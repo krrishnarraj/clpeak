@@ -1,0 +1,68 @@
+Platform: NVIDIA CUDA
+  Device: Tesla P40
+    Driver version  : 550.54.14 (Linux x64)
+    Compute units   : 30
+    Clock frequency : 1531 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 282.85
+      float2  : 294.10
+      float4  : 301.39
+      float8  : 279.29
+      float16 : 193.72
+
+    Single-precision compute (GFLOPS)
+      float   : 11153.70
+      float2  : 11505.40
+      float4  : 11475.82
+      float8  : 11410.92
+      float16 : 11367.69
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 367.62
+      double2  : 367.05
+      double4  : 366.32
+      double8  : 365.52
+      double16 : 362.97
+
+    Integer compute (GIOPS)
+      int   : 3897.08
+      int2  : 3889.65
+      int4  : 3904.29
+      int8  : 3610.75
+      int16 : 3540.68
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 3895.72
+      int2  : 3901.65
+      int4  : 3895.32
+      int8  : 3882.49
+      int16 : 3866.57
+
+    Integer char (8bit) compute (GIOPS)
+      char   : 10813.47
+      char2  : 11447.82
+      char4  : 11485.37
+      char8  : 11522.07
+      char16 : 11404.32
+
+    Integer short (16bit) compute (GIOPS)
+      short   : 10708.50
+      short2  : 11449.04
+      short4  : 11481.69
+      short8  : 11518.50
+      short16 : 11333.30
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 6.17
+      enqueueReadBuffer               : 6.45
+      enqueueWriteBuffer non-blocking : 5.68
+      enqueueReadBuffer non-blocking  : 6.37
+      enqueueMapBuffer(for read)      : 5.75
+        memcpy from mapped ptr        : 9.36
+      enqueueUnmap(after write)       : 6.27
+        memcpy to mapped ptr          : 9.36
+
+    Kernel launch latency : 3.78 us
