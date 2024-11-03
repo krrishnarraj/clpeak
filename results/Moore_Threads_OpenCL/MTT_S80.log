@@ -1,0 +1,73 @@
+Platform: Moore Threads OpenCL
+  Device: MUSA GEN1-104
+    Driver version  : 20241010 release kuae1.3.0_musa3.1.0 db329f8fb@20241009  (Linux x64)
+    Compute units   : 32
+    Clock frequency : 1799 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 273.11
+      float2  : 374.98
+      float4  : 387.00
+      float8  : 391.09
+      float16 : 399.77
+
+    Single-precision compute (GFLOPS)
+      float   : 14176.27
+      float2  : 13376.75
+      float4  : 13451.20
+      float8  : 13425.36
+      float16 : 13350.33
+
+    Half-precision compute (GFLOPS)
+      half   : 13296.25
+      half2  : 13387.43
+      half4  : 13450.06
+      half8  : 13437.34
+      half16 : 13368.42
+
+    Double-precision compute (GFLOPS)
+      double   : 35.60
+      double2  : 30.19
+      double4  : 21.89
+      double8  : 13.00
+      double16 : 7.04
+
+    Integer compute (GIOPS)
+      int   : 2094.24
+      int2  : 2092.97
+      int4  : 2096.44
+      int8  : 2096.89
+      int16 : 2099.12
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 2094.74
+      int2  : 2092.97
+      int4  : 2095.84
+      int8  : 2097.56
+      int16 : 2099.13
+
+    Integer char (8bit) compute (GIOPS)
+      char   : 2095.43
+      char2  : 2093.63
+      char4  : 2097.98
+      char8  : 2097.77
+      char16 : 2100.38
+
+    Integer short (16bit) compute (GIOPS)
+      short   : 2095.20
+      short2  : 2093.82
+      short4  : 2096.92
+      short8  : 2098.04
+      short16 : 2099.83
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 5.84
+      enqueueReadBuffer               : 5.92
+      enqueueWriteBuffer non-blocking : 5.85
+      enqueueReadBuffer non-blocking  : 5.91
+      enqueueMapBuffer(for read)      : 5743.47
+        memcpy from mapped ptr        : 0.02
+      enqueueUnmap(after write)       : 6042.44
+        memcpy to mapped ptr          : 5.03
+
+    Kernel launch latency : 48.02 us
