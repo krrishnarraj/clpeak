@@ -1,4 +1,5 @@
 #include <clpeak.h>
+#include <cstdlib>
 
 int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
@@ -17,7 +18,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
   try
   {
-    arr = new float[numItems];
+    arr = static_cast<float *>(aligned_alloc(64, numItems * sizeof(float)));
     memset(arr, 0, numItems * sizeof(float));
     cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
 
@@ -324,7 +325,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     log->xmlCloseTag(); // transfer_bandwidth
 
     if (arr)
-      delete[] arr;
+      std::free(arr);
   }
   catch (cl::Error &error)
   {
@@ -335,7 +336,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     if (arr)
     {
-      delete[] arr;
+      std::free(arr);
     }
     return -1;
   }
