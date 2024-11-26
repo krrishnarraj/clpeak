@@ -22,12 +22,12 @@ extern "C"
 }
 #endif
 
-clPeak::clPeak() : forcePlatform(false), forceDevice(false), forceTest(false), useEventTimer(false),
-                   isGlobalBW(true), isComputeHP(true), isComputeSP(true), isComputeDP(true), isComputeIntFast(true), isComputeInt(true),
-                   isComputeChar(true), isComputeShort(true),
-                   isTransferBW(true), isKernelLatency(true),
+clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
+                   forceDeviceName(false), forceTest(false), useEventTimer(false),
+                   isGlobalBW(true), isComputeHP(true), isComputeSP(true), isComputeDP(true),
+                   isComputeIntFast(true), isComputeInt(true),
+                   isTransferBW(true), isKernelLatency(true), isComputeChar(true), isComputeShort(true),
                    specifiedPlatform(0), specifiedDevice(0),
-                   forcePlatformName(false), forceDeviceName(false),
                    specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0)
 {
 }
@@ -60,7 +60,7 @@ int clPeak::runAll()
       std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
       trimString(platformName);
 
-      if (forcePlatformName && (!strcmp(platformName.c_str(), specifiedPlatformName) == 0))
+      if (forcePlatformName && !(strcmp(platformName.c_str(), specifiedPlatformName) == 0))
         continue;
 
       log->print(NEWLINE "Platform: " + platformName + NEWLINE);
@@ -84,7 +84,7 @@ int clPeak::runAll()
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
 
-        if (forceDeviceName && (!strcmp(devInfo.deviceName.c_str(), specifiedDeviceName) == 0))
+        if (forceDeviceName && !(strcmp(devInfo.deviceName.c_str(), specifiedDeviceName) == 0))
           continue;
 
         log->print(TAB "Device: " + devInfo.deviceName + NEWLINE);
