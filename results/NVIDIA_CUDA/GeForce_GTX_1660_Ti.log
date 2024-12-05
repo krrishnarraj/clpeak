@@ -1,0 +1,68 @@
+Platform: NVIDIA CUDA
+  Device: NVIDIA GeForce GTX 1660 Ti
+    Driver version  : 565.57.01 (Linux x64)
+    Compute units   : 24
+    Clock frequency : 1590 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 235.92
+      float2  : 247.28
+      float4  : 260.64
+      float8  : 254.10
+      float16 : 217.35
+
+    Single-precision compute (GFLOPS)
+      float   : 5692.43
+      float2  : 5705.85
+      float4  : 5697.71
+      float8  : 5497.52
+      float16 : 4822.71
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 166.56
+      double2  : 169.71
+      double4  : 151.43
+      double8  : 152.88
+      double16 : 163.43
+
+    Integer compute (GIOPS)
+      int   : 5009.23
+      int2  : 5025.67
+      int4  : 4511.78
+      int8  : 4535.21
+      int16 : 4828.46
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 5030.41
+      int2  : 5000.83
+      int4  : 5002.84
+      int8  : 4461.20
+      int16 : 4415.56
+
+    Integer char (8bit) compute (GIOPS)
+      char   : 4137.69
+      char2  : 4238.38
+      char4  : 4174.55
+      char8  : 4234.00
+      char16 : 3432.68
+
+    Integer short (16bit) compute (GIOPS)
+      short   : 4185.20
+      short2  : 4014.07
+      short4  : 4125.94
+      short8  : 3622.42
+      short16 : 3496.44
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 6.85
+      enqueueReadBuffer               : 6.92
+      enqueueWriteBuffer non-blocking : 6.14
+      enqueueReadBuffer non-blocking  : 6.08
+      enqueueMapBuffer(for read)      : 9.77
+        memcpy from mapped ptr        : 11.68
+      enqueueUnmap(after write)       : 12.33
+        memcpy to mapped ptr          : 11.99
+
+    Kernel launch latency : 4.14 us
