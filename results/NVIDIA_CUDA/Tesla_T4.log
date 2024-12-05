@@ -1,0 +1,45 @@
+Platform: NVIDIA CUDA
+  Device: Tesla T4
+    Driver version  : 560.35.03 (Linux x64)
+    Compute units   : 40
+    Clock frequency : 1590 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 235.00
+      float2  : 247.01
+      float4  : 253.11
+      float8  : 263.44
+      float16 : 252.38
+
+    Single-precision compute (GFLOPS)
+      float   : 8030.45
+      float2  : 8034.32
+      float4  : 7985.38
+      float8  : 7848.48
+      float16 : 7651.69
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 256.45
+      double2  : 256.03
+      double4  : 253.74
+      double8  : 252.76
+      double16 : 251.68
+
+    Integer compute (GIOPS)
+      int   : 5802.79
+      int2  : 5715.24
+      int4  : 5742.30
+      int8  : 5863.19
+      int16 : 5711.99
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer         : 4.73
+      enqueueReadBuffer          : 4.78
+      enqueueMapBuffer(for read) : 8.73
+        memcpy from mapped ptr   : 5.39
+      enqueueUnmap(after write)  : 12.17
+        memcpy to mapped ptr     : 5.39
+
+    Kernel launch latency : 5.82 us
