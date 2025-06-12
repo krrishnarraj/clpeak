@@ -11,6 +11,7 @@ static const char *helpStr =
     "\n  -pn, --platformName name    choose platform name"
     "\n  -dn, --deviceName name      choose device name"
     "\n  -tn, --testName name        choose test name"
+    "\n  -i, --iters                 choose the number of iterations per kernel (default: CPU=10, GPU=30)"
     "\n  --use-event-timer           time using cl events instead of std chrono timer"
     "\n                              hide driver latencies [default: No]"
     "\n  --global-bandwidth          selectively run global bandwidth test"
@@ -95,6 +96,15 @@ int clPeak::parseArgs(int argc, char **argv)
       {
         forceTest = true;
         specifiedTestName = argv[i + 1];
+        i++;
+      }
+    }
+    else if ((strcmp(argv[i], "-i") == 0) || (strcmp(argv[i], "--iters") == 0))
+    {
+      if ((i + 1) < argc)
+      {
+        forceIters = true;
+        specifiedIters = (uint)strtoul(argv[i+1], NULL, 0);
         i++;
       }
     }

@@ -23,12 +23,12 @@ extern "C"
 #endif
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
-                   forceDeviceName(false), forceTest(false), useEventTimer(false),
+                   forceDeviceName(false), forceTest(false), forceIters(false), useEventTimer(false),
                    isGlobalBW(true), isComputeHP(true), isComputeSP(true), isComputeDP(true),
                    isComputeIntFast(true), isComputeInt(true),
                    isTransferBW(true), isKernelLatency(true), isComputeChar(true), isComputeShort(true),
                    specifiedPlatform(0), specifiedDevice(0),
-                   specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0)
+                   specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0), specifiedIters(0)
 {
 }
 
@@ -83,6 +83,9 @@ int clPeak::runAll()
           continue;
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
+
+        if (forceIters)
+          devInfo.computeIters = specifiedIters;
 
         if (forceDeviceName && !(strcmp(devInfo.deviceName.c_str(), specifiedDeviceName) == 0))
           continue;

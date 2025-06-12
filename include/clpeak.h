@@ -16,12 +16,13 @@ using namespace std;
 class clPeak
 {
 public:
-  bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, useEventTimer;
+  bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, forceIters, useEventTimer;
   bool isGlobalBW, isComputeHP, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isTransferBW, isKernelLatency, isComputeChar, isComputeShort;
   ulong specifiedPlatform, specifiedDevice;
   char *specifiedPlatformName;
   char *specifiedDeviceName;
   char *specifiedTestName;
+  uint specifiedIters;
   logger *log;
 
   clPeak();
