@@ -1,5 +1,8 @@
 #include <clpeak.h>
 #include <cstdlib>
+#if defined(__ANDROID__)
+#include <malloc.h>
+#endif
 
 int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
@@ -20,6 +23,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   {
 #if defined(_WIN32) && (_MSC_VER >= 1920)
     arr = static_cast<float *>(_aligned_malloc(numItems * sizeof(float), 64));
+#elif defined(__ANDROID__)
+    arr = static_cast<float *>(memalign(64, numItems * sizeof(float)));
 #else
     arr = static_cast<float *>(aligned_alloc(64, numItems * sizeof(float)));
 #endif
