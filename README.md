@@ -1,6 +1,6 @@
 # clpeak
 
-[![Build Status](https://app.travis-ci.com/krrishnarraj/clpeak.svg?branch=master)](https://app.travis-ci.com/github/krrishnarraj/clpeak)
+[![Build](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml)
 [![Snap Status](https://snapcraft.io/clpeak/badge.svg)](https://snapcraft.io/clpeak)
 
 A synthetic benchmarking tool to measure peak capabilities of opencl devices. It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
