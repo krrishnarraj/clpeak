@@ -64,6 +64,32 @@ jobs:
           name: clpeak-windows-x86_64
           path: build/Release/clpeak.exe
 
+  build-macos:
+    name: macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake
+          brew install opencl-headers || true
+
+      - name: Configure CMake (arm64)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clpeak-macos-arm64
+          path: build/clpeak
+
   build-android:
     name: Android
     runs-on: ubuntu-latest
