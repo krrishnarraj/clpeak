@@ -1,6 +1,6 @@
 #include <clpeak.h>
 #include <cstdlib>
-#if defined(__ANDROID__)
+#if defined(_WIN32) || defined(__ANDROID__)
 #include <malloc.h>
 #endif
 
@@ -21,7 +21,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
   try
   {
-#if defined(_WIN32) && (_MSC_VER >= 1920)
+#if defined(_WIN32)
     arr = static_cast<float *>(_aligned_malloc(numItems * sizeof(float), 64));
 #elif defined(__ANDROID__)
     arr = static_cast<float *>(memalign(64, numItems * sizeof(float)));
@@ -359,7 +359,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     log->xmlCloseTag(); // transfer_bandwidth
 
     if (arr)
-#if defined(_WIN32) && (_MSC_VER >= 1920)
+#if defined(_WIN32)
       _aligned_free(arr);
 #else
       std::free(arr);
@@ -374,7 +374,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     if (arr)
     {
-#if defined(_WIN32) && (_MSC_VER >= 1920)
+#if defined(_WIN32)
       _aligned_free(arr);
 #else
       std::free(arr);
