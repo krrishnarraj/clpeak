@@ -170,7 +170,7 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if (strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isTransferBW = isKernelLatency = true;
+      isGlobalBW = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = true;
     }
     else if (strcmp(argv[i], "--enable-xml-dump") == 0)
     {
