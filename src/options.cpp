@@ -1,4 +1,6 @@
 #include <clpeak.h>
+#include <cerrno>
+#include <limits>
 
 #define DEFAULT_XML_FILE_NAME "clpeak_results.xml"
 
@@ -31,6 +33,35 @@ static const char *helpStr =
     "\n  -h, --help                  display help message"
     "\n";
 
+static void printParseErrorAndExit()
+{
+  cout << helpStr;
+  cout << NEWLINE;
+  cout.flush();
+  exit(-1);
+}
+
+static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
+{
+  char *end = NULL;
+  errno = 0;
+
+  value = strtoul(arg, &end, 0);
+
+  return (errno != ERANGE) && (end != arg) && (*end == '\0');
+}
+
+static bool parseUIntArg(const char *arg, uint &value, bool allowZero = true)
+{
+  unsigned long parsed;
+
+  if (!parseUnsignedLongArg(arg, parsed) || (parsed > std::numeric_limits<uint>::max()) || (!allowZero && (parsed == 0)))
+    return false;
+
+  value = static_cast<uint>(parsed);
+  return true;
+}
+
 int clPeak::parseArgs(int argc, char **argv)
 {
   bool forcedTests = false;
@@ -58,8 +89,13 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       if ((i + 1) < argc)
       {
+        unsigned long parsed;
+
+        if (!parseUnsignedLongArg(argv[i + 1], parsed))
+          printParseErrorAndExit();
+
         forcePlatform = true;
-        specifiedPlatform = strtoul(argv[i + 1], NULL, 0);
+        specifiedPlatform = parsed;
         i++;
       }
     }
@@ -67,8 +103,13 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       if ((i + 1) < argc)
       {
+        unsigned long parsed;
+
+        if (!parseUnsignedLongArg(argv[i + 1], parsed))
+          printParseErrorAndExit();
+
         forceDevice = true;
-        specifiedDevice = strtoul(argv[i + 1], NULL, 0);
+        specifiedDevice = parsed;
         i++;
       }
     }
@@ -103,8 +144,13 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       if ((i + 1) < argc)
       {
+        uint parsed;
+
+        if (!parseUIntArg(argv[i + 1], parsed, false))
+          printParseErrorAndExit();
+
         forceIters = true;
-        specifiedIters = (uint)strtoul(argv[i+1], NULL, 0);
+        specifiedIters = parsed;
         i++;
       }
     }
