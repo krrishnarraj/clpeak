@@ -1,0 +1,60 @@
+
+Platform: Portable Computing Language
+  Device: cpu-alderlake-13th Gen Intel(R) Core(TM) i9-13900K
+    Driver version  : 6.0 (Linux x64)
+    Compute units   : 32
+    Clock frequency : 5500 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 45.20
+      float2  : 48.79
+      float4  : 51.31
+      float8  : 51.47
+      float16 : 50.20
+
+    Single-precision compute (GFLOPS)
+      float   : 33.52
+      float2  : 69.83
+      float4  : 139.19
+      float8  : 308.44
+      float16 : 665.57
+
+    Half-precision compute (GFLOPS)
+      half   : 3.57
+      half2  : 4.22
+      half4  : 3.97
+      half8  : 3.92
+      half16 : 3.75
+
+    Double-precision compute (GFLOPS)
+      double   : 37.35
+      double2  : 70.62
+      double4  : 143.53
+      double8  : 336.42
+      double16 : 553.95
+
+    Integer compute (GIOPS)
+      int   : 67.91
+      int2  : 70.03
+      int4  : 137.77
+      int8  : 300.14
+      int16 : 521.00
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 60.04
+      int2  : 63.84
+      int4  : 121.40
+      int8  : 152.66
+      int16 : 492.42
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 23.93
+      enqueueReadBuffer               : 23.57
+      enqueueWriteBuffer non-blocking : 23.46
+      enqueueReadBuffer non-blocking  : 24.04
+      enqueueMapBuffer(for read)      : 41617.90
+        memcpy from mapped ptr        : 24.06
+      enqueueUnmap(after write)       : 51871.59
+        memcpy to mapped ptr          : 24.00
+
+    Kernel launch latency : 11.35 us
