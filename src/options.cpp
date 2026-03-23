@@ -62,6 +62,12 @@ static bool parseUIntArg(const char *arg, uint &value, bool allowZero = true)
   return true;
 }
 
+static void printParseMessage(const std::string &message)
+{
+  cout << message;
+  cout.flush();
+}
+
 int clPeak::parseArgs(int argc, char **argv)
 {
   bool forcedTests = false;
@@ -72,8 +78,8 @@ int clPeak::parseArgs(int argc, char **argv)
   {
     if ((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))
     {
-      log->print(helpStr);
-      log->print(NEWLINE);
+      printParseMessage(helpStr);
+      printParseMessage(NEWLINE);
       exit(0);
     }
     else if ((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
@@ -81,8 +87,8 @@ int clPeak::parseArgs(int argc, char **argv)
       stringstream versionStr;
       versionStr << "clpeak version: " << VERSION_STR;
 
-      log->print(versionStr.str().c_str());
-      log->print(NEWLINE);
+      printParseMessage(versionStr.str());
+      printParseMessage(NEWLINE);
       exit(0);
     }
     else if ((strcmp(argv[i], "-p") == 0) || (strcmp(argv[i], "--platform") == 0))
@@ -210,7 +216,7 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if (strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isTransferBW = isKernelLatency = true;
+      isGlobalBW = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = true;
     }
     else if (strcmp(argv[i], "--enable-xml-dump") == 0)
     {
@@ -231,8 +237,8 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else
     {
-      log->print(helpStr);
-      log->print(NEWLINE);
+      printParseMessage(helpStr);
+      printParseMessage(NEWLINE);
       exit(-1);
     }
   }
