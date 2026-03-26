@@ -23,6 +23,7 @@ public:
   char *specifiedDeviceName;
   char *specifiedTestName;
   uint specifiedIters;
+  uint warmupCount;
   logger *log;
 
   clPeak();
@@ -30,8 +31,8 @@ public:
 
   int parseArgs(int argc, char **argv);
 
-  // Return avg time in us
-  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters);
+  // Return avg time in us; optionally write the minimum per-iteration time to peak_us
+  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters, float *peak_us = nullptr);
 
   int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 

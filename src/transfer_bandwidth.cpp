@@ -41,9 +41,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB "enqueueWriteBuffer              : ");
 
-      // Dummy warm-up
-      queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
+      for (uint w = 0; w < warmupCount; w++)
+      {
+        queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
+        queue.finish();
+      }
 
       timed = 0;
 
@@ -82,9 +84,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB "enqueueReadBuffer               : ");
 
-      // Dummy warm-up
-      queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
+      for (uint w = 0; w < warmupCount; w++)
+      {
+        queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
+        queue.finish();
+      }
 
       timed = 0;
       if (useEventTimer)
@@ -122,9 +126,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB "enqueueWriteBuffer non-blocking : ");
 
-      // Dummy warm-up
-      queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
+      for (uint w = 0; w < warmupCount; w++)
+      {
+        queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
+        queue.finish();
+      }
 
       timed = 0;
 
@@ -163,9 +169,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB "enqueueReadBuffer non-blocking  : ");
 
-      // Dummy warm-up
-      queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
+      for (uint w = 0; w < warmupCount; w++)
+      {
+        queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
+        queue.finish();
+      }
 
       timed = 0;
       if (useEventTimer)

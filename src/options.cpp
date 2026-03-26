@@ -14,6 +14,7 @@ static const char *helpStr =
     "\n  -dn, --deviceName name      choose device name"
     "\n  -tn, --testName name        choose test name"
     "\n  -i, --iters                 choose the number of iterations per kernel (default: CPU=10, GPU=30)"
+    "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
     "\n  --use-event-timer           time using cl events instead of std chrono timer"
     "\n                              hide driver latencies [default: No]"
     "\n  --global-bandwidth          selectively run global bandwidth test"
@@ -157,6 +158,19 @@ int clPeak::parseArgs(int argc, char **argv)
 
         forceIters = true;
         specifiedIters = parsed;
+        i++;
+      }
+    }
+    else if ((strcmp(argv[i], "-w") == 0) || (strcmp(argv[i], "--warmup") == 0))
+    {
+      if ((i + 1) < argc)
+      {
+        uint parsed;
+
+        if (!parseUIntArg(argv[i + 1], parsed))
+          printParseErrorAndExit();
+
+        warmupCount = parsed;
         i++;
       }
     }

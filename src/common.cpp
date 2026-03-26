@@ -19,8 +19,8 @@ device_info_t getDeviceInfo(cl::Device &d)
   maxWIPerDim = d.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>();
   devInfo.maxWGSize = (uint)maxWIPerDim[0];
 
-  // Limiting max work-group size to 256
-#define MAX_WG_SIZE 256
+  // Cap work-group size to what hardware reports (up to 1024)
+#define MAX_WG_SIZE 1024
   devInfo.maxWGSize = std::min(devInfo.maxWGSize, (uint)MAX_WG_SIZE);
 
   // FIXME limit max-workgroup size for qualcomm platform to 128

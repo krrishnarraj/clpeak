@@ -1,5 +1,6 @@
 #include <clpeak.h>
 #include <cstring>
+#include <limits>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
@@ -29,6 +30,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    isTransferBW(true), isKernelLatency(true), isComputeChar(true), isComputeShort(true),
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0), specifiedIters(0),
+                   warmupCount(2),
                    log(NULL)
 {
 }
@@ -166,13 +168,14 @@ int clPeak::runAll()
   return 0;
 }
 
-float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters)
+float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters, float *peak_us)
 {
   float timed = 0;
+  float min_us = std::numeric_limits<float>::max();
 
-  // Dummy calls
-  queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
-  queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+  // Warm-up runs
+  for (uint w = 0; w < warmupCount; w++)
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
   queue.finish();
 
   if (useEventTimer)
@@ -183,22 +186,27 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
       queue.finish();
-      timed += timeInUS(timeEvent);
+      float t = timeInUS(timeEvent);
+      timed += t;
+      if (t < min_us) min_us = t;
     }
   }
   else // std timer
   {
-    Timer timer;
-
-    timer.start();
     for (uint i = 0; i < iters; i++)
     {
+      Timer timer;
+      timer.start();
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
-      queue.flush();
+      queue.finish();
+      float t = timer.stopAndTime();
+      timed += t;
+      if (t < min_us) min_us = t;
     }
-    queue.finish();
-    timed = timer.stopAndTime();
   }
+
+  if (peak_us)
+    *peak_us = min_us;
 
   return (timed / static_cast<float>(iters));
 }

@@ -2,7 +2,7 @@
 
 int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
-  float timed, gflops;
+  float timed, gflops, peak_timed, peak_gflops;
   cl_uint workPerWI;
   cl::NDRange globalSize, localSize;
   cl_float A = 1.3f;
@@ -51,11 +51,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
       workPerWI = 4096; // Indicates flops executed per work-item
 
-      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters, &peak_timed);
 
       gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      peak_gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(gflops);
+      log->print(" (peak: "); log->print(peak_gflops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float", gflops);
     }
@@ -68,11 +70,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
       workPerWI = 4096;
 
-      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters, &peak_timed);
 
       gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      peak_gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(gflops);
+      log->print(" (peak: "); log->print(peak_gflops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float2", gflops);
     }
@@ -85,11 +89,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
       workPerWI = 4096;
 
-      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters, &peak_timed);
 
       gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      peak_gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(gflops);
+      log->print(" (peak: "); log->print(peak_gflops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float4", gflops);
     }
@@ -102,11 +108,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
       workPerWI = 4096;
 
-      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters, &peak_timed);
 
       gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      peak_gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(gflops);
+      log->print(" (peak: "); log->print(peak_gflops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float8", gflops);
     }
@@ -119,11 +127,13 @@ int clPeak::runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info
 
       workPerWI = 4096;
 
-      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters, &peak_timed);
 
       gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      peak_gflops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(gflops);
+      log->print(" (peak: "); log->print(peak_gflops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float16", gflops);
     }
