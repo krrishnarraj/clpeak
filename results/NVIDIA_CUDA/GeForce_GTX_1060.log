@@ -1,0 +1,70 @@
+
+Platform: NVIDIA CUDA
+  Device: NVIDIA GeForce GTX 1060 3GB
+    Driver version  : 580.126.09 (Linux x64)
+    Compute units   : 9
+    Clock frequency : 1759 MHz
+
+    Global memory bandwidth (GBPS)
+      float   : 148.50
+      float2  : 154.41
+      float4  : 158.60
+      float8  : 159.97
+      float16 : 103.66
+
+    Single-precision compute (GFLOPS)
+      float   : 4128.89
+      float2  : 4259.79
+      float4  : 4248.95
+      float8  : 4225.30
+      float16 : 4209.96
+
+    No half precision support! Skipped
+
+    Double-precision compute (GFLOPS)
+      double   : 137.02
+      double2  : 136.62
+      double4  : 136.40
+      double8  : 136.08
+      double16 : 134.82
+
+    Integer compute (GIOPS)
+      int   : 1410.44
+      int2  : 1404.88
+      int4  : 1403.32
+      int8  : 1308.93
+      int16 : 1300.05
+
+    Integer compute Fast 24bit (GIOPS)
+      int   : 1401.40
+      int2  : 1386.67
+      int4  : 1396.61
+      int8  : 1378.75
+      int16 : 1383.57
+
+    Integer char (8bit) compute (GIOPS)
+      char   : 3808.05
+      char2  : 4043.94
+      char4  : 4081.06
+      char8  : 4100.51
+      char16 : 4056.05
+
+    Integer short (16bit) compute (GIOPS)
+      short   : 3815.56
+      short2  : 4070.92
+      short4  : 4044.73
+      short8  : 4062.19
+      short16 : 4020.11
+
+    Transfer bandwidth (GBPS)
+      enqueueWriteBuffer              : 11.64
+      enqueueReadBuffer               : 12.66
+      enqueueWriteBuffer non-blocking : 11.38
+      enqueueReadBuffer non-blocking  : 11.80
+      enqueueMapBuffer(for read)      : 12.29
+        memcpy from mapped ptr        : 23.50
+      enqueueUnmap(after write)       : 12.39
+        memcpy to mapped ptr          : 22.78
+
+    Kernel launch latency : 4.14 us
+

@@ -28,7 +28,8 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    isComputeIntFast(true), isComputeInt(true),
                    isTransferBW(true), isKernelLatency(true), isComputeChar(true), isComputeShort(true),
                    specifiedPlatform(0), specifiedDevice(0),
-                   specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0), specifiedIters(0)
+                   specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0), specifiedIters(0),
+                   log(NULL)
 {
 }
 
