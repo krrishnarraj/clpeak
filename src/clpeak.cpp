@@ -75,8 +75,6 @@ int clPeak::runAll()
 
       cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
       vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-      cl::Program::Sources source(1, stringifiedKernels);
-      cl::Program prog = cl::Program(ctx, source);
 
       for (size_t d = 0; d < devices.size(); d++)
       {
@@ -86,7 +84,12 @@ int clPeak::runAll()
         device_info_t devInfo = getDeviceInfo(devices[d]);
 
         if (forceIters)
+        {
           devInfo.computeIters = specifiedIters;
+          devInfo.globalBWIters = specifiedIters;
+          devInfo.transferBWIters = specifiedIters;
+          devInfo.kernelLatencyIters = specifiedIters;
+        }
 
         if (forceDeviceName && !(strcmp(devInfo.deviceName.c_str(), specifiedDeviceName) == 0))
           continue;
@@ -108,6 +111,8 @@ int clPeak::runAll()
         log->xmlAppendAttribs("clock_frequency", devInfo.maxClockFreq);
         log->xmlAppendAttribs("clock_frequency_unit", "MHz");
 
+        cl::Program::Sources source(1, stringifiedKernels);
+        cl::Program prog = cl::Program(ctx, source);
         try
         {
           vector<cl::Device> dev = {devices[d]};
@@ -148,7 +153,7 @@ int clPeak::runAll()
     log->print(ss.str());
 
     // skip error for no platform
-    if (strcmp(error.what(), "clGetPlatformIDs") == 0)
+    if (error.err() == CL_INVALID_VALUE || error.err() == CL_PLATFORM_NOT_FOUND_KHR)
     {
       log->print("no platforms found" NEWLINE);
     }

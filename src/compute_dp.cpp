@@ -5,7 +5,7 @@ int clPeak::runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info
   float timed, gflops;
   cl_uint workPerWI;
   cl::NDRange globalSize, localSize;
-  cl_double A = 1.3f;
+  cl_double A = 1.3;
   uint iters = devInfo.computeIters;
 
   if (!isComputeDP)

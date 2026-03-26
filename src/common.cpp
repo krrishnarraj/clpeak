@@ -1,7 +1,7 @@
 #include <common.h>
-#include <math.h>
 #include <iostream>
 #include <string>
+#include <cctype>
 
 using namespace std;
 
@@ -26,8 +26,9 @@ device_info_t getDeviceInfo(cl::Device &d)
   // FIXME limit max-workgroup size for qualcomm platform to 128
   // Kernel launch fails for workgroup size 256(CL_DEVICE_MAX_WORK_ITEM_SIZES)
   string vendor = d.getInfo<CL_DEVICE_VENDOR>();
-  if ((vendor.find("QUALCOMM") != std::string::npos) ||
-      (vendor.find("qualcomm") != std::string::npos))
+  std::string vendorLower = vendor;
+  std::transform(vendorLower.begin(), vendorLower.end(), vendorLower.begin(), ::tolower);
+  if (vendorLower.find("qualcomm") != std::string::npos)
   {
     devInfo.maxWGSize = std::min(devInfo.maxWGSize, (uint)128);
   }
@@ -50,7 +51,7 @@ device_info_t getDeviceInfo(cl::Device &d)
 
   if (devInfo.deviceType & CL_DEVICE_TYPE_CPU)
   {
-    devInfo.gloalBWIters = 20;
+    devInfo.globalBWIters = 20;
     devInfo.globalBWMaxSize = 1 << 27;
     devInfo.computeWgsPerCU = 512;
     devInfo.computeDPWgsPerCU = 256;
@@ -59,7 +60,7 @@ device_info_t getDeviceInfo(cl::Device &d)
   }
   else
   { // GPU
-    devInfo.gloalBWIters = 50;
+    devInfo.globalBWIters = 50;
     devInfo.globalBWMaxSize = 1 << 29;
     devInfo.computeWgsPerCU = 2048;
     devInfo.computeDPWgsPerCU = 512;
@@ -77,7 +78,7 @@ float timeInUS(cl::Event &timeEvent)
   cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
   cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() / 1000;
 
-  return (float)((int)end - (int)start);
+  return (float)(end - start);
 }
 
 void Timer::start()
@@ -93,22 +94,16 @@ float Timer::stopAndTime()
 
 void populate(float *ptr, uint64_t N)
 {
-  srand((unsigned int)time(NULL));
-
   for (uint64_t i = 0; i < N; i++)
   {
-    //ptr[i] = (float)rand();
     ptr[i] = (float)i;
   }
 }
 
 void populate(double *ptr, uint64_t N)
 {
-  srand((unsigned int)time(NULL));
-
   for (uint64_t i = 0; i < N; i++)
   {
-    //ptr[i] = (double)rand();
     ptr[i] = (double)i;
   }
 }

@@ -73,7 +73,7 @@ typedef struct {
   cl_device_type  deviceType;
 
   // Test specific options
-  uint gloalBWIters;
+  uint globalBWIters;
   uint64_t globalBWMaxSize;
   uint computeWgsPerCU;
   uint computeDPWgsPerCU;

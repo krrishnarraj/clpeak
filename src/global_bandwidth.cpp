@@ -12,7 +12,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  uint iters = devInfo.gloalBWIters;
+  uint iters = devInfo.globalBWIters;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
   uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), devInfo.globalBWMaxSize);

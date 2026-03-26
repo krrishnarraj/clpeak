@@ -13,7 +13,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   cl::NDRange globalSize, localSize;
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
   uint iters = devInfo.transferBWIters;
-  Timer timer;
   float *arr = NULL;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
@@ -255,12 +254,12 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed = 0;
       for (uint i = 0; i < iters; i++)
       {
-        cl::Event timeEvent;
         void *mapPtr;
 
         mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)));
         queue.finish();
 
+        Timer timer;
         timer.start();
         memcpy(arr, mapPtr, (numItems * sizeof(float)));
         timed += timer.stopAndTime();
@@ -334,12 +333,12 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed = 0;
       for (uint i = 0; i < iters; i++)
       {
-        cl::Event timeEvent;
         void *mapPtr;
 
         mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
         queue.finish();
 
+        Timer timer;
         timer.start();
         memcpy(mapPtr, arr, (numItems * sizeof(float)));
         timed += timer.stopAndTime();
