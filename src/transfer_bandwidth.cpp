@@ -213,36 +213,22 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
       queue.finish();
 
+      // Always use wall-clock for map/unmap: CL events measure only GPU command
+      // processing time, which is zero on unified-memory platforms (Apple Silicon),
+      // causing division-by-zero / inf with --use-event-timer.
       timed = 0;
-      if (useEventTimer)
+      for (uint i = 0; i < iters; i++)
       {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          void *mapPtr;
+        Timer timer;
+        void *mapPtr;
 
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)), NULL, &timeEvent);
-          queue.finish();
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          Timer timer;
-          void *mapPtr;
+        timer.start();
+        mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)));
+        queue.finish();
+        timed += timer.stopAndTime();
 
-          timer.start();
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)));
-          queue.finish();
-          timed += timer.stopAndTime();
-
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-          queue.finish();
-        }
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
       }
       timed /= static_cast<float>(iters);
 
@@ -292,36 +278,20 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
       queue.finish();
 
+      // Always use wall-clock for map/unmap (see enqueueMapBuffer comment above).
       timed = 0;
-      if (useEventTimer)
+      for (uint i = 0; i < iters; i++)
       {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          void *mapPtr;
+        Timer timer;
+        void *mapPtr;
 
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
-          queue.finish();
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, &timeEvent);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          Timer timer;
-          void *mapPtr;
+        mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
+        queue.finish();
 
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
-          queue.finish();
-
-          timer.start();
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-          queue.finish();
-          timed += timer.stopAndTime();
-        }
+        timer.start();
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+        timed += timer.stopAndTime();
       }
       timed /= static_cast<float>(iters);
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;

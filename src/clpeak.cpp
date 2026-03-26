@@ -106,6 +106,8 @@ int clPeak::runAll()
         log->print(TAB TAB "Clock frequency : ");
         log->print(devInfo.maxClockFreq);
         log->print(" MHz" NEWLINE);
+        if (useEventTimer)
+          log->print(TAB TAB "Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation" NEWLINE);
         log->xmlOpenTag("device");
         log->xmlAppendAttribs("name", devInfo.deviceName);
         log->xmlAppendAttribs("driver_version", devInfo.driverVersion);
