@@ -1,20 +1,18 @@
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/RelativeLayout1"
-    android:layout_width="fill_parent"
-    android:layout_height="fill_parent"
-    android:background="#F0F0F0" >
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
 
     <TextView
         android:id="@+id/textView_about"
-        android:layout_width="wrap_content"
-        android:layout_height="fill_parent"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentTop="true"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:autoLink="web"
-        android:fontFamily="@font/ubuntu_medium"
-        android:gravity="center|top"
-        android:paddingTop="15dp"
+        android:gravity="top"
+        android:lineSpacingMultiplier="1.4"
+        android:padding="24dp"
         android:text="@string/about_clpeak"
-        android:textAppearance="?android:attr/textAppearanceMedium" />
+        android:textAppearance="?attr/textAppearanceBodyLarge" />
 
-</RelativeLayout>
+</ScrollView>

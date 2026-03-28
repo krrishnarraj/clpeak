@@ -54,6 +54,7 @@ public:
   JNIEnv *jEnv;
   jobject *jObj;
   jmethodID printCallback;
+  jmethodID recordMetricCallback;
 #endif
 
   logger(bool _enableXml     = false, string _xmlFileName     = "",

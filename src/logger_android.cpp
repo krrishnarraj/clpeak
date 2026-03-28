@@ -3,8 +3,10 @@
 #include <sstream>
 
 // Android logger: print() methods dispatch to the Java UI via JNI.
-// All XML / JSON / CSV / compare functionality is stubbed out — output
-// formats that write to the filesystem are not useful in the Android app.
+// XML / JSON / CSV file output is not used on Android, but the context stack
+// (xmlOpenTag / xmlAppendAttribs / xmlCloseTag) is maintained in memory so
+// that recordMetric() can extract fully-qualified result entries and dispatch
+// them to the Kotlin layer via a second JNI callback.
 
 logger::logger(bool _enableXml,     string _xmlFileName,
                bool _enableJson,    string _jsonFileName,
@@ -16,7 +18,6 @@ logger::logger(bool _enableXml,     string _xmlFileName,
     enableCsv(false),
     compareEnabled(false)
 {
-  // Suppress unused-parameter warnings
   (void)_enableXml; (void)_xmlFileName;
   (void)_enableJson; (void)_jsonFileName;
   (void)_enableCsv;  (void)_csvFileName;
@@ -62,14 +63,79 @@ void logger::print(unsigned int val)
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
 }
 
-// ---- XML / result recording — all no-ops on Android ---------------------
+// ---- Context stack — maintained in memory for recordMetric() -------------
 
-void logger::xmlOpenTag(string tag)          { (void)tag; }
-void logger::xmlAppendAttribs(string key, string value) { (void)key; (void)value; }
-void logger::xmlAppendAttribs(string key, uint value)   { (void)key; (void)value; }
-void logger::xmlSetContent(string value)     { (void)value; }
-void logger::xmlSetContent(float value)      { (void)value; }
-void logger::xmlCloseTag()                   { }
-void logger::xmlRecord(string tag, string value) { (void)tag; (void)value; }
-void logger::xmlRecord(string tag, float value)  { (void)tag; (void)value; }
-void logger::recordMetric(const std::string &metric, float value) { (void)metric; (void)value; }
+void logger::xmlOpenTag(string tag)
+{
+  contextStack.push_back({tag, {}});
+}
+
+void logger::xmlAppendAttribs(string key, string value)
+{
+  if (!contextStack.empty())
+    contextStack.back().attribs[key] = value;
+}
+
+void logger::xmlAppendAttribs(string key, uint value)
+{
+  if (!contextStack.empty())
+    contextStack.back().attribs[key] = std::to_string(value);
+}
+
+void logger::xmlSetContent(string value)
+{
+  (void)value;
+}
+
+void logger::xmlSetContent(float value)
+{
+  // kernel_latency uses xmlSetContent instead of xmlRecord
+  recordMetric("latency", value);
+}
+
+void logger::xmlCloseTag()
+{
+  if (!contextStack.empty())
+    contextStack.pop_back();
+}
+
+void logger::xmlRecord(string tag, string value)
+{
+  (void)tag; (void)value;
+}
+
+void logger::xmlRecord(string tag, float value)
+{
+  // Called at context depth 4 (clpeak > platform > device > test_group)
+  recordMetric(tag, value);
+}
+
+// ---- Structured metric callback → Kotlin ---------------------------------
+
+void logger::recordMetric(const std::string &metric, float value)
+{
+  if (contextStack.size() < 4 || !recordMetricCallback)
+    return;
+
+  auto getAttrib = [&](int idx, const char *key) -> std::string {
+    auto it = contextStack[idx].attribs.find(key);
+    return (it != contextStack[idx].attribs.end()) ? it->second : "";
+  };
+
+  const std::string platform = getAttrib(1, "name");
+  const std::string device   = getAttrib(2, "name");
+  const std::string driver   = getAttrib(2, "driver_version");
+  const std::string test     = contextStack[3].tag;
+  const std::string unit     = getAttrib(3, "unit");
+
+  jEnv->CallVoidMethod(
+      (*jObj),
+      recordMetricCallback,
+      jEnv->NewStringUTF(platform.c_str()),
+      jEnv->NewStringUTF(device.c_str()),
+      jEnv->NewStringUTF(driver.c_str()),
+      jEnv->NewStringUTF(test.c_str()),
+      jEnv->NewStringUTF(metric.c_str()),
+      jEnv->NewStringUTF(unit.c_str()),
+      static_cast<jfloat>(value));
+}

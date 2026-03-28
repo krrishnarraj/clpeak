@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4.1)
+cmake_minimum_required(VERSION 3.22.1)
 
 # Build stub
 add_subdirectory(libopencl-stub)
@@ -36,5 +36,5 @@ target_include_directories(clpeak PRIVATE
 )
 
 target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL)
-target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions)
+target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions -std=c++17)
 target_link_libraries(clpeak log atomic dl OpenCL)

@@ -1,6 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#3F51B5</color>
-    <color name="colorPrimaryDark">#303F9F</color>
-    <color name="colorAccent">#FF4081</color>
+    <!-- Material 3 color tokens (Indigo-based scheme) -->
+    <color name="md_theme_primary">#3F51B5</color>
+    <color name="md_theme_on_primary">#FFFFFF</color>
+    <color name="md_theme_primary_container">#C5CAE9</color>
+    <color name="md_theme_on_primary_container">#1A237E</color>
+    <color name="md_theme_secondary">#5C6BC0</color>
+    <color name="md_theme_on_secondary">#FFFFFF</color>
+    <color name="md_theme_secondary_container">#E8EAF6</color>
+    <color name="md_theme_on_secondary_container">#283593</color>
+    <color name="md_theme_surface">#FFFBFE</color>
+    <color name="md_theme_on_surface">#1C1B1F</color>
+    <color name="md_theme_surface_variant">#E7E0EC</color>
+    <color name="md_theme_on_surface_variant">#49454F</color>
+    <color name="md_theme_outline_variant">#CAC4D0</color>
+    <color name="md_theme_background">#FFFBFE</color>
+    <color name="md_theme_on_background">#1C1B1F</color>
+
+    <!-- Semantic colors for benchmark test types -->
+    <color name="test_bandwidth">#1565C0</color>
+    <color name="test_compute">#BF360C</color>
+    <color name="test_latency">#1B5E20</color>
 </resources>
