@@ -44,6 +44,7 @@ set(CLPEAK_SOURCE_FILES
     src/options.cpp
     src/logger.cpp
     src/global_bandwidth.cpp
+    src/local_bandwidth.cpp
     src/compute_sp.cpp
     src/compute_hp.cpp
     src/compute_dp.cpp

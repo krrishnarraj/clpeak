@@ -5,6 +5,7 @@
 
 static const std::string stringifiedKernels =
 #include "global_bandwidth_kernels.cl"
+#include "local_bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_hp_kernels.cl"
 #include "compute_dp_kernels.cl"
@@ -24,7 +25,7 @@ extern "C"
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
                    forceDeviceName(false), forceTest(false), forceIters(false), useEventTimer(false),
-                   isGlobalBW(true), isComputeHP(true), isComputeSP(true), isComputeDP(true),
+                   isGlobalBW(true), isLocalBW(true), isComputeHP(true), isComputeSP(true), isComputeDP(true),
                    isComputeIntFast(true), isComputeInt(true),
                    isTransferBW(true), isKernelLatency(true), isComputeChar(true), isComputeShort(true),
                    specifiedPlatform(0), specifiedDevice(0),
@@ -131,6 +132,7 @@ int clPeak::runAll()
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
 
         runGlobalBandwidthTest(queue, prog, devInfo);
+        runLocalBandwidthTest(queue, prog, devInfo);
         runComputeSP(queue, prog, devInfo);
         runComputeHP(queue, prog, devInfo);
         runComputeDP(queue, prog, devInfo);

@@ -34,6 +34,7 @@ device_info_t getDeviceInfo(cl::Device &d)
   }
 
   devInfo.maxAllocSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>());
+  devInfo.localMemSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>());
   devInfo.maxGlobalSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
   devInfo.maxClockFreq = static_cast<uint>(d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>());
   devInfo.doubleSupported = false;
@@ -56,6 +57,7 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.computeWgsPerCU = 512;
     devInfo.computeDPWgsPerCU = 256;
     devInfo.computeIters = 10;
+    devInfo.localBWIters = 20;
     devInfo.transferBWMaxSize = 1 << 27;
   }
   else
@@ -65,6 +67,7 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.computeWgsPerCU = 2048;
     devInfo.computeDPWgsPerCU = 512;
     devInfo.computeIters = 30;
+    devInfo.localBWIters = 50;
     devInfo.transferBWMaxSize = 1 << 29;
   }
   devInfo.transferBWIters = 20;

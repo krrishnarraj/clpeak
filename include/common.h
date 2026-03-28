@@ -72,12 +72,15 @@ typedef struct {
   bool doubleSupported;
   cl_device_type  deviceType;
 
+  uint64_t localMemSize;
+
   // Test specific options
   uint globalBWIters;
   uint64_t globalBWMaxSize;
   uint computeWgsPerCU;
   uint computeDPWgsPerCU;
   uint computeIters;
+  uint localBWIters;
   uint transferBWIters;
   uint kernelLatencyIters;
   uint64_t transferBWMaxSize;
