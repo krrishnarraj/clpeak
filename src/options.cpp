@@ -19,6 +19,7 @@ static const char *helpStr =
     "\n                              hide driver latencies [default: No]"
     "\n  --global-bandwidth          selectively run global bandwidth test"
     "\n  --local-bandwidth           selectively run local memory bandwidth test"
+    "\n  --image-bandwidth           selectively run image (texture) bandwidth test"
     "\n  --atomic-throughput         selectively run atomic throughput test"
     "\n  --compute-hp                selectively run half precision compute test"
     "\n  --compute-sp                selectively run single precision compute test"
@@ -180,12 +181,12 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       useEventTimer = true;
     }
-    else if ((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--local-bandwidth") == 0) || (strcmp(argv[i], "--atomic-throughput") == 0) || (strcmp(argv[i], "--compute-hp") == 0) || (strcmp(argv[i], "--compute-sp") == 0) || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0) || (strcmp(argv[i], "--compute-intfast") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0) || (strcmp(argv[i], "--compute-char") == 0) || (strcmp(argv[i], "--compute-short") == 0))
+    else if ((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--local-bandwidth") == 0) || (strcmp(argv[i], "--image-bandwidth") == 0) || (strcmp(argv[i], "--atomic-throughput") == 0) || (strcmp(argv[i], "--compute-hp") == 0) || (strcmp(argv[i], "--compute-sp") == 0) || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0) || (strcmp(argv[i], "--compute-intfast") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0) || (strcmp(argv[i], "--compute-char") == 0) || (strcmp(argv[i], "--compute-short") == 0))
     {
       // Disable all and enable only selected ones
       if (!forcedTests)
       {
-        isGlobalBW = isLocalBW = isAtomicThroughput = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = false;
+        isGlobalBW = isLocalBW = isImageBW = isAtomicThroughput = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = false;
         forcedTests = true;
       }
 
@@ -196,6 +197,10 @@ int clPeak::parseArgs(int argc, char **argv)
       else if (strcmp(argv[i], "--local-bandwidth") == 0)
       {
         isLocalBW = true;
+      }
+      else if (strcmp(argv[i], "--image-bandwidth") == 0)
+      {
+        isImageBW = true;
       }
       else if (strcmp(argv[i], "--atomic-throughput") == 0)
       {
@@ -240,7 +245,7 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if (strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isLocalBW = isAtomicThroughput = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = true;
+      isGlobalBW = isLocalBW = isImageBW = isAtomicThroughput = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = true;
     }
     else if (strcmp(argv[i], "--enable-xml-dump") == 0)
     {

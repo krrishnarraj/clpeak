@@ -45,6 +45,7 @@ set(CLPEAK_SOURCE_FILES
     src/logger.cpp
     src/global_bandwidth.cpp
     src/local_bandwidth.cpp
+    src/image_bandwidth.cpp
     src/atomic_throughput.cpp
     src/compute_sp.cpp
     src/compute_hp.cpp

@@ -17,7 +17,7 @@ class clPeak
 {
 public:
   bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, forceIters, useEventTimer;
-  bool isGlobalBW, isLocalBW, isComputeHP, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isAtomicThroughput, isTransferBW, isKernelLatency, isComputeChar, isComputeShort;
+  bool isGlobalBW, isLocalBW, isImageBW, isComputeHP, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isAtomicThroughput, isTransferBW, isKernelLatency, isComputeChar, isComputeShort;
   ulong specifiedPlatform, specifiedDevice;
   char *specifiedPlatformName;
   char *specifiedDeviceName;
@@ -36,6 +36,8 @@ public:
   int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
   int runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+
+  int runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 
   int runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
 

@@ -74,6 +74,10 @@ typedef struct {
 
   uint64_t localMemSize;
 
+  bool imageSupported;
+  uint64_t image2dMaxWidth;
+  uint64_t image2dMaxHeight;
+
   // Test specific options
   uint globalBWIters;
   uint64_t globalBWMaxSize;
@@ -81,6 +85,7 @@ typedef struct {
   uint computeDPWgsPerCU;
   uint computeIters;
   uint localBWIters;
+  uint imageBWIters;
   uint transferBWIters;
   uint kernelLatencyIters;
   uint64_t transferBWMaxSize;
