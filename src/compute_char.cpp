@@ -2,7 +2,7 @@
 
 int clPeak::runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
-  float timed, giops, peak_timed, peak_giops;
+  float timed, giops;
   cl_uint workPerWI;
   cl::NDRange globalSize, localSize;
   cl_char A = 4;
@@ -51,13 +51,11 @@ int clPeak::runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_in
 
       workPerWI = 2048; // Indicates integer operations executed per work-item
 
-      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters, &peak_timed);
+      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
 
       giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
-      peak_giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(giops);
-      log->print(" (peak: "); log->print(peak_giops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("char", giops);
     }
@@ -70,13 +68,11 @@ int clPeak::runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_in
 
       workPerWI = 2048;
 
-      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters, &peak_timed);
+      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
 
       giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
-      peak_giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(giops);
-      log->print(" (peak: "); log->print(peak_giops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("char2", giops);
     }
@@ -89,13 +85,11 @@ int clPeak::runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_in
 
       workPerWI = 2048;
 
-      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters, &peak_timed);
+      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
 
       giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
-      peak_giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(giops);
-      log->print(" (peak: "); log->print(peak_giops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("char4", giops);
     }
@@ -108,13 +102,11 @@ int clPeak::runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_in
 
       workPerWI = 2048;
 
-      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters, &peak_timed);
+      timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
 
       giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
-      peak_giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(giops);
-      log->print(" (peak: "); log->print(peak_giops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("char8", giops);
     }
@@ -127,13 +119,11 @@ int clPeak::runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_in
 
       workPerWI = 2048;
 
-      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters, &peak_timed);
+      timed = run_kernel(queue, kernel_v16, globalSize, localSize, iters);
 
       giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
-      peak_giops = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / peak_timed / 1e3f;
 
       log->print(giops);
-      log->print(" (peak: "); log->print(peak_giops); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("char16", giops);
     }

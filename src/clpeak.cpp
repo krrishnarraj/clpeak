@@ -1,6 +1,5 @@
 #include <clpeak.h>
 #include <cstring>
-#include <limits>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
@@ -170,10 +169,9 @@ int clPeak::runAll()
   return 0;
 }
 
-float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters, float *peak_us)
+float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters)
 {
   float timed = 0;
-  float min_us = std::numeric_limits<float>::max();
 
   // Warm-up runs
   for (uint w = 0; w < warmupCount; w++)
@@ -188,9 +186,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
       queue.finish();
-      float t = timeInUS(timeEvent);
-      timed += t;
-      if (t < min_us) min_us = t;
+      timed += timeInUS(timeEvent);
     }
   }
   else // std timer
@@ -201,14 +197,9 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
       timer.start();
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
       queue.finish();
-      float t = timer.stopAndTime();
-      timed += t;
-      if (t < min_us) min_us = t;
+      timed += timer.stopAndTime();
     }
   }
-
-  if (peak_us)
-    *peak_us = min_us;
 
   return (timed / static_cast<float>(iters));
 }

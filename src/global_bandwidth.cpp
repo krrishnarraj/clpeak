@@ -4,7 +4,7 @@
 
 int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
 {
-  float timed_lo, timed_go, timed, gbps, peak_lo, peak_go, peak_timed, peak_gbps;
+  float timed_lo, timed_go, timed, gbps;
   cl::NDRange globalSize, localSize;
   float *arr = NULL;
 
@@ -73,16 +73,13 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       // Run 2 kind of bandwidth kernel
       // lo -- local_size offset - subsequent fetches at local_size offset
       // go -- global_size offset
-      timed_lo = run_kernel(queue, kernel_v1_lo, globalSize, localSize, iters, &peak_lo);
-      timed_go = run_kernel(queue, kernel_v1_go, globalSize, localSize, iters, &peak_go);
+      timed_lo = run_kernel(queue, kernel_v1_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v1_go, globalSize, localSize, iters);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-      peak_timed = (peak_lo < peak_go) ? peak_lo : peak_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      peak_gbps = ((float)numItems * sizeof(float)) / peak_timed / 1e3f;
 
       log->print(gbps);
-      log->print(" (peak: "); log->print(peak_gbps); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float", gbps);
     }
@@ -95,16 +92,13 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       globalSize = (numItems / 2 / FETCH_PER_WI);
 
-      timed_lo = run_kernel(queue, kernel_v2_lo, globalSize, localSize, iters, &peak_lo);
-      timed_go = run_kernel(queue, kernel_v2_go, globalSize, localSize, iters, &peak_go);
+      timed_lo = run_kernel(queue, kernel_v2_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v2_go, globalSize, localSize, iters);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-      peak_timed = (peak_lo < peak_go) ? peak_lo : peak_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      peak_gbps = ((float)numItems * sizeof(float)) / peak_timed / 1e3f;
 
       log->print(gbps);
-      log->print(" (peak: "); log->print(peak_gbps); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float2", gbps);
     }
@@ -117,16 +111,13 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       globalSize = (numItems / 4 / FETCH_PER_WI);
 
-      timed_lo = run_kernel(queue, kernel_v4_lo, globalSize, localSize, iters, &peak_lo);
-      timed_go = run_kernel(queue, kernel_v4_go, globalSize, localSize, iters, &peak_go);
+      timed_lo = run_kernel(queue, kernel_v4_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v4_go, globalSize, localSize, iters);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-      peak_timed = (peak_lo < peak_go) ? peak_lo : peak_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      peak_gbps = ((float)numItems * sizeof(float)) / peak_timed / 1e3f;
 
       log->print(gbps);
-      log->print(" (peak: "); log->print(peak_gbps); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float4", gbps);
     }
@@ -139,16 +130,13 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       globalSize = (numItems / 8 / FETCH_PER_WI);
 
-      timed_lo = run_kernel(queue, kernel_v8_lo, globalSize, localSize, iters, &peak_lo);
-      timed_go = run_kernel(queue, kernel_v8_go, globalSize, localSize, iters, &peak_go);
+      timed_lo = run_kernel(queue, kernel_v8_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v8_go, globalSize, localSize, iters);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-      peak_timed = (peak_lo < peak_go) ? peak_lo : peak_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      peak_gbps = ((float)numItems * sizeof(float)) / peak_timed / 1e3f;
 
       log->print(gbps);
-      log->print(" (peak: "); log->print(peak_gbps); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float8", gbps);
     }
@@ -160,16 +148,13 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       log->print(TAB TAB TAB "float16 : ");
       globalSize = (numItems / 16 / FETCH_PER_WI);
 
-      timed_lo = run_kernel(queue, kernel_v16_lo, globalSize, localSize, iters, &peak_lo);
-      timed_go = run_kernel(queue, kernel_v16_go, globalSize, localSize, iters, &peak_go);
+      timed_lo = run_kernel(queue, kernel_v16_lo, globalSize, localSize, iters);
+      timed_go = run_kernel(queue, kernel_v16_go, globalSize, localSize, iters);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-      peak_timed = (peak_lo < peak_go) ? peak_lo : peak_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      peak_gbps = ((float)numItems * sizeof(float)) / peak_timed / 1e3f;
 
       log->print(gbps);
-      log->print(" (peak: "); log->print(peak_gbps); log->print(")");
       log->print(NEWLINE);
       log->xmlRecord("float16", gbps);
     }
