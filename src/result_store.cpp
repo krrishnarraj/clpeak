@@ -196,9 +196,193 @@ ResultStore loadResultFile(const std::string &filename)
         ext = filename.substr(dot);
         for (char &c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
     }
-    if (ext == ".csv")
-        return loadCsv(filename);
+    if (ext == ".csv")  return loadCsv(filename);
+    if (ext == ".xml")  return loadXml(filename);
     return loadJson(filename);
+}
+
+// ---- XML parser -----------------------------------------------------------
+// Parses the format produced by the xmlWriter / --enable-xml-dump path.
+// No external XML library required: the format is regular enough for a
+// line-by-line state-machine that tracks the four nesting levels
+// (clpeak > platform > device > test_group > metric_leaf).
+
+static std::string xmlUnescape(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++)
+    {
+        if (s[i] != '&') { out += s[i]; continue; }
+        if      (s.compare(i, 5, "&amp;")  == 0) { out += '&';  i += 4; }
+        else if (s.compare(i, 4, "&lt;")   == 0) { out += '<';  i += 3; }
+        else if (s.compare(i, 4, "&gt;")   == 0) { out += '>';  i += 3; }
+        else if (s.compare(i, 6, "&apos;") == 0) { out += '\''; i += 5; }
+        else if (s.compare(i, 6, "&quot;") == 0) { out += '"';  i += 5; }
+        else                                      { out += s[i]; }
+    }
+    return out;
+}
+
+// Extract the tag name from an opening-tag line (already left-trimmed).
+// Returns "" for closing tags, processing instructions, or malformed input.
+static std::string xmlTagName(const std::string &t)
+{
+    if (t.size() < 2 || t[0] != '<' || t[1] == '/' || t[1] == '?')
+        return "";
+    std::string name;
+    for (size_t i = 1; i < t.size(); i++)
+    {
+        char c = t[i];
+        if (c == ' ' || c == '>' || c == '/') break;
+        name += c;
+    }
+    return name;
+}
+
+// Extract the value of an XML attribute ( attr="value" ).
+static std::string xmlAttr(const std::string &t, const std::string &attr)
+{
+    std::string needle = " " + attr + "=\"";
+    size_t pos = t.find(needle);
+    if (pos == std::string::npos) return "";
+    pos += needle.size();
+    std::string raw;
+    for (; pos < t.size() && t[pos] != '"'; pos++) raw += t[pos];
+    return xmlUnescape(raw);
+}
+
+// Try to read a complete leaf element from a single trimmed line:
+//   <tagname>content</tagname>   (no attributes — metrics never have any)
+// Fills tag and content; returns false if the pattern does not match.
+static bool xmlLeaf(const std::string &t,
+                    std::string &tag, std::string &content)
+{
+    tag = xmlTagName(t);
+    if (tag.empty()) return false;
+
+    // Opening tag must be exactly "<tag>" with no attributes
+    std::string open  = "<"  + tag + ">";
+    std::string close = "</" + tag + ">";
+    if (t.compare(0, open.size(), open) != 0) return false;
+
+    size_t closePos = t.find(close, open.size());
+    if (closePos == std::string::npos) return false;
+
+    content = xmlUnescape(t.substr(open.size(), closePos - open.size()));
+    return true;
+}
+
+ResultStore loadXml(const std::string &filename)
+{
+    ResultStore store;
+    std::ifstream f(filename);
+    if (!f.is_open())
+    {
+        std::cerr << "clpeak: cannot open compare file: " << filename << "\n";
+        return store;
+    }
+
+    std::string platform, device, driver, test, unit;
+    std::string line;
+
+    while (std::getline(f, line))
+    {
+        // Left-trim
+        size_t first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos) continue;
+        const std::string t = line.substr(first);
+        if (t.empty()) continue;
+
+        // Skip processing instructions and closing tags
+        if (t.rfind("<?", 0) == 0 || t.rfind("</", 0) == 0) continue;
+
+        const std::string tag = xmlTagName(t);
+        if (tag.empty()) continue;
+
+        // ---- Structural tags ---------------------------------------------
+
+        if (tag == "clpeak")   { continue; } // root: nothing to extract here
+
+        if (tag == "platform")
+        {
+            platform = xmlAttr(t, "name");
+            device.clear(); driver.clear(); test.clear(); unit.clear();
+            continue;
+        }
+
+        if (tag == "device")
+        {
+            device = xmlAttr(t, "name");
+            driver = xmlAttr(t, "driver_version");
+            test.clear(); unit.clear();
+            continue;
+        }
+
+        // ---- Test group opener (always carries unit= attribute) ----------
+
+        if (t.find(" unit=\"") != std::string::npos)
+        {
+            test = tag;
+            unit = xmlAttr(t, "unit");
+
+            // Single-value tests pack open + content + close on one line:
+            //   <kernel_launch_latency unit="us">2.35</kernel_launch_latency>
+            std::string openTag = "<" + test;
+            size_t openEnd = t.find('>', openTag.size());
+            if (openEnd != std::string::npos)
+            {
+                std::string closeTag = "</" + test + ">";
+                size_t closePos = t.find(closeTag, openEnd + 1);
+                if (closePos != std::string::npos)
+                {
+                    std::string content = xmlUnescape(
+                        t.substr(openEnd + 1, closePos - openEnd - 1));
+                    try
+                    {
+                        ResultEntry e;
+                        e.platform = platform;
+                        e.device   = device;
+                        e.driver   = driver;
+                        e.test     = test;
+                        e.metric   = "latency";
+                        e.unit     = unit;
+                        e.value    = std::stof(content);
+                        if (!e.platform.empty() && !e.test.empty())
+                            store.push_back(e);
+                    }
+                    catch (...) {}
+                }
+            }
+            continue;
+        }
+
+        // ---- Metric leaf: <tag>value</tag> -------------------------------
+
+        if (platform.empty() || device.empty() || test.empty()) continue;
+
+        std::string metricTag, content;
+        if (xmlLeaf(t, metricTag, content))
+        {
+            try
+            {
+                ResultEntry e;
+                e.platform = platform;
+                e.device   = device;
+                e.driver   = driver;
+                e.test     = test;
+                e.metric   = metricTag;
+                e.unit     = unit;
+                e.value    = std::stof(content);
+                store.push_back(e);
+            }
+            catch (...) {}
+        }
+    }
+
+    if (store.empty())
+        std::cerr << "clpeak: warning: no valid entries found in: " << filename << "\n";
+    return store;
 }
 
 // ---- JSON parser ----------------------------------------------------------

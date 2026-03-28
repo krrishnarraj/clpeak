@@ -43,6 +43,9 @@ ResultStore loadJson(const std::string &filename);
 // Parse a CSV file written by saveCsv.
 ResultStore loadCsv(const std::string &filename);
 
+// Parse an XML file written by --enable-xml-dump / --xml-file.
+ResultStore loadXml(const std::string &filename);
+
 // Dispatch to loadJson or loadCsv based on the file extension
 // (.csv -> CSV; anything else -> JSON).
 ResultStore loadResultFile(const std::string &filename);
