@@ -9,8 +9,12 @@ include(${ROOT_FOLDER}/cmake/common.cmake)
 set(SRC_FOLDER "${ROOT_FOLDER}/src")
 add_library(clpeak SHARED
         ${SRC_FOLDER}/common.cpp
+        ${SRC_FOLDER}/result_store.cpp
         ${SRC_FOLDER}/clpeak.cpp
         ${SRC_FOLDER}/global_bandwidth.cpp
+        ${SRC_FOLDER}/local_bandwidth.cpp
+        ${SRC_FOLDER}/image_bandwidth.cpp
+        ${SRC_FOLDER}/atomic_throughput.cpp
         ${SRC_FOLDER}/compute_sp.cpp
         ${SRC_FOLDER}/compute_hp.cpp
         ${SRC_FOLDER}/compute_dp.cpp
