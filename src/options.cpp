@@ -33,6 +33,10 @@ static const char *helpStr =
     "\n  --all-tests                 run all above tests [default]"
     "\n  --enable-xml-dump           Dump results to xml file"
     "\n  -f, --xml-file file_name    specify file name for xml dump"
+    "\n  --json-file file_name       save results to a JSON file"
+    "\n  --csv-file file_name        save results to a CSV file"
+    "\n  --compare file_name         compare results against a JSON baseline;"
+    "\n                              print delta for each metric"
     "\n  -v, --version               display version"
     "\n  -h, --help                  display help message"
     "\n";
@@ -77,6 +81,9 @@ int clPeak::parseArgs(int argc, char **argv)
   bool forcedTests = false;
   bool enableXml = false;
   string xmlFileName;
+  string jsonFile;
+  string csvFile;
+  string compareFile;
 
   for (int i = 1; i < argc; i++)
   {
@@ -264,6 +271,32 @@ int clPeak::parseArgs(int argc, char **argv)
         i++;
       }
     }
+    else if (strcmp(argv[i], "--json-file") == 0)
+    {
+      if ((i + 1) < argc)
+      {
+        enableJson = true;
+        jsonFile = argv[i + 1];
+        i++;
+      }
+    }
+    else if (strcmp(argv[i], "--csv-file") == 0)
+    {
+      if ((i + 1) < argc)
+      {
+        enableCsv = true;
+        csvFile = argv[i + 1];
+        i++;
+      }
+    }
+    else if (strcmp(argv[i], "--compare") == 0)
+    {
+      if ((i + 1) < argc)
+      {
+        compareFileName = argv[i + 1];
+        i++;
+      }
+    }
     else
     {
       printParseMessage(helpStr);
@@ -272,7 +305,13 @@ int clPeak::parseArgs(int argc, char **argv)
     }
   }
 
+  jsonFileName = jsonFile;
+  csvFileName  = csvFile;
+
   // Allocate logger after parsing
-  log = new logger(enableXml, xmlFileName);
+  log = new logger(enableXml, xmlFileName,
+                   enableJson, jsonFileName,
+                   enableCsv,  csvFileName,
+                   compareFileName);
   return 0;
 }

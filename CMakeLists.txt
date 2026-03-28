@@ -40,6 +40,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CLPEAK_SOURCE_FILES
     src/common.cpp
+    src/result_store.cpp
     src/clpeak.cpp
     src/options.cpp
     src/logger.cpp

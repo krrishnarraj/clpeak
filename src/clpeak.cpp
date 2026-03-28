@@ -33,6 +33,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedPlatformName(0), specifiedDeviceName(0), specifiedTestName(0), specifiedIters(0),
                    warmupCount(2),
+                   enableJson(false), enableCsv(false),
                    log(NULL)
 {
 }

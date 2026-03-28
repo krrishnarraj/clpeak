@@ -24,6 +24,16 @@ public:
   char *specifiedTestName;
   uint specifiedIters;
   uint warmupCount;
+
+  // Output format options
+  bool enableJson;
+  std::string jsonFileName;
+  bool enableCsv;
+  std::string csvFileName;
+
+  // Baseline compare
+  std::string compareFileName;
+
   logger *log;
 
   clPeak();
