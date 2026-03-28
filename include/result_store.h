@@ -40,4 +40,11 @@ void saveCsv(const ResultStore &store, const std::string &filename);
 // warning on stderr if the file cannot be opened or contains no valid entries.
 ResultStore loadJson(const std::string &filename);
 
+// Parse a CSV file written by saveCsv.
+ResultStore loadCsv(const std::string &filename);
+
+// Dispatch to loadJson or loadCsv based on the file extension
+// (.csv -> CSV; anything else -> JSON).
+ResultStore loadResultFile(const std::string &filename);
+
 #endif // RESULT_STORE_H

@@ -23,7 +23,7 @@ logger::logger(bool _enableXml,     string _xmlFileName,
 
   if (compareEnabled)
   {
-    ResultStore base = loadJson(_compareFileName);
+    ResultStore base = loadResultFile(_compareFileName);
     baseline = buildBaselineMap(base);
     if (!baseline.empty())
     {

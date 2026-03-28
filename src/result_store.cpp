@@ -98,6 +98,109 @@ void saveCsv(const ResultStore &store, const std::string &filename)
     }
 }
 
+// ---- CSV parser -----------------------------------------------------------
+// Parses the RFC-4180-style quoted format produced by saveCsv.
+// Fields 0-5 are double-quoted strings; field 6 is an unquoted float.
+
+static std::vector<std::string> parseCsvLine(const std::string &line)
+{
+    std::vector<std::string> fields;
+    std::string field;
+    bool inQuotes = false;
+    for (size_t i = 0; i < line.size(); i++)
+    {
+        char c = line[i];
+        if (inQuotes)
+        {
+            if (c == '"')
+            {
+                // "" inside quotes is an escaped quote character
+                if (i + 1 < line.size() && line[i + 1] == '"')
+                {
+                    field += '"';
+                    i++;
+                }
+                else
+                {
+                    inQuotes = false;
+                }
+            }
+            else
+            {
+                field += c;
+            }
+        }
+        else
+        {
+            if      (c == '"')  { inQuotes = true; }
+            else if (c == ',')  { fields.push_back(field); field.clear(); }
+            else if (c == '\r') { /* skip CR in CRLF line endings */ }
+            else                { field += c; }
+        }
+    }
+    fields.push_back(field); // last field (unquoted value)
+    return fields;
+}
+
+ResultStore loadCsv(const std::string &filename)
+{
+    ResultStore store;
+    std::ifstream f(filename);
+    if (!f.is_open())
+    {
+        std::cerr << "clpeak: cannot open compare file: " << filename << "\n";
+        return store;
+    }
+    std::string line;
+    bool header = true;
+    while (std::getline(f, line))
+    {
+        if (header) { header = false; continue; } // skip header row
+        if (line.empty() || line[0] == '\r') continue;
+
+        std::vector<std::string> fields = parseCsvLine(line);
+        if (fields.size() < 7) continue;
+
+        ResultEntry e;
+        e.platform = fields[0];
+        e.device   = fields[1];
+        e.driver   = fields[2];
+        e.test     = fields[3];
+        e.metric   = fields[4];
+        e.unit     = fields[5];
+        try
+        {
+            size_t consumed = 0;
+            e.value = std::stof(fields[6], &consumed);
+            if (consumed == 0) continue;
+        }
+        catch (...) { continue; }
+
+        if (!e.platform.empty() && !e.test.empty() && !e.metric.empty())
+            store.push_back(e);
+    }
+    if (store.empty())
+        std::cerr << "clpeak: warning: no valid entries found in: " << filename << "\n";
+    return store;
+}
+
+// Dispatch to the right parser based on the file extension (.csv vs everything
+// else which is assumed to be JSON).
+ResultStore loadResultFile(const std::string &filename)
+{
+    // Extract and lowercase the extension
+    std::string ext;
+    size_t dot = filename.rfind('.');
+    if (dot != std::string::npos)
+    {
+        ext = filename.substr(dot);
+        for (char &c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    }
+    if (ext == ".csv")
+        return loadCsv(filename);
+    return loadJson(filename);
+}
+
 // ---- JSON parser ----------------------------------------------------------
 // Handles the one-object-per-line format produced by saveJson.  Only the
 // fields needed for ResultEntry are extracted; everything else is ignored.
