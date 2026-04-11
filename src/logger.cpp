@@ -2,10 +2,10 @@
 #include <iomanip>
 #include <sstream>
 
-logger::logger(bool _enableXml,     string _xmlFileName,
-               bool _enableJson,    string _jsonFileName,
-               bool _enableCsv,     string _csvFileName,
-               string _compareFileName)
+logger::logger(bool _enableXml,     std::string _xmlFileName,
+               bool _enableJson,    std::string _jsonFileName,
+               bool _enableCsv,     std::string _csvFileName,
+               std::string _compareFileName)
   : enableXml(_enableXml),
     xw(nullptr),
     enableJson(_enableJson),
@@ -27,9 +27,9 @@ logger::logger(bool _enableXml,     string _xmlFileName,
     baseline = buildBaselineMap(base);
     if (!baseline.empty())
     {
-      cout << "clpeak: comparing against baseline: " << _compareFileName
-           << " (" << baseline.size() << " entries)" << "\n";
-      cout.flush();
+      std::cout << "clpeak: comparing against baseline: " << _compareFileName
+                << " (" << baseline.size() << " entries)" << "\n";
+      std::cout.flush();
     }
   }
 }
@@ -52,41 +52,41 @@ logger::~logger()
 
 // ---- stdout output --------------------------------------------------------
 
-void logger::print(string str)
+void logger::print(std::string str)
 {
-  cout << str;
-  cout.flush();
+  std::cout << str;
+  std::cout.flush();
 }
 
 void logger::print(double val)
 {
-  cout << setprecision(2) << fixed;
-  cout << val;
-  cout.flush();
+  std::cout << std::setprecision(2) << std::fixed;
+  std::cout << val;
+  std::cout.flush();
 }
 
 void logger::print(float val)
 {
-  cout << setprecision(2) << fixed;
-  cout << val;
-  cout.flush();
+  std::cout << std::setprecision(2) << std::fixed;
+  std::cout << val;
+  std::cout.flush();
 }
 
 void logger::print(int val)
 {
-  cout << val;
-  cout.flush();
+  std::cout << val;
+  std::cout.flush();
 }
 
 void logger::print(unsigned int val)
 {
-  cout << val;
-  cout.flush();
+  std::cout << val;
+  std::cout.flush();
 }
 
 // ---- XML / context-tracking -----------------------------------------------
 
-void logger::xmlOpenTag(string tag)
+void logger::xmlOpenTag(std::string tag)
 {
   contextStack.push_back({tag, {}});
 
@@ -97,7 +97,7 @@ void logger::xmlOpenTag(string tag)
   }
 }
 
-void logger::xmlAppendAttribs(string key, string value)
+void logger::xmlAppendAttribs(std::string key, std::string value)
 {
   if (!contextStack.empty())
     contextStack.back().attribs[key] = value;
@@ -109,15 +109,15 @@ void logger::xmlAppendAttribs(string key, string value)
   }
 }
 
-void logger::xmlAppendAttribs(string key, uint value)
+void logger::xmlAppendAttribs(std::string key, unsigned int value)
 {
-  stringstream ss;
+  std::stringstream ss;
   ss << value;
   // Delegate to string overload so the context frame is also updated
   xmlAppendAttribs(key, ss.str());
 }
 
-void logger::xmlSetContent(string value)
+void logger::xmlSetContent(std::string value)
 {
   if (enableXml)
   {
@@ -135,7 +135,7 @@ void logger::xmlSetContent(float value)
 
   if (enableXml)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << value;
     xw->content(ss.str().c_str());
     xmlFile.flush();
@@ -154,7 +154,7 @@ void logger::xmlCloseTag()
   }
 }
 
-void logger::xmlRecord(string tag, string value)
+void logger::xmlRecord(std::string tag, std::string value)
 {
   if (enableXml)
   {
@@ -165,7 +165,7 @@ void logger::xmlRecord(string tag, string value)
   }
 }
 
-void logger::xmlRecord(string tag, float value)
+void logger::xmlRecord(std::string tag, float value)
 {
   // xmlRecord is always called at context depth 4 (clpeak > platform > device
   // > test_group).  Collect the result and optionally print the compare delta.
@@ -174,7 +174,7 @@ void logger::xmlRecord(string tag, float value)
 
   if (enableXml)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << value;
     xw->openElt(tag.c_str());
     xw->content(ss.str().c_str());
@@ -214,11 +214,9 @@ void logger::recordMetric(const std::string &metric, float value)
   char sign = (delta >= 0.0f) ? '+' : '-';
   float absDelta = (delta < 0.0f) ? -delta : delta;
 
-  // Print on its own line, indented to nest visually under the metric value.
-  // TAB TAB TAB TAB = 8 spaces; "(was X.XX, +/-d.d%)" gives full context.
-  cout << "        "
-       << "(was " << fixed << setprecision(2) << base
-       << ",  " << sign << setprecision(1) << absDelta << "%)"
-       << "\n";
-  cout.flush();
+  std::cout << "        "
+            << "(was " << std::fixed << std::setprecision(2) << base
+            << ",  " << sign << std::setprecision(1) << absDelta << "%)"
+            << "\n";
+  std::cout.flush();
 }

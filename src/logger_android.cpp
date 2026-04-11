@@ -8,10 +8,10 @@
 // that recordMetric() can extract fully-qualified result entries and dispatch
 // them to the Kotlin layer via a second JNI callback.
 
-logger::logger(bool _enableXml,     string _xmlFileName,
-               bool _enableJson,    string _jsonFileName,
-               bool _enableCsv,     string _csvFileName,
-               string _compareFileName)
+logger::logger(bool _enableXml,     std::string _xmlFileName,
+               bool _enableJson,    std::string _jsonFileName,
+               bool _enableCsv,     std::string _csvFileName,
+               std::string _compareFileName)
   : enableXml(false),
     xw(nullptr),
     enableJson(false),
@@ -28,61 +28,61 @@ logger::~logger()
 {
 }
 
-// ---- stdout → JNI callbacks ----------------------------------------------
+// ---- stdout -> JNI callbacks ----------------------------------------------
 
-void logger::print(string str)
+void logger::print(std::string str)
 {
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(str.c_str()));
 }
 
 void logger::print(double val)
 {
-  stringstream ss;
-  ss << setprecision(2) << fixed << val;
+  std::stringstream ss;
+  ss << std::setprecision(2) << std::fixed << val;
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
 }
 
 void logger::print(float val)
 {
-  stringstream ss;
-  ss << setprecision(2) << fixed << val;
+  std::stringstream ss;
+  ss << std::setprecision(2) << std::fixed << val;
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
 }
 
 void logger::print(int val)
 {
-  stringstream ss;
+  std::stringstream ss;
   ss << val;
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
 }
 
 void logger::print(unsigned int val)
 {
-  stringstream ss;
+  std::stringstream ss;
   ss << val;
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
 }
 
-// ---- Context stack — maintained in memory for recordMetric() -------------
+// ---- Context stack -- maintained in memory for recordMetric() -------------
 
-void logger::xmlOpenTag(string tag)
+void logger::xmlOpenTag(std::string tag)
 {
   contextStack.push_back({tag, {}});
 }
 
-void logger::xmlAppendAttribs(string key, string value)
+void logger::xmlAppendAttribs(std::string key, std::string value)
 {
   if (!contextStack.empty())
     contextStack.back().attribs[key] = value;
 }
 
-void logger::xmlAppendAttribs(string key, uint value)
+void logger::xmlAppendAttribs(std::string key, unsigned int value)
 {
   if (!contextStack.empty())
     contextStack.back().attribs[key] = std::to_string(value);
 }
 
-void logger::xmlSetContent(string value)
+void logger::xmlSetContent(std::string value)
 {
   (void)value;
 }
@@ -99,18 +99,18 @@ void logger::xmlCloseTag()
     contextStack.pop_back();
 }
 
-void logger::xmlRecord(string tag, string value)
+void logger::xmlRecord(std::string tag, std::string value)
 {
   (void)tag; (void)value;
 }
 
-void logger::xmlRecord(string tag, float value)
+void logger::xmlRecord(std::string tag, float value)
 {
   // Called at context depth 4 (clpeak > platform > device > test_group)
   recordMetric(tag, value);
 }
 
-// ---- Structured metric callback → Kotlin ---------------------------------
+// ---- Structured metric callback -> Kotlin ---------------------------------
 
 void logger::recordMetric(const std::string &metric, float value)
 {

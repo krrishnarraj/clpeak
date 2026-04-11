@@ -1,17 +1,15 @@
 #include <clpeak.h>
 
-#define FETCH_PER_WI 16
-
-int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
+int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  if (!isKernelLatency)
+  if (!isTestEnabled(Benchmark::KernelLatency))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
   cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
   cl::NDRange globalSize = (numItems / FETCH_PER_WI);
   cl::NDRange localSize = devInfo.maxWGSize;
-  uint iters = devInfo.kernelLatencyIters;
+  unsigned int iters = cfg.kernelLatencyIters;
   float latency;
 
   try
@@ -32,10 +30,10 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     queue.finish();
 
     latency = 0;
-    for (uint i = 0; i < iters; i++)
+    for (unsigned int i = 0; i < iters; i++)
     {
       cl::Event timeEvent;
-      queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, NULL, &timeEvent);
+      queue.enqueueNDRangeKernel(kernel_v1, cl::NullRange, globalSize, localSize, nullptr, &timeEvent);
       queue.finish();
       cl_ulong start = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_QUEUED>() / 1000;
       cl_ulong end = timeEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() / 1000;
@@ -50,7 +48,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   }
   catch (cl::Error &error)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());

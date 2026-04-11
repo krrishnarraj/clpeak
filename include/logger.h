@@ -18,8 +18,6 @@
 #include <jni.h>
 #endif
 
-using namespace std;
-
 // One frame on the XML context stack.  Tracks the tag name and all key-value
 // attributes set via xmlAppendAttribs so that xmlRecord can build a fully
 // qualified ResultEntry without needing changes in the benchmark code.
@@ -33,7 +31,7 @@ class logger
 public:
   // ---- XML output ---------------------------------------------------------
   bool enableXml;
-  ofstream xmlFile;
+  std::ofstream xmlFile;
   xmlWriter *xw;
 
   // ---- JSON / CSV output --------------------------------------------------
@@ -57,29 +55,29 @@ public:
   jmethodID recordMetricCallback;
 #endif
 
-  logger(bool _enableXml     = false, string _xmlFileName     = "",
-         bool _enableJson     = false, string _jsonFileName    = "",
-         bool _enableCsv      = false, string _csvFileName     = "",
-         string _compareFileName = "");
+  logger(bool _enableXml      = false, std::string _xmlFileName     = "",
+         bool _enableJson     = false, std::string _jsonFileName    = "",
+         bool _enableCsv      = false, std::string _csvFileName     = "",
+         std::string _compareFileName = "");
   ~logger();
 
   // Overloaded function to print on stdout/android activity
-  void print(string str);
+  void print(std::string str);
   void print(double val);
   void print(float val);
   void print(int val);
   void print(unsigned int val);
 
   // Functions to record metrics into xml file
-  void xmlOpenTag(string tag);
-  void xmlAppendAttribs(string key, string value);
-  void xmlAppendAttribs(string key, uint value);
-  void xmlSetContent(string value);
+  void xmlOpenTag(std::string tag);
+  void xmlAppendAttribs(std::string key, std::string value);
+  void xmlAppendAttribs(std::string key, unsigned int value);
+  void xmlSetContent(std::string value);
   void xmlSetContent(float value);
   void xmlCloseTag();
 
-  void xmlRecord(string tag, string value);
-  void xmlRecord(string tag, float value);
+  void xmlRecord(std::string tag, std::string value);
+  void xmlRecord(std::string tag, float value);
 
 private:
   // Extract context and push a ResultEntry; optionally print compare delta.

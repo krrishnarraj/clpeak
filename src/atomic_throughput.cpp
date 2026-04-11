@@ -1,19 +1,16 @@
 #include <clpeak.h>
 
-// Must match ATOMIC_REPS defined in atomic_throughput_kernels.cl
-static const uint ATOMIC_REPS = 512;
-
-int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
+int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed, giops;
   cl::NDRange globalSize, localSize;
 
-  if (!isAtomicThroughput)
+  if (!isTestEnabled(Benchmark::AtomicThroughput))
     return 0;
 
-  uint iters = devInfo.computeIters;
+  unsigned int iters = cfg.computeIters;
 
-  uint64_t globalWIs = (uint64_t)devInfo.numCUs * devInfo.computeWgsPerCU * devInfo.maxWGSize;
+  uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
   uint64_t numWGs    = globalWIs / devInfo.maxWGSize;
 
   try
@@ -28,8 +25,8 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     localSize  = devInfo.maxWGSize;
 
     ///////////////////////////////////////////////////////////////////////////
-    // Global atomics — independent per-WI counters (no cross-WI contention)
-    if (!forceTest || strcmp(specifiedTestName, "global") == 0)
+    // Global atomics -- independent per-WI counters (no cross-WI contention)
+    if (!forceTest || specifiedTestName == "global")
     {
       log->print(TAB TAB TAB "global  : ");
 
@@ -50,8 +47,8 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     }
     ///////////////////////////////////////////////////////////////////////////
 
-    // Local atomics — all WIs in a WG contend on one shared counter
-    if (!forceTest || strcmp(specifiedTestName, "local") == 0)
+    // Local atomics -- all WIs in a WG contend on one shared counter
+    if (!forceTest || specifiedTestName == "local")
     {
       log->print(TAB TAB TAB "local   : ");
 
@@ -74,7 +71,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   }
   catch (cl::Error &error)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());

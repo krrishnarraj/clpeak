@@ -1,9 +1,40 @@
 #include <common.h>
+#include <benchmark_constants.h>
 #include <iostream>
 #include <string>
 #include <cctype>
 
-using namespace std;
+benchmark_config_t benchmark_config_t::forDevice(cl_device_type type)
+{
+  benchmark_config_t cfg;
+
+  if (type & CL_DEVICE_TYPE_CPU)
+  {
+    cfg.globalBWIters = 20;
+    cfg.globalBWMaxSize = 1 << 27;
+    cfg.computeWgsPerCU = 512;
+    cfg.computeDPWgsPerCU = 256;
+    cfg.computeIters = 10;
+    cfg.localBWIters = 20;
+    cfg.imageBWIters = 20;
+    cfg.transferBWMaxSize = 1 << 27;
+  }
+  else
+  { // GPU
+    cfg.globalBWIters = 50;
+    cfg.globalBWMaxSize = 1 << 29;
+    cfg.computeWgsPerCU = 2048;
+    cfg.computeDPWgsPerCU = 512;
+    cfg.computeIters = 30;
+    cfg.localBWIters = 50;
+    cfg.imageBWIters = 50;
+    cfg.transferBWMaxSize = 1 << 29;
+  }
+  cfg.transferBWIters = 20;
+  cfg.kernelLatencyIters = 20000;
+
+  return cfg;
+}
 
 device_info_t getDeviceInfo(cl::Device &d)
 {
@@ -14,23 +45,22 @@ device_info_t getDeviceInfo(cl::Device &d)
   trimString(devInfo.deviceName);
   trimString(devInfo.driverVersion);
 
-  devInfo.numCUs = (uint)d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
-  vector<size_t> maxWIPerDim;
+  devInfo.numCUs = (unsigned int)d.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
+  std::vector<size_t> maxWIPerDim;
   maxWIPerDim = d.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>();
-  devInfo.maxWGSize = (uint)maxWIPerDim[0];
+  devInfo.maxWGSize = (unsigned int)maxWIPerDim[0];
 
-  // Cap work-group size to what hardware reports (up to 1024)
-#define MAX_WG_SIZE 1024
-  devInfo.maxWGSize = std::min(devInfo.maxWGSize, (uint)MAX_WG_SIZE);
+  // Cap work-group size to what hardware reports (up to MAX_WG_SIZE)
+  devInfo.maxWGSize = std::min(devInfo.maxWGSize, (unsigned int)MAX_WG_SIZE);
 
   // FIXME limit max-workgroup size for qualcomm platform to 128
   // Kernel launch fails for workgroup size 256(CL_DEVICE_MAX_WORK_ITEM_SIZES)
-  string vendor = d.getInfo<CL_DEVICE_VENDOR>();
+  std::string vendor = d.getInfo<CL_DEVICE_VENDOR>();
   std::string vendorLower = vendor;
   std::transform(vendorLower.begin(), vendorLower.end(), vendorLower.begin(), ::tolower);
   if (vendorLower.find("qualcomm") != std::string::npos)
   {
-    devInfo.maxWGSize = std::min(devInfo.maxWGSize, (uint)128);
+    devInfo.maxWGSize = std::min(devInfo.maxWGSize, (unsigned int)128);
   }
 
   devInfo.maxAllocSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>());
@@ -40,7 +70,7 @@ device_info_t getDeviceInfo(cl::Device &d)
   devInfo.imageSupported = (d.getInfo<CL_DEVICE_IMAGE_SUPPORT>() == CL_TRUE);
   devInfo.image2dMaxWidth  = devInfo.imageSupported ? static_cast<uint64_t>(d.getInfo<CL_DEVICE_IMAGE2D_MAX_WIDTH>())  : 0;
   devInfo.image2dMaxHeight = devInfo.imageSupported ? static_cast<uint64_t>(d.getInfo<CL_DEVICE_IMAGE2D_MAX_HEIGHT>()) : 0;
-  devInfo.maxClockFreq = static_cast<uint>(d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>());
+  devInfo.maxClockFreq = static_cast<unsigned int>(d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>());
   devInfo.doubleSupported = false;
   devInfo.halfSupported = false;
 
@@ -53,31 +83,6 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.doubleSupported = true;
 
   devInfo.deviceType = d.getInfo<CL_DEVICE_TYPE>();
-
-  if (devInfo.deviceType & CL_DEVICE_TYPE_CPU)
-  {
-    devInfo.globalBWIters = 20;
-    devInfo.globalBWMaxSize = 1 << 27;
-    devInfo.computeWgsPerCU = 512;
-    devInfo.computeDPWgsPerCU = 256;
-    devInfo.computeIters = 10;
-    devInfo.localBWIters = 20;
-    devInfo.imageBWIters = 20;
-    devInfo.transferBWMaxSize = 1 << 27;
-  }
-  else
-  { // GPU
-    devInfo.globalBWIters = 50;
-    devInfo.globalBWMaxSize = 1 << 29;
-    devInfo.computeWgsPerCU = 2048;
-    devInfo.computeDPWgsPerCU = 512;
-    devInfo.computeIters = 30;
-    devInfo.localBWIters = 50;
-    devInfo.imageBWIters = 50;
-    devInfo.transferBWMaxSize = 1 << 29;
-  }
-  devInfo.transferBWIters = 20;
-  devInfo.kernelLatencyIters = 20000;
 
   return devInfo;
 }
@@ -92,13 +97,13 @@ float timeInUS(cl::Event &timeEvent)
 
 void Timer::start()
 {
-  tick = chrono::high_resolution_clock::now();
+  tick = std::chrono::high_resolution_clock::now();
 }
 
 float Timer::stopAndTime()
 {
-  tock = chrono::high_resolution_clock::now();
-  return (float)(chrono::duration_cast<chrono::microseconds>(tock - tick).count());
+  tock = std::chrono::high_resolution_clock::now();
+  return (float)(std::chrono::duration_cast<std::chrono::microseconds>(tock - tick).count());
 }
 
 void populate(float *ptr, uint64_t N)

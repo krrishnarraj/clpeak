@@ -1,19 +1,16 @@
 #include <clpeak.h>
 
-// Must match the rep count hardcoded in local_bandwidth_kernels.cl
-static const uint LMEM_REPS = 64;
-
-int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
+int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed, gbps;
   cl::NDRange globalSize, localSize;
 
-  if (!isLocalBW)
+  if (!isTestEnabled(Benchmark::LocalBW))
     return 0;
 
-  uint iters = devInfo.localBWIters;
+  unsigned int iters = cfg.localBWIters;
 
-  uint64_t globalWIs = (uint64_t)devInfo.numCUs * devInfo.computeWgsPerCU * devInfo.maxWGSize;
+  uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
   try
   {
@@ -27,96 +24,46 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     globalSize = globalWIs;
     localSize  = devInfo.maxWGSize;
 
-    cl::Kernel kernel_v1(prog, "local_bandwidth_v1");
-    kernel_v1.setArg(0, outputBuf);
-    kernel_v1.setArg(1, cl::Local(devInfo.maxWGSize * 1 * sizeof(cl_float)));
+    const int widths[] = {1, 2, 4, 8};
+    const char *knames[] = {"local_bandwidth_v1", "local_bandwidth_v2", "local_bandwidth_v4", "local_bandwidth_v8"};
+    const char *labels[] = {"float", "float2", "float4", "float8"};
+    const char *display[] = {"float   ", "float2  ", "float4  ", "float8  "};
 
-    cl::Kernel kernel_v2(prog, "local_bandwidth_v2");
-    kernel_v2.setArg(0, outputBuf);
-    kernel_v2.setArg(1, cl::Local(devInfo.maxWGSize * 2 * sizeof(cl_float)));
-
-    cl::Kernel kernel_v4(prog, "local_bandwidth_v4");
-    kernel_v4.setArg(0, outputBuf);
-    kernel_v4.setArg(1, cl::Local(devInfo.maxWGSize * 4 * sizeof(cl_float)));
-
-    cl::Kernel kernel_v8(prog, "local_bandwidth_v8");
-    kernel_v8.setArg(0, outputBuf);
-    kernel_v8.setArg(1, cl::Local(devInfo.maxWGSize * 8 * sizeof(cl_float)));
-
-    ///////////////////////////////////////////////////////////////////////////
-    // float
-    if (!forceTest || strcmp(specifiedTestName, "float") == 0)
+    cl::Kernel kernels[4];
+    for (int w = 0; w < 4; w++)
     {
-      log->print(TAB TAB TAB "float   : ");
+      kernels[w] = cl::Kernel(prog, knames[w]);
+      kernels[w].setArg(0, outputBuf);
+      kernels[w].setArg(1, cl::Local(devInfo.maxWGSize * widths[w] * sizeof(cl_float)));
+    }
 
-      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+    for (int w = 0; w < 4; w++)
+    {
+      if (forceTest && specifiedTestName != labels[w])
+        continue;
 
-      // Each rep: 1 write + 1 read per WI = 2 * sizeof(float) bytes per WI
-      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * 1 * sizeof(cl_float) * globalWIs;
+      // float8 requires enough local memory
+      if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
+        continue;
+
+      log->print(TAB TAB TAB + std::string(display[w]) + ": ");
+
+      timed = run_kernel(queue, kernels[w], globalSize, localSize, iters);
+
+      // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
+      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * globalWIs;
       gbps = (float)bytesPerCall / timed / 1e3f;
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("float", gbps);
+      log->xmlRecord(labels[w], gbps);
     }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // float2
-    if (!forceTest || strcmp(specifiedTestName, "float2") == 0)
-    {
-      log->print(TAB TAB TAB "float2  : ");
-
-      timed = run_kernel(queue, kernel_v2, globalSize, localSize, iters);
-
-      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * 2 * sizeof(cl_float) * globalWIs;
-      gbps = (float)bytesPerCall / timed / 1e3f;
-
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("float2", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // float4
-    if (!forceTest || strcmp(specifiedTestName, "float4") == 0)
-    {
-      log->print(TAB TAB TAB "float4  : ");
-
-      timed = run_kernel(queue, kernel_v4, globalSize, localSize, iters);
-
-      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * 4 * sizeof(cl_float) * globalWIs;
-      gbps = (float)bytesPerCall / timed / 1e3f;
-
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("float4", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // float8 — requires 32 KB local memory per workgroup; skip if insufficient
-    if (!forceTest || strcmp(specifiedTestName, "float8") == 0)
-    {
-      if (devInfo.localMemSize >= devInfo.maxWGSize * 8 * sizeof(cl_float))
-      {
-        log->print(TAB TAB TAB "float8  : ");
-
-        timed = run_kernel(queue, kernel_v8, globalSize, localSize, iters);
-
-        uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * 8 * sizeof(cl_float) * globalWIs;
-        gbps = (float)bytesPerCall / timed / 1e3f;
-
-        log->print(gbps);
-        log->print(NEWLINE);
-        log->xmlRecord("float8", gbps);
-      }
-    }
-    ///////////////////////////////////////////////////////////////////////////
 
     log->xmlCloseTag(); // local_memory_bandwidth
   }
   catch (cl::Error &error)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());

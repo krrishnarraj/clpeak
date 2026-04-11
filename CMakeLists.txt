@@ -48,13 +48,6 @@ set(CLPEAK_SOURCE_FILES
     src/local_bandwidth.cpp
     src/image_bandwidth.cpp
     src/atomic_throughput.cpp
-    src/compute_sp.cpp
-    src/compute_hp.cpp
-    src/compute_dp.cpp
-    src/compute_integer.cpp
-    src/compute_integer_fast.cpp
-    src/compute_char.cpp
-    src/compute_short.cpp
     src/transfer_bandwidth.cpp
     src/kernel_latency.cpp
     src/entry.cpp

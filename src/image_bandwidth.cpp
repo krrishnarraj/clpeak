@@ -1,15 +1,12 @@
 #include <clpeak.h>
 #include <algorithm>
 
-// Must match the rep count hardcoded in image_bandwidth_kernels.cl
-static const uint IMAGE_FETCH_PER_WI = 16;
-
-int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
+int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed, gbps;
   cl::NDRange globalSize, localSize;
 
-  if (!isImageBW)
+  if (!isTestEnabled(Benchmark::ImageBW))
     return 0;
 
   log->print(NEWLINE TAB TAB "Image memory bandwidth (GBPS)" NEWLINE);
@@ -23,7 +20,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
   }
 
-  uint iters = devInfo.imageBWIters;
+  unsigned int iters = cfg.imageBWIters;
 
   // Choose image dimensions: up to 4096x4096, bounded by device limits and maxAllocSize
   uint64_t imgW = std::min((uint64_t)4096, devInfo.image2dMaxWidth);
@@ -37,7 +34,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       imgH = 1;
   }
 
-  uint64_t globalWIs = (uint64_t)devInfo.numCUs * devInfo.computeWgsPerCU * devInfo.maxWGSize;
+  uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
   try
   {
@@ -52,8 +49,8 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     localSize  = devInfo.maxWGSize;
 
     ///////////////////////////////////////////////////////////////////////////
-    // float4 — read_imagef always returns float4 (RGBA)
-    if (!forceTest || strcmp(specifiedTestName, "float4") == 0)
+    // float4 -- read_imagef always returns float4 (RGBA)
+    if (!forceTest || specifiedTestName == "float4")
     {
       log->print(TAB TAB TAB "float4  : ");
 
@@ -77,7 +74,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   }
   catch (cl::Error &error)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());

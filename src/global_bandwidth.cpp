@@ -1,21 +1,19 @@
 #include <clpeak.h>
 
-#define FETCH_PER_WI 16
-
-int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
+int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed_lo, timed_go, timed, gbps;
   cl::NDRange globalSize, localSize;
-  float *arr = NULL;
+  float *arr = nullptr;
 
-  if (!isGlobalBW)
+  if (!isTestEnabled(Benchmark::GlobalBW))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  uint iters = devInfo.globalBWIters;
+  unsigned int iters = cfg.globalBWIters;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), devInfo.globalBWMaxSize);
+  uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize);
 
   try
   {
@@ -60,123 +58,52 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     cl::Kernel kernel_v16_go(prog, "global_bandwidth_v16_global_offset");
     kernel_v16_go.setArg(0, inputBuf), kernel_v16_go.setArg(1, outputBuf);
 
+    cl::Kernel *lo_kernels[] = {&kernel_v1_lo, &kernel_v2_lo, &kernel_v4_lo, &kernel_v8_lo, &kernel_v16_lo};
+    cl::Kernel *go_kernels[] = {&kernel_v1_go, &kernel_v2_go, &kernel_v4_go, &kernel_v8_go, &kernel_v16_go};
+    const int widths[] = {1, 2, 4, 8, 16};
+    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    const char *display[] = {"float   ", "float2  ", "float4  ", "float8  ", "float16 "};
+
     localSize = devInfo.maxWGSize;
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Vector width 1
-    if (!forceTest || strcmp(specifiedTestName, "float") == 0)
+    for (int w = 0; w < 5; w++)
     {
-      log->print(TAB TAB TAB "float   : ");
+      if (forceTest && specifiedTestName != labels[w])
+        continue;
 
-      globalSize = numItems / FETCH_PER_WI;
+      log->print(TAB TAB TAB + std::string(display[w]) + ": ");
 
-      // Run 2 kind of bandwidth kernel
-      // lo -- local_size offset - subsequent fetches at local_size offset
-      // go -- global_size offset
-      timed_lo = run_kernel(queue, kernel_v1_lo, globalSize, localSize, iters);
-      timed_go = run_kernel(queue, kernel_v1_go, globalSize, localSize, iters);
+      globalSize = numItems / widths[w] / FETCH_PER_WI;
+
+      timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, iters);
+      timed_go = run_kernel(queue, *go_kernels[w], globalSize, localSize, iters);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("float", gbps);
+      log->xmlRecord(labels[w], gbps);
     }
-    ///////////////////////////////////////////////////////////////////////////
 
-    // Vector width 2
-    if (!forceTest || strcmp(specifiedTestName, "float2") == 0)
-    {
-      log->print(TAB TAB TAB "float2  : ");
-
-      globalSize = (numItems / 2 / FETCH_PER_WI);
-
-      timed_lo = run_kernel(queue, kernel_v2_lo, globalSize, localSize, iters);
-      timed_go = run_kernel(queue, kernel_v2_go, globalSize, localSize, iters);
-      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("float2", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // Vector width 4
-    if (!forceTest || strcmp(specifiedTestName, "float4") == 0)
-    {
-      log->print(TAB TAB TAB "float4  : ");
-
-      globalSize = (numItems / 4 / FETCH_PER_WI);
-
-      timed_lo = run_kernel(queue, kernel_v4_lo, globalSize, localSize, iters);
-      timed_go = run_kernel(queue, kernel_v4_go, globalSize, localSize, iters);
-      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("float4", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // Vector width 8
-    if (!forceTest || strcmp(specifiedTestName, "float8") == 0)
-    {
-      log->print(TAB TAB TAB "float8  : ");
-
-      globalSize = (numItems / 8 / FETCH_PER_WI);
-
-      timed_lo = run_kernel(queue, kernel_v8_lo, globalSize, localSize, iters);
-      timed_go = run_kernel(queue, kernel_v8_go, globalSize, localSize, iters);
-      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("float8", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // Vector width 16
-    if (!forceTest || strcmp(specifiedTestName, "float16") == 0)
-    {
-      log->print(TAB TAB TAB "float16 : ");
-      globalSize = (numItems / 16 / FETCH_PER_WI);
-
-      timed_lo = run_kernel(queue, kernel_v16_lo, globalSize, localSize, iters);
-      timed_go = run_kernel(queue, kernel_v16_go, globalSize, localSize, iters);
-      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("float16", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // global_memory_bandwidth
 
-    if (arr)
-    {
-      delete[] arr;
-    }
+    delete[] arr;
   }
   catch (cl::Error &error)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
-    if (arr)
-    {
-      delete[] arr;
-    }
+    delete[] arr;
+    return -1;
+  }
+  catch (std::bad_alloc &)
+  {
+    log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
+    delete[] arr;
     return -1;
   }
 

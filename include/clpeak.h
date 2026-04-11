@@ -4,26 +4,44 @@
 #include <iostream>
 #include <stdio.h>
 #include <iomanip>
-#include <string.h>
+#include <cstring>
 #include <sstream>
+#include <bitset>
+#include <memory>
 #include <common.h>
+#include <benchmark_constants.h>
 #include <logger.h>
 
 #define BUILD_OPTIONS " -cl-mad-enable "
 
-using namespace std;
+enum class Benchmark : unsigned int {
+  GlobalBW = 0,
+  LocalBW,
+  ImageBW,
+  ComputeHP,
+  ComputeSP,
+  ComputeDP,
+  ComputeInt,
+  ComputeIntFast,
+  ComputeChar,
+  ComputeShort,
+  AtomicThroughput,
+  TransferBW,
+  KernelLatency,
+  COUNT
+};
 
 class clPeak
 {
 public:
   bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, forceIters, useEventTimer;
-  bool isGlobalBW, isLocalBW, isImageBW, isComputeHP, isComputeSP, isComputeDP, isComputeIntFast, isComputeInt, isAtomicThroughput, isTransferBW, isKernelLatency, isComputeChar, isComputeShort;
-  ulong specifiedPlatform, specifiedDevice;
-  char *specifiedPlatformName;
-  char *specifiedDeviceName;
-  char *specifiedTestName;
-  uint specifiedIters;
-  uint warmupCount;
+  std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
+  unsigned long specifiedPlatform, specifiedDevice;
+  std::string specifiedPlatformName;
+  std::string specifiedDeviceName;
+  std::string specifiedTestName;
+  unsigned int specifiedIters;
+  unsigned int warmupCount;
 
   // Output format options
   bool enableJson;
@@ -34,40 +52,42 @@ public:
   // Baseline compare
   std::string compareFileName;
 
-  logger *log;
+  // List devices mode
+  bool listDevices;
+
+  std::unique_ptr<logger> log;
 
   clPeak();
-  ~clPeak();
+  ~clPeak() = default;
 
   int parseArgs(int argc, char **argv);
 
-  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, uint iters);
+  bool isTestEnabled(Benchmark b) const { return enabledTests.test(static_cast<size_t>(b)); }
+  void enableTest(Benchmark b)  { enabledTests.set(static_cast<size_t>(b)); }
+  void disableAll()             { enabledTests.reset(); }
+  void enableAll()              { enabledTests.set(); }
 
-  int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, unsigned int iters);
 
-  int runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  // Unified compute benchmark helper -- replaces 7 nearly-identical runCompute* methods
+  int runComputeTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo,
+                     benchmark_config_t &cfg, Benchmark which,
+                     const std::string &displayName, const std::string &xmlTag,
+                     const std::string &kernelPrefix, const std::string &typeName,
+                     const std::string &unit, unsigned int workPerWI,
+                     unsigned int wgsPerCU, size_t elemSize);
 
-  int runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 
-  int runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 
-  int runComputeSP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 
-  int runComputeHP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 
-  int runComputeDP(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 
-  int runComputeInteger(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
-
-  int runComputeIntFast(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
-
-  int runComputeChar(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
-
-  int runComputeShort(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
-
-  int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
-
-  int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo);
+  int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 
   int runAll();
 };

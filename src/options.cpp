@@ -31,6 +31,10 @@ static const char *helpStr =
     "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
     "\n  --kernel-latency            selectively run kernel latency test"
     "\n  --all-tests                 run all above tests [default]"
+    "\n  --list-devices              list available platforms/devices and exit"
+#ifdef ENABLE_VULKAN
+    "\n  --vulkan                    use Vulkan compute backend instead of OpenCL"
+#endif
     "\n  --enable-xml-dump           Dump results to xml file"
     "\n  -f, --xml-file file_name    specify file name for xml dump"
     "\n  --json-file file_name       save results to a JSON file"
@@ -43,15 +47,15 @@ static const char *helpStr =
 
 static void printParseErrorAndExit()
 {
-  cout << helpStr;
-  cout << NEWLINE;
-  cout.flush();
+  std::cout << helpStr;
+  std::cout << NEWLINE;
+  std::cout.flush();
   exit(-1);
 }
 
 static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
 {
-  char *end = NULL;
+  char *end = nullptr;
   errno = 0;
 
   value = strtoul(arg, &end, 0);
@@ -59,31 +63,54 @@ static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
   return (errno != ERANGE) && (end != arg) && (*end == '\0');
 }
 
-static bool parseUIntArg(const char *arg, uint &value, bool allowZero = true)
+static bool parseUIntArg(const char *arg, unsigned int &value, bool allowZero = true)
 {
   unsigned long parsed;
 
-  if (!parseUnsignedLongArg(arg, parsed) || (parsed > std::numeric_limits<uint>::max()) || (!allowZero && (parsed == 0)))
+  if (!parseUnsignedLongArg(arg, parsed) || (parsed > std::numeric_limits<unsigned int>::max()) || (!allowZero && (parsed == 0)))
     return false;
 
-  value = static_cast<uint>(parsed);
+  value = static_cast<unsigned int>(parsed);
   return true;
 }
 
 static void printParseMessage(const std::string &message)
 {
-  cout << message;
-  cout.flush();
+  std::cout << message;
+  std::cout.flush();
 }
+
+// Map from CLI flag to Benchmark enum
+struct TestFlag {
+  const char *flag;
+  Benchmark test;
+};
+
+static const TestFlag testFlags[] = {
+  {"--global-bandwidth",  Benchmark::GlobalBW},
+  {"--local-bandwidth",   Benchmark::LocalBW},
+  {"--image-bandwidth",   Benchmark::ImageBW},
+  {"--atomic-throughput",  Benchmark::AtomicThroughput},
+  {"--compute-hp",        Benchmark::ComputeHP},
+  {"--compute-sp",        Benchmark::ComputeSP},
+  {"--compute-dp",        Benchmark::ComputeDP},
+  {"--compute-integer",   Benchmark::ComputeInt},
+  {"--compute-intfast",   Benchmark::ComputeIntFast},
+  {"--compute-char",      Benchmark::ComputeChar},
+  {"--compute-short",     Benchmark::ComputeShort},
+  {"--transfer-bandwidth", Benchmark::TransferBW},
+  {"--kernel-latency",    Benchmark::KernelLatency},
+};
+static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
 int clPeak::parseArgs(int argc, char **argv)
 {
   bool forcedTests = false;
   bool enableXml = false;
-  string xmlFileName;
-  string jsonFile;
-  string csvFile;
-  string compareFile;
+  std::string xmlFileName;
+  std::string jsonFile;
+  std::string csvFile;
+  std::string compareFile;
 
   for (int i = 1; i < argc; i++)
   {
@@ -95,7 +122,7 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if ((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
     {
-      stringstream versionStr;
+      std::stringstream versionStr;
       versionStr << "clpeak version: " << VERSION_STR;
 
       printParseMessage(versionStr.str());
@@ -161,7 +188,7 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       if ((i + 1) < argc)
       {
-        uint parsed;
+        unsigned int parsed;
 
         if (!parseUIntArg(argv[i + 1], parsed, false))
           printParseErrorAndExit();
@@ -175,7 +202,7 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       if ((i + 1) < argc)
       {
-        uint parsed;
+        unsigned int parsed;
 
         if (!parseUIntArg(argv[i + 1], parsed))
           printParseErrorAndExit();
@@ -188,71 +215,13 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       useEventTimer = true;
     }
-    else if ((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--local-bandwidth") == 0) || (strcmp(argv[i], "--image-bandwidth") == 0) || (strcmp(argv[i], "--atomic-throughput") == 0) || (strcmp(argv[i], "--compute-hp") == 0) || (strcmp(argv[i], "--compute-sp") == 0) || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0) || (strcmp(argv[i], "--compute-intfast") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0) || (strcmp(argv[i], "--compute-char") == 0) || (strcmp(argv[i], "--compute-short") == 0))
+    else if (strcmp(argv[i], "--list-devices") == 0)
     {
-      // Disable all and enable only selected ones
-      if (!forcedTests)
-      {
-        isGlobalBW = isLocalBW = isImageBW = isAtomicThroughput = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = false;
-        forcedTests = true;
-      }
-
-      if (strcmp(argv[i], "--global-bandwidth") == 0)
-      {
-        isGlobalBW = true;
-      }
-      else if (strcmp(argv[i], "--local-bandwidth") == 0)
-      {
-        isLocalBW = true;
-      }
-      else if (strcmp(argv[i], "--image-bandwidth") == 0)
-      {
-        isImageBW = true;
-      }
-      else if (strcmp(argv[i], "--atomic-throughput") == 0)
-      {
-        isAtomicThroughput = true;
-      }
-      else if (strcmp(argv[i], "--compute-hp") == 0)
-      {
-        isComputeHP = true;
-      }
-      else if (strcmp(argv[i], "--compute-sp") == 0)
-      {
-        isComputeSP = true;
-      }
-      else if (strcmp(argv[i], "--compute-dp") == 0)
-      {
-        isComputeDP = true;
-      }
-      else if (strcmp(argv[i], "--compute-integer") == 0)
-      {
-        isComputeInt = true;
-      }
-      else if (strcmp(argv[i], "--compute-intfast") == 0)
-      {
-        isComputeIntFast = true;
-      }
-      else if (strcmp(argv[i], "--compute-char") == 0)
-      {
-        isComputeChar = true;
-      }
-      else if (strcmp(argv[i], "--compute-short") == 0)
-      {
-        isComputeShort = true;
-      }
-      else if (strcmp(argv[i], "--transfer-bandwidth") == 0)
-      {
-        isTransferBW = true;
-      }
-      else if (strcmp(argv[i], "--kernel-latency") == 0)
-      {
-        isKernelLatency = true;
-      }
+      listDevices = true;
     }
     else if (strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isLocalBW = isImageBW = isAtomicThroughput = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = true;
+      enableAll();
     }
     else if (strcmp(argv[i], "--enable-xml-dump") == 0)
     {
@@ -299,19 +268,38 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else
     {
-      printParseMessage(helpStr);
-      printParseMessage(NEWLINE);
-      exit(-1);
+      // Check if it's a test selection flag
+      bool matched = false;
+      for (int t = 0; t < numTestFlags; t++)
+      {
+        if (strcmp(argv[i], testFlags[t].flag) == 0)
+        {
+          if (!forcedTests)
+          {
+            disableAll();
+            forcedTests = true;
+          }
+          enableTest(testFlags[t].test);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched)
+      {
+        printParseMessage(helpStr);
+        printParseMessage(NEWLINE);
+        exit(-1);
+      }
     }
   }
 
   jsonFileName = jsonFile;
   csvFileName  = csvFile;
 
-  // Allocate logger after parsing
-  log = new logger(enableXml, xmlFileName,
-                   enableJson, jsonFileName,
-                   enableCsv,  csvFileName,
-                   compareFileName);
+  // Allocate logger after parsing (not needed for --list-devices but harmless)
+  log.reset(new logger(enableXml, xmlFileName,
+                       enableJson, jsonFileName,
+                       enableCsv,  csvFileName,
+                       compareFileName));
   return 0;
 }

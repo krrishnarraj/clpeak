@@ -19,10 +19,6 @@
 
 #define TAB             "  "
 #define NEWLINE         "\n"
-#ifndef __FreeBSD__
-#define uint            unsigned int
-#endif
-#define ulong           unsigned long
 
 #ifdef UNUSED
 #undef UNUSED
@@ -58,15 +54,16 @@
 #endif
 
 
-typedef struct {
+// Immutable device properties queried from OpenCL
+struct device_info_t {
   std::string deviceName;
   std::string driverVersion;
 
-  uint numCUs;
-  uint maxWGSize;
+  unsigned int numCUs;
+  unsigned int maxWGSize;
   uint64_t maxAllocSize;
   uint64_t maxGlobalSize;
-  uint maxClockFreq;
+  unsigned int maxClockFreq;
 
   bool halfSupported;
   bool doubleSupported;
@@ -77,19 +74,23 @@ typedef struct {
   bool imageSupported;
   uint64_t image2dMaxWidth;
   uint64_t image2dMaxHeight;
+};
 
-  // Test specific options
-  uint globalBWIters;
+// Per-device benchmark tuning knobs (CPU vs GPU defaults, overridable via --iters)
+struct benchmark_config_t {
+  unsigned int globalBWIters;
   uint64_t globalBWMaxSize;
-  uint computeWgsPerCU;
-  uint computeDPWgsPerCU;
-  uint computeIters;
-  uint localBWIters;
-  uint imageBWIters;
-  uint transferBWIters;
-  uint kernelLatencyIters;
+  unsigned int computeWgsPerCU;
+  unsigned int computeDPWgsPerCU;
+  unsigned int computeIters;
+  unsigned int localBWIters;
+  unsigned int imageBWIters;
+  unsigned int transferBWIters;
+  unsigned int kernelLatencyIters;
   uint64_t transferBWMaxSize;
-} device_info_t;
+
+  static benchmark_config_t forDevice(cl_device_type type);
+};
 
 class Timer
 {
@@ -117,4 +118,3 @@ void populate(double *ptr, uint64_t N);
 void trimString(std::string &str);
 
 #endif  // COMMON_H
-
