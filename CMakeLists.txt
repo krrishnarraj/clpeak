@@ -4,6 +4,8 @@ project(clpeak)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common.cmake)
 include(GNUInstallDirs)
 
+option(ENABLE_VULKAN "Build with Vulkan compute backend (--vulkan flag)" OFF)
+
 if (NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to Release")
   set(CMAKE_BUILD_TYPE "Release")
@@ -53,10 +55,36 @@ set(CLPEAK_SOURCE_FILES
     src/entry.cpp
 )
 
+# ---- Optional Vulkan backend ----------------------------------------------
+if(ENABLE_VULKAN)
+  find_package(Vulkan REQUIRED)
+  message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
+
+  list(APPEND CLPEAK_SOURCE_FILES
+    src/vk_peak.cpp
+    src/entry_vk.cpp
+  )
+endif()
+
 add_executable(clpeak ${CLPEAK_SOURCE_FILES})
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
 target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} "include" "src/kernels")
 target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=120)
+
+if(ENABLE_VULKAN)
+  target_link_libraries(clpeak ${Vulkan_LIBRARIES})
+  target_include_directories(clpeak PRIVATE ${Vulkan_INCLUDE_DIRS})
+  target_compile_definitions(clpeak PRIVATE ENABLE_VULKAN)
+
+  # Compile GLSL shaders to SPIR-V and embed as C++ arrays
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake)
+  compile_shaders(
+    TARGET clpeak
+    SHADERS
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/compute_sp_v1.comp
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/global_bandwidth_v1.comp
+  )
+endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"   OR
