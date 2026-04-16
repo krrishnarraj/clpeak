@@ -29,6 +29,7 @@ function(compile_shaders)
       COMMAND ${GLSLC} -O ${SHADER} -o ${SPV_FILE}
       DEPENDS ${SHADER}
       COMMENT "Compiling GLSL shader ${SHADER_NAME}.comp -> SPIR-V"
+      VERBATIM
     )
 
     # Generate hex include at build time via a script
@@ -38,22 +39,26 @@ function(compile_shaders)
               -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/SpvToHex.cmake
       DEPENDS ${SPV_FILE}
       COMMENT "Generating C++ hex array for ${SHADER_NAME}"
+      VERBATIM
     )
 
     list(APPEND SPV_FILES ${SPV_HEX_FILE})
   endforeach()
 
-  # Generate the combined C++ file
-  # Use $<SEMICOLON> so cmake passes a proper ';'-separated list to the -P script
-  # without CMake splitting it into separate COMMAND arguments at configure time.
-  string(REPLACE ";" "$<SEMICOLON>" SPV_FILES_ARG "${SPV_FILES}")
+  # Generate the combined C++ file.
+  # Write hex file paths to a manifest so we avoid passing a CMake list through
+  # -D (semicolons in COMMAND args cause shell splitting or list-parsing issues
+  # regardless of escaping strategy).
   set(GEN_CPP "${CMAKE_CURRENT_BINARY_DIR}/vk_shaders_generated.cpp")
+  set(HEX_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/vk_shaders.manifest")
+  file(GENERATE OUTPUT ${HEX_MANIFEST} CONTENT "${SPV_FILES}")
   add_custom_command(
     OUTPUT ${GEN_CPP}
-    COMMAND ${CMAKE_COMMAND} "-DHEX_FILES=${SPV_FILES_ARG}" -DOUT_FILE=${GEN_CPP}
+    COMMAND ${CMAKE_COMMAND} -DMANIFEST_FILE=${HEX_MANIFEST} -DOUT_FILE=${GEN_CPP}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CombineHex.cmake
     DEPENDS ${SPV_FILES}
     COMMENT "Combining shader hex arrays"
+    VERBATIM
   )
 
   target_sources(${CS_TARGET} PRIVATE ${GEN_CPP})
