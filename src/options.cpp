@@ -3,8 +3,6 @@
 #include <limits>
 #include <version.h>
 
-#define DEFAULT_XML_FILE_NAME "clpeak_results.xml"
-
 static const char *helpStr =
     "\n clpeak [OPTIONS]"
     "\n"
@@ -36,12 +34,11 @@ static const char *helpStr =
 #ifdef ENABLE_VULKAN
     "\n  --vulkan                    use Vulkan compute backend instead of OpenCL"
 #endif
-    "\n  --enable-xml-dump           Dump results to xml file"
-    "\n  -f, --xml-file file_name    specify file name for xml dump"
+    "\n  --xml-file file_name        save results to an XML file"
     "\n  --json-file file_name       save results to a JSON file"
     "\n  --csv-file file_name        save results to a CSV file"
-    "\n  --compare file_name         compare results against a JSON baseline;"
-    "\n                              print delta for each metric"
+    "\n  --compare file_name         compare results against a baseline file"
+    "\n                              (supports JSON, CSV, and XML formats)"
     "\n  -v, --version               display version"
     "\n  -h, --help                  display help message"
     "\n";
@@ -224,15 +221,7 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       enableAll();
     }
-    else if (strcmp(argv[i], "--enable-xml-dump") == 0)
-    {
-      enableXml = true;
-      if (xmlFileName.length() < 1)
-      {
-        xmlFileName = DEFAULT_XML_FILE_NAME;
-      }
-    }
-    else if ((strcmp(argv[i], "-f") == 0) || (strcmp(argv[i], "--xml-file") == 0))
+    else if (strcmp(argv[i], "--xml-file") == 0)
     {
       if ((i + 1) < argc)
       {

@@ -184,8 +184,8 @@ ResultStore loadCsv(const std::string &filename)
     return store;
 }
 
-// Dispatch to the right parser based on the file extension (.csv vs everything
-// else which is assumed to be JSON).
+// Dispatch to the right parser based on the file extension (.csv, .xml, or
+// JSON for anything else).
 ResultStore loadResultFile(const std::string &filename)
 {
     // Extract and lowercase the extension
@@ -202,7 +202,7 @@ ResultStore loadResultFile(const std::string &filename)
 }
 
 // ---- XML parser -----------------------------------------------------------
-// Parses the format produced by the xmlWriter / --enable-xml-dump path.
+// Parses the format produced by the xmlWriter / --xml-file path.
 // No external XML library required: the format is regular enough for a
 // line-by-line state-machine that tracks the four nesting levels
 // (clpeak > platform > device > test_group > metric_leaf).
