@@ -1,14 +1,19 @@
 package kr.clpeak
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kr.clpeak.databinding.ActivityMainBinding
@@ -32,10 +37,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+
+        // Apply window insets for edge-to-edge
+        ViewCompat.setOnApplyWindowInsetsListener(binding.coordinator) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            binding.fabRun.updatePadding(bottom = bars.bottom)
+            // Let CoordinatorLayout handle the rest
+            insets
+        }
 
         adapter = ResultAdapter { testName -> viewModel.toggleCategory(testName) }
         binding.recyclerResults.adapter = adapter
@@ -46,16 +60,20 @@ class MainActivity : AppCompatActivity() {
             nativeSetenv("LIBOPENCL_SO_PATH", openclLibPaths[0])
         }
 
-        binding.fabRun.setOnClickListener { viewModel.runBenchmarks() }
+        binding.fabRun.setOnClickListener {
+            if (viewModel.isRunning.value == true) return@setOnClickListener
+            viewModel.runBenchmarks()
+        }
 
         observeViewModel()
     }
 
     private fun observeViewModel() {
         viewModel.isRunning.observe(this) { running ->
-            binding.fabRun.isEnabled = !running
+            updateFabState(running)
             binding.progressIndicator.visibility = if (running) View.VISIBLE else View.GONE
             if (running) {
+                binding.idleState.visibility = View.GONE
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             } else {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -86,6 +104,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateFabState(running: Boolean) {
+        if (running) {
+            binding.fabRun.text = getString(R.string.stop_button_text)
+            binding.fabRun.setIconResource(R.drawable.ic_stop)
+            binding.fabRun.backgroundTintList =
+                ColorStateList.valueOf(getColor(R.color.fab_stop))
+            binding.fabRun.setTextColor(getColor(R.color.fab_on_stop))
+            binding.fabRun.iconTint =
+                ColorStateList.valueOf(getColor(R.color.fab_on_stop))
+        } else {
+            binding.fabRun.text = getString(R.string.run_button_text)
+            binding.fabRun.setIconResource(R.drawable.ic_play_arrow)
+            binding.fabRun.backgroundTintList =
+                ColorStateList.valueOf(getColor(R.color.md_theme_primary))
+            binding.fabRun.setTextColor(getColor(R.color.md_theme_on_primary))
+            binding.fabRun.iconTint =
+                ColorStateList.valueOf(getColor(R.color.md_theme_on_primary))
+        }
+    }
+
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
         return true
@@ -94,9 +132,13 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.menu_opencl_lib -> { showOpenclLibraryPicker(); true }
-            R.id.menu_about      -> { startActivity(Intent(this, AboutActivity::class.java)); true }
+            R.id.menu_about      -> { showAbout(); true }
             else                 -> super.onOptionsItemSelected(item)
         }
+    }
+
+    private fun showAbout() {
+        AboutBottomSheet().show(supportFragmentManager, AboutBottomSheet.TAG)
     }
 
     private fun buildOpenclLibraryList() {

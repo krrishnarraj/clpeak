@@ -1,8 +1,11 @@
 package kr.clpeak
 
+import android.animation.ValueAnimator
+import android.graphics.drawable.GradientDrawable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -28,49 +31,137 @@ class ResultAdapter(
         private val binding: ItemBenchmarkCategoryBinding
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var currentlyExpanded = false
+
         fun bind(category: BenchmarkCategory) {
+            val ctx = binding.root.context
+
             binding.tvCategoryName.text = category.displayName
             binding.tvPeakValue.text    = "%.2f".format(category.peakValue)
             binding.tvUnit.text         = category.unit.uppercase()
 
-            val colorRes = when (category.testType) {
+            // Tonal card background based on test type
+            val containerColor = when (category.testType) {
+                TestType.BANDWIDTH -> R.color.test_bandwidth_container
+                TestType.COMPUTE   -> R.color.test_compute_container
+                TestType.LATENCY   -> R.color.test_latency_container
+            }
+            binding.root.setCardBackgroundColor(ctx.getColor(containerColor))
+
+            // Type indicator dot color
+            val indicatorColor = when (category.testType) {
                 TestType.BANDWIDTH -> R.color.test_bandwidth
                 TestType.COMPUTE   -> R.color.test_compute
                 TestType.LATENCY   -> R.color.test_latency
             }
-            binding.viewTypeIndicator.setBackgroundResource(colorRes)
+            val dot = binding.viewTypeIndicator.background
+            if (dot is GradientDrawable) {
+                dot.setColor(ctx.getColor(indicatorColor))
+            } else {
+                binding.viewTypeIndicator.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(ctx.getColor(indicatorColor))
+                }
+            }
+
+            // Text color on the tonal container
+            val onContainerColor = when (category.testType) {
+                TestType.BANDWIDTH -> R.color.test_bandwidth_on_container
+                TestType.COMPUTE   -> R.color.test_compute_on_container
+                TestType.LATENCY   -> R.color.test_latency_on_container
+            }
+            binding.tvCategoryName.setTextColor(ctx.getColor(onContainerColor))
 
             val expanded = category.isExpanded
-            binding.metricsContainer.visibility = if (expanded) View.VISIBLE else View.GONE
-            binding.ivExpand.rotation = if (expanded) 180f else 0f
+            val shouldAnimate = expanded != currentlyExpanded
+            currentlyExpanded = expanded
 
             if (expanded) {
                 bindMetricRows(category)
             }
 
+            if (shouldAnimate) {
+                animateExpandCollapse(binding.metricsContainer, expanded)
+                binding.ivExpand.animate()
+                    .rotation(if (expanded) 180f else 0f)
+                    .setDuration(250)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            } else {
+                binding.metricsContainer.visibility = if (expanded) View.VISIBLE else View.GONE
+                binding.ivExpand.rotation = if (expanded) 180f else 0f
+            }
+
             binding.root.setOnClickListener { onToggle(category.testName) }
         }
 
+        private fun animateExpandCollapse(view: View, expand: Boolean) {
+            if (expand) {
+                view.visibility = View.VISIBLE
+                view.measure(
+                    View.MeasureSpec.makeMeasureSpec(view.width.takeIf { it > 0 }
+                        ?: (view.parent as View).width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                )
+                val targetHeight = view.measuredHeight
+                view.layoutParams.height = 0
+                view.requestLayout()
+                view.alpha = 0f
+
+                ValueAnimator.ofInt(0, targetHeight).apply {
+                    duration = 250
+                    interpolator = DecelerateInterpolator()
+                    addUpdateListener { anim ->
+                        view.layoutParams.height = anim.animatedValue as Int
+                        view.requestLayout()
+                    }
+                    start()
+                }
+                view.animate().alpha(1f).setDuration(200).setStartDelay(50).start()
+            } else {
+                val startHeight = view.height
+                ValueAnimator.ofInt(startHeight, 0).apply {
+                    duration = 200
+                    interpolator = DecelerateInterpolator()
+                    addUpdateListener { anim ->
+                        view.layoutParams.height = anim.animatedValue as Int
+                        view.requestLayout()
+                        if (anim.animatedValue as Int == 0) {
+                            view.visibility = View.GONE
+                            view.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        }
+                    }
+                    start()
+                }
+                view.animate().alpha(0f).setDuration(150).start()
+            }
+        }
+
         private fun bindMetricRows(category: BenchmarkCategory) {
-            binding.metricsContainer.removeAllViews()
+            val container = binding.metricsContainer
+            // Keep the divider (first child), remove dynamically added rows
+            while (container.childCount > 1) {
+                container.removeViewAt(container.childCount - 1)
+            }
+
             val maxVal = category.metrics.maxOfOrNull { it.value }?.takeIf { it > 0f } ?: 1f
-            val inflater = LayoutInflater.from(binding.root.context)
+            val inflater = LayoutInflater.from(container.context)
 
             val barColorRes = when (category.testType) {
                 TestType.BANDWIDTH -> R.color.test_bandwidth
                 TestType.COMPUTE   -> R.color.test_compute
                 TestType.LATENCY   -> R.color.test_latency
             }
-            val barColor = binding.root.context.getColor(barColorRes)
+            val barColor = container.context.getColor(barColorRes)
 
             for (entry in category.metrics) {
-                val row = ItemBenchmarkMetricBinding.inflate(inflater, binding.metricsContainer, false)
+                val row = ItemBenchmarkMetricBinding.inflate(inflater, container, false)
                 row.tvMetricName.text  = entry.metric
                 row.tvMetricValue.text = "%.2f".format(entry.value)
                 row.progressBar.max      = 1000
                 row.progressBar.progress = ((entry.value / maxVal) * 1000).toInt()
                 row.progressBar.setIndicatorColor(barColor)
-                binding.metricsContainer.addView(row.root)
+                container.addView(row.root)
             }
         }
     }

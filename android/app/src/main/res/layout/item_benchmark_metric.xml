@@ -5,18 +5,18 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:paddingHorizontal="16dp"
+    android:paddingHorizontal="20dp"
     android:paddingVertical="6dp"
     android:gravity="center_vertical">
 
     <!-- Metric name (e.g. "float4") -->
     <TextView
         android:id="@+id/tv_metric_name"
-        android:layout_width="72dp"
+        android:layout_width="80dp"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
         android:textAppearance="?attr/textAppearanceBodySmall"
-        android:textColor="?attr/colorOnSurface" />
+        android:textColor="?attr/colorOnSurfaceVariant" />
 
     <!-- Proportional bar -->
     <com.google.android.material.progressindicator.LinearProgressIndicator
@@ -24,14 +24,14 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:layout_marginHorizontal="8dp"
-        app:trackCornerRadius="4dp"
-        app:trackThickness="8dp" />
+        android:layout_marginHorizontal="12dp"
+        app:trackCornerRadius="6dp"
+        app:trackThickness="10dp" />
 
     <!-- Numeric value -->
     <TextView
         android:id="@+id/tv_metric_value"
-        android:layout_width="72dp"
+        android:layout_width="80dp"
         android:layout_height="wrap_content"
         android:gravity="end"
         android:fontFamily="monospace"

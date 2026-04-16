@@ -1,24 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Material 3 color tokens (Indigo-based scheme) -->
-    <color name="md_theme_primary">#3F51B5</color>
+    <!-- Material 3 light color tokens — Teal/Cyan palette -->
+    <color name="md_theme_primary">#006B5E</color>
     <color name="md_theme_on_primary">#FFFFFF</color>
-    <color name="md_theme_primary_container">#C5CAE9</color>
-    <color name="md_theme_on_primary_container">#1A237E</color>
-    <color name="md_theme_secondary">#5C6BC0</color>
+    <color name="md_theme_primary_container">#74F8E2</color>
+    <color name="md_theme_on_primary_container">#00201B</color>
+    <color name="md_theme_secondary">#4A635E</color>
     <color name="md_theme_on_secondary">#FFFFFF</color>
-    <color name="md_theme_secondary_container">#E8EAF6</color>
-    <color name="md_theme_on_secondary_container">#283593</color>
-    <color name="md_theme_surface">#FFFBFE</color>
-    <color name="md_theme_on_surface">#1C1B1F</color>
-    <color name="md_theme_surface_variant">#E7E0EC</color>
-    <color name="md_theme_on_surface_variant">#49454F</color>
-    <color name="md_theme_outline_variant">#CAC4D0</color>
-    <color name="md_theme_background">#FFFBFE</color>
-    <color name="md_theme_on_background">#1C1B1F</color>
+    <color name="md_theme_secondary_container">#CCE8E1</color>
+    <color name="md_theme_on_secondary_container">#06201B</color>
+    <color name="md_theme_tertiary">#436279</color>
+    <color name="md_theme_on_tertiary">#FFFFFF</color>
+    <color name="md_theme_tertiary_container">#C8E6FF</color>
+    <color name="md_theme_on_tertiary_container">#001E31</color>
+    <color name="md_theme_error">#BA1A1A</color>
+    <color name="md_theme_on_error">#FFFFFF</color>
+    <color name="md_theme_error_container">#FFDAD6</color>
+    <color name="md_theme_on_error_container">#410002</color>
+    <color name="md_theme_surface">#F5FBF8</color>
+    <color name="md_theme_on_surface">#171D1B</color>
+    <color name="md_theme_surface_variant">#DAE5E1</color>
+    <color name="md_theme_on_surface_variant">#3F4946</color>
+    <color name="md_theme_surface_container">#EAF0ED</color>
+    <color name="md_theme_surface_container_high">#E4EAE7</color>
+    <color name="md_theme_outline">#6F7976</color>
+    <color name="md_theme_outline_variant">#BFC9C5</color>
+    <color name="md_theme_background">#F5FBF8</color>
+    <color name="md_theme_on_background">#171D1B</color>
+    <color name="md_theme_inverse_surface">#2C3230</color>
+    <color name="md_theme_inverse_on_surface">#ECF2EF</color>
 
-    <!-- Semantic colors for benchmark test types -->
-    <color name="test_bandwidth">#1565C0</color>
-    <color name="test_compute">#BF360C</color>
-    <color name="test_latency">#1B5E20</color>
+    <!-- Semantic colors for benchmark test types (tonal, softer) -->
+    <color name="test_bandwidth">#0061A6</color>
+    <color name="test_compute">#9C4400</color>
+    <color name="test_latency">#3A6A00</color>
+    <color name="test_bandwidth_container">#D2E4FF</color>
+    <color name="test_compute_container">#FFDCC8</color>
+    <color name="test_latency_container">#C2F18D</color>
+    <color name="test_bandwidth_on_container">#001C38</color>
+    <color name="test_compute_on_container">#331200</color>
+    <color name="test_latency_on_container">#0F2000</color>
+
+    <!-- FAB states -->
+    <color name="fab_stop">#BA1A1A</color>
+    <color name="fab_on_stop">#FFFFFF</color>
 </resources>

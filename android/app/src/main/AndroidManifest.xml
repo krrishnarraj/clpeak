@@ -22,10 +22,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".AboutActivity"
-            android:exported="false" />
-
     </application>
 
 </manifest>
