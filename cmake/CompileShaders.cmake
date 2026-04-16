@@ -44,10 +44,12 @@ function(compile_shaders)
   endforeach()
 
   # Generate the combined C++ file
+  # Escape semicolons so the list survives CMake's COMMAND argument splitting
+  string(REPLACE ";" "\\;" SPV_FILES_ARG "${SPV_FILES}")
   set(GEN_CPP "${CMAKE_CURRENT_BINARY_DIR}/vk_shaders_generated.cpp")
   add_custom_command(
     OUTPUT ${GEN_CPP}
-    COMMAND ${CMAKE_COMMAND} -DHEX_FILES="${SPV_FILES}" -DOUT_FILE=${GEN_CPP}
+    COMMAND ${CMAKE_COMMAND} "-DHEX_FILES=${SPV_FILES_ARG}" -DOUT_FILE=${GEN_CPP}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CombineHex.cmake
     DEPENDS ${SPV_FILES}
     COMMENT "Combining shader hex arrays"
