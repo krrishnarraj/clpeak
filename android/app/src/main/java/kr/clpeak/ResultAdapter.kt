@@ -157,9 +157,15 @@ class ResultAdapter(
             for (entry in category.metrics) {
                 val row = ItemBenchmarkMetricBinding.inflate(inflater, container, false)
                 row.tvMetricName.text  = entry.metric
-                row.tvMetricValue.text = "%.2f".format(entry.value)
-                row.progressBar.max      = 1000
-                row.progressBar.progress = ((entry.value / maxVal) * 1000).toInt()
+                if (entry.value == 0f && isZeroCopyMetric(entry.metric)) {
+                    row.tvMetricValue.text = "zero-copy"
+                    row.progressBar.max      = 1000
+                    row.progressBar.progress = 0
+                } else {
+                    row.tvMetricValue.text = "%.2f".format(entry.value)
+                    row.progressBar.max      = 1000
+                    row.progressBar.progress = ((entry.value / maxVal) * 1000).toInt()
+                }
                 row.progressBar.setIndicatorColor(barColor)
                 container.addView(row.root)
             }
@@ -167,6 +173,12 @@ class ResultAdapter(
     }
 
     companion object {
+        // Metrics that report 0 when the GPU uses shared memory (zero-copy)
+        private val ZERO_COPY_METRICS = setOf("enqueuemapbuffer", "enqueueunmap")
+
+        private fun isZeroCopyMetric(name: String) =
+            name.lowercase().replace(" ", "") in ZERO_COPY_METRICS
+
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<BenchmarkCategory>() {
             override fun areItemsTheSame(a: BenchmarkCategory, b: BenchmarkCategory) =
                 a.testName == b.testName

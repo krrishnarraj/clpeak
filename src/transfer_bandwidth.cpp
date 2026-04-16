@@ -2,6 +2,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+
+// If map/unmap bandwidth exceeds this multiplier of the peak real-transfer
+// bandwidth measured earlier in the same run, it's a zero-copy / shared-memory
+// operation with no actual data movement.  5x is conservative: on M1 the ratio
+// is ~15000x, on Mali ~10x; on discrete GPUs the ratio is ~1x.
+static const float ZERO_COPY_MULTIPLIER = 5.0f;
+
+// Absolute floor: if no real-transfer baselines were measured (e.g. user ran
+// only the map sub-test), fall back to this.  Well above any real hardware.
+static const float ZERO_COPY_ABSOLUTE_GBPS = 10000.0f;
+
 #if defined(_WIN32) || defined(__ANDROID__)
 #include <malloc.h>
 #endif
@@ -43,12 +54,16 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   uint64_t numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, cfg.transferBWMaxSize);
   size_t bytes = numItems * sizeof(float);
 
-  // Helper: run a timed transfer test with warmup
+  // Track the peak bandwidth from real-transfer tests (write/read) so that
+  // map/unmap can be compared against it to detect zero-copy.
+  float peakRealTransferBW = 0;
+
+  // Helper: run a timed transfer test with warmup, return measured gbps
   auto runTransfer = [&](const std::string &label, const std::string &xmlName,
-                         std::function<void(cl::Event *)> op, bool forceWallClock = false)
+                         std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
   {
     if (forceTest && specifiedTestName != xmlName)
-      return;
+      return 0;
 
     log->print(label);
 
@@ -88,6 +103,32 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     log->print(gbps);
     log->print(NEWLINE);
     log->xmlRecord(xmlName, gbps);
+    return gbps;
+  };
+
+  // Helper: check if a bandwidth value looks like zero-copy
+  auto isZeroCopy = [&](float gbps) -> bool
+  {
+    if (peakRealTransferBW > 0)
+      return gbps > peakRealTransferBW * ZERO_COPY_MULTIPLIER;
+    return gbps > ZERO_COPY_ABSOLUTE_GBPS;
+  };
+
+  // Helper: report a map/unmap result, detecting zero-copy
+  auto reportMapUnmap = [&](float gbps, const std::string &xmlName)
+  {
+    if (isZeroCopy(gbps))
+    {
+      log->print("inf (zero-copy)");
+      log->print(NEWLINE);
+      log->xmlRecord(xmlName, (float)0);
+    }
+    else
+    {
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord(xmlName, gbps);
+    }
   };
 
   try
@@ -106,20 +147,25 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     log->xmlAppendAttribs("unit", "gbps");
 
     // enqueueWriteBuffer (blocking)
-    runTransfer(TAB TAB TAB "enqueueWriteBuffer              : ", "enqueuewritebuffer",
+    float bw;
+    bw = runTransfer(TAB TAB TAB "enqueueWriteBuffer              : ", "enqueuewritebuffer",
       [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueReadBuffer (blocking)
-    runTransfer(TAB TAB TAB "enqueueReadBuffer               : ", "enqueuereadbuffer",
+    bw = runTransfer(TAB TAB TAB "enqueueReadBuffer               : ", "enqueuereadbuffer",
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueWriteBuffer non-blocking
-    runTransfer(TAB TAB TAB "enqueueWriteBuffer non-blocking : ", "enqueuewritebuffer_nonblocking",
+    bw = runTransfer(TAB TAB TAB "enqueueWriteBuffer non-blocking : ", "enqueuewritebuffer_nonblocking",
       [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueReadBuffer non-blocking
-    runTransfer(TAB TAB TAB "enqueueReadBuffer non-blocking  : ", "enqueuereadbuffer_nonblocking",
+    bw = runTransfer(TAB TAB TAB "enqueueReadBuffer non-blocking  : ", "enqueuereadbuffer_nonblocking",
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueMapBuffer(for read)
     // Always use wall-clock for map/unmap: CL events measure only GPU command
@@ -145,9 +191,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueuemapbuffer", gbps);
+      reportMapUnmap(gbps, "enqueuemapbuffer");
     }
 
     // memcpy from mapped ptr
@@ -199,9 +243,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueueunmap", gbps);
+      reportMapUnmap(gbps, "enqueueunmap");
     }
 
     // memcpy to mapped ptr
