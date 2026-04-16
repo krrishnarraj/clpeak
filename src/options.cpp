@@ -1,6 +1,7 @@
 #include <clpeak.h>
 #include <cerrno>
 #include <limits>
+#include <version.h>
 
 #define DEFAULT_XML_FILE_NAME "clpeak_results.xml"
 
@@ -123,7 +124,7 @@ int clPeak::parseArgs(int argc, char **argv)
     else if ((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
     {
       std::stringstream versionStr;
-      versionStr << "clpeak version: " << VERSION_STR;
+      versionStr << "clpeak version: " << CLPEAK_VERSION_STR;
 
       printParseMessage(versionStr.str());
       printParseMessage(NEWLINE);

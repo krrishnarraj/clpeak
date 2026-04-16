@@ -1,8 +1,3 @@
 
-set(VERSION_MAJOR 1)
-set(VERSION_MINOR 1)
-set(VERSION_PATCH 7)
-set(VERSION_SUFFIX "")
-set(VERSION_STR "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_SUFFIX}")
-
-add_definitions("-DVERSION_STR=\"${VERSION_STR}\"")
+# cmake/common.cmake
+# Kept for backward compatibility. Version is now handled by version.cmake.

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 project(clpeak)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake)
 include(GNUInstallDirs)
 
 option(ENABLE_VULKAN "Build with Vulkan compute backend (--vulkan flag)" OFF)
@@ -67,6 +67,7 @@ if(ENABLE_VULKAN)
 endif()
 
 add_executable(clpeak ${CLPEAK_SOURCE_FILES})
+clpeak_setup_version(clpeak)
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
 target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} "include" "src/kernels")
 target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=120)
@@ -98,6 +99,6 @@ install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
 enable_testing()
 add_test(clpeak_test_run clpeak)
 
-set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${VERSION_STR}")
+set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${CLPEAK_VERSION_STR}")
 set(CPACK_GENERATOR "ZIP")
 include (CPack)
