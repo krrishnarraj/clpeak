@@ -69,9 +69,13 @@ function(compile_shaders)
       math(EXPR I "${I} + 8")
     endwhile()
 
+    # Use 'extern' so the symbols have external linkage.
+    # (In C++, `const` at namespace scope defaults to internal linkage; since
+    #  vk_shaders_generated.cpp doesn't include vk_peak.h the compiler can't
+    #  see that the header already marked these `extern`.)
     string(APPEND CPP_CONTENT "// Auto-generated from ${SHADER_NAME}.comp\n")
-    string(APPEND CPP_CONTENT "const uint32_t ${SHADER_NAME}[] = {\n    ${ARRAY_INIT}\n};\n")
-    string(APPEND CPP_CONTENT "const size_t ${SHADER_NAME}_size = sizeof(${SHADER_NAME});\n\n")
+    string(APPEND CPP_CONTENT "extern const uint32_t ${SHADER_NAME}[] = {\n    ${ARRAY_INIT}\n};\n")
+    string(APPEND CPP_CONTENT "extern const size_t ${SHADER_NAME}_size = sizeof(${SHADER_NAME});\n\n")
   endforeach()
 
   string(APPEND CPP_CONTENT "} // namespace vk_shaders\n")
