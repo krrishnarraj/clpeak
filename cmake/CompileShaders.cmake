@@ -44,8 +44,9 @@ function(compile_shaders)
   endforeach()
 
   # Generate the combined C++ file
-  # Escape semicolons so the list survives CMake's COMMAND argument splitting
-  string(REPLACE ";" "\\;" SPV_FILES_ARG "${SPV_FILES}")
+  # Use $<SEMICOLON> so cmake passes a proper ';'-separated list to the -P script
+  # without CMake splitting it into separate COMMAND arguments at configure time.
+  string(REPLACE ";" "$<SEMICOLON>" SPV_FILES_ARG "${SPV_FILES}")
   set(GEN_CPP "${CMAKE_CURRENT_BINARY_DIR}/vk_shaders_generated.cpp")
   add_custom_command(
     OUTPUT ${GEN_CPP}
