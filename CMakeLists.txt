@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.5)
 project(clpeak)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake)
+set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+include(${CLPEAK_ROOT}/cmake/version.cmake)
+include(${CLPEAK_ROOT}/cmake/sources.cmake)
 include(GNUInstallDirs)
 
 option(ENABLE_VULKAN "Build with Vulkan compute backend (--vulkan flag)" OFF)
@@ -41,17 +43,8 @@ set(CMAKE_CXX_STANDARD "11")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CLPEAK_SOURCE_FILES
-    src/common.cpp
-    src/result_store.cpp
-    src/clpeak.cpp
-    src/options.cpp
+    ${CLPEAK_CORE_SOURCES}
     src/logger.cpp
-    src/global_bandwidth.cpp
-    src/local_bandwidth.cpp
-    src/image_bandwidth.cpp
-    src/atomic_throughput.cpp
-    src/transfer_bandwidth.cpp
-    src/kernel_latency.cpp
     src/entry.cpp
 )
 
@@ -69,7 +62,7 @@ endif()
 add_executable(clpeak ${CLPEAK_SOURCE_FILES})
 clpeak_setup_version(clpeak)
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
-target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} "include" "src/kernels")
+target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} ${CLPEAK_CORE_INCLUDE_DIRS})
 target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=120)
 
 if(ENABLE_VULKAN)

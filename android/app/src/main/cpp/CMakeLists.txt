@@ -1,40 +1,26 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-# Build stub
+# Build OpenCL stub
 add_subdirectory(libopencl-stub)
 
-set(ROOT_FOLDER "../../../../..")
-include(${ROOT_FOLDER}/cmake/common.cmake)
+set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
+include(${CLPEAK_ROOT}/cmake/version.cmake)
+include(${CLPEAK_ROOT}/cmake/sources.cmake)
 
-set(SRC_FOLDER "${ROOT_FOLDER}/src")
 add_library(clpeak SHARED
-        ${SRC_FOLDER}/common.cpp
-        ${SRC_FOLDER}/result_store.cpp
-        ${SRC_FOLDER}/clpeak.cpp
-        ${SRC_FOLDER}/global_bandwidth.cpp
-        ${SRC_FOLDER}/local_bandwidth.cpp
-        ${SRC_FOLDER}/image_bandwidth.cpp
-        ${SRC_FOLDER}/atomic_throughput.cpp
-        ${SRC_FOLDER}/compute_sp.cpp
-        ${SRC_FOLDER}/compute_hp.cpp
-        ${SRC_FOLDER}/compute_dp.cpp
-        ${SRC_FOLDER}/compute_integer.cpp
-        ${SRC_FOLDER}/compute_integer_fast.cpp
-        ${SRC_FOLDER}/compute_char.cpp
-        ${SRC_FOLDER}/compute_short.cpp
-        ${SRC_FOLDER}/transfer_bandwidth.cpp
-        ${SRC_FOLDER}/kernel_latency.cpp
-        ${SRC_FOLDER}/entry_android.cpp
-        ${SRC_FOLDER}/options.cpp
-        ${SRC_FOLDER}/logger_android.cpp
+    ${CLPEAK_CORE_SOURCES}
+    ${CLPEAK_ROOT}/src/logger_android.cpp
+    ${CLPEAK_ROOT}/src/entry_android.cpp
 )
+
+clpeak_setup_version(clpeak)
 
 target_include_directories(clpeak PRIVATE
-        libopencl-stub/include/
-        ${ROOT_FOLDER}/include/
-        ${SRC_FOLDER}/kernels/
+    libopencl-stub/include
+    ${CLPEAK_CORE_INCLUDE_DIRS}
 )
 
-target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL)
-target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions -std=c++17)
+target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL CL_TARGET_OPENCL_VERSION=120)
+target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions)
+set_target_properties(clpeak PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(clpeak log atomic dl OpenCL)
