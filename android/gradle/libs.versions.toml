@@ -1,6 +1,6 @@
 [versions]
-agp = "9.1.1"
-kotlin = "2.2.10"
+agp = "8.7.3"
+kotlin = "2.0.21"
 coreKtx = "1.15.0"
 appcompat = "1.7.0"
 material = "1.12.0"
