@@ -17,11 +17,17 @@ void main()
 {
     uint gid = gl_GlobalInvocationID.x;
     uint lid = gl_LocalInvocationID.x;
+    uint wid = gl_WorkGroupID.x;
     uint lsz = gl_WorkGroupSize.x;
 
-    float sum = 0.0;
-    uint offset = gid;
+    // Each workgroup owns a disjoint (lsz * FETCH_PER_WI)-element region of
+    // the input buffer.  Without this layout, adjacent workgroups share
+    // 15/16 of their fetches, so the benchmark ends up measuring L2 cache
+    // bandwidth rather than VRAM bandwidth (mirrors the OpenCL
+    // `global_bandwidth_v1_local_offset` kernel).
+    uint offset = wid * lsz * FETCH_PER_WI + lid;
 
+    float sum = 0.0;
     for (int i = 0; i < FETCH_PER_WI; i++)
     {
         sum += inputBuf.data[offset];
