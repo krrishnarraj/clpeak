@@ -7,7 +7,6 @@ static const std::string stringifiedKernels =
 #include "global_bandwidth_kernels.cl"
 #include "local_bandwidth_kernels.cl"
 #include "atomic_throughput_kernels.cl"
-#include "image_bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_hp_kernels.cl"
 #include "compute_dp_kernels.cl"
@@ -15,6 +14,14 @@ static const std::string stringifiedKernels =
 #include "compute_integer_kernels.cl"
 #include "compute_char_kernels.cl"
 #include "compute_short_kernels.cl"
+    ;
+
+// Image kernels live in a separate program to avoid contaminating the main
+// program with image/sampler resources on drivers that budget them globally
+// (e.g. NVIDIA CUDA-OpenCL), which can cause CL_OUT_OF_RESOURCES for
+// register-heavy kernels like global_bandwidth_v16.
+static const std::string stringifiedImageKernels =
+#include "image_bandwidth_kernels.cl"
     ;
 
 #ifdef USE_STUB_OPENCL
@@ -161,11 +168,35 @@ int clPeak::runAll()
           continue;
         }
 
+        // Build a separate program for image kernels so that image/sampler
+        // resources are not budgeted against the main program on drivers
+        // that do global resource accounting (e.g. NVIDIA CUDA-OpenCL).
+        cl::Program imgProg;
+        bool imageProgReady = false;
+        if (devInfo.imageSupported)
+        {
+          try
+          {
+            cl::Program::Sources imgSrc(1, stringifiedImageKernels);
+            imgProg = cl::Program(ctx, imgSrc);
+            std::vector<cl::Device> dev = {devices[d]};
+            imgProg.build(dev, BUILD_OPTIONS);
+            imageProgReady = true;
+          }
+          catch (cl::Error &)
+          {
+            log->print(TAB TAB "Image kernel build failed, image bandwidth test skipped" NEWLINE);
+          }
+        }
+
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
 
         runGlobalBandwidthTest(queue, prog, devInfo, cfg);
         runLocalBandwidthTest(queue, prog, devInfo, cfg);
-        runImageBandwidthTest(queue, prog, devInfo, cfg);
+        {
+          cl::Program &imgProgRef = imageProgReady ? imgProg : prog;
+          runImageBandwidthTest(queue, imgProgRef, devInfo, cfg);
+        }
 
         // Compute tests via unified helper
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
