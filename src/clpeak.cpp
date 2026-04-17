@@ -3,10 +3,13 @@
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
+// Main program: only kernels without __local pointer arguments.
+// Keeping this set identical to what shipped in master ensures that
+// NVIDIA CUDA-OpenCL's module compiler does not reserve dynamic shared-memory
+// resources, which would shrink the register budget and break the v16 kernels
+// (global_bandwidth_v16 / compute_dp_v16) with CL_OUT_OF_RESOURCES.
 static const std::string stringifiedKernels =
 #include "global_bandwidth_kernels.cl"
-#include "local_bandwidth_kernels.cl"
-#include "atomic_throughput_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_hp_kernels.cl"
 #include "compute_dp_kernels.cl"
@@ -16,10 +19,18 @@ static const std::string stringifiedKernels =
 #include "compute_short_kernels.cl"
     ;
 
-// Image kernels live in a separate program to avoid contaminating the main
-// program with image/sampler resources on drivers that budget them globally
-// (e.g. NVIDIA CUDA-OpenCL), which can cause CL_OUT_OF_RESOURCES for
-// register-heavy kernels like global_bandwidth_v16.
+// Separate programs for kernels that use __local pointer arguments or
+// image/sampler types.  On NVIDIA CUDA-OpenCL these force module-level
+// resource reservations that spill into every other kernel in the same
+// program, so they must be isolated from the main benchmark kernels.
+static const std::string stringifiedLocalKernels =
+#include "local_bandwidth_kernels.cl"
+    ;
+
+static const std::string stringifiedAtomicKernels =
+#include "atomic_throughput_kernels.cl"
+    ;
+
 static const std::string stringifiedImageKernels =
 #include "image_bandwidth_kernels.cl"
     ;
@@ -168,37 +179,43 @@ int clPeak::runAll()
           continue;
         }
 
-        // Build a separate program for image kernels so that image/sampler
-        // resources are not budgeted against the main program on drivers
-        // that do global resource accounting (e.g. NVIDIA CUDA-OpenCL).
-        cl::Program imgProg;
-        bool imageProgReady = false;
-        if (devInfo.imageSupported)
-        {
+        // Helper: build an auxiliary program, silently skip on failure.
+        auto buildAuxProg = [&](const std::string &src, const std::string &label) -> cl::Program {
+          cl::Program p;
           try
           {
-            cl::Program::Sources imgSrc(1, stringifiedImageKernels);
-            imgProg = cl::Program(ctx, imgSrc);
+            cl::Program::Sources s(1, src);
+            p = cl::Program(ctx, s);
             std::vector<cl::Device> dev = {devices[d]};
-            imgProg.build(dev, BUILD_OPTIONS);
-            imageProgReady = true;
+            p.build(dev, BUILD_OPTIONS);
           }
           catch (cl::Error &)
           {
-            log->print(TAB TAB "Image kernel build failed, image bandwidth test skipped" NEWLINE);
+            log->print(TAB TAB + label + " kernel build failed, test skipped" NEWLINE);
+            p = cl::Program(); // return empty/invalid program
           }
-        }
+          return p;
+        };
+
+        // Local-BW and atomic kernels use __local pointer arguments.
+        // Image kernels use image2d_t / sampler_t.
+        // All three cause NVIDIA CUDA-OpenCL to reserve module-level resources
+        // that compress the register budget for every other kernel in the same
+        // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
+        // Each gets its own isolated program object.
+        cl::Program localProg  = buildAuxProg(stringifiedLocalKernels,  "Local bandwidth");
+        cl::Program atomicProg = buildAuxProg(stringifiedAtomicKernels, "Atomic throughput");
+        cl::Program imgProg;
+        if (devInfo.imageSupported)
+          imgProg = buildAuxProg(stringifiedImageKernels, "Image bandwidth");
 
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
 
         runGlobalBandwidthTest(queue, prog, devInfo, cfg);
-        runLocalBandwidthTest(queue, prog, devInfo, cfg);
-        {
-          cl::Program &imgProgRef = imageProgReady ? imgProg : prog;
-          runImageBandwidthTest(queue, imgProgRef, devInfo, cfg);
-        }
+        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
+        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
 
-        // Compute tests via unified helper
+        // Compute tests via unified helper (main program — no __local args)
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute (GFLOPS)", "single_precision_compute",
                        "compute_sp", "float", "gflops",
@@ -234,7 +251,7 @@ int clPeak::runAll()
                        "compute_short", "short", "giops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
-        runAtomicThroughputTest(queue, prog, devInfo, cfg);
+        runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
         runTransferBandwidthTest(queue, prog, devInfo, cfg);
         runKernelLatency(queue, prog, devInfo, cfg);
 
