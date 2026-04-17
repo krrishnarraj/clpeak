@@ -1,17 +1,17 @@
 [versions]
-agp = "8.13.2"
-kotlin = "2.0.21"
-coreKtx = "1.15.0"
-appcompat = "1.7.0"
-material = "1.12.0"
+agp = "9.1.1"
+kotlin = "2.3.20"
+coreKtx = "1.18.0"
+appcompat = "1.7.1"
+material = "1.13.0"
 constraintlayout = "2.2.1"
 recyclerview = "1.4.0"
-lifecycleKtx = "2.8.7"
-activityKtx = "1.9.3"
-coroutines = "1.9.0"
+lifecycleKtx = "2.10.0"
+activityKtx = "1.13.0"
+coroutines = "1.10.2"
 junit = "4.13.2"
-espresso = "3.6.1"
-androidxTest = "1.6.1"
+espresso = "3.7.0"
+androidxTest = "1.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
