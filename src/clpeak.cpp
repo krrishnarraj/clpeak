@@ -83,16 +83,16 @@ int clPeak::runAll()
         for (size_t d = 0; d < devices.size(); d++)
         {
           device_info_t info = getDeviceInfo(devices[d]);
-          const char *typeStr = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU" :
-                                (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU" : "Other";
+          const char *typeStr = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU" : (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
+                                                                                                                        : "Other";
           std::cout << "  Device " << d << ": " << info.deviceName
                     << " [" << typeStr << "]"
                     << "\n";
           std::cout << "    Driver    : " << info.driverVersion << "\n";
           std::cout << "    CUs       : " << info.numCUs << "\n";
           std::cout << "    Clock     : " << info.maxClockFreq << " MHz\n";
-          std::cout << "    Global mem: " << (info.maxGlobalSize / (1024*1024)) << " MB\n";
-          std::cout << "    Max alloc : " << (info.maxAllocSize / (1024*1024)) << " MB\n";
+          std::cout << "    Global mem: " << (info.maxGlobalSize / (1024 * 1024)) << " MB\n";
+          std::cout << "    Max alloc : " << (info.maxAllocSize / (1024 * 1024)) << " MB\n";
           std::cout << "    FP16      : " << (info.halfSupported ? "yes" : "no") << "\n";
           std::cout << "    FP64      : " << (info.doubleSupported ? "yes" : "no") << "\n";
         }
@@ -180,7 +180,8 @@ int clPeak::runAll()
         }
 
         // Helper: build an auxiliary program, silently skip on failure.
-        auto buildAuxProg = [&](const std::string &src, const std::string &label) -> cl::Program {
+        auto buildAuxProg = [&](const std::string &src, const std::string &label) -> cl::Program
+        {
           cl::Program p;
           try
           {
@@ -203,13 +204,27 @@ int clPeak::runAll()
         // that compress the register budget for every other kernel in the same
         // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
         // Each gets its own isolated program object.
-        cl::Program localProg  = buildAuxProg(stringifiedLocalKernels,  "Local bandwidth");
+        cl::Program localProg = buildAuxProg(stringifiedLocalKernels, "Local bandwidth");
         cl::Program atomicProg = buildAuxProg(stringifiedAtomicKernels, "Atomic throughput");
         cl::Program imgProg;
         if (devInfo.imageSupported)
           imgProg = buildAuxProg(stringifiedImageKernels, "Image bandwidth");
 
-        cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
+        cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
+        bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
+
+        cl_command_queue_properties queueCreateProps = supportsProfilingQueue ? CL_QUEUE_PROFILING_ENABLE : 0;
+        cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], queueCreateProps);
+
+        bool savedUseEventTimer = useEventTimer;
+        if (!supportsProfilingQueue)
+        {
+          if (useEventTimer)
+          {
+            log->print(TAB TAB "NOTE: Device does not support profiling queue, --use-event-timer disabled" NEWLINE);
+          }
+          useEventTimer = false;
+        }
 
         runGlobalBandwidthTest(queue, prog, devInfo, cfg);
         runLocalBandwidthTest(queue, localProg, devInfo, cfg);
@@ -253,7 +268,12 @@ int clPeak::runAll()
 
         runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
         runTransferBandwidthTest(queue, prog, devInfo, cfg);
-        runKernelLatency(queue, prog, devInfo, cfg);
+        if (supportsProfilingQueue)
+          runKernelLatency(queue, prog, devInfo, cfg);
+        else if (isTestEnabled(Benchmark::KernelLatency))
+          log->print(NEWLINE TAB TAB "Kernel launch latency         : Skipped (no profiling queue support)" NEWLINE);
+
+        useEventTimer = savedUseEventTimer;
 
         log->print(NEWLINE);
         log->xmlCloseTag(); // device
@@ -421,7 +441,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
       // Padding for aligned output
       std::string padded = labels[w];
-      while (padded.size() < 8) padded += ' ';
+      while (padded.size() < 8)
+        padded += ' ';
       log->print(TAB TAB TAB + padded + ": ");
 
       float timed = run_kernel(queue, kernels[w], globalSize, localSize, iters);
