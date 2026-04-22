@@ -429,6 +429,14 @@ int vkPeak::runAll()
     return 0;
   }
 
+  // Mirror the OpenCL context stack so logger_android recordMetric() can
+  // reach contextStack depth 4 (clpeak > platform > device > test_group).
+  log->xmlOpenTag("clpeak");
+  log->xmlAppendAttribs("os", OS_NAME);
+  log->xmlOpenTag("platform");
+  log->xmlAppendAttribs("name", "Vulkan");
+  log->xmlAppendAttribs("backend", "Vulkan");
+
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
     VulkanDevice dev;
@@ -469,6 +477,8 @@ int vkPeak::runAll()
     log->xmlCloseTag(); // device
   }
 
+  log->xmlCloseTag(); // platform
+  log->xmlCloseTag(); // clpeak
   return 0;
 }
 

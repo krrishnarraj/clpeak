@@ -122,6 +122,7 @@ void logger::recordMetric(const std::string &metric, float value)
     return (it != contextStack[idx].attribs.end()) ? it->second : "";
   };
 
+  const std::string backend  = getAttrib(1, "backend");
   const std::string platform = getAttrib(1, "name");
   const std::string device   = getAttrib(2, "name");
   const std::string driver   = getAttrib(2, "driver_version");
@@ -131,6 +132,7 @@ void logger::recordMetric(const std::string &metric, float value)
   jEnv->CallVoidMethod(
       (*jObj),
       recordMetricCallback,
+      jEnv->NewStringUTF(backend.c_str()),
       jEnv->NewStringUTF(platform.c_str()),
       jEnv->NewStringUTF(device.c_str()),
       jEnv->NewStringUTF(driver.c_str()),

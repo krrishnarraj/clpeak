@@ -16,7 +16,7 @@ static void wireLoggerToJni(logger *lg, JNIEnv *jniEnv, jobject *jObj, jclass cl
       PRINT_CALLBACK, "(Ljava/lang/String;)V");
   lg->recordMetricCallback = jniEnv->GetMethodID(cls,
       RECORD_METRIC_CALLBACK,
-      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
       "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F)V");
 }
 

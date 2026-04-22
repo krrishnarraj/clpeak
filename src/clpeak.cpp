@@ -103,6 +103,7 @@ int clPeak::runAll()
       return 0;
     }
 
+    log->print(NEWLINE "=== OpenCL backend ===" NEWLINE);
     log->xmlOpenTag("clpeak");
     log->xmlAppendAttribs("os", OS_NAME);
     for (size_t p = 0; p < platforms.size(); p++)
@@ -119,6 +120,7 @@ int clPeak::runAll()
       log->print(NEWLINE "Platform: " + platformName + NEWLINE);
       log->xmlOpenTag("platform");
       log->xmlAppendAttribs("name", platformName);
+      log->xmlAppendAttribs("backend", "OpenCL");
 
       cl_context_properties cps[3] = {
           CL_CONTEXT_PLATFORM,
