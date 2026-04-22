@@ -120,7 +120,21 @@ int clPeak::runAll()
           continue;
         }
 
-        cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], CL_QUEUE_PROFILING_ENABLE);
+        cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
+        bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
+
+        cl_command_queue_properties queueCreateProps = supportsProfilingQueue ? CL_QUEUE_PROFILING_ENABLE : 0;
+        cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], queueCreateProps);
+
+        bool savedUseEventTimer = useEventTimer;
+        if (!supportsProfilingQueue)
+        {
+          if (useEventTimer)
+          {
+            log->print(TAB TAB "NOTE: Device does not support profiling queue, --use-event-timer disabled" NEWLINE);
+          }
+          useEventTimer = false;
+        }
 
         runGlobalBandwidthTest(queue, prog, devInfo);
         runComputeSP(queue, prog, devInfo);
@@ -131,7 +145,12 @@ int clPeak::runAll()
         runComputeChar(queue, prog, devInfo);
         runComputeShort(queue, prog, devInfo);
         runTransferBandwidthTest(queue, prog, devInfo);
-        runKernelLatency(queue, prog, devInfo);
+        if (supportsProfilingQueue)
+          runKernelLatency(queue, prog, devInfo);
+        else if (isKernelLatency)
+          log->print(NEWLINE TAB TAB "Kernel launch latency         : Skipped (no profiling queue support)" NEWLINE);
+
+        useEventTimer = savedUseEventTimer;
 
         log->print(NEWLINE);
         log->xmlCloseTag(); // device
