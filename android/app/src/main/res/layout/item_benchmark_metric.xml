@@ -12,7 +12,7 @@
     <!-- Metric name (e.g. "float4") -->
     <TextView
         android:id="@+id/tv_metric_name"
-        android:layout_width="80dp"
+        android:layout_width="110dp"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
         android:textAppearance="?attr/textAppearanceBodySmall"
@@ -31,7 +31,7 @@
     <!-- Numeric value -->
     <TextView
         android:id="@+id/tv_metric_value"
-        android:layout_width="80dp"
+        android:layout_width="70dp"
         android:layout_height="wrap_content"
         android:gravity="end"
         android:fontFamily="monospace"

@@ -80,7 +80,7 @@ class ResultAdapter(
                 bindMetricRows(category)
             }
 
-            if (shouldAnimate) {
+            if (shouldAnimate && binding.root.width > 0) {
                 animateExpandCollapse(binding.metricsContainer, expanded)
                 binding.ivExpand.animate()
                     .rotation(if (expanded) 180f else 0f)
@@ -89,6 +89,7 @@ class ResultAdapter(
                     .start()
             } else {
                 binding.metricsContainer.visibility = if (expanded) View.VISIBLE else View.GONE
+                binding.metricsContainer.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
                 binding.ivExpand.rotation = if (expanded) 180f else 0f
             }
 
@@ -98,11 +99,13 @@ class ResultAdapter(
         private fun animateExpandCollapse(view: View, expand: Boolean) {
             if (expand) {
                 view.visibility = View.VISIBLE
-                view.measure(
-                    View.MeasureSpec.makeMeasureSpec(view.width.takeIf { it > 0 }
-                        ?: (view.parent as View).width, View.MeasureSpec.EXACTLY),
-                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                val parent = view.parent as? View ?: return
+                val widthSpec = View.MeasureSpec.makeMeasureSpec(
+                    if (parent.width > 0) parent.width else 1000,
+                    View.MeasureSpec.EXACTLY
                 )
+                view.measure(widthSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+
                 val targetHeight = view.measuredHeight
                 view.layoutParams.height = 0
                 view.requestLayout()
@@ -115,6 +118,11 @@ class ResultAdapter(
                         view.layoutParams.height = anim.animatedValue as Int
                         view.requestLayout()
                     }
+                    addListener(object : android.animation.AnimatorListenerAdapter() {
+                        override fun onAnimationEnd(animation: android.animation.Animator) {
+                            view.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        }
+                    })
                     start()
                 }
                 view.animate().alpha(1f).setDuration(200).setStartDelay(50).start()
