@@ -7,11 +7,26 @@ set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 include(${CLPEAK_ROOT}/cmake/version.cmake)
 include(${CLPEAK_ROOT}/cmake/sources.cmake)
 
-add_library(clpeak SHARED
+set(CLPEAK_ANDROID_SOURCES
     ${CLPEAK_CORE_SOURCES}
     ${CLPEAK_ROOT}/src/logger_android.cpp
     ${CLPEAK_ROOT}/src/entry_android.cpp
 )
+
+# Vulkan is part of the NDK since API 24; libvulkan.so and headers ship with
+# every modern NDK. glslc for shader compilation lives at
+# ${ANDROID_NDK}/shader-tools/<host>. We enable Vulkan unconditionally here;
+# at runtime vkPeak::initInstance() fails gracefully on devices without a
+# Vulkan driver.
+find_library(ANDROID_VULKAN_LIB vulkan)
+if(ANDROID_VULKAN_LIB)
+  list(APPEND CLPEAK_ANDROID_SOURCES
+    ${CLPEAK_ROOT}/src/vk_peak.cpp
+    ${CLPEAK_ROOT}/src/entry_vk.cpp
+  )
+endif()
+
+add_library(clpeak SHARED ${CLPEAK_ANDROID_SOURCES})
 
 clpeak_setup_version(clpeak)
 
@@ -28,3 +43,16 @@ target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL CL_TARG
 target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions)
 set_target_properties(clpeak PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(clpeak log atomic dl OpenCL)
+
+if(ANDROID_VULKAN_LIB)
+  target_compile_definitions(clpeak PRIVATE ENABLE_VULKAN)
+  target_link_libraries(clpeak ${ANDROID_VULKAN_LIB})
+  include(${CLPEAK_ROOT}/cmake/CompileShaders.cmake)
+  compile_shaders(
+    TARGET clpeak
+    SHADERS
+      ${CLPEAK_ROOT}/src/shaders/compute_sp_v1.comp
+      ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v1.comp
+      ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v1.comp
+  )
+endif()

@@ -12,7 +12,23 @@
 function(compile_shaders)
   cmake_parse_arguments(CS "" "TARGET" "SHADERS" ${ARGN})
 
-  find_program(GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin")
+  # Search Vulkan SDK first, then the NDK's bundled shader-tools when building
+  # for Android (Gradle passes ANDROID_NDK to CMake; ANDROID_HOST_TAG is set by
+  # android.toolchain.cmake, e.g. "darwin-x86_64" / "linux-x86_64").
+  set(_shader_tool_hints "$ENV{VULKAN_SDK}/bin")
+  if(DEFINED ANDROID_NDK)
+    if(NOT ANDROID_HOST_TAG)
+      if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+        set(ANDROID_HOST_TAG "darwin-x86_64")
+      elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+        set(ANDROID_HOST_TAG "linux-x86_64")
+      elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+        set(ANDROID_HOST_TAG "windows-x86_64")
+      endif()
+    endif()
+    list(APPEND _shader_tool_hints "${ANDROID_NDK}/shader-tools/${ANDROID_HOST_TAG}")
+  endif()
+  find_program(GLSLC glslc HINTS ${_shader_tool_hints})
   if(NOT GLSLC)
     message(FATAL_ERROR "glslc not found. Install the Vulkan SDK or set VULKAN_SDK env var.")
   endif()
@@ -32,13 +48,21 @@ function(compile_shaders)
 
     message(STATUS "Compiling shader: ${SHADER_NAME}.comp -> SPIR-V")
     execute_process(
-      COMMAND "${GLSLC}" -O "${SHADER}" -o "${SPV_FILE}"
+      COMMAND "${GLSLC}" --target-env=vulkan1.1 -O "${SHADER}" -o "${SPV_FILE}"
       RESULT_VARIABLE GLSLC_RESULT
       ERROR_VARIABLE  GLSLC_ERROR
     )
     if(NOT GLSLC_RESULT EQUAL 0)
-      message(FATAL_ERROR "glslc failed for ${SHADER}:\n${GLSLC_ERROR}")
+      # Some shaders require newer GLSL/SPIR-V features (e.g. integer dot
+      # product) that older glslc versions (notably the one bundled with
+      # the Android NDK) don't support. Skip with a warning so the build
+      # still produces a functional binary; host code is gated with
+      # CLPEAK_VK_HAS_<SHADER_NAME_UPPER> defines (see below).
+      message(WARNING "glslc could not build ${SHADER_NAME}.comp; skipping it. Error:\n${GLSLC_ERROR}")
+      continue()
     endif()
+    string(TOUPPER "${SHADER_NAME}" SHADER_NAME_UPPER)
+    target_compile_definitions(${CS_TARGET} PRIVATE CLPEAK_VK_HAS_${SHADER_NAME_UPPER})
 
     # Read SPIR-V binary as a hex string (two chars per byte)
     file(READ "${SPV_FILE}" SPV_HEX HEX)

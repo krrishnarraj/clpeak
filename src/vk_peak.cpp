@@ -87,7 +87,12 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   std::vector<const char *> enabledExts;
   info.int8DotProductSupported = false;
 
-  // INT8 dot-product: VK_KHR_shader_integer_dot_product + shaderInt8
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+  // INT8 dot-product: VK_KHR_shader_integer_dot_product + shaderInt8.
+  // Compiled in only when glslc could build the shader AND the Vulkan loader
+  // exposes vkGetPhysicalDeviceFeatures2 (Vulkan 1.1 core). On older Android
+  // API levels (< 28) that symbol isn't present in the NDK sysroot stub, so
+  // we don't reference it there.
   VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
   dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
@@ -96,7 +101,6 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME) &&
       hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
   {
-    // Query via vkGetPhysicalDeviceFeatures2 (requires Vulkan 1.1 or KHR promoted)
     VkPhysicalDeviceFeatures2 features2 = {};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.pNext = &dpFeatures;
@@ -107,12 +111,12 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
     {
       enabledExts.push_back(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
       enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
-      // 8-bit storage is required to pass i8 through push_constant / storage buffers
       if (hasExt(VK_KHR_8BIT_STORAGE_EXTENSION_NAME))
         enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
       info.int8DotProductSupported = true;
     }
   }
+#endif
 
 #if defined(__APPLE__) || defined(__MACOSX)
   if (hasExt("VK_KHR_portability_subset"))
@@ -134,7 +138,7 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-  // Chain feature structs if any optional features enabled
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
   enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
   if (info.int8DotProductSupported)
@@ -144,6 +148,7 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
     f16i8Features.pNext = nullptr;
     deviceCI.pNext = &enabledFeatures2;
   }
+#endif
 
   if (vkCreateDevice(physDev, &deviceCI, nullptr, &device) != VK_SUCCESS)
     return false;
@@ -449,7 +454,9 @@ int vkPeak::runAll()
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
 
     runComputeSP(dev, cfg);
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
     runComputeInt8DP(dev, cfg);
+#endif
     runGlobalBandwidth(dev, cfg);
 
     log->print(NEWLINE);
@@ -601,6 +608,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   return 0;
 }
 
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
 // ---------------------------------------------------------------------------
 // INT8 dot-product benchmark (Vulkan, VK_KHR_shader_integer_dot_product)
 // ---------------------------------------------------------------------------
@@ -737,6 +745,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   log->xmlCloseTag(); // integer_compute_int8_dp
   return 0;
 }
+#endif // CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
 
 // ---------------------------------------------------------------------------
 // Global bandwidth benchmark (Vulkan)

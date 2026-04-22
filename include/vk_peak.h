@@ -82,7 +82,9 @@ public:
 
   // Individual benchmarks
   int runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg);
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   int runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg);
+#endif
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
@@ -106,8 +108,10 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v1_size;
   extern const uint32_t global_bandwidth_v1[];
   extern const size_t   global_bandwidth_v1_size;
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;
+#endif
 }
 
 #endif // ENABLE_VULKAN
