@@ -17,7 +17,15 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-#define MAD_DP_4(x, y, a)  a = dotAccSatEXT(x, y, a); a = dotAccSatEXT(x, y, a); a = dotAccSatEXT(x, y, a); a = dotAccSatEXT(x, y, a);
+// Re-pack the accumulator into y after every dot so the compiler cannot
+// fold dot(x, y) to a scalar constant and collapse the chain. The four
+// bytes of the int32 accumulator drive the four lanes of y independently,
+// keeping the dot product a genuine 4-mul / 3-add op.
+#define REPACK(a, y) y = i8vec4(int8_t(a), int8_t(a >> 8), int8_t(a >> 16), int8_t(a >> 24))
+#define MAD_DP_4(x, y, a)  a = dotAccSatEXT(x, y, a); REPACK(a, y); \
+                           a = dotAccSatEXT(x, y, a); REPACK(a, y); \
+                           a = dotAccSatEXT(x, y, a); REPACK(a, y); \
+                           a = dotAccSatEXT(x, y, a); REPACK(a, y);
 #define MAD_DP_16(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a)
 
 void main()
@@ -25,7 +33,7 @@ void main()
     int8_t _A = int8_t(pc.A);
     i8vec4 x = i8vec4(_A, int8_t(_A + int8_t(1)), int8_t(_A + int8_t(2)), int8_t(_A + int8_t(3)));
     i8vec4 y = i8vec4(int8_t(gl_LocalInvocationID.x));
-    int a0 = 0;
+    int a0 = int(gl_LocalInvocationID.x);
 
     for (int i = 0; i < 64; i++)
     {
