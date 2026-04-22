@@ -4,7 +4,6 @@
 #include <cstring>
 #include <sstream>
 #include <chrono>
-#include <iostream>
 
 // ---------------------------------------------------------------------------
 // VulkanDevice
@@ -297,9 +296,15 @@ bool vkPeak::initInstance()
   appInfo.pApplicationName = "clpeak-vulkan";
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "clpeak";
-  // Request 1.1 so vkGetPhysicalDeviceFeatures2 / pNext chaining on features
-  // are available core (needed for optional extension feature queries).
+  // Only request 1.1 when we compiled in code that actually needs 1.1-core
+  // symbols (e.g. vkGetPhysicalDeviceFeatures2 for INT8 DP feature query).
+  // Otherwise request 1.0 so we work on older drivers / Android API levels
+  // where libvulkan only exposes 1.0.
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   appInfo.apiVersion = VK_API_VERSION_1_1;
+#else
+  appInfo.apiVersion = VK_API_VERSION_1_0;
+#endif
 
   VkInstanceCreateInfo instCI = {};
   instCI.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -398,9 +403,10 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
 
 int vkPeak::runAll()
 {
+  log->print(NEWLINE "=== Vulkan backend ===" NEWLINE);
   if (!initInstance())
   {
-    std::cerr << "Vulkan: failed to create instance or no devices found\n";
+    log->print("Vulkan: failed to create instance or no devices found" NEWLINE);
     return -1;
   }
 
@@ -413,12 +419,12 @@ int vkPeak::runAll()
       const char *typeStr = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ? "Discrete GPU" :
                             (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) ? "Integrated GPU" :
                             (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? "CPU" : "Other";
-      std::cout << "  Vulkan Device " << i << ": " << props.deviceName
-                << " [" << typeStr << "]"
-                << "\n";
-      std::cout << "    API       : " << VK_VERSION_MAJOR(props.apiVersion) << "."
-                << VK_VERSION_MINOR(props.apiVersion) << "."
-                << VK_VERSION_PATCH(props.apiVersion) << "\n";
+      std::stringstream ss;
+      ss << "  Vulkan Device " << i << ": " << props.deviceName << " [" << typeStr << "]" << NEWLINE
+         << "    API       : " << VK_VERSION_MAJOR(props.apiVersion) << "."
+         << VK_VERSION_MINOR(props.apiVersion) << "."
+         << VK_VERSION_PATCH(props.apiVersion) << NEWLINE;
+      log->print(ss.str());
     }
     return 0;
   }
@@ -428,7 +434,7 @@ int vkPeak::runAll()
     VulkanDevice dev;
     if (!dev.init(physicalDevices[d]))
     {
-      std::cerr << "Vulkan: failed to init device " << d << "\n";
+      log->print(NEWLINE "Vulkan: failed to init device " + std::to_string(d) + NEWLINE);
       continue;
     }
 
