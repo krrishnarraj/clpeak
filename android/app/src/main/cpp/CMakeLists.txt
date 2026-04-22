@@ -54,5 +54,6 @@ if(ANDROID_VULKAN_LIB)
       ${CLPEAK_ROOT}/src/shaders/compute_sp_v1.comp
       ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v1.comp
       ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v1.comp
+      ${CLPEAK_ROOT}/src/shaders/compute_mp_v1.comp
   )
 endif()

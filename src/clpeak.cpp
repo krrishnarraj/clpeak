@@ -12,6 +12,7 @@ static const std::string stringifiedKernels =
 #include "global_bandwidth_kernels.cl"
 #include "compute_sp_kernels.cl"
 #include "compute_hp_kernels.cl"
+#include "compute_mp_kernels.cl"
 #include "compute_dp_kernels.cl"
 #include "compute_int24_kernels.cl"
 #include "compute_integer_kernels.cl"
@@ -246,6 +247,11 @@ int clPeak::runAll()
                        "compute_hp", "half", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
+                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
+                       "compute_mp", "mp", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute (GFLOPS)", "double_precision_compute",
                        "compute_dp", "double", "gflops",
@@ -369,6 +375,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
   {
     log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
+    return 0;
+  }
+  if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
+  {
+    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
+    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
     return 0;
   }
   if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)

@@ -21,6 +21,7 @@ static const char *helpStr =
     "\n  --image-bandwidth           selectively run image (texture) bandwidth test"
     "\n  --atomic-throughput         selectively run atomic throughput test"
     "\n  --compute-hp                selectively run half precision compute test"
+    "\n  --compute-mp                selectively run mixed-precision (fp16xfp16+fp32) compute test"
     "\n  --compute-sp                selectively run single precision compute test"
     "\n  --compute-dp                selectively run double precision compute test"
     "\n  --compute-integer           selectively run integer compute test"
@@ -92,6 +93,7 @@ static const TestFlag testFlags[] = {
   {"--image-bandwidth",   Benchmark::ImageBW},
   {"--atomic-throughput",  Benchmark::AtomicThroughput},
   {"--compute-hp",        Benchmark::ComputeHP},
+  {"--compute-mp",        Benchmark::ComputeMP},
   {"--compute-sp",        Benchmark::ComputeSP},
   {"--compute-dp",        Benchmark::ComputeDP},
   {"--compute-integer",   Benchmark::ComputeInt},

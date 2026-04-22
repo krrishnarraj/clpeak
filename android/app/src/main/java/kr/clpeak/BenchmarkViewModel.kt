@@ -122,6 +122,7 @@ class BenchmarkViewModel : ViewModel() {
             "single_precision_compute"  to CategoryMeta("Single-Precision Compute",  TestType.COMPUTE),
             "double_precision_compute"  to CategoryMeta("Double-Precision Compute",  TestType.COMPUTE),
             "half_precision_compute"    to CategoryMeta("Half-Precision Compute",    TestType.COMPUTE),
+            "mixed_precision_compute"   to CategoryMeta("Mixed-Precision Compute (fp16\u00D7fp16+fp32)", TestType.COMPUTE),
             "integer_compute"           to CategoryMeta("Integer Compute",           TestType.COMPUTE),
             "integer_24bit_compute"     to CategoryMeta("Integer 24-bit Compute",    TestType.COMPUTE),
             "char_compute"              to CategoryMeta("Char Compute",              TestType.COMPUTE),

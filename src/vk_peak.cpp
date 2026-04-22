@@ -85,35 +85,58 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
 
   std::vector<const char *> enabledExts;
   info.int8DotProductSupported = false;
+  info.float16Supported = false;
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-  // INT8 dot-product: VK_KHR_shader_integer_dot_product + shaderInt8.
-  // Compiled in only when glslc could build the shader AND the Vulkan loader
-  // exposes vkGetPhysicalDeviceFeatures2 (Vulkan 1.1 core). On older Android
-  // API levels (< 28) that symbol isn't present in the NDK sysroot stub, so
-  // we don't reference it there.
-  VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
-  dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1)
+  // Feature query for optional shader types (INT8 dot-product, fp16).
+  // Uses vkGetPhysicalDeviceFeatures2 (Vulkan 1.1 core); only compiled in
+  // when at least one shader needing these features was built by glslc.
+  // On Android API < 28 that symbol isn't in the libvulkan stub, so none
+  // of the Android-built shaders should enable either of these defines
+  // unless the NDK provides a modern-enough loader (see CompileShaders.cmake).
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+  VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
+  dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
+#endif
 
-  if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME) &&
-      hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
+  if (hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
   {
     VkPhysicalDeviceFeatures2 features2 = {};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &dpFeatures;
-    dpFeatures.pNext = &f16i8Features;
+    features2.pNext = &f16i8Features;
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+    if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME))
+      f16i8Features.pNext = &dpFeatures;
+#endif
     vkGetPhysicalDeviceFeatures2(physDev, &features2);
 
-    if (dpFeatures.shaderIntegerDotProduct && f16i8Features.shaderInt8)
+    bool f16i8ExtEnabled = false;
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+    if (f16i8Features.shaderFloat16)
+    {
+      enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+      f16i8ExtEnabled = true;
+      info.float16Supported = true;
+    }
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+    if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME) &&
+        dpFeatures.shaderIntegerDotProduct && f16i8Features.shaderInt8)
     {
       enabledExts.push_back(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
-      enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+      if (!f16i8ExtEnabled)
+      {
+        enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+        f16i8ExtEnabled = true;
+      }
       if (hasExt(VK_KHR_8BIT_STORAGE_EXTENSION_NAME))
         enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
       info.int8DotProductSupported = true;
     }
+#endif
+    (void)f16i8ExtEnabled;
   }
 #endif
 
@@ -137,14 +160,20 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1)
   VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
   enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-  if (info.int8DotProductSupported)
+  if (info.int8DotProductSupported || info.float16Supported)
   {
-    enabledFeatures2.pNext = &dpFeatures;
-    dpFeatures.pNext = &f16i8Features;
+    enabledFeatures2.pNext = &f16i8Features;
     f16i8Features.pNext = nullptr;
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+    if (info.int8DotProductSupported)
+    {
+      f16i8Features.pNext = &dpFeatures;
+      dpFeatures.pNext = nullptr;
+    }
+#endif
     deviceCI.pNext = &enabledFeatures2;
   }
 #endif
@@ -300,7 +329,7 @@ bool vkPeak::initInstance()
   // symbols (e.g. vkGetPhysicalDeviceFeatures2 for INT8 DP feature query).
   // Otherwise request 1.0 so we work on older drivers / Android API levels
   // where libvulkan only exposes 1.0.
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1)
   appInfo.apiVersion = VK_API_VERSION_1_1;
 #else
   appInfo.apiVersion = VK_API_VERSION_1_0;
@@ -468,6 +497,9 @@ int vkPeak::runAll()
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
 
     runComputeSP(dev, cfg);
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+    runComputeMP(dev, cfg);
+#endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
     runComputeInt8DP(dev, cfg);
 #endif
@@ -623,6 +655,145 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   log->xmlCloseTag(); // single_precision_compute
   return 0;
 }
+
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+// ---------------------------------------------------------------------------
+// Mixed-precision MAC benchmark (Vulkan, fp16 x fp16 + fp32)
+// ---------------------------------------------------------------------------
+
+int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  log->print(NEWLINE TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
+  log->xmlOpenTag("mixed_precision_compute");
+  log->xmlAppendAttribs("unit", "gflops");
+
+  if (!dev.info.float16Supported)
+  {
+    log->print(TAB TAB "shaderFloat16 not supported! Skipped" NEWLINE);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  unsigned int iters = cfg.computeIters;
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  if (globalWIs * sizeof(float) > dev.info.maxAllocSize)
+    globalWIs = dev.info.maxAllocSize / sizeof(float);
+  globalWIs = (globalWIs / wgSize) * wgSize;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+
+  VkBuffer outputBuf;
+  VkDeviceMemory outputMem;
+  if (!dev.createBuffer(globalWIs * sizeof(float),
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        outputBuf, outputMem))
+  {
+    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  VkDescriptorSetLayoutBinding binding = {};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
+  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dsLayoutCI.bindingCount = 1;
+  dsLayoutCI.pBindings = &binding;
+
+  VkDescriptorSetLayout dsLayout;
+  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
+
+  VkPushConstantRange pushRange = {};
+  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  pushRange.offset = 0;
+  pushRange.size = sizeof(float);
+
+  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
+  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeLayoutCI.setLayoutCount = 1;
+  pipeLayoutCI.pSetLayouts = &dsLayout;
+  pipeLayoutCI.pushConstantRangeCount = 1;
+  pipeLayoutCI.pPushConstantRanges = &pushRange;
+
+  VkPipelineLayout pipeLayout;
+  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
+
+  VkPipeline pipeline;
+  if (!dev.createComputePipeline(vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size,
+                                  dsLayout, pipeLayout, pipeline))
+  {
+    log->print(TAB TAB "Failed to create mixed-precision compute pipeline" NEWLINE);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+    vkDestroyBuffer(dev.device, outputBuf, nullptr);
+    vkFreeMemory(dev.device, outputMem, nullptr);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  VkDescriptorPoolSize poolSize = {};
+  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  poolSize.descriptorCount = 1;
+
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1;
+  dpCI.poolSizeCount = 1;
+  dpCI.pPoolSizes = &poolSize;
+
+  VkDescriptorPool descPool;
+  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = descPool;
+  dsAI.descriptorSetCount = 1;
+  dsAI.pSetLayouts = &dsLayout;
+
+  VkDescriptorSet descSet;
+  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+
+  VkDescriptorBufferInfo bufInfo = {};
+  bufInfo.buffer = outputBuf;
+  bufInfo.offset = 0;
+  bufInfo.range = globalWIs * sizeof(float);
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = descSet;
+  write.dstBinding = 0;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  write.pBufferInfo = &bufInfo;
+
+  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
+
+  log->print(TAB TAB "mp      : ");
+
+  float A = 1.3f;
+  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(float));
+  float gflops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_FP_WORK_PER_WI)) / timed / 1e3f;
+
+  log->print(gflops);
+  log->print(NEWLINE);
+  log->xmlRecord("mp", gflops);
+
+  vkDestroyPipeline(dev.device, pipeline, nullptr);
+  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  vkDestroyBuffer(dev.device, outputBuf, nullptr);
+  vkFreeMemory(dev.device, outputMem, nullptr);
+
+  log->xmlCloseTag(); // mixed_precision_compute
+  return 0;
+}
+#endif // CLPEAK_VK_HAS_COMPUTE_MP_V1
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
 // ---------------------------------------------------------------------------

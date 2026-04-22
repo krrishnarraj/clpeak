@@ -1,0 +1,41 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+// Mixed-precision MAC: fp16 x fp16 + fp32 accumulator. Dominant arithmetic
+// path in LLM training/prefill. Distinct from compute_sp (pure fp32) and
+// from compute_hp (pure fp16).
+//
+// Requires VK_KHR_shader_float16_int8 + shaderFloat16.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+// Tie x, y back to the accumulator via an fp16 downcast on every step so the
+// compiler can't hoist (float)x*(float)y across iterations.
+#define MAD_4(x, y, a) \
+    a = fma(float(x), float(y), a); x = float16_t(a); \
+    a = fma(float(y), float(x), a); y = float16_t(a); \
+    a = fma(float(x), float(y), a); x = float16_t(a); \
+    a = fma(float(y), float(x), a); y = float16_t(a);
+#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+
+void main()
+{
+    float16_t x = float16_t(pc.A);
+    float16_t y = float16_t(gl_LocalInvocationID.x);
+    float     a = pc.A;
+
+    for (int i = 0; i < 128; i++)
+    {
+        MAD_16(x, y, a)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a + float(x) + float(y);
+}

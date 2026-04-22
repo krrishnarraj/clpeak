@@ -19,6 +19,7 @@ enum class Benchmark : unsigned int {
   LocalBW,
   ImageBW,
   ComputeHP,
+  ComputeMP,
   ComputeSP,
   ComputeDP,
   ComputeInt,
