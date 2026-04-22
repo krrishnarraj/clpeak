@@ -24,6 +24,11 @@ static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 
+// compute_int8_dp_kernels.cl
+// Each dot_acc_sat(char4, char4, int) is 4 INT8 multiply-adds = 8 ops.
+// v1: 64 iters * MAD_DP_16 (16 dots) * 8 ops = 8192 per WI (all variants equal).
+static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
+
 // Max work-group size cap.  Hardware may report higher (1024 on most NVIDIA
 // GPUs), but we clamp to 256 because v16 kernels hold a float16/double16
 // accumulator (~50-64 registers per thread).  At localSize=1024 this exceeds

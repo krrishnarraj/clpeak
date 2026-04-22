@@ -1,0 +1,36 @@
+#version 450
+
+// INT8 dot-product compute throughput using VK_KHR_shader_integer_dot_product.
+// Each dotAccSatEXT(i8vec4, i8vec4, int) computes 4 signed INT8 multiply-adds
+// into a 32-bit accumulator; it maps to the hardware DP4a / XDL / INT8-tensor
+// path on modern GPUs (NVIDIA Turing+, AMD RDNA2+, Intel Xe+, Adreno, Mali).
+#extension GL_EXT_integer_dot_product : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define MAD_DP_4(x, y, a)  a = dotAccSatEXT(x, y, a); a = dotAccSatEXT(x, y, a); a = dotAccSatEXT(x, y, a); a = dotAccSatEXT(x, y, a);
+#define MAD_DP_16(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a)
+
+void main()
+{
+    int8_t _A = int8_t(pc.A);
+    i8vec4 x = i8vec4(_A, int8_t(_A + int8_t(1)), int8_t(_A + int8_t(2)), int8_t(_A + int8_t(3)));
+    i8vec4 y = i8vec4(int8_t(gl_LocalInvocationID.x));
+    int a0 = 0;
+
+    for (int i = 0; i < 64; i++)
+    {
+        MAD_DP_16(x, y, a0)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a0;
+}

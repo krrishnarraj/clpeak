@@ -102,6 +102,7 @@ if(Vulkan_FOUND)
     SHADERS
       ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/compute_sp_v1.comp
       ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/global_bandwidth_v1.comp
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/compute_int8_dp_v1.comp
   )
 endif()
 

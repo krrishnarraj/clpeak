@@ -25,6 +25,9 @@ struct vk_device_info_t {
 
   VkPhysicalDeviceType deviceType;
   uint32_t computeQueueFamily;
+
+  // Optional feature / extension gates
+  bool int8DotProductSupported;   // VK_KHR_shader_integer_dot_product + shaderInt8
 };
 
 // Manages a single Vulkan device for benchmarking
@@ -79,6 +82,7 @@ public:
 
   // Individual benchmarks
   int runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
@@ -102,6 +106,8 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v1_size;
   extern const uint32_t global_bandwidth_v1[];
   extern const size_t   global_bandwidth_v1_size;
+  extern const uint32_t compute_int8_dp_v1[];
+  extern const size_t   compute_int8_dp_v1_size;
 }
 
 #endif // ENABLE_VULKAN

@@ -73,6 +73,52 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   if (info.computeQueueFamily == UINT32_MAX)
     return false;
 
+  // Query supported extensions
+  uint32_t extCount = 0;
+  vkEnumerateDeviceExtensionProperties(physDev, nullptr, &extCount, nullptr);
+  std::vector<VkExtensionProperties> extProps(extCount);
+  vkEnumerateDeviceExtensionProperties(physDev, nullptr, &extCount, extProps.data());
+  auto hasExt = [&](const char *name) {
+    for (auto &e : extProps)
+      if (strcmp(e.extensionName, name) == 0) return true;
+    return false;
+  };
+
+  std::vector<const char *> enabledExts;
+  info.int8DotProductSupported = false;
+
+  // INT8 dot-product: VK_KHR_shader_integer_dot_product + shaderInt8
+  VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
+  dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
+  VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
+  f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
+
+  if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME) &&
+      hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
+  {
+    // Query via vkGetPhysicalDeviceFeatures2 (requires Vulkan 1.1 or KHR promoted)
+    VkPhysicalDeviceFeatures2 features2 = {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &dpFeatures;
+    dpFeatures.pNext = &f16i8Features;
+    vkGetPhysicalDeviceFeatures2(physDev, &features2);
+
+    if (dpFeatures.shaderIntegerDotProduct && f16i8Features.shaderInt8)
+    {
+      enabledExts.push_back(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
+      enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+      // 8-bit storage is required to pass i8 through push_constant / storage buffers
+      if (hasExt(VK_KHR_8BIT_STORAGE_EXTENSION_NAME))
+        enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
+      info.int8DotProductSupported = true;
+    }
+  }
+
+#if defined(__APPLE__) || defined(__MACOSX)
+  if (hasExt("VK_KHR_portability_subset"))
+    enabledExts.push_back("VK_KHR_portability_subset");
+#endif
+
   // Create logical device
   float queuePriority = 1.0f;
   VkDeviceQueueCreateInfo queueCI = {};
@@ -85,6 +131,19 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   deviceCI.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   deviceCI.queueCreateInfoCount = 1;
   deviceCI.pQueueCreateInfos = &queueCI;
+  deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
+  deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
+
+  // Chain feature structs if any optional features enabled
+  VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
+  enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+  if (info.int8DotProductSupported)
+  {
+    enabledFeatures2.pNext = &dpFeatures;
+    dpFeatures.pNext = &f16i8Features;
+    f16i8Features.pNext = nullptr;
+    deviceCI.pNext = &enabledFeatures2;
+  }
 
   if (vkCreateDevice(physDev, &deviceCI, nullptr, &device) != VK_SUCCESS)
     return false;
@@ -233,7 +292,9 @@ bool vkPeak::initInstance()
   appInfo.pApplicationName = "clpeak-vulkan";
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "clpeak";
-  appInfo.apiVersion = VK_API_VERSION_1_0;
+  // Request 1.1 so vkGetPhysicalDeviceFeatures2 / pNext chaining on features
+  // are available core (needed for optional extension feature queries).
+  appInfo.apiVersion = VK_API_VERSION_1_1;
 
   VkInstanceCreateInfo instCI = {};
   instCI.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -388,6 +449,7 @@ int vkPeak::runAll()
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
 
     runComputeSP(dev, cfg);
+    runComputeInt8DP(dev, cfg);
     runGlobalBandwidth(dev, cfg);
 
     log->print(NEWLINE);
@@ -534,6 +596,143 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   vkFreeMemory(dev.device, outputMem, nullptr);
 
   log->xmlCloseTag(); // single_precision_compute
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// INT8 dot-product benchmark (Vulkan, VK_KHR_shader_integer_dot_product)
+// ---------------------------------------------------------------------------
+
+int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  log->print(NEWLINE TAB "INT8 dot-product compute (GIOPS)" NEWLINE);
+  log->xmlOpenTag("integer_compute_int8_dp");
+  log->xmlAppendAttribs("unit", "giops");
+
+  if (!dev.info.int8DotProductSupported)
+  {
+    log->print(TAB TAB "VK_KHR_shader_integer_dot_product / shaderInt8 not supported! Skipped" NEWLINE);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  unsigned int iters = cfg.computeIters;
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 1024 * 1024;
+  if (globalWIs * sizeof(int32_t) > dev.info.maxAllocSize)
+    globalWIs = dev.info.maxAllocSize / sizeof(int32_t);
+  globalWIs = (globalWIs / wgSize) * wgSize;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+
+  VkBuffer outputBuf;
+  VkDeviceMemory outputMem;
+  if (!dev.createBuffer(globalWIs * sizeof(int32_t),
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        outputBuf, outputMem))
+  {
+    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  VkDescriptorSetLayoutBinding binding = {};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
+  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dsLayoutCI.bindingCount = 1;
+  dsLayoutCI.pBindings = &binding;
+
+  VkDescriptorSetLayout dsLayout;
+  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
+
+  VkPushConstantRange pushRange = {};
+  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  pushRange.offset = 0;
+  pushRange.size = sizeof(int32_t);
+
+  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
+  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeLayoutCI.setLayoutCount = 1;
+  pipeLayoutCI.pSetLayouts = &dsLayout;
+  pipeLayoutCI.pushConstantRangeCount = 1;
+  pipeLayoutCI.pPushConstantRanges = &pushRange;
+
+  VkPipelineLayout pipeLayout;
+  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
+
+  VkPipeline pipeline;
+  if (!dev.createComputePipeline(vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
+                                  dsLayout, pipeLayout, pipeline))
+  {
+    log->print(TAB TAB "Failed to create INT8-DP compute pipeline (driver may not honor extension)" NEWLINE);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+    vkDestroyBuffer(dev.device, outputBuf, nullptr);
+    vkFreeMemory(dev.device, outputMem, nullptr);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  VkDescriptorPoolSize poolSize = {};
+  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  poolSize.descriptorCount = 1;
+
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1;
+  dpCI.poolSizeCount = 1;
+  dpCI.pPoolSizes = &poolSize;
+
+  VkDescriptorPool descPool;
+  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = descPool;
+  dsAI.descriptorSetCount = 1;
+  dsAI.pSetLayouts = &dsLayout;
+
+  VkDescriptorSet descSet;
+  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+
+  VkDescriptorBufferInfo bufInfo = {};
+  bufInfo.buffer = outputBuf;
+  bufInfo.offset = 0;
+  bufInfo.range = globalWIs * sizeof(int32_t);
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = descSet;
+  write.dstBinding = 0;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  write.pBufferInfo = &bufInfo;
+
+  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
+
+  log->print(TAB TAB "int8_dp : ");
+
+  int32_t A = 4;
+  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(int32_t));
+  float giops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_INT8_DP_WORK_PER_WI)) / timed / 1e3f;
+
+  log->print(giops);
+  log->print(NEWLINE);
+  log->xmlRecord("int8_dp", giops);
+
+  vkDestroyPipeline(dev.device, pipeline, nullptr);
+  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  vkDestroyBuffer(dev.device, outputBuf, nullptr);
+  vkFreeMemory(dev.device, outputMem, nullptr);
+
+  log->xmlCloseTag(); // integer_compute_int8_dp
   return 0;
 }
 

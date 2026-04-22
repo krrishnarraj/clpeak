@@ -67,6 +67,7 @@ struct device_info_t {
 
   bool halfSupported;
   bool doubleSupported;
+  bool int8DotProductSupported;
   cl_device_type  deviceType;
 
   uint64_t localMemSize;

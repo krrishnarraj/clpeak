@@ -25,6 +25,7 @@ enum class Benchmark : unsigned int {
   ComputeIntFast,
   ComputeChar,
   ComputeShort,
+  ComputeInt8DP,
   AtomicThroughput,
   TransferBW,
   KernelLatency,

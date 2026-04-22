@@ -73,6 +73,7 @@ device_info_t getDeviceInfo(cl::Device &d)
   devInfo.maxClockFreq = static_cast<unsigned int>(d.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>());
   devInfo.doubleSupported = false;
   devInfo.halfSupported = false;
+  devInfo.int8DotProductSupported = false;
 
   std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
 
@@ -81,6 +82,9 @@ device_info_t getDeviceInfo(cl::Device &d)
 
   if ((extns.find("cl_khr_fp64") != std::string::npos) || (extns.find("cl_amd_fp64") != std::string::npos))
     devInfo.doubleSupported = true;
+
+  if (extns.find("cl_khr_integer_dot_product") != std::string::npos)
+    devInfo.int8DotProductSupported = true;
 
   devInfo.deviceType = d.getInfo<CL_DEVICE_TYPE>();
 
