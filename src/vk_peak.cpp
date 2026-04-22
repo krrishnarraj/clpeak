@@ -467,12 +467,14 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
 
-  // Use a workgroup size matching the shader's local_size_x
+  // Size the dispatch to match OpenCL's sizing: large enough to saturate the
+  // device and amortize submit overhead. Vulkan doesn't expose CU count, so
+  // target 32M work items (typical of OpenCL's numCUs*2048*maxWGSize on most
+  // GPUs once clamped), bounded by maxStorageBufferRange.
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = 1024 * 1024; // 1M work items as a reasonable starting point
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
   if (globalWIs * sizeof(float) > dev.info.maxAllocSize)
     globalWIs = dev.info.maxAllocSize / sizeof(float);
-  // Round down to multiple of wgSize
   globalWIs = (globalWIs / wgSize) * wgSize;
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
 
@@ -618,7 +620,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 
   unsigned int iters = cfg.computeIters;
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = 1024 * 1024;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
   if (globalWIs * sizeof(int32_t) > dev.info.maxAllocSize)
     globalWIs = dev.info.maxAllocSize / sizeof(int32_t);
   globalWIs = (globalWIs / wgSize) * wgSize;
