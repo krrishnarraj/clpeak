@@ -11,49 +11,42 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-# FindOpenCL.cmake checks for the CL_VERSION_X_Y symbol to determine the header
-# version. In the modern Khronos headers CL_VERSION_3_0 is only defined when
-# CL_TARGET_OPENCL_VERSION >= 300, so we pre-set the required definition for
-# the version probe before calling find_package.
-set(_clpeak_saved_required_defs "${CMAKE_REQUIRED_DEFINITIONS}")
-list(APPEND CMAKE_REQUIRED_DEFINITIONS "-DCL_TARGET_OPENCL_VERSION=300")
-
-find_package(OpenCL 3.0)
+# ---- OpenCL: 1.2 is the baseline; 3.0-only tests are enabled when the
+#      headers/runtime expose CL_VERSION_3_0 (detected below).
+find_package(OpenCL)
 FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
 if(NOT OpenCL_FOUND OR NOT HPP_FOUND)
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
   include(BuildSdk)
-
-  # Re-search after BuildSdk installed a 3.0-capable SDK to ${SDK_ROOT}.
   set(OpenCL_ROOT "${SDK_ROOT}")
-  if(APPLE)
-    # macOS system framework is OpenCL 1.2; the first find_package cached those
-    # results. Clear them and deprioritize frameworks so the 3.0 SDK wins.
-    unset(OpenCL_FOUND CACHE)
-    unset(OpenCL_INCLUDE_DIR CACHE)
-    unset(OpenCL_LIBRARY CACHE)
-    foreach(_v 3_0 2_2 2_1 2_0 1_2 1_1 1_0)
-      unset(OPENCL_VERSION_${_v} CACHE)
-    endforeach()
-    set(_clpeak_saved_find_framework ${CMAKE_FIND_FRAMEWORK})
-    set(CMAKE_FIND_FRAMEWORK LAST)
-  endif()
-  find_package(OpenCL 3.0 REQUIRED)
-  if(APPLE)
-    set(CMAKE_FIND_FRAMEWORK ${_clpeak_saved_find_framework})
-  endif()
-
-  set(OpenCL_INCLUDE_DIRS ${OpenCL_INCLUDE_DIRS} "${SDK_ROOT}/include")
-  FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS} REQUIRED)
+  find_package(OpenCL REQUIRED)
+  FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS "${SDK_ROOT}/include" ${OpenCL_INCLUDE_DIRS} REQUIRED)
 endif()
+# Ensure the directory containing opencl.hpp is on the include path (needed on
+# systems like macOS where the framework lacks the C++ bindings header).
+list(APPEND OpenCL_INCLUDE_DIRS "${HPP_FOUND}")
+list(REMOVE_DUPLICATES OpenCL_INCLUDE_DIRS)
+message(STATUS "Selected OpenCL ${OpenCL_VERSION_STRING} includes from ${OpenCL_INCLUDE_DIRS}")
+message(STATUS "Selected OpenCL lib ${OpenCL_LIBRARIES}")
 
+# Does the selected OpenCL provide the 3.0 symbol set? (CL_VERSION_3_0 is only
+# defined by the Khronos headers when CL_TARGET_OPENCL_VERSION >= 300, so set
+# that for the probe.)
+include(CheckSymbolExists)
+set(_clpeak_saved_required_defs "${CMAKE_REQUIRED_DEFINITIONS}")
+set(_clpeak_saved_required_incs "${CMAKE_REQUIRED_INCLUDES}")
+list(APPEND CMAKE_REQUIRED_DEFINITIONS "-DCL_TARGET_OPENCL_VERSION=300")
+set(CMAKE_REQUIRED_INCLUDES ${OpenCL_INCLUDE_DIRS})
+check_symbol_exists(CL_VERSION_3_0 "CL/cl.h" CLPEAK_HAS_OPENCL_30)
 set(CMAKE_REQUIRED_DEFINITIONS "${_clpeak_saved_required_defs}")
+set(CMAKE_REQUIRED_INCLUDES    "${_clpeak_saved_required_incs}")
 
-if(NOT OpenCL_FOUND)
-  message(FATAL_ERROR "Could not find OpenCL 3.0+ include/libs. Set OCL_ROOT to an OpenCL 3.0 SDK")
+if(CLPEAK_HAS_OPENCL_30)
+  message(STATUS "OpenCL 3.0 headers detected -- 3.0-only tests enabled")
+  set(CLPEAK_OPENCL_TARGET_VERSION 300)
 else()
-  message(STATUS "Selected OpenCL ${OpenCL_VERSION_STRING} includes from ${OpenCL_INCLUDE_DIRS}")
-  message(STATUS "Selected OpenCL lib ${OpenCL_LIBRARIES}")
+  message(STATUS "OpenCL 1.2 baseline -- 3.0-only tests disabled")
+  set(CLPEAK_OPENCL_TARGET_VERSION 120)
 endif()
 
 # extra libs for static library
@@ -88,7 +81,10 @@ add_executable(clpeak ${CLPEAK_SOURCE_FILES})
 clpeak_setup_version(clpeak)
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
 target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} ${CLPEAK_CORE_INCLUDE_DIRS})
-target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=300)
+target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=${CLPEAK_OPENCL_TARGET_VERSION})
+if(CLPEAK_HAS_OPENCL_30)
+  target_compile_definitions(clpeak PRIVATE CLPEAK_HAS_OPENCL_30)
+endif()
 
 if(Vulkan_FOUND)
   target_link_libraries(clpeak ${Vulkan_LIBRARIES})

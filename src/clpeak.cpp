@@ -17,7 +17,9 @@ static const std::string stringifiedKernels =
 #include "compute_integer_kernels.cl"
 #include "compute_char_kernels.cl"
 #include "compute_short_kernels.cl"
+#ifdef CLPEAK_HAS_OPENCL_30
 #include "compute_int8_dp_kernels.cl"
+#endif
     ;
 
 // Separate programs for kernels that use __local pointer arguments or
@@ -267,10 +269,12 @@ int clPeak::runAll()
                        "compute_short", "short", "giops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
+#ifdef CLPEAK_HAS_OPENCL_30
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute (GIOPS)", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "giops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
+#endif
 
         runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
         runTransferBandwidthTest(queue, prog, devInfo, cfg);
