@@ -32,7 +32,8 @@ static const char *helpStr =
     "\n  --all-tests                 run all above tests [default]"
     "\n  --list-devices              list available platforms/devices and exit"
 #ifdef ENABLE_VULKAN
-    "\n  --vulkan                    use Vulkan compute backend instead of OpenCL"
+    "\n  --no-opencl                 skip the OpenCL backend (Vulkan only)"
+    "\n  --no-vulkan                 skip the Vulkan backend (OpenCL only)"
 #endif
     "\n  --xml-file file_name        save results to an XML file"
     "\n  --json-file file_name       save results to a JSON file"
@@ -255,6 +256,10 @@ int clPeak::parseArgs(int argc, char **argv)
         compareFileName = argv[i + 1];
         i++;
       }
+    }
+    else if (strcmp(argv[i], "--no-opencl") == 0 || strcmp(argv[i], "--no-vulkan") == 0)
+    {
+      // Backend-selection flags consumed in entry.cpp; ignore here.
     }
     else
     {
