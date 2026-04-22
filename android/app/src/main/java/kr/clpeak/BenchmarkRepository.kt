@@ -30,6 +30,7 @@ class BenchmarkRepository {
     // Called from C++ logger_android.cpp::recordMetric() on the benchmark thread.
     @Suppress("unused")
     fun record_metric_callback_from_c(
+        backend: String,
         platform: String,
         device: String,
         driver: String,
@@ -39,7 +40,7 @@ class BenchmarkRepository {
         value: Float
     ) {
         _metricChannel.trySend(
-            ResultEntry(platform, device, driver, test, metric, unit, value)
+            ResultEntry(backend, platform, device, driver, test, metric, unit, value)
         )
     }
 

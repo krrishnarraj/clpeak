@@ -1,6 +1,7 @@
 package kr.clpeak
 
 data class ResultEntry(
+    val backend: String,
     val platform: String,
     val device: String,
     val driver: String,

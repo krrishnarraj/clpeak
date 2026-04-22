@@ -13,7 +13,7 @@ import kr.clpeak.databinding.ItemBenchmarkCategoryBinding
 import kr.clpeak.databinding.ItemBenchmarkMetricBinding
 
 class ResultAdapter(
-    private val onToggle: (String) -> Unit
+    private val onToggle: (String, String) -> Unit
 ) : ListAdapter<BenchmarkCategory, ResultAdapter.CategoryViewHolder>(DIFF_CALLBACK) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CategoryViewHolder {
@@ -93,7 +93,7 @@ class ResultAdapter(
                 binding.ivExpand.rotation = if (expanded) 180f else 0f
             }
 
-            binding.root.setOnClickListener { onToggle(category.testName) }
+            binding.root.setOnClickListener { onToggle(category.backend, category.testName) }
         }
 
         private fun animateExpandCollapse(view: View, expand: Boolean) {
@@ -189,7 +189,7 @@ class ResultAdapter(
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<BenchmarkCategory>() {
             override fun areItemsTheSame(a: BenchmarkCategory, b: BenchmarkCategory) =
-                a.testName == b.testName
+                a.backend == b.backend && a.testName == b.testName
             override fun areContentsTheSame(a: BenchmarkCategory, b: BenchmarkCategory) =
                 a == b
         }

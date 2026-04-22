@@ -16,6 +16,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.tabs.TabLayout
 import kr.clpeak.databinding.ActivityMainBinding
 import java.io.File
 
@@ -24,6 +25,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: BenchmarkViewModel by viewModels()
     private lateinit var adapter: ResultAdapter
+    private var selectedBackend: String? = null
 
     // Parallel lists: display names and their library paths
     private val openclDisplayNames = mutableListOf<String>()
@@ -51,9 +53,20 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        adapter = ResultAdapter { testName -> viewModel.toggleCategory(testName) }
+        adapter = ResultAdapter { backend, testName ->
+            viewModel.toggleCategory(backend, testName)
+        }
         binding.recyclerResults.adapter = adapter
         binding.recyclerResults.layoutManager = LinearLayoutManager(this)
+
+        binding.backendTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                selectedBackend = tab.text?.toString()
+                refreshCurrentTab()
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
+        })
 
         buildOpenclLibraryList()
         if (openclLibPaths.isNotEmpty()) {
@@ -80,17 +93,17 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        viewModel.deviceInfo.observe(this) { info ->
-            if (info != null) {
-                binding.cardDeviceInfo.visibility = View.VISIBLE
-                binding.tvPlatform.text = info.platformName
-                binding.tvDevice.text   = info.deviceName
-                binding.tvDriver.text   = info.driverVersion
-            }
+        viewModel.backends.observe(this) { list ->
+            syncTabs(list)
+            refreshCurrentTab()
         }
 
-        viewModel.categories.observe(this) { cats ->
-            adapter.submitList(cats.toList())
+        viewModel.categoriesByBackend.observe(this) {
+            refreshCurrentTab()
+        }
+
+        viewModel.deviceInfoByBackend.observe(this) {
+            refreshCurrentTab()
         }
 
         viewModel.errorMsg.observe(this) { msg ->
@@ -101,6 +114,43 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton("OK", null)
                     .show()
             }
+        }
+    }
+
+    private fun syncTabs(backends: List<String>) {
+        val tabs = binding.backendTabs
+        val currentLabels = (0 until tabs.tabCount).map { tabs.getTabAt(it)?.text?.toString() }
+        if (currentLabels == backends) return
+
+        tabs.removeAllTabs()
+        for (b in backends) {
+            tabs.addTab(tabs.newTab().setText(b), false)
+        }
+        tabs.visibility = if (backends.isEmpty()) View.GONE else View.VISIBLE
+
+        // Preserve previous selection if still present, otherwise default to first.
+        val target = backends.indexOf(selectedBackend).takeIf { it >= 0 } ?: 0
+        if (backends.isNotEmpty()) {
+            tabs.getTabAt(target)?.select()
+            selectedBackend = backends[target]
+        } else {
+            selectedBackend = null
+        }
+    }
+
+    private fun refreshCurrentTab() {
+        val backend = selectedBackend
+        val cats = viewModel.categoriesByBackend.value?.get(backend) ?: emptyList()
+        adapter.submitList(cats.toList())
+
+        val info = viewModel.deviceInfoByBackend.value?.get(backend)
+        if (info != null) {
+            binding.cardDeviceInfo.visibility = View.VISIBLE
+            binding.tvPlatform.text = info.platformName
+            binding.tvDevice.text   = info.deviceName
+            binding.tvDriver.text   = info.driverVersion
+        } else {
+            binding.cardDeviceInfo.visibility = View.GONE
         }
     }
 

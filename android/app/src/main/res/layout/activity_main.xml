@@ -43,6 +43,15 @@
             android:visibility="gone"
             app:trackCornerRadius="0dp" />
 
+        <!-- Backend tabs (OpenCL / Vulkan / ...) — visible once any backend reports -->
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/backend_tabs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:tabMode="scrollable"
+            app:tabGravity="start" />
+
     </com.google.android.material.appbar.AppBarLayout>
 
     <!-- Main scrollable content -->

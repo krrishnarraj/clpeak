@@ -11,4 +11,5 @@ data class BenchmarkCategory(
     val isExpanded: Boolean = false
 ) {
     val peakValue: Float get() = metrics.maxOfOrNull { it.value } ?: 0f
+    val backend: String get() = metrics.firstOrNull()?.backend ?: ""
 }
