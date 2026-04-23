@@ -36,4 +36,7 @@ set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/compute_mp_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_int4_packed_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_bf16_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/coopmat_fp16.comp
+    ${CLPEAK_ROOT}/src/shaders/coopmat_bf16.comp
+    ${CLPEAK_ROOT}/src/shaders/coopmat_int8.comp
 )

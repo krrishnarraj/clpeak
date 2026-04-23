@@ -34,6 +34,11 @@ static const unsigned int COMPUTE_INT4_PACKED_WORK_PER_WI = 4096;
 // v1: 64 iters * MAD_DP_16 (16 dots) * 8 ops = 8192 per WI (all variants equal).
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
+// coopmat_*.comp: 16x16x16 tile, 256 iters per subgroup, one subgroup
+// (32 threads) per work-group.  Per subgroup: M*N*K*2*ITERS = 2,097,152 ops;
+// per work-item: 2,097,152 / 32 = 65,536 ops.
+static const unsigned int COOPMAT_WORK_PER_WI = 65536;
+
 // Max work-group size cap.  Hardware may report higher (1024 on most NVIDIA
 // GPUs), but we clamp to 256 because v16 kernels hold a float16/double16
 // accumulator (~50-64 registers per thread).  At localSize=1024 this exceeds

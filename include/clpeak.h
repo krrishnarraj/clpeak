@@ -29,6 +29,7 @@ enum class Benchmark : unsigned int {
   ComputeInt8DP,
   ComputeInt4Packed,
   ComputeBF16,
+  CoopMatrix,
   AtomicThroughput,
   TransferBW,
   KernelLatency,

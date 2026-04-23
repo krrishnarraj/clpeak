@@ -87,6 +87,10 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   info.int8DotProductSupported = false;
   info.float16Supported = false;
   info.bfloat16Supported = false;
+  info.cooperativeMatrixSupported = false;
+  info.coopmatFP16Supported = false;
+  info.coopmatBF16Supported = false;
+  info.coopmatINT8Supported = false;
 
   // Feature query for optional shader types.  Uses vkGetPhysicalDeviceFeatures2
   // (Vulkan 1.1 core).  Each optional shader's feature struct gets chained
@@ -98,16 +102,25 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   // On Android API < 28 Features2 isn't in the stub loader, so none of the
   // optional shader defines should be active unless the NDK provides a
   // modern-enough loader (see CompileShaders.cmake).
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1)
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
   dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
   VkPhysicalDeviceShaderBfloat16FeaturesKHR bf16Features = {};
   bf16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR;
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+  VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopmatFeatures = {};
+  coopmatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
+  // Cooperative-matrix shaders emitted by glslang use MemoryModel Vulkan via
+  // GL_KHR_memory_scope_semantics, which requires the vulkanMemoryModel
+  // feature bit (core in 1.2, otherwise VK_KHR_vulkan_memory_model).
+  VkPhysicalDeviceVulkanMemoryModelFeatures vmmFeatures = {};
+  vmmFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
 #endif
 
   // Small helper: prepend a features struct onto a pNext chain.
@@ -128,9 +141,20 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
     if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME))
       chain = chainPNext(chain, &dpFeatures);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
     if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME))
       chain = chainPNext(chain, &bf16Features);
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+    // Cooperative-matrix requires vulkanMemoryModel.  Chain both feature
+    // structs whenever the coopmat extension is present; the memory-model
+    // struct is core-1.2 and is what drivers advertising coopmat expose.
+    bool hasCoopmatExt = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    if (hasCoopmatExt)
+    {
+      chain = chainPNext(chain, &coopmatFeatures);
+      chain = chainPNext(chain, &vmmFeatures);
+    }
 #endif
 
     VkPhysicalDeviceFeatures2 features2 = {};
@@ -161,11 +185,40 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
       info.int8DotProductSupported = true;
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
     if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME) && bf16Features.shaderBFloat16Type)
     {
       enabledExts.push_back(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME);
       info.bfloat16Supported = true;
+    }
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+    if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix && vmmFeatures.vulkanMemoryModel)
+    {
+      enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+      info.cooperativeMatrixSupported = true;
+      // FP16 coopmat inputs also need shaderFloat16.
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP16
+      if (f16i8Features.shaderFloat16 && !f16i8ExtEnabled)
+      {
+        enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+        f16i8ExtEnabled = true;
+        info.float16Supported = true;
+      }
+#endif
+      // INT8 coopmat inputs also need shaderInt8 + 8-bit storage.
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+      if (f16i8Features.shaderInt8)
+      {
+        if (!f16i8ExtEnabled)
+        {
+          enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+          f16i8ExtEnabled = true;
+        }
+        if (hasExt(VK_KHR_8BIT_STORAGE_EXTENSION_NAME))
+          enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
+      }
+#endif
     }
 #endif
   }
@@ -192,7 +245,7 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1)
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT)
   // Re-chain the feature structs we actually enabled for vkCreateDevice.
   // The query-phase chain is discarded; these are the features we ask the
   // driver to turn on.
@@ -211,11 +264,20 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
     enabledChain = chainPNext(enabledChain, &dpFeatures);
   }
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
   if (info.bfloat16Supported)
   {
     bf16Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &bf16Features);
+  }
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+  if (info.cooperativeMatrixSupported)
+  {
+    coopmatFeatures.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &coopmatFeatures);
+    vmmFeatures.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &vmmFeatures);
   }
 #endif
   if (enabledChain)
@@ -376,7 +438,10 @@ bool vkPeak::initInstance()
   // symbols (e.g. vkGetPhysicalDeviceFeatures2 for INT8 DP feature query).
   // Otherwise request 1.0 so we work on older drivers / Android API levels
   // where libvulkan only exposes 1.0.
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1)
+  // 1.1 gets us vkGetPhysicalDeviceFeatures2; cooperative matrix brings its
+  // own extension + VK_KHR_vulkan_memory_model, so 1.1 is sufficient as the
+  // instance version (MoltenVK 1.2 headers reject some older loaders).
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT)
   appInfo.apiVersion = VK_API_VERSION_1_1;
 #else
   appInfo.apiVersion = VK_API_VERSION_1_0;
@@ -522,6 +587,44 @@ int vkPeak::runAll()
       continue;
     }
 
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+    // Enumerate cooperative-matrix properties to decide which dtype
+    // combinations are advertised at the canonical 16x16x16 subgroup-scope
+    // tile.  Done here (not in VulkanDevice::init) because the entry point
+    // is an instance-level extension function that must be resolved via
+    // vkGetInstanceProcAddr against the real VkInstance.
+    if (dev.info.cooperativeMatrixSupported)
+    {
+      auto pfn = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)
+          vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
+      uint32_t propCount = 0;
+      if (pfn && pfn(physicalDevices[d], &propCount, nullptr) == VK_SUCCESS && propCount > 0)
+      {
+        std::vector<VkCooperativeMatrixPropertiesKHR> props(propCount);
+        for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+        if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
+        {
+          auto matches = [](const VkCooperativeMatrixPropertiesKHR &p,
+                            VkComponentTypeKHR ab, VkComponentTypeKHR c) {
+            return p.MSize == 16 && p.NSize == 16 && p.KSize == 16 &&
+                   p.scope == VK_SCOPE_SUBGROUP_KHR &&
+                   p.AType == ab && p.BType == ab &&
+                   p.CType == c && p.ResultType == c;
+          };
+          for (auto &p : props)
+          {
+            if (matches(p, VK_COMPONENT_TYPE_FLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
+              dev.info.coopmatFP16Supported = true;
+            if (matches(p, VK_COMPONENT_TYPE_BFLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
+              dev.info.coopmatBF16Supported = true;
+            if (matches(p, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
+              dev.info.coopmatINT8Supported = true;
+          }
+        }
+      }
+    }
+#endif
+
     benchmark_config_t cfg = benchmark_config_t::forDevice(
         (dev.info.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU);
 
@@ -555,6 +658,9 @@ int vkPeak::runAll()
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
     runComputeBF16(dev, cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+    runCoopMatrix(dev, cfg);
 #endif
     runGlobalBandwidth(dev, cfg);
 
@@ -603,17 +709,23 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Size the dispatch to saturate the device and amortize submit overhead.
   // Vulkan doesn't expose a CU count, so target 32M work-items (matches
   // OpenCL's numCUs*2048*maxWGSize on most GPUs once clamped), bounded
-  // by maxStorageBufferRange.
-  const uint32_t wgSize = 256;
+  // by maxStorageBufferRange.  Cooperative-matrix shaders run one subgroup
+  // per work-group (32 threads on NVIDIA / AMD RDNA3+ / Intel Arc); other
+  // compute kernels use the classic 256.
+  const uint32_t wgSize = d.wgSize ? d.wgSize : 256;
+  const uint32_t outPerWG = d.outElemsPerWG ? d.outElemsPerWG : wgSize;
   uint64_t globalWIs = 32ULL * 1024 * 1024;
-  if (globalWIs * d.elemSize > dev.info.maxAllocSize)
-    globalWIs = dev.info.maxAllocSize / d.elemSize;
-  globalWIs = (globalWIs / wgSize) * wgSize;
-  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+  // Buffer footprint = numGroups * outPerWG * elemSize.  Bound by allocation.
+  uint64_t bytesPerWG = (uint64_t)outPerWG * d.elemSize;
+  uint64_t maxWGs = dev.info.maxAllocSize / bytesPerWG;
+  uint64_t wantWGs = globalWIs / wgSize;
+  uint32_t numGroups = (uint32_t)std::min(wantWGs, maxWGs);
+  globalWIs = (uint64_t)numGroups * wgSize;
+  uint64_t bufferBytes = (uint64_t)numGroups * bytesPerWG;
 
   VkBuffer outputBuf;
   VkDeviceMemory outputMem;
-  if (!dev.createBuffer(globalWIs * d.elemSize,
+  if (!dev.createBuffer(bufferBytes,
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
@@ -692,7 +804,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   VkDescriptorBufferInfo bufInfo = {};
   bufInfo.buffer = outputBuf;
   bufInfo.offset = 0;
-  bufInfo.range = globalWIs * d.elemSize;
+  bufInfo.range = bufferBytes;
 
   VkWriteDescriptorSet write = {};
   write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -832,6 +944,107 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   return runComputeKernel(dev, cfg, d);
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// Cooperative matrix (tensor-core) umbrella.
+//
+// Runs every dtype combination the driver advertises at the canonical
+// 16x16x16 subgroup-scope tile (queried once in VulkanDevice::init).  Each
+// dtype shares the same scaffolding via runComputeKernel -- only the shader,
+// buffer element type, and label strings differ.  Adding FP8 / INT4 in
+// Phase 2 reduces to: compile a coopmat_fp8.comp, query the matching
+// component-type enums, and add one more entry here.
+// ---------------------------------------------------------------------------
+
+int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  if (!dev.info.cooperativeMatrixSupported)
+  {
+    log->print(NEWLINE TAB "Cooperative matrix (TFLOPS/TOPS)" NEWLINE);
+    log->xmlOpenTag("cooperative_matrix");
+    log->xmlAppendAttribs("tile", "16x16x16");
+    log->print(TAB TAB "VK_KHR_cooperative_matrix not supported! Skipped" NEWLINE);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  // Coopmat shape constants: shaders hard-code 16x16x16 with 256 iters and
+  // local_size_x=32 (one subgroup per work-group).  See COOPMAT_WORK_PER_WI.
+  const uint32_t coopWGSize  = 32;
+  const uint32_t coopOutElems = 16 * 16;  // M*N tile written per WG
+  const uint32_t coopWork    = COOPMAT_WORK_PER_WI;
+
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP16
+  {
+    float A = 1.3f;
+    vk_compute_desc_t d = {};
+    d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (GFLOPS)";
+    d.xmlTag         = "coopmat_fp16";
+    d.metricLabel    = "coopmat_fp16";
+    d.unit           = "gflops";
+    d.spirv          = vk_shaders::coopmat_fp16;
+    d.spirvSize      = vk_shaders::coopmat_fp16_size;
+    d.workPerWI      = coopWork;
+    d.elemSize       = sizeof(float);
+    d.wgSize         = coopWGSize;
+    d.outElemsPerWG  = coopOutElems;
+    d.pushData       = &A;
+    d.pushSize       = sizeof(A);
+    d.skip           = !dev.info.coopmatFP16Supported;
+    d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "16x16x16";
+    runComputeKernel(dev, cfg, d);
+  }
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_BF16
+  {
+    float A = 1.3f;
+    vk_compute_desc_t d = {};
+    d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (GFLOPS)";
+    d.xmlTag         = "coopmat_bf16";
+    d.metricLabel    = "coopmat_bf16";
+    d.unit           = "gflops";
+    d.spirv          = vk_shaders::coopmat_bf16;
+    d.spirvSize      = vk_shaders::coopmat_bf16_size;
+    d.workPerWI      = coopWork;
+    d.elemSize       = sizeof(float);
+    d.wgSize         = coopWGSize;
+    d.outElemsPerWG  = coopOutElems;
+    d.pushData       = &A;
+    d.pushSize       = sizeof(A);
+    d.skip           = !dev.info.coopmatBF16Supported;
+    d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "16x16x16";
+    runComputeKernel(dev, cfg, d);
+  }
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+  {
+    int32_t A = 3;
+    vk_compute_desc_t d = {};
+    d.title          = "Cooperative-matrix int8xint8+int32 16x16x16 (GIOPS)";
+    d.xmlTag         = "coopmat_int8";
+    d.metricLabel    = "coopmat_int8";
+    d.unit           = "giops";
+    d.spirv          = vk_shaders::coopmat_int8;
+    d.spirvSize      = vk_shaders::coopmat_int8_size;
+    d.workPerWI      = coopWork;
+    d.elemSize       = sizeof(int32_t);
+    d.wgSize         = coopWGSize;
+    d.outElemsPerWG  = coopOutElems;
+    d.pushData       = &A;
+    d.pushSize       = sizeof(A);
+    d.skip           = !dev.info.coopmatINT8Supported;
+    d.skipMsg        = "No 16x16x16 int8xint8+int32 coopmat property! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "16x16x16";
+    runComputeKernel(dev, cfg, d);
+  }
+#endif
+  return 0;
+}
 
 // ---------------------------------------------------------------------------
 // Global bandwidth benchmark (Vulkan)

@@ -11,6 +11,12 @@
 #include <benchmark_constants.h>
 #include <logger.h>
 
+// Convenience: defined if any cooperative-matrix shader compiled.  Used by
+// vk_peak.cpp to gate extension / feature enablement and dispatch.
+#if defined(CLPEAK_VK_HAS_COOPMAT_FP16) || defined(CLPEAK_VK_HAS_COOPMAT_BF16) || defined(CLPEAK_VK_HAS_COOPMAT_INT8)
+#define CLPEAK_VK_HAS_ANY_COOPMAT 1
+#endif
+
 // Vulkan device info (mirrors OpenCL device_info_t for display)
 struct vk_device_info_t {
   std::string deviceName;
@@ -30,6 +36,16 @@ struct vk_device_info_t {
   bool int8DotProductSupported;   // VK_KHR_shader_integer_dot_product + shaderInt8
   bool float16Supported;          // VK_KHR_shader_float16_int8::shaderFloat16
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
+  bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
+
+  // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
+  // to gate individual coopmat dtype tests.  Each flag means "a 16x16x16
+  // subgroup-scope property exists advertising this input/accumulator
+  // combination".  16x16x16 is the most widely supported shape; more
+  // exotic tiles can be added when needed.
+  bool coopmatFP16Supported;      // fp16 A/B, fp32 C
+  bool coopmatBF16Supported;      // bf16 A/B, fp32 C
+  bool coopmatINT8Supported;      // int8 A/B, int32 C
 };
 
 // Manages a single Vulkan device for benchmarking
@@ -85,6 +101,12 @@ struct vk_compute_desc_t
   // Scaling
   uint32_t workPerWI;        // matches the kernel's per-WI op budget
   uint32_t elemSize;         // output element size (sizeof float / int32 / ...)
+  uint32_t wgSize;           // local_size_x in the shader; 0 => use default 256.
+                             // Cooperative-matrix shaders use 32 (one subgroup).
+  uint32_t outElemsPerWG;    // number of output buffer elements the shader
+                             // writes per work-group.  0 => defaults to wgSize
+                             // (one element per WI).  Coopmat shaders write
+                             // an M*N tile = 256 elements per WG.
 
   // Push-constant payload.  nullptr => no push constants bound.
   const void *pushData;
@@ -129,6 +151,8 @@ public:
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
   int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
+  // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
+  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
@@ -173,6 +197,18 @@ namespace vk_shaders {
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
   extern const uint32_t compute_bf16_v1[];
   extern const size_t   compute_bf16_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP16
+  extern const uint32_t coopmat_fp16[];
+  extern const size_t   coopmat_fp16_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_BF16
+  extern const uint32_t coopmat_bf16[];
+  extern const size_t   coopmat_bf16_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+  extern const uint32_t coopmat_int8[];
+  extern const size_t   coopmat_int8_size;
 #endif
 }
 
