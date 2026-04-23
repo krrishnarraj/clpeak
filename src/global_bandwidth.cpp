@@ -97,12 +97,17 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
+    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // a leaked parent -- manifests on Android as later tests collapsing into
+    // this test's result card.
+    log->xmlCloseTag();
     delete[] arr;
     return -1;
   }
   catch (std::bad_alloc &)
   {
     log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
+    log->xmlCloseTag();
     delete[] arr;
     return -1;
   }

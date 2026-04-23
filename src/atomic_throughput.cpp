@@ -75,6 +75,10 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // a leaked parent -- manifests on Android as later tests collapsing into
+    // this test's result card.
+    log->xmlCloseTag();
     return -1;
   }
 

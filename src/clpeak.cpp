@@ -497,6 +497,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    // xmlOpenTag was already pushed above; close it so subsequent tests
+    // don't nest under a leaked parent (manifests on Android as all later
+    // tests collapsing into this test's result card).
+    log->xmlCloseTag();
     return -1;
   }
   catch (std::exception &e)
@@ -505,6 +509,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << "Exception: " << e.what() << NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    log->xmlCloseTag();
     return -1;
   }
 

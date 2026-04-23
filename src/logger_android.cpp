@@ -122,12 +122,18 @@ void logger::recordMetric(const std::string &metric, float value)
     return (it != contextStack[idx].attribs.end()) ? it->second : "";
   };
 
+  // Outer frames (clpeak > platform > device) are at fixed positions; the
+  // test frame is always the innermost open tag.  Using back() instead of
+  // [3] keeps metrics attributed correctly even if a prior test leaked its
+  // xmlCloseTag -- otherwise all subsequent siblings would nest under the
+  // leaked parent and collapse into a single Android result card.
+  const size_t testIdx = contextStack.size() - 1;
   const std::string backend  = getAttrib(1, "backend");
   const std::string platform = getAttrib(1, "name");
   const std::string device   = getAttrib(2, "name");
   const std::string driver   = getAttrib(2, "driver_version");
-  const std::string test     = contextStack[3].tag;
-  const std::string unit     = getAttrib(3, "unit");
+  const std::string test     = contextStack[testIdx].tag;
+  const std::string unit     = getAttrib(testIdx, "unit");
 
   jEnv->CallVoidMethod(
       (*jObj),
