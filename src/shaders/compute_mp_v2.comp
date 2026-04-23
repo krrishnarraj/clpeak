@@ -1,0 +1,40 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+// Mixed-precision MAC v2: fp16 x fp16 + fp32 on f16vec2 lanes.
+// On NVIDIA shader cores this is the width that unlocks HFMA2 (packed
+// fp16 multiply-add) at 2x FP32 rate; scalar fp16 runs at 1x.  Same
+// fp32-downcast trick on every step as v1 to defeat hoisting.
+//
+// Per-WI op budget: 64 iters * MAD_16 (16 fmas) * 2 lanes * 2 ops/MAC = 4096.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+#define MAD_4(x, y, a) \
+    a = fma(vec2(x), vec2(y), a); x = f16vec2(a); \
+    a = fma(vec2(y), vec2(x), a); y = f16vec2(a); \
+    a = fma(vec2(x), vec2(y), a); x = f16vec2(a); \
+    a = fma(vec2(y), vec2(x), a); y = f16vec2(a);
+#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+
+void main()
+{
+    f16vec2 x = f16vec2(pc.A, pc.A + 1.0);
+    f16vec2 y = f16vec2(gl_LocalInvocationID.x);
+    vec2    a = vec2(pc.A);
+
+    for (int i = 0; i < 64; i++)
+    {
+        MAD_16(x, y, a)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a.x + a.y + float(x.x) + float(y.x);
+}

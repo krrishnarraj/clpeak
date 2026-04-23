@@ -99,17 +99,34 @@ private:
 // between runComputeSP / MP / INT8-DP / INT4-packed / etc.  The Vulkan
 // scaffolding (buffer, descriptors, pipeline, dispatch loop, cleanup) is
 // identical across all of them and lives in vkPeak::runComputeKernel.
+//
+// A benchmark can declare one or more *variants* (typically vector widths
+// v1/v2/v4 matching the OpenCL kernels); they share the output buffer and
+// descriptor set but each has its own SPIR-V module and metric row.  If
+// variants == nullptr, runComputeKernel falls back to the single-variant
+// (metricLabel + spirv + spirvSize) fields.
+struct vk_compute_variant_t
+{
+  const char *label;         // column + xmlRecord key, e.g. "mp", "mp2", "mp4"
+  const uint32_t *spirv;
+  size_t spirvSize;
+};
+
 struct vk_compute_desc_t
 {
   // Display / reporting
   const char *title;         // e.g. "Single-precision compute (GFLOPS)"
   const char *xmlTag;        // e.g. "single_precision_compute"
-  const char *metricLabel;   // LHS column + xmlRecord key, e.g. "float"
+  const char *metricLabel;   // used when variants==nullptr
   const char *unit;          // "gflops" / "giops" / "tflops"
 
-  // Shader
+  // Single-variant shader (used when variants == nullptr)
   const uint32_t *spirv;
   size_t spirvSize;
+
+  // Multi-variant shader list (takes precedence over single-variant fields)
+  const vk_compute_variant_t *variants;
+  uint32_t numVariants;
 
   // Scaling
   uint32_t workPerWI;        // matches the kernel's per-WI op budget
@@ -199,9 +216,25 @@ namespace vk_shaders {
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V2
+  extern const uint32_t compute_int8_dp_v2[];
+  extern const size_t   compute_int8_dp_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V4
+  extern const uint32_t compute_int8_dp_v4[];
+  extern const size_t   compute_int8_dp_v4_size;
+#endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
   extern const uint32_t compute_mp_v1[];
   extern const size_t   compute_mp_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2
+  extern const uint32_t compute_mp_v2[];
+  extern const size_t   compute_mp_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4
+  extern const uint32_t compute_mp_v4[];
+  extern const size_t   compute_mp_v4_size;
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
   extern const uint32_t compute_int4_packed_v1[];
@@ -210,6 +243,14 @@ namespace vk_shaders {
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
   extern const uint32_t compute_bf16_v1[];
   extern const size_t   compute_bf16_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2
+  extern const uint32_t compute_bf16_v2[];
+  extern const size_t   compute_bf16_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V4
+  extern const uint32_t compute_bf16_v4[];
+  extern const size_t   compute_bf16_v4_size;
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP16
   extern const uint32_t coopmat_fp16[];

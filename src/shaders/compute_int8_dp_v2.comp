@@ -1,0 +1,56 @@
+#version 450
+#extension GL_EXT_integer_dot_product : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+
+// INT8 dot-product v2: two parallel dp4a chains per thread.
+//
+// The v1 variant has a hard serial dependency (a -> REPACK -> y -> dp4a(x,y,a)).
+// On NVIDIA that means one dp4a per dep-chain stall, capping IPC far below
+// the 4x-FP32-rate dp4a peak.  Here we keep two independent chains
+// (a0, y0) and (a1, y1), doubling the independent work the issue queue
+// sees.  Final cross-feed prevents the compiler from DCE'ing a chain.
+//
+// Per-WI op budget matches v1: 64 iters * 16 dots * 8 ops = 8192 across
+// both chains combined (each chain does 32 iters' worth of dots).
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define REPACK(a, y) y = i8vec4(int8_t(a), int8_t(a >> 8), int8_t(a >> 16), int8_t(a >> 24))
+
+// One "step" = two parallel dp4a's + their repacks.  Counts as 2 dots.
+#define STEP(x0, y0, a0, x1, y1, a1) \
+    a0 = dotAccSatEXT(x0, y0, a0); REPACK(a0, y0); \
+    a1 = dotAccSatEXT(x1, y1, a1); REPACK(a1, y1);
+
+#define STEP_8(x0, y0, a0, x1, y1, a1) \
+    STEP(x0, y0, a0, x1, y1, a1) STEP(x0, y0, a0, x1, y1, a1) \
+    STEP(x0, y0, a0, x1, y1, a1) STEP(x0, y0, a0, x1, y1, a1)
+
+void main()
+{
+    int8_t A0 = int8_t(pc.A);
+    i8vec4 x0 = i8vec4(A0, int8_t(A0 + int8_t(1)), int8_t(A0 + int8_t(2)), int8_t(A0 + int8_t(3)));
+    i8vec4 x1 = i8vec4(int8_t(A0 + int8_t(4)), int8_t(A0 + int8_t(5)), int8_t(A0 + int8_t(6)), int8_t(A0 + int8_t(7)));
+    i8vec4 y0 = i8vec4(int8_t(gl_LocalInvocationID.x));
+    i8vec4 y1 = i8vec4(int8_t(gl_LocalInvocationID.x + 1u));
+    int a0 = int(gl_LocalInvocationID.x);
+    int a1 = int(gl_LocalInvocationID.x + 1u);
+
+    // 64 outer iters * STEP_8 (= 8 steps, each = 2 dots) = 1024 dots total
+    // (same dot count as v1's 64 * MAD_DP_16 = 1024 dots).
+    for (int i = 0; i < 64; i++)
+    {
+        STEP_8(x0, y0, a0, x1, y1, a1)
+    }
+
+    // Cross-feed so the compiler can't DCE one of the chains.
+    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1;
+}

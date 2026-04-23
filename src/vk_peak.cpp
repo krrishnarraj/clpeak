@@ -759,6 +759,21 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     return 0;
   }
 
+  // Collect variants.  Multi-variant path (e.g. fp16 v1/v2/v4) shares one
+  // buffer + descriptor set and swaps only the pipeline between dispatches;
+  // single-variant benchmarks materialize a one-entry list.
+  struct Variant { const char *label; const uint32_t *spirv; size_t spirvSize; };
+  std::vector<Variant> variants;
+  if (d.variants && d.numVariants > 0)
+  {
+    for (uint32_t i = 0; i < d.numVariants; i++)
+      variants.push_back({d.variants[i].label, d.variants[i].spirv, d.variants[i].spirvSize});
+  }
+  else
+  {
+    variants.push_back({d.metricLabel, d.spirv, d.spirvSize});
+  }
+
   // Size the dispatch to saturate the device and amortize submit overhead.
   // Vulkan doesn't expose a CU count, so target 32M work-items (matches
   // OpenCL's numCUs*2048*maxWGSize on most GPUs once clamped), bounded
@@ -820,18 +835,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   VkPipelineLayout pipeLayout;
   vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
 
-  VkPipeline pipeline;
-  if (!dev.createComputePipeline(d.spirv, d.spirvSize, dsLayout, pipeLayout, pipeline))
-  {
-    log->print(TAB TAB "Failed to create compute pipeline (driver may not honor extension)" NEWLINE);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-    vkDestroyBuffer(dev.device, outputBuf, nullptr);
-    vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
-    return 0;
-  }
-
   VkDescriptorPoolSize poolSize = {};
   poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   poolSize.descriptorCount = 1;
@@ -869,19 +872,33 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
   vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
 
-  log->print(TAB TAB);
-  log->print(d.metricLabel);
-  log->print(" : ");
+  // Build + dispatch each variant's pipeline.  Variants failing pipeline
+  // creation are printed as skipped but don't abort the group -- some
+  // drivers accept the v1 shader but choke on a wider packed variant.
+  for (const auto &v : variants)
+  {
+    log->print(TAB TAB);
+    log->print(v.label);
+    log->print(" : ");
 
-  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
-                          cfg.computeIters, d.pushData, d.pushSize);
-  float value = (static_cast<float>(globalWIs) * static_cast<float>(d.workPerWI)) / timed / 1e3f;
+    VkPipeline pipeline;
+    if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline))
+    {
+      log->print("pipeline creation failed (driver may not honor extension)" NEWLINE);
+      continue;
+    }
 
-  log->print(value);
-  log->print(NEWLINE);
-  log->xmlRecord(d.metricLabel, value);
+    float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
+                            cfg.computeIters, d.pushData, d.pushSize);
+    float value = (static_cast<float>(globalWIs) * static_cast<float>(d.workPerWI)) / timed / 1e3f;
 
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
+    log->print(value);
+    log->print(NEWLINE);
+    log->xmlRecord(v.label, value);
+
+    vkDestroyPipeline(dev.device, pipeline, nullptr);
+  }
+
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
@@ -917,14 +934,26 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
 int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
+  // v1 = scalar fp16 (baseline; no HFMA2 packing).
+  // v2 = f16vec2  (unlocks NVIDIA HFMA2 at 2x FP32 rate on shader cores).
+  // v4 = f16vec4  (wider packing; informs AMD/Intel where issue rate
+  //                exceeds two lanes per slot).
+  static const vk_compute_variant_t variants[] = {
+    { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2
+    { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4
+    { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size },
+#endif
+  };
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
   d.xmlTag      = "mixed_precision_compute";
-  d.metricLabel = "mp";
   d.unit        = "gflops";
-  d.spirv       = vk_shaders::compute_mp_v1;
-  d.spirvSize   = vk_shaders::compute_mp_v1_size;
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
@@ -959,14 +988,27 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
 int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
+  // v1 = single dp4a chain (serial through REPACK; dep-stall bound).
+  // v2 = two parallel dp4a chains (double the independent work for the
+  //       instruction issue queue to pipeline).
+  // v4 = four parallel chains (enough to saturate dp4a issue rate on
+  //       NVIDIA Turing+ / AMD RDNA2+ / Intel Xe+).
+  static const vk_compute_variant_t variants[] = {
+    { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V2
+    { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V4
+    { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size },
+#endif
+  };
   int32_t A = 4;
   vk_compute_desc_t d = {};
   d.title       = "INT8 dot-product compute (GIOPS)";
   d.xmlTag      = "integer_compute_int8_dp";
-  d.metricLabel = "int8_dp";
   d.unit        = "giops";
-  d.spirv       = vk_shaders::compute_int8_dp_v1;
-  d.spirvSize   = vk_shaders::compute_int8_dp_v1_size;
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;
   d.elemSize    = sizeof(int32_t);
   d.pushData    = &A;
@@ -980,14 +1022,24 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
 int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 {
+  // v1 / v2 / v4: same packing story as MP.  NVIDIA shader-core BF16
+  // peaks at bf16vec2 via BMMA2-style packed multiply.
+  static const vk_compute_variant_t variants[] = {
+    { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2
+    { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V4
+    { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size },
+#endif
+  };
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
   d.xmlTag      = "bfloat16_compute";
-  d.metricLabel = "bf16";
   d.unit        = "gflops";
-  d.spirv       = vk_shaders::compute_bf16_v1;
-  d.spirvSize   = vk_shaders::compute_bf16_v1_size;
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;

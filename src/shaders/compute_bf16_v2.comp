@@ -1,0 +1,39 @@
+#version 450
+#extension GL_EXT_bfloat16 : require
+
+// BF16 x BF16 + FP32 on bf16vec2 lanes.  Mirrors compute_mp_v2.comp:
+// packed bf16 is where NVIDIA's shader-core BF16 path reaches its peak
+// (BMMA2-like packed multiply).  See v1 for the non-packed baseline.
+//
+// Per-WI op budget: 64 iters * MAD_16 * 2 lanes * 2 ops/MAC = 4096.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+#define MAD_4(x, y, a) \
+    a = fma(vec2(x), vec2(y), a); x = bf16vec2(a); \
+    a = fma(vec2(y), vec2(x), a); y = bf16vec2(a); \
+    a = fma(vec2(x), vec2(y), a); x = bf16vec2(a); \
+    a = fma(vec2(y), vec2(x), a); y = bf16vec2(a);
+#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+
+void main()
+{
+    bf16vec2 x = bf16vec2(pc.A, pc.A + 1.0);
+    bf16vec2 y = bf16vec2(gl_LocalInvocationID.x);
+    vec2     a = vec2(pc.A);
+
+    for (int i = 0; i < 64; i++)
+    {
+        MAD_16(x, y, a)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a.x + a.y + float(x.x) + float(y.x);
+}

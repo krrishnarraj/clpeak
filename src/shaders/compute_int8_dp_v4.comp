@@ -1,0 +1,60 @@
+#version 450
+#extension GL_EXT_integer_dot_product : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+
+// INT8 dot-product v4: four parallel dp4a chains per thread.
+// See v2 for rationale; v4 gives the compiler / scheduler four
+// independent chains of dp4a so it can fill issue slots even when
+// each individual chain stalls on its repack dependency.
+//
+// Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1).
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define REPACK(a, y) y = i8vec4(int8_t(a), int8_t(a >> 8), int8_t(a >> 16), int8_t(a >> 24))
+
+#define STEP4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3) \
+    a0 = dotAccSatEXT(x0, y0, a0); REPACK(a0, y0); \
+    a1 = dotAccSatEXT(x1, y1, a1); REPACK(a1, y1); \
+    a2 = dotAccSatEXT(x2, y2, a2); REPACK(a2, y2); \
+    a3 = dotAccSatEXT(x3, y3, a3); REPACK(a3, y3);
+
+#define STEP4_4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3) \
+    STEP4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3) \
+    STEP4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3) \
+    STEP4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3) \
+    STEP4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3)
+
+void main()
+{
+    int8_t A0 = int8_t(pc.A);
+    i8vec4 x0 = i8vec4(A0, int8_t(A0+int8_t(1)), int8_t(A0+int8_t(2)), int8_t(A0+int8_t(3)));
+    i8vec4 x1 = i8vec4(int8_t(A0+int8_t(4)), int8_t(A0+int8_t(5)), int8_t(A0+int8_t(6)), int8_t(A0+int8_t(7)));
+    i8vec4 x2 = i8vec4(int8_t(A0+int8_t(8)), int8_t(A0+int8_t(9)), int8_t(A0+int8_t(10)), int8_t(A0+int8_t(11)));
+    i8vec4 x3 = i8vec4(int8_t(A0+int8_t(12)), int8_t(A0+int8_t(13)), int8_t(A0+int8_t(14)), int8_t(A0+int8_t(15)));
+    uint lid = gl_LocalInvocationID.x;
+    i8vec4 y0 = i8vec4(int8_t(lid));
+    i8vec4 y1 = i8vec4(int8_t(lid + 1u));
+    i8vec4 y2 = i8vec4(int8_t(lid + 2u));
+    i8vec4 y3 = i8vec4(int8_t(lid + 3u));
+    int a0 = int(lid);
+    int a1 = int(lid + 1u);
+    int a2 = int(lid + 2u);
+    int a3 = int(lid + 3u);
+
+    // 64 iters * STEP4_4 (= 4 * 4 = 16 dots) = 1024 dots (matches v1/v2).
+    for (int i = 0; i < 64; i++)
+    {
+        STEP4_4(x0, y0, a0, x1, y1, a1, x2, y2, a2, x3, y3, a3)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1 + a2 + a3;
+}
