@@ -1,0 +1,40 @@
+#version 450
+#extension GL_EXT_bfloat16 : require
+
+// BF16 x BF16 + FP32 accumulator -- the non-tensor-core BF16 MAD path.
+// Distinct from compute_mp (fp16 x fp16 + fp32) and from the cooperative
+// matrix BF16 test (tensor-core path).  Requires VK_KHR_shader_bfloat16
+// + shaderBFloat16Type.  Skips cleanly where unsupported.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+// Tie x, y back to the accumulator via a bf16 downcast on every step so
+// the compiler cannot hoist (float)x*(float)y across iterations.
+#define MAD_4(x, y, a) \
+    a = fma(float(x), float(y), a); x = bfloat16_t(a); \
+    a = fma(float(y), float(x), a); y = bfloat16_t(a); \
+    a = fma(float(x), float(y), a); x = bfloat16_t(a); \
+    a = fma(float(y), float(x), a); y = bfloat16_t(a);
+#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+
+void main()
+{
+    bfloat16_t x = bfloat16_t(pc.A);
+    bfloat16_t y = bfloat16_t(gl_LocalInvocationID.x);
+    float      a = pc.A;
+
+    for (int i = 0; i < 128; i++)
+    {
+        MAD_16(x, y, a)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a + float(x) + float(y);
+}

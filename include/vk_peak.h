@@ -29,6 +29,7 @@ struct vk_device_info_t {
   // Optional feature / extension gates
   bool int8DotProductSupported;   // VK_KHR_shader_integer_dot_product + shaderInt8
   bool float16Supported;          // VK_KHR_shader_float16_int8::shaderFloat16
+  bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
 };
 
 // Manages a single Vulkan device for benchmarking
@@ -125,6 +126,9 @@ public:
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
   int runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+  int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
+#endif
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
@@ -165,6 +169,10 @@ namespace vk_shaders {
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
   extern const uint32_t compute_int4_packed_v1[];
   extern const size_t   compute_int4_packed_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+  extern const uint32_t compute_bf16_v1[];
+  extern const size_t   compute_bf16_v1_size;
 #endif
 }
 

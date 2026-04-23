@@ -86,33 +86,58 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   std::vector<const char *> enabledExts;
   info.int8DotProductSupported = false;
   info.float16Supported = false;
+  info.bfloat16Supported = false;
 
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1)
-  // Feature query for optional shader types (INT8 dot-product, fp16).
-  // Uses vkGetPhysicalDeviceFeatures2 (Vulkan 1.1 core); only compiled in
-  // when at least one shader needing these features was built by glslc.
-  // On Android API < 28 that symbol isn't in the libvulkan stub, so none
-  // of the Android-built shaders should enable either of these defines
-  // unless the NDK provides a modern-enough loader (see CompileShaders.cmake).
+  // Feature query for optional shader types.  Uses vkGetPhysicalDeviceFeatures2
+  // (Vulkan 1.1 core).  Each optional shader's feature struct gets chained
+  // into pNext, queried, and then re-chained at vkCreateDevice time if the
+  // driver advertises the capability we need.  Adding a new dtype reduces
+  // to: declare the struct + macro + two conditional blocks here and one
+  // runCompute* wrapper.
+  //
+  // On Android API < 28 Features2 isn't in the stub loader, so none of the
+  // optional shader defines should be active unless the NDK provides a
+  // modern-enough loader (see CompileShaders.cmake).
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
   dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+  VkPhysicalDeviceShaderBfloat16FeaturesKHR bf16Features = {};
+  bf16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR;
+#endif
 
+  // Small helper: prepend a features struct onto a pNext chain.
+  // All VkPhysicalDevice*Features* structs begin with the (sType, pNext)
+  // pair described by VkBaseOutStructure, which is what we rely on here.
+  auto chainPNext = [](void *head, void *newNode) -> void * {
+    reinterpret_cast<VkBaseOutStructure *>(newNode)->pNext =
+        reinterpret_cast<VkBaseOutStructure *>(head);
+    return newNode;
+  };
+
+  bool f16i8ExtEnabled = false;
   if (hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
   {
-    VkPhysicalDeviceFeatures2 features2 = {};
-    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &f16i8Features;
+    void *chain = nullptr;
+    chain = chainPNext(chain, &f16i8Features);
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
     if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME))
-      f16i8Features.pNext = &dpFeatures;
+      chain = chainPNext(chain, &dpFeatures);
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+    if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME))
+      chain = chainPNext(chain, &bf16Features);
+#endif
+
+    VkPhysicalDeviceFeatures2 features2 = {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = chain;
     vkGetPhysicalDeviceFeatures2(physDev, &features2);
 
-    bool f16i8ExtEnabled = false;
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
     if (f16i8Features.shaderFloat16)
     {
@@ -136,8 +161,15 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
       info.int8DotProductSupported = true;
     }
 #endif
-    (void)f16i8ExtEnabled;
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+    if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME) && bf16Features.shaderBFloat16Type)
+    {
+      enabledExts.push_back(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME);
+      info.bfloat16Supported = true;
+    }
+#endif
   }
+  (void)f16i8ExtEnabled;
 #endif
 
 #if defined(__APPLE__) || defined(__MACOSX)
@@ -160,20 +192,35 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1)
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1)
+  // Re-chain the feature structs we actually enabled for vkCreateDevice.
+  // The query-phase chain is discarded; these are the features we ask the
+  // driver to turn on.
   VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
   enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-  if (info.int8DotProductSupported || info.float16Supported)
+  void *enabledChain = nullptr;
+  if (info.float16Supported || info.int8DotProductSupported)
   {
-    enabledFeatures2.pNext = &f16i8Features;
     f16i8Features.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &f16i8Features);
+  }
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-    if (info.int8DotProductSupported)
-    {
-      f16i8Features.pNext = &dpFeatures;
-      dpFeatures.pNext = nullptr;
-    }
+  if (info.int8DotProductSupported)
+  {
+    dpFeatures.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &dpFeatures);
+  }
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+  if (info.bfloat16Supported)
+  {
+    bf16Features.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &bf16Features);
+  }
+#endif
+  if (enabledChain)
+  {
+    enabledFeatures2.pNext = enabledChain;
     deviceCI.pNext = &enabledFeatures2;
   }
 #endif
@@ -506,6 +553,9 @@ int vkPeak::runAll()
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
     runComputeInt4Packed(dev, cfg);
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+    runComputeBF16(dev, cfg);
+#endif
     runGlobalBandwidth(dev, cfg);
 
     log->print(NEWLINE);
@@ -758,6 +808,27 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.pushSize    = sizeof(A);
   d.skip        = !dev.info.int8DotProductSupported;
   d.skipMsg     = "VK_KHR_shader_integer_dot_product / shaderInt8 not supported! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+#endif
+
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  float A = 1.3f;
+  vk_compute_desc_t d = {};
+  d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
+  d.xmlTag      = "bfloat16_compute";
+  d.metricLabel = "bf16";
+  d.unit        = "gflops";
+  d.spirv       = vk_shaders::compute_bf16_v1;
+  d.spirvSize   = vk_shaders::compute_bf16_v1_size;
+  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize    = sizeof(float);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  d.skip        = !dev.info.bfloat16Supported;
+  d.skipMsg     = "VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped";
   return runComputeKernel(dev, cfg, d);
 }
 #endif
