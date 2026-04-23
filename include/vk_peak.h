@@ -61,7 +61,7 @@ public:
   VulkanDevice();
   ~VulkanDevice();
 
-  bool init(VkPhysicalDevice physDev);
+  bool init(VkInstance inst, VkPhysicalDevice physDev);
   void cleanup();
 
   // Allocate a device-local buffer

@@ -20,7 +20,7 @@ VulkanDevice::~VulkanDevice()
   cleanup();
 }
 
-bool VulkanDevice::init(VkPhysicalDevice physDev)
+bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
 {
   physicalDevice = physDev;
 
@@ -160,7 +160,18 @@ bool VulkanDevice::init(VkPhysicalDevice physDev)
     VkPhysicalDeviceFeatures2 features2 = {};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.pNext = chain;
-    vkGetPhysicalDeviceFeatures2(physDev, &features2);
+    // Resolve at runtime: on Android API 26 the NDK's libvulkan.so does not
+    // export the 1.1-core symbol statically, but the 1.1 driver underneath
+    // still answers the call.  Fall back to the KHR alias (VK_KHR_get_phys-
+    // ical_device_properties2, a 1.0 extension) if the core entrypoint is
+    // missing.  If neither resolves, leave all optional features disabled.
+    auto pfnGetFeat2 = (PFN_vkGetPhysicalDeviceFeatures2)
+        vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceFeatures2");
+    if (!pfnGetFeat2)
+      pfnGetFeat2 = (PFN_vkGetPhysicalDeviceFeatures2)
+          vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceFeatures2KHR");
+    if (pfnGetFeat2)
+      pfnGetFeat2(physDev, &features2);
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
     if (f16i8Features.shaderFloat16)
@@ -581,7 +592,7 @@ int vkPeak::runAll()
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
     VulkanDevice dev;
-    if (!dev.init(physicalDevices[d]))
+    if (!dev.init(instance, physicalDevices[d]))
     {
       log->print(NEWLINE "Vulkan: failed to init device " + std::to_string(d) + NEWLINE);
       continue;
