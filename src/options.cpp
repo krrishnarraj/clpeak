@@ -29,6 +29,7 @@ static const char *helpStr =
     "\n  --compute-char              selectively run char (integer 8bit) compute test"
     "\n  --compute-short             selectively run short (integer 16bit) compute test"
     "\n  --compute-int8-dp           selectively run INT8 dot-product (DP4a) compute test"
+    "\n  --compute-int4-packed       selectively run packed INT4 compute test (emulated)"
     "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
     "\n  --kernel-latency            selectively run kernel latency test"
     "\n  --all-tests                 run all above tests [default]"
@@ -101,6 +102,7 @@ static const TestFlag testFlags[] = {
   {"--compute-char",      Benchmark::ComputeChar},
   {"--compute-short",     Benchmark::ComputeShort},
   {"--compute-int8-dp",   Benchmark::ComputeInt8DP},
+  {"--compute-int4-packed", Benchmark::ComputeInt4Packed},
   {"--transfer-bandwidth", Benchmark::TransferBW},
   {"--kernel-latency",    Benchmark::KernelLatency},
 };

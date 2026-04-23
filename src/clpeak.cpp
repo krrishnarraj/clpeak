@@ -18,6 +18,7 @@ static const std::string stringifiedKernels =
 #include "compute_integer_kernels.cl"
 #include "compute_char_kernels.cl"
 #include "compute_short_kernels.cl"
+#include "compute_int4_packed_kernels.cl"
 #ifdef CLPEAK_HAS_OPENCL_30
 #include "compute_int8_dp_kernels.cl"
 #endif
@@ -276,6 +277,11 @@ int clPeak::runAll()
                        "Integer short (16bit) compute (GIOPS)", "integer_compute_short",
                        "compute_short", "short", "giops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
+                       "Packed INT4 compute (emulated) (GIOPS)", "int4_packed_compute",
+                       "compute_int4_packed", "int4_packed", "giops",
+                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
 #ifdef CLPEAK_HAS_OPENCL_30
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,

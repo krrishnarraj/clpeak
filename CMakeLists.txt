@@ -69,10 +69,7 @@ set(CLPEAK_SOURCE_FILES
 find_package(Vulkan)
 if(Vulkan_FOUND)
   message(STATUS "Vulkan found: ${Vulkan_LIBRARIES} -- Vulkan backend enabled")
-  list(APPEND CLPEAK_SOURCE_FILES
-    src/vk_peak.cpp
-    src/entry_vk.cpp
-  )
+  list(APPEND CLPEAK_SOURCE_FILES ${CLPEAK_VK_SOURCES})
 else()
   message(WARNING "Vulkan SDK/loader not found -- Vulkan tests will be disabled. Install the Vulkan SDK to enable the Vulkan backend.")
 endif()
@@ -95,11 +92,7 @@ if(Vulkan_FOUND)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake)
   compile_shaders(
     TARGET clpeak
-    SHADERS
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/compute_sp_v1.comp
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/global_bandwidth_v1.comp
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/compute_int8_dp_v1.comp
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/compute_mp_v1.comp
+    SHADERS ${CLPEAK_VK_SHADERS}
   )
 endif()
 

@@ -503,6 +503,9 @@ int vkPeak::runAll()
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
     runComputeInt8DP(dev, cfg);
 #endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+    runComputeInt4Packed(dev, cfg);
+#endif
     runGlobalBandwidth(dev, cfg);
 
     log->print(NEWLINE);
@@ -794,6 +797,143 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   return 0;
 }
 #endif // CLPEAK_VK_HAS_COMPUTE_MP_V1
+
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+// ---------------------------------------------------------------------------
+// Packed INT4 MAD benchmark (Vulkan, emulated via int32 unpack/mac/repack).
+// Labeled "emulated" to make clear this is ALU-bound, not a hardware-INT4
+// tensor peak -- native INT4 hardware is reachable only through cooperative
+// matrix, which is covered separately.
+// ---------------------------------------------------------------------------
+
+int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  log->print(NEWLINE TAB "Packed INT4 compute (emulated) (GIOPS)" NEWLINE);
+  log->xmlOpenTag("int4_packed_compute");
+  log->xmlAppendAttribs("unit", "giops");
+  log->xmlAppendAttribs("emulated", "true");
+
+  unsigned int iters = cfg.computeIters;
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  if (globalWIs * sizeof(int32_t) > dev.info.maxAllocSize)
+    globalWIs = dev.info.maxAllocSize / sizeof(int32_t);
+  globalWIs = (globalWIs / wgSize) * wgSize;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+
+  VkBuffer outputBuf;
+  VkDeviceMemory outputMem;
+  if (!dev.createBuffer(globalWIs * sizeof(int32_t),
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        outputBuf, outputMem))
+  {
+    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  VkDescriptorSetLayoutBinding binding = {};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
+  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dsLayoutCI.bindingCount = 1;
+  dsLayoutCI.pBindings = &binding;
+
+  VkDescriptorSetLayout dsLayout;
+  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
+
+  VkPushConstantRange pushRange = {};
+  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  pushRange.offset = 0;
+  pushRange.size = sizeof(int32_t);
+
+  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
+  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeLayoutCI.setLayoutCount = 1;
+  pipeLayoutCI.pSetLayouts = &dsLayout;
+  pipeLayoutCI.pushConstantRangeCount = 1;
+  pipeLayoutCI.pPushConstantRanges = &pushRange;
+
+  VkPipelineLayout pipeLayout;
+  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
+
+  VkPipeline pipeline;
+  if (!dev.createComputePipeline(vk_shaders::compute_int4_packed_v1,
+                                  vk_shaders::compute_int4_packed_v1_size,
+                                  dsLayout, pipeLayout, pipeline))
+  {
+    log->print(TAB TAB "Failed to create packed-INT4 compute pipeline" NEWLINE);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+    vkDestroyBuffer(dev.device, outputBuf, nullptr);
+    vkFreeMemory(dev.device, outputMem, nullptr);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  VkDescriptorPoolSize poolSize = {};
+  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  poolSize.descriptorCount = 1;
+
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1;
+  dpCI.poolSizeCount = 1;
+  dpCI.pPoolSizes = &poolSize;
+
+  VkDescriptorPool descPool;
+  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = descPool;
+  dsAI.descriptorSetCount = 1;
+  dsAI.pSetLayouts = &dsLayout;
+
+  VkDescriptorSet descSet;
+  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+
+  VkDescriptorBufferInfo bufInfo = {};
+  bufInfo.buffer = outputBuf;
+  bufInfo.offset = 0;
+  bufInfo.range = globalWIs * sizeof(int32_t);
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = descSet;
+  write.dstBinding = 0;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  write.pBufferInfo = &bufInfo;
+
+  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
+
+  log->print(TAB TAB "int4_packed : ");
+
+  int32_t A = 3;
+  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(int32_t));
+  float giops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_INT4_PACKED_WORK_PER_WI)) / timed / 1e3f;
+
+  log->print(giops);
+  log->print(NEWLINE);
+  log->xmlRecord("int4_packed", giops);
+
+  vkDestroyPipeline(dev.device, pipeline, nullptr);
+  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  vkDestroyBuffer(dev.device, outputBuf, nullptr);
+  vkFreeMemory(dev.device, outputMem, nullptr);
+
+  log->xmlCloseTag(); // int4_packed_compute
+  return 0;
+}
+#endif // CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
 // ---------------------------------------------------------------------------

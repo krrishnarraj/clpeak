@@ -20,10 +20,7 @@ set(CLPEAK_ANDROID_SOURCES
 # Vulkan driver.
 find_library(ANDROID_VULKAN_LIB vulkan)
 if(ANDROID_VULKAN_LIB)
-  list(APPEND CLPEAK_ANDROID_SOURCES
-    ${CLPEAK_ROOT}/src/vk_peak.cpp
-    ${CLPEAK_ROOT}/src/entry_vk.cpp
-  )
+  list(APPEND CLPEAK_ANDROID_SOURCES ${CLPEAK_VK_SOURCES})
 endif()
 
 add_library(clpeak SHARED ${CLPEAK_ANDROID_SOURCES})
@@ -50,10 +47,6 @@ if(ANDROID_VULKAN_LIB)
   include(${CLPEAK_ROOT}/cmake/CompileShaders.cmake)
   compile_shaders(
     TARGET clpeak
-    SHADERS
-      ${CLPEAK_ROOT}/src/shaders/compute_sp_v1.comp
-      ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v1.comp
-      ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v1.comp
-      ${CLPEAK_ROOT}/src/shaders/compute_mp_v1.comp
+    SHADERS ${CLPEAK_VK_SHADERS}
   )
 endif()
