@@ -43,15 +43,22 @@ struct vk_device_info_t {
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
 
   // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
-  // to gate individual coopmat dtype tests.  Each flag means "a 16x16x16
-  // subgroup-scope property exists advertising this input/accumulator
-  // combination".  16x16x16 is the most widely supported shape; more
-  // exotic tiles can be added when needed.
-  bool coopmatFP16Supported;      // fp16 A/B, fp32 C
-  bool coopmatBF16Supported;      // bf16 A/B, fp32 C
-  bool coopmatINT8Supported;      // int8 A/B, int32 C
-  bool coopmatFP8E4M3Supported;   // fp8 E4M3 A/B, fp32 C
-  bool coopmatFP8E5M2Supported;   // fp8 E5M2 A/B, fp32 C
+  // to gate individual coopmat dtype tests.  Each flag means "a subgroup-
+  // scope property exists advertising this input/accumulator combination
+  // at a tile we have a pre-compiled shader for".
+  //
+  // FP16/BF16/FP8 tests are compiled at 16x16x16 (widely supported on
+  // NVIDIA/AMD/Intel).  INT8 is trickier: NVIDIA tensor cores advertise
+  // INT8 only at K=32 (typically 16x16x32), reflecting how DP4a lanes
+  // naturally accumulate four INT8s per 32-bit slot -- so we ship two
+  // INT8 shader variants (K=16, K=32) and select whichever matches.
+  bool coopmatFP16Supported;      // fp16 A/B, fp32 C  @ 16x16x16
+  bool coopmatBF16Supported;      // bf16 A/B, fp32 C  @ 16x16x16
+  bool coopmatFP8E4M3Supported;   // fp8 E4M3 A/B, fp32 C  @ 16x16x16
+  bool coopmatFP8E5M2Supported;   // fp8 E5M2 A/B, fp32 C  @ 16x16x16
+  // INT8: store the selected K so host can pick the right shader variant.
+  // 0 = unsupported; 16 or 32 = supported at 16x16xK.
+  uint32_t coopmatINT8K;
 };
 
 // Manages a single Vulkan device for benchmarking
@@ -213,8 +220,10 @@ namespace vk_shaders {
   extern const size_t   coopmat_bf16_size;
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_INT8
-  extern const uint32_t coopmat_int8[];
+  extern const uint32_t coopmat_int8[];       // 16x16x16 tile (AMD/Intel path)
   extern const size_t   coopmat_int8_size;
+  extern const uint32_t coopmat_int8_k32[];   // 16x16x32 tile (NVIDIA tensor-core INT8)
+  extern const size_t   coopmat_int8_k32_size;
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
   extern const uint32_t coopmat_fp8_e4m3[];

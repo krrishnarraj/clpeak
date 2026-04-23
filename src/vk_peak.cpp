@@ -91,7 +91,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   info.fp8Supported = false;
   info.coopmatFP16Supported = false;
   info.coopmatBF16Supported = false;
-  info.coopmatINT8Supported = false;
+  info.coopmatINT8K = 0;
   info.coopmatFP8E4M3Supported = false;
   info.coopmatFP8E5M2Supported = false;
 
@@ -644,25 +644,34 @@ int vkPeak::runAll()
         for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
         if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
         {
+          // Tile matcher: subgroup-scope property at the requested MxNxK
+          // with matching A/B input type and C/Result accumulator type.
           auto matches = [](const VkCooperativeMatrixPropertiesKHR &p,
+                            uint32_t m, uint32_t n, uint32_t k,
                             VkComponentTypeKHR ab, VkComponentTypeKHR c) {
-            return p.MSize == 16 && p.NSize == 16 && p.KSize == 16 &&
+            return p.MSize == m && p.NSize == n && p.KSize == k &&
                    p.scope == VK_SCOPE_SUBGROUP_KHR &&
                    p.AType == ab && p.BType == ab &&
                    p.CType == c && p.ResultType == c;
           };
           for (auto &p : props)
           {
-            if (matches(p, VK_COMPONENT_TYPE_FLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
+            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
               dev.info.coopmatFP16Supported = true;
-            if (matches(p, VK_COMPONENT_TYPE_BFLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
+            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_BFLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
               dev.info.coopmatBF16Supported = true;
-            if (matches(p, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
-              dev.info.coopmatINT8Supported = true;
-            if (matches(p, VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
+            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
               dev.info.coopmatFP8E4M3Supported = true;
-            if (matches(p, VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
+            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
               dev.info.coopmatFP8E5M2Supported = true;
+            // INT8: prefer K=16 (AMD/Intel) but fall back to K=32 (NVIDIA
+            // Turing+ advertises INT8 tensor-core tiles only with K=32).
+            if (dev.info.coopmatINT8K == 0 &&
+                matches(p, 16,16,16, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
+              dev.info.coopmatINT8K = 16;
+            if (dev.info.coopmatINT8K != 16 &&
+                matches(p, 16,16,32, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
+              dev.info.coopmatINT8K = 32;
           }
         }
       }
@@ -1110,26 +1119,63 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     runComputeKernel(dev, cfg, d);
   }
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+#if defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_COOPMAT_INT8_K32)
   {
+    // Select the shader variant matching whichever INT8 tile the driver
+    // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.
     int32_t A = 3;
     vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix int8xint8+int32 16x16x16 (GIOPS)";
     d.xmlTag         = "coopmat_int8";
     d.metricLabel    = "coopmat_int8";
     d.unit           = "giops";
-    d.spirv          = vk_shaders::coopmat_int8;
-    d.spirvSize      = vk_shaders::coopmat_int8_size;
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(int32_t);
     d.wgSize         = coopWGSize;
     d.outElemsPerWG  = coopOutElems;
     d.pushData       = &A;
     d.pushSize       = sizeof(A);
-    d.skip           = !dev.info.coopmatINT8Supported;
-    d.skipMsg        = "No 16x16x16 int8xint8+int32 coopmat property! Skipped";
     d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
+
+    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (GIOPS)";
+    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (GIOPS)";
+    bool haveShaderK16 = false, haveShaderK32 = false;
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+    haveShaderK16 = true;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8_K32
+    haveShaderK32 = true;
+#endif
+
+    if (dev.info.coopmatINT8K == 16 && haveShaderK16)
+    {
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+      d.title          = titleK16;
+      d.spirv          = vk_shaders::coopmat_int8;
+      d.spirvSize      = vk_shaders::coopmat_int8_size;
+      d.extraAttribVal = "16x16x16";
+#endif
+    }
+    else if (dev.info.coopmatINT8K == 32 && haveShaderK32)
+    {
+#ifdef CLPEAK_VK_HAS_COOPMAT_INT8_K32
+      d.title          = titleK32;
+      d.spirv          = vk_shaders::coopmat_int8_k32;
+      d.spirvSize      = vk_shaders::coopmat_int8_k32_size;
+      d.extraAttribVal = "16x16x32";
+#endif
+    }
+    else
+    {
+      // Driver advertised neither 16x16x16 nor 16x16x32 INT8 -- or the
+      // corresponding shader didn't compile in this build.  Skip with a
+      // label that names the probed tiles so the reason is obvious.
+      d.title          = titleK16;
+      d.skip           = true;
+      d.skipMsg        = "No 16x16x{16,32} int8xint8+int32 coopmat property! Skipped";
+      d.extraAttribVal = "16x16x16";
+      d.spirv          = nullptr;
+      d.spirvSize      = 0;
+    }
     runComputeKernel(dev, cfg, d);
   }
 #endif

@@ -446,7 +446,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
         cl_double A = 1.3;
         kernels[w].setArg(1, A);
       }
-      else if (which == Benchmark::ComputeChar || which == Benchmark::ComputeInt8DP)
+      else if (which == Benchmark::ComputeChar || which == Benchmark::ComputeInt8DP ||
+               which == Benchmark::ComputeInt4Packed)
       {
         cl_char A = 4;
         kernels[w].setArg(1, A);
