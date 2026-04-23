@@ -13,7 +13,10 @@
 
 // Convenience: defined if any cooperative-matrix shader compiled.  Used by
 // vk_peak.cpp to gate extension / feature enablement and dispatch.
-#if defined(CLPEAK_VK_HAS_COOPMAT_FP16) || defined(CLPEAK_VK_HAS_COOPMAT_BF16) || defined(CLPEAK_VK_HAS_COOPMAT_INT8)
+#if defined(CLPEAK_VK_HAS_COOPMAT_FP8_E4M3) || defined(CLPEAK_VK_HAS_COOPMAT_FP8_E5M2)
+#define CLPEAK_VK_HAS_ANY_COOPMAT_FP8 1
+#endif
+#if defined(CLPEAK_VK_HAS_COOPMAT_FP16) || defined(CLPEAK_VK_HAS_COOPMAT_BF16) || defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_ANY_COOPMAT_FP8)
 #define CLPEAK_VK_HAS_ANY_COOPMAT 1
 #endif
 
@@ -37,6 +40,7 @@ struct vk_device_info_t {
   bool float16Supported;          // VK_KHR_shader_float16_int8::shaderFloat16
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
+  bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
 
   // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
   // to gate individual coopmat dtype tests.  Each flag means "a 16x16x16
@@ -46,6 +50,8 @@ struct vk_device_info_t {
   bool coopmatFP16Supported;      // fp16 A/B, fp32 C
   bool coopmatBF16Supported;      // bf16 A/B, fp32 C
   bool coopmatINT8Supported;      // int8 A/B, int32 C
+  bool coopmatFP8E4M3Supported;   // fp8 E4M3 A/B, fp32 C
+  bool coopmatFP8E5M2Supported;   // fp8 E5M2 A/B, fp32 C
 };
 
 // Manages a single Vulkan device for benchmarking
@@ -209,6 +215,14 @@ namespace vk_shaders {
 #ifdef CLPEAK_VK_HAS_COOPMAT_INT8
   extern const uint32_t coopmat_int8[];
   extern const size_t   coopmat_int8_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
+  extern const uint32_t coopmat_fp8_e4m3[];
+  extern const size_t   coopmat_fp8_e4m3_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
+  extern const uint32_t coopmat_fp8_e5m2[];
+  extern const size_t   coopmat_fp8_e5m2_size;
 #endif
 }
 

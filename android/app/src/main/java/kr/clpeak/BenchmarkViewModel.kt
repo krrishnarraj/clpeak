@@ -133,6 +133,8 @@ class BenchmarkViewModel : ViewModel() {
             "coopmat_fp16"              to CategoryMeta("Coop-Matrix FP16 (tensor cores)", TestType.COMPUTE),
             "coopmat_bf16"              to CategoryMeta("Coop-Matrix BF16 (tensor cores)", TestType.COMPUTE),
             "coopmat_int8"              to CategoryMeta("Coop-Matrix INT8 (tensor cores)", TestType.COMPUTE),
+            "coopmat_fp8_e4m3"          to CategoryMeta("Coop-Matrix FP8 E4M3 (tensor cores)", TestType.COMPUTE),
+            "coopmat_fp8_e5m2"          to CategoryMeta("Coop-Matrix FP8 E5M2 (tensor cores)", TestType.COMPUTE),
             "atomic_throughput"         to CategoryMeta("Atomic Throughput",         TestType.COMPUTE),
             "kernel_launch_latency"     to CategoryMeta("Kernel Launch Latency",     TestType.LATENCY)
         )

@@ -1,0 +1,41 @@
+#version 450
+#extension GL_KHR_cooperative_matrix     : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_EXT_float_e5m2             : require
+
+// Cooperative-matrix FP8 (E5M2) x FP8 (E5M2) + FP32 accumulator.
+// Wider-range FP8 variant.  Design notes: see coopmat_fp8_e4m3.comp and
+// coopmat_fp16.comp.
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+const int ITERS = 256;
+const uint M = 16u;
+const uint N = 16u;
+const uint K = 16u;
+
+void main()
+{
+    coopmat<floate5m2_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA> matA =
+        coopmat<floate5m2_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(floate5m2_t(pc.A));
+    coopmat<floate5m2_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
+        coopmat<floate5m2_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(floate5m2_t(pc.A));
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
+        coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+
+    for (int i = 0; i < ITERS; i++)
+    {
+        matC = coopMatMulAdd(matA, matB, matC);
+    }
+
+    coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
+                 gl_CooperativeMatrixLayoutRowMajor);
+}

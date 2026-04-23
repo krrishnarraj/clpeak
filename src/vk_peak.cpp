@@ -88,9 +88,12 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   info.float16Supported = false;
   info.bfloat16Supported = false;
   info.cooperativeMatrixSupported = false;
+  info.fp8Supported = false;
   info.coopmatFP16Supported = false;
   info.coopmatBF16Supported = false;
   info.coopmatINT8Supported = false;
+  info.coopmatFP8E4M3Supported = false;
+  info.coopmatFP8E5M2Supported = false;
 
   // Feature query for optional shader types.  Uses vkGetPhysicalDeviceFeatures2
   // (Vulkan 1.1 core).  Each optional shader's feature struct gets chained
@@ -121,6 +124,10 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   // feature bit (core in 1.2, otherwise VK_KHR_vulkan_memory_model).
   VkPhysicalDeviceVulkanMemoryModelFeatures vmmFeatures = {};
   vmmFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+  VkPhysicalDeviceShaderFloat8FeaturesEXT fp8Features = {};
+  fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
+#endif
 #endif
 
   // Small helper: prepend a features struct onto a pNext chain.
@@ -155,6 +162,11 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       chain = chainPNext(chain, &coopmatFeatures);
       chain = chainPNext(chain, &vmmFeatures);
     }
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+    bool hasFP8Ext = hasExt(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+    if (hasFP8Ext)
+      chain = chainPNext(chain, &fp8Features);
+#endif
 #endif
 
     VkPhysicalDeviceFeatures2 features2 = {};
@@ -230,6 +242,16 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
           enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
       }
 #endif
+      // FP8 coopmat inputs additionally need VK_EXT_shader_float8 with
+      // shaderFloat8 + shaderFloat8CooperativeMatrix both advertised.
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+      if (hasFP8Ext && fp8Features.shaderFloat8 &&
+          fp8Features.shaderFloat8CooperativeMatrix)
+      {
+        enabledExts.push_back(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+        info.fp8Supported = true;
+      }
+#endif
     }
 #endif
   }
@@ -290,6 +312,13 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
     vmmFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &vmmFeatures);
   }
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+  if (info.fp8Supported)
+  {
+    fp8Features.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &fp8Features);
+  }
+#endif
 #endif
   if (enabledChain)
   {
@@ -630,6 +659,10 @@ int vkPeak::runAll()
               dev.info.coopmatBF16Supported = true;
             if (matches(p, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
               dev.info.coopmatINT8Supported = true;
+            if (matches(p, VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
+              dev.info.coopmatFP8E4M3Supported = true;
+            if (matches(p, VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
+              dev.info.coopmatFP8E5M2Supported = true;
           }
         }
       }
@@ -1026,6 +1059,52 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.pushSize       = sizeof(A);
     d.skip           = !dev.info.coopmatBF16Supported;
     d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "16x16x16";
+    runComputeKernel(dev, cfg, d);
+  }
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
+  {
+    float A = 1.3f;
+    vk_compute_desc_t d = {};
+    d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (GFLOPS)";
+    d.xmlTag         = "coopmat_fp8_e4m3";
+    d.metricLabel    = "coopmat_fp8_e4m3";
+    d.unit           = "gflops";
+    d.spirv          = vk_shaders::coopmat_fp8_e4m3;
+    d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
+    d.workPerWI      = coopWork;
+    d.elemSize       = sizeof(float);
+    d.wgSize         = coopWGSize;
+    d.outElemsPerWG  = coopOutElems;
+    d.pushData       = &A;
+    d.pushSize       = sizeof(A);
+    d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E4M3Supported);
+    d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "16x16x16";
+    runComputeKernel(dev, cfg, d);
+  }
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
+  {
+    float A = 1.3f;
+    vk_compute_desc_t d = {};
+    d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (GFLOPS)";
+    d.xmlTag         = "coopmat_fp8_e5m2";
+    d.metricLabel    = "coopmat_fp8_e5m2";
+    d.unit           = "gflops";
+    d.spirv          = vk_shaders::coopmat_fp8_e5m2;
+    d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
+    d.workPerWI      = coopWork;
+    d.elemSize       = sizeof(float);
+    d.wgSize         = coopWGSize;
+    d.outElemsPerWG  = coopOutElems;
+    d.pushData       = &A;
+    d.pushSize       = sizeof(A);
+    d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E5M2Supported);
+    d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
     runComputeKernel(dev, cfg, d);
