@@ -518,561 +518,249 @@ int vkPeak::runAll()
 }
 
 // ---------------------------------------------------------------------------
-// Compute SP benchmark (Vulkan)
+// Shared compute-peak driver.
+//
+// Every compute-peak benchmark (runComputeSP / MP / INT8-DP / INT4-packed /
+// coop-matrix / ...) shares the same Vulkan scaffolding: allocate a single
+// device-local output buffer, build a one-binding descriptor set, create a
+// pipeline from the shader's SPIR-V, dispatch repeatedly with a push
+// constant, and report work-per-WI / elapsed time.  The only differences
+// are the shader, the buffer-element size, the push-constant payload, and
+// the strings used for display / XML.  All of those are bundled into
+// vk_compute_desc_t so each concrete benchmark becomes a few-line wrapper.
+// ---------------------------------------------------------------------------
+
+int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
+                             const vk_compute_desc_t &d)
+{
+  log->print(NEWLINE TAB);
+  log->print(d.title);
+  log->print(NEWLINE);
+  log->xmlOpenTag(d.xmlTag);
+  log->xmlAppendAttribs("unit", d.unit);
+  if (d.extraAttribKey && d.extraAttribVal)
+    log->xmlAppendAttribs(d.extraAttribKey, d.extraAttribVal);
+
+  if (d.skip)
+  {
+    log->print(TAB TAB);
+    log->print(d.skipMsg ? d.skipMsg : "Skipped");
+    log->print(NEWLINE);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  // Size the dispatch to saturate the device and amortize submit overhead.
+  // Vulkan doesn't expose a CU count, so target 32M work-items (matches
+  // OpenCL's numCUs*2048*maxWGSize on most GPUs once clamped), bounded
+  // by maxStorageBufferRange.
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  if (globalWIs * d.elemSize > dev.info.maxAllocSize)
+    globalWIs = dev.info.maxAllocSize / d.elemSize;
+  globalWIs = (globalWIs / wgSize) * wgSize;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+
+  VkBuffer outputBuf;
+  VkDeviceMemory outputMem;
+  if (!dev.createBuffer(globalWIs * d.elemSize,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        outputBuf, outputMem))
+  {
+    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  VkDescriptorSetLayoutBinding binding = {};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
+  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dsLayoutCI.bindingCount = 1;
+  dsLayoutCI.pBindings = &binding;
+
+  VkDescriptorSetLayout dsLayout;
+  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
+
+  VkPushConstantRange pushRange = {};
+  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  pushRange.offset = 0;
+  pushRange.size = d.pushSize;
+
+  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
+  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeLayoutCI.setLayoutCount = 1;
+  pipeLayoutCI.pSetLayouts = &dsLayout;
+  if (d.pushSize > 0)
+  {
+    pipeLayoutCI.pushConstantRangeCount = 1;
+    pipeLayoutCI.pPushConstantRanges = &pushRange;
+  }
+
+  VkPipelineLayout pipeLayout;
+  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
+
+  VkPipeline pipeline;
+  if (!dev.createComputePipeline(d.spirv, d.spirvSize, dsLayout, pipeLayout, pipeline))
+  {
+    log->print(TAB TAB "Failed to create compute pipeline (driver may not honor extension)" NEWLINE);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+    vkDestroyBuffer(dev.device, outputBuf, nullptr);
+    vkFreeMemory(dev.device, outputMem, nullptr);
+    log->xmlCloseTag();
+    return 0;
+  }
+
+  VkDescriptorPoolSize poolSize = {};
+  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  poolSize.descriptorCount = 1;
+
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1;
+  dpCI.poolSizeCount = 1;
+  dpCI.pPoolSizes = &poolSize;
+
+  VkDescriptorPool descPool;
+  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = descPool;
+  dsAI.descriptorSetCount = 1;
+  dsAI.pSetLayouts = &dsLayout;
+
+  VkDescriptorSet descSet;
+  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+
+  VkDescriptorBufferInfo bufInfo = {};
+  bufInfo.buffer = outputBuf;
+  bufInfo.offset = 0;
+  bufInfo.range = globalWIs * d.elemSize;
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = descSet;
+  write.dstBinding = 0;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  write.pBufferInfo = &bufInfo;
+
+  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
+
+  log->print(TAB TAB);
+  log->print(d.metricLabel);
+  log->print(" : ");
+
+  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
+                          cfg.computeIters, d.pushData, d.pushSize);
+  float value = (static_cast<float>(globalWIs) * static_cast<float>(d.workPerWI)) / timed / 1e3f;
+
+  log->print(value);
+  log->print(NEWLINE);
+  log->xmlRecord(d.metricLabel, value);
+
+  vkDestroyPipeline(dev.device, pipeline, nullptr);
+  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  vkDestroyBuffer(dev.device, outputBuf, nullptr);
+  vkFreeMemory(dev.device, outputMem, nullptr);
+
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Concrete compute benchmarks.  Each is a thin wrapper that fills in a
+// vk_compute_desc_t and delegates to runComputeKernel above.
 // ---------------------------------------------------------------------------
 
 int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
-
-  // Size the dispatch to match OpenCL's sizing: large enough to saturate the
-  // device and amortize submit overhead. Vulkan doesn't expose CU count, so
-  // target 32M work items (typical of OpenCL's numCUs*2048*maxWGSize on most
-  // GPUs once clamped), bounded by maxStorageBufferRange.
-  const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
-  if (globalWIs * sizeof(float) > dev.info.maxAllocSize)
-    globalWIs = dev.info.maxAllocSize / sizeof(float);
-  globalWIs = (globalWIs / wgSize) * wgSize;
-  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
-
-  log->print(NEWLINE TAB "Single-precision compute (GFLOPS)" NEWLINE);
-  log->xmlOpenTag("single_precision_compute");
-  log->xmlAppendAttribs("unit", "gflops");
-
-  // Create output buffer
-  VkBuffer outputBuf;
-  VkDeviceMemory outputMem;
-  if (!dev.createBuffer(globalWIs * sizeof(float),
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                        outputBuf, outputMem))
-  {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
-    return -1;
-  }
-
-  // Descriptor set layout
-  VkDescriptorSetLayoutBinding binding = {};
-  binding.binding = 0;
-  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  binding.descriptorCount = 1;
-  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
-  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  dsLayoutCI.bindingCount = 1;
-  dsLayoutCI.pBindings = &binding;
-
-  VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
-
-  // Push constant range for the scalar A
-  VkPushConstantRange pushRange = {};
-  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  pushRange.offset = 0;
-  pushRange.size = sizeof(float);
-
-  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
-  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  pipeLayoutCI.setLayoutCount = 1;
-  pipeLayoutCI.pSetLayouts = &dsLayout;
-  pipeLayoutCI.pushConstantRangeCount = 1;
-  pipeLayoutCI.pPushConstantRanges = &pushRange;
-
-  VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
-
-  // Create pipeline
-  VkPipeline pipeline;
-  if (!dev.createComputePipeline(vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size,
-                                  dsLayout, pipeLayout, pipeline))
-  {
-    log->print(TAB TAB "Failed to create compute pipeline" NEWLINE);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-    vkDestroyBuffer(dev.device, outputBuf, nullptr);
-    vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
-    return -1;
-  }
-
-  // Descriptor pool + set
-  VkDescriptorPoolSize poolSize = {};
-  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  poolSize.descriptorCount = 1;
-
-  VkDescriptorPoolCreateInfo dpCI = {};
-  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  dpCI.maxSets = 1;
-  dpCI.poolSizeCount = 1;
-  dpCI.pPoolSizes = &poolSize;
-
-  VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
-
-  VkDescriptorSetAllocateInfo dsAI = {};
-  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  dsAI.descriptorPool = descPool;
-  dsAI.descriptorSetCount = 1;
-  dsAI.pSetLayouts = &dsLayout;
-
-  VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
-
-  VkDescriptorBufferInfo bufInfo = {};
-  bufInfo.buffer = outputBuf;
-  bufInfo.offset = 0;
-  bufInfo.range = globalWIs * sizeof(float);
-
-  VkWriteDescriptorSet write = {};
-  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  write.dstSet = descSet;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  write.pBufferInfo = &bufInfo;
-
-  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
-
-  // Run benchmark
-  log->print(TAB TAB "float   : ");
-
   float A = 1.3f;
-  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(float));
-  float gflops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_FP_WORK_PER_WI)) / timed / 1e3f;
-
-  log->print(gflops);
-  log->print(NEWLINE);
-  log->xmlRecord("float", gflops);
-
-  // Cleanup
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, outputBuf, nullptr);
-  vkFreeMemory(dev.device, outputMem, nullptr);
-
-  log->xmlCloseTag(); // single_precision_compute
-  return 0;
+  vk_compute_desc_t d = {};
+  d.title       = "Single-precision compute (GFLOPS)";
+  d.xmlTag      = "single_precision_compute";
+  d.metricLabel = "float";
+  d.unit        = "gflops";
+  d.spirv       = vk_shaders::compute_sp_v1;
+  d.spirvSize   = vk_shaders::compute_sp_v1_size;
+  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize    = sizeof(float);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
 }
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-// ---------------------------------------------------------------------------
-// Mixed-precision MAC benchmark (Vulkan, fp16 x fp16 + fp32)
-// ---------------------------------------------------------------------------
-
 int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
-  log->xmlOpenTag("mixed_precision_compute");
-  log->xmlAppendAttribs("unit", "gflops");
-
-  if (!dev.info.float16Supported)
-  {
-    log->print(TAB TAB "shaderFloat16 not supported! Skipped" NEWLINE);
-    log->xmlCloseTag();
-    return 0;
-  }
-
-  unsigned int iters = cfg.computeIters;
-  const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
-  if (globalWIs * sizeof(float) > dev.info.maxAllocSize)
-    globalWIs = dev.info.maxAllocSize / sizeof(float);
-  globalWIs = (globalWIs / wgSize) * wgSize;
-  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
-
-  VkBuffer outputBuf;
-  VkDeviceMemory outputMem;
-  if (!dev.createBuffer(globalWIs * sizeof(float),
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                        outputBuf, outputMem))
-  {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
-    return -1;
-  }
-
-  VkDescriptorSetLayoutBinding binding = {};
-  binding.binding = 0;
-  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  binding.descriptorCount = 1;
-  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
-  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  dsLayoutCI.bindingCount = 1;
-  dsLayoutCI.pBindings = &binding;
-
-  VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
-
-  VkPushConstantRange pushRange = {};
-  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  pushRange.offset = 0;
-  pushRange.size = sizeof(float);
-
-  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
-  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  pipeLayoutCI.setLayoutCount = 1;
-  pipeLayoutCI.pSetLayouts = &dsLayout;
-  pipeLayoutCI.pushConstantRangeCount = 1;
-  pipeLayoutCI.pPushConstantRanges = &pushRange;
-
-  VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
-
-  VkPipeline pipeline;
-  if (!dev.createComputePipeline(vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size,
-                                  dsLayout, pipeLayout, pipeline))
-  {
-    log->print(TAB TAB "Failed to create mixed-precision compute pipeline" NEWLINE);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-    vkDestroyBuffer(dev.device, outputBuf, nullptr);
-    vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
-    return 0;
-  }
-
-  VkDescriptorPoolSize poolSize = {};
-  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  poolSize.descriptorCount = 1;
-
-  VkDescriptorPoolCreateInfo dpCI = {};
-  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  dpCI.maxSets = 1;
-  dpCI.poolSizeCount = 1;
-  dpCI.pPoolSizes = &poolSize;
-
-  VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
-
-  VkDescriptorSetAllocateInfo dsAI = {};
-  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  dsAI.descriptorPool = descPool;
-  dsAI.descriptorSetCount = 1;
-  dsAI.pSetLayouts = &dsLayout;
-
-  VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
-
-  VkDescriptorBufferInfo bufInfo = {};
-  bufInfo.buffer = outputBuf;
-  bufInfo.offset = 0;
-  bufInfo.range = globalWIs * sizeof(float);
-
-  VkWriteDescriptorSet write = {};
-  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  write.dstSet = descSet;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  write.pBufferInfo = &bufInfo;
-
-  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
-
-  log->print(TAB TAB "mp      : ");
-
   float A = 1.3f;
-  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(float));
-  float gflops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_FP_WORK_PER_WI)) / timed / 1e3f;
-
-  log->print(gflops);
-  log->print(NEWLINE);
-  log->xmlRecord("mp", gflops);
-
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, outputBuf, nullptr);
-  vkFreeMemory(dev.device, outputMem, nullptr);
-
-  log->xmlCloseTag(); // mixed_precision_compute
-  return 0;
+  vk_compute_desc_t d = {};
+  d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
+  d.xmlTag      = "mixed_precision_compute";
+  d.metricLabel = "mp";
+  d.unit        = "gflops";
+  d.spirv       = vk_shaders::compute_mp_v1;
+  d.spirvSize   = vk_shaders::compute_mp_v1_size;
+  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize    = sizeof(float);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  d.skip        = !dev.info.float16Supported;
+  d.skipMsg     = "shaderFloat16 not supported! Skipped";
+  return runComputeKernel(dev, cfg, d);
 }
-#endif // CLPEAK_VK_HAS_COMPUTE_MP_V1
+#endif
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
-// ---------------------------------------------------------------------------
-// Packed INT4 MAD benchmark (Vulkan, emulated via int32 unpack/mac/repack).
-// Labeled "emulated" to make clear this is ALU-bound, not a hardware-INT4
-// tensor peak -- native INT4 hardware is reachable only through cooperative
-// matrix, which is covered separately.
-// ---------------------------------------------------------------------------
-
 int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Packed INT4 compute (emulated) (GIOPS)" NEWLINE);
-  log->xmlOpenTag("int4_packed_compute");
-  log->xmlAppendAttribs("unit", "giops");
-  log->xmlAppendAttribs("emulated", "true");
-
-  unsigned int iters = cfg.computeIters;
-  const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
-  if (globalWIs * sizeof(int32_t) > dev.info.maxAllocSize)
-    globalWIs = dev.info.maxAllocSize / sizeof(int32_t);
-  globalWIs = (globalWIs / wgSize) * wgSize;
-  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
-
-  VkBuffer outputBuf;
-  VkDeviceMemory outputMem;
-  if (!dev.createBuffer(globalWIs * sizeof(int32_t),
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                        outputBuf, outputMem))
-  {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
-    return -1;
-  }
-
-  VkDescriptorSetLayoutBinding binding = {};
-  binding.binding = 0;
-  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  binding.descriptorCount = 1;
-  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
-  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  dsLayoutCI.bindingCount = 1;
-  dsLayoutCI.pBindings = &binding;
-
-  VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
-
-  VkPushConstantRange pushRange = {};
-  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  pushRange.offset = 0;
-  pushRange.size = sizeof(int32_t);
-
-  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
-  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  pipeLayoutCI.setLayoutCount = 1;
-  pipeLayoutCI.pSetLayouts = &dsLayout;
-  pipeLayoutCI.pushConstantRangeCount = 1;
-  pipeLayoutCI.pPushConstantRanges = &pushRange;
-
-  VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
-
-  VkPipeline pipeline;
-  if (!dev.createComputePipeline(vk_shaders::compute_int4_packed_v1,
-                                  vk_shaders::compute_int4_packed_v1_size,
-                                  dsLayout, pipeLayout, pipeline))
-  {
-    log->print(TAB TAB "Failed to create packed-INT4 compute pipeline" NEWLINE);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-    vkDestroyBuffer(dev.device, outputBuf, nullptr);
-    vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
-    return 0;
-  }
-
-  VkDescriptorPoolSize poolSize = {};
-  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  poolSize.descriptorCount = 1;
-
-  VkDescriptorPoolCreateInfo dpCI = {};
-  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  dpCI.maxSets = 1;
-  dpCI.poolSizeCount = 1;
-  dpCI.pPoolSizes = &poolSize;
-
-  VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
-
-  VkDescriptorSetAllocateInfo dsAI = {};
-  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  dsAI.descriptorPool = descPool;
-  dsAI.descriptorSetCount = 1;
-  dsAI.pSetLayouts = &dsLayout;
-
-  VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
-
-  VkDescriptorBufferInfo bufInfo = {};
-  bufInfo.buffer = outputBuf;
-  bufInfo.offset = 0;
-  bufInfo.range = globalWIs * sizeof(int32_t);
-
-  VkWriteDescriptorSet write = {};
-  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  write.dstSet = descSet;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  write.pBufferInfo = &bufInfo;
-
-  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
-
-  log->print(TAB TAB "int4_packed : ");
-
   int32_t A = 3;
-  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(int32_t));
-  float giops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_INT4_PACKED_WORK_PER_WI)) / timed / 1e3f;
-
-  log->print(giops);
-  log->print(NEWLINE);
-  log->xmlRecord("int4_packed", giops);
-
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, outputBuf, nullptr);
-  vkFreeMemory(dev.device, outputMem, nullptr);
-
-  log->xmlCloseTag(); // int4_packed_compute
-  return 0;
+  vk_compute_desc_t d = {};
+  d.title           = "Packed INT4 compute (emulated) (GIOPS)";
+  d.xmlTag          = "int4_packed_compute";
+  d.metricLabel     = "int4_packed";
+  d.unit            = "giops";
+  d.spirv           = vk_shaders::compute_int4_packed_v1;
+  d.spirvSize       = vk_shaders::compute_int4_packed_v1_size;
+  d.workPerWI       = COMPUTE_INT4_PACKED_WORK_PER_WI;
+  d.elemSize        = sizeof(int32_t);
+  d.pushData        = &A;
+  d.pushSize        = sizeof(A);
+  d.extraAttribKey  = "emulated";
+  d.extraAttribVal  = "true";
+  return runComputeKernel(dev, cfg, d);
 }
-#endif // CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+#endif
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-// ---------------------------------------------------------------------------
-// INT8 dot-product benchmark (Vulkan, VK_KHR_shader_integer_dot_product)
-// ---------------------------------------------------------------------------
-
 int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "INT8 dot-product compute (GIOPS)" NEWLINE);
-  log->xmlOpenTag("integer_compute_int8_dp");
-  log->xmlAppendAttribs("unit", "giops");
-
-  if (!dev.info.int8DotProductSupported)
-  {
-    log->print(TAB TAB "VK_KHR_shader_integer_dot_product / shaderInt8 not supported! Skipped" NEWLINE);
-    log->xmlCloseTag();
-    return 0;
-  }
-
-  unsigned int iters = cfg.computeIters;
-  const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
-  if (globalWIs * sizeof(int32_t) > dev.info.maxAllocSize)
-    globalWIs = dev.info.maxAllocSize / sizeof(int32_t);
-  globalWIs = (globalWIs / wgSize) * wgSize;
-  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
-
-  VkBuffer outputBuf;
-  VkDeviceMemory outputMem;
-  if (!dev.createBuffer(globalWIs * sizeof(int32_t),
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                        outputBuf, outputMem))
-  {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
-    return -1;
-  }
-
-  VkDescriptorSetLayoutBinding binding = {};
-  binding.binding = 0;
-  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  binding.descriptorCount = 1;
-  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-  VkDescriptorSetLayoutCreateInfo dsLayoutCI = {};
-  dsLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  dsLayoutCI.bindingCount = 1;
-  dsLayoutCI.pBindings = &binding;
-
-  VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
-
-  VkPushConstantRange pushRange = {};
-  pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  pushRange.offset = 0;
-  pushRange.size = sizeof(int32_t);
-
-  VkPipelineLayoutCreateInfo pipeLayoutCI = {};
-  pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  pipeLayoutCI.setLayoutCount = 1;
-  pipeLayoutCI.pSetLayouts = &dsLayout;
-  pipeLayoutCI.pushConstantRangeCount = 1;
-  pipeLayoutCI.pPushConstantRanges = &pushRange;
-
-  VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
-
-  VkPipeline pipeline;
-  if (!dev.createComputePipeline(vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
-                                  dsLayout, pipeLayout, pipeline))
-  {
-    log->print(TAB TAB "Failed to create INT8-DP compute pipeline (driver may not honor extension)" NEWLINE);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-    vkDestroyBuffer(dev.device, outputBuf, nullptr);
-    vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
-    return 0;
-  }
-
-  VkDescriptorPoolSize poolSize = {};
-  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  poolSize.descriptorCount = 1;
-
-  VkDescriptorPoolCreateInfo dpCI = {};
-  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  dpCI.maxSets = 1;
-  dpCI.poolSizeCount = 1;
-  dpCI.pPoolSizes = &poolSize;
-
-  VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
-
-  VkDescriptorSetAllocateInfo dsAI = {};
-  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  dsAI.descriptorPool = descPool;
-  dsAI.descriptorSetCount = 1;
-  dsAI.pSetLayouts = &dsLayout;
-
-  VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
-
-  VkDescriptorBufferInfo bufInfo = {};
-  bufInfo.buffer = outputBuf;
-  bufInfo.offset = 0;
-  bufInfo.range = globalWIs * sizeof(int32_t);
-
-  VkWriteDescriptorSet write = {};
-  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  write.dstSet = descSet;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  write.pBufferInfo = &bufInfo;
-
-  vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
-
-  log->print(TAB TAB "int8_dp : ");
-
   int32_t A = 4;
-  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters, &A, sizeof(int32_t));
-  float giops = (static_cast<float>(globalWIs) * static_cast<float>(COMPUTE_INT8_DP_WORK_PER_WI)) / timed / 1e3f;
-
-  log->print(giops);
-  log->print(NEWLINE);
-  log->xmlRecord("int8_dp", giops);
-
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, outputBuf, nullptr);
-  vkFreeMemory(dev.device, outputMem, nullptr);
-
-  log->xmlCloseTag(); // integer_compute_int8_dp
-  return 0;
+  vk_compute_desc_t d = {};
+  d.title       = "INT8 dot-product compute (GIOPS)";
+  d.xmlTag      = "integer_compute_int8_dp";
+  d.metricLabel = "int8_dp";
+  d.unit        = "giops";
+  d.spirv       = vk_shaders::compute_int8_dp_v1;
+  d.spirvSize   = vk_shaders::compute_int8_dp_v1_size;
+  d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;
+  d.elemSize    = sizeof(int32_t);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  d.skip        = !dev.info.int8DotProductSupported;
+  d.skipMsg     = "VK_KHR_shader_integer_dot_product / shaderInt8 not supported! Skipped";
+  return runComputeKernel(dev, cfg, d);
 }
-#endif // CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#endif
 
 // ---------------------------------------------------------------------------
 // Global bandwidth benchmark (Vulkan)

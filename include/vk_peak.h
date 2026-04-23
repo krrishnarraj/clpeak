@@ -65,6 +65,39 @@ private:
   uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 };
 
+// Describes a single compute-peak benchmark: just the bits that differ
+// between runComputeSP / MP / INT8-DP / INT4-packed / etc.  The Vulkan
+// scaffolding (buffer, descriptors, pipeline, dispatch loop, cleanup) is
+// identical across all of them and lives in vkPeak::runComputeKernel.
+struct vk_compute_desc_t
+{
+  // Display / reporting
+  const char *title;         // e.g. "Single-precision compute (GFLOPS)"
+  const char *xmlTag;        // e.g. "single_precision_compute"
+  const char *metricLabel;   // LHS column + xmlRecord key, e.g. "float"
+  const char *unit;          // "gflops" / "giops" / "tflops"
+
+  // Shader
+  const uint32_t *spirv;
+  size_t spirvSize;
+
+  // Scaling
+  uint32_t workPerWI;        // matches the kernel's per-WI op budget
+  uint32_t elemSize;         // output element size (sizeof float / int32 / ...)
+
+  // Push-constant payload.  nullptr => no push constants bound.
+  const void *pushData;
+  uint32_t pushSize;
+
+  // Optional feature gate.  If skip==true, emit skipMsg and close the tag.
+  bool skip;
+  const char *skipMsg;
+
+  // Optional extra xml attribute (e.g. emulated="true" for packed INT4).
+  const char *extraAttribKey;
+  const char *extraAttribVal;
+};
+
 // Top-level Vulkan benchmark runner
 class vkPeak
 {
@@ -107,6 +140,12 @@ private:
                   VkDescriptorSet descriptorSet,
                   uint32_t groupCountX, unsigned int iters,
                   const void *pushData = nullptr, uint32_t pushSize = 0);
+
+  // Shared implementation of the single-buffer compute-peak pattern
+  // used by every runCompute* benchmark.  Returns 0 on success (including
+  // a clean skip) and -1 if buffer allocation itself failed.
+  int runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
+                       const vk_compute_desc_t &d);
 };
 
 // Embedded SPIR-V shader data (generated at build time)
