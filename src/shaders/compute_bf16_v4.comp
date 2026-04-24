@@ -22,18 +22,15 @@ layout(push_constant) uniform PushConstants {
 
 void main()
 {
-    bf16vec4 xb = bf16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0);
-    bf16vec4 yb = bf16vec4(gl_LocalInvocationID.x);
+    vec4 x = vec4(bf16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0));
+    vec4 y = vec4(bf16vec4(gl_LocalInvocationID.x));
 
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 32; i++)
     {
-        vec4 x = vec4(xb);
-        vec4 y = vec4(yb);
-        MAD_64(x, y)
-        xb = bf16vec4(x);
-        yb = bf16vec4(y);
+        MAD_16(x, y)
+        x = vec4(bf16vec4(x));
+        y = vec4(bf16vec4(y));
     }
 
-    vec4 fx = vec4(xb); vec4 fy = vec4(yb);
-    outputBuf.data[gl_GlobalInvocationID.x] = fx.x + fx.y + fx.z + fx.w + fy.x + fy.y + fy.z + fy.w;
+    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y + x.z + x.w + y.x + y.y + y.z + y.w;
 }

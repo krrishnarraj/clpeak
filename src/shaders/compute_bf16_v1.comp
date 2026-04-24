@@ -34,20 +34,23 @@ layout(push_constant) uniform PushConstants {
 
 void main()
 {
-    bfloat16_t xb = bfloat16_t(pc.A);
-    bfloat16_t yb = bfloat16_t(gl_LocalInvocationID.x);
+    // Mirror compute_sp_v1.comp exactly -- x and y loop-carried in fp32
+    // so glslang SSA-promotes them (compute_sp disassembles to 16 FMAs
+    // + 1 store; an earlier bf16 version that declared x,y inside the
+    // loop emitted 64 stores because the variables were OpVariable-
+    // backed, blocking NVIDIA's compiler from treating them as phis).
+    // Roundtrip through bf16 once per outer iter to force the bf16 type
+    // into the data path.
+    float x = float(bfloat16_t(pc.A));
+    float y = float(bfloat16_t(gl_LocalInvocationID.x));
 
-    // 32 outer iters * 64 FMAs * 2 chains * 2 ops = 8192 ops/WI.
-    // bf16<->fp32 on NVIDIA 595 is emulated, so deepen the inner loop
-    // (~0.06 casts per FMA) to push closer to the FP32 ceiling.
-    for (int i = 0; i < 32; i++)
+    // 128 outer iters * 16 FMAs * 2 chains * 2 ops = 8192 ops/WI.
+    for (int i = 0; i < 128; i++)
     {
-        float x = float(xb);
-        float y = float(yb);
-        MAD_64(x, y)
-        xb = bfloat16_t(x);
-        yb = bfloat16_t(y);
+        MAD_16(x, y)
+        x = float(bfloat16_t(x));
+        y = float(bfloat16_t(y));
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = float(xb) + float(yb);
+    outputBuf.data[gl_GlobalInvocationID.x] = x + y;
 }
