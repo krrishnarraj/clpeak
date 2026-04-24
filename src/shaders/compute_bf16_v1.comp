@@ -28,9 +28,10 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
-#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
-#define MAD_64(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
+#define MAD_4(x, y)   x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y)  MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+#define MAD_64(x, y)  MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
+#define MAD_128(x, y) MAD_64(x, y) MAD_64(x, y)
 
 void main()
 {
@@ -44,10 +45,14 @@ void main()
     float x = float(bfloat16_t(pc.A));
     float y = float(bfloat16_t(gl_LocalInvocationID.x));
 
-    // 128 outer iters * 16 FMAs * 2 chains * 2 ops = 8192 ops/WI.
-    for (int i = 0; i < 128; i++)
+    // 16 outer iters * 128 FMAs * 2 chains * 2 ops = 8192 ops/WI.
+    // Deep inner loop because bf16<->fp32 conversions are emulated on
+    // NVIDIA 595 -- each cast is ~2x the cost of the fp16 cast in MP,
+    // so amortising 2 casts over 128 FMAs (~0.03 casts/FMA) is what
+    // closes the gap to the FP32 ceiling.
+    for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, y)
+        MAD_128(x, y)
         x = float(bfloat16_t(x));
         y = float(bfloat16_t(y));
     }
