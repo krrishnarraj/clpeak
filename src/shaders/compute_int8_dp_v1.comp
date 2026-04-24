@@ -1,11 +1,20 @@
 #version 450
 
-// INT8 dot-product compute throughput using VK_KHR_shader_integer_dot_product.
-// Each dotAccSatEXT(i8vec4, i8vec4, int) computes 4 signed INT8 multiply-adds
-// into a 32-bit accumulator; it maps to the hardware DP4a / XDL / INT8-tensor
-// path on modern GPUs (NVIDIA Turing+, AMD RDNA2+, Intel Xe+, Adreno, Mali).
+// INT8 dot-product compute throughput (packed dp4a).
+//
+// Uses dotPacked4x8AccSatEXT(uint, uint, int) -- the uint32-packed form of
+// dotAccSatEXT.  Packed is the hardware-native path on NVIDIA, AMD and
+// Intel (dp4a / V_DOT4 / IDPAS take 32-bit packed operands natively), so
+// the driver doesn't insert any pack/unpack around the op.  An earlier
+// i8vec4 version ran ~6x slower on NVIDIA because of exactly that
+// lowering overhead.
+//
+// Each dotPacked4x8AccSatEXT is 4 signed INT8 multiply-adds into a 32-bit
+// accumulator = 8 INT8 ops.  REPACK is a cheap int XOR that reuses the
+// accumulator as the new y -- changes every iter so the compiler can't
+// fold the dot to a constant, but runs at full IALU rate (no byte
+// extracts like the old i8vec4 version).
 #extension GL_EXT_integer_dot_product : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
 
 layout(local_size_x = 256) in;
 
@@ -17,28 +26,28 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-// Re-pack the accumulator into y after every dot so the compiler cannot
-// fold dot(x, y) to a scalar constant and collapse the chain. The four
-// bytes of the int32 accumulator drive the four lanes of y independently,
-// keeping the dot product a genuine 4-mul / 3-add op.
-#define REPACK(a, y) y = i8vec4(int8_t(a), int8_t(a >> 8), int8_t(a >> 16), int8_t(a >> 24))
-#define MAD_DP_4(x, y, a)  a = dotAccSatEXT(x, y, a); REPACK(a, y); \
-                           a = dotAccSatEXT(x, y, a); REPACK(a, y); \
-                           a = dotAccSatEXT(x, y, a); REPACK(a, y); \
-                           a = dotAccSatEXT(x, y, a); REPACK(a, y);
-#define MAD_DP_16(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a) MAD_DP_4(x, y, a)
+#define STEP(x, y, a)     a = dotPacked4x8AccSatEXT(x, y, a); y ^= a;
+#define STEP_4(x, y, a)   STEP(x, y, a) STEP(x, y, a) STEP(x, y, a) STEP(x, y, a)
+#define STEP_16(x, y, a)  STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a)
 
 void main()
 {
-    int8_t _A = int8_t(pc.A);
-    i8vec4 x = i8vec4(_A, int8_t(_A + int8_t(1)), int8_t(_A + int8_t(2)), int8_t(_A + int8_t(3)));
-    i8vec4 y = i8vec4(int8_t(gl_LocalInvocationID.x));
-    int a0 = int(gl_LocalInvocationID.x);
+    // x holds four int8 lanes packed LSB->MSB: (A, A+1, A+2, A+3).
+    // int (not uint) so glslang picks the signed int32 overload of
+    // dotPacked4x8AccSatEXT and emits OpSDotAccSat + PackedVectorFormat4x8Bit
+    // (the native dp4a path) instead of folding back to i8vec4.
+    int x = (pc.A & 0xff)
+          | (((pc.A + 1) & 0xff) << 8)
+          | (((pc.A + 2) & 0xff) << 16)
+          | (((pc.A + 3) & 0xff) << 24);
+    int y = int(gl_LocalInvocationID.x);
+    int a = int(gl_LocalInvocationID.x);
 
+    // 64 outer iters * 16 dots = 1024 dots * 8 ops = 8192 ops per WI.
     for (int i = 0; i < 64; i++)
     {
-        MAD_DP_16(x, y, a0)
+        STEP_16(x, y, a)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a0;
+    outputBuf.data[gl_GlobalInvocationID.x] = a;
 }
