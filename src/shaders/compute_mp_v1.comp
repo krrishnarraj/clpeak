@@ -6,6 +6,14 @@
 // from compute_hp (pure fp16).
 //
 // Requires VK_KHR_shader_float16_int8 + shaderFloat16.
+//
+// An earlier version cast x = float16_t(a) inside the FMA macro, chaining
+// a fp16 downcast and two fp16->fp32 expands into the critical path of
+// every FMA -- capped RTX 5060 at ~5.7 TFLOPS (27% of FP32).  This
+// version mirrors compute_sp_v1's ping-pong MAD chain and amortises the
+// fp16<->fp32 conversions across 16 FMAs per outer iter.  Expected
+// ceiling: FP32 peak (NVIDIA shader core's fp16xfp16+fp32 tops out there
+// -- the 2x HFMA2 rate is fp16xfp16+fp16, which is compute_hp, not mp).
 
 layout(local_size_x = 256) in;
 
@@ -17,25 +25,22 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-// Tie x, y back to the accumulator via an fp16 downcast on every step so the
-// compiler can't hoist (float)x*(float)y across iterations.
-#define MAD_4(x, y, a) \
-    a = fma(float(x), float(y), a); x = float16_t(a); \
-    a = fma(float(y), float(x), a); y = float16_t(a); \
-    a = fma(float(x), float(y), a); x = float16_t(a); \
-    a = fma(float(y), float(x), a); y = float16_t(a);
-#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
 
 void main()
 {
-    float16_t x = float16_t(pc.A);
-    float16_t y = float16_t(gl_LocalInvocationID.x);
-    float     a = pc.A;
+    float16_t xh = float16_t(pc.A);
+    float16_t yh = float16_t(gl_LocalInvocationID.x);
 
     for (int i = 0; i < 128; i++)
     {
-        MAD_16(x, y, a)
+        float x = float(xh);
+        float y = float(yh);
+        MAD_16(x, y)
+        xh = float16_t(x);
+        yh = float16_t(y);
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a + float(x) + float(y);
+    outputBuf.data[gl_GlobalInvocationID.x] = float(xh) + float(yh);
 }

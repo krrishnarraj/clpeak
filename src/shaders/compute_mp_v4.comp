@@ -2,11 +2,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
 
 // Mixed-precision MAC v4: fp16 x fp16 + fp32 on f16vec4 lanes.
-// On NVIDIA this emits two HFMA2 per fma(), showing whether the issue
-// rate scales beyond the v2 packed-pair peak; on architectures with
-// wider fp16 ALUs (some AMD, Intel Xe) this can outperform v2.
+// See v1/v2 for the amortised-cast rationale.
 //
-// Per-WI op budget: 32 iters * MAD_16 (16 fmas) * 4 lanes * 2 ops/MAC = 4096.
+// Per-WI op budget: 32 iters * 16 FMAs * 2 chains * 4 lanes * 2 ops = 8192.
 
 layout(local_size_x = 256) in;
 
@@ -18,23 +16,23 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-#define MAD_4(x, y, a) \
-    a = fma(vec4(x), vec4(y), a); x = f16vec4(a); \
-    a = fma(vec4(y), vec4(x), a); y = f16vec4(a); \
-    a = fma(vec4(x), vec4(y), a); x = f16vec4(a); \
-    a = fma(vec4(y), vec4(x), a); y = f16vec4(a);
-#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
 
 void main()
 {
-    f16vec4 x = f16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0);
-    f16vec4 y = f16vec4(gl_LocalInvocationID.x);
-    vec4    a = vec4(pc.A);
+    f16vec4 xh = f16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0);
+    f16vec4 yh = f16vec4(gl_LocalInvocationID.x);
 
     for (int i = 0; i < 32; i++)
     {
-        MAD_16(x, y, a)
+        vec4 x = vec4(xh);
+        vec4 y = vec4(yh);
+        MAD_16(x, y)
+        xh = f16vec4(x);
+        yh = f16vec4(y);
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a.x + a.y + a.z + a.w + float(x.x) + float(y.x);
+    vec4 fx = vec4(xh); vec4 fy = vec4(yh);
+    outputBuf.data[gl_GlobalInvocationID.x] = fx.x + fx.y + fx.z + fx.w + fy.x + fy.y + fy.z + fy.w;
 }

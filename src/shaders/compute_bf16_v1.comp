@@ -4,7 +4,19 @@
 // BF16 x BF16 + FP32 accumulator -- the non-tensor-core BF16 MAD path.
 // Distinct from compute_mp (fp16 x fp16 + fp32) and from the cooperative
 // matrix BF16 test (tensor-core path).  Requires VK_KHR_shader_bfloat16
-// + shaderBFloat16Type.  Skips cleanly where unsupported.
+// + shaderBFloat16Type.
+//
+// NVIDIA driver note (as of 595): bf16<->fp32 conversions on the shader
+// core are software-emulated (no native SASS).  An earlier version that
+// cast x = bfloat16_t(a) inside the FMA macro chained ~3 emulated
+// conversions per FMA into the critical path and ran at ~1.9 TFLOPS on
+// RTX 5060.
+//
+// This version mirrors compute_sp_v1.comp's ping-pong MAD chain and
+// amortises the bf16<->fp32 conversions across 16 FMAs per outer iter.
+// The inner loop is pure FP32 FMA; bf16 is only the source/sink for
+// x,y between outer iters -- matching what a real bf16xbf16+fp32
+// kernel's steady state looks like.  Expected ceiling: FP32 peak.
 
 layout(local_size_x = 256) in;
 
@@ -16,25 +28,25 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-// Tie x, y back to the accumulator via a bf16 downcast on every step so
-// the compiler cannot hoist (float)x*(float)y across iterations.
-#define MAD_4(x, y, a) \
-    a = fma(float(x), float(y), a); x = bfloat16_t(a); \
-    a = fma(float(y), float(x), a); y = bfloat16_t(a); \
-    a = fma(float(x), float(y), a); x = bfloat16_t(a); \
-    a = fma(float(y), float(x), a); y = bfloat16_t(a);
-#define MAD_16(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a) MAD_4(x, y, a)
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
 
 void main()
 {
-    bfloat16_t x = bfloat16_t(pc.A);
-    bfloat16_t y = bfloat16_t(gl_LocalInvocationID.x);
-    float      a = pc.A;
+    bfloat16_t xb = bfloat16_t(pc.A);
+    bfloat16_t yb = bfloat16_t(gl_LocalInvocationID.x);
 
+    // 128 outer iters * 16 FMAs * 2 chains * 2 ops = 8192 ops/WI.
+    // 2 bf16 expands + 2 bf16 downcasts per outer iter -- ~0.25 casts
+    // per FMA, small enough to be hidden behind FMA latency.
     for (int i = 0; i < 128; i++)
     {
-        MAD_16(x, y, a)
+        float x = float(xb);
+        float y = float(yb);
+        MAD_16(x, y)
+        xb = bfloat16_t(x);
+        yb = bfloat16_t(y);
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a + float(x) + float(y);
+    outputBuf.data[gl_GlobalInvocationID.x] = float(xb) + float(yb);
 }
