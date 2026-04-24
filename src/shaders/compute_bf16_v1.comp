@@ -30,20 +30,21 @@ layout(push_constant) uniform PushConstants {
 
 #define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
 #define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+#define MAD_64(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
 
 void main()
 {
     bfloat16_t xb = bfloat16_t(pc.A);
     bfloat16_t yb = bfloat16_t(gl_LocalInvocationID.x);
 
-    // 128 outer iters * 16 FMAs * 2 chains * 2 ops = 8192 ops/WI.
-    // 2 bf16 expands + 2 bf16 downcasts per outer iter -- ~0.25 casts
-    // per FMA, small enough to be hidden behind FMA latency.
-    for (int i = 0; i < 128; i++)
+    // 32 outer iters * 64 FMAs * 2 chains * 2 ops = 8192 ops/WI.
+    // bf16<->fp32 on NVIDIA 595 is emulated, so deepen the inner loop
+    // (~0.06 casts per FMA) to push closer to the FP32 ceiling.
+    for (int i = 0; i < 32; i++)
     {
         float x = float(xb);
         float y = float(yb);
-        MAD_16(x, y)
+        MAD_64(x, y)
         xb = bfloat16_t(x);
         yb = bfloat16_t(y);
     }
