@@ -1,7 +1,15 @@
 // FP16 MAD-chain throughput.  Two variants:
 //   compute_hp   -- scalar half FMA
-//   compute_hp2  -- half2 packed FMA (Apple GPUs issue half2 ALU at 2x
-//                   FP32 rate from M1 onwards; this is the fp16 peak).
+//   compute_hp2  -- half2 packed FMA
+//
+// Apple silicon note: unlike NVIDIA HFMA2 (2x FP32 rate) or AMD's WMMA-
+// adjacent fp16 path, the Apple silicon shader core does NOT have a fp16
+// throughput advantage over fp32 -- both flavors lower to the same FMA
+// pipe.  Both compute_hp variants therefore plateau near the FP32 peak
+// from compute_sp; the only path to Apple's true fp16 throughput is
+// simdgroup_matrix (the matrix engine), measured separately.  Reporting
+// the shader-core hp number anyway is still useful for cross-backend
+// comparison vs. NVIDIA / AMD where a delta does exist.
 //
 // Op accounting matches compute_hp.cu: 4096 fp16 ops/thread either way.
 
