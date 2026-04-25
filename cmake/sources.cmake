@@ -26,6 +26,31 @@ set(CLPEAK_VK_SOURCES
     ${CLPEAK_ROOT}/src/entry_vk.cpp
 )
 
+# CUDA backend sources -- included when CUDA Toolkit (driver API + NVRTC)
+# is available.  Kernels are NVRTC-compiled at runtime; .cu files are
+# embedded as C++ string literals via embed_cuda_kernels().
+set(CLPEAK_CUDA_SOURCES
+    ${CLPEAK_ROOT}/src/cuda_peak.cpp
+    ${CLPEAK_ROOT}/src/entry_cuda.cpp
+)
+
+set(CLPEAK_CUDA_KERNELS
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_sp.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_hp.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_dp.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_mp.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_bf16.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_int8_dp.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_int4_packed.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/global_bandwidth.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/kernel_latency.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp16.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_bf16.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int8.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e4m3.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e5m2.cu
+)
+
 # SPIR-V compute shaders shared by both the main CLI build and the Android
 # build.  compile_shaders() turns each .comp into an embedded C++ array and
 # defines CLPEAK_VK_HAS_<NAME> for per-shader gating in vk_peak.cpp.

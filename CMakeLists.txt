@@ -65,14 +65,19 @@ set(CLPEAK_SOURCE_FILES
     src/entry.cpp
 )
 
-# ---- Vulkan backend (enabled by default when Vulkan is available) ---------
+# ---- Optional backends: Vulkan (default-on if Vulkan loader present)
+#      and CUDA (default-on if CUDA Toolkit driver API + NVRTC are present).
 find_package(Vulkan)
+find_package(CUDAToolkit)
 if(Vulkan_FOUND)
   message(STATUS "Vulkan found: ${Vulkan_LIBRARIES} -- Vulkan backend enabled")
   list(APPEND CLPEAK_SOURCE_FILES ${CLPEAK_VK_SOURCES})
 else()
   message(WARNING "Vulkan SDK/loader not found -- Vulkan tests will be disabled. Install the Vulkan SDK to enable the Vulkan backend.")
 endif()
+# CUDA sources are appended to the target after add_executable below, since
+# embed_cuda_kernels() needs the target to exist before it can target_sources()
+# the generated file onto it.
 
 add_executable(clpeak ${CLPEAK_SOURCE_FILES})
 clpeak_setup_version(clpeak)
@@ -94,6 +99,32 @@ if(Vulkan_FOUND)
     TARGET clpeak
     SHADERS ${CLPEAK_VK_SHADERS}
   )
+endif()
+
+# ---- CUDA backend (NVRTC + driver API; enabled by default when CUDA
+#      Toolkit is present).  No nvcc / cubin / fatbin: kernels are .cu
+#      source text embedded into the binary and compiled at runtime by
+#      NVRTC, mirroring the OpenCL string-kernel pattern.
+if(CUDAToolkit_FOUND)
+  message(STATUS "CUDA Toolkit found (${CUDAToolkit_VERSION}) -- CUDA backend enabled")
+  target_sources(clpeak PRIVATE ${CLPEAK_CUDA_SOURCES})
+  target_link_libraries(clpeak CUDA::cuda_driver CUDA::nvrtc)
+  target_include_directories(clpeak PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+  target_compile_definitions(clpeak PRIVATE ENABLE_CUDA)
+  # NVRTC needs the toolkit include dir to resolve <mma.h>, <cuda_fp16.h>
+  # etc. at runtime.  Embed it as a string literal the runtime hands to
+  # nvrtcCompileProgram via "-I<dir>".
+  list(GET CUDAToolkit_INCLUDE_DIRS 0 _clpeak_cuda_inc)
+  target_compile_definitions(clpeak PRIVATE
+    CLPEAK_CUDA_INCLUDE_DIR="${_clpeak_cuda_inc}")
+
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
+  embed_cuda_kernels(
+    TARGET clpeak
+    KERNELS ${CLPEAK_CUDA_KERNELS}
+  )
+else()
+  message(STATUS "CUDA Toolkit not found -- CUDA backend disabled")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
