@@ -686,7 +686,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E4M3) mma.sync m16n8k32+fp32 (GFLOPS)";
+    d.title          = "FP8(E4M3) mma.sync m16n8k64+fp32 (GFLOPS)";
     d.xmlTag         = "wmma_fp8_e4m3";
     d.unit           = "gflops";
     d.metricLabel    = "fp8_e4m3";
@@ -702,14 +702,14 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.skip           = !dev.info.fp8MmaSupported;
     d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
     d.extraAttribKey = "tile";
-    d.extraAttribVal = "m16n8k32";
+    d.extraAttribVal = "m16n8k64";
     runComputeKernel(dev, cfg, d);
   }
   // FP8 mma.sync E5M2 (PTX) - sm_89+
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E5M2) mma.sync m16n8k32+fp32 (GFLOPS)";
+    d.title          = "FP8(E5M2) mma.sync m16n8k64+fp32 (GFLOPS)";
     d.xmlTag         = "wmma_fp8_e5m2";
     d.unit           = "gflops";
     d.metricLabel    = "fp8_e5m2";
@@ -725,7 +725,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.skip           = !dev.info.fp8MmaSupported;
     d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
     d.extraAttribKey = "tile";
-    d.extraAttribVal = "m16n8k32";
+    d.extraAttribVal = "m16n8k64";
     runComputeKernel(dev, cfg, d);
   }
   return 0;
