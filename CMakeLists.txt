@@ -127,6 +127,30 @@ else()
   message(STATUS "CUDA Toolkit not found -- CUDA backend disabled")
 endif()
 
+# ---- Metal backend (Apple silicon only).  Source text is embedded as
+#      string literals; the runtime hands it to MTLDevice newLibraryWithSource:
+#      so there's no offline metal/metallib step.
+if(APPLE)
+  find_library(METAL_FRAMEWORK Metal)
+  find_library(FOUNDATION_FRAMEWORK Foundation)
+  if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
+    message(STATUS "Metal framework found -- Metal backend enabled")
+    target_sources(clpeak PRIVATE ${CLPEAK_MTL_SOURCES})
+    target_link_libraries(clpeak ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+    target_compile_definitions(clpeak PRIVATE ENABLE_METAL)
+    # Compile .mm files with ObjC ARC -- saves us from sprinkling release
+    # calls on autoreleased Metal objects.
+    set_source_files_properties(${CLPEAK_MTL_SOURCES}
+      PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMetalKernels.cmake)
+    embed_metal_kernels(
+      TARGET clpeak
+      KERNELS ${CLPEAK_MTL_KERNELS}
+    )
+  endif()
+endif()
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"   OR
    CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")

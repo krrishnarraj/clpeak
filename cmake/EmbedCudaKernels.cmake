@@ -34,8 +34,9 @@ function(embed_cuda_kernels)
     # source.  CLPEAK_KDELIM is unlikely to appear in CUDA code.
     set(DELIM "CLPEAK_KDELIM")
     string(APPEND CPP_CONTENT "// from ${KERNEL_NAME}.cu\n")
-    string(APPEND CPP_CONTENT "extern const char *${KERNEL_NAME}_name = \"${KERNEL_NAME}.cu\";\n")
-    string(APPEND CPP_CONTENT "extern const char *${KERNEL_NAME}_src = R\"${DELIM}(\n")
+    # See EmbedMetalKernels.cmake -- no `extern` to keep clang happy.
+    string(APPEND CPP_CONTENT "const char *${KERNEL_NAME}_name = \"${KERNEL_NAME}.cu\";\n")
+    string(APPEND CPP_CONTENT "const char *${KERNEL_NAME}_src = R\"${DELIM}(\n")
     string(APPEND CPP_CONTENT "${KSRC}")
     string(APPEND CPP_CONTENT ")${DELIM}\";\n\n")
 

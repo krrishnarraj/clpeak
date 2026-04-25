@@ -31,6 +31,7 @@ enum class Benchmark : unsigned int {
   ComputeBF16,
   CoopMatrix,
   Wmma,
+  SimdgroupMatrix,
   AtomicThroughput,
   TransferBW,
   KernelLatency,

@@ -36,7 +36,7 @@ static const char *helpStr =
     "\n  --kernel-latency            selectively run kernel latency test"
     "\n  --all-tests                 run all above tests [default]"
     "\n  --list-devices              list available platforms/devices and exit"
-#if defined(ENABLE_VULKAN) || defined(ENABLE_CUDA)
+#if defined(ENABLE_VULKAN) || defined(ENABLE_CUDA) || defined(ENABLE_METAL)
     "\n  --no-opencl                 skip the OpenCL backend"
 #endif
 #ifdef ENABLE_VULKAN
@@ -45,6 +45,10 @@ static const char *helpStr =
 #ifdef ENABLE_CUDA
     "\n  --no-cuda                   skip the CUDA backend"
     "\n  --wmma                      selectively run CUDA WMMA tensor-core tests"
+#endif
+#ifdef ENABLE_METAL
+    "\n  --no-metal                  skip the Metal backend"
+    "\n  --simdgroup-matrix          selectively run Metal simdgroup_matrix tensor tests"
 #endif
     "\n  --xml-file file_name        save results to an XML file"
     "\n  --json-file file_name       save results to a JSON file"
@@ -114,6 +118,7 @@ static const TestFlag testFlags[] = {
   {"--compute-bf16",      Benchmark::ComputeBF16},
   {"--coop-matrix",       Benchmark::CoopMatrix},
   {"--wmma",              Benchmark::Wmma},
+  {"--simdgroup-matrix",  Benchmark::SimdgroupMatrix},
   {"--transfer-bandwidth", Benchmark::TransferBW},
   {"--kernel-latency",    Benchmark::KernelLatency},
 };
@@ -276,7 +281,8 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if (strcmp(argv[i], "--no-opencl") == 0 ||
              strcmp(argv[i], "--no-vulkan") == 0 ||
-             strcmp(argv[i], "--no-cuda")   == 0)
+             strcmp(argv[i], "--no-cuda")   == 0 ||
+             strcmp(argv[i], "--no-metal")  == 0)
     {
       // Backend-selection flags consumed in entry.cpp; ignore here.
     }

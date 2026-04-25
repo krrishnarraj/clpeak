@@ -7,12 +7,16 @@
 #ifdef ENABLE_CUDA
 #include <cuda_peak.h>
 #endif
+#ifdef ENABLE_METAL
+#include <mtl_peak.h>
+#endif
 
 int main(int argc, char **argv)
 {
   bool skipOpenCL = false;
   bool skipVulkan = false;
   bool skipCuda   = false;
+  bool skipMetal  = false;
   for (int i = 1; i < argc; i++)
   {
     if (strcmp(argv[i], "--no-opencl") == 0)
@@ -21,6 +25,8 @@ int main(int argc, char **argv)
       skipVulkan = true;
     else if (strcmp(argv[i], "--no-cuda") == 0)
       skipCuda = true;
+    else if (strcmp(argv[i], "--no-metal") == 0)
+      skipMetal = true;
   }
 
   int clStatus = 0;
@@ -63,7 +69,27 @@ int main(int argc, char **argv)
   (void)skipCuda;
 #endif
 
-  if (clStatus != 0) return clStatus;
-  if (vkStatus != 0) return vkStatus;
-  return cuStatus;
+  int mtlStatus = 0;
+#ifdef ENABLE_METAL
+  if (!skipMetal)
+  {
+    MetalPeak mtlObj;
+    mtlObj.parseArgs(argc, argv);
+    mtlStatus = mtlObj.runAll();
+    // Same non-fatal policy: a missing Apple-silicon device shouldn't fail
+    // the run if another backend already produced numbers.
+    if (mtlStatus != 0 &&
+        ((!skipOpenCL && clStatus == 0) ||
+         (!skipVulkan && vkStatus == 0) ||
+         (!skipCuda   && cuStatus == 0)))
+      mtlStatus = 0;
+  }
+#else
+  (void)skipMetal;
+#endif
+
+  if (clStatus  != 0) return clStatus;
+  if (vkStatus  != 0) return vkStatus;
+  if (cuStatus  != 0) return cuStatus;
+  return mtlStatus;
 }

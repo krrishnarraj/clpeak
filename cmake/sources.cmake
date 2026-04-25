@@ -34,6 +34,26 @@ set(CLPEAK_CUDA_SOURCES
     ${CLPEAK_ROOT}/src/entry_cuda.cpp
 )
 
+# Metal backend sources -- enabled on APPLE only.  Apple silicon (M1+)
+# is the only supported runtime target; the build still compiles on Intel
+# Macs but the runtime refuses non-Apple-silicon devices.
+set(CLPEAK_MTL_SOURCES
+    ${CLPEAK_ROOT}/src/mtl_peak.mm
+    ${CLPEAK_ROOT}/src/entry_mtl.mm
+)
+
+set(CLPEAK_MTL_KERNELS
+    ${CLPEAK_ROOT}/src/mtl_kernels/compute_sp.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/compute_hp.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/compute_mp.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/compute_int8_dp.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/compute_int4_packed.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/global_bandwidth.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/kernel_latency.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_fp16.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_bf16.metal
+)
+
 set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_sp.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_hp.cu

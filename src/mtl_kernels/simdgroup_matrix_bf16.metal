@@ -1,0 +1,42 @@
+// Apple simdgroup_matrix bf16 -- M3+ only (Apple9).  bfloat type requires
+// Metal 3.1 (macOS 14+).  Identical structure to simdgroup_matrix_fp16.metal;
+// only the input element type differs.
+
+#include <metal_stdlib>
+#include <metal_simdgroup_matrix>
+using namespace metal;
+
+kernel void simdgroup_matrix_bf16(
+    device float* out [[buffer(0)]],
+    constant float& A [[buffer(1)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint lid   [[thread_position_in_threadgroup]])
+{
+    threadgroup bfloat tg_a[64];
+    threadgroup bfloat tg_b[64];
+
+    tg_a[lid * 2 + 0] = (bfloat)A;
+    tg_a[lid * 2 + 1] = (bfloat)A;
+    tg_b[lid * 2 + 0] = (bfloat)A;
+    tg_b[lid * 2 + 1] = (bfloat)A;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    simdgroup_matrix<bfloat, 8, 8> a;
+    simdgroup_matrix<bfloat, 8, 8> b;
+    simdgroup_matrix<float,  8, 8> c = simdgroup_matrix<float, 8, 8>(0.0f);
+
+    simdgroup_load(a, tg_a, 8);
+    simdgroup_load(b, tg_b, 8);
+
+    for (int i = 0; i < 1024; i++)
+    {
+        simdgroup_multiply_accumulate(c, a, b, c);
+    }
+
+    threadgroup float tg_out[64];
+    simdgroup_store(c, tg_out, 8);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    out[tg_id * 64 + lid * 2 + 0] = tg_out[lid * 2 + 0];
+    out[tg_id * 64 + lid * 2 + 1] = tg_out[lid * 2 + 1];
+}
