@@ -693,7 +693,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.kernelName     = "wmma_fp8_e4m3";
     d.src            = cuda_kernels::wmma_fp8_e4m3_src;
     d.srcName        = cuda_kernels::wmma_fp8_e4m3_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
     d.elemSize       = sizeof(float);
     d.blockSize      = warp;
     d.outElemsPerBlock = 16 * 8; // m16n8 output tile
@@ -716,7 +716,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.kernelName     = "wmma_fp8_e5m2";
     d.src            = cuda_kernels::wmma_fp8_e5m2_src;
     d.srcName        = cuda_kernels::wmma_fp8_e5m2_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
     d.elemSize       = sizeof(float);
     d.blockSize      = warp;
     d.outElemsPerBlock = 16 * 8;
