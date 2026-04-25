@@ -558,6 +558,7 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
     { "int8_dp",  "compute_int8_dp",  cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
     { "int8_dp2", "compute_int8_dp2", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
     { "int8_dp4", "compute_int8_dp4", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
+    { "int8_dp8", "compute_int8_dp8", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
   };
   int A = 4;
   cuda_compute_desc_t d = {};
@@ -680,6 +681,29 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.skipMsg        = "INT8 WMMA requires sm_72 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
+    runComputeKernel(dev, cfg, d);
+  }
+  // INT8 mma.sync K=32 (NVIDIA-native tile via inline PTX)
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title          = "INT8 mma.sync m16n8k32+int32 (GIOPS)";
+    d.xmlTag         = "wmma_int8_k32";
+    d.unit           = "giops";
+    d.metricLabel    = "int8_k32";
+    d.kernelName     = "wmma_int8_k32";
+    d.src            = cuda_kernels::wmma_int8_k32_src;
+    d.srcName        = cuda_kernels::wmma_int8_k32_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 chains, K=32 doubles ops/issue vs K=16
+    d.elemSize       = sizeof(int);
+    d.blockSize      = warp;
+    d.outElemsPerBlock = 16 * 8; // m16n8 tile
+    d.scalarArg      = &A;
+    d.scalarSize     = sizeof(A);
+    d.skip           = !dev.info.wmmaInt8Supported;
+    d.skipMsg        = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
   }
   // FP8 mma.sync E4M3 (PTX) - sm_89+
