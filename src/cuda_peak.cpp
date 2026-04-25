@@ -81,7 +81,14 @@ bool CudaDevice::init(int devIndex)
   info.wmmaInt8Supported = (info.major >  7) || (info.major == 7 && info.minor >= 2);
   info.fp8MmaSupported   = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
 
+  // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
+  // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
+  // Branch on CUDA_VERSION so the same source builds against both toolkits.
+#if CUDA_VERSION >= 13000
+  CU_CHECK(cuCtxCreate(&context, nullptr, 0, device));
+#else
   CU_CHECK(cuCtxCreate(&context, 0, device));
+#endif
   CU_CHECK(cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING));
 
   return true;
