@@ -2,7 +2,8 @@
 // shape to wmma_fp8_e4m3.cu; only the dtype mnemonic on the mma.sync
 // instruction changes.  Same 8-chain / single-asm-block structure for
 // the same reason (consumer-Blackwell FP8 issue pipeline is deeper than
-// INT8's; 4 chains in volatile blocks plateaued at ~84 TFLOPS).
+// INT8's; 4 chains in volatile blocks plateaued at ~84 TFLOPS).  See
+// wmma_fp8_e4m3.cu for the consumer-Blackwell FP8 ceiling note.
 
 extern "C" __global__ void wmma_fp8_e5m2(float *out, float A)
 {

@@ -19,6 +19,16 @@
 //
 // Per warp ops = 256 outer * 8 chains * (16*8*32*2) = 16,777,216;
 // per thread = 524,288 (= 8 * COOPMAT_WORK_PER_WI).
+//
+// Consumer-Blackwell ceiling note: this kernel measures ~85 TFLOPS on
+// RTX 5060 regardless of chain count or asm-block packing, so 85 TFLOPS
+// appears to be the hardware ceiling for dense `mma.sync` FP8 on
+// sm_120 -- roughly 1/4 of the WMMA INT8 number on the same device.
+// Higher FP8 throughput would require `wgmma.mma_async` (Hopper+
+// warpgroup-scope MMA, 4x larger tiles) or `tcgen05.mma` (Blackwell-only,
+// uses separate tensor memory).  Both are major undertakings; the
+// simpler mma.sync path is what we ship.  The m16n8k64 shape only
+// supports INT8 / sub-byte types -- ptxas rejects it for FP8.
 
 extern "C" __global__ void wmma_fp8_e4m3(float *out, float A)
 {
