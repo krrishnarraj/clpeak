@@ -5,8 +5,9 @@
 //
 // compute_hp uses 2 parallel (x,y) chains (rather than the 1 chain in the
 // SP/MP/BF16 kernels) because RTX 5060 single-chain scalar __hfma
-// measured at 60% of compute_sp -- suggesting the scalar HFMA pipe is
-// latency-bound at 1 chain.  2 chains brings it back into line with SP.
+// measured at 60% of compute_sp -- the scalar HFMA pipe is latency-bound
+// at 1 chain.  Confirmed empirically: 1 chain hit 10.6 TFLOPS, 2 chains
+// hit 21.1 TFLOPS, matching the half2 packed peak.
 //
 // Op accounting matches compute_hp.cu prior version: 4096 fp16 ops/thread
 // either way.  hp scalar = 64 outer * 16 FMAs * 2 chains * 2 ops; hp2 =

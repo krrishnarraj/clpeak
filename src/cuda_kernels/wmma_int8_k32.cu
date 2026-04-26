@@ -1,8 +1,28 @@
-// INT8 tensor-core throughput at the NVIDIA-native m16n8k32 tile via
-// inline mma.sync PTX.  The wmma.h fragment-API path uses m16n16k16
-// (K=16), which on NVIDIA effectively halves the natural INT8 tensor
-// throughput because the hardware pipe accumulates 4 INT8 lanes per
-// 32-bit slot at K=32.  This kernel exposes that K=32 path directly.
+// INT8 tensor-core throughput at the m16n8k32 tile via inline mma.sync
+// PTX.  Originally added on the hypothesis that the wmma.h K=16 path
+// (m16n16k16) was halving INT8 tensor throughput; the actual measurement
+// flipped that.
+//
+// RTX 5060 (sm_120): wmma_int8 (K=16) hits 327 TIOPS; this kernel
+// (K=32, m16n8k32, 4 chains, single non-volatile asm block) hits 165
+// TIOPS -- exactly HALF the wmma path.  Likely cause: nvcc lowers wmma
+// m16n16k16 INT8 to multiple mma.sync.m16n8k16 instructions issued
+// back-to-back, exposing more ILP for ptxas to interleave than our
+// explicit K=32 chain.  Or m16n8k32 INT8 has half the issue rate of
+// m16n8k16 on this arch.
+//
+// We keep this kernel because the K=16 vs K=32 throughput delta IS
+// useful data -- it documents that the wmma fragment API is the right
+// path for INT8 on consumer Blackwell, not raw mma.sync.  Datacenter
+// (sm_100) parts may behave differently.
+//
+// Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major):
+//   A: m16 x k32 = 512 bytes / 32 threads = 16 bytes/thread = 4 x .b32
+//   B: k32 x  n8 = 256 bytes / 32 threads =  8 bytes/thread = 2 x .b32
+//   C/D: m16 x n8 = 128 int32 / 32 threads = 4 int32/thread per accumulator
+//
+// 4 independent accumulator chains, packed into one non-volatile asm
+// block (same pattern as wmma_fp8_e4m3.cu).
 //
 // Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major):
 //   A: m16 x k32 = 512 bytes / 32 threads = 16 bytes/thread = 4 x .b32

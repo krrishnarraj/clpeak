@@ -7,9 +7,13 @@
 //   compute_int8_dp   -- 1 dependent chain (issue-rate floor)
 //   compute_int8_dp2  -- 2 independent chains
 //   compute_int8_dp4  -- 4 independent chains (matches Vulkan int8_dp4)
-//   compute_int8_dp8  -- 8 independent chains (probes whether RTX 5060's
-//                        46%-of-theoretical-dp4a plateau at v4 is chain-
-//                        count bound or hardware-pinned)
+//   compute_int8_dp8  -- 8 independent chains.  Probed whether v4's
+//                        plateau was chain-count bound or hardware
+//                        pinned: v8 measured at the same ~34 TIOPS,
+//                        confirming __dp4a is hardware-capped at ~half
+//                        of theoretical SP rate on consumer Blackwell.
+//                        The variant is kept because the v1..v8 series
+//                        is itself the documentation of that ceiling.
 //
 // Op accounting: 8192 ops/thread = 1024 dp4a calls.  v1 = 64*16, v2 = each
 // chain does 32*16 = 512 calls => 1024 total per thread.  v4 = each chain
