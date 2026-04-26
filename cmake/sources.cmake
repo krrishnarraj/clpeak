@@ -52,6 +52,9 @@ set(CLPEAK_MTL_KERNELS
     ${CLPEAK_ROOT}/src/mtl_kernels/kernel_latency.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_fp16.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_bf16.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/local_bandwidth.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/image_bandwidth.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput.metal
 )
 
 set(CLPEAK_CUDA_KERNELS
@@ -70,6 +73,9 @@ set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int8_k32.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e4m3.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e5m2.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/local_bandwidth.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/image_bandwidth.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/atomic_throughput.cu
 )
 
 # SPIR-V compute shaders shared by both the main CLI build and the Android
@@ -94,4 +100,11 @@ set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/coopmat_int8_k32.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e4m3.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e5m2.comp
+    ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v4.comp
+    ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v8.comp
+    ${CLPEAK_ROOT}/src/shaders/image_bandwidth_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global.comp
+    ${CLPEAK_ROOT}/src/shaders/atomic_throughput_local.comp
 )

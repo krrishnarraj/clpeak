@@ -283,6 +283,9 @@ int MetalPeak::runAll()
         runComputeInt4Packed(dev, cfg);
         runSimdgroupMatrix(dev, cfg);
         runGlobalBandwidth(dev, cfg);
+        runLocalBandwidth(dev, cfg);
+        runImageBandwidth(dev, cfg);
+        runAtomicThroughput(dev, cfg);
         runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
@@ -652,6 +655,201 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     log->print(us);
     log->print(NEWLINE);
     log->xmlRecord("noop", us);
+
+    log->xmlCloseTag();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Local memory bandwidth (Metal -- threadgroup memory)
+// ---------------------------------------------------------------------------
+
+int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    unsigned int iters = cfg.computeIters;
+    log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
+    log->xmlOpenTag("local_memory_bandwidth");
+    log->xmlAppendAttribs("unit", "gbps");
+
+    const uint32_t tgSize = 256;
+    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+
+    id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
+                                                         options:MTLResourceStorageModeShared];
+    if (!outBuf)
+    {
+        log->print(TAB TAB "Buffer alloc failed" NEWLINE);
+        log->xmlCloseTag();
+        return -1;
+    }
+
+    struct V { const char *label; const char *kname; uint32_t width; };
+    const V vs[] = {
+        {"float  ", "local_bandwidth_v1", 1},
+        {"float2 ", "local_bandwidth_v2", 2},
+        {"float4 ", "local_bandwidth_v4", 4},
+        {"float8 ", "local_bandwidth_v8", 8},
+    };
+    MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
+    MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
+    for (const auto &v : vs)
+    {
+        log->print(TAB TAB);
+        log->print(v.label);
+        log->print(": ");
+        id<MTLComputePipelineState> pso = getPipeline(dev,
+            mtl_kernels::local_bandwidth_src,
+            mtl_kernels::local_bandwidth_name, v.kname);
+        if (!pso) { log->print("compile/load failed" NEWLINE); continue; }
+        float us = runDispatches(dev, pso, outBuf, nullptr, 0, nil,
+                                 gridSize, tgSizeM, warmupCount, iters);
+        uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
+        float gbps = (float)bytes / us / 1e3f;
+        log->print(gbps); log->print(NEWLINE);
+        std::string key(v.label);
+        while (!key.empty() && key.back() == ' ') key.pop_back();
+        log->xmlRecord(key, gbps);
+    }
+
+    log->xmlCloseTag();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Image (texture) bandwidth (Metal -- MTLTexture + sampler)
+// ---------------------------------------------------------------------------
+
+int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    unsigned int iters = cfg.globalBWIters;
+    log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
+    log->xmlOpenTag("image_memory_bandwidth");
+    log->xmlAppendAttribs("unit", "gbps");
+
+    const NSUInteger imgW = 4096, imgH = 4096;
+    const uint32_t tgSize = 256;
+    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+
+    MTLTextureDescriptor *td = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+                                     width:imgW height:imgH mipmapped:NO];
+    td.usage = MTLTextureUsageShaderRead;
+    td.storageMode = MTLStorageModeShared;
+    id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
+    if (!tex)
+    {
+        log->print(TAB TAB "Texture create failed" NEWLINE);
+        log->xmlCloseTag();
+        return -1;
+    }
+    // Contents undefined is fine for a bandwidth measurement.
+
+    id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
+                                                         options:MTLResourceStorageModeShared];
+
+    id<MTLComputePipelineState> pso = getPipeline(dev,
+        mtl_kernels::image_bandwidth_src,
+        mtl_kernels::image_bandwidth_name, "image_bandwidth");
+    if (!pso)
+    {
+        log->print(TAB TAB "Pipeline create failed" NEWLINE);
+        log->xmlCloseTag();
+        return -1;
+    }
+
+    MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
+    MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
+
+    log->print(TAB TAB "float4 : ");
+    // Custom dispatch -- runDispatches doesn't know about textures.
+    auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
+        id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+        [enc setComputePipelineState:pso];
+        [enc setTexture:tex atIndex:0];
+        [enc setBuffer:outBuf offset:0 atIndex:0];
+        for (unsigned int i = 0; i < n; i++)
+            [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSizeM];
+        [enc endEncoding];
+        [cb commit];
+        return cb;
+    };
+    if (warmupCount > 0)
+    {
+        id<MTLCommandBuffer> w = enqueue(warmupCount);
+        [w waitUntilCompleted];
+    }
+    id<MTLCommandBuffer> t = enqueue(iters);
+    [t waitUntilCompleted];
+    float us = (float)((t.GPUEndTime - t.GPUStartTime) * 1e6 / iters);
+    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
+    float gbps = (float)bytes / us / 1e3f;
+    log->print(gbps); log->print(NEWLINE);
+    log->xmlRecord("float4", gbps);
+
+    log->xmlCloseTag();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Atomic throughput (Metal -- global + local atomics)
+// ---------------------------------------------------------------------------
+
+int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    unsigned int iters = cfg.computeIters;
+    log->print(NEWLINE TAB "Atomic throughput (GIOPS)" NEWLINE);
+    log->xmlOpenTag("atomic_throughput");
+    log->xmlAppendAttribs("unit", "giops");
+
+    const uint32_t tgSize = 256;
+    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+    MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
+    MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
+
+    auto runOne = [&](const char *fnName, NSUInteger bufBytes) -> float
+    {
+        id<MTLBuffer> buf = [dev.impl->device newBufferWithLength:bufBytes
+                                                          options:MTLResourceStorageModeShared];
+        if (!buf) return -1.0f;
+        memset(buf.contents, 0, bufBytes);
+        id<MTLComputePipelineState> pso = getPipeline(dev,
+            mtl_kernels::atomic_throughput_src,
+            mtl_kernels::atomic_throughput_name, fnName);
+        if (!pso) return -1.0f;
+        float us = runDispatches(dev, pso, buf, nullptr, 0, nil,
+                                 gridSize, tgSizeM, warmupCount, iters);
+        return us;
+    };
+
+    log->print(TAB TAB "global : ");
+    float us_g = runOne("atomic_throughput_global", globalThreads * sizeof(int));
+    if (us_g > 0)
+    {
+        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us_g / 1e3f;
+        log->print(giops); log->print(NEWLINE);
+        log->xmlRecord("global", giops);
+    }
+    else
+    {
+        log->print("failed" NEWLINE);
+    }
+
+    log->print(TAB TAB "local  : ");
+    float us_l = runOne("atomic_throughput_local", numGroups * sizeof(int));
+    if (us_l > 0)
+    {
+        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us_l / 1e3f;
+        log->print(giops); log->print(NEWLINE);
+        log->xmlRecord("local", giops);
+    }
+    else
+    {
+        log->print("failed" NEWLINE);
+    }
 
     log->xmlCloseTag();
     return 0;

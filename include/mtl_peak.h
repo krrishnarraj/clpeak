@@ -110,6 +110,9 @@ public:
   int runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
   int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
+  int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
+  int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
@@ -141,6 +144,12 @@ namespace mtl_kernels {
   extern const char *simdgroup_matrix_fp16_name;
   extern const char *simdgroup_matrix_bf16_src;
   extern const char *simdgroup_matrix_bf16_name;
+  extern const char *local_bandwidth_src;
+  extern const char *local_bandwidth_name;
+  extern const char *image_bandwidth_src;
+  extern const char *image_bandwidth_name;
+  extern const char *atomic_throughput_src;
+  extern const char *atomic_throughput_name;
 }
 
 #endif // ENABLE_METAL

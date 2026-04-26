@@ -148,6 +148,9 @@ public:
   int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg);
   int runWmma(CudaDevice &dev, benchmark_config_t &cfg);
+  int runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
+  int runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg);
 
 private:
   bool initialised;
@@ -197,6 +200,12 @@ namespace cuda_kernels {
   extern const char *wmma_fp8_e4m3_name;
   extern const char *wmma_fp8_e5m2_src;
   extern const char *wmma_fp8_e5m2_name;
+  extern const char *local_bandwidth_src;
+  extern const char *local_bandwidth_name;
+  extern const char *image_bandwidth_src;
+  extern const char *image_bandwidth_name;
+  extern const char *atomic_throughput_src;
+  extern const char *atomic_throughput_name;
 }
 
 #endif // ENABLE_CUDA

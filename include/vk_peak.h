@@ -184,6 +184,9 @@ public:
   // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
   int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
   VkInstance instance;
@@ -212,6 +215,20 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v1_size;
   extern const uint32_t global_bandwidth_v1[];
   extern const size_t   global_bandwidth_v1_size;
+  extern const uint32_t local_bandwidth_v1[];
+  extern const size_t   local_bandwidth_v1_size;
+  extern const uint32_t local_bandwidth_v2[];
+  extern const size_t   local_bandwidth_v2_size;
+  extern const uint32_t local_bandwidth_v4[];
+  extern const size_t   local_bandwidth_v4_size;
+  extern const uint32_t local_bandwidth_v8[];
+  extern const size_t   local_bandwidth_v8_size;
+  extern const uint32_t image_bandwidth_v1[];
+  extern const size_t   image_bandwidth_v1_size;
+  extern const uint32_t atomic_throughput_global[];
+  extern const size_t   atomic_throughput_global_size;
+  extern const uint32_t atomic_throughput_local[];
+  extern const size_t   atomic_throughput_local_size;
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;

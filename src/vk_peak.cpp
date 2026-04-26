@@ -716,6 +716,9 @@ int vkPeak::runAll()
     runCoopMatrix(dev, cfg);
 #endif
     runGlobalBandwidth(dev, cfg);
+    runLocalBandwidth(dev, cfg);
+    runImageBandwidth(dev, cfg);
+    runAtomicThroughput(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device
@@ -1378,6 +1381,416 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkFreeMemory(dev.device, outputMem, nullptr);
 
   log->xmlCloseTag(); // global_memory_bandwidth
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Local memory bandwidth (Vulkan -- shared memory)
+// ---------------------------------------------------------------------------
+//
+// Same single-output-buffer scaffolding as runComputeKernel; only the bytes-
+// per-WI calculation differs per variant.  Width = 1/2/4/8 floats per slot.
+
+int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.computeIters;
+
+  log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
+  log->xmlOpenTag("local_memory_bandwidth");
+  log->xmlAppendAttribs("unit", "gbps");
+
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+  uint64_t bufferBytes = (uint64_t)globalWIs * sizeof(float);
+
+  VkBuffer outBuf;
+  VkDeviceMemory outMem;
+  if (!dev.createBuffer(bufferBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
+  {
+    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  // Descriptor set layout: 1 storage buffer.
+  VkDescriptorSetLayoutBinding binding = {};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  VkDescriptorSetLayoutCreateInfo dslCI = {};
+  dslCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dslCI.bindingCount = 1; dslCI.pBindings = &binding;
+  VkDescriptorSetLayout dsLayout;
+  vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsLayout);
+
+  VkPipelineLayoutCreateInfo plCI = {};
+  plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsLayout;
+  VkPipelineLayout pipeLayout;
+  vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout);
+
+  VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1; dpCI.poolSizeCount = 1; dpCI.pPoolSizes = &ps;
+  VkDescriptorPool descPool;
+  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = descPool; dsAI.descriptorSetCount = 1; dsAI.pSetLayouts = &dsLayout;
+  VkDescriptorSet descSet;
+  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+
+  VkDescriptorBufferInfo bi = {outBuf, 0, bufferBytes};
+  VkWriteDescriptorSet w = {};
+  w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  w.dstSet = descSet; w.dstBinding = 0; w.descriptorCount = 1;
+  w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.pBufferInfo = &bi;
+  vkUpdateDescriptorSets(dev.device, 1, &w, 0, nullptr);
+
+  struct V { const char *label; const uint32_t *spv; size_t sz; uint32_t width; };
+  const V variants[] = {
+    {"float  ", vk_shaders::local_bandwidth_v1, vk_shaders::local_bandwidth_v1_size, 1},
+    {"float2 ", vk_shaders::local_bandwidth_v2, vk_shaders::local_bandwidth_v2_size, 2},
+    {"float4 ", vk_shaders::local_bandwidth_v4, vk_shaders::local_bandwidth_v4_size, 4},
+    {"float8 ", vk_shaders::local_bandwidth_v8, vk_shaders::local_bandwidth_v8_size, 8},
+  };
+  for (const auto &v : variants)
+  {
+    log->print(TAB TAB);
+    log->print(v.label);
+    log->print(": ");
+    VkPipeline pipe;
+    if (!dev.createComputePipeline(v.spv, v.sz, dsLayout, pipeLayout, pipe))
+    {
+      log->print("pipeline failed" NEWLINE);
+      continue;
+    }
+    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
+    // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
+    uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
+    float gbps = (float)bytes / us / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    // strip padding from label for the xml record key
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ') key.pop_back();
+    log->xmlRecord(key, gbps);
+    vkDestroyPipeline(dev.device, pipe, nullptr);
+  }
+
+  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  vkDestroyBuffer(dev.device, outBuf, nullptr);
+  vkFreeMemory(dev.device, outMem, nullptr);
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Image (texture) bandwidth (Vulkan)
+// ---------------------------------------------------------------------------
+//
+// Combined image-sampler descriptor + storage-buffer output.  Image is
+// VK_FORMAT_R32G32B32A32_SFLOAT, sampled with NEAREST + CLAMP_TO_EDGE.
+
+int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.globalBWIters;
+
+  log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
+  log->xmlOpenTag("image_memory_bandwidth");
+  log->xmlAppendAttribs("unit", "gbps");
+
+  const uint32_t imgW = 4096, imgH = 4096;
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+  uint64_t outBytes  = globalWIs * sizeof(float);
+
+  // Create image (RGBA32F, sampled, transfer-dst so we can clear it).
+  VkImageCreateInfo imgCI = {};
+  imgCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  imgCI.imageType = VK_IMAGE_TYPE_2D;
+  imgCI.format    = VK_FORMAT_R32G32B32A32_SFLOAT;
+  imgCI.extent    = {imgW, imgH, 1};
+  imgCI.mipLevels = 1; imgCI.arrayLayers = 1;
+  imgCI.samples   = VK_SAMPLE_COUNT_1_BIT;
+  imgCI.tiling    = VK_IMAGE_TILING_OPTIMAL;
+  imgCI.usage     = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  imgCI.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+  imgCI.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  VkImage img;
+  if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
+  {
+    log->print(TAB TAB "Image create failed" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  // Allocate device-local memory for the image.
+  VkMemoryRequirements imReq;
+  vkGetImageMemoryRequirements(dev.device, img, &imReq);
+  VkPhysicalDeviceMemoryProperties memProps;
+  vkGetPhysicalDeviceMemoryProperties(dev.physicalDevice, &memProps);
+  uint32_t typeIdx = UINT32_MAX;
+  for (uint32_t i = 0; i < memProps.memoryTypeCount; i++)
+    if ((imReq.memoryTypeBits & (1u << i)) &&
+        (memProps.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+    { typeIdx = i; break; }
+
+  VkMemoryAllocateInfo aI = {};
+  aI.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  aI.allocationSize = imReq.size;
+  aI.memoryTypeIndex = typeIdx;
+  VkDeviceMemory imgMem;
+  vkAllocateMemory(dev.device, &aI, nullptr, &imgMem);
+  vkBindImageMemory(dev.device, img, imgMem, 0);
+
+  // Transition UNDEFINED -> SHADER_READ_ONLY_OPTIMAL.  We don't need to
+  // upload any data; the image contents being unspecified is fine for a
+  // bandwidth measurement (the cache lines still get fetched).
+  VkCommandBufferAllocateInfo cbAI = {};
+  cbAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  cbAI.commandPool = dev.commandPool;
+  cbAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cbAI.commandBufferCount = 1;
+  VkCommandBuffer transCmd;
+  vkAllocateCommandBuffers(dev.device, &cbAI, &transCmd);
+  VkCommandBufferBeginInfo cbBI = {};
+  cbBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  cbBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(transCmd, &cbBI);
+  VkImageMemoryBarrier b = {};
+  b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  b.image = img;
+  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  b.srcAccessMask = 0;
+  b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(transCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                       0, nullptr, 0, nullptr, 1, &b);
+  vkEndCommandBuffer(transCmd);
+  dev.submitAndWait(transCmd);
+  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &transCmd);
+
+  VkImageViewCreateInfo ivCI = {};
+  ivCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  ivCI.image = img; ivCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  ivCI.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+  ivCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  VkImageView imgView;
+  vkCreateImageView(dev.device, &ivCI, nullptr, &imgView);
+
+  VkSamplerCreateInfo smCI = {};
+  smCI.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  smCI.magFilter = VK_FILTER_NEAREST;
+  smCI.minFilter = VK_FILTER_NEAREST;
+  smCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  smCI.addressModeU = smCI.addressModeV = smCI.addressModeW =
+      VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  smCI.unnormalizedCoordinates = VK_FALSE;
+  VkSampler sampler;
+  vkCreateSampler(dev.device, &smCI, nullptr, &sampler);
+
+  VkBuffer outBuf; VkDeviceMemory outMem;
+  if (!dev.createBuffer(outBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
+  {
+    log->print(TAB TAB "Output buffer alloc failed" NEWLINE);
+    vkDestroySampler(dev.device, sampler, nullptr);
+    vkDestroyImageView(dev.device, imgView, nullptr);
+    vkDestroyImage(dev.device, img, nullptr);
+    vkFreeMemory(dev.device, imgMem, nullptr);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  VkDescriptorSetLayoutBinding bs[2] = {};
+  bs[0].binding = 0; bs[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  bs[0].descriptorCount = 1; bs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  bs[1].binding = 1; bs[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bs[1].descriptorCount = 1; bs[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  VkDescriptorSetLayoutCreateInfo dslCI = {};
+  dslCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dslCI.bindingCount = 2; dslCI.pBindings = bs;
+  VkDescriptorSetLayout dsLayout;
+  vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsLayout);
+
+  VkPipelineLayoutCreateInfo plCI = {};
+  plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsLayout;
+  VkPipelineLayout pipeLayout;
+  vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout);
+
+  VkDescriptorPoolSize ps[2] = {
+    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+  };
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1; dpCI.poolSizeCount = 2; dpCI.pPoolSizes = ps;
+  VkDescriptorPool descPool;
+  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = descPool; dsAI.descriptorSetCount = 1; dsAI.pSetLayouts = &dsLayout;
+  VkDescriptorSet descSet;
+  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+
+  VkDescriptorImageInfo ii = {};
+  ii.imageView = imgView; ii.sampler = sampler;
+  ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkDescriptorBufferInfo bi = {outBuf, 0, outBytes};
+  VkWriteDescriptorSet ws[2] = {};
+  ws[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  ws[0].dstSet = descSet; ws[0].dstBinding = 0; ws[0].descriptorCount = 1;
+  ws[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  ws[0].pImageInfo = &ii;
+  ws[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  ws[1].dstSet = descSet; ws[1].dstBinding = 1; ws[1].descriptorCount = 1;
+  ws[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  ws[1].pBufferInfo = &bi;
+  vkUpdateDescriptorSets(dev.device, 2, ws, 0, nullptr);
+
+  VkPipeline pipe;
+  bool ok = dev.createComputePipeline(vk_shaders::image_bandwidth_v1,
+      vk_shaders::image_bandwidth_v1_size, dsLayout, pipeLayout, pipe);
+  log->print(TAB TAB "float4 : ");
+  if (!ok)
+  {
+    log->print("pipeline failed" NEWLINE);
+  }
+  else
+  {
+    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
+    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
+    float gbps = (float)bytes / us / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->xmlRecord("float4", gbps);
+    vkDestroyPipeline(dev.device, pipe, nullptr);
+  }
+
+  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  vkDestroyBuffer(dev.device, outBuf, nullptr);
+  vkFreeMemory(dev.device, outMem, nullptr);
+  vkDestroySampler(dev.device, sampler, nullptr);
+  vkDestroyImageView(dev.device, imgView, nullptr);
+  vkDestroyImage(dev.device, img, nullptr);
+  vkFreeMemory(dev.device, imgMem, nullptr);
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Atomic throughput (Vulkan -- global + local atomics)
+// ---------------------------------------------------------------------------
+
+int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.computeIters;
+
+  log->print(NEWLINE TAB "Atomic throughput (GIOPS)" NEWLINE);
+  log->xmlOpenTag("atomic_throughput");
+  log->xmlAppendAttribs("unit", "giops");
+
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+
+  // Helper: allocate a single-storage-buffer descriptor + dispatch + time.
+  auto runOne = [&](const char *label, const uint32_t *spv, size_t spvSize,
+                    uint64_t bufBytes) -> float
+  {
+    VkBuffer buf; VkDeviceMemory mem;
+    if (!dev.createBuffer(bufBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buf, mem))
+      return -1.0f;
+    VkDescriptorSetLayoutBinding b = {};
+    b.binding = 0; b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    b.descriptorCount = 1; b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutCreateInfo dslCI = {};
+    dslCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    dslCI.bindingCount = 1; dslCI.pBindings = &b;
+    VkDescriptorSetLayout dsl; vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsl);
+    VkPipelineLayoutCreateInfo plCI = {};
+    plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsl;
+    VkPipelineLayout pl; vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pl);
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+    VkDescriptorPoolCreateInfo dpCI = {};
+    dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    dpCI.maxSets = 1; dpCI.poolSizeCount = 1; dpCI.pPoolSizes = &ps;
+    VkDescriptorPool dp; vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &dp);
+    VkDescriptorSetAllocateInfo dsAI = {};
+    dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    dsAI.descriptorPool = dp; dsAI.descriptorSetCount = 1; dsAI.pSetLayouts = &dsl;
+    VkDescriptorSet ds; vkAllocateDescriptorSets(dev.device, &dsAI, &ds);
+    VkDescriptorBufferInfo bi = {buf, 0, bufBytes};
+    VkWriteDescriptorSet w = {};
+    w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    w.dstSet = ds; w.dstBinding = 0; w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.pBufferInfo = &bi;
+    vkUpdateDescriptorSets(dev.device, 1, &w, 0, nullptr);
+
+    VkPipeline pipe;
+    if (!dev.createComputePipeline(spv, spvSize, dsl, pl, pipe))
+    {
+      log->print("pipeline failed" NEWLINE);
+      vkDestroyDescriptorPool(dev.device, dp, nullptr);
+      vkDestroyPipelineLayout(dev.device, pl, nullptr);
+      vkDestroyDescriptorSetLayout(dev.device, dsl, nullptr);
+      vkDestroyBuffer(dev.device, buf, nullptr);
+      vkFreeMemory(dev.device, mem, nullptr);
+      return -1.0f;
+    }
+    float us = runKernel(dev, pipe, pl, ds, numGroups, iters);
+    vkDestroyPipeline(dev.device, pipe, nullptr);
+    vkDestroyDescriptorPool(dev.device, dp, nullptr);
+    vkDestroyPipelineLayout(dev.device, pl, nullptr);
+    vkDestroyDescriptorSetLayout(dev.device, dsl, nullptr);
+    vkDestroyBuffer(dev.device, buf, nullptr);
+    vkFreeMemory(dev.device, mem, nullptr);
+    (void)label;
+    return us;
+  };
+
+  // Global atomics: one int counter per WI -> 128 MB output.
+  log->print(TAB TAB "global : ");
+  float us_g = runOne("global", vk_shaders::atomic_throughput_global,
+      vk_shaders::atomic_throughput_global_size, globalWIs * sizeof(int32_t));
+  if (us_g > 0)
+  {
+    float giops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
+    log->print(giops); log->print(NEWLINE);
+    log->xmlRecord("global", giops);
+  }
+
+  // Local atomics: one int counter per workgroup.
+  log->print(TAB TAB "local  : ");
+  float us_l = runOne("local", vk_shaders::atomic_throughput_local,
+      vk_shaders::atomic_throughput_local_size, (uint64_t)numGroups * sizeof(int32_t));
+  if (us_l > 0)
+  {
+    float giops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
+    log->print(giops); log->print(NEWLINE);
+    log->xmlRecord("local", giops);
+  }
+
+  log->xmlCloseTag();
   return 0;
 }
 

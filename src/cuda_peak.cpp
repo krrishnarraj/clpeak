@@ -338,6 +338,9 @@ int CudaPeak::runAll()
     runComputeInt4Packed(dev, cfg);
     runWmma(dev, cfg);
     runGlobalBandwidth(dev, cfg);
+    runLocalBandwidth(dev, cfg);
+    runImageBandwidth(dev, cfg);
+    runAtomicThroughput(dev, cfg);
     runTransferBandwidth(dev, cfg);
     runKernelLatency(dev, cfg);
 
@@ -918,6 +921,211 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   log->print(us);
   log->print(NEWLINE);
   log->xmlRecord("noop", us);
+
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Local memory bandwidth (CUDA -- __shared__ memory)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.computeIters;
+  log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
+  log->xmlOpenTag("local_memory_bandwidth");
+  log->xmlAppendAttribs("unit", "gbps");
+
+  const uint32_t blockSize = 256;
+  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+
+  CUdeviceptr outBuf = 0;
+  if (cuMemAlloc(&outBuf, globalThreads * sizeof(float)) != CUDA_SUCCESS)
+  {
+    log->print(TAB TAB "Buffer alloc failed" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  struct V { const char *label; const char *kname; uint32_t width; };
+  const V vs[] = {
+    {"float  ", "local_bandwidth_v1", 1},
+    {"float2 ", "local_bandwidth_v2", 2},
+    {"float4 ", "local_bandwidth_v4", 4},
+    {"float8 ", "local_bandwidth_v8", 8},
+  };
+  for (const auto &v : vs)
+  {
+    log->print(TAB TAB);
+    log->print(v.label);
+    log->print(": ");
+    CUfunction fn;
+    if (!dev.getKernel(cuda_kernels::local_bandwidth_src,
+                       cuda_kernels::local_bandwidth_name, v.kname, fn))
+    {
+      log->print("compile/load failed" NEWLINE);
+      continue;
+    }
+    void *args[1] = { &outBuf };
+    float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+    uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
+    float gbps = (float)bytes / us / 1e3f;
+    log->print(gbps); log->print(NEWLINE);
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ') key.pop_back();
+    log->xmlRecord(key, gbps);
+  }
+
+  cuMemFree(outBuf);
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Image (texture) bandwidth (CUDA -- cudaTextureObject_t via driver API)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.globalBWIters;
+  log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
+  log->xmlOpenTag("image_memory_bandwidth");
+  log->xmlAppendAttribs("unit", "gbps");
+
+  const int imgW = 4096, imgH = 4096;
+  const uint32_t blockSize = 256;
+  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+
+  // Create CUarray (RGBA float).
+  CUDA_ARRAY_DESCRIPTOR adesc = {};
+  adesc.Width = imgW; adesc.Height = imgH;
+  adesc.Format = CU_AD_FORMAT_FLOAT;
+  adesc.NumChannels = 4;
+  CUarray arr;
+  if (cuArrayCreate(&arr, &adesc) != CUDA_SUCCESS)
+  {
+    log->print(TAB TAB "Image array create failed" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+  // Contents undefined is fine for a bandwidth measurement -- the cache
+  // lines still get fetched.
+
+  CUDA_RESOURCE_DESC rd = {};
+  rd.resType = CU_RESOURCE_TYPE_ARRAY;
+  rd.res.array.hArray = arr;
+  CUDA_TEXTURE_DESC td = {};
+  td.addressMode[0] = CU_TR_ADDRESS_MODE_CLAMP;
+  td.addressMode[1] = CU_TR_ADDRESS_MODE_CLAMP;
+  td.filterMode = CU_TR_FILTER_MODE_POINT;
+  td.flags = CU_TRSF_READ_AS_INTEGER;        // we want raw float bits, no normalization
+  CUtexObject tex = 0;
+  if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
+  {
+    log->print(TAB TAB "Texture object create failed" NEWLINE);
+    cuArrayDestroy(arr);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  CUdeviceptr outBuf = 0;
+  cuMemAlloc(&outBuf, globalThreads * sizeof(float));
+
+  CUfunction fn;
+  if (!dev.getKernel(cuda_kernels::image_bandwidth_src,
+                     cuda_kernels::image_bandwidth_name,
+                     "image_bandwidth", fn))
+  {
+    log->print(TAB TAB "Compile failed" NEWLINE);
+    cuTexObjectDestroy(tex); cuArrayDestroy(arr); cuMemFree(outBuf);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  int w = imgW, h = imgH;
+  void *args[4] = { &tex, &outBuf, &w, &h };
+  log->print(TAB TAB "float4 : ");
+  float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+  uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
+  float gbps = (float)bytes / us / 1e3f;
+  log->print(gbps); log->print(NEWLINE);
+  log->xmlRecord("float4", gbps);
+
+  cuTexObjectDestroy(tex);
+  cuArrayDestroy(arr);
+  cuMemFree(outBuf);
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Atomic throughput (CUDA -- global + local atomics)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.computeIters;
+  log->print(NEWLINE TAB "Atomic throughput (GIOPS)" NEWLINE);
+  log->xmlOpenTag("atomic_throughput");
+  log->xmlAppendAttribs("unit", "giops");
+
+  const uint32_t blockSize = 256;
+  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+
+  // Global: per-thread counter (128 MB).
+  {
+    CUdeviceptr buf = 0;
+    if (cuMemAlloc(&buf, globalThreads * sizeof(int)) == CUDA_SUCCESS)
+    {
+      cuMemsetD32(buf, 0, globalThreads);
+      CUfunction fn;
+      log->print(TAB TAB "global : ");
+      if (dev.getKernel(cuda_kernels::atomic_throughput_src,
+                        cuda_kernels::atomic_throughput_name,
+                        "atomic_throughput_global", fn))
+      {
+        void *args[1] = { &buf };
+        float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+        log->print(giops); log->print(NEWLINE);
+        log->xmlRecord("global", giops);
+      }
+      else
+      {
+        log->print("compile failed" NEWLINE);
+      }
+      cuMemFree(buf);
+    }
+  }
+
+  // Local: one counter per block.
+  {
+    CUdeviceptr buf = 0;
+    if (cuMemAlloc(&buf, (uint64_t)numBlocks * sizeof(int)) == CUDA_SUCCESS)
+    {
+      CUfunction fn;
+      log->print(TAB TAB "local  : ");
+      if (dev.getKernel(cuda_kernels::atomic_throughput_src,
+                        cuda_kernels::atomic_throughput_name,
+                        "atomic_throughput_local", fn))
+      {
+        void *args[1] = { &buf };
+        float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+        log->print(giops); log->print(NEWLINE);
+        log->xmlRecord("local", giops);
+      }
+      else
+      {
+        log->print("compile failed" NEWLINE);
+      }
+      cuMemFree(buf);
+    }
+  }
 
   log->xmlCloseTag();
   return 0;
