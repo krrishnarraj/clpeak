@@ -40,8 +40,4 @@
     <color name="test_bandwidth_on_container">#001C38</color>
     <color name="test_compute_on_container">#331200</color>
     <color name="test_latency_on_container">#0F2000</color>
-
-    <!-- FAB states -->
-    <color name="fab_stop">#BA1A1A</color>
-    <color name="fab_on_stop">#FFFFFF</color>
 </resources>

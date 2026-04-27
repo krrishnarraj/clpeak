@@ -155,14 +155,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFabState(running: Boolean) {
+        binding.fabRun.isEnabled = !running
         if (running) {
-            binding.fabRun.text = getString(R.string.stop_button_text)
-            binding.fabRun.setIconResource(R.drawable.ic_stop)
+            binding.fabRun.text = getString(R.string.running_state_text)
+            binding.fabRun.icon = null
             binding.fabRun.backgroundTintList =
-                ColorStateList.valueOf(getColor(R.color.fab_stop))
-            binding.fabRun.setTextColor(getColor(R.color.fab_on_stop))
-            binding.fabRun.iconTint =
-                ColorStateList.valueOf(getColor(R.color.fab_on_stop))
+                ColorStateList.valueOf(getColor(R.color.md_theme_surface_container_high))
+            binding.fabRun.setTextColor(getColor(R.color.md_theme_on_surface_variant))
         } else {
             binding.fabRun.text = getString(R.string.run_button_text)
             binding.fabRun.setIconResource(R.drawable.ic_play_arrow)
