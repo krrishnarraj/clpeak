@@ -62,11 +62,9 @@ jobs:
       # Linux arm64 has no LunarG tarball -- left without Vulkan by design.
       - name: Install Vulkan SDK
         if: matrix.runner != 'ubuntu-24.04-arm'
-        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        uses: humbletim/install-vulkan-sdk@v1.2
         with:
-          vulkan-query-version: latest
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools
-          vulkan-use-cache: true
+          cache: true
 
       # CUDA Toolkit: install on Linux x64 and Windows x64 only.
       # NVIDIA does not ship a toolkit for macOS or desktop Linux arm64.
