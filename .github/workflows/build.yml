@@ -58,21 +58,20 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
-      # Vulkan SDK: install on Linux x64, Windows x64, macOS arm64.
-      # Linux arm64 has no LunarG tarball -- left without Vulkan by design.
+      # Vulkan SDK: install on Linux x64, Windows x64
       - name: Install Vulkan SDK
-        if: matrix.runner != 'ubuntu-24.04-arm'
+        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
           cache: true
 
       # CUDA Toolkit: install on Linux x64 and Windows x64 only.
-      # - name: Install CUDA Toolkit
-      #   if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
-      #   uses: Jimver/cuda-toolkit@v0.2.35
-      #   with:
-      #     cuda: "13.2.0"
-      #     method: network
+      - name: Install CUDA Toolkit
+        if: matrix.runner == 'windows-latest'
+        uses: Jimver/cuda-toolkit@v0.2.35
+        with:
+          cuda: "13.2.0"
+          method: network
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
