@@ -67,13 +67,12 @@ jobs:
           cache: true
 
       # CUDA Toolkit: install on Linux x64 and Windows x64 only.
-      # NVIDIA does not ship a toolkit for macOS or desktop Linux arm64.
-      - name: Install CUDA Toolkit
-        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
-        uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: "13.2.0"
-          method: network
+      # - name: Install CUDA Toolkit
+      #   if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
+      #   uses: Jimver/cuda-toolkit@v0.2.35
+      #   with:
+      #     cuda: "13.2.0"
+      #     method: network
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
