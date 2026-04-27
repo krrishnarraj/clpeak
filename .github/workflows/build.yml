@@ -2,109 +2,112 @@ name: Build
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
+    tags: ["*"]
   pull_request:
-    branches: [ master, main ]
+    branches: [master, main]
   workflow_dispatch:
 
 jobs:
-  build-linux:
-    name: Linux (Debian Trixie)
-    runs-on: ubuntu-latest
-    container:
-      image: debian:trixie
+  # ---------------------------------------------------------------------------
+  # Desktop builds (Linux x64, Linux arm64, Windows x64, macOS arm64)
+  # ---------------------------------------------------------------------------
+  build-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-latest
+            artifact: clpeak-linux-x86_64
+            binary: build/clpeak
+
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            artifact: clpeak-linux-arm64
+            binary: build/clpeak
+
+          - name: Windows x64
+            runner: windows-latest
+            artifact: clpeak-windows-x86_64
+            binary: build/Release/clpeak.exe
+
+          - name: macOS arm64
+            runner: macos-latest
+            artifact: clpeak-macos-arm64
+            binary: build/clpeak
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
 
     steps:
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential \
-            cmake \
-            git \
-            ca-certificates \
-            ocl-icd-opencl-dev \
-            opencl-headers
-
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for git-describe versioning
 
-      - name: Mark directory as safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git ca-certificates \
+            ocl-icd-opencl-dev opencl-headers
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      # Vulkan SDK: install on Linux x64 and Windows x64 only.
+      - name: Install Vulkan SDK
+        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          cache: true
+
+      # CUDA Toolkit: install on Linux x64 and Windows x64 only.
+      - name: Install CUDA Toolkit
+        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
+        uses: Jimver/cuda-toolkit@v0.2.35
+        with:
+          cuda: "13.2.0"
+          method: network
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release -j$(nproc)
+        run: cmake --build build --config Release -j4
+
+      # run it, show errors, but don’t fail job
+      - name: Print version
+        run: ${{ matrix.binary }} --version 2>&1 || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: clpeak-linux-x86_64
-          path: build/clpeak
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
 
-  build-windows:
-    name: Windows
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clpeak-windows-x86_64
-          path: build/Release/clpeak.exe
-
-  build-macos:
-    name: macOS
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          brew update
-          brew install cmake
-          brew install opencl-headers || true
-
-      - name: Configure CMake (arm64)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
-
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clpeak-macos-arm64
-          path: build/clpeak
-
+  # ---------------------------------------------------------------------------
+  # Android APK
+  # ---------------------------------------------------------------------------
   build-android:
-    name: Android
+    name: Android APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
-      - name: Set up JDK 17 (for Android SDK tools)
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: temurin
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -112,36 +115,53 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android SDK components
-        run: |
-          sdkmanager "ndk;21.4.7075529"
-          sdkmanager "build-tools;29.0.3"
-          sdkmanager "platforms;android-29"
-
-      - name: Set up JDK 11 (for Gradle build)
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Build release APK
-        working-directory: android
-        run: ./gradlew assembleRelease
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: clpeak-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          ./gradlew assembleRelease
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: clpeak-android-release
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+  # ---------------------------------------------------------------------------
+  # GitHub Release — attach binaries on tag push
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-desktop, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          # Package each desktop binary into a zip
+          for dir in artifacts/clpeak-linux-x86_64 artifacts/clpeak-linux-arm64 artifacts/clpeak-macos-arm64; do
+            name=$(basename "$dir")
+            chmod +x "$dir"/* 2>/dev/null || true
+            (cd "$dir" && zip -j "../../release/${name}.zip" *)
+          done
+          for dir in artifacts/clpeak-windows-x86_64; do
+            name=$(basename "$dir")
+            (cd "$dir" && zip -j "../../release/${name}.zip" *)
+          done
+          # Copy APK directly
+          cp artifacts/clpeak-android-release/*.apk release/clpeak-android.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*

@@ -1,0 +1,50 @@
+#ifndef BENCHMARK_CONSTANTS_H
+#define BENCHMARK_CONSTANTS_H
+
+// Centralized tuning constants that MUST match the corresponding values
+// hard-coded in the OpenCL kernel source files (.cl).
+//
+// If you change a value here, update the matching kernel too (and vice versa).
+
+// global_bandwidth_kernels.cl & kernel_latency.cpp
+static const unsigned int FETCH_PER_WI = 16;
+
+// local_bandwidth_kernels.cl
+static const unsigned int LMEM_REPS = 64;
+
+// atomic_throughput_kernels.cl
+static const unsigned int ATOMIC_REPS = 512;
+
+// image_bandwidth_kernels.cl
+static const unsigned int IMAGE_FETCH_PER_WI = 16;
+
+// compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
+static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
+
+// compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
+static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
+
+// compute_int4_packed_kernels.cl
+// Two int4 lanes per char.  Every variant performs 4096 int4 ops per WI
+// (iter count scaled by vector width).  Labeled emulated in the UI/CLI.
+static const unsigned int COMPUTE_INT4_PACKED_WORK_PER_WI = 4096;
+
+// compute_int8_dp_kernels.cl
+// Each dot_acc_sat(char4, char4, int) is 4 INT8 multiply-adds = 8 ops.
+// v1: 64 iters * MAD_DP_16 (16 dots) * 8 ops = 8192 per WI (all variants equal).
+static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
+
+// coopmat_*.comp: 16x16x16 tile, 256 iters per subgroup, one subgroup
+// (32 threads) per work-group.  Per subgroup: M*N*K*2*ITERS = 2,097,152 ops;
+// per work-item: 2,097,152 / 32 = 65,536 ops.
+static const unsigned int COOPMAT_WORK_PER_WI = 65536;
+
+// Max work-group size cap.  Hardware may report higher (1024 on most NVIDIA
+// GPUs), but we clamp to 256 because v16 kernels hold a float16/double16
+// accumulator (~50-64 registers per thread).  At localSize=1024 this exceeds
+// the SM register file on e.g. RTX 5060 (65536 regs/SM), causing
+// clEnqueueNDRangeKernel to fail with CL_OUT_OF_RESOURCES.  256 matches
+// clpeak's historical cap and leaves broad headroom across all devices.
+static const unsigned int MAX_WG_SIZE = 256;
+
+#endif // BENCHMARK_CONSTANTS_H

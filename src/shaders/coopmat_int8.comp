@@ -1,0 +1,42 @@
+#version 450
+#extension GL_KHR_cooperative_matrix     : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8  : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+
+// Cooperative-matrix INT8 x INT8 + INT32 accumulator (tensor-core INT8).
+// Requires VK_KHR_cooperative_matrix + shaderInt8 + 8-bit storage.  See
+// coopmat_fp16.comp for design notes.
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int32_t data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int32_t A;
+} pc;
+
+const int ITERS = 256;
+const uint M = 16u;
+const uint N = 16u;
+const uint K = 16u;
+
+void main()
+{
+    coopmat<int8_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA> matA =
+        coopmat<int8_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(int8_t(pc.A));
+    coopmat<int8_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
+        coopmat<int8_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(int8_t(pc.A));
+    coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
+        coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0);
+
+    for (int i = 0; i < ITERS; i++)
+    {
+        matC = coopMatMulAdd(matA, matB, matC);
+    }
+
+    coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
+                 gl_CooperativeMatrixLayoutRowMajor);
+}

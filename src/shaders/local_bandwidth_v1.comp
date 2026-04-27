@@ -1,0 +1,35 @@
+#version 450
+
+// Local memory (Vulkan: workgroup-shared) bandwidth.  Ping-pong write/read
+// with two barriers per rep, mirrors local_bandwidth_kernels.cl::v1.
+//
+// 64 reps * (1 write + 1 read) = 128 accesses per WI per kernel call.
+// Bytes = LMEM_REPS * 2 * sizeof(float) * globalWIs.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) writeonly buffer Output {
+    float data[];
+} outputBuf;
+
+shared float scratch[256];
+
+void main()
+{
+    uint lid   = gl_LocalInvocationID.x;
+    uint lsize = gl_WorkGroupSize.x;
+    uint gid   = gl_GlobalInvocationID.x;
+    uint next  = (lid + 1u) % lsize;
+
+    float sum = float(gid);
+
+    for (int i = 0; i < 64; i++)
+    {
+        scratch[lid] = sum;
+        barrier();
+        sum = scratch[next];
+        barrier();
+    }
+
+    outputBuf.data[gid] = sum;
+}

@@ -1,0 +1,36 @@
+#version 450
+
+// 256 threads * 8 floats * 4 bytes = 8 KB per workgroup -- well within
+// the 32 KB Vulkan minimum guarantee for shared memory.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) writeonly buffer Output {
+    float data[];
+} outputBuf;
+
+struct vec8 { vec4 lo; vec4 hi; };
+shared vec8 scratch[256];
+
+void main()
+{
+    uint lid   = gl_LocalInvocationID.x;
+    uint lsize = gl_WorkGroupSize.x;
+    uint gid   = gl_GlobalInvocationID.x;
+    uint next  = (lid + 1u) % lsize;
+
+    vec8 sum;
+    sum.lo = vec4(float(gid),     float(gid + 1u), float(gid + 2u), float(gid + 3u));
+    sum.hi = vec4(float(gid + 4u), float(gid + 5u), float(gid + 6u), float(gid + 7u));
+
+    for (int i = 0; i < 64; i++)
+    {
+        scratch[lid] = sum;
+        barrier();
+        sum = scratch[next];
+        barrier();
+    }
+
+    outputBuf.data[gid] = sum.lo.x + sum.lo.y + sum.lo.z + sum.lo.w
+                       +  sum.hi.x + sum.hi.y + sum.hi.z + sum.hi.w;
+}

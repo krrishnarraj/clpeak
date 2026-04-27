@@ -1,0 +1,53 @@
+#version 450
+
+// INT8 dot-product compute throughput (packed dp4a).
+//
+// Uses dotPacked4x8AccSatEXT(uint, uint, int) -- the uint32-packed form of
+// dotAccSatEXT.  Packed is the hardware-native path on NVIDIA, AMD and
+// Intel (dp4a / V_DOT4 / IDPAS take 32-bit packed operands natively), so
+// the driver doesn't insert any pack/unpack around the op.  An earlier
+// i8vec4 version ran ~6x slower on NVIDIA because of exactly that
+// lowering overhead.
+//
+// Each dotPacked4x8AccSatEXT is 4 signed INT8 multiply-adds into a 32-bit
+// accumulator = 8 INT8 ops.  REPACK is a cheap int XOR that reuses the
+// accumulator as the new y -- changes every iter so the compiler can't
+// fold the dot to a constant, but runs at full IALU rate (no byte
+// extracts like the old i8vec4 version).
+#extension GL_EXT_integer_dot_product : require
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define STEP(x, y, a)     a = dotPacked4x8AccSatEXT(x, y, a); y ^= a;
+#define STEP_4(x, y, a)   STEP(x, y, a) STEP(x, y, a) STEP(x, y, a) STEP(x, y, a)
+#define STEP_16(x, y, a)  STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a)
+
+void main()
+{
+    // x holds four int8 lanes packed LSB->MSB: (A, A+1, A+2, A+3).
+    // int (not uint) so glslang picks the signed int32 overload of
+    // dotPacked4x8AccSatEXT and emits OpSDotAccSat + PackedVectorFormat4x8Bit
+    // (the native dp4a path) instead of folding back to i8vec4.
+    int x = (pc.A & 0xff)
+          | (((pc.A + 1) & 0xff) << 8)
+          | (((pc.A + 2) & 0xff) << 16)
+          | (((pc.A + 3) & 0xff) << 24);
+    int y = int(gl_LocalInvocationID.x);
+    int a = int(gl_LocalInvocationID.x);
+
+    // 64 outer iters * 16 dots = 1024 dots * 8 ops = 8192 ops per WI.
+    for (int i = 0; i < 64; i++)
+    {
+        STEP_16(x, y, a)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a;
+}

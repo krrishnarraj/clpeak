@@ -1,0 +1,47 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+// Mixed-precision MAC: fp16 x fp16 + fp32 accumulator. Dominant arithmetic
+// path in LLM training/prefill. Distinct from compute_sp (pure fp32) and
+// from compute_hp (pure fp16).
+//
+// Requires VK_KHR_shader_float16_int8 + shaderFloat16.
+//
+// An earlier version cast x = float16_t(a) inside the FMA macro, chaining
+// a fp16 downcast and two fp16->fp32 expands into the critical path of
+// every FMA -- capped RTX 5060 at ~5.7 TFLOPS (27% of FP32).  This
+// version mirrors compute_sp_v1's ping-pong MAD chain and amortises the
+// fp16<->fp32 conversions across 16 FMAs per outer iter.  Expected
+// ceiling: FP32 peak (NVIDIA shader core's fp16xfp16+fp32 tops out there
+// -- the 2x HFMA2 rate is fp16xfp16+fp16, which is compute_hp, not mp).
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+
+void main()
+{
+    // Mirror compute_sp_v1.comp exactly -- loop-carried fp32 x,y so
+    // glslang SSA-promotes them to phis.  Roundtrip through fp16 once
+    // per outer iter to force the fp16 type into the data path.
+    float x = float(float16_t(pc.A));
+    float y = float(float16_t(gl_LocalInvocationID.x));
+
+    for (int i = 0; i < 128; i++)
+    {
+        MAD_16(x, y)
+        x = float(float16_t(x));
+        y = float(float16_t(y));
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = x + y;
+}

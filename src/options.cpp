@@ -1,8 +1,7 @@
 #include <clpeak.h>
 #include <cerrno>
 #include <limits>
-
-#define DEFAULT_XML_FILE_NAME "clpeak_results.xml"
+#include <version.h>
 
 static const char *helpStr =
     "\n clpeak [OPTIONS]"
@@ -14,36 +13,63 @@ static const char *helpStr =
     "\n  -dn, --deviceName name      choose device name"
     "\n  -tn, --testName name        choose test name"
     "\n  -i, --iters                 choose the number of iterations per kernel (default: CPU=10, GPU=30)"
+    "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
     "\n  --use-event-timer           time using cl events instead of std chrono timer"
     "\n                              hide driver latencies [default: No]"
     "\n  --global-bandwidth          selectively run global bandwidth test"
+    "\n  --local-bandwidth           selectively run local memory bandwidth test"
+    "\n  --image-bandwidth           selectively run image (texture) bandwidth test"
+    "\n  --atomic-throughput         selectively run atomic throughput test"
     "\n  --compute-hp                selectively run half precision compute test"
+    "\n  --compute-mp                selectively run mixed-precision (fp16xfp16+fp32) compute test"
     "\n  --compute-sp                selectively run single precision compute test"
     "\n  --compute-dp                selectively run double precision compute test"
     "\n  --compute-integer           selectively run integer compute test"
     "\n  --compute-intfast           selectively run integer 24bit compute test"
     "\n  --compute-char              selectively run char (integer 8bit) compute test"
     "\n  --compute-short             selectively run short (integer 16bit) compute test"
+    "\n  --compute-int8-dp           selectively run INT8 dot-product (DP4a) compute test"
+    "\n  --compute-int4-packed       selectively run packed INT4 compute test (emulated)"
+    "\n  --compute-bf16              selectively run BF16 compute test (Vulkan only)"
+    "\n  --coop-matrix               selectively run cooperative-matrix tensor-core tests (Vulkan only)"
     "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
     "\n  --kernel-latency            selectively run kernel latency test"
     "\n  --all-tests                 run all above tests [default]"
-    "\n  --enable-xml-dump           Dump results to xml file"
-    "\n  -f, --xml-file file_name    specify file name for xml dump"
+    "\n  --list-devices              list available platforms/devices and exit"
+#if defined(ENABLE_VULKAN) || defined(ENABLE_CUDA) || defined(ENABLE_METAL)
+    "\n  --no-opencl                 skip the OpenCL backend"
+#endif
+#ifdef ENABLE_VULKAN
+    "\n  --no-vulkan                 skip the Vulkan backend"
+#endif
+#ifdef ENABLE_CUDA
+    "\n  --no-cuda                   skip the CUDA backend"
+    "\n  --wmma                      selectively run CUDA WMMA tensor-core tests"
+#endif
+#ifdef ENABLE_METAL
+    "\n  --no-metal                  skip the Metal backend"
+    "\n  --simdgroup-matrix          selectively run Metal simdgroup_matrix tensor tests"
+#endif
+    "\n  --xml-file file_name        save results to an XML file"
+    "\n  --json-file file_name       save results to a JSON file"
+    "\n  --csv-file file_name        save results to a CSV file"
+    "\n  --compare file_name         compare results against a baseline file"
+    "\n                              (supports JSON, CSV, and XML formats)"
     "\n  -v, --version               display version"
     "\n  -h, --help                  display help message"
     "\n";
 
 static void printParseErrorAndExit()
 {
-  cout << helpStr;
-  cout << NEWLINE;
-  cout.flush();
+  std::cout << helpStr;
+  std::cout << NEWLINE;
+  std::cout.flush();
   exit(-1);
 }
 
 static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
 {
-  char *end = NULL;
+  char *end = nullptr;
   errno = 0;
 
   value = strtoul(arg, &end, 0);
@@ -51,28 +77,61 @@ static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
   return (errno != ERANGE) && (end != arg) && (*end == '\0');
 }
 
-static bool parseUIntArg(const char *arg, uint &value, bool allowZero = true)
+static bool parseUIntArg(const char *arg, unsigned int &value, bool allowZero = true)
 {
   unsigned long parsed;
 
-  if (!parseUnsignedLongArg(arg, parsed) || (parsed > std::numeric_limits<uint>::max()) || (!allowZero && (parsed == 0)))
+  if (!parseUnsignedLongArg(arg, parsed) || (parsed > std::numeric_limits<unsigned int>::max()) || (!allowZero && (parsed == 0)))
     return false;
 
-  value = static_cast<uint>(parsed);
+  value = static_cast<unsigned int>(parsed);
   return true;
 }
 
 static void printParseMessage(const std::string &message)
 {
-  cout << message;
-  cout.flush();
+  std::cout << message;
+  std::cout.flush();
 }
+
+// Map from CLI flag to Benchmark enum
+struct TestFlag {
+  const char *flag;
+  Benchmark test;
+};
+
+static const TestFlag testFlags[] = {
+  {"--global-bandwidth",  Benchmark::GlobalBW},
+  {"--local-bandwidth",   Benchmark::LocalBW},
+  {"--image-bandwidth",   Benchmark::ImageBW},
+  {"--atomic-throughput",  Benchmark::AtomicThroughput},
+  {"--compute-hp",        Benchmark::ComputeHP},
+  {"--compute-mp",        Benchmark::ComputeMP},
+  {"--compute-sp",        Benchmark::ComputeSP},
+  {"--compute-dp",        Benchmark::ComputeDP},
+  {"--compute-integer",   Benchmark::ComputeInt},
+  {"--compute-intfast",   Benchmark::ComputeIntFast},
+  {"--compute-char",      Benchmark::ComputeChar},
+  {"--compute-short",     Benchmark::ComputeShort},
+  {"--compute-int8-dp",   Benchmark::ComputeInt8DP},
+  {"--compute-int4-packed", Benchmark::ComputeInt4Packed},
+  {"--compute-bf16",      Benchmark::ComputeBF16},
+  {"--coop-matrix",       Benchmark::CoopMatrix},
+  {"--wmma",              Benchmark::Wmma},
+  {"--simdgroup-matrix",  Benchmark::SimdgroupMatrix},
+  {"--transfer-bandwidth", Benchmark::TransferBW},
+  {"--kernel-latency",    Benchmark::KernelLatency},
+};
+static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
 int clPeak::parseArgs(int argc, char **argv)
 {
   bool forcedTests = false;
   bool enableXml = false;
-  string xmlFileName;
+  std::string xmlFileName;
+  std::string jsonFile;
+  std::string csvFile;
+  std::string compareFile;
 
   for (int i = 1; i < argc; i++)
   {
@@ -84,8 +143,8 @@ int clPeak::parseArgs(int argc, char **argv)
     }
     else if ((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
     {
-      stringstream versionStr;
-      versionStr << "clpeak version: " << VERSION_STR;
+      std::stringstream versionStr;
+      versionStr << "clpeak version: " << CLPEAK_VERSION_STR;
 
       printParseMessage(versionStr.str());
       printParseMessage(NEWLINE);
@@ -150,7 +209,7 @@ int clPeak::parseArgs(int argc, char **argv)
     {
       if ((i + 1) < argc)
       {
-        uint parsed;
+        unsigned int parsed;
 
         if (!parseUIntArg(argv[i + 1], parsed, false))
           printParseErrorAndExit();
@@ -160,73 +219,32 @@ int clPeak::parseArgs(int argc, char **argv)
         i++;
       }
     }
+    else if ((strcmp(argv[i], "-w") == 0) || (strcmp(argv[i], "--warmup") == 0))
+    {
+      if ((i + 1) < argc)
+      {
+        unsigned int parsed;
+
+        if (!parseUIntArg(argv[i + 1], parsed))
+          printParseErrorAndExit();
+
+        warmupCount = parsed;
+        i++;
+      }
+    }
     else if (strcmp(argv[i], "--use-event-timer") == 0)
     {
       useEventTimer = true;
     }
-    else if ((strcmp(argv[i], "--global-bandwidth") == 0) || (strcmp(argv[i], "--compute-hp") == 0) || (strcmp(argv[i], "--compute-sp") == 0) || (strcmp(argv[i], "--compute-dp") == 0) || (strcmp(argv[i], "--compute-integer") == 0) || (strcmp(argv[i], "--compute-intfast") == 0) || (strcmp(argv[i], "--transfer-bandwidth") == 0) || (strcmp(argv[i], "--kernel-latency") == 0) || (strcmp(argv[i], "--compute-char") == 0) || (strcmp(argv[i], "--compute-short") == 0))
+    else if (strcmp(argv[i], "--list-devices") == 0)
     {
-      // Disable all and enable only selected ones
-      if (!forcedTests)
-      {
-        isGlobalBW = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = false;
-        forcedTests = true;
-      }
-
-      if (strcmp(argv[i], "--global-bandwidth") == 0)
-      {
-        isGlobalBW = true;
-      }
-      else if (strcmp(argv[i], "--compute-hp") == 0)
-      {
-        isComputeHP = true;
-      }
-      else if (strcmp(argv[i], "--compute-sp") == 0)
-      {
-        isComputeSP = true;
-      }
-      else if (strcmp(argv[i], "--compute-dp") == 0)
-      {
-        isComputeDP = true;
-      }
-      else if (strcmp(argv[i], "--compute-integer") == 0)
-      {
-        isComputeInt = true;
-      }
-      else if (strcmp(argv[i], "--compute-intfast") == 0)
-      {
-        isComputeIntFast = true;
-      }
-      else if (strcmp(argv[i], "--compute-char") == 0)
-      {
-        isComputeChar = true;
-      }
-      else if (strcmp(argv[i], "--compute-short") == 0)
-      {
-        isComputeShort = true;
-      }
-      else if (strcmp(argv[i], "--transfer-bandwidth") == 0)
-      {
-        isTransferBW = true;
-      }
-      else if (strcmp(argv[i], "--kernel-latency") == 0)
-      {
-        isKernelLatency = true;
-      }
+      listDevices = true;
     }
     else if (strcmp(argv[i], "--all-tests") == 0)
     {
-      isGlobalBW = isComputeHP = isComputeSP = isComputeDP = isComputeInt = isComputeIntFast = isComputeChar = isComputeShort = isTransferBW = isKernelLatency = true;
+      enableAll();
     }
-    else if (strcmp(argv[i], "--enable-xml-dump") == 0)
-    {
-      enableXml = true;
-      if (xmlFileName.length() < 1)
-      {
-        xmlFileName = DEFAULT_XML_FILE_NAME;
-      }
-    }
-    else if ((strcmp(argv[i], "-f") == 0) || (strcmp(argv[i], "--xml-file") == 0))
+    else if (strcmp(argv[i], "--xml-file") == 0)
     {
       if ((i + 1) < argc)
       {
@@ -235,15 +253,73 @@ int clPeak::parseArgs(int argc, char **argv)
         i++;
       }
     }
+    else if (strcmp(argv[i], "--json-file") == 0)
+    {
+      if ((i + 1) < argc)
+      {
+        enableJson = true;
+        jsonFile = argv[i + 1];
+        i++;
+      }
+    }
+    else if (strcmp(argv[i], "--csv-file") == 0)
+    {
+      if ((i + 1) < argc)
+      {
+        enableCsv = true;
+        csvFile = argv[i + 1];
+        i++;
+      }
+    }
+    else if (strcmp(argv[i], "--compare") == 0)
+    {
+      if ((i + 1) < argc)
+      {
+        compareFileName = argv[i + 1];
+        i++;
+      }
+    }
+    else if (strcmp(argv[i], "--no-opencl") == 0 ||
+             strcmp(argv[i], "--no-vulkan") == 0 ||
+             strcmp(argv[i], "--no-cuda")   == 0 ||
+             strcmp(argv[i], "--no-metal")  == 0)
+    {
+      // Backend-selection flags consumed in entry.cpp; ignore here.
+    }
     else
     {
-      printParseMessage(helpStr);
-      printParseMessage(NEWLINE);
-      exit(-1);
+      // Check if it's a test selection flag
+      bool matched = false;
+      for (int t = 0; t < numTestFlags; t++)
+      {
+        if (strcmp(argv[i], testFlags[t].flag) == 0)
+        {
+          if (!forcedTests)
+          {
+            disableAll();
+            forcedTests = true;
+          }
+          enableTest(testFlags[t].test);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched)
+      {
+        printParseMessage(helpStr);
+        printParseMessage(NEWLINE);
+        exit(-1);
+      }
     }
   }
 
-  // Allocate logger after parsing
-  log = new logger(enableXml, xmlFileName);
+  jsonFileName = jsonFile;
+  csvFileName  = csvFile;
+
+  // Allocate logger after parsing (not needed for --list-devices but harmless)
+  log.reset(new logger(enableXml, xmlFileName,
+                       enableJson, jsonFileName,
+                       enableCsv,  csvFileName,
+                       compareFileName));
   return 0;
 }

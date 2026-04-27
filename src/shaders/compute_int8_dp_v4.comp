@@ -1,0 +1,56 @@
+#version 450
+#extension GL_EXT_integer_dot_product : require
+
+// INT8 packed-dp4a v4: four parallel dp4a chains per thread.  See v1/v2
+// for lowering / extension details.  v4 doubles v2's independent work
+// per thread, letting the scheduler hide more REPACK latency at the
+// cost of register pressure -- if occupancy drops, v2 is faster.
+//
+// Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1/v2).
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
+    a0 = dotPacked4x8AccSatEXT(x0, y0, a0); y0 ^= a0; \
+    a1 = dotPacked4x8AccSatEXT(x1, y1, a1); y1 ^= a1; \
+    a2 = dotPacked4x8AccSatEXT(x2, y2, a2); y2 ^= a2; \
+    a3 = dotPacked4x8AccSatEXT(x3, y3, a3); y3 ^= a3;
+#define STEP4_4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
+    STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
+    STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
+    STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
+    STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3)
+
+void main()
+{
+    int A = pc.A;
+    int x0 = (A & 0xff) | (((A+1) & 0xff) << 8) | (((A+2) & 0xff) << 16) | (((A+3) & 0xff) << 24);
+    int x1 = ((A+4) & 0xff) | (((A+5) & 0xff) << 8) | (((A+6) & 0xff) << 16) | (((A+7) & 0xff) << 24);
+    int x2 = ((A+8) & 0xff) | (((A+9) & 0xff) << 8) | (((A+10) & 0xff) << 16) | (((A+11) & 0xff) << 24);
+    int x3 = ((A+12) & 0xff) | (((A+13) & 0xff) << 8) | (((A+14) & 0xff) << 16) | (((A+15) & 0xff) << 24);
+    int lid = int(gl_LocalInvocationID.x);
+    int y0 = lid;
+    int y1 = lid + 1;
+    int y2 = lid + 2;
+    int y3 = lid + 3;
+    int a0 = lid;
+    int a1 = lid + 1;
+    int a2 = lid + 2;
+    int a3 = lid + 3;
+
+    // 64 iters * STEP4_4 (= 4 groups-of-4 = 16 dots total) = 1024 dots.
+    for (int i = 0; i < 64; i++)
+    {
+        STEP4_4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1 + a2 + a3;
+}

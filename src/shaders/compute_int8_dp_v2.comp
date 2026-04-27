@@ -1,0 +1,49 @@
+#version 450
+#extension GL_EXT_integer_dot_product : require
+
+// INT8 packed-dp4a v2: two parallel dp4a chains per thread.  Each chain
+// has its own (x, y, a) so the per-chain REPACK dependency doesn't block
+// the instruction issue queue; NVIDIA / AMD / Intel can pipeline the
+// independent dp4a's at full IDP4A rate.  See v1 for the extension /
+// lowering rationale.
+//
+// Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1).
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define STEP2(x0, y0, a0, x1, y1, a1) \
+    a0 = dotPacked4x8AccSatEXT(x0, y0, a0); y0 ^= a0; \
+    a1 = dotPacked4x8AccSatEXT(x1, y1, a1); y1 ^= a1;
+#define STEP2_8(x0, y0, a0, x1, y1, a1) \
+    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1) \
+    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1) \
+    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1) \
+    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1)
+
+void main()
+{
+    int A = pc.A;
+    int x0 = (A & 0xff) | (((A+1) & 0xff) << 8) | (((A+2) & 0xff) << 16) | (((A+3) & 0xff) << 24);
+    int x1 = ((A+4) & 0xff) | (((A+5) & 0xff) << 8) | (((A+6) & 0xff) << 16) | (((A+7) & 0xff) << 24);
+    int lid = int(gl_LocalInvocationID.x);
+    int y0 = lid;
+    int y1 = lid + 1;
+    int a0 = lid;
+    int a1 = lid + 1;
+
+    // 64 outer iters * STEP2_8 (= 8 pairs = 16 dots total) = 1024 dots.
+    for (int i = 0; i < 64; i++)
+    {
+        STEP2_8(x0, y0, a0, x1, y1, a1)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1;
+}

@@ -1,0 +1,29 @@
+#version 450
+
+// Local atomics: every WI in the workgroup contends on a single shared
+// counter (histogram / reduction pattern).  WI 0 zeros the counter
+// before the loop so results are deterministic across re-invocations.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) writeonly buffer Output {
+    int data[];
+} outputBuf;
+
+shared int scratch;
+
+void main()
+{
+    if (gl_LocalInvocationID.x == 0u)
+        scratch = 0;
+    barrier();
+
+    for (int i = 0; i < 512; i++)
+    {
+        atomicAdd(scratch, 1);
+    }
+
+    barrier();
+    if (gl_LocalInvocationID.x == 0u)
+        outputBuf.data[gl_WorkGroupID.x] = scratch;
+}

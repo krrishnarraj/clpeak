@@ -1,0 +1,61 @@
+#version 450
+#extension GL_EXT_bfloat16 : require
+
+// BF16 x BF16 + FP32 accumulator -- the non-tensor-core BF16 MAD path.
+// Distinct from compute_mp (fp16 x fp16 + fp32) and from the cooperative
+// matrix BF16 test (tensor-core path).  Requires VK_KHR_shader_bfloat16
+// + shaderBFloat16Type.
+//
+// NVIDIA driver note (as of 595): bf16<->fp32 conversions on the shader
+// core are software-emulated (no native SASS).  An earlier version that
+// cast x = bfloat16_t(a) inside the FMA macro chained ~3 emulated
+// conversions per FMA into the critical path and ran at ~1.9 TFLOPS on
+// RTX 5060.
+//
+// This version mirrors compute_sp_v1.comp's ping-pong MAD chain and
+// amortises the bf16<->fp32 conversions across 16 FMAs per outer iter.
+// The inner loop is pure FP32 FMA; bf16 is only the source/sink for
+// x,y between outer iters -- matching what a real bf16xbf16+fp32
+// kernel's steady state looks like.  Expected ceiling: FP32 peak.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+#define MAD_4(x, y)   x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y)  MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+#define MAD_64(x, y)  MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
+#define MAD_128(x, y) MAD_64(x, y) MAD_64(x, y)
+
+void main()
+{
+    // Mirror compute_sp_v1.comp exactly -- x and y loop-carried in fp32
+    // so glslang SSA-promotes them (compute_sp disassembles to 16 FMAs
+    // + 1 store; an earlier bf16 version that declared x,y inside the
+    // loop emitted 64 stores because the variables were OpVariable-
+    // backed, blocking NVIDIA's compiler from treating them as phis).
+    // Roundtrip through bf16 once per outer iter to force the bf16 type
+    // into the data path.
+    float x = float(bfloat16_t(pc.A));
+    float y = float(bfloat16_t(gl_LocalInvocationID.x));
+
+    // 16 outer iters * 128 FMAs * 2 chains * 2 ops = 8192 ops/WI.
+    // Deep inner loop because bf16<->fp32 conversions are emulated on
+    // NVIDIA 595 -- each cast is ~2x the cost of the fp16 cast in MP,
+    // so amortising 2 casts over 128 FMAs (~0.03 casts/FMA) is what
+    // closes the gap to the FP32 ceiling.
+    for (int i = 0; i < 16; i++)
+    {
+        MAD_128(x, y)
+        x = float(bfloat16_t(x));
+        y = float(bfloat16_t(y));
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = x + y;
+}

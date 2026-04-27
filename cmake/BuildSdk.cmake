@@ -1,7 +1,7 @@
 set(SDK_ROOT "${CMAKE_CURRENT_BINARY_DIR}/sdk_install")
 
 set(CMAKE_LIST_CONTENT "
-  cmake_minimum_required(VERSION 3.5)
+  cmake_minimum_required(VERSION 3.20)
   project(opencl_sdk)
   include(ExternalProject)
 

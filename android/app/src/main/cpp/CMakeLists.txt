@@ -1,36 +1,52 @@
-cmake_minimum_required(VERSION 3.4.1)
+cmake_minimum_required(VERSION 3.20)
 
-# Build stub
+# Build OpenCL stub
 add_subdirectory(libopencl-stub)
 
-set(ROOT_FOLDER "../../../../..")
-include(${ROOT_FOLDER}/cmake/common.cmake)
+set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
+include(${CLPEAK_ROOT}/cmake/version.cmake)
+include(${CLPEAK_ROOT}/cmake/sources.cmake)
 
-set(SRC_FOLDER "${ROOT_FOLDER}/src")
-add_library(clpeak SHARED
-        ${SRC_FOLDER}/common.cpp
-        ${SRC_FOLDER}/clpeak.cpp
-        ${SRC_FOLDER}/global_bandwidth.cpp
-        ${SRC_FOLDER}/compute_sp.cpp
-        ${SRC_FOLDER}/compute_hp.cpp
-        ${SRC_FOLDER}/compute_dp.cpp
-        ${SRC_FOLDER}/compute_integer.cpp
-        ${SRC_FOLDER}/compute_integer_fast.cpp
-        ${SRC_FOLDER}/compute_char.cpp
-        ${SRC_FOLDER}/compute_short.cpp
-        ${SRC_FOLDER}/transfer_bandwidth.cpp
-        ${SRC_FOLDER}/kernel_latency.cpp
-        ${SRC_FOLDER}/entry_android.cpp
-        ${SRC_FOLDER}/options.cpp
-        ${SRC_FOLDER}/logger_android.cpp
+set(CLPEAK_ANDROID_SOURCES
+    ${CLPEAK_CORE_SOURCES}
+    ${CLPEAK_ROOT}/src/logger_android.cpp
+    ${CLPEAK_ROOT}/src/entry_android.cpp
 )
+
+# Vulkan is part of the NDK since API 24; libvulkan.so and headers ship with
+# every modern NDK. glslc for shader compilation lives at
+# ${ANDROID_NDK}/shader-tools/<host>. We enable Vulkan unconditionally here;
+# at runtime vkPeak::initInstance() fails gracefully on devices without a
+# Vulkan driver.
+find_library(ANDROID_VULKAN_LIB vulkan)
+if(ANDROID_VULKAN_LIB)
+  list(APPEND CLPEAK_ANDROID_SOURCES ${CLPEAK_VK_SOURCES})
+endif()
+
+add_library(clpeak SHARED ${CLPEAK_ANDROID_SOURCES})
+
+clpeak_setup_version(clpeak)
 
 target_include_directories(clpeak PRIVATE
-        libopencl-stub/include/
-        ${ROOT_FOLDER}/include/
-        ${SRC_FOLDER}/kernels/
+    libopencl-stub/include
+    ${CLPEAK_CORE_INCLUDE_DIRS}
 )
 
-target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL)
+# Target OpenCL 3.0 headers so 3.0-only tests (e.g. INT8 dot-product) are
+# reachable. The stub dlopens the device's libOpenCL at runtime, and each
+# test checks its extension string before running — devices with a 1.2
+# driver skip the 3.0 tests cleanly.
+target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER USE_STUB_OPENCL CL_TARGET_OPENCL_VERSION=300 CLPEAK_HAS_OPENCL_30)
 target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions)
+set_target_properties(clpeak PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(clpeak log atomic dl OpenCL)
+
+if(ANDROID_VULKAN_LIB)
+  target_compile_definitions(clpeak PRIVATE ENABLE_VULKAN)
+  target_link_libraries(clpeak ${ANDROID_VULKAN_LIB})
+  include(${CLPEAK_ROOT}/cmake/CompileShaders.cmake)
+  compile_shaders(
+    TARGET clpeak
+    SHADERS ${CLPEAK_VK_SHADERS}
+  )
+endif()

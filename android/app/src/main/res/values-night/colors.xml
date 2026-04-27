@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 dark color tokens — Teal/Cyan palette -->
+    <color name="md_theme_primary">#54DBC6</color>
+    <color name="md_theme_on_primary">#003730</color>
+    <color name="md_theme_primary_container">#005047</color>
+    <color name="md_theme_on_primary_container">#74F8E2</color>
+    <color name="md_theme_secondary">#B1CCC5</color>
+    <color name="md_theme_on_secondary">#1C3530</color>
+    <color name="md_theme_secondary_container">#334B46</color>
+    <color name="md_theme_on_secondary_container">#CCE8E1</color>
+    <color name="md_theme_tertiary">#ABCAE4</color>
+    <color name="md_theme_on_tertiary">#133348</color>
+    <color name="md_theme_tertiary_container">#2C4A60</color>
+    <color name="md_theme_on_tertiary_container">#C8E6FF</color>
+    <color name="md_theme_error">#FFB4AB</color>
+    <color name="md_theme_on_error">#690005</color>
+    <color name="md_theme_error_container">#93000A</color>
+    <color name="md_theme_on_error_container">#FFDAD6</color>
+    <color name="md_theme_surface">#0F1513</color>
+    <color name="md_theme_on_surface">#DEE4E1</color>
+    <color name="md_theme_surface_variant">#3F4946</color>
+    <color name="md_theme_on_surface_variant">#BFC9C5</color>
+    <color name="md_theme_surface_container">#1B211F</color>
+    <color name="md_theme_surface_container_high">#262C2A</color>
+    <color name="md_theme_outline">#899390</color>
+    <color name="md_theme_outline_variant">#3F4946</color>
+    <color name="md_theme_background">#0F1513</color>
+    <color name="md_theme_on_background">#DEE4E1</color>
+    <color name="md_theme_inverse_surface">#DEE4E1</color>
+    <color name="md_theme_inverse_on_surface">#2C3230</color>
+
+    <!-- Semantic colors for benchmark test types (dark tonal) -->
+    <color name="test_bandwidth">#A0C9FF</color>
+    <color name="test_compute">#FFB690</color>
+    <color name="test_latency">#A7D474</color>
+    <color name="test_bandwidth_container">#004880</color>
+    <color name="test_compute_container">#6E3000</color>
+    <color name="test_latency_container">#275100</color>
+    <color name="test_bandwidth_on_container">#D2E4FF</color>
+    <color name="test_compute_on_container">#FFDCC8</color>
+    <color name="test_latency_on_container">#C2F18D</color>
+</resources>

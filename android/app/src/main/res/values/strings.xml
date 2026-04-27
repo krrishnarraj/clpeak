@@ -1,11 +1,20 @@
 <resources>
-
     <string name="app_name">clpeak</string>
 
-    <string name="about_clpeak">\nclpeak is a benchmarking tool intended toward developers to fine-tune opencl kernels for a particular device/class of device. It calculates bandwidth and compute performance for different vector-widths of a datatype\n\ngithub.com/krrishnarraj/clpeak</string>
-    <string name="run">Run</string>
-    <string name="platform">platform :</string>
-    <string name="platform_checked_text">platform :</string>
-    <string name="run_button_text">Run</string>
+    <string name="about_clpeak">clpeak is a benchmarking tool for developers to fine-tune OpenCL kernels for a particular device or class of device.\n\nIt measures bandwidth and compute performance across different vector widths and data types.</string>
+    <string name="about_url">https://github.com/krrishnarraj/clpeak</string>
 
+    <string name="run_button_text">Run Benchmark</string>
+    <string name="running_state_text">Running\u2026</string>
+    <string name="menu_about">About</string>
+    <string name="menu_opencl_lib">OpenCL Library</string>
+
+    <string name="device_info_title">Device</string>
+    <string name="label_platform">Platform</string>
+    <string name="label_device">Device</string>
+    <string name="label_driver">Driver</string>
+    <string name="expand_desc">Expand or collapse metrics</string>
+
+    <string name="idle_title">Ready to benchmark</string>
+    <string name="idle_subtitle">Tap Run Benchmark to measure your device\'s OpenCL performance</string>
 </resources>

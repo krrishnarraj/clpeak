@@ -1,0 +1,33 @@
+#version 450
+
+// Image (texture) bandwidth.  Each WI reads 16 RGBA-float pixels using
+// integer coords + nearest sampler (combined image-sampler in Vulkan).
+// Mirrors image_bandwidth_kernels.cl::v1.
+//
+// Bytes = IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) uniform sampler2D img;
+layout(set = 0, binding = 1) writeonly buffer Output {
+    float data[];
+} outputBuf;
+
+void main()
+{
+    int gid    = int(gl_GlobalInvocationID.x);
+    int gsize  = int(gl_NumWorkGroups.x * gl_WorkGroupSize.x);
+    ivec2 sz   = textureSize(img, 0);
+    int width  = sz.x;
+    int height = sz.y;
+    int total  = width * height;
+
+    vec4 sum = vec4(0.0);
+    for (int i = 0; i < 16; i++)
+    {
+        int pixel = (gid + i * gsize) % total;
+        ivec2 coord = ivec2(pixel % width, pixel / width);
+        sum += texelFetch(img, coord, 0);
+    }
+    outputBuf.data[gid] = sum.x + sum.y + sum.z + sum.w;
+}

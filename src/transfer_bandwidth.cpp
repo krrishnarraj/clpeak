@@ -1,268 +1,188 @@
 #include <clpeak.h>
 #include <cstdlib>
+#include <cstring>
+#include <functional>
+
+// If map/unmap bandwidth exceeds this multiplier of the peak real-transfer
+// bandwidth measured earlier in the same run, it's a zero-copy / shared-memory
+// operation with no actual data movement.  5x is conservative: on M1 the ratio
+// is ~15000x, on Mali ~10x; on discrete GPUs the ratio is ~1x.
+static const float ZERO_COPY_MULTIPLIER = 5.0f;
+
+// Absolute floor: if no real-transfer baselines were measured (e.g. user ran
+// only the map sub-test), fall back to this.  Well above any real hardware.
+static const float ZERO_COPY_ABSOLUTE_GBPS = 10000.0f;
+
 #if defined(_WIN32) || defined(__ANDROID__)
 #include <malloc.h>
 #endif
 
-int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo)
+// Platform-specific aligned alloc/free
+static float *allocAligned(size_t bytes)
 {
-  if (!isTransferBW)
+#if defined(_WIN32)
+  return static_cast<float *>(_aligned_malloc(bytes, 64));
+#elif defined(__ANDROID__)
+  return static_cast<float *>(memalign(64, bytes));
+#else
+  return static_cast<float *>(aligned_alloc(64, bytes));
+#endif
+}
+
+static void freeAligned(float *ptr)
+{
+  if (!ptr) return;
+#if defined(_WIN32)
+  _aligned_free(ptr);
+#else
+  std::free(ptr);
+#endif
+}
+
+int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
+{
+  UNUSED(prog);
+
+  if (!isTestEnabled(Benchmark::TransferBW))
     return 0;
 
-  float timed, gbps;
-  cl::NDRange globalSize, localSize;
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  uint iters = devInfo.transferBWIters;
-  Timer timer;
-  float *arr = NULL;
+  unsigned int iters = cfg.transferBWIters;
+  float *arr = nullptr;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  uint64_t numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, devInfo.transferBWMaxSize);
+  uint64_t numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, cfg.transferBWMaxSize);
+  size_t bytes = numItems * sizeof(float);
+
+  // Track the peak bandwidth from real-transfer tests (write/read) so that
+  // map/unmap can be compared against it to detect zero-copy.
+  float peakRealTransferBW = 0;
+
+  // Helper: run a timed transfer test with warmup, return measured gbps
+  auto runTransfer = [&](const std::string &label, const std::string &xmlName,
+                         std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
+  {
+    if (forceTest && specifiedTestName != xmlName)
+      return 0;
+
+    log->print(label);
+
+    // Warmup
+    for (unsigned int w = 0; w < warmupCount; w++)
+    {
+      op(nullptr);
+      queue.finish();
+    }
+
+    float timed = 0;
+
+    if (useEventTimer && !forceWallClock)
+    {
+      for (unsigned int i = 0; i < iters; i++)
+      {
+        cl::Event timeEvent;
+        op(&timeEvent);
+        queue.finish();
+        timed += timeInUS(timeEvent);
+      }
+    }
+    else
+    {
+      Timer timer;
+      timer.start();
+      for (unsigned int i = 0; i < iters; i++)
+      {
+        op(nullptr);
+      }
+      queue.finish();
+      timed = timer.stopAndTime();
+    }
+    timed /= static_cast<float>(iters);
+
+    float gbps = (float)bytes / timed / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->xmlRecord(xmlName, gbps);
+    return gbps;
+  };
+
+  // Helper: check if a bandwidth value looks like zero-copy
+  auto isZeroCopy = [&](float gbps) -> bool
+  {
+    if (peakRealTransferBW > 0)
+      return gbps > peakRealTransferBW * ZERO_COPY_MULTIPLIER;
+    return gbps > ZERO_COPY_ABSOLUTE_GBPS;
+  };
+
+  // Helper: report a map/unmap result, detecting zero-copy
+  auto reportMapUnmap = [&](float gbps, const std::string &xmlName)
+  {
+    if (isZeroCopy(gbps))
+    {
+      log->print("inf (zero-copy)");
+      log->print(NEWLINE);
+      log->xmlRecord(xmlName, (float)0);
+    }
+    else
+    {
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->xmlRecord(xmlName, gbps);
+    }
+  };
 
   try
   {
-#if defined(_WIN32)
-    arr = static_cast<float *>(_aligned_malloc(numItems * sizeof(float), 64));
-#elif defined(__ANDROID__)
-    arr = static_cast<float *>(memalign(64, numItems * sizeof(float)));
-#else
-    arr = static_cast<float *>(aligned_alloc(64, numItems * sizeof(float)));
-#endif
-
-    memset(arr, 0, numItems * sizeof(float));
-    cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), (numItems * sizeof(float)));
+    arr = allocAligned(bytes);
+    if (!arr)
+    {
+      log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
+      return -1;
+    }
+    memset(arr, 0, bytes);
+    cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), bytes);
 
     log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
     log->xmlOpenTag("transfer_bandwidth");
     log->xmlAppendAttribs("unit", "gbps");
 
-    ///////////////////////////////////////////////////////////////////////////
-    // enqueueWriteBuffer
-    if (!forceTest || strcmp(specifiedTestName, "enqueuewritebuffer") == 0)
-    {
-      log->print(TAB TAB TAB "enqueueWriteBuffer              : ");
+    // enqueueWriteBuffer (blocking)
+    float bw;
+    bw = runTransfer(TAB TAB TAB "enqueueWriteBuffer              : ", "enqueuewritebuffer",
+      [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
-      // Dummy warm-up
-      queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
+    // enqueueReadBuffer (blocking)
+    bw = runTransfer(TAB TAB TAB "enqueueReadBuffer               : ", "enqueuereadbuffer",
+      [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
-      timed = 0;
-
-      if (useEventTimer)
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        Timer timer;
-
-        timer.start();
-        for (uint i = 0; i < iters; i++)
-        {
-          queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
-        }
-        queue.finish();
-        timed = timer.stopAndTime();
-      }
-      timed /= static_cast<float>(iters);
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueuewritebuffer", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-    // enqueueReadBuffer
-    if (!forceTest || strcmp(specifiedTestName, "enqueuereadbuffer") == 0)
-    {
-      log->print(TAB TAB TAB "enqueueReadBuffer               : ");
-
-      // Dummy warm-up
-      queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
-
-      timed = 0;
-      if (useEventTimer)
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        Timer timer;
-
-        timer.start();
-        for (uint i = 0; i < iters; i++)
-        {
-          queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, (numItems * sizeof(float)), arr);
-        }
-        queue.finish();
-        timed = timer.stopAndTime();
-      }
-      timed /= static_cast<float>(iters);
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueuereadbuffer", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
     // enqueueWriteBuffer non-blocking
-    if (!forceTest || strcmp(specifiedTestName, "enqueuewritebuffer_nonblocking") == 0)
-    {
-      log->print(TAB TAB TAB "enqueueWriteBuffer non-blocking : ");
+    bw = runTransfer(TAB TAB TAB "enqueueWriteBuffer non-blocking : ", "enqueuewritebuffer_nonblocking",
+      [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
-      // Dummy warm-up
-      queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
-
-      timed = 0;
-
-      if (useEventTimer)
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        Timer timer;
-
-        timer.start();
-        for (uint i = 0; i < iters; i++)
-        {
-          queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
-        }
-        queue.finish();
-        timed = timer.stopAndTime();
-      }
-      timed /= static_cast<float>(iters);
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueuewritebuffer_nonblocking", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
     // enqueueReadBuffer non-blocking
-    if (!forceTest || strcmp(specifiedTestName, "enqueuereadbuffer_nonblocking") == 0)
-    {
-      log->print(TAB TAB TAB "enqueueReadBuffer non-blocking  : ");
+    bw = runTransfer(TAB TAB TAB "enqueueReadBuffer non-blocking  : ", "enqueuereadbuffer_nonblocking",
+      [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
+    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
-      // Dummy warm-up
-      queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
-      queue.finish();
-
-      timed = 0;
-      if (useEventTimer)
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr, NULL, &timeEvent);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        Timer timer;
-
-        timer.start();
-        for (uint i = 0; i < iters; i++)
-        {
-          queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, (numItems * sizeof(float)), arr);
-        }
-        queue.finish();
-        timed = timer.stopAndTime();
-      }
-      timed /= static_cast<float>(iters);
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueuereadbuffer_nonblocking", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-    // enqueueMapBuffer
-    if (!forceTest || strcmp(specifiedTestName, "enqueuemapbuffer") == 0)
+    // enqueueMapBuffer(for read)
+    // Always use wall-clock for map/unmap: CL events measure only GPU command
+    // processing time, which is zero on unified-memory platforms (Apple Silicon),
+    // causing division-by-zero / inf with --use-event-timer.
+    if (!forceTest || specifiedTestName == "enqueuemapbuffer")
     {
       log->print(TAB TAB TAB "enqueueMapBuffer(for read)      : ");
-
       queue.finish();
 
-      timed = 0;
-      if (useEventTimer)
+      float timed = 0;
+      for (unsigned int i = 0; i < iters; i++)
       {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          void *mapPtr;
-
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)), NULL, &timeEvent);
-          queue.finish();
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          Timer timer;
-          void *mapPtr;
-
-          timer.start();
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)));
-          queue.finish();
-          timed += timer.stopAndTime();
-
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-          queue.finish();
-        }
-      }
-      timed /= static_cast<float>(iters);
-
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueuemapbuffer", gbps);
-    }
-    ///////////////////////////////////////////////////////////////////////////
-
-    // memcpy from mapped ptr
-    if (!forceTest || strcmp(specifiedTestName, "memcpy_from_mapped_ptr") == 0)
-    {
-      log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
-      queue.finish();
-
-      timed = 0;
-      for (uint i = 0; i < iters; i++)
-      {
-        cl::Event timeEvent;
-        void *mapPtr;
-
-        mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, (numItems * sizeof(float)));
-        queue.finish();
-
+        Timer timer;
         timer.start();
-        memcpy(arr, mapPtr, (numItems * sizeof(float)));
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
+        queue.finish();
         timed += timer.stopAndTime();
 
         queue.enqueueUnmapMemObject(clBuffer, mapPtr);
@@ -270,78 +190,77 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       }
       timed /= static_cast<float>(iters);
 
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      float gbps = (float)bytes / timed / 1e3f;
+      reportMapUnmap(gbps, "enqueuemapbuffer");
+    }
+
+    // memcpy from mapped ptr
+    if (!forceTest || specifiedTestName == "memcpy_from_mapped_ptr")
+    {
+      log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
+      queue.finish();
+
+      float timed = 0;
+      for (unsigned int i = 0; i < iters; i++)
+      {
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
+        queue.finish();
+
+        Timer timer;
+        timer.start();
+        memcpy(arr, mapPtr, bytes);
+        timed += timer.stopAndTime();
+
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+      }
+      timed /= static_cast<float>(iters);
+
+      float gbps = (float)bytes / timed / 1e3f;
       log->print(gbps);
       log->print(NEWLINE);
       log->xmlRecord("memcpy_from_mapped_ptr", gbps);
     }
 
-    ///////////////////////////////////////////////////////////////////////////
-
-    // enqueueUnmap
-    if (!forceTest || strcmp(specifiedTestName, "enqueueunmap") == 0)
+    // enqueueUnmap(after write)
+    if (!forceTest || specifiedTestName == "enqueueunmap")
     {
       log->print(TAB TAB TAB "enqueueUnmap(after write)       : ");
-
       queue.finish();
 
-      timed = 0;
-      if (useEventTimer)
+      float timed = 0;
+      for (unsigned int i = 0; i < iters; i++)
       {
-        for (uint i = 0; i < iters; i++)
-        {
-          cl::Event timeEvent;
-          void *mapPtr;
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
+        queue.finish();
 
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
-          queue.finish();
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr, NULL, &timeEvent);
-          queue.finish();
-          timed += timeInUS(timeEvent);
-        }
-      }
-      else
-      {
-        for (uint i = 0; i < iters; i++)
-        {
-          Timer timer;
-          void *mapPtr;
-
-          mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
-          queue.finish();
-
-          timer.start();
-          queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-          queue.finish();
-          timed += timer.stopAndTime();
-        }
+        Timer timer;
+        timer.start();
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+        timed += timer.stopAndTime();
       }
       timed /= static_cast<float>(iters);
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->xmlRecord("enqueueunmap", gbps);
+      float gbps = (float)bytes / timed / 1e3f;
+      reportMapUnmap(gbps, "enqueueunmap");
     }
-    ///////////////////////////////////////////////////////////////////////////
 
     // memcpy to mapped ptr
-    if (!forceTest || strcmp(specifiedTestName, "memcpy_to_mapped_ptr") == 0)
+    if (!forceTest || specifiedTestName == "memcpy_to_mapped_ptr")
     {
       log->print(TAB TAB TAB TAB "memcpy to mapped ptr          : ");
       queue.finish();
 
-      timed = 0;
-      for (uint i = 0; i < iters; i++)
+      float timed = 0;
+      for (unsigned int i = 0; i < iters; i++)
       {
-        cl::Event timeEvent;
-        void *mapPtr;
-
-        mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, (numItems * sizeof(float)));
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
         queue.finish();
 
+        Timer timer;
         timer.start();
-        memcpy(mapPtr, arr, (numItems * sizeof(float)));
+        memcpy(mapPtr, arr, bytes);
         timed += timer.stopAndTime();
 
         queue.enqueueUnmapMemObject(clBuffer, mapPtr);
@@ -349,37 +268,28 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       }
       timed /= static_cast<float>(iters);
 
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      float gbps = (float)bytes / timed / 1e3f;
       log->print(gbps);
       log->print(NEWLINE);
       log->xmlRecord("memcpy_to_mapped_ptr", gbps);
     }
 
-    ///////////////////////////////////////////////////////////////////////////
     log->xmlCloseTag(); // transfer_bandwidth
 
-    if (arr)
-#if defined(_WIN32)
-      _aligned_free(arr);
-#else
-      std::free(arr);
-#endif
+    freeAligned(arr);
   }
   catch (cl::Error &error)
   {
-    stringstream ss;
+    std::stringstream ss;
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
-    if (arr)
-    {
-#if defined(_WIN32)
-      _aligned_free(arr);
-#else
-      std::free(arr);
-#endif
-    }
+    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // a leaked parent -- manifests on Android as later tests collapsing into
+    // this test's result card.
+    log->xmlCloseTag();
+    freeAligned(arr);
     return -1;
   }
 
