@@ -21,21 +21,37 @@ jobs:
             runner: ubuntu-latest
             artifact: clpeak-linux-x86_64
             binary: build/clpeak
+            cuda: false
 
           - name: Linux arm64
             runner: ubuntu-24.04-arm
             artifact: clpeak-linux-arm64
             binary: build/clpeak
+            cuda: false
 
           - name: Windows x64
             runner: windows-latest
             artifact: clpeak-windows-x86_64
             binary: build/Release/clpeak.exe
+            cuda: false
 
           - name: macOS arm64
             runner: macos-latest
             artifact: clpeak-macos-arm64
             binary: build/clpeak
+            cuda: false
+
+          - name: Linux x64 CUDA
+            runner: ubuntu-latest
+            artifact: clpeak-linux-x86_64-cuda
+            binary: build/clpeak
+            cuda: true
+
+          - name: Windows x64 CUDA
+            runner: windows-latest
+            artifact: clpeak-windows-x86_64-cuda
+            binary: build/Release/clpeak.exe
+            cuda: true
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -58,16 +74,15 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
-      # Vulkan SDK: install on Linux x64 and Windows x64 only.
       - name: Install Vulkan SDK
-        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
-        uses: humbletim/install-vulkan-sdk@v1.2
+        uses: jakoch/install-vulkan-sdk-action@v1
         with:
+          install_runtime: true
           cache: true
 
-      # CUDA Toolkit: install on Linux x64 and Windows x64 only.
+      # CUDA Toolkit: install only for CUDA-enabled matrix entries.
       - name: Install CUDA Toolkit
-        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
+        if: matrix.cuda
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: "13.2.0"
@@ -79,8 +94,16 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -j4
 
-      # run it, show errors, but don’t fail job
       - name: Print version
+        if: ${{ !matrix.cuda }}
+        shell: bash
+        run: ${{ matrix.binary }} --version 2>&1
+
+      # CUDA binaries cannot launch on the default runner image (libcuda.so.1
+      # missing / no NVIDIA driver), so failure here is expected and ignored.
+      - name: Print version (CUDA, allow failure)
+        if: matrix.cuda
+        shell: bash
         run: ${{ matrix.binary }} --version 2>&1 || true
 
       - name: Upload artifact
@@ -148,12 +171,12 @@ jobs:
         run: |
           mkdir -p release
           # Package each desktop binary into a zip
-          for dir in artifacts/clpeak-linux-x86_64 artifacts/clpeak-linux-arm64 artifacts/clpeak-macos-arm64; do
+          for dir in artifacts/clpeak-linux-x86_64 artifacts/clpeak-linux-x86_64-cuda artifacts/clpeak-linux-arm64 artifacts/clpeak-macos-arm64; do
             name=$(basename "$dir")
             chmod +x "$dir"/* 2>/dev/null || true
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
-          for dir in artifacts/clpeak-windows-x86_64; do
+          for dir in artifacts/clpeak-windows-x86_64 artifacts/clpeak-windows-x86_64-cuda; do
             name=$(basename "$dir")
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
