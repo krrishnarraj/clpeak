@@ -157,6 +157,43 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
   target_compile_options(clpeak PRIVATE -fPIC -Wall -Wextra -Wno-unused-parameter)
 endif()
 
+# ---- Backend status summary ------------------------------------------------
+# Print a single block at the end of configure so the user can see at a
+# glance which backends will be built into the resulting clpeak binary.
+set(_clpeak_summary "")
+string(APPEND _clpeak_summary "  OpenCL : ENABLED  (target ${CLPEAK_OPENCL_TARGET_VERSION}, runtime ${OpenCL_VERSION_STRING})\n")
+if(Vulkan_FOUND)
+  string(APPEND _clpeak_summary "  Vulkan : ENABLED  (${Vulkan_VERSION})\n")
+else()
+  string(APPEND _clpeak_summary "  Vulkan : disabled (Vulkan SDK / loader not found)\n")
+endif()
+if(CUDAToolkit_FOUND)
+  string(APPEND _clpeak_summary "  CUDA   : ENABLED  (Toolkit ${CUDAToolkit_VERSION})\n")
+else()
+  string(APPEND _clpeak_summary "  CUDA   : disabled (CUDA Toolkit not found)\n")
+endif()
+if(APPLE AND METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
+  string(APPEND _clpeak_summary "  Metal  : ENABLED  (Apple silicon target)\n")
+elseif(APPLE)
+  string(APPEND _clpeak_summary "  Metal  : disabled (Metal/Foundation framework not found)\n")
+else()
+  string(APPEND _clpeak_summary "  Metal  : disabled (non-Apple host)\n")
+endif()
+message(STATUS "")
+message(STATUS "===============================================================")
+message(STATUS "clpeak backend summary")
+message(STATUS "")
+# Print the multi-line block.  CMake `message(STATUS "...")` re-prefixes
+# every newline so we split manually.
+string(REPLACE "\n" ";" _summary_lines "${_clpeak_summary}")
+foreach(_line IN LISTS _summary_lines)
+  if(NOT "${_line}" STREQUAL "")
+    message(STATUS "${_line}")
+  endif()
+endforeach()
+message(STATUS "===============================================================")
+message(STATUS "")
+
 install(TARGETS clpeak RUNTIME DESTINATION bin)
 install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
 
