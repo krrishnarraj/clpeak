@@ -186,6 +186,37 @@ int clPeak::runAll()
           continue;
         }
 
+        // Helper: build an auxiliary program, silently skip on failure.
+        auto buildAuxProg = [&](const std::string &src, const std::string &label) -> cl::Program
+        {
+          cl::Program p;
+          try
+          {
+            cl::Program::Sources s(1, src);
+            p = cl::Program(ctx, s);
+            std::vector<cl::Device> dev = {devices[d]};
+            p.build(dev, BUILD_OPTIONS);
+          }
+          catch (cl::Error &)
+          {
+            log->print(TAB TAB + label + " kernel build failed, test skipped" NEWLINE);
+            p = cl::Program(); // return empty/invalid program
+          }
+          return p;
+        };
+
+        // Local-BW and atomic kernels use __local pointer arguments.
+        // Image kernels use image2d_t / sampler_t.
+        // All three cause NVIDIA CUDA-OpenCL to reserve module-level resources
+        // that compress the register budget for every other kernel in the same
+        // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
+        // Each gets its own isolated program object.
+        cl::Program localProg = buildAuxProg(stringifiedLocalKernels, "Local bandwidth");
+        cl::Program atomicProg = buildAuxProg(stringifiedAtomicKernels, "Atomic throughput");
+        cl::Program imgProg;
+        if (devInfo.imageSupported)
+          imgProg = buildAuxProg(stringifiedImageKernels, "Image bandwidth");
+
         cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
         bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
 
@@ -202,18 +233,68 @@ int clPeak::runAll()
           useEventTimer = false;
         }
 
-        runGlobalBandwidthTest(queue, prog, devInfo);
-        runComputeSP(queue, prog, devInfo);
-        runComputeHP(queue, prog, devInfo);
-        runComputeDP(queue, prog, devInfo);
-        runComputeInteger(queue, prog, devInfo);
-        runComputeIntFast(queue, prog, devInfo);
-        runComputeChar(queue, prog, devInfo);
-        runComputeShort(queue, prog, devInfo);
-        runTransferBandwidthTest(queue, prog, devInfo);
+        runGlobalBandwidthTest(queue, prog, devInfo, cfg);
+        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
+        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
+
+        // Compute tests via unified helper (main program — no __local args)
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
+                       "Single-precision compute (GFLOPS)", "single_precision_compute",
+                       "compute_sp", "float", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
+                       "Half-precision compute (GFLOPS)", "half_precision_compute",
+                       "compute_hp", "half", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
+                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
+                       "compute_mp", "mp", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
+                       "Double-precision compute (GFLOPS)", "double_precision_compute",
+                       "compute_dp", "double", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
+                       "Integer compute (GIOPS)", "integer_compute",
+                       "compute_integer", "int", "giops",
+                       COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
+                       "Integer compute Fast 24bit (GIOPS)", "integer_compute_fast",
+                       "compute_intfast", "int", "giops",
+                       COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
+                       "Integer char (8bit) compute (GIOPS)", "integer_compute_char",
+                       "compute_char", "char", "giops",
+                       COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
+                       "Integer short (16bit) compute (GIOPS)", "integer_compute_short",
+                       "compute_short", "short", "giops",
+                       COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
+
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
+                       "Packed INT4 compute (emulated) (GIOPS)", "int4_packed_compute",
+                       "compute_int4_packed", "int4_packed", "giops",
+                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
+
+#ifdef CLPEAK_HAS_OPENCL_30
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,
+                       "INT8 dot-product compute (GIOPS)", "integer_compute_int8_dp",
+                       "compute_int8_dp", "int8_dp", "giops",
+                       COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
+#endif
+
+        runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
+        runTransferBandwidthTest(queue, prog, devInfo, cfg);
         if (supportsProfilingQueue)
-          runKernelLatency(queue, prog, devInfo);
-        else if (isKernelLatency)
+          runKernelLatency(queue, prog, devInfo, cfg);
+        else if (isTestEnabled(Benchmark::KernelLatency))
           log->print(NEWLINE TAB TAB "Kernel launch latency         : Skipped (no profiling queue support)" NEWLINE);
 
         useEventTimer = savedUseEventTimer;
