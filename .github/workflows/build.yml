@@ -74,11 +74,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
-      # Vulkan SDK: install on Linux x64 and Windows x64 only.
       - name: Install Vulkan SDK
-        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
-        uses: humbletim/install-vulkan-sdk@v1.2
+        uses: jakoch/install-vulkan-sdk-action@v1
         with:
+          install_runtime: true
           cache: true
 
       # CUDA Toolkit: install only for CUDA-enabled matrix entries.
