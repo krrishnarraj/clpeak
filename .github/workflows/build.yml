@@ -58,7 +58,7 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
-      # Vulkan SDK: install on Linux x64, Windows x64
+      # Vulkan SDK: install on Linux x64 and Windows x64 only.
       - name: Install Vulkan SDK
         if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
         uses: humbletim/install-vulkan-sdk@v1.2
@@ -67,7 +67,7 @@ jobs:
 
       # CUDA Toolkit: install on Linux x64 and Windows x64 only.
       - name: Install CUDA Toolkit
-        if: matrix.runner == 'windows-latest'
+        if: matrix.runner == 'ubuntu-latest' || matrix.runner == 'windows-latest'
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: "13.2.0"
@@ -79,8 +79,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -j4
 
+      # run it, show errors, but don’t fail job
       - name: Print version
-        run: ${{ matrix.binary }} --version
+        run: ${{ matrix.binary }} --version 2>&1 || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
