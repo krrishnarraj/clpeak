@@ -1,7 +1,6 @@
 # clpeak
 
 [![Build](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml)
-[![Snap Status](https://snapcraft.io/clpeak/badge.svg)](https://snapcraft.io/clpeak)
 
 A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops to expose what the hardware is capable of in isolation, not real-world workload performance.
 
