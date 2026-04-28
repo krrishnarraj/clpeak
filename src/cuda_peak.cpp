@@ -565,9 +565,9 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
   };
   int A = 4;
   cuda_compute_desc_t d = {};
-  d.title       = "INT8 dot-product compute (__dp4a) (GIOPS)";
+  d.title       = "INT8 dot-product compute (__dp4a) (GOPS)";
   d.xmlTag      = "integer_compute_int8_dp";
-  d.unit        = "giops";
+  d.unit        = "gops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;
@@ -583,9 +583,9 @@ int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
 {
   int A = 3;
   cuda_compute_desc_t d = {};
-  d.title           = "Packed INT4 compute (emulated) (GIOPS)";
+  d.title           = "Packed INT4 compute (emulated) (GOPS)";
   d.xmlTag          = "int4_packed_compute";
-  d.unit            = "giops";
+  d.unit            = "gops";
   d.metricLabel     = "int4_packed";
   d.kernelName      = "compute_int4_packed";
   d.src             = cuda_kernels::compute_int4_packed_src;
@@ -607,7 +607,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
 {
   if (!dev.info.wmmaSupported)
   {
-    log->print(NEWLINE TAB "WMMA tensor-core compute (TFLOPS/TOPS)" NEWLINE);
+    log->print(NEWLINE TAB "WMMA tensor-core compute (GFLOPS/GOPS)" NEWLINE);
     log->xmlOpenTag("wmma");
     log->print(TAB TAB "WMMA requires sm_70 or newer (Volta+)! Skipped" NEWLINE);
     log->xmlCloseTag();
@@ -667,9 +667,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA int8xint8+int32 16x16x16 (GIOPS)";
+    d.title          = "WMMA int8xint8+int32 16x16x16 (GOPS)";
     d.xmlTag         = "wmma_int8";
-    d.unit           = "giops";
+    d.unit           = "gops";
     d.metricLabel    = "wmma_int8";
     d.kernelName     = "wmma_int8";
     d.src            = cuda_kernels::wmma_int8_src;
@@ -690,9 +690,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "INT8 mma.sync m16n8k32+int32 (GIOPS)";
+    d.title          = "INT8 mma.sync m16n8k32+int32 (GOPS)";
     d.xmlTag         = "wmma_int8_k32";
-    d.unit           = "giops";
+    d.unit           = "gops";
     d.metricLabel    = "int8_k32";
     d.kernelName     = "wmma_int8_k32";
     d.src            = cuda_kernels::wmma_int8_k32_src;
@@ -1068,9 +1068,9 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
-  log->print(NEWLINE TAB "Atomic throughput (GIOPS)" NEWLINE);
+  log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   log->xmlOpenTag("atomic_throughput");
-  log->xmlAppendAttribs("unit", "giops");
+  log->xmlAppendAttribs("unit", "gops");
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -1090,9 +1090,9 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
       {
         void *args[1] = { &buf };
         float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
-        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-        log->print(giops); log->print(NEWLINE);
-        log->xmlRecord("global", giops);
+        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+        log->print(gops); log->print(NEWLINE);
+        log->xmlRecord("global", gops);
       }
       else
       {
@@ -1115,9 +1115,9 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
       {
         void *args[1] = { &buf };
         float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
-        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-        log->print(giops); log->print(NEWLINE);
-        log->xmlRecord("local", giops);
+        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+        log->print(gops); log->print(NEWLINE);
+        log->xmlRecord("local", gops);
       }
       else
       {

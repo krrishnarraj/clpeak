@@ -12,7 +12,7 @@ struct ResultEntry {
     std::string driver;
     std::string test;    // XML group tag, e.g. "global_memory_bandwidth"
     std::string metric;  // sub-tag or derived name, e.g. "float4"
-    std::string unit;    // e.g. "gbps", "gflops", "giops", "us"
+    std::string unit;    // e.g. "gbps", "gflops", "gops", "us"
     float value;
 
     // Composite key used for baseline lookup in --compare mode.

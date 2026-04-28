@@ -443,9 +443,9 @@ int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
 {
     int A = 4;
     mtl_compute_desc_t d = {};
-    d.title          = "INT8 dot-product compute (emulated) (GIOPS)";
+    d.title          = "INT8 dot-product compute (emulated) (GOPS)";
     d.xmlTag         = "integer_compute_int8_dp";
-    d.unit           = "giops";
+    d.unit           = "gops";
     d.metricLabel    = "int8_dp";
     d.kernelName     = "compute_int8_dp";
     d.src            = mtl_kernels::compute_int8_dp_src;
@@ -463,9 +463,9 @@ int MetalPeak::runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg)
 {
     int A = 3;
     mtl_compute_desc_t d = {};
-    d.title          = "Packed INT4 compute (emulated) (GIOPS)";
+    d.title          = "Packed INT4 compute (emulated) (GOPS)";
     d.xmlTag         = "int4_packed_compute";
-    d.unit           = "giops";
+    d.unit           = "gops";
     d.metricLabel    = "int4_packed";
     d.kernelName     = "compute_int4_packed";
     d.src            = mtl_kernels::compute_int4_packed_src;
@@ -800,9 +800,9 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.computeIters;
-    log->print(NEWLINE TAB "Atomic throughput (GIOPS)" NEWLINE);
+    log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
     log->xmlOpenTag("atomic_throughput");
-    log->xmlAppendAttribs("unit", "giops");
+    log->xmlAppendAttribs("unit", "gops");
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -829,9 +829,9 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
     float us_g = runOne("atomic_throughput_global", globalThreads * sizeof(int));
     if (us_g > 0)
     {
-        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us_g / 1e3f;
-        log->print(giops); log->print(NEWLINE);
-        log->xmlRecord("global", giops);
+        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us_g / 1e3f;
+        log->print(gops); log->print(NEWLINE);
+        log->xmlRecord("global", gops);
     }
     else
     {
@@ -842,9 +842,9 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
     float us_l = runOne("atomic_throughput_local", numGroups * sizeof(int));
     if (us_l > 0)
     {
-        float giops = ((float)globalThreads * (float)ATOMIC_REPS) / us_l / 1e3f;
-        log->print(giops); log->print(NEWLINE);
-        log->xmlRecord("local", giops);
+        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us_l / 1e3f;
+        log->print(gops); log->print(NEWLINE);
+        log->xmlRecord("local", gops);
     }
     else
     {
