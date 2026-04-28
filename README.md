@@ -19,13 +19,13 @@ NVIDIA RTX 5060, condensed:
   BF16 compute bf16xbf16+fp32 (GFLOPS)
     bf16 : 19655.23
 
-  INT8 dot-product compute (__dp4a) (GIOPS)
+  INT8 dot-product compute (__dp4a) (GOPS)
     int8_dp4 : 33885.94
 
   WMMA fp16xfp16+fp32 16x16x16 (GFLOPS)
     wmma_fp16 : 165847.38
 
-  WMMA int8xint8+int32 16x16x16 (GIOPS)
+  WMMA int8xint8+int32 16x16x16 (GOPS)
     wmma_int8 : 327761.69
 
   FP8(E4M3) mma.sync m16n8k32+fp32 (GFLOPS)
@@ -37,7 +37,7 @@ NVIDIA RTX 5060, condensed:
   Local memory bandwidth (GBPS)
     float4 : 9128.73
 
-  Atomic throughput (GIOPS)
+  Atomic throughput (GOPS)
     global : 171.03
     local  : 1327.35
 
@@ -65,7 +65,7 @@ Apple M1 Pro, condensed:
   Image memory bandwidth (GBPS)
     float4 : 498.00
 
-  Atomic throughput (GIOPS)
+  Atomic throughput (GOPS)
     global : 24.44
     local  : 256.24
 ```
@@ -99,11 +99,11 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Image / texture bandwidth | GB/s | &check; | &check; | &check; | &check; |
 | Transfer bandwidth (host&harr;device) | GB/s | &check; | &mdash; | &check; | &mdash; |
 | Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; |
-| Compute INT / INT24 / INT8 / INT16 | GIOPS | &check; | &mdash; | &mdash; | &mdash; |
-| INT8 dot-product (DP4a) | GIOPS | &check;\* | &check; | &check; | &check; (emul) |
-| Packed INT4 (emulated) | GIOPS | &check; | &check; | &check; | &check; |
-| Tensor / matrix-engine MMA | TFLOPS / TOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
-| Atomic throughput (global + local) | GIOPS | &check; | &check; | &check; | &check; |
+| Compute INT / INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
+| INT8 dot-product (DP4a) | GOPS | &check;\* | &check; | &check; | &check; (emul) |
+| Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; |
+| Tensor / matrix-engine MMA | GFLOPS / GOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
+| Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; |
 | Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; |
 
 \* needs `cl_khr_integer_dot_product`; not exposed on every OpenCL driver.

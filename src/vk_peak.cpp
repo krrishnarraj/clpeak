@@ -972,10 +972,10 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   int32_t A = 3;
   vk_compute_desc_t d = {};
-  d.title           = "Packed INT4 compute (emulated) (GIOPS)";
+  d.title           = "Packed INT4 compute (emulated) (GOPS)";
   d.xmlTag          = "int4_packed_compute";
   d.metricLabel     = "int4_packed";
-  d.unit            = "giops";
+  d.unit            = "gops";
   d.spirv           = vk_shaders::compute_int4_packed_v1;
   d.spirvSize       = vk_shaders::compute_int4_packed_v1_size;
   d.workPerWI       = COMPUTE_INT4_PACKED_WORK_PER_WI;
@@ -1007,9 +1007,9 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   int32_t A = 4;
   vk_compute_desc_t d = {};
-  d.title       = "INT8 dot-product compute (GIOPS)";
+  d.title       = "INT8 dot-product compute (GOPS)";
   d.xmlTag      = "integer_compute_int8_dp";
-  d.unit        = "giops";
+  d.unit        = "gops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;
@@ -1068,7 +1068,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   if (!dev.info.cooperativeMatrixSupported)
   {
-    log->print(NEWLINE TAB "Cooperative matrix (TFLOPS/TOPS)" NEWLINE);
+    log->print(NEWLINE TAB "Cooperative matrix (GFLOPS/GOPS)" NEWLINE);
     log->xmlOpenTag("cooperative_matrix");
     log->xmlAppendAttribs("tile", "16x16x16");
     log->print(TAB TAB "VK_KHR_cooperative_matrix not supported! Skipped" NEWLINE);
@@ -1182,7 +1182,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     vk_compute_desc_t d = {};
     d.xmlTag         = "coopmat_int8";
     d.metricLabel    = "coopmat_int8";
-    d.unit           = "giops";
+    d.unit           = "gops";
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(int32_t);
     d.wgSize         = coopWGSize;
@@ -1191,8 +1191,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.pushSize       = sizeof(A);
     d.extraAttribKey = "tile";
 
-    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (GIOPS)";
-    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (GIOPS)";
+    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (GOPS)";
+    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (GOPS)";
     bool haveShaderK16 = false, haveShaderK32 = false;
 #ifdef CLPEAK_VK_HAS_COOPMAT_INT8
     haveShaderK16 = true;
@@ -1703,9 +1703,9 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
 
-  log->print(NEWLINE TAB "Atomic throughput (GIOPS)" NEWLINE);
+  log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   log->xmlOpenTag("atomic_throughput");
-  log->xmlAppendAttribs("unit", "giops");
+  log->xmlAppendAttribs("unit", "gops");
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = 32ULL * 1024 * 1024;
@@ -1774,9 +1774,9 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
       vk_shaders::atomic_throughput_global_size, globalWIs * sizeof(int32_t));
   if (us_g > 0)
   {
-    float giops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
-    log->print(giops); log->print(NEWLINE);
-    log->xmlRecord("global", giops);
+    float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
+    log->print(gops); log->print(NEWLINE);
+    log->xmlRecord("global", gops);
   }
 
   // Local atomics: one int counter per workgroup.
@@ -1785,9 +1785,9 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
       vk_shaders::atomic_throughput_local_size, (uint64_t)numGroups * sizeof(int32_t));
   if (us_l > 0)
   {
-    float giops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
-    log->print(giops); log->print(NEWLINE);
-    log->xmlRecord("local", giops);
+    float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
+    log->print(gops); log->print(NEWLINE);
+    log->xmlRecord("local", gops);
   }
 
   log->xmlCloseTag();

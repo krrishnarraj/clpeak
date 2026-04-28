@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 add_subdirectory(libopencl-stub)
 
 set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
-include(${CLPEAK_ROOT}/cmake/version.cmake)
+include(version_android.cmake)
 include(${CLPEAK_ROOT}/cmake/sources.cmake)
 
 set(CLPEAK_ANDROID_SOURCES
@@ -25,7 +25,7 @@ endif()
 
 add_library(clpeak SHARED ${CLPEAK_ANDROID_SOURCES})
 
-clpeak_setup_version(clpeak)
+clpeak_setup_version_android(clpeak)
 
 target_include_directories(clpeak PRIVATE
     libopencl-stub/include

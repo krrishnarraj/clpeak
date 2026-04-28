@@ -259,34 +259,34 @@ int clPeak::runAll()
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
-                       "Integer compute (GIOPS)", "integer_compute",
-                       "compute_integer", "int", "giops",
+                       "Integer compute (GOPS)", "integer_compute",
+                       "compute_integer", "int", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
-                       "Integer compute Fast 24bit (GIOPS)", "integer_compute_fast",
-                       "compute_intfast", "int", "giops",
+                       "Integer compute Fast 24bit (GOPS)", "integer_compute_fast",
+                       "compute_intfast", "int", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
-                       "Integer char (8bit) compute (GIOPS)", "integer_compute_char",
-                       "compute_char", "char", "giops",
+                       "Integer char (8bit) compute (GOPS)", "integer_compute_char",
+                       "compute_char", "char", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
-                       "Integer short (16bit) compute (GIOPS)", "integer_compute_short",
-                       "compute_short", "short", "giops",
+                       "Integer short (16bit) compute (GOPS)", "integer_compute_short",
+                       "compute_short", "short", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated) (GIOPS)", "int4_packed_compute",
-                       "compute_int4_packed", "int4_packed", "giops",
+                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
+                       "compute_int4_packed", "int4_packed", "gops",
                        COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
 #ifdef CLPEAK_HAS_OPENCL_30
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,
-                       "INT8 dot-product compute (GIOPS)", "integer_compute_int8_dp",
-                       "compute_int8_dp", "int8_dp", "giops",
+                       "INT8 dot-product compute (GOPS)", "integer_compute_int8_dp",
+                       "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 #endif
 

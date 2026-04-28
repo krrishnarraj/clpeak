@@ -1,8 +1,8 @@
 package kr.clpeak
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import androidx.core.net.toUri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -11,18 +11,29 @@ import kr.clpeak.databinding.AboutFormBinding
 
 class AboutBottomSheet : BottomSheetDialogFragment() {
 
+    private external fun nativeGetVersion(): String
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
-        savedInstanceState: Bundle?
+        savedInstanceState: Bundle?,
     ): View {
         val binding = AboutFormBinding.inflate(inflater, container, false)
 
-        binding.tvVersion.text = "Version ${BuildConfig.VERSION_NAME}"
+        val version = try {
+            nativeGetVersion()
+        } catch (_: UnsatisfiedLinkError) {
+            BuildConfig.VERSION_NAME
+        }
+
+        binding.tvVersion.text = getString(R.string.about_version, version)
 
         binding.btnGithub.setOnClickListener {
             startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.about_url)))
+                Intent(
+                    Intent.ACTION_VIEW,
+                    getString(R.string.about_url).toUri(),
+                )
             )
         }
 

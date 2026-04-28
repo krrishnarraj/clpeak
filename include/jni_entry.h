@@ -33,6 +33,14 @@ extern "C" {
 JNIEXPORT void JNICALL Java_kr_clpeak_MainActivity_nativeSetenv
 (JNIEnv *, jobject, jstring, jstring);
 
+/*
+ * Class:     kr.clpeak.AboutBottomSheet
+ * Method:    nativeGetVersion
+ * Signature: ()Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_kr_clpeak_AboutBottomSheet_nativeGetVersion
+(JNIEnv *, jobject);
+
 #ifdef __cplusplus
 }
 #endif

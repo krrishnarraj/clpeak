@@ -63,3 +63,11 @@ void Java_kr_clpeak_MainActivity_nativeSetenv(JNIEnv *jniEnv,
   setenv((char *)jniEnv->GetStringUTFChars(key, 0),
          (char *)jniEnv->GetStringUTFChars(value, 0), 1);
 }
+
+#include <version.h>
+
+jstring Java_kr_clpeak_AboutBottomSheet_nativeGetVersion(JNIEnv *jniEnv, jobject _jObj)
+{
+  (void)_jObj;
+  return jniEnv->NewStringUTF(CLPEAK_VERSION_STR);
+}

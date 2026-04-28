@@ -2,7 +2,7 @@
 
 int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  float timed, giops;
+  float timed, gops;
   cl::NDRange globalSize, localSize;
 
   if (!isTestEnabled(Benchmark::AtomicThroughput))
@@ -15,9 +15,9 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
 
   try
   {
-    log->print(NEWLINE TAB TAB "Atomic throughput (GIOPS)" NEWLINE);
+    log->print(NEWLINE TAB TAB "Atomic throughput (GOPS)" NEWLINE);
     log->xmlOpenTag("atomic_throughput");
-    log->xmlAppendAttribs("unit", "giops");
+    log->xmlAppendAttribs("unit", "gops");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
@@ -40,10 +40,10 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
 
       timed = run_kernel(queue, kernel_global, globalSize, localSize, iters);
 
-      giops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
-      log->print(giops);
+      gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
+      log->print(gops);
       log->print(NEWLINE);
-      log->xmlRecord("global", giops);
+      log->xmlRecord("global", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
@@ -60,10 +60,10 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
 
       timed = run_kernel(queue, kernel_local, globalSize, localSize, iters);
 
-      giops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
-      log->print(giops);
+      gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
+      log->print(gops);
       log->print(NEWLINE);
-      log->xmlRecord("local", giops);
+      log->xmlRecord("local", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
