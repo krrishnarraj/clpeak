@@ -1,0 +1,21 @@
+Privacy Policy
+
+This application is based on the open-source project "clpeak", a benchmarking tool for OpenCL-capable devices.
+
+Data Collection and Use:
+This app does not collect, store, transmit, or share any personal or sensitive user data.
+
+All benchmarking operations are performed locally on the user's device. No data is sent to any external servers.
+
+Permissions:
+The app may access device hardware components such as CPU and GPU strictly for benchmarking purposes. These permissions are not used to collect personal information.
+
+Third-party Services:
+This app does not use any third-party services (such as analytics, advertising, or cloud services) that collect user data.
+
+Open Source:
+The source code for this application is publicly available at:
+https://github.com/krrishnarraj/clpeak
+
+Changes to This Privacy Policy:
+This privacy policy may be updated in the future. Any changes will be reflected in this file.
