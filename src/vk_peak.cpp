@@ -893,7 +893,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
                             cfg.computeIters, d.pushData, d.pushSize);
-    float value = (static_cast<float>(globalWIs) * static_cast<float>(d.workPerWI)) / timed / 1e3f;
+    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
+    float value = (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
 
     log->print(value);
     log->print(NEWLINE);
@@ -1068,7 +1069,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   if (!dev.info.cooperativeMatrixSupported)
   {
-    log->print(NEWLINE TAB "Cooperative matrix (GFLOPS/GOPS)" NEWLINE);
+    log->print(NEWLINE TAB "Cooperative matrix (TFLOPS/TOPS)" NEWLINE);
     log->xmlOpenTag("cooperative_matrix");
     log->xmlAppendAttribs("tile", "16x16x16");
     log->print(TAB TAB "VK_KHR_cooperative_matrix not supported! Skipped" NEWLINE);
@@ -1086,10 +1087,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (GFLOPS)";
+    d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
     d.xmlTag         = "coopmat_fp16";
     d.metricLabel    = "coopmat_fp16";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_fp16;
     d.spirvSize      = vk_shaders::coopmat_fp16_size;
     d.workPerWI      = coopWork;
@@ -1109,10 +1111,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (GFLOPS)";
+    d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
     d.xmlTag         = "coopmat_bf16";
     d.metricLabel    = "coopmat_bf16";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_bf16;
     d.spirvSize      = vk_shaders::coopmat_bf16_size;
     d.workPerWI      = coopWork;
@@ -1132,10 +1135,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (GFLOPS)";
+    d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
     d.xmlTag         = "coopmat_fp8_e4m3";
     d.metricLabel    = "coopmat_fp8_e4m3";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_fp8_e4m3;
     d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
     d.workPerWI      = coopWork;
@@ -1155,10 +1159,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (GFLOPS)";
+    d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
     d.xmlTag         = "coopmat_fp8_e5m2";
     d.metricLabel    = "coopmat_fp8_e5m2";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_fp8_e5m2;
     d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
     d.workPerWI      = coopWork;
@@ -1182,7 +1187,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     vk_compute_desc_t d = {};
     d.xmlTag         = "coopmat_int8";
     d.metricLabel    = "coopmat_int8";
-    d.unit           = "gops";
+    d.unit           = "tops";
+    d.unitDivider    = 1e12;
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(int32_t);
     d.wgSize         = coopWGSize;
@@ -1191,8 +1197,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.pushSize       = sizeof(A);
     d.extraAttribKey = "tile";
 
-    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (GOPS)";
-    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (GOPS)";
+    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (TOPS)";
+    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (TOPS)";
     bool haveShaderK16 = false, haveShaderK32 = false;
 #ifdef CLPEAK_VK_HAS_COOPMAT_INT8
     haveShaderK16 = true;

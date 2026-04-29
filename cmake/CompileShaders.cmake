@@ -48,7 +48,7 @@ function(compile_shaders)
 
     message(STATUS "Compiling shader: ${SHADER_NAME}.comp -> SPIR-V")
     execute_process(
-      COMMAND "${GLSLC}" --target-env=vulkan1.1 -O "${SHADER}" -o "${SPV_FILE}"
+      COMMAND "${GLSLC}" --target-env=vulkan1.3 -O "${SHADER}" -o "${SPV_FILE}"
       RESULT_VARIABLE GLSLC_RESULT
       ERROR_VARIABLE  GLSLC_ERROR
     )

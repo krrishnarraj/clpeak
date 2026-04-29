@@ -83,7 +83,8 @@ struct cuda_compute_desc_t
 {
   const char *title;             // header line
   const char *xmlTag;            // outer XML tag
-  const char *unit;              // "gflops" / "gops"
+  const char *unit;              // "gflops" / "gops" / "tflops" / "tops"
+  double      unitDivider;       // 1e9 = G* (default when 0), 1e12 = T*
 
   // Single-variant fallback (used when variants==nullptr).
   const char *metricLabel;

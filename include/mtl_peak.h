@@ -60,7 +60,8 @@ struct mtl_compute_desc_t
 {
   const char *title;
   const char *xmlTag;
-  const char *unit;
+  const char *unit;                // "gflops" / "gops" / "tflops" / "tops"
+  double      unitDivider;         // 1e9 = G* (default when 0), 1e12 = T*
 
   // Single-variant fallback.
   const char *metricLabel;

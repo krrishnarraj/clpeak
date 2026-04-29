@@ -14,35 +14,35 @@ NVIDIA RTX 5060, condensed:
 === CUDA backend ===
 
   Single-precision compute (GFLOPS)
-    float : 17797.50
+    float : 17830.03
 
   BF16 compute bf16xbf16+fp32 (GFLOPS)
-    bf16 : 19655.23
+    bf16 : 19653.56
 
   INT8 dot-product compute (__dp4a) (GOPS)
-    int8_dp4 : 33885.94
+    int8_dp4 : 33758.77
 
-  WMMA fp16xfp16+fp32 16x16x16 (GFLOPS)
-    wmma_fp16 : 165847.38
+  WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)
+    wmma_fp16 : 165.93
 
-  WMMA int8xint8+int32 16x16x16 (GOPS)
-    wmma_int8 : 327761.69
+  WMMA int8xint8+int32 16x16x16 (TOPS)
+    wmma_int8 : 327.36
 
-  FP8(E4M3) mma.sync m16n8k32+fp32 (GFLOPS)
-    fp8_e4m3 : 85069.15
+  FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)
+    fp8_e4m3 : 85.10
 
   Global memory bandwidth (GBPS)
-    float   : 393.89
+    float   : 390.90
 
   Local memory bandwidth (GBPS)
-    float4 : 9128.73
+    float4 : 9139.50
 
   Atomic throughput (GOPS)
-    global : 171.03
-    local  : 1327.35
+    global : 170.90
+    local  : 1322.27
 
   Kernel launch latency (us)
-    noop : 2.32
+    noop : 2.35
 ```
 
 Apple M1 Pro, condensed:
@@ -51,23 +51,23 @@ Apple M1 Pro, condensed:
 === Metal backend ===
 
   Single-precision compute (GFLOPS)
-    float : 4344.09
+    float : 4487.11
 
-  simdgroup_matrix fp16xfp16+fp32 8x8x8 (GFLOPS)
-    simdgroup_fp16 : 15046.75
+  simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)
+    simdgroup_fp16 : 15.84
 
   Global memory bandwidth (GBPS)
-    float   : 179.94
+    float   : 180.87
 
   Local memory bandwidth (GBPS)
-    float4 : 2698.03
+    float4 : 2705.21
 
   Image memory bandwidth (GBPS)
-    float4 : 498.00
+    float4 : 499.71
 
   Atomic throughput (GOPS)
-    global : 24.44
-    local  : 256.24
+    global : 24.64
+    local  : 256.45
 ```
 
 ## Building
@@ -102,7 +102,7 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Compute INT / INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
 | INT8 dot-product (DP4a) | GOPS | &check;\* | &check; | &check; | &check; (emul) |
 | Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; |
-| Tensor / matrix-engine MMA | GFLOPS / GOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
+| Tensor / matrix-engine MMA | TFLOPS / TOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
 | Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; |
 | Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; |
 
@@ -116,7 +116,7 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 
 - NVIDIA RTX 5060: OpenCL image bandwidth comes in at ~1/10 the Vulkan or CUDA equivalent &mdash; driver-side image-fetch lowering issue, not a hardware limit.
 - NVIDIA RTX 5060: Vulkan local-atomic throughput is ~1/2 the OpenCL or CUDA rate &mdash; NVIDIA's Vulkan SPIR-V atomic lowering takes a heavier-ordering path.
-- NVIDIA RTX 5060: CUDA WMMA INT8 (328 TIOPS) is exactly 2&times; the Vulkan coopmat INT8 (165 TIOPS), reflecting the K=16 vs K=32 tile difference and ptxas's cross-chain ILP.
+- NVIDIA RTX 5060: CUDA WMMA INT8 (327 TOPS) is almost exactly 2&times; the Vulkan coopmat INT8 (166 TOPS), reflecting the K=16 vs K=32 tile difference and ptxas's cross-chain ILP.
 - Apple M1 Pro: all three backends agree on atomic throughput &mdash; MoltenVK and native Metal both reach the hardware path.
 
 ## CLI
