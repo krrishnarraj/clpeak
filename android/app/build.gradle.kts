@@ -8,7 +8,7 @@ android {
 
     defaultConfig {
         applicationId = "kr.clpeak"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 36
         versionCode = 7
         versionName = "2.0.0"
