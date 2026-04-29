@@ -368,7 +368,8 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         float us = runDispatches(dev, pso, outBuf, d.scalarArg, d.scalarSize, nil,
                                  gridSize, tgSizeM, warmupCount, cfg.computeIters);
         uint64_t totalThreads = (uint64_t)numGroups * tgSize;
-        float value = ((float)totalThreads * (float)d.workPerWI) / us / 1e3f;
+        double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
+        float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
 
         log->print(value);
         log->print(NEWLINE);
@@ -483,7 +484,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
 {
     if (!dev.info.simdgroupMatrixFP16Supported)
     {
-        log->print(NEWLINE TAB "simdgroup_matrix tensor compute (GFLOPS)" NEWLINE);
+        log->print(NEWLINE TAB "simdgroup_matrix tensor compute (TFLOPS)" NEWLINE);
         log->xmlOpenTag("simdgroup_matrix");
         log->print(TAB TAB "simdgroup_matrix requires Apple7 (M1) or newer! Skipped" NEWLINE);
         log->xmlCloseTag();
@@ -493,9 +494,10 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     {
         float A = 1.3f;
         mtl_compute_desc_t d = {};
-        d.title            = "simdgroup_matrix fp16xfp16+fp32 8x8x8 (GFLOPS)";
+        d.title            = "simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)";
         d.xmlTag           = "simdgroup_matrix_fp16";
-        d.unit             = "gflops";
+        d.unit             = "tflops";
+        d.unitDivider      = 1e12;
         d.metricLabel      = "simdgroup_fp16";
         d.kernelName       = "simdgroup_matrix_fp16";
         d.src              = mtl_kernels::simdgroup_matrix_fp16_src;
@@ -513,9 +515,10 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     {
         float A = 1.3f;
         mtl_compute_desc_t d = {};
-        d.title            = "simdgroup_matrix bf16xbf16+fp32 8x8x8 (GFLOPS)";
+        d.title            = "simdgroup_matrix bf16xbf16+fp32 8x8x8 (TFLOPS)";
         d.xmlTag           = "simdgroup_matrix_bf16";
-        d.unit             = "gflops";
+        d.unit             = "tflops";
+        d.unitDivider      = 1e12;
         d.metricLabel      = "simdgroup_bf16";
         d.kernelName       = "simdgroup_matrix_bf16";
         d.src              = mtl_kernels::simdgroup_matrix_bf16_src;

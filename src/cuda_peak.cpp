@@ -435,7 +435,8 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
 
     float us = runKernel(dev, fn, numBlocks, blockSize, args, cfg.computeIters);
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
-    float value = ((float)totalThreads * (float)d.workPerWI) / us / 1e3f;
+    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
+    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
 
     log->print(value);
     log->print(NEWLINE);
@@ -607,7 +608,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
 {
   if (!dev.info.wmmaSupported)
   {
-    log->print(NEWLINE TAB "WMMA tensor-core compute (GFLOPS/GOPS)" NEWLINE);
+    log->print(NEWLINE TAB "WMMA tensor-core compute (TFLOPS/TOPS)" NEWLINE);
     log->xmlOpenTag("wmma");
     log->print(TAB TAB "WMMA requires sm_70 or newer (Volta+)! Skipped" NEWLINE);
     log->xmlCloseTag();
@@ -623,9 +624,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA fp16xfp16+fp32 16x16x16 (GFLOPS)";
+    d.title          = "WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)";
     d.xmlTag         = "wmma_fp16";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.metricLabel    = "wmma_fp16";
     d.kernelName     = "wmma_fp16";
     d.src            = cuda_kernels::wmma_fp16_src;
@@ -644,9 +646,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA bf16xbf16+fp32 16x16x16 (GFLOPS)";
+    d.title          = "WMMA bf16xbf16+fp32 16x16x16 (TFLOPS)";
     d.xmlTag         = "wmma_bf16";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.metricLabel    = "wmma_bf16";
     d.kernelName     = "wmma_bf16";
     d.src            = cuda_kernels::wmma_bf16_src;
@@ -667,9 +670,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA int8xint8+int32 16x16x16 (GOPS)";
+    d.title          = "WMMA int8xint8+int32 16x16x16 (TOPS)";
     d.xmlTag         = "wmma_int8";
-    d.unit           = "gops";
+    d.unit           = "tops";
+    d.unitDivider    = 1e12;
     d.metricLabel    = "wmma_int8";
     d.kernelName     = "wmma_int8";
     d.src            = cuda_kernels::wmma_int8_src;
@@ -690,9 +694,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "INT8 mma.sync m16n8k32+int32 (GOPS)";
+    d.title          = "INT8 mma.sync m16n8k32+int32 (TOPS)";
     d.xmlTag         = "wmma_int8_k32";
-    d.unit           = "gops";
+    d.unit           = "tops";
+    d.unitDivider    = 1e12;
     d.metricLabel    = "int8_k32";
     d.kernelName     = "wmma_int8_k32";
     d.src            = cuda_kernels::wmma_int8_k32_src;
@@ -713,9 +718,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E4M3) mma.sync m16n8k32+fp32 (GFLOPS)";
+    d.title          = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
     d.xmlTag         = "wmma_fp8_e4m3";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.metricLabel    = "fp8_e4m3";
     d.kernelName     = "wmma_fp8_e4m3";
     d.src            = cuda_kernels::wmma_fp8_e4m3_src;
@@ -736,9 +742,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E5M2) mma.sync m16n8k32+fp32 (GFLOPS)";
+    d.title          = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
     d.xmlTag         = "wmma_fp8_e5m2";
-    d.unit           = "gflops";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
     d.metricLabel    = "fp8_e5m2";
     d.kernelName     = "wmma_fp8_e5m2";
     d.src            = cuda_kernels::wmma_fp8_e5m2_src;

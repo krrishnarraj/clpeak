@@ -118,7 +118,8 @@ struct vk_compute_desc_t
   const char *title;         // e.g. "Single-precision compute (GFLOPS)"
   const char *xmlTag;        // e.g. "single_precision_compute"
   const char *metricLabel;   // used when variants==nullptr
-  const char *unit;          // "gflops" / "gops"
+  const char *unit;          // "gflops" / "gops" / "tflops" / "tops"
+  double      unitDivider;   // 1e9 = G* (default when 0), 1e12 = T*
 
   // Single-variant shader (used when variants == nullptr)
   const uint32_t *spirv;
