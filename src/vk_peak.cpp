@@ -724,6 +724,7 @@ int vkPeak::runAll()
     if (isTestEnabled(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
     if (isTestEnabled(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
     if (isTestEnabled(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
+    if (isTestEnabled(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device
@@ -1800,6 +1801,113 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
     log->print(gops); log->print(NEWLINE);
     log->xmlRecord("local", gops);
   }
+
+  log->xmlCloseTag();
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Kernel launch latency (Vulkan)
+//
+// Pre-record a no-op compute dispatch into one command buffer (no descriptor
+// set, no buffer bindings).  Then time vkQueueSubmit + vkQueueWaitIdle in a
+// loop with std::chrono.  What we measure is pure submit -> driver schedule
+// -> queue idle round-trip; no shader work, no transfer.
+// ---------------------------------------------------------------------------
+
+int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
+
+  log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
+  log->xmlOpenTag("kernel_launch_latency");
+  log->xmlAppendAttribs("unit", "us");
+
+  // Pipeline layout with no descriptor sets and no push constants.
+  VkPipelineLayoutCreateInfo plCI = {};
+  plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
+  if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
+  {
+    log->print(TAB TAB "pipeline layout creation failed" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  // Shader module from the embedded no-op SPIR-V.
+  VkShaderModuleCreateInfo smCI = {};
+  smCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  smCI.codeSize = vk_shaders::kernel_latency_size;
+  smCI.pCode    = vk_shaders::kernel_latency;
+  VkShaderModule shaderModule = VK_NULL_HANDLE;
+  if (vkCreateShaderModule(dev.device, &smCI, nullptr, &shaderModule) != VK_SUCCESS)
+  {
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    log->print(TAB TAB "shader module creation failed" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  VkComputePipelineCreateInfo pCI = {};
+  pCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  pCI.layout = pipeLayout;
+  pCI.stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  pCI.stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+  pCI.stage.module = shaderModule;
+  pCI.stage.pName  = "main";
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  if (vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &pCI, nullptr, &pipeline) != VK_SUCCESS)
+  {
+    vkDestroyShaderModule(dev.device, shaderModule, nullptr);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    log->print(TAB TAB "compute pipeline creation failed" NEWLINE);
+    log->xmlCloseTag();
+    return -1;
+  }
+
+  // Pre-record a 1x1x1 dispatch.  Reusing the same command buffer across
+  // iters keeps record overhead out of the timing loop -- we want to
+  // measure submit + queue-idle, not vkBeginCommandBuffer.
+  VkCommandBufferAllocateInfo allocInfo = {};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = dev.commandPool;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = 1;
+  VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
+  vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
+
+  VkCommandBufferBeginInfo beginInfo = {};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+  vkBeginCommandBuffer(cmdBuf, &beginInfo);
+  vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdDispatch(cmdBuf, 1, 1, 1);
+  vkEndCommandBuffer(cmdBuf);
+
+  // Warmup
+  for (unsigned int w = 0; w < warmupCount; w++)
+    dev.submitAndWait(cmdBuf);
+
+  // Timed runs
+  float totalUs = 0;
+  for (unsigned int i = 0; i < iters; i++)
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    dev.submitAndWait(cmdBuf);
+    auto end = std::chrono::high_resolution_clock::now();
+    totalUs += (float)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1000.0f;
+  }
+  float us = totalUs / static_cast<float>(iters);
+
+  log->print(TAB TAB "noop : ");
+  log->print(us);
+  log->print(NEWLINE);
+  log->xmlRecord("noop", us);
+
+  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  vkDestroyPipeline(dev.device, pipeline, nullptr);
+  vkDestroyShaderModule(dev.device, shaderModule, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
 
   log->xmlCloseTag();
   return 0;

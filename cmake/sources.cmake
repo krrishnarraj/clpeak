@@ -107,4 +107,5 @@ set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/image_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_local.comp
+    ${CLPEAK_ROOT}/src/shaders/kernel_latency.comp
 )

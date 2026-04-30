@@ -1,0 +1,12 @@
+#version 450
+
+// No-op compute shader.  Used to measure kernel-launch + queue-complete
+// round-trip latency.  Single thread, single group, no buffer bindings --
+// whatever microseconds/launch we observe is pure Vulkan dispatch +
+// driver scheduling overhead.
+
+layout(local_size_x = 1) in;
+
+void main()
+{
+}
