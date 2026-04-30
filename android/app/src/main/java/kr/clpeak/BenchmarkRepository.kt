@@ -52,7 +52,7 @@ class BenchmarkRepository {
      * Must be called on a background dispatcher (e.g. Dispatchers.IO).
      */
     fun runBenchmark(): Int {
-        val argv = arrayOf("clpeak", "--all-tests")
+        val argv = arrayOf("clpeak")
         return try {
             launchClpeak(argv.size, argv)
         } finally {
