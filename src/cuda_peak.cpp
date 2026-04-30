@@ -927,14 +927,53 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  void *args[1] = { nullptr }; // no args
-  // Single-block, single-thread no-op so the only thing being timed is the
-  // launch+complete round-trip, not any work.
-  float us = runKernel(dev, fn, 1, 1, args, iters);
+  void *args[1] = { nullptr };
+
+  // Per-iteration:
+  //   round-trip = chrono around cuLaunchKernel + cuStreamSynchronize
+  //   kernel-dur = cuEventRecord pair on the same stream (GPU-side ms)
+  // dispatch_one_way = (round_trip - kernel) / 2.  This approximates the
+  // host->driver->GPU dispatch latency that OpenCL profiling reports as
+  // CL_PROFILING_COMMAND_QUEUED -> CL_PROFILING_COMMAND_START.
+  CUevent evtStart, evtStop;
+  cuEventCreate(&evtStart, CU_EVENT_DEFAULT);
+  cuEventCreate(&evtStop,  CU_EVENT_DEFAULT);
+
+  // Warmup
+  for (unsigned int w = 0; w < warmupCount; w++)
+  {
+    cuLaunchKernel(fn, 1,1,1, 1,1,1, 0, dev.stream, args, nullptr);
+    cuStreamSynchronize(dev.stream);
+  }
+
+  double totalRoundTripUs = 0;
+  double totalKernelUs    = 0;
+  for (unsigned int i = 0; i < iters; i++)
+  {
+    auto t0 = std::chrono::high_resolution_clock::now();
+    cuEventRecord(evtStart, dev.stream);
+    cuLaunchKernel(fn, 1,1,1, 1,1,1, 0, dev.stream, args, nullptr);
+    cuEventRecord(evtStop, dev.stream);
+    cuStreamSynchronize(dev.stream);
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    float ms = 0;
+    cuEventElapsedTime(&ms, evtStart, evtStop);
+    totalKernelUs    += (double)ms * 1000.0;
+    totalRoundTripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
+  }
+
+  cuEventDestroy(evtStart);
+  cuEventDestroy(evtStop);
+
+  double avgRoundTripUs = totalRoundTripUs / static_cast<double>(iters);
+  double avgKernelUs    = totalKernelUs    / static_cast<double>(iters);
+  double avgDispatchUs  = std::max(0.0, (avgRoundTripUs - avgKernelUs) / 2.0);
+
   log->print(TAB TAB "noop : ");
-  log->print(us);
+  log->print((float)avgDispatchUs);
   log->print(NEWLINE);
-  log->xmlRecord("noop", us);
+  log->xmlRecord("noop", (float)avgDispatchUs);
 
   log->xmlCloseTag();
   return 0;

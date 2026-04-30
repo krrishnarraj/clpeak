@@ -628,15 +628,21 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         return -1;
     }
 
-    // Submit each iter as its own MTLCommandBuffer so what we time is the
-    // per-cmdBuf submit + complete latency, not encoder reuse.  Sum the
-    // GPU-time deltas reported by each cmdBuf.
-    auto enqueueOne = [&]() -> id<MTLCommandBuffer> {
+    // Measure dispatch latency the same way as OpenCL's QUEUED -> START:
+    // host time captured just before [cb commit] vs the GPU-reported time
+    // when the kernel actually started executing.  Both NSProcessInfo's
+    // systemUptime and MTLCommandBuffer.kernelStartTime live in the
+    // mach_absolute_time / CFTimeInterval domain (seconds since boot), so
+    // the difference is the host->driver->GPU dispatch one-way latency.
+    NSProcessInfo *pi = [NSProcessInfo processInfo];
+
+    auto enqueueOne = [&](double &commitTimeOut) -> id<MTLCommandBuffer> {
         id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:pso];
         [enc dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];
         [enc endEncoding];
+        commitTimeOut = pi.systemUptime;
         [cb commit];
         return cb;
     };
@@ -644,23 +650,21 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     // Warmup
     for (unsigned int w = 0; w < warmupCount; w++)
     {
-        id<MTLCommandBuffer> cb = enqueueOne();
+        double t;
+        id<MTLCommandBuffer> cb = enqueueOne(t);
         [cb waitUntilCompleted];
+        (void)t;
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
-    id<MTLCommandBuffer> last = nil;
+    double totalSec = 0;
     for (unsigned int i = 0; i < iters; i++)
     {
-        id<MTLCommandBuffer> cb = enqueueOne();
+        double commitTime = 0;
+        id<MTLCommandBuffer> cb = enqueueOne(commitTime);
         [cb waitUntilCompleted];
-        last = cb;
+        totalSec += (cb.kernelStartTime - commitTime);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
-    (void)last;
-
-    double total_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-    float us = (float)(total_us / iters);
+    float us = (float)(totalSec * 1e6 / iters);
     log->print(TAB TAB "noop : ");
     log->print(us);
     log->print(NEWLINE);

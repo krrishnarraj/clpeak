@@ -1809,10 +1809,19 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 // ---------------------------------------------------------------------------
 // Kernel launch latency (Vulkan)
 //
-// Pre-record a no-op compute dispatch into one command buffer (no descriptor
-// set, no buffer bindings).  Then time vkQueueSubmit + vkQueueWaitIdle in a
-// loop with std::chrono.  What we measure is pure submit -> driver schedule
-// -> queue idle round-trip; no shader work, no transfer.
+// Pre-record a no-op compute dispatch (no descriptor set, no bindings) and
+// measure two things per submit:
+//
+//   1) host round-trip = chrono around vkQueueSubmit + vkQueueWaitIdle
+//   2) GPU kernel duration = TOP_OF_PIPE -> BOTTOM_OF_PIPE timestamp delta
+//      from a 2-entry timestamp query pool, scaled by timestampPeriod.
+//
+// dispatch_one_way ~= (round_trip - gpu_kernel) / 2.  This approximates the
+// host->driver->GPU dispatch latency that OpenCL reports as the
+// CL_PROFILING_COMMAND_QUEUED -> CL_PROFILING_COMMAND_START gap.  Without
+// VK_EXT_calibrated_timestamps we can't pin a host time into the GPU clock
+// domain directly, so we assume the submit half and the signal-back half
+// are roughly symmetric.
 // ---------------------------------------------------------------------------
 
 int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
@@ -1865,9 +1874,27 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  // Pre-record a 1x1x1 dispatch.  Reusing the same command buffer across
-  // iters keeps record overhead out of the timing loop -- we want to
-  // measure submit + queue-idle, not vkBeginCommandBuffer.
+  // Timestamp query pool (2 entries: TOP_OF_PIPE and BOTTOM_OF_PIPE).  Used
+  // to measure pure GPU kernel duration so we can subtract it from the
+  // host-side round-trip and isolate dispatch latency.
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(dev.physicalDevice, &props);
+  float timestampPeriodNs = props.limits.timestampPeriod;
+  bool haveTimestamps = (timestampPeriodNs > 0.0f);
+
+  VkQueryPool queryPool = VK_NULL_HANDLE;
+  if (haveTimestamps)
+  {
+    VkQueryPoolCreateInfo qpCI = {};
+    qpCI.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qpCI.queryCount = 2;
+    if (vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool) != VK_SUCCESS)
+      haveTimestamps = false;
+  }
+
+  // Pre-record a 1x1x1 dispatch sandwiched by timestamp writes.  Reusing one
+  // command buffer across iters keeps record overhead out of the timing loop.
   VkCommandBufferAllocateInfo allocInfo = {};
   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   allocInfo.commandPool = dev.commandPool;
@@ -1880,31 +1907,60 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
   vkBeginCommandBuffer(cmdBuf, &beginInfo);
+  if (haveTimestamps)
+  {
+    vkCmdResetQueryPool(cmdBuf, queryPool, 0, 2);
+    vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, 0);
+  }
   vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdDispatch(cmdBuf, 1, 1, 1);
+  if (haveTimestamps)
+    vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, 1);
   vkEndCommandBuffer(cmdBuf);
 
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
     dev.submitAndWait(cmdBuf);
 
-  // Timed runs
-  float totalUs = 0;
+  double totalRoundTripUs = 0;
+  double totalKernelUs    = 0;
   for (unsigned int i = 0; i < iters; i++)
   {
     auto start = std::chrono::high_resolution_clock::now();
     dev.submitAndWait(cmdBuf);
     auto end = std::chrono::high_resolution_clock::now();
-    totalUs += (float)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1000.0f;
+    totalRoundTripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1000.0;
+
+    if (haveTimestamps)
+    {
+      uint64_t ts[2] = {0, 0};
+      if (vkGetQueryPoolResults(dev.device, queryPool, 0, 2,
+                                sizeof(ts), ts, sizeof(uint64_t),
+                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+      {
+        totalKernelUs += (double)(ts[1] - ts[0]) * timestampPeriodNs / 1000.0;
+      }
+    }
   }
-  float us = totalUs / static_cast<float>(iters);
+
+  double avgRoundTripUs = totalRoundTripUs / static_cast<double>(iters);
+  double avgKernelUs    = totalKernelUs    / static_cast<double>(iters);
+  // One-way dispatch latency: subtract the GPU-side kernel time from
+  // round-trip and split the remainder symmetrically between submit and
+  // signal-back paths.  When timestamps are unavailable, fall back to
+  // round-trip / 2 (still in the same ballpark for a 1x1 no-op).
+  double avgDispatchUs = haveTimestamps
+      ? std::max(0.0, (avgRoundTripUs - avgKernelUs) / 2.0)
+      : avgRoundTripUs / 2.0;
 
   log->print(TAB TAB "noop : ");
-  log->print(us);
+  log->print((float)avgDispatchUs);
   log->print(NEWLINE);
-  log->xmlRecord("noop", us);
+  log->xmlRecord("noop", (float)avgDispatchUs);
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  if (queryPool != VK_NULL_HANDLE)
+    vkDestroyQueryPool(dev.device, queryPool, nullptr);
   vkDestroyPipeline(dev.device, pipeline, nullptr);
   vkDestroyShaderModule(dev.device, shaderModule, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
