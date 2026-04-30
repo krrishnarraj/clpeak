@@ -3,6 +3,7 @@ package kr.clpeak
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -15,6 +16,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: BenchmarkViewModel by viewModels()
+
+    // Consumes back presses while a benchmark is running. Native code has no
+    // cooperative cancel, so once a run starts the user must wait for it
+    // to finish — there is nothing useful to navigate to.
+    private val blockBackWhileRunning = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { /* swallow */ }
+    }
 
     companion object {
         init { System.loadLibrary("clpeak") }
@@ -41,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         supportFragmentManager.addOnBackStackChangedListener { updateUpAffordance() }
+        onBackPressedDispatcher.addCallback(this, blockBackWhileRunning)
 
         viewModel.screen.observe(this) { screen ->
             when (screen) {
@@ -48,6 +57,11 @@ class MainActivity : AppCompatActivity() {
                 BenchmarkViewModel.Screen.SETUP   -> popToSetup()
                 null -> {}
             }
+        }
+
+        viewModel.isRunning.observe(this) { running ->
+            blockBackWhileRunning.isEnabled = running
+            updateUpAffordance()
         }
     }
 
@@ -72,7 +86,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUpAffordance() {
         val hasBackStack = supportFragmentManager.backStackEntryCount > 0
-        supportActionBar?.setDisplayHomeAsUpEnabled(hasBackStack)
+        val running = viewModel.isRunning.value == true
+        supportActionBar?.setDisplayHomeAsUpEnabled(hasBackStack && !running)
         if (!hasBackStack) {
             binding.toolbar.title = getString(R.string.app_name)
         }
