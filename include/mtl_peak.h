@@ -7,9 +7,13 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
+#include <clpeak.h>      // Benchmark enum
+
+struct CliOptions; // forward decl
 
 // Forward-declare the implementation as opaque pointers so this header can
 // be included from pure C++ TUs (entry.cpp).  All Objective-C / Metal
@@ -96,11 +100,16 @@ public:
   unsigned int specifiedIters;
   bool forceIters;
   bool listDevices;
+  int  deviceIndex; // -1 = run all
+
+  std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
+  bool isTestEnabled(Benchmark b) const
+  { return enabledTests.test(static_cast<size_t>(b)); }
 
   MetalPeak();
   ~MetalPeak();
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
   int runAll();
 
   int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);

@@ -7,9 +7,13 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
+#include <clpeak.h>      // Benchmark enum
+
+struct CliOptions; // forward decl
 
 // Convenience: defined if any cooperative-matrix shader compiled.  Used by
 // vk_peak.cpp to gate extension / feature enablement and dispatch.
@@ -161,11 +165,16 @@ public:
   unsigned int specifiedIters;
   bool forceIters;
   bool listDevices;
+  int  deviceIndex; // -1 = run all
+
+  std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
+  bool isTestEnabled(Benchmark b) const
+  { return enabledTests.test(static_cast<size_t>(b)); }
 
   vkPeak();
   ~vkPeak();
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
   int runAll();
 
   // Individual benchmarks

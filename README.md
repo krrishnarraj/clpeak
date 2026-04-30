@@ -121,18 +121,32 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 
 ## CLI
 
+`./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, or Metal is doing the work.
+
 ```console
-./clpeak --help                       # full flag list
-./clpeak --compute-sp                 # run a single test on every backend that supports it
+./clpeak                              # run every test on every available backend
+./clpeak --compute-sp                 # run only single-precision compute, on every backend
+./clpeak --no-opencl --no-cuda        # skip backends you don't want to measure
 ./clpeak --wmma                       # CUDA tensor-core tests
 ./clpeak --simdgroup-matrix           # Apple matrix-engine tests
 ./clpeak --coop-matrix                # Vulkan tensor-core tests
-./clpeak --xml-file out.xml           # save results
-./clpeak --json-file out.json
-./clpeak --csv-file out.csv
+./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
 ./clpeak --compare baseline.json      # diff against a previous run
-./clpeak --list-devices               # enumerate without running
+./clpeak --list-devices               # enumerate devices for every backend, no benchmarks
 ```
+
+### Selecting a specific device
+
+Multi-GPU machines pick devices per-backend:
+
+```console
+./clpeak --cl-platform 0 --cl-device 1   # OpenCL platform/device pair
+./clpeak --vk-device 1                   # Vulkan physical-device index
+./clpeak --cuda-device 0                 # CUDA device ordinal
+./clpeak --mtl-device 0                  # Metal device index
+```
+
+`--cl-platform` / `--cl-device` / `--cl-platform-name` / `--cl-device-name` are the new spellings of `-p` / `-d` / `-pn` / `-dn`; the short forms still work and emit a deprecation warning.
 
 ## License
 

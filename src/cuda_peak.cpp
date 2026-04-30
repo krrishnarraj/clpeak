@@ -203,7 +203,11 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
 
 CudaPeak::CudaPeak()
   : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
-    initialised(false) {}
+    deviceIndex(-1),
+    initialised(false)
+{
+  enabledTests.set();
+}
 
 CudaPeak::~CudaPeak() {}
 
@@ -296,6 +300,9 @@ int CudaPeak::runAll()
 
   for (int idx : devIndices)
   {
+    if (deviceIndex >= 0 && idx != deviceIndex)
+      continue;
+
     CudaDevice dev;
     if (!dev.init(idx))
     {
@@ -329,20 +336,20 @@ int CudaPeak::runAll()
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
     log->xmlAppendAttribs("arch", dev.info.archName);
 
-    runComputeSP(dev, cfg);
-    runComputeHP(dev, cfg);
-    runComputeDP(dev, cfg);
-    runComputeMP(dev, cfg);
-    runComputeBF16(dev, cfg);
-    runComputeInt8DP(dev, cfg);
-    runComputeInt4Packed(dev, cfg);
-    runWmma(dev, cfg);
-    runGlobalBandwidth(dev, cfg);
-    runLocalBandwidth(dev, cfg);
-    runImageBandwidth(dev, cfg);
-    runAtomicThroughput(dev, cfg);
-    runTransferBandwidth(dev, cfg);
-    runKernelLatency(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeDP))         runComputeDP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeBF16))       runComputeBF16(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+    if (isTestEnabled(Benchmark::Wmma))              runWmma(dev, cfg);
+    if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
+    if (isTestEnabled(Benchmark::TransferBW))        runTransferBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device

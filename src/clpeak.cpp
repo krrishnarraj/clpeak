@@ -1,4 +1,5 @@
 #include <clpeak.h>
+#include <options.h>
 #include <cstring>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
@@ -57,6 +58,41 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    listDevices(false)
 {
   enableAll(); // all tests on by default
+}
+
+void clPeak::applyOptions(const CliOptions &opts)
+{
+  forcePlatform         = opts.forcePlatform;
+  specifiedPlatform     = opts.platformIndex;
+  forcePlatformName     = opts.forcePlatformName;
+  specifiedPlatformName = opts.platformName;
+  forceDevice           = opts.forceDevice;
+  specifiedDevice       = opts.deviceIndex;
+  forceDeviceName       = opts.forceDeviceName;
+  specifiedDeviceName   = opts.deviceName;
+
+  forceIters            = opts.forceIters;
+  specifiedIters        = opts.iters;
+  warmupCount           = opts.warmupCount;
+
+  useEventTimer         = opts.useEventTimer;
+  listDevices           = opts.listDevices;
+
+  // Test selection: copy bitset directly.
+  enabledTests          = opts.enabledTests;
+  forceTest             = false;
+  specifiedTestName.clear();
+
+  enableJson            = opts.enableJson;
+  jsonFileName          = opts.jsonFile;
+  enableCsv             = opts.enableCsv;
+  csvFileName           = opts.csvFile;
+  compareFileName       = opts.compareFile;
+
+  log.reset(new logger(opts.enableXml,  opts.xmlFile,
+                       opts.enableJson, opts.jsonFile,
+                       opts.enableCsv,  opts.csvFile,
+                       opts.compareFile));
 }
 
 int clPeak::runAll()

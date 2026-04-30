@@ -8,9 +8,13 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
+#include <clpeak.h>      // Benchmark enum
+
+struct CliOptions; // forward decl
 
 // CUDA device info (mirrors vk_device_info_t for display + per-test gating).
 struct cuda_device_info_t {
@@ -131,11 +135,16 @@ public:
   unsigned int specifiedIters;
   bool forceIters;
   bool listDevices;
+  int  deviceIndex;  // -1 = run all
+
+  std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
+  bool isTestEnabled(Benchmark b) const
+  { return enabledTests.test(static_cast<size_t>(b)); }
 
   CudaPeak();
   ~CudaPeak();
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
   int runAll();
 
   int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg);

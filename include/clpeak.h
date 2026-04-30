@@ -12,6 +12,8 @@
 #include <benchmark_constants.h>
 #include <logger.h>
 
+struct CliOptions; // forward decl
+
 #define BUILD_OPTIONS " -cl-mad-enable "
 
 enum class Benchmark : unsigned int {
@@ -67,7 +69,7 @@ public:
   clPeak();
   ~clPeak() = default;
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
 
   bool isTestEnabled(Benchmark b) const { return enabledTests.test(static_cast<size_t>(b)); }
   void enableTest(Benchmark b)  { enabledTests.set(static_cast<size_t>(b)); }

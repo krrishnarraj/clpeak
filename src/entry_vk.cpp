@@ -1,40 +1,21 @@
 #ifdef ENABLE_VULKAN
 
 #include <vk_peak.h>
-#include <cstring>
+#include <options.h>
 
-int vkPeak::parseArgs(int argc, char **argv)
+void vkPeak::applyOptions(const CliOptions &opts)
 {
-  bool enableXml = false;
-  std::string xmlFileName, jsonFile, csvFile, compareFile;
+  forceIters     = opts.forceIters;
+  specifiedIters = opts.iters;
+  warmupCount    = opts.warmupCount;
+  listDevices    = opts.listDevices;
+  deviceIndex    = opts.vkDeviceIndex;
+  enabledTests   = opts.enabledTests;
 
-  for (int i = 1; i < argc; i++)
-  {
-    if (strcmp(argv[i], "--list-devices") == 0)
-      listDevices = true;
-    else if ((strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--iters") == 0) && i + 1 < argc)
-    {
-      forceIters = true;
-      specifiedIters = (unsigned int)atoi(argv[++i]);
-    }
-    else if ((strcmp(argv[i], "-w") == 0 || strcmp(argv[i], "--warmup") == 0) && i + 1 < argc)
-    {
-      warmupCount = (unsigned int)atoi(argv[++i]);
-    }
-    else if (strcmp(argv[i], "--json-file") == 0 && i + 1 < argc)
-      jsonFile = argv[++i];
-    else if (strcmp(argv[i], "--csv-file") == 0 && i + 1 < argc)
-      csvFile = argv[++i];
-    else if (strcmp(argv[i], "--compare") == 0 && i + 1 < argc)
-      compareFile = argv[++i];
-    // Skip OpenCL-specific flags silently
-  }
-
-  log.reset(new logger(enableXml, xmlFileName,
-                       !jsonFile.empty(), jsonFile,
-                       !csvFile.empty(), csvFile,
-                       compareFile));
-  return 0;
+  log.reset(new logger(opts.enableXml,  opts.xmlFile,
+                       opts.enableJson, opts.jsonFile,
+                       opts.enableCsv,  opts.csvFile,
+                       opts.compareFile));
 }
 
 #endif // ENABLE_VULKAN

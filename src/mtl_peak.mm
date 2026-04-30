@@ -162,7 +162,11 @@ static id<MTLComputePipelineState> getPipeline(MetalDevice &dev, const char *src
 
 MetalPeak::MetalPeak()
   : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
-    impl(nullptr) {}
+    deviceIndex(-1),
+    impl(nullptr)
+{
+  enabledTests.set();
+}
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
 
@@ -238,6 +242,9 @@ int MetalPeak::runAll()
 
     for (NSUInteger d = 0; d < impl->allDevices.count; d++)
     {
+        if (deviceIndex >= 0 && static_cast<NSUInteger>(deviceIndex) != d)
+            continue;
+
         MetalDevice dev;
         if (!dev.init((int)d))
         {
@@ -276,17 +283,17 @@ int MetalPeak::runAll()
             log->xmlAppendAttribs("family", ss.str());
         }
 
-        runComputeSP(dev, cfg);
-        runComputeHP(dev, cfg);
-        runComputeMP(dev, cfg);
-        runComputeInt8DP(dev, cfg);
-        runComputeInt4Packed(dev, cfg);
-        runSimdgroupMatrix(dev, cfg);
-        runGlobalBandwidth(dev, cfg);
-        runLocalBandwidth(dev, cfg);
-        runImageBandwidth(dev, cfg);
-        runAtomicThroughput(dev, cfg);
-        runKernelLatency(dev, cfg);
+        if (isTestEnabled(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
+        if (isTestEnabled(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
+        if (isTestEnabled(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
+        if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+        if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+        if (isTestEnabled(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
+        if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
+        if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
+        if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+        if (isTestEnabled(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
+        if (isTestEnabled(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
         log->xmlCloseTag(); // device

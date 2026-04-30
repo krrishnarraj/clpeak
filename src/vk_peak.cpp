@@ -458,8 +458,10 @@ uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags
 
 vkPeak::vkPeak()
   : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
+    deviceIndex(-1),
     instance(VK_NULL_HANDLE)
 {
+  enabledTests.set();
 }
 
 vkPeak::~vkPeak()
@@ -620,6 +622,9 @@ int vkPeak::runAll()
 
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
+    if (deviceIndex >= 0 && static_cast<size_t>(deviceIndex) != d)
+      continue;
+
     VulkanDevice dev;
     if (!dev.init(instance, physicalDevices[d]))
     {
@@ -699,26 +704,26 @@ int vkPeak::runAll()
     log->xmlAppendAttribs("api", "vulkan");
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
 
-    runComputeSP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-    runComputeMP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-    runComputeInt8DP(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeInt8DP))   runComputeInt8DP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
-    runComputeInt4Packed(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-    runComputeBF16(dev, cfg);
+    if (isTestEnabled(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
-    runCoopMatrix(dev, cfg);
+    if (isTestEnabled(Benchmark::CoopMatrix))      runCoopMatrix(dev, cfg);
 #endif
-    runGlobalBandwidth(dev, cfg);
-    runLocalBandwidth(dev, cfg);
-    runImageBandwidth(dev, cfg);
-    runAtomicThroughput(dev, cfg);
+    if (isTestEnabled(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device
