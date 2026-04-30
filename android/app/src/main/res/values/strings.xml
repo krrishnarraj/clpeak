@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">clpeak</string>
 
-    <string name="about_clpeak">clpeak is a benchmarking tool for developers to fine-tune OpenCL kernels for a particular device or class of device.\n\nIt measures bandwidth and compute performance across different vector widths and data types.</string>
+    <string name="about_clpeak">A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops to expose what the hardware is capable of in isolation, not real-world workload performance.</string>
     <string name="about_url">https://github.com/krrishnarraj/clpeak</string>
     <string name="about_version">Version %1$s</string>
 
@@ -16,5 +16,5 @@
     <string name="expand_desc">Expand or collapse metrics</string>
 
     <string name="idle_title">Ready to benchmark</string>
-    <string name="idle_subtitle">Tap Run Benchmark to measure your device\'s OpenCL performance</string>
+    <string name="idle_subtitle">Tap Run Benchmark to measure your device\'s performance</string>
 </resources>
