@@ -41,14 +41,6 @@ static const std::string stringifiedImageKernels =
 #include "image_bandwidth_kernels.cl"
     ;
 
-#ifdef USE_STUB_OPENCL
-// Prototype
-extern "C"
-{
-  void stubOpenclReset();
-}
-#endif
-
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
                    forceDeviceName(false), forceTest(false), forceIters(false), useEventTimer(false),
                    specifiedPlatform(0), specifiedDevice(0),
@@ -62,36 +54,36 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
 
 void clPeak::applyOptions(const CliOptions &opts)
 {
-  forcePlatform         = opts.forcePlatform;
-  specifiedPlatform     = opts.platformIndex;
-  forcePlatformName     = opts.forcePlatformName;
+  forcePlatform = opts.forcePlatform;
+  specifiedPlatform = opts.platformIndex;
+  forcePlatformName = opts.forcePlatformName;
   specifiedPlatformName = opts.platformName;
-  forceDevice           = opts.forceDevice;
-  specifiedDevice       = opts.deviceIndex;
-  forceDeviceName       = opts.forceDeviceName;
-  specifiedDeviceName   = opts.deviceName;
+  forceDevice = opts.forceDevice;
+  specifiedDevice = opts.deviceIndex;
+  forceDeviceName = opts.forceDeviceName;
+  specifiedDeviceName = opts.deviceName;
 
-  forceIters            = opts.forceIters;
-  specifiedIters        = opts.iters;
-  warmupCount           = opts.warmupCount;
+  forceIters = opts.forceIters;
+  specifiedIters = opts.iters;
+  warmupCount = opts.warmupCount;
 
-  useEventTimer         = opts.useEventTimer;
-  listDevices           = opts.listDevices;
+  useEventTimer = opts.useEventTimer;
+  listDevices = opts.listDevices;
 
   // Test selection: copy bitset directly.
-  enabledTests          = opts.enabledTests;
-  forceTest             = false;
+  enabledTests = opts.enabledTests;
+  forceTest = false;
   specifiedTestName.clear();
 
-  enableJson            = opts.enableJson;
-  jsonFileName          = opts.jsonFile;
-  enableCsv             = opts.enableCsv;
-  csvFileName           = opts.csvFile;
-  compareFileName       = opts.compareFile;
+  enableJson = opts.enableJson;
+  jsonFileName = opts.jsonFile;
+  enableCsv = opts.enableCsv;
+  csvFileName = opts.csvFile;
+  compareFileName = opts.compareFile;
 
-  log.reset(new logger(opts.enableXml,  opts.xmlFile,
+  log.reset(new logger(opts.enableXml, opts.xmlFile,
                        opts.enableJson, opts.jsonFile,
-                       opts.enableCsv,  opts.csvFile,
+                       opts.enableCsv, opts.csvFile,
                        opts.compareFile));
 }
 
@@ -99,9 +91,6 @@ int clPeak::runAll()
 {
   try
   {
-#ifdef USE_STUB_OPENCL
-    stubOpenclReset();
-#endif
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
 
