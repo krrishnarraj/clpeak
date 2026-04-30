@@ -26,14 +26,6 @@ JNIEXPORT jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak
 extern "C" {
 #endif
 /*
- * Class:     kr.clpeak.MainActivity
- * Method:    nativeSetenv
- * Signature: (Ljava/lang/String;Ljava/lang/String;)V
- */
-JNIEXPORT void JNICALL Java_kr_clpeak_MainActivity_nativeSetenv
-(JNIEnv *, jobject, jstring, jstring);
-
-/*
  * Class:     kr.clpeak.AboutBottomSheet
  * Method:    nativeGetVersion
  * Signature: ()Ljava/lang/String;

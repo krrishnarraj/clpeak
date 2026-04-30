@@ -1,8 +1,6 @@
 package kr.clpeak
 
-import android.content.Intent
 import android.content.res.ColorStateList
-import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -18,7 +16,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
 import kr.clpeak.databinding.ActivityMainBinding
-import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -26,13 +23,6 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: BenchmarkViewModel by viewModels()
     private lateinit var adapter: ResultAdapter
     private var selectedBackend: String? = null
-
-    // Parallel lists: display names and their library paths
-    private val openclDisplayNames = mutableListOf<String>()
-    private val openclLibPaths     = mutableListOf<String>()
-    private var selectedLibIndex   = 0
-
-    private external fun nativeSetenv(key: String, value: String)
 
     companion object {
         init { System.loadLibrary("clpeak") }
@@ -67,11 +57,6 @@ class MainActivity : AppCompatActivity() {
             override fun onTabUnselected(tab: TabLayout.Tab) {}
             override fun onTabReselected(tab: TabLayout.Tab) {}
         })
-
-        buildOpenclLibraryList()
-        if (openclLibPaths.isNotEmpty()) {
-            nativeSetenv("LIBOPENCL_SO_PATH", openclLibPaths[0])
-        }
 
         binding.fabRun.setOnClickListener {
             if (viewModel.isRunning.value == true) return@setOnClickListener
@@ -180,70 +165,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.menu_opencl_lib -> { showOpenclLibraryPicker(); true }
-            R.id.menu_about      -> { showAbout(); true }
-            else                 -> super.onOptionsItemSelected(item)
+            R.id.menu_about -> { showAbout(); true }
+            else            -> super.onOptionsItemSelected(item)
         }
     }
 
     private fun showAbout() {
         AboutBottomSheet().show(supportFragmentManager, AboutBottomSheet.TAG)
-    }
-
-    private fun buildOpenclLibraryList() {
-        val allPaths = listOf(
-            "/vendor/lib64/libOpenCL.so"              to "vendor lib64",
-            "/system/lib64/libOpenCL.so"              to "system lib64",
-            "/system/vendor/lib64/libOpenCL.so"       to "system vendor lib64",
-            "/system/lib/libOpenCL.so"                to "system lib",
-            "/system/vendor/lib/libOpenCL.so"         to "system vendor lib",
-            "/system/vendor/lib64/egl/libGLES_mali.so" to "Mali",
-            "/system/vendor/lib/egl/libGLES_mali.so"  to "Mali (32-bit)",
-            "/system/vendor/lib/libPVROCL.so"         to "PowerVR",
-            "/data/data/org.pocl.libs/files/lib/libpocl.so" to "POCL"
-        )
-
-        for ((path, label) in allPaths) {
-            if (File(path).exists()) {
-                openclLibPaths.add(path)
-                openclDisplayNames.add(label)
-            }
-        }
-
-        // Always include the system default
-        openclLibPaths.add("libOpenCL.so")
-        openclDisplayNames.add("Default")
-    }
-
-    private fun showOpenclLibraryPicker() {
-        if (openclLibPaths.isEmpty()) return
-
-        val items = openclDisplayNames.toTypedArray()
-        val pocl = openclDisplayNames.indexOf("POCL")
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.menu_opencl_lib)
-            .setSingleChoiceItems(items, selectedLibIndex) { dialog, which ->
-                // POCL special case: prompt to install if library file is missing
-                if (which == pocl && !File(openclLibPaths[which]).exists()) {
-                    dialog.dismiss()
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("POCL not installed")
-                        .setMessage("Install POCL from the Play Store?")
-                        .setPositiveButton("Install") { _, _ ->
-                            startActivity(
-                                Intent(Intent.ACTION_VIEW,
-                                    Uri.parse("market://details?id=org.pocl.libs"))
-                            )
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                    return@setSingleChoiceItems
-                }
-                selectedLibIndex = which
-                nativeSetenv("LIBOPENCL_SO_PATH", openclLibPaths[which])
-                dialog.dismiss()
-            }
-            .show()
     }
 }
