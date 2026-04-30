@@ -1,9 +1,25 @@
 // Non-destructive backend/device enumeration exposed to Kotlin.
 // Returns a JSON string consumed by BackendCatalog.kt. Keeping the schema
 // flat avoids any third-party JSON dependency on the C++ side.
+//
+// IMPORTANT: We deliberately do NOT use the libopencl-stub here. The stub
+// caches each wrapper's resolved function pointer in a `static` local on
+// first call, but clPeak::runAll() calls stubOpenclReset() (dlclose) at the
+// start of every run — invalidating the underlying library while leaving the
+// cached function pointers dangling. If we touched the stub from this code
+// path before a run, the run would crash inside cl::Platform::get when it
+// hit a stale cached pointer.
+//
+// Instead, this file dlopen()s libOpenCL on its own private handle, dlsym()s
+// just the few entry points it needs, and dlclose()s before returning. The
+// stub never sees this activity; clpeak.cpp's stubOpenclReset() then loads
+// the library fresh on first run, with no stale state.
 
 #include <jni.h>
 
+#include <dlfcn.h>
+#include <cstdio>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -53,10 +69,63 @@ std::string trimNul(const std::vector<char> &buf)
   return std::string(buf.data(), n);
 }
 
+// Private, throwaway dlopen of libOpenCL — see header comment.
+struct OpenClLoader {
+  void *handle = nullptr;
+
+  using fn_GetPlatformIDs = cl_int(CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
+  using fn_GetPlatformInfo = cl_int(CL_API_CALL *)(cl_platform_id, cl_platform_info, size_t, void *, size_t *);
+  using fn_GetDeviceIDs = cl_int(CL_API_CALL *)(cl_platform_id, cl_device_type, cl_uint, cl_device_id *, cl_uint *);
+  using fn_GetDeviceInfo = cl_int(CL_API_CALL *)(cl_device_id, cl_device_info, size_t, void *, size_t *);
+
+  fn_GetPlatformIDs  GetPlatformIDs  = nullptr;
+  fn_GetPlatformInfo GetPlatformInfo = nullptr;
+  fn_GetDeviceIDs    GetDeviceIDs    = nullptr;
+  fn_GetDeviceInfo   GetDeviceInfo   = nullptr;
+
+  static const char *kCandidates[];
+
+  bool load()
+  {
+    for (const char **p = kCandidates; *p; ++p)
+    {
+      handle = dlopen(*p, RTLD_NOW | RTLD_LOCAL);
+      if (handle) break;
+    }
+    if (!handle) return false;
+    GetPlatformIDs  = (fn_GetPlatformIDs ) dlsym(handle, "clGetPlatformIDs");
+    GetPlatformInfo = (fn_GetPlatformInfo) dlsym(handle, "clGetPlatformInfo");
+    GetDeviceIDs    = (fn_GetDeviceIDs   ) dlsym(handle, "clGetDeviceIDs");
+    GetDeviceInfo   = (fn_GetDeviceInfo  ) dlsym(handle, "clGetDeviceInfo");
+    return GetPlatformIDs && GetPlatformInfo && GetDeviceIDs && GetDeviceInfo;
+  }
+
+  ~OpenClLoader()
+  {
+    if (handle) dlclose(handle);
+  }
+};
+
+const char *OpenClLoader::kCandidates[] = {
+  "libOpenCL.so",
+  "/system/vendor/lib64/libOpenCL.so",
+  "/system/lib64/libOpenCL.so",
+  "/system/vendor/lib/libOpenCL.so",
+  "/system/lib/libOpenCL.so",
+  nullptr,
+};
+
 void appendOpenCl(std::ostringstream &out)
 {
+  OpenClLoader cl;
+  if (!cl.load())
+  {
+    out << "\"opencl\":{\"available\":false,\"platforms\":[]}";
+    return;
+  }
+
   cl_uint platformCount = 0;
-  cl_int  err           = clGetPlatformIDs(0, nullptr, &platformCount);
+  cl_int  err           = cl.GetPlatformIDs(0, nullptr, &platformCount);
   if (err != CL_SUCCESS || platformCount == 0)
   {
     out << "\"opencl\":{\"available\":false,\"platforms\":[]}";
@@ -64,7 +133,7 @@ void appendOpenCl(std::ostringstream &out)
   }
 
   std::vector<cl_platform_id> platforms(platformCount);
-  err = clGetPlatformIDs(platformCount, platforms.data(), nullptr);
+  err = cl.GetPlatformIDs(platformCount, platforms.data(), nullptr);
   if (err != CL_SUCCESS)
   {
     out << "\"opencl\":{\"available\":false,\"platforms\":[]}";
@@ -76,29 +145,29 @@ void appendOpenCl(std::ostringstream &out)
   {
     if (p) out << ",";
     size_t nameSize = 0;
-    clGetPlatformInfo(platforms[p], CL_PLATFORM_NAME, 0, nullptr, &nameSize);
+    cl.GetPlatformInfo(platforms[p], CL_PLATFORM_NAME, 0, nullptr, &nameSize);
     std::vector<char> nameBuf(nameSize);
     if (nameSize)
-      clGetPlatformInfo(platforms[p], CL_PLATFORM_NAME, nameSize, nameBuf.data(), nullptr);
+      cl.GetPlatformInfo(platforms[p], CL_PLATFORM_NAME, nameSize, nameBuf.data(), nullptr);
 
     out << "{\"index\":" << p
         << ",\"name\":\"" << jsonEscape(trimNul(nameBuf)) << "\""
         << ",\"devices\":[";
 
     cl_uint deviceCount = 0;
-    err = clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, 0, nullptr, &deviceCount);
+    err = cl.GetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, 0, nullptr, &deviceCount);
     if (err == CL_SUCCESS && deviceCount > 0)
     {
       std::vector<cl_device_id> devices(deviceCount);
-      clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, deviceCount, devices.data(), nullptr);
+      cl.GetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, deviceCount, devices.data(), nullptr);
       for (cl_uint d = 0; d < deviceCount; ++d)
       {
         if (d) out << ",";
         size_t devNameSize = 0;
-        clGetDeviceInfo(devices[d], CL_DEVICE_NAME, 0, nullptr, &devNameSize);
+        cl.GetDeviceInfo(devices[d], CL_DEVICE_NAME, 0, nullptr, &devNameSize);
         std::vector<char> devNameBuf(devNameSize);
         if (devNameSize)
-          clGetDeviceInfo(devices[d], CL_DEVICE_NAME, devNameSize, devNameBuf.data(), nullptr);
+          cl.GetDeviceInfo(devices[d], CL_DEVICE_NAME, devNameSize, devNameBuf.data(), nullptr);
         out << "{\"index\":" << d
             << ",\"name\":\"" << jsonEscape(trimNul(devNameBuf)) << "\"}";
       }
