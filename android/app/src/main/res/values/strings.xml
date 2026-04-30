@@ -17,4 +17,13 @@
 
     <string name="idle_title">Ready to benchmark</string>
     <string name="idle_subtitle">Tap Run Benchmark to measure your device\'s performance</string>
+
+    <string name="setup_backends_title">Backends</string>
+    <string name="setup_no_backends">No GPU backends detected on this device.</string>
+    <string name="setup_no_devices">No devices</string>
+    <string name="setup_select_all">Select all</string>
+    <string name="setup_clear">Clear</string>
+    <string name="backend_opencl">OpenCL</string>
+    <string name="backend_vulkan">Vulkan</string>
+    <string name="results_title">Results</string>
 </resources>

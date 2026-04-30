@@ -10,25 +10,91 @@ import kotlinx.coroutines.withContext
 
 class BenchmarkViewModel : ViewModel() {
 
+    enum class Screen { SETUP, RESULTS }
+
     private val _isRunning       = MutableLiveData(false)
     private val _deviceInfoByBackend = MutableLiveData<Map<String, DeviceInfo>>(emptyMap())
     private val _backends        = MutableLiveData<List<String>>(emptyList())
     private val _categoriesByBackend = MutableLiveData<Map<String, List<BenchmarkCategory>>>(emptyMap())
     private val _errorMsg        = MutableLiveData<String?>(null)
+    private val _catalog         = MutableLiveData(BackendCatalog.EMPTY)
+    private val _selection       = MutableLiveData(BenchmarkSelection(emptySet(), emptySet()))
+    private val _screen          = MutableLiveData(Screen.SETUP)
 
     val isRunning:  LiveData<Boolean>                          = _isRunning
     val deviceInfoByBackend: LiveData<Map<String, DeviceInfo>> = _deviceInfoByBackend
     val backends:   LiveData<List<String>>                     = _backends
     val categoriesByBackend: LiveData<Map<String, List<BenchmarkCategory>>> = _categoriesByBackend
     val errorMsg:   LiveData<String?>                          = _errorMsg
+    val catalog:    LiveData<BackendCatalog>                   = _catalog
+    val selection:  LiveData<BenchmarkSelection>               = _selection
+    val screen:     LiveData<Screen>                           = _screen
 
     // Accumulate metrics preserving arrival order per (backend, test) so the
     // UI cards stay in the sequence they first appeared in.
     private val accumulated = mutableListOf<ResultEntry>()
     private val expandedKeys = mutableSetOf<String>()  // "backend|test"
 
+    init {
+        loadCatalog()
+    }
+
+    private fun loadCatalog() {
+        viewModelScope.launch {
+            val cat = withContext(Dispatchers.IO) {
+                runCatching { BackendCatalog.fromJson(BenchmarkRepository().nativeEnumerateBackends()) }
+                    .getOrDefault(BackendCatalog.EMPTY)
+            }
+            _catalog.value = cat
+            // Pre-select everything so first-time users get the existing
+            // "run all backends/devices" behavior with one tap.
+            _selection.value = BenchmarkSelection.allOf(cat)
+        }
+    }
+
+    fun toggleOpenClDevice(platform: Int, device: Int) {
+        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
+            .toggleOpenCl(platform, device)
+    }
+
+    fun toggleVulkanDevice(device: Int) {
+        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
+            .toggleVulkan(device)
+    }
+
+    fun setOpenClBackendEnabled(on: Boolean) {
+        val cat = _catalog.value ?: return
+        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
+            .setOpenClBackend(cat.opencl, on)
+    }
+
+    fun setVulkanBackendEnabled(on: Boolean) {
+        val cat = _catalog.value ?: return
+        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
+            .setVulkanBackend(cat.vulkan, on)
+    }
+
+    fun selectAll() {
+        _selection.value = BenchmarkSelection.allOf(_catalog.value ?: BackendCatalog.EMPTY)
+    }
+
+    fun resetSelection() {
+        _selection.value = BenchmarkSelection(emptySet(), emptySet())
+    }
+
+    fun returnToSetup() {
+        if (_isRunning.value == true) return
+        _screen.value = Screen.SETUP
+    }
+
     fun runBenchmarks() {
         if (_isRunning.value == true) return
+        val sel = _selection.value ?: return
+        if (sel.isEmpty) {
+            _errorMsg.value = "Select at least one device to benchmark."
+            return
+        }
+        val cat = _catalog.value ?: BackendCatalog.EMPTY
 
         _isRunning.value = true
         _deviceInfoByBackend.value = emptyMap()
@@ -37,7 +103,9 @@ class BenchmarkViewModel : ViewModel() {
         _errorMsg.value = null
         accumulated.clear()
         expandedKeys.clear()
+        _screen.value = Screen.RESULTS
 
+        val argv = ArgvBuilder.build(sel, cat)
         val repo = BenchmarkRepository()
 
         viewModelScope.launch {
@@ -49,7 +117,7 @@ class BenchmarkViewModel : ViewModel() {
                 }
             }
 
-            val result = withContext(Dispatchers.IO) { repo.runBenchmark() }
+            val result = withContext(Dispatchers.IO) { repo.runBenchmark(argv) }
             metricJob.join()
 
             if (result != 0) {
@@ -122,14 +190,14 @@ class BenchmarkViewModel : ViewModel() {
             "single_precision_compute"  to CategoryMeta("Single-Precision Compute",  TestType.COMPUTE),
             "double_precision_compute"  to CategoryMeta("Double-Precision Compute",  TestType.COMPUTE),
             "half_precision_compute"    to CategoryMeta("Half-Precision Compute",    TestType.COMPUTE),
-            "mixed_precision_compute"   to CategoryMeta("Mixed-Precision Compute (fp16\u00D7fp16+fp32)", TestType.COMPUTE),
+            "mixed_precision_compute"   to CategoryMeta("Mixed-Precision Compute (fp16×fp16+fp32)", TestType.COMPUTE),
             "integer_compute"           to CategoryMeta("Integer Compute",           TestType.COMPUTE),
             "integer_24bit_compute"     to CategoryMeta("Integer 24-bit Compute",    TestType.COMPUTE),
             "char_compute"              to CategoryMeta("Char Compute",              TestType.COMPUTE),
             "short_compute"             to CategoryMeta("Short Compute",             TestType.COMPUTE),
             "integer_compute_int8_dp"   to CategoryMeta("INT8 Dot-Product Compute",  TestType.COMPUTE),
             "int4_packed_compute"       to CategoryMeta("Packed INT4 Compute (emulated)", TestType.COMPUTE),
-            "bfloat16_compute"          to CategoryMeta("BF16 Compute (bf16\u00D7bf16+fp32)", TestType.COMPUTE),
+            "bfloat16_compute"          to CategoryMeta("BF16 Compute (bf16×bf16+fp32)", TestType.COMPUTE),
             "coopmat_fp16"              to CategoryMeta("Coop-Matrix FP16 (tensor cores)", TestType.COMPUTE),
             "coopmat_bf16"              to CategoryMeta("Coop-Matrix BF16 (tensor cores)", TestType.COMPUTE),
             "coopmat_int8"              to CategoryMeta("Coop-Matrix INT8 (tensor cores)", TestType.COMPUTE),

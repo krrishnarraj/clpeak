@@ -11,6 +11,7 @@ set(CLPEAK_ANDROID_SOURCES
     ${CLPEAK_CORE_SOURCES}
     logger_android.cpp
     entry_android.cpp
+    enumerate_backends.cpp
 )
 
 # Vulkan is part of the NDK since API 24; libvulkan.so and headers ship with

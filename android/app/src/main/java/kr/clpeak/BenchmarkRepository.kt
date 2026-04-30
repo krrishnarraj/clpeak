@@ -21,6 +21,9 @@ class BenchmarkRepository {
 
     private external fun launchClpeak(argc: Int, argv: Array<String>): Int
 
+    /** Non-destructive enumeration. Safe to call from any thread. */
+    external fun nativeEnumerateBackends(): String
+
     // Called from C++ logger_android.cpp::print() on the benchmark thread.
     @Suppress("unused")
     fun print_callback_from_c(str: String) {
@@ -47,12 +50,11 @@ class BenchmarkRepository {
     // ---- Run ---------------------------------------------------------------
 
     /**
-     * Blocking call — runs the full benchmark suite via JNI, then closes both
+     * Blocking call — runs the benchmark suite via JNI, then closes both
      * channels so that collector coroutines terminate cleanly.
      * Must be called on a background dispatcher (e.g. Dispatchers.IO).
      */
-    fun runBenchmark(): Int {
-        val argv = arrayOf("clpeak")
+    fun runBenchmark(argv: Array<String>): Int {
         return try {
             launchClpeak(argv.size, argv)
         } finally {

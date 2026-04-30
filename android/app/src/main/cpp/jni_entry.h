@@ -14,6 +14,14 @@ extern "C" {
 JNIEXPORT jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak
 (JNIEnv *, jobject, jint, jobjectArray);
 
+/*
+ * Class:     kr.clpeak.BenchmarkRepository
+ * Method:    nativeEnumerateBackends
+ * Signature: ()Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_kr_clpeak_BenchmarkRepository_nativeEnumerateBackends
+(JNIEnv *, jobject);
+
 #ifdef __cplusplus
 }
 #endif
