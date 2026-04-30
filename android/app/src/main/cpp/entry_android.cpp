@@ -1,5 +1,5 @@
 #include <clpeak.h>
-#include <jni_entry.h>
+#include "jni_entry.h"
 
 #ifdef ENABLE_VULKAN
 #include <vk_peak.h>

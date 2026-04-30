@@ -9,8 +9,8 @@ include(${CLPEAK_ROOT}/cmake/sources.cmake)
 
 set(CLPEAK_ANDROID_SOURCES
     ${CLPEAK_CORE_SOURCES}
-    ${CLPEAK_ROOT}/src/logger_android.cpp
-    ${CLPEAK_ROOT}/src/entry_android.cpp
+    logger_android.cpp
+    entry_android.cpp
 )
 
 # Vulkan is part of the NDK since API 24; libvulkan.so and headers ship with
