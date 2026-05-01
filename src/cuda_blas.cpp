@@ -216,18 +216,23 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
         cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
 
-        // Heuristic: ask cuBLASLt to pick the best algo for our shape + dtype.
-        // If returnedResults == 0, the path is unsupported on this device.
+        // Heuristic: ask cuBLASLt for its top-K algo candidates.  The top-1
+        // result is an estimator pick, not a measured pick; for some dtypes
+        // (notably bf16 on RTX 5060 sm_120) the estimator's top algo is ~50%
+        // slower than the measured-best.  We request K candidates, run a
+        // short timing pass on each, and use the measured fastest for the
+        // full timing run.
+        const int kCandidates = 8;
         cublasLtMatmulPreference_t pref = nullptr;
         cublasLtMatmulPreferenceCreate(&pref);
         cublasLtMatmulPreferenceSetAttribute(pref,
             CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
 
-        cublasLtMatmulHeuristicResult_t heur = {};
+        cublasLtMatmulHeuristicResult_t heurs[kCandidates] = {};
         int returnedResults = 0;
         cublasStatus_t hs = cublasLtMatmulAlgoGetHeuristic(
             lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
-            pref, 1, &heur, &returnedResults);
+            pref, kCandidates, heurs, &returnedResults);
         cublasLtMatmulPreferenceDestroy(pref);
 
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
@@ -243,13 +248,40 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
             return 0;
         }
 
+        // Measured algo selection.  4 iters per candidate is enough to filter
+        // out estimator outliers without burning a noticeable wall-clock budget
+        // (top-K total is ~4 * K * per_iter_us; on a fast dtype that's well
+        // under a second).  Skip candidates that fail to launch (CUBLAS_STATUS
+        // not SUCCESS within timeCublasLt -- it returns a negative time).
+        const unsigned int probeIters = 4;
+        int bestIdx = -1;
+        double bestProbeUs = 1e30;
+        for (int i = 0; i < returnedResults; i++)
+        {
+            double t = timeCublasLt(lt, dev.stream, opDesc,
+                alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
+                betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
+                &heurs[i].algo, (void*)dWS, wsBytes, probeIters);
+            if (t > 0.0 && t < bestProbeUs) { bestProbeUs = t; bestIdx = i; }
+        }
+        if (bestIdx < 0)
+        {
+            log->print("all candidate algos failed" NEWLINE);
+            log->xmlRecord(label, 0.0f);
+            cublasLtMatmulDescDestroy(opDesc);
+            cublasLtMatrixLayoutDestroy(Adesc);
+            cublasLtMatrixLayoutDestroy(Bdesc);
+            cublasLtMatrixLayoutDestroy(Cdesc);
+            return -1;
+        }
+
         // alpha / beta scalar bit-widths must match `scaleType`; the caller
         // supplies them by pointer so we don't have to fan out a switch here.
         unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
         double per_iter_us = timeCublasLt(lt, dev.stream, opDesc,
             alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
             betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-            &heur.algo, (void*)dWS, wsBytes, warmup);
+            &heurs[bestIdx].algo, (void*)dWS, wsBytes, warmup);
 
         if (per_iter_us <= 0.0)
         {
@@ -266,7 +298,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         double mean_us = timeCublasLt(lt, dev.stream, opDesc,
             alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
             betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-            &heur.algo, (void*)dWS, wsBytes, iters);
+            &heurs[bestIdx].algo, (void*)dWS, wsBytes, iters);
 
         double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
         log->print((float)tops);
@@ -312,13 +344,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         runVariant("fp16", CUDA_R_16F,  CUDA_R_16F, CUBLAS_COMPUTE_16F,
                    CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
 
-    // bf16: bf16 inputs + bf16 output + fp32 compute (mixed-precision).
-    // bf16 has no native accumulator format, so compute is fp32; output is
-    // kept at bf16 (not fp32) so the C-write memory traffic matches the
-    // fp16 path -- with fp32 output, bf16 throughput halved on RTX 5060
-    // because the kernel was bound by output bandwidth, not MMA throughput.
+    // bf16: bf16 inputs + fp32 output + fp32 compute (mixed-precision).
+    // bf16 has no native accumulator format -- compute is always fp32.
+    // R_32F output matches the dtype combo NVIDIA's published bf16 GEMM
+    // peaks are quoted against.
     if (dev.info.bf16Supported)
-        runVariant("bf16", CUDA_R_16BF, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
+        runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
     cublasLtDestroy(lt);
