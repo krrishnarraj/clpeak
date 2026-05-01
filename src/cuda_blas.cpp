@@ -125,7 +125,9 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         std::stringstream ss; ss << M << "x" << N << "x" << K;
         log->xmlAppendAttribs("dim", ss.str());
     }
-    log->xmlAppendAttribs("layout", "col-major-TN");
+    // Layout per variant: fp32 (CUDA cores) uses NN; tensor-core dtypes use TN
+    // because that keeps the K axis contiguous for both A and B, matching the
+    // MMA load pattern.
     log->xmlAppendAttribs("workspace", "256MB");
 
     // -----------------------------------------------------------------------
@@ -176,7 +178,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                           cudaDataType_t abType, cudaDataType_t cType,
                           cublasComputeType_t computeType,
                           cudaDataType_t scaleType,
-                          const void *alphaPtr, const void *betaPtr) -> int
+                          const void *alphaPtr, const void *betaPtr,
+                          bool useTN) -> int
     {
         log->print(TAB TAB);
         log->print(label);
@@ -185,15 +188,17 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         cublasLtMatmulDesc_t opDesc = nullptr;
         cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
 
-        // TN layout: TRANSA=T, TRANSB=N.  Stored A is K x M col-major (so the
-        // K dimension is contiguous in memory), B is K x N col-major (K
-        // contiguous).  This is what tensor-core kernels are tuned around --
-        // both inputs have the inner-product axis on the contiguous side, which
-        // lets the kernel issue wide vector loads straight into the MMA pipe.
-        // Using NN here filtered out the fast tensor-core algos and dropped
-        // throughput by 2-4x on every dtype (measured on RTX 5060 sm_120).
+        // TN (TRANSA=T, TRANSB=N) puts the K axis on the contiguous side of
+        // both stored A and stored B -- the MMA load pattern tensor-core
+        // kernels are tuned around.  Stored A is K x M col-major, B is K x N
+        // col-major.  NN is kept for fp32 because cuBLASLt's CUDA-core fp32
+        // kernels are better tuned for the NN layout (TN measured ~50% slower
+        // for fp32 on RTX 5060).
+        const uint64_t Arows = useTN ? K : M;
+        const uint64_t Acols = useTN ? M : K;
+        const uint64_t Ald   = Arows;
         if (cublasLtMatmulDescCreate(&opDesc, computeType, scaleType) != CUBLAS_STATUS_SUCCESS ||
-            cublasLtMatrixLayoutCreate(&Adesc, abType, K, M, K) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Adesc, abType, Arows, Acols, Ald) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Bdesc, abType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, cType,  M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
@@ -206,9 +211,9 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
             return -1;
         }
 
-        cublasOperation_t opT = CUBLAS_OP_T;
+        cublasOperation_t opA = useTN ? CUBLAS_OP_T : CUBLAS_OP_N;
         cublasOperation_t opN = CUBLAS_OP_N;
-        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT));
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
         cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
 
         // Heuristic: ask cuBLASLt to pick the best algo for our shape + dtype.
@@ -289,29 +294,32 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     const float    alpha32 = 1.0f, beta32 = 0.0f;
     const uint16_t alpha16 = 0x3c00, beta16 = 0x0000;
 
-    // fp32: full-precision GEMM, no tensor cores.
+    // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
+    // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
+    // tuned kernel set for fp32 + TN.
     runVariant("fp32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F,
-               CUDA_R_32F, &alpha32, &beta32);
+               CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
 
     // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
-    // tensor cores (Ampere+).  Inputs/outputs stay fp32; the dtype tag for
-    // A/B is still R_32F.
+    // tensor cores (Ampere+).  Inputs/outputs stay fp32.
     if (dev.info.tf32GemmSupported)
         runVariant("tf32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
-                   CUDA_R_32F, &alpha32, &beta32);
+                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
     // fp16: half inputs + half output + half compute.  scaleType is R_16F so
     // alpha/beta must be 16-bit half values, not float.
     if (dev.info.fp16Supported)
         runVariant("fp16", CUDA_R_16F,  CUDA_R_16F, CUBLAS_COMPUTE_16F,
-                   CUDA_R_16F, &alpha16, &beta16);
+                   CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
 
-    // bf16: bf16 inputs, fp32 output, fp32 compute (mixed-precision).  This
-    // is the dtype combo cuBLASLt's bf16 tensor-core kernels are tuned for;
-    // bf16->bf16 output is also supported but typically slower.
+    // bf16: bf16 inputs + bf16 output + fp32 compute (mixed-precision).
+    // bf16 has no native accumulator format, so compute is fp32; output is
+    // kept at bf16 (not fp32) so the C-write memory traffic matches the
+    // fp16 path -- with fp32 output, bf16 throughput halved on RTX 5060
+    // because the kernel was bound by output bandwidth, not MMA throughput.
     if (dev.info.bf16Supported)
-        runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
-                   CUDA_R_32F, &alpha32, &beta32);
+        runVariant("bf16", CUDA_R_16BF, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
+                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
     cublasLtDestroy(lt);
     cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
