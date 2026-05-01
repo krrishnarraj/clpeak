@@ -24,7 +24,18 @@ static const char *helpStr =
     "\n  --csv-file file             save results to a CSV file"
     "\n  --compare file              compare results against a baseline (JSON / CSV / XML)"
     "\n"
-    "\n BACKEND SELECTION:"
+    "\n BACKEND SELECTION (default: run every available backend):"
+    "\n  --opencl                    run only the OpenCL backend"
+#ifdef ENABLE_VULKAN
+    "\n  --vulkan                    run only the Vulkan backend"
+#endif
+#ifdef ENABLE_CUDA
+    "\n  --cuda                      run only the CUDA backend"
+#endif
+#ifdef ENABLE_METAL
+    "\n  --metal                     run only the Metal backend"
+#endif
+    "\n  (multiple --<backend> flags can be combined: --cuda --vulkan)"
 #if defined(ENABLE_VULKAN) || defined(ENABLE_CUDA) || defined(ENABLE_METAL)
     "\n  --no-opencl                 skip the OpenCL backend"
 #endif
@@ -172,6 +183,12 @@ static void deprecate(const char *oldFlag, const char *newFlag)
 
 int parseCliOptions(int argc, char **argv, CliOptions &out)
 {
+  // Positive backend includes.  When any --<backend> flag is present, only
+  // listed backends run; everything else gets skipped at the end of parsing.
+  // --no-<backend> still composes on top, so `--cuda --no-cuda` runs nothing.
+  bool includeAny = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incMetal = false;
+
   for (int i = 1; i < argc; i++)
   {
     const char *a = argv[i];
@@ -186,11 +203,15 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       std::cout << "clpeak version: " << CLPEAK_VERSION_STR << "\n";
       std::exit(0);
     }
-    // ---- backend skip -----------------------------------------------------
+    // ---- backend selection ------------------------------------------------
     else if (!strcmp(a, "--no-opencl")) out.skipOpenCL = true;
     else if (!strcmp(a, "--no-vulkan")) out.skipVulkan = true;
     else if (!strcmp(a, "--no-cuda"))   out.skipCuda   = true;
     else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
+    else if (!strcmp(a, "--opencl"))    { incOpenCL = true; includeAny = true; }
+    else if (!strcmp(a, "--vulkan"))    { incVulkan = true; includeAny = true; }
+    else if (!strcmp(a, "--cuda"))      { incCuda   = true; includeAny = true; }
+    else if (!strcmp(a, "--metal"))     { incMetal  = true; includeAny = true; }
 
     // ---- iters / warmup ---------------------------------------------------
     else if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
@@ -352,6 +373,16 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       std::cerr << "clpeak: unknown option '" << a << "'\n";
       printHelpAndExit(-1);
     }
+  }
+
+  // Apply positive backend selection: any --<backend> flag means "only run
+  // the listed backends".  Skips set by --no-<backend> still apply.
+  if (includeAny)
+  {
+    if (!incOpenCL) out.skipOpenCL = true;
+    if (!incVulkan) out.skipVulkan = true;
+    if (!incCuda)   out.skipCuda   = true;
+    if (!incMetal)  out.skipMetal  = true;
   }
 
   return 0;

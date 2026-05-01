@@ -126,7 +126,9 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 ```console
 ./clpeak                              # run every test on every available backend
 ./clpeak --compute-sp                 # run only single-precision compute, on every backend
-./clpeak --no-opencl --no-cuda        # skip backends you don't want to measure
+./clpeak --metal                      # run only one backend
+./clpeak --cuda --vulkan              # combine multiple --<backend> flags
+./clpeak --no-opencl --no-cuda        # or skip the ones you don't want
 ./clpeak --wmma                       # CUDA tensor-core tests
 ./clpeak --simdgroup-matrix           # Apple matrix-engine tests
 ./clpeak --coop-matrix                # Vulkan tensor-core tests
