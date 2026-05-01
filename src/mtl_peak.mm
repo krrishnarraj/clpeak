@@ -628,12 +628,14 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         return -1;
     }
 
-    // Measure dispatch latency the same way as OpenCL's QUEUED -> START:
-    // host time captured just before [cb commit] vs the GPU-reported time
-    // when the kernel actually started executing.  Both NSProcessInfo's
-    // systemUptime and MTLCommandBuffer.kernelStartTime live in the
-    // mach_absolute_time / CFTimeInterval domain (seconds since boot), so
-    // the difference is the host->driver->GPU dispatch one-way latency.
+    // Two metrics:
+    //   dispatch  = (GPU kernelStartTime) - (host systemUptime captured just
+    //               before [cb commit]).  Both live in the mach_absolute_time
+    //               / CFTimeInterval domain, so this is the exact one-way
+    //               host->driver->GPU dispatch latency, equivalent to
+    //               OpenCL's CL_PROFILING_COMMAND_QUEUED -> COMMAND_START.
+    //   roundtrip = host time around [cb commit] + waitUntilCompleted, i.e.
+    //               full submit -> GPU complete -> signal back.
     NSProcessInfo *pi = [NSProcessInfo processInfo];
 
     auto enqueueOne = [&](double &commitTimeOut) -> id<MTLCommandBuffer> {
@@ -656,19 +658,26 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         (void)t;
     }
 
-    double totalSec = 0;
+    double totalDispatchSec  = 0;
+    double totalRoundtripSec = 0;
     for (unsigned int i = 0; i < iters; i++)
     {
         double commitTime = 0;
         id<MTLCommandBuffer> cb = enqueueOne(commitTime);
         [cb waitUntilCompleted];
-        totalSec += (cb.kernelStartTime - commitTime);
+        double doneTime = pi.systemUptime;
+        totalDispatchSec  += (cb.kernelStartTime - commitTime);
+        totalRoundtripSec += (doneTime - commitTime);
     }
-    float us = (float)(totalSec * 1e6 / iters);
-    log->print(TAB TAB "noop : ");
-    log->print(us);
+    float dispatchUs  = (float)(totalDispatchSec  * 1e6 / iters);
+    float roundtripUs = (float)(totalRoundtripSec * 1e6 / iters);
+    log->print(TAB TAB TAB "dispatch  : ");
+    log->print(dispatchUs);
+    log->print(NEWLINE TAB TAB TAB "roundtrip : ");
+    log->print(roundtripUs);
     log->print(NEWLINE);
-    log->xmlRecord("noop", us);
+    log->xmlRecord("dispatch",  dispatchUs);
+    log->xmlRecord("roundtrip", roundtripUs);
 
     log->xmlCloseTag();
     return 0;

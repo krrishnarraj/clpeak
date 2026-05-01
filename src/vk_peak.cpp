@@ -94,6 +94,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   info.coopmatINT8K = 0;
   info.coopmatFP8E4M3Supported = false;
   info.coopmatFP8E5M2Supported = false;
+  info.calibratedTimestampsSupported = false;
 
   // Feature query for optional shader types.  Uses vkGetPhysicalDeviceFeatures2
   // (Vulkan 1.1 core).  Each optional shader's feature struct gets chained
@@ -262,6 +263,16 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   if (hasExt("VK_KHR_portability_subset"))
     enabledExts.push_back("VK_KHR_portability_subset");
 #endif
+
+  // VK_EXT_calibrated_timestamps lets us pin a host time into the GPU
+  // timestamp domain, which is exactly what's needed to measure one-way
+  // dispatch latency (host submit -> GPU kernel start) the same way
+  // OpenCL does via CL_PROFILING_COMMAND_QUEUED.  Optional.
+  if (hasExt("VK_EXT_calibrated_timestamps"))
+  {
+    enabledExts.push_back("VK_EXT_calibrated_timestamps");
+    info.calibratedTimestampsSupported = true;
+  }
 
   // Create logical device
   float queuePriority = 1.0f;
@@ -1807,21 +1818,15 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 
 // ---------------------------------------------------------------------------
-// Kernel launch latency (Vulkan)
+// Kernel launch latency (Vulkan) -- two metrics:
 //
-// Pre-record a no-op compute dispatch (no descriptor set, no bindings) and
-// measure two things per submit:
-//
-//   1) host round-trip = chrono around vkQueueSubmit + vkQueueWaitIdle
-//   2) GPU kernel duration = TOP_OF_PIPE -> BOTTOM_OF_PIPE timestamp delta
-//      from a 2-entry timestamp query pool, scaled by timestampPeriod.
-//
-// dispatch_one_way ~= (round_trip - gpu_kernel) / 2.  This approximates the
-// host->driver->GPU dispatch latency that OpenCL reports as the
-// CL_PROFILING_COMMAND_QUEUED -> CL_PROFILING_COMMAND_START gap.  Without
-// VK_EXT_calibrated_timestamps we can't pin a host time into the GPU clock
-// domain directly, so we assume the submit half and the signal-back half
-// are roughly symmetric.
+//   dispatch  : one-way host-submit -> GPU-kernel-start.  Requires
+//               VK_EXT_calibrated_timestamps to map host time into the GPU
+//               clock domain.  Skipped (with note) when the extension is
+//               unavailable.
+//   roundtrip : std::chrono around vkQueueSubmit + vkQueueWaitIdle.  Always
+//               reported, directly comparable to the same metric on
+//               OpenCL/CUDA/Metal.
 // ---------------------------------------------------------------------------
 
 int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
@@ -1874,13 +1879,50 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  // Timestamp query pool (2 entries: TOP_OF_PIPE and BOTTOM_OF_PIPE).  Used
-  // to measure pure GPU kernel duration so we can subtract it from the
-  // host-side round-trip and isolate dispatch latency.
+  // GPU timestamp query pool used by the dispatch-latency path: a single
+  // TOP_OF_PIPE timestamp tells us when the GPU started executing.
   VkPhysicalDeviceProperties props;
   vkGetPhysicalDeviceProperties(dev.physicalDevice, &props);
   float timestampPeriodNs = props.limits.timestampPeriod;
-  bool haveTimestamps = (timestampPeriodNs > 0.0f);
+  bool haveTimestamps = (timestampPeriodNs > 0.0f) && dev.info.calibratedTimestampsSupported;
+
+  // Resolve VK_EXT_calibrated_timestamps function pointers.  These let us
+  // capture a (host_t, gpu_t) pair "at the same instant" so we can convert
+  // GPU timestamps into the host clock domain and measure exact one-way
+  // dispatch latency, the same way OpenCL profiling reports QUEUED -> START.
+  PFN_vkGetCalibratedTimestampsEXT pfnGetCalTs = nullptr;
+  VkTimeDomainEXT hostDomain = VK_TIME_DOMAIN_DEVICE_EXT; // sentinel: unset
+  if (haveTimestamps)
+  {
+    pfnGetCalTs = (PFN_vkGetCalibratedTimestampsEXT)
+        vkGetDeviceProcAddr(dev.device, "vkGetCalibratedTimestampsEXT");
+    auto pfnGetDomains = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)
+        vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
+    if (pfnGetCalTs && pfnGetDomains)
+    {
+      uint32_t n = 0;
+      pfnGetDomains(dev.physicalDevice, &n, nullptr);
+      std::vector<VkTimeDomainEXT> domains(n);
+      pfnGetDomains(dev.physicalDevice, &n, domains.data());
+      // Prefer a host monotonic clock so we can read it cheaply with
+      // std::chrono::steady_clock (CLOCK_MONOTONIC on POSIX, QPC on Windows).
+      VkTimeDomainEXT preferred[] = {
+#if defined(_WIN32)
+        VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT,
+#else
+        VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT,
+        VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT,
+#endif
+      };
+      for (auto p : preferred)
+      {
+        for (auto d : domains) if (d == p) { hostDomain = p; break; }
+        if (hostDomain != VK_TIME_DOMAIN_DEVICE_EXT) break;
+      }
+    }
+    if (hostDomain == VK_TIME_DOMAIN_DEVICE_EXT)
+      haveTimestamps = false; // can't pin host<->device clocks; skip dispatch
+  }
 
   VkQueryPool queryPool = VK_NULL_HANDLE;
   if (haveTimestamps)
@@ -1888,13 +1930,13 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     VkQueryPoolCreateInfo qpCI = {};
     qpCI.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
-    qpCI.queryCount = 2;
+    qpCI.queryCount = 1;
     if (vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool) != VK_SUCCESS)
       haveTimestamps = false;
   }
 
-  // Pre-record a 1x1x1 dispatch sandwiched by timestamp writes.  Reusing one
-  // command buffer across iters keeps record overhead out of the timing loop.
+  // Pre-record a 1x1x1 dispatch.  Reusing one command buffer across iters
+  // keeps record overhead out of the timing loop.
   VkCommandBufferAllocateInfo allocInfo = {};
   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   allocInfo.commandPool = dev.commandPool;
@@ -1909,54 +1951,93 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   vkBeginCommandBuffer(cmdBuf, &beginInfo);
   if (haveTimestamps)
   {
-    vkCmdResetQueryPool(cmdBuf, queryPool, 0, 2);
+    vkCmdResetQueryPool(cmdBuf, queryPool, 0, 1);
     vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, 0);
   }
   vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdDispatch(cmdBuf, 1, 1, 1);
-  if (haveTimestamps)
-    vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, 1);
   vkEndCommandBuffer(cmdBuf);
+
+  // Helper: read the next host timestamp in the same units the calibrated
+  // call returns (nanoseconds for CLOCK_MONOTONIC{,_RAW}; raw QPC ticks for
+  // QUERY_PERFORMANCE_COUNTER, but we only ever subtract two of them so the
+  // unit cancels).
+  auto hostNowSameDomain = []() -> uint64_t {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  };
 
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
     dev.submitAndWait(cmdBuf);
 
-  double totalRoundTripUs = 0;
-  double totalKernelUs    = 0;
+  double totalDispatchUs  = 0;
+  double totalRoundtripUs = 0;
+  unsigned int dispatchSamples = 0;
   for (unsigned int i = 0; i < iters; i++)
   {
-    auto start = std::chrono::high_resolution_clock::now();
+    // Calibrated pair captured "right now" so the host reference matches
+    // the GPU timestamp domain to within VkMaxDeviation nanoseconds.
+    uint64_t hostCalib = 0, gpuCalib = 0, maxDev = 0;
+    if (haveTimestamps)
+    {
+      VkCalibratedTimestampInfoEXT infos[2] = {};
+      infos[0].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
+      infos[0].timeDomain = hostDomain;
+      infos[1].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
+      infos[1].timeDomain = VK_TIME_DOMAIN_DEVICE_EXT;
+      uint64_t ts[2] = {0, 0};
+      if (pfnGetCalTs(dev.device, 2, infos, ts, &maxDev) != VK_SUCCESS)
+        haveTimestamps = false;
+      hostCalib = ts[0];
+      gpuCalib  = ts[1];
+    }
+
+    uint64_t hostSubmit = hostNowSameDomain();
+    auto chronoStart = std::chrono::high_resolution_clock::now();
     dev.submitAndWait(cmdBuf);
-    auto end = std::chrono::high_resolution_clock::now();
-    totalRoundTripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1000.0;
+    auto chronoEnd = std::chrono::high_resolution_clock::now();
+    totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(chronoEnd - chronoStart).count() / 1000.0;
 
     if (haveTimestamps)
     {
-      uint64_t ts[2] = {0, 0};
-      if (vkGetQueryPoolResults(dev.device, queryPool, 0, 2,
-                                sizeof(ts), ts, sizeof(uint64_t),
+      uint64_t gpuStart = 0;
+      if (vkGetQueryPoolResults(dev.device, queryPool, 0, 1,
+                                sizeof(gpuStart), &gpuStart, sizeof(uint64_t),
                                 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
       {
-        totalKernelUs += (double)(ts[1] - ts[0]) * timestampPeriodNs / 1000.0;
+        // Map GPU timestamp into host nanosecond domain via the calibrated
+        // pair, then subtract host-submit time captured just before
+        // vkQueueSubmit returned.
+        double gpuDeltaNs = (double)((int64_t)gpuStart - (int64_t)gpuCalib) * (double)timestampPeriodNs;
+        double hostStartNs = (double)hostCalib + gpuDeltaNs;
+        double dispatchNs  = hostStartNs - (double)hostSubmit;
+        if (dispatchNs > 0)
+        {
+          totalDispatchUs += dispatchNs / 1000.0;
+          dispatchSamples++;
+        }
       }
     }
   }
 
-  double avgRoundTripUs = totalRoundTripUs / static_cast<double>(iters);
-  double avgKernelUs    = totalKernelUs    / static_cast<double>(iters);
-  // One-way dispatch latency: subtract the GPU-side kernel time from
-  // round-trip and split the remainder symmetrically between submit and
-  // signal-back paths.  When timestamps are unavailable, fall back to
-  // round-trip / 2 (still in the same ballpark for a 1x1 no-op).
-  double avgDispatchUs = haveTimestamps
-      ? std::max(0.0, (avgRoundTripUs - avgKernelUs) / 2.0)
-      : avgRoundTripUs / 2.0;
-
-  log->print(TAB TAB "noop : ");
-  log->print((float)avgDispatchUs);
+  double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
+  log->print(TAB TAB "dispatch  : ");
+  if (dispatchSamples > 0)
+  {
+    float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
+    log->print(dispatchUs);
+    log->print(NEWLINE);
+    log->xmlRecord("dispatch", dispatchUs);
+  }
+  else
+  {
+    log->print("skipped (needs VK_EXT_calibrated_timestamps)" NEWLINE);
+  }
+  log->print(TAB TAB "roundtrip : ");
+  log->print((float)avgRoundtripUs);
   log->print(NEWLINE);
-  log->xmlRecord("noop", (float)avgDispatchUs);
+  log->xmlRecord("roundtrip", (float)avgRoundtripUs);
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
   if (queryPool != VK_NULL_HANDLE)

@@ -45,6 +45,7 @@ struct vk_device_info_t {
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
+  bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
 
   // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
   // to gate individual coopmat dtype tests.  Each flag means "a subgroup-
