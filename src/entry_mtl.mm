@@ -8,7 +8,6 @@ void MetalPeak::applyOptions(const CliOptions &opts)
   forceIters     = opts.forceIters;
   specifiedIters = opts.iters;
   warmupCount    = opts.warmupCount;
-  listDevices    = opts.listDevices;
   deviceIndex    = opts.mtlDeviceIndex;
   enabledTests   = opts.enabledTests;
 

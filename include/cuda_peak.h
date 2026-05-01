@@ -134,7 +134,6 @@ public:
   unsigned int warmupCount;
   unsigned int specifiedIters;
   bool forceIters;
-  bool listDevices;
   int  deviceIndex;  // -1 = run all
 
   std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;

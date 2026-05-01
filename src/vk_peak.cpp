@@ -1,6 +1,7 @@
 #ifdef ENABLE_VULKAN
 
 #include <vk_peak.h>
+#include <inventory.h>
 #include <cstring>
 #include <sstream>
 #include <chrono>
@@ -473,7 +474,7 @@ uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags
 // ---------------------------------------------------------------------------
 
 vkPeak::vkPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
+  : warmupCount(2), specifiedIters(0), forceIters(false),
     deviceIndex(-1),
     instance(VK_NULL_HANDLE)
 {
@@ -607,25 +608,6 @@ int vkPeak::runAll()
   {
     log->print("Vulkan: failed to create instance or no devices found" NEWLINE);
     return -1;
-  }
-
-  if (listDevices)
-  {
-    for (size_t i = 0; i < physicalDevices.size(); i++)
-    {
-      VkPhysicalDeviceProperties props;
-      vkGetPhysicalDeviceProperties(physicalDevices[i], &props);
-      const char *typeStr = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ? "Discrete GPU" :
-                            (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) ? "Integrated GPU" :
-                            (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? "CPU" : "Other";
-      std::stringstream ss;
-      ss << "  Vulkan Device " << i << ": " << props.deviceName << " [" << typeStr << "]" << NEWLINE
-         << "    API       : " << VK_VERSION_MAJOR(props.apiVersion) << "."
-         << VK_VERSION_MINOR(props.apiVersion) << "."
-         << VK_VERSION_PATCH(props.apiVersion) << NEWLINE;
-      log->print(ss.str());
-    }
-    return 0;
   }
 
   // Mirror the OpenCL context stack so logger_android recordMetric() can
@@ -2085,6 +2067,50 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
 
   log->xmlCloseTag();
   return 0;
+}
+
+// Free-function enumeration used by --list-devices (desktop) and the Android
+// JNI surface. Spins up a throwaway VkInstance just long enough to read
+// physical-device properties, then tears it down.
+BackendInventory enumerateVulkan()
+{
+  BackendInventory inv;
+  inv.backend = "Vulkan";
+
+  vkPeak vk;
+  if (!vk.initInstance())
+    return inv;  // available stays false
+
+  inv.available = !vk.physicalDevices.empty();
+
+  InventoryPlatform plat;
+  plat.index = 0;
+  plat.name  = "Vulkan";
+
+  for (size_t i = 0; i < vk.physicalDevices.size(); i++)
+  {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(vk.physicalDevices[i], &props);
+
+    InventoryDevice dev;
+    dev.index   = static_cast<int>(i);
+    dev.name    = props.deviceName;
+    dev.typeStr = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)   ? "Discrete GPU"
+                : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) ? "Integrated GPU"
+                : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)            ? "CPU"
+                                                                               : "Other";
+    {
+      std::ostringstream api;
+      api << VK_VERSION_MAJOR(props.apiVersion) << "."
+          << VK_VERSION_MINOR(props.apiVersion) << "."
+          << VK_VERSION_PATCH(props.apiVersion);
+      dev.apiVersion = api.str();
+    }
+    plat.devices.push_back(std::move(dev));
+  }
+
+  inv.platforms.push_back(std::move(plat));
+  return inv;
 }
 
 #endif // ENABLE_VULKAN

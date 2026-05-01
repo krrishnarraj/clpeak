@@ -61,9 +61,6 @@ public:
   // Baseline compare
   std::string compareFileName;
 
-  // List devices mode
-  bool listDevices;
-
   std::unique_ptr<logger> log;
 
   clPeak();

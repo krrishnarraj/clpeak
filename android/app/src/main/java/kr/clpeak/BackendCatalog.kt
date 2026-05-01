@@ -2,7 +2,7 @@ package kr.clpeak
 
 import org.json.JSONObject
 
-data class DeviceRef(val index: Int, val name: String)
+data class DeviceRef(val index: Int, val name: String, val type: String = "")
 
 data class OpenClPlatformInfo(
     val index: Int,
@@ -39,56 +39,76 @@ data class BackendCatalog(
             VulkanCatalog(available = false, devices = emptyList())
         )
 
+        /**
+         * Parses the JSON shape emitted by inventoryToJson() in src/inventory.cpp:
+         * `{"backends":[{"name":"OpenCL","available":bool,"platforms":[
+         *    {"index":i,"name":s,"devices":[{"index":i,"name":s,"type":s,...}]}
+         *  ]}, {"name":"Vulkan", ...}]}`.
+         */
         fun fromJson(json: String): BackendCatalog {
             val root = JSONObject(json)
+            val backends = root.optJSONArray("backends") ?: return EMPTY
 
-            val cl = root.optJSONObject("opencl")
-            val opencl = if (cl != null) {
-                val plats = cl.optJSONArray("platforms")
-                val platforms = mutableListOf<OpenClPlatformInfo>()
-                if (plats != null) {
-                    for (i in 0 until plats.length()) {
-                        val p = plats.getJSONObject(i)
-                        val devs = p.optJSONArray("devices")
-                        val deviceList = mutableListOf<DeviceRef>()
-                        if (devs != null) {
-                            for (j in 0 until devs.length()) {
-                                val d = devs.getJSONObject(j)
-                                deviceList.add(DeviceRef(d.getInt("index"), d.getString("name")))
-                            }
-                        }
-                        platforms.add(OpenClPlatformInfo(
-                            index = p.getInt("index"),
-                            name = p.getString("name"),
-                            devices = deviceList
-                        ))
-                    }
+            var opencl = OpenClCatalog(false, emptyList())
+            var vulkan = VulkanCatalog(false, emptyList())
+
+            for (i in 0 until backends.length()) {
+                val b = backends.getJSONObject(i)
+                when (b.optString("name")) {
+                    "OpenCL" -> opencl = parseOpenCl(b)
+                    "Vulkan" -> vulkan = parseVulkan(b)
                 }
-                OpenClCatalog(cl.optBoolean("available", false), platforms)
-            } else {
-                OpenClCatalog(false, emptyList())
             }
-
-            val vk = root.optJSONObject("vulkan")
-            val vulkan = if (vk != null) {
-                val devs = vk.optJSONArray("devices")
-                val deviceList = mutableListOf<VulkanDevice>()
-                if (devs != null) {
-                    for (i in 0 until devs.length()) {
-                        val d = devs.getJSONObject(i)
-                        deviceList.add(VulkanDevice(
-                            index = d.getInt("index"),
-                            name = d.getString("name"),
-                            type = d.optString("type", "other")
-                        ))
-                    }
-                }
-                VulkanCatalog(vk.optBoolean("available", false), deviceList)
-            } else {
-                VulkanCatalog(false, emptyList())
-            }
-
             return BackendCatalog(opencl, vulkan)
+        }
+
+        private fun parseOpenCl(b: JSONObject): OpenClCatalog {
+            val platforms = mutableListOf<OpenClPlatformInfo>()
+            val plats = b.optJSONArray("platforms")
+            if (plats != null) {
+                for (i in 0 until plats.length()) {
+                    val p = plats.getJSONObject(i)
+                    val devs = p.optJSONArray("devices")
+                    val deviceList = mutableListOf<DeviceRef>()
+                    if (devs != null) {
+                        for (j in 0 until devs.length()) {
+                            val d = devs.getJSONObject(j)
+                            deviceList.add(DeviceRef(
+                                index = d.getInt("index"),
+                                name  = d.getString("name"),
+                                type  = d.optString("type", "")
+                            ))
+                        }
+                    }
+                    platforms.add(OpenClPlatformInfo(
+                        index = p.getInt("index"),
+                        name = p.getString("name"),
+                        devices = deviceList
+                    ))
+                }
+            }
+            return OpenClCatalog(b.optBoolean("available", false), platforms)
+        }
+
+        private fun parseVulkan(b: JSONObject): VulkanCatalog {
+            // Vulkan inventory has a single synthetic platform; flatten its devices.
+            val devices = mutableListOf<VulkanDevice>()
+            val plats = b.optJSONArray("platforms")
+            if (plats != null) {
+                for (i in 0 until plats.length()) {
+                    val p = plats.getJSONObject(i)
+                    val devs = p.optJSONArray("devices") ?: continue
+                    for (j in 0 until devs.length()) {
+                        val d = devs.getJSONObject(j)
+                        devices.add(VulkanDevice(
+                            index = d.getInt("index"),
+                            name  = d.getString("name"),
+                            type  = d.optString("type", "other")
+                        ))
+                    }
+                }
+            }
+            return VulkanCatalog(b.optBoolean("available", false), devices)
         }
     }
 }

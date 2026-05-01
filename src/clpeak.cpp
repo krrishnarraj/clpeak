@@ -1,4 +1,5 @@
 #include <clpeak.h>
+#include <inventory.h>
 #include <options.h>
 #include <cstring>
 
@@ -46,8 +47,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedIters(0),
                    warmupCount(2),
-                   enableJson(false), enableCsv(false),
-                   listDevices(false)
+                   enableJson(false), enableCsv(false)
 {
   enableAll(); // all tests on by default
 }
@@ -68,7 +68,6 @@ void clPeak::applyOptions(const CliOptions &opts)
   warmupCount = opts.warmupCount;
 
   useEventTimer = opts.useEventTimer;
-  listDevices = opts.listDevices;
 
   // Test selection: copy bitset directly.
   enabledTests = opts.enabledTests;
@@ -93,42 +92,6 @@ int clPeak::runAll()
   {
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
-
-    // --list-devices mode: print platforms/devices and exit
-    if (listDevices)
-    {
-      for (size_t p = 0; p < platforms.size(); p++)
-      {
-        std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
-        trimString(platformName);
-        std::cout << "Platform " << p << ": " << platformName << "\n";
-
-        cl_context_properties cps[3] = {
-            CL_CONTEXT_PLATFORM,
-            (cl_context_properties)(platforms[p])(),
-            0};
-        cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
-        std::vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-
-        for (size_t d = 0; d < devices.size(); d++)
-        {
-          device_info_t info = getDeviceInfo(devices[d]);
-          const char *typeStr = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU" : (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
-                                                                                                                        : "Other";
-          std::cout << "  Device " << d << ": " << info.deviceName
-                    << " [" << typeStr << "]"
-                    << "\n";
-          std::cout << "    Driver    : " << info.driverVersion << "\n";
-          std::cout << "    CUs       : " << info.numCUs << "\n";
-          std::cout << "    Clock     : " << info.maxClockFreq << " MHz\n";
-          std::cout << "    Global mem: " << (info.maxGlobalSize / (1024 * 1024)) << " MB\n";
-          std::cout << "    Max alloc : " << (info.maxAllocSize / (1024 * 1024)) << " MB\n";
-          std::cout << "    FP16      : " << (info.halfSupported ? "yes" : "no") << "\n";
-          std::cout << "    FP64      : " << (info.doubleSupported ? "yes" : "no") << "\n";
-        }
-      }
-      return 0;
-    }
 
     log->print(NEWLINE "=== OpenCL backend ===" NEWLINE);
     log->xmlOpenTag("clpeak");
@@ -540,4 +503,70 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
 
   return 0;
+}
+
+// Free-function enumeration used by --list-devices (desktop) and the Android
+// JNI surface. Mirrors the device-listing logic that previously lived inside
+// runAll() but populates a backend-neutral structure instead of printing.
+BackendInventory enumerateOpenCL()
+{
+  BackendInventory inv;
+  inv.backend = "OpenCL";
+
+  try
+  {
+    std::vector<cl::Platform> platforms;
+    cl::Platform::get(&platforms);
+    inv.available = !platforms.empty();
+
+    for (size_t p = 0; p < platforms.size(); p++)
+    {
+      InventoryPlatform plat;
+      plat.index = static_cast<int>(p);
+      plat.name  = platforms[p].getInfo<CL_PLATFORM_NAME>();
+      trimString(plat.name);
+
+      try
+      {
+        cl_context_properties cps[3] = {
+            CL_CONTEXT_PLATFORM,
+            (cl_context_properties)(platforms[p])(),
+            0};
+        cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
+        std::vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+
+        for (size_t d = 0; d < devices.size(); d++)
+        {
+          device_info_t info = getDeviceInfo(devices[d]);
+          InventoryDevice dev;
+          dev.index           = static_cast<int>(d);
+          dev.name            = info.deviceName;
+          dev.typeStr         = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU"
+                              : (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
+                                                                       : "Other";
+          dev.driverVersion   = info.driverVersion;
+          dev.numComputeUnits = info.numCUs;
+          dev.maxClockMHz     = info.maxClockFreq;
+          dev.globalMemBytes  = info.maxGlobalSize;
+          dev.maxAllocBytes   = info.maxAllocSize;
+          dev.hasFp16         = info.halfSupported;
+          dev.hasFp64         = info.doubleSupported;
+          plat.devices.push_back(std::move(dev));
+        }
+      }
+      catch (cl::Error &)
+      {
+        // No usable devices on this platform — leave plat.devices empty.
+      }
+
+      inv.platforms.push_back(std::move(plat));
+    }
+  }
+  catch (cl::Error &)
+  {
+    inv.available = false;
+    inv.platforms.clear();
+  }
+
+  return inv;
 }

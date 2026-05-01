@@ -13,7 +13,8 @@
 #include <logger.h>
 #include <clpeak.h>      // Benchmark enum
 
-struct CliOptions; // forward decl
+struct CliOptions;       // forward decl
+struct BackendInventory; // forward decl
 
 // Convenience: defined if any cooperative-matrix shader compiled.  Used by
 // vk_peak.cpp to gate extension / feature enablement and dispatch.
@@ -165,7 +166,6 @@ public:
   unsigned int warmupCount;
   unsigned int specifiedIters;
   bool forceIters;
-  bool listDevices;
   int  deviceIndex; // -1 = run all
 
   std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
@@ -201,6 +201,10 @@ public:
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
+  // enumerateVulkan() in vk_peak.cpp drives a throwaway vkPeak through
+  // initInstance() to read physicalDevices for --list-devices / Android JNI.
+  friend BackendInventory enumerateVulkan();
+
   VkInstance instance;
   std::vector<VkPhysicalDevice> physicalDevices;
 

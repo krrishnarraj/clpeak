@@ -8,7 +8,6 @@ void vkPeak::applyOptions(const CliOptions &opts)
   forceIters     = opts.forceIters;
   specifiedIters = opts.iters;
   warmupCount    = opts.warmupCount;
-  listDevices    = opts.listDevices;
   deviceIndex    = opts.vkDeviceIndex;
   enabledTests   = opts.enabledTests;
 

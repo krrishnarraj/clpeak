@@ -8,7 +8,6 @@ void CudaPeak::applyOptions(const CliOptions &opts)
   forceIters     = opts.forceIters;
   specifiedIters = opts.iters;
   warmupCount    = opts.warmupCount;
-  listDevices    = opts.listDevices;
   deviceIndex    = opts.cudaDeviceIndex;
   enabledTests   = opts.enabledTests;
 

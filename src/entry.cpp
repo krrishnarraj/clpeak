@@ -1,5 +1,8 @@
 #include <clpeak.h>
+#include <inventory.h>
 #include <options.h>
+
+#include <iostream>
 
 #ifdef ENABLE_VULKAN
 #include <vk_peak.h>
@@ -15,6 +18,13 @@ int main(int argc, char **argv)
 {
   CliOptions opts;
   parseCliOptions(argc, argv, opts);
+
+  // --list-devices: print every backend's inventory via the shared enumerator.
+  if (opts.listDevices)
+  {
+    printInventory(enumerateAllBackends(opts), std::cout);
+    return 0;
+  }
 
   int clStatus = 0;
   if (!opts.skipOpenCL)

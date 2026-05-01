@@ -1,6 +1,7 @@
 #ifdef ENABLE_METAL
 
 #include <mtl_peak.h>
+#include <inventory.h>
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
 #include <vector>
@@ -161,7 +162,7 @@ static id<MTLComputePipelineState> getPipeline(MetalDevice &dev, const char *src
 // ---------------------------------------------------------------------------
 
 MetalPeak::MetalPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
+  : warmupCount(2), specifiedIters(0), forceIters(false),
     deviceIndex(-1),
     impl(nullptr)
 {
@@ -220,18 +221,6 @@ int MetalPeak::runAll()
     {
         log->print("Metal: no devices found" NEWLINE);
         return -1;
-    }
-
-    if (listDevices)
-    {
-        for (NSUInteger i = 0; i < impl->allDevices.count; i++)
-        {
-            id<MTLDevice> d = impl->allDevices[i];
-            std::stringstream ss;
-            ss << "  Metal Device " << i << ": " << [d.name UTF8String] << NEWLINE;
-            log->print(ss.str());
-        }
-        return 0;
     }
 
     log->xmlOpenTag("clpeak");
@@ -876,6 +865,39 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 
     log->xmlCloseTag();
     return 0;
+}
+
+// Free-function enumeration used by --list-devices and the Android JNI surface.
+// Mirrors the device-discovery logic at the top of MetalPeak::runAll() but
+// stops at name extraction.
+BackendInventory enumerateMetal()
+{
+    BackendInventory inv;
+    inv.backend = "Metal";
+
+    NSArray<id<MTLDevice>> *devs = MTLCopyAllDevices();
+    if (devs.count == 0)
+    {
+        id<MTLDevice> def = MTLCreateSystemDefaultDevice();
+        if (def) devs = @[def];
+    }
+    if (devs.count == 0) return inv;
+
+    inv.available = true;
+    InventoryPlatform plat;
+    plat.index = 0;
+    plat.name  = "Metal";
+
+    for (NSUInteger i = 0; i < devs.count; i++)
+    {
+        InventoryDevice dev;
+        dev.index = static_cast<int>(i);
+        dev.name  = [devs[i].name UTF8String];
+        plat.devices.push_back(std::move(dev));
+    }
+
+    inv.platforms.push_back(std::move(plat));
+    return inv;
 }
 
 #endif // ENABLE_METAL

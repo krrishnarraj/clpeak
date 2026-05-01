@@ -1,6 +1,7 @@
 #ifdef ENABLE_CUDA
 
 #include <cuda_peak.h>
+#include <inventory.h>
 #include <nvrtc.h>
 #include <cstring>
 #include <cstdio>
@@ -202,7 +203,7 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
 // ---------------------------------------------------------------------------
 
 CudaPeak::CudaPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
+  : warmupCount(2), specifiedIters(0), forceIters(false),
     deviceIndex(-1),
     initialised(false)
 {
@@ -272,23 +273,6 @@ int CudaPeak::runAll()
   {
     log->print("CUDA: no devices found" NEWLINE);
     return -1;
-  }
-
-  if (listDevices)
-  {
-    for (int idx : devIndices)
-    {
-      CUdevice d; cuDeviceGet(&d, idx);
-      char name[256] = {0};
-      cuDeviceGetName(name, sizeof(name), d);
-      int maj = 0, min = 0;
-      cuDeviceGetAttribute(&maj, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, d);
-      cuDeviceGetAttribute(&min, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, d);
-      std::stringstream ss;
-      ss << "  CUDA Device " << idx << ": " << name << " [sm_" << maj << min << "]" << NEWLINE;
-      log->print(ss.str());
-    }
-    return 0;
   }
 
   // Mirror the OpenCL/Vulkan logger context stack (clpeak > platform > device).
@@ -1167,6 +1151,43 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 
   log->xmlCloseTag();
   return 0;
+}
+
+// Free-function enumeration used by --list-devices and the Android JNI surface.
+// Uses the static driver API directly — no CudaPeak instance required.
+BackendInventory enumerateCuda()
+{
+  BackendInventory inv;
+  inv.backend = "CUDA";
+
+  if (cuInit(0) != CUDA_SUCCESS) return inv;
+  int n = 0;
+  if (cuDeviceGetCount(&n) != CUDA_SUCCESS || n == 0) return inv;
+  inv.available = true;
+
+  InventoryPlatform plat;
+  plat.index = 0;
+  plat.name  = "CUDA";
+
+  for (int i = 0; i < n; i++)
+  {
+    CUdevice d;
+    if (cuDeviceGet(&d, i) != CUDA_SUCCESS) continue;
+    char name[256] = {0};
+    cuDeviceGetName(name, sizeof(name), d);
+    int maj = 0, min = 0;
+    cuDeviceGetAttribute(&maj, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, d);
+    cuDeviceGetAttribute(&min, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, d);
+
+    InventoryDevice dev;
+    dev.index   = i;
+    dev.name    = name;
+    dev.typeStr = "sm_" + std::to_string(maj) + std::to_string(min);
+    plat.devices.push_back(std::move(dev));
+  }
+
+  inv.platforms.push_back(std::move(plat));
+  return inv;
 }
 
 #endif // ENABLE_CUDA
