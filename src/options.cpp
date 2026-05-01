@@ -90,6 +90,7 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_METAL
     "\n  --simdgroup-matrix          simdgroup_matrix tensor engine  [Metal]"
+    "\n  --mps-gemm                  MPS GEMM peak (fp32/fp16/bf16)           [Metal]"
 #endif
     "\n"
     "\n OPENCL-SPECIFIC:"
@@ -124,6 +125,7 @@ static const TestFlag testFlags[] = {
   {"--coop-matrix",         Benchmark::CoopMatrix},
   {"--wmma",                Benchmark::Wmma},
   {"--simdgroup-matrix",    Benchmark::SimdgroupMatrix},
+  {"--mps-gemm",            Benchmark::MpsGemm},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 

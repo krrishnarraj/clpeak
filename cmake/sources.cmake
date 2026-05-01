@@ -40,6 +40,7 @@ set(CLPEAK_CUDA_SOURCES
 # Macs but the runtime refuses non-Apple-silicon devices.
 set(CLPEAK_MTL_SOURCES
     ${CLPEAK_ROOT}/src/mtl_peak.mm
+    ${CLPEAK_ROOT}/src/mtl_blas.mm
     ${CLPEAK_ROOT}/src/entry_mtl.mm
 )
 

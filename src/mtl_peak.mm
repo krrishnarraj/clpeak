@@ -4,6 +4,7 @@
 #include <inventory.h>
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
+#import <IOKit/IOKitLib.h>
 #include <vector>
 #include <string>
 #include <sstream>
@@ -87,6 +88,46 @@ bool MetalDevice::init(int devIndex)
     info.fp16Supported                = info.isAppleSilicon;
     info.simdgroupMatrixFP16Supported = info.appleFamily >= 7;
     info.simdgroupMatrixBF16Supported = info.appleFamily >= 9;
+
+    // MPSGraph bf16 dtype was added in macOS 14 (Sonoma) and only lights up
+    // on Apple9+ (M3); below that it falls back to a slow software path.
+    info.mpsGraphBF16Supported = false;
+    if (@available(macOS 14.0, *))
+        info.mpsGraphBF16Supported = info.appleFamily >= 9;
+
+    // Best-effort GPU core count via IORegistry (Apple silicon exposes
+    // "gpu-core-count" on the AGXAccelerator service).  Used to scale the
+    // GEMM dim so similar-class GPUs land in similar wall-clock windows.
+    info.gpuCoreCount = 0;
+#if __has_include(<IOKit/IOKitLib.h>)
+    {
+        io_iterator_t it = 0;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault,
+                                         IOServiceMatching("AGXAccelerator"),
+                                         &it) == KERN_SUCCESS)
+        {
+            io_object_t obj;
+            while ((obj = IOIteratorNext(it)) != 0)
+            {
+                CFTypeRef p = IORegistryEntryCreateCFProperty(obj,
+                    CFSTR("gpu-core-count"), kCFAllocatorDefault, 0);
+                if (p)
+                {
+                    if (CFGetTypeID(p) == CFNumberGetTypeID())
+                    {
+                        int v = 0;
+                        CFNumberGetValue((CFNumberRef)p, kCFNumberIntType, &v);
+                        if (v > 0) info.gpuCoreCount = (uint32_t)v;
+                    }
+                    CFRelease(p);
+                }
+                IOObjectRelease(obj);
+                if (info.gpuCoreCount) break;
+            }
+            IOObjectRelease(it);
+        }
+    }
+#endif
 
     return true;
 }
@@ -263,6 +304,12 @@ int MetalPeak::runAll()
         log->print(TAB "Working set   : ");
         log->print((unsigned int)(dev.info.recommendedMaxWorkingSetSize / (1024 * 1024)));
         log->print(" MB" NEWLINE);
+        if (dev.info.gpuCoreCount)
+        {
+            log->print(TAB "GPU cores     : ");
+            log->print((unsigned int)dev.info.gpuCoreCount);
+            log->print(NEWLINE);
+        }
 
         log->xmlOpenTag("device");
         log->xmlAppendAttribs("name", dev.info.deviceName);
@@ -278,6 +325,7 @@ int MetalPeak::runAll()
         if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
         if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
         if (isTestEnabled(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
+        if (isTestEnabled(Benchmark::MpsGemm))           runMpsGemm(dev, cfg);
         if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
         if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
         if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);

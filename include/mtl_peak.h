@@ -33,7 +33,9 @@ struct mtl_device_info_t {
   bool fp16Supported;             // always true on Apple silicon
   bool simdgroupMatrixFP16Supported; // M1+ (Apple7)
   bool simdgroupMatrixBF16Supported; // M3+ (Apple9)
+  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: macOS 14 + Apple9 (M3)
   uint32_t appleFamily;           // largest MTLGPUFamilyApple<N> the device supports
+  uint32_t gpuCoreCount;          // GPU core count (e.g. 8 on M1 base, 32 on M1 Max). 0 = unknown.
 };
 
 class MetalDevice
@@ -119,6 +121,7 @@ public:
   int runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
   int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
+  int runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg);
