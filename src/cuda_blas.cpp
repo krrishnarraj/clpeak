@@ -7,8 +7,16 @@
 // are excluded from timing; we measure only the kernel launch + execution
 // window via cuEvents.
 //
-// Iteration 1 (this file): fp32 only.  Subsequent iterations add fp16, bf16,
-// tf32, fp8 e4m3/e5m2, int8, int4.
+// Note on consumer Blackwell (RTX 50 series, sm_120):
+// NVIDIA caps several tensor-core dtypes on consumer parts as product
+// segmentation vs the datacenter dies (B100 / B200).  Measured on RTX 5060:
+//   * tf32 ~= fp32 (no tensor-core boost; TF32 runs on the regular ALUs)
+//   * bf16 = 1/2 of fp16
+//   * fp16 = full tensor-core rate
+//   * fp8  = 2x fp16
+// This is intentional, not a kernel-selection bug -- the numbers are at peak
+// once the dtype/algo combo is correct.  Don't try to "fix" bf16 ~ 1/2 fp16
+// on these cards.
 
 #include <cuda_peak.h>
 #include <cublasLt.h>
@@ -320,11 +328,13 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // -----------------------------------------------------------------------
 
     // Scale-type scalars.  Bit widths MUST match the cublasLtMatmul scaleType:
-    //   * R_32F path -> float
-    //   * R_16F path -> half (16-bit; we use uint16_t with the IEEE half
-    //                  bit pattern: 0x3c00 = 1.0, 0x0000 = 0.0)
-    const float    alpha32 = 1.0f, beta32 = 0.0f;
-    const uint16_t alpha16 = 0x3c00, beta16 = 0x0000;
+    //   * R_32F  -> float
+    //   * R_16F  -> half (16-bit; we use uint16_t with the IEEE half bit
+    //               pattern: 0x3c00 = 1.0, 0x0000 = 0.0)
+    //   * R_32I  -> int32
+    const float    alpha32   = 1.0f,  beta32   = 0.0f;
+    const uint16_t alpha16   = 0x3c00, beta16  = 0x0000;
+    const int32_t  alpha32i  = 1,     beta32i  = 0;
 
     // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
     // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
@@ -351,6 +361,33 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     if (dev.info.bf16Supported)
         runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+
+    // fp8 (e4m3, e5m2): cuBLASLt's fp8 matmul requires TN layout (the only
+    // layout the fp8 tensor-core kernels support); inputs are 1-byte fp8,
+    // accumulator + output are bf16, scale is fp32.  Gated on cc >= 8.9
+    // (Ada / Hopper / Blackwell).  RTX 5060 (sm_120) supports both.
+    if (dev.info.fp8MmaSupported)
+    {
+        runVariant("fp8_e4m3", CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
+                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+        runVariant("fp8_e5m2", CUDA_R_8F_E5M2, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
+                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+    }
+
+    // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
+    // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores; RTX 5060 ✓.
+    if (dev.info.int8GemmSupported)
+        runVariant("int8", CUDA_R_8I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
+                   CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
+
+    // int4: packed 4-bit signed inputs, int32 accumulator + output.  cc >= 9.0
+    // (Hopper) for the IMMA int4 path; RTX 5060 (sm_120) ✓.  cuBLASLt may
+    // refuse this on some toolkit versions even when the device claims sm_120
+    // -- the algo heuristic returning 0 results is the canonical "unsupported"
+    // signal and we report that line cleanly.
+    if (dev.info.int4GemmSupported)
+        runVariant("int4", CUDA_R_4I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
+                   CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
     cublasLtDestroy(lt);
     cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
