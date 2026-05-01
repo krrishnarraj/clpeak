@@ -108,7 +108,7 @@ endif()
 if(CUDAToolkit_FOUND)
   message(STATUS "CUDA Toolkit found (${CUDAToolkit_VERSION}) -- CUDA backend enabled")
   target_sources(clpeak PRIVATE ${CLPEAK_CUDA_SOURCES})
-  target_link_libraries(clpeak CUDA::cuda_driver CUDA::nvrtc)
+  target_link_libraries(clpeak CUDA::cuda_driver CUDA::nvrtc CUDA::cublasLt)
   target_include_directories(clpeak PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
   target_compile_definitions(clpeak PRIVATE ENABLE_CUDA)
   # NVRTC needs the toolkit include dir to resolve <mma.h>, <cuda_fp16.h>

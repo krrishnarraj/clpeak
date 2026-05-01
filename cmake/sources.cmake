@@ -32,6 +32,7 @@ set(CLPEAK_VK_SOURCES
 # embedded as C++ string literals via embed_cuda_kernels().
 set(CLPEAK_CUDA_SOURCES
     ${CLPEAK_ROOT}/src/cuda_peak.cpp
+    ${CLPEAK_ROOT}/src/cuda_blas.cpp
     ${CLPEAK_ROOT}/src/entry_cuda.cpp
 )
 

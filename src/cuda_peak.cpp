@@ -81,6 +81,9 @@ bool CudaDevice::init(int devIndex)
   info.wmmaSupported     = (info.major >= 7);
   info.wmmaInt8Supported = (info.major >  7) || (info.major == 7 && info.minor >= 2);
   info.fp8MmaSupported   = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
+  info.tf32GemmSupported = (info.major >= 8);
+  info.int8GemmSupported = (info.major >  7) || (info.major == 7 && info.minor >= 5);
+  info.int4GemmSupported = (info.major >= 9);
 
   // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
   // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
@@ -328,6 +331,7 @@ int CudaPeak::runAll()
     if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
     if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
     if (isTestEnabled(Benchmark::Wmma))              runWmma(dev, cfg);
+    if (isTestEnabled(Benchmark::Cublas))            runCublas(dev, cfg);
     if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
     if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
     if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);

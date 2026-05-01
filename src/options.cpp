@@ -87,6 +87,7 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CUDA
     "\n  --wmma                      WMMA tensor cores               [CUDA]"
+    "\n  --cublas                    cuBLASLt GEMM peak (fp32/tf32/fp16/bf16/fp8/int8/int4) [CUDA]"
 #endif
 #ifdef ENABLE_METAL
     "\n  --simdgroup-matrix          simdgroup_matrix tensor engine  [Metal]"
@@ -124,6 +125,7 @@ static const TestFlag testFlags[] = {
   {"--compute-bf16",        Benchmark::ComputeBF16},
   {"--coop-matrix",         Benchmark::CoopMatrix},
   {"--wmma",                Benchmark::Wmma},
+  {"--cublas",              Benchmark::Cublas},
   {"--simdgroup-matrix",    Benchmark::SimdgroupMatrix},
   {"--mps-gemm",            Benchmark::MpsGemm},
 };
