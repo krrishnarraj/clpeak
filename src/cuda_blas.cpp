@@ -122,21 +122,14 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 {
     (void)cfg;
 
-    log->print(NEWLINE TAB "cuBLASLt GEMM peak (TFLOPS)" NEWLINE);
-    log->xmlOpenTag("cublas");
-
     const uint32_t D = pickGemmDim(dev.info);
     const uint32_t M = D, N = D, K = D;
     const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
-    {
-        std::stringstream ss; ss << M << "x" << N << "x" << K;
-        log->xmlAppendAttribs("dim", ss.str());
-    }
     // Layout per variant: fp32 (CUDA cores) uses NN; tensor-core dtypes use TN
     // because that keeps the K axis contiguous for both A and B, matching the
     // MMA load pattern.
-    log->xmlAppendAttribs("workspace", "256MB");
+    std::stringstream dimStr; dimStr << M << "x" << N << "x" << K;
 
     // -----------------------------------------------------------------------
     // Allocate persistent buffers (A, B, C, workspace).  Worst-case input
@@ -159,7 +152,6 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         if (dB)  cuMemFree(dB);
         if (dC)  cuMemFree(dC);
         if (dWS) cuMemFree(dWS);
-        log->xmlCloseTag();
         return -1;
     }
 
@@ -178,7 +170,6 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     {
         log->print(TAB TAB "cublasLtCreate failed" NEWLINE);
         cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
-        log->xmlCloseTag();
         return -1;
     }
 
@@ -349,6 +340,14 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     const uint16_t alpha16   = 0x3c00, beta16  = 0x0000;
     const int32_t  alpha32i  = 1,     beta32i  = 0;
 
+    // -----------------------------------------------------------------------
+    // Floating-point variants -- reported in TFLOPS.
+    // -----------------------------------------------------------------------
+    log->print(NEWLINE TAB "cuBLASLt GEMM peak (TFLOPS)" NEWLINE);
+    log->xmlOpenTag("cublas-tflops");
+    log->xmlAppendAttribs("dim", dimStr.str());
+    log->xmlAppendAttribs("workspace", "256MB");
+
     // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
     // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
     // tuned kernel set for fp32 + TN.
@@ -394,32 +393,41 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     {
         runVariant("fp8_e4m3", CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
-        // A=E5M2, B=E4M3 mixed (cuBLASLt does not expose E5M2 x E5M2 GEMM).
-        // Hardware throughput is identical to E4M3 x E4M3; the asymmetry is
-        // an algorithm-coverage choice, not a tensor-core limit.
         runVariantAB("fp8_e5m2", CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
                      CUBLAS_COMPUTE_32F, CUDA_R_32F,
                      &alpha32, &beta32, /*useTN=*/true);
     }
 
+    log->xmlCloseTag(); // cublas-tflops
+
+    // -----------------------------------------------------------------------
+    // Integer variants -- reported in TOPS (numerically equivalent to TFLOPS;
+    // the unit just signals integer ops).
+    // -----------------------------------------------------------------------
+    log->print(NEWLINE TAB "cuBLASLt GEMM peak (TOPS)" NEWLINE);
+    log->xmlOpenTag("cublas-tops");
+    log->xmlAppendAttribs("dim", dimStr.str());
+    log->xmlAppendAttribs("workspace", "256MB");
+
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
-    // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores; RTX 5060 ✓.
+    // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.
     if (dev.info.int8GemmSupported)
         runVariant("int8", CUDA_R_8I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
     // int4: packed 4-bit signed inputs, int32 accumulator + output.  cc >= 9.0
-    // (Hopper) for the IMMA int4 path; RTX 5060 (sm_120) ✓.  cuBLASLt may
-    // refuse this on some toolkit versions even when the device claims sm_120
-    // -- the algo heuristic returning 0 results is the canonical "unsupported"
-    // signal and we report that line cleanly.
+    // (Hopper) for the IMMA int4 path.  cuBLASLt may refuse this even when the
+    // device's compute capability claims support -- the algo heuristic
+    // returning 0 results is the canonical "unsupported" signal and we report
+    // that line cleanly.
     if (dev.info.int4GemmSupported)
         runVariant("int4", CUDA_R_4I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
+    log->xmlCloseTag(); // cublas-tops
+
     cublasLtDestroy(lt);
     cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
-    log->xmlCloseTag(); // cublas
     return 0;
 }
 
