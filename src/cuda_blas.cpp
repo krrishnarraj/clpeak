@@ -125,8 +125,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         std::stringstream ss; ss << M << "x" << N << "x" << K;
         log->xmlAppendAttribs("dim", ss.str());
     }
-    log->xmlAppendAttribs("layout", "col-major-NN");
-    log->xmlAppendAttribs("workspace", "128MB");
+    log->xmlAppendAttribs("layout", "col-major-TN");
+    log->xmlAppendAttribs("workspace", "256MB");
 
     // -----------------------------------------------------------------------
     // Allocate persistent buffers (A, B, C, workspace).  Worst-case input
@@ -136,7 +136,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     const size_t aBytes = (size_t)M * K * sizeof(float);
     const size_t bBytes = (size_t)K * N * sizeof(float);
     const size_t cBytes = (size_t)M * N * sizeof(float);
-    const size_t wsBytes = 128ULL * 1024 * 1024; // 128 MB workspace
+    const size_t wsBytes = 256ULL * 1024 * 1024; // 256 MB workspace
 
     CUdeviceptr dA = 0, dB = 0, dC = 0, dWS = 0;
     if (cuMemAlloc(&dA, aBytes) != CUDA_SUCCESS ||
@@ -185,8 +185,15 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         cublasLtMatmulDesc_t opDesc = nullptr;
         cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
 
+        // TN layout: TRANSA=T, TRANSB=N.  Stored A is K x M col-major (so the
+        // K dimension is contiguous in memory), B is K x N col-major (K
+        // contiguous).  This is what tensor-core kernels are tuned around --
+        // both inputs have the inner-product axis on the contiguous side, which
+        // lets the kernel issue wide vector loads straight into the MMA pipe.
+        // Using NN here filtered out the fast tensor-core algos and dropped
+        // throughput by 2-4x on every dtype (measured on RTX 5060 sm_120).
         if (cublasLtMatmulDescCreate(&opDesc, computeType, scaleType) != CUBLAS_STATUS_SUCCESS ||
-            cublasLtMatrixLayoutCreate(&Adesc, abType, M, K, M) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Adesc, abType, K, M, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Bdesc, abType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, cType,  M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
@@ -199,9 +206,9 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
             return -1;
         }
 
-        // OP_N for both A and B (column-major NN), matching default cuBLAS layout.
+        cublasOperation_t opT = CUBLAS_OP_T;
         cublasOperation_t opN = CUBLAS_OP_N;
-        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT));
         cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
 
         // Heuristic: ask cuBLASLt to pick the best algo for our shape + dtype.
