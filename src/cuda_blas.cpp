@@ -182,12 +182,13 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         return -1;
     }
 
-    auto runVariant = [&](const char *label,
-                          cudaDataType_t abType, cudaDataType_t cType,
-                          cublasComputeType_t computeType,
-                          cudaDataType_t scaleType,
-                          const void *alphaPtr, const void *betaPtr,
-                          bool useTN) -> int
+    auto runVariantAB = [&](const char *label,
+                            cudaDataType_t aType, cudaDataType_t bType,
+                            cudaDataType_t cType,
+                            cublasComputeType_t computeType,
+                            cudaDataType_t scaleType,
+                            const void *alphaPtr, const void *betaPtr,
+                            bool useTN) -> int
     {
         log->print(TAB TAB);
         log->print(label);
@@ -206,9 +207,9 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         const uint64_t Acols = useTN ? M : K;
         const uint64_t Ald   = Arows;
         if (cublasLtMatmulDescCreate(&opDesc, computeType, scaleType) != CUBLAS_STATUS_SUCCESS ||
-            cublasLtMatrixLayoutCreate(&Adesc, abType, Arows, Acols, Ald) != CUBLAS_STATUS_SUCCESS ||
-            cublasLtMatrixLayoutCreate(&Bdesc, abType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
-            cublasLtMatrixLayoutCreate(&Cdesc, cType,  M, N, M) != CUBLAS_STATUS_SUCCESS)
+            cublasLtMatrixLayoutCreate(&Adesc, aType, Arows, Acols, Ald) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Bdesc, bType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Cdesc, cType, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
             log->print("descriptor create failed" NEWLINE);
             log->xmlRecord(label, 0.0f);
@@ -327,6 +328,18 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // the runner prints "unsupported on sm_<cc>".
     // -----------------------------------------------------------------------
 
+    // Convenience wrapper: most variants use the same dtype for A and B.
+    auto runVariant = [&](const char *label,
+                          cudaDataType_t abType, cudaDataType_t cType,
+                          cublasComputeType_t computeType,
+                          cudaDataType_t scaleType,
+                          const void *alphaPtr, const void *betaPtr,
+                          bool useTN) -> int
+    {
+        return runVariantAB(label, abType, abType, cType, computeType, scaleType,
+                            alphaPtr, betaPtr, useTN);
+    };
+
     // Scale-type scalars.  Bit widths MUST match the cublasLtMatmul scaleType:
     //   * R_32F  -> float
     //   * R_16F  -> half (16-bit; we use uint16_t with the IEEE half bit
@@ -362,16 +375,31 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
-    // fp8 (e4m3, e5m2): cuBLASLt's fp8 matmul requires TN layout (the only
-    // layout the fp8 tensor-core kernels support); inputs are 1-byte fp8,
+    // fp8: cuBLASLt's fp8 matmul requires TN layout; inputs are 1-byte fp8,
     // accumulator + output are bf16, scale is fp32.  Gated on cc >= 8.9
-    // (Ada / Hopper / Blackwell).  RTX 5060 (sm_120) supports both.
+    // (Ada / Hopper / Blackwell).
+    //
+    // cuBLASLt does NOT support both A and B being E5M2 -- the heuristic
+    // returns 0 results for that combo on every CUDA version we've tested
+    // (incl. 13.2 on sm_120).  The supported pairs are:
+    //     E4M3 x E4M3   -- canonical "training" fp8 path
+    //     E4M3 x E5M2   -- mixed
+    //     E5M2 x E4M3   -- mixed (typical inference: e5m2 activations,
+    //                              e4m3 weights)
+    // We label the second variant "fp8_e5m2" and run E5M2 x E4M3 to measure
+    // the throughput of fp8 paths that include an E5M2 input.  Hardware
+    // throughput is the same as E4M3 x E4M3; the asymmetry comes from
+    // cuBLASLt's algorithm coverage, not the tensor cores.
     if (dev.info.fp8MmaSupported)
     {
         runVariant("fp8_e4m3", CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
-        runVariant("fp8_e5m2", CUDA_R_8F_E5M2, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
-                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+        // A=E5M2, B=E4M3 mixed (cuBLASLt does not expose E5M2 x E5M2 GEMM).
+        // Hardware throughput is identical to E4M3 x E4M3; the asymmetry is
+        // an algorithm-coverage choice, not a tensor-core limit.
+        runVariantAB("fp8_e5m2", CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
+                     CUBLAS_COMPUTE_32F, CUDA_R_32F,
+                     &alpha32, &beta32, /*useTN=*/true);
     }
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
