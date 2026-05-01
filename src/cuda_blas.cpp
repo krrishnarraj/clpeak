@@ -175,7 +175,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     auto runVariant = [&](const char *label,
                           cudaDataType_t abType, cudaDataType_t cType,
                           cublasComputeType_t computeType,
-                          cudaDataType_t scaleType) -> int
+                          cudaDataType_t scaleType,
+                          const void *alphaPtr, const void *betaPtr) -> int
     {
         log->print(TAB TAB);
         log->print(label);
@@ -230,14 +231,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
             return 0;
         }
 
-        // alpha = 1, beta = 0; scaled in `scaleType`.  fp32 path uses float;
-        // we pass a pair of f32 scalars and let cuBLASLt cast as needed.
-        float alpha = 1.0f, beta = 0.0f;
-
+        // alpha / beta scalar bit-widths must match `scaleType`; the caller
+        // supplies them by pointer so we don't have to fan out a switch here.
         unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
         double per_iter_us = timeCublasLt(lt, dev.stream, opDesc,
-            &alpha, (void*)dA, Adesc, (void*)dB, Bdesc,
-            &beta,  (void*)dC, Cdesc, (void*)dC, Cdesc,
+            alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
+            betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
             &heur.algo, (void*)dWS, wsBytes, warmup);
 
         if (per_iter_us <= 0.0)
@@ -253,8 +252,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 
         unsigned int iters = pickIters(per_iter_us, forceIters, specifiedIters);
         double mean_us = timeCublasLt(lt, dev.stream, opDesc,
-            &alpha, (void*)dA, Adesc, (void*)dB, Bdesc,
-            &beta,  (void*)dC, Cdesc, (void*)dC, Cdesc,
+            alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
+            betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
             &heur.algo, (void*)dWS, wsBytes, iters);
 
         double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
@@ -270,9 +269,42 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     };
 
     // -----------------------------------------------------------------------
-    // Iteration 1: fp32 only.
+    // Floating-point variants.  All share col-major NN layout; cuBLASLt's
+    // heuristic picks the best algo per dtype.  Where a dtype isn't supported
+    // by the device's compute capability the heuristic returns 0 results and
+    // the runner prints "unsupported on sm_<cc>".
     // -----------------------------------------------------------------------
-    runVariant("fp32", CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F, CUDA_R_32F);
+
+    // Scale-type scalars.  Bit widths MUST match the cublasLtMatmul scaleType:
+    //   * R_32F path -> float
+    //   * R_16F path -> half (16-bit; we use uint16_t with the IEEE half
+    //                  bit pattern: 0x3c00 = 1.0, 0x0000 = 0.0)
+    const float    alpha32 = 1.0f, beta32 = 0.0f;
+    const uint16_t alpha16 = 0x3c00, beta16 = 0x0000;
+
+    // fp32: full-precision GEMM, no tensor cores.
+    runVariant("fp32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F,
+               CUDA_R_32F, &alpha32, &beta32);
+
+    // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
+    // tensor cores (Ampere+).  Inputs/outputs stay fp32; the dtype tag for
+    // A/B is still R_32F.
+    if (dev.info.tf32GemmSupported)
+        runVariant("tf32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
+                   CUDA_R_32F, &alpha32, &beta32);
+
+    // fp16: half inputs + half output + half compute.  scaleType is R_16F so
+    // alpha/beta must be 16-bit half values, not float.
+    if (dev.info.fp16Supported)
+        runVariant("fp16", CUDA_R_16F,  CUDA_R_16F, CUBLAS_COMPUTE_16F,
+                   CUDA_R_16F, &alpha16, &beta16);
+
+    // bf16: bf16 inputs, fp32 output, fp32 compute (mixed-precision).  This
+    // is the dtype combo cuBLASLt's bf16 tensor-core kernels are tuned for;
+    // bf16->bf16 output is also supported but typically slower.
+    if (dev.info.bf16Supported)
+        runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
+                   CUDA_R_32F, &alpha32, &beta32);
 
     cublasLtDestroy(lt);
     cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
