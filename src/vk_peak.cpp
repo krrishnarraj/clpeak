@@ -4,6 +4,11 @@
 #include <cstring>
 #include <sstream>
 #include <chrono>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // VulkanDevice
@@ -1958,14 +1963,63 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   vkCmdDispatch(cmdBuf, 1, 1, 1);
   vkEndCommandBuffer(cmdBuf);
 
-  // Helper: read the next host timestamp in the same units the calibrated
-  // call returns (nanoseconds for CLOCK_MONOTONIC{,_RAW}; raw QPC ticks for
-  // QUERY_PERFORMANCE_COUNTER, but we only ever subtract two of them so the
-  // unit cancels).
-  auto hostNowSameDomain = []() -> uint64_t {
-    return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+  // Get a calibrated (host, gpu) pair.  Stored in driver-domain units:
+  //   ns since CLOCK_MONOTONIC epoch (POSIX) or QPC ticks (Windows).
+  // We re-read the matching host timestamp in the SAME domain inside the
+  // hot loop, so the units always match across the subtraction.
+  auto getCalibrated = [&](uint64_t &hostOut, uint64_t &gpuOut) -> bool {
+    VkCalibratedTimestampInfoEXT infos[2] = {};
+    infos[0].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
+    infos[0].timeDomain = hostDomain;
+    infos[1].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
+    infos[1].timeDomain = VK_TIME_DOMAIN_DEVICE_EXT;
+    uint64_t ts[2] = {0, 0};
+    uint64_t maxDev = 0;
+    if (pfnGetCalTs(dev.device, 2, infos, ts, &maxDev) != VK_SUCCESS)
+      return false;
+    hostOut = ts[0];
+    gpuOut  = ts[1];
+    return true;
   };
+
+  // Read the host clock in the same domain as `hostDomain`.  POSIX:
+  // CLOCK_MONOTONIC nanoseconds; Windows: QPC ticks.  Matches what the
+  // driver returns for VK_TIME_DOMAIN_CLOCK_MONOTONIC{,_RAW}_EXT and
+  // VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT respectively, so the
+  // raw uint64 can be subtracted directly from `hostCalib`.
+  auto hostNowInDriverDomain = [&]() -> uint64_t {
+#if defined(_WIN32)
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return (uint64_t)c.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime((hostDomain == VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT)
+                    ? CLOCK_MONOTONIC_RAW : CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+  };
+
+  // Conversion factor from host driver-domain "ticks" to nanoseconds.
+  // POSIX: ticks ARE nanoseconds, factor = 1.  Windows: ticks are QPC,
+  // factor = 1e9 / QPC_frequency.
+  double hostTickNs = 1.0;
+#if defined(_WIN32)
+  {
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    hostTickNs = 1e9 / (double)freq.QuadPart;
+  }
+#endif
+
+  // Calibrate ONCE before the loop.  vkGetCalibratedTimestampsEXT itself
+  // costs a few microseconds; doing it per-iter pollutes the dispatch
+  // measurement by exactly that cost.  Clock drift over our short
+  // measurement window is negligible (<<1us across thousands of iters
+  // on every modern OS clock).
+  uint64_t hostCalib = 0, gpuCalib = 0;
+  if (haveTimestamps && !getCalibrated(hostCalib, gpuCalib))
+    haveTimestamps = false;
 
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
@@ -1976,24 +2030,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int dispatchSamples = 0;
   for (unsigned int i = 0; i < iters; i++)
   {
-    // Calibrated pair captured "right now" so the host reference matches
-    // the GPU timestamp domain to within VkMaxDeviation nanoseconds.
-    uint64_t hostCalib = 0, gpuCalib = 0, maxDev = 0;
-    if (haveTimestamps)
-    {
-      VkCalibratedTimestampInfoEXT infos[2] = {};
-      infos[0].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
-      infos[0].timeDomain = hostDomain;
-      infos[1].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
-      infos[1].timeDomain = VK_TIME_DOMAIN_DEVICE_EXT;
-      uint64_t ts[2] = {0, 0};
-      if (pfnGetCalTs(dev.device, 2, infos, ts, &maxDev) != VK_SUCCESS)
-        haveTimestamps = false;
-      hostCalib = ts[0];
-      gpuCalib  = ts[1];
-    }
-
-    uint64_t hostSubmit = hostNowSameDomain();
+    uint64_t hostSubmit = haveTimestamps ? hostNowInDriverDomain() : 0;
     auto chronoStart = std::chrono::high_resolution_clock::now();
     dev.submitAndWait(cmdBuf);
     auto chronoEnd = std::chrono::high_resolution_clock::now();
@@ -2006,15 +2043,15 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
                                 sizeof(gpuStart), &gpuStart, sizeof(uint64_t),
                                 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
       {
-        // Map GPU timestamp into host nanosecond domain via the calibrated
-        // pair, then subtract host-submit time captured just before
-        // vkQueueSubmit returned.
-        double gpuDeltaNs = (double)((int64_t)gpuStart - (int64_t)gpuCalib) * (double)timestampPeriodNs;
-        double hostStartNs = (double)hostCalib + gpuDeltaNs;
-        double dispatchNs  = hostStartNs - (double)hostSubmit;
-        if (dispatchNs > 0)
+        // Convert everything to nanoseconds, then to microseconds.
+        double hostSubmitNs = (double)hostSubmit * hostTickNs;
+        double hostCalibNs  = (double)hostCalib  * hostTickNs;
+        double gpuDeltaNs   = (double)((int64_t)gpuStart - (int64_t)gpuCalib) * (double)timestampPeriodNs;
+        double hostStartNs  = hostCalibNs + gpuDeltaNs;
+        double dispatchUs   = (hostStartNs - hostSubmitNs) / 1000.0;
+        if (dispatchUs > 0)
         {
-          totalDispatchUs += dispatchNs / 1000.0;
+          totalDispatchUs += dispatchUs;
           dispatchSamples++;
         }
       }
