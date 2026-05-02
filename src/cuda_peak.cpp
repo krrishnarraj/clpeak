@@ -872,7 +872,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   // <wmma-tops>.  Kept in a separate XML group so consumers cannot
   // accidentally aggregate integer ops with floating ops.
   // ---------------------------------------------------------------------
-  log->print(NEWLINE TAB "WMMA tensor-core compute (TOPS)" NEWLINE);
   log->xmlOpenTag("wmma-tops");
 
   // INT8 WMMA
@@ -1014,11 +1013,16 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   // Each variant takes input typed as floatN* so element index strides by
   // V floats per iteration -- matching the OpenCL backend.  numBlocks
   // shrinks accordingly so the total bytes touched remain the same.
-  struct Variant { const char *label; const char *kernelName; uint32_t width; };
+  struct Variant
+  {
+    const char *label;
+    const char *kernelName;
+    uint32_t width;
+  };
   static const Variant variants[] = {
-    { "float   ", "global_bandwidth_v1", 1 },
-    { "float2  ", "global_bandwidth_v2", 2 },
-    { "float4  ", "global_bandwidth_v4", 4 },
+      {"float   ", "global_bandwidth_v1", 1},
+      {"float2  ", "global_bandwidth_v2", 2},
+      {"float4  ", "global_bandwidth_v4", 4},
   };
 
   for (const auto &v : variants)
@@ -1036,7 +1040,8 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
     // Threads cover numItems/V elements: numBlocks = numItems / FETCH_PER_WI / V / blockSize.
     uint64_t blocks = numItems / FETCH_PER_WI / v.width / blockSize;
-    if (blocks == 0) blocks = 1;
+    if (blocks == 0)
+      blocks = 1;
     uint32_t blocksU = (uint32_t)blocks;
 
     void *args[2] = {&inBuf, &outBuf};
