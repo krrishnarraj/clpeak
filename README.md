@@ -96,6 +96,19 @@ cmake --build build -j
 ./build/clpeak
 ```
 
+Optional backends are auto-detected and enabled when their SDK is found. To opt out of a backend at configure time:
+
+```console
+cmake -S . -B build -DCLPEAK_ENABLE_CUDA=OFF
+cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
+```
+
+| CMake option | Default | Effect when `OFF` |
+|---|---|---|
+| `CLPEAK_ENABLE_VULKAN` | `ON` | Skip Vulkan even if Vulkan SDK is present |
+| `CLPEAK_ENABLE_CUDA` | `ON` | Skip CUDA even if CUDA Toolkit is present |
+| `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
+
 ## Backends
 
 | Backend | Default | Compile path | Targets |
