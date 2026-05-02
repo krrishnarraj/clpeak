@@ -24,10 +24,16 @@ static const char *cuErrStr(CUresult r)
   return s ? s : "unknown CUDA error";
 }
 
-#define CU_CHECK(call) do { CUresult _r = (call); \
-  if (_r != CUDA_SUCCESS) { \
-    fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r)); \
-    return false; } } while (0)
+#define CU_CHECK(call)                                                                \
+  do                                                                                  \
+  {                                                                                   \
+    CUresult _r = (call);                                                             \
+    if (_r != CUDA_SUCCESS)                                                           \
+    {                                                                                 \
+      fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r)); \
+      return false;                                                                   \
+    }                                                                                 \
+  } while (0)
 
 // ---------------------------------------------------------------------------
 // CudaDevice
@@ -65,24 +71,26 @@ bool CudaDevice::init(int devIndex)
   {
     int major = 0, minor = 0;
     nvrtcVersion(&major, &minor);
-    std::stringstream ss; ss << major << "." << minor;
+    std::stringstream ss;
+    ss << major << "." << minor;
     info.runtimeVersion = ss.str();
   }
   {
-    std::stringstream ss; ss << "sm_" << info.major << info.minor;
+    std::stringstream ss;
+    ss << "sm_" << info.major << info.minor;
     info.archName = ss.str();
   }
 
   // Capability bits.  Compute-capability cutoffs follow CUDA's documented
   // first-architecture-supporting-X numbers.
-  info.fp16Supported    = (info.major > 5) || (info.major == 5 && info.minor >= 3);
-  info.bf16Supported    = (info.major >= 8);
-  info.dp4aSupported    = (info.major > 6) || (info.major == 6 && info.minor >= 1);
-  info.wmmaSupported     = (info.major >= 7);
-  info.wmmaInt8Supported = (info.major >  7) || (info.major == 7 && info.minor >= 2);
-  info.fp8MmaSupported   = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
+  info.fp16Supported = (info.major > 5) || (info.major == 5 && info.minor >= 3);
+  info.bf16Supported = (info.major >= 8);
+  info.dp4aSupported = (info.major > 6) || (info.major == 6 && info.minor >= 1);
+  info.wmmaSupported = (info.major >= 7);
+  info.wmmaInt8Supported = (info.major > 7) || (info.major == 7 && info.minor >= 2);
+  info.fp8MmaSupported = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
   info.tf32GemmSupported = (info.major >= 8);
-  info.int8GemmSupported = (info.major >  7) || (info.major == 7 && info.minor >= 5);
+  info.int8GemmSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int4GemmSupported = (info.major >= 9);
   info.dpTensorSupported = (info.major >= 8);
   // s4 mma.sync was added on Turing (sm_75), kept on Ampere/Ada, removed on
@@ -91,7 +99,7 @@ bool CudaDevice::init(int devIndex)
     int cc = info.major * 10 + info.minor;
     info.int4MmaSupported = (cc >= 75) && (cc <= 89);
   }
-  info.bmmaSupported     = (info.major >  7) || (info.major == 7 && info.minor >= 5);
+  info.bmmaSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
 
   // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
   // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
@@ -112,8 +120,16 @@ void CudaDevice::cleanup()
     cuModuleUnload(kv.second);
   moduleCache.clear();
 
-  if (stream)  { cuStreamDestroy(stream);  stream = nullptr; }
-  if (context) { cuCtxDestroy(context);    context = nullptr; }
+  if (stream)
+  {
+    cuStreamDestroy(stream);
+    stream = nullptr;
+  }
+  if (context)
+  {
+    cuCtxDestroy(context);
+    context = nullptr;
+  }
 }
 
 bool CudaDevice::getKernel(const char *src, const char *srcName,
@@ -151,7 +167,8 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
     std::vector<const char *> opts;
     opts.push_back(archStr.c_str());
     opts.push_back(incOpt.c_str());
-    for (auto *e : extraOpts) opts.push_back(e);
+    for (auto *e : extraOpts)
+      opts.push_back(e);
 
     nr = nvrtcCompileProgram(prog, (int)opts.size(), opts.data());
     if (nr != NVRTC_SUCCESS)
@@ -159,7 +176,8 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
       size_t logSize = 0;
       nvrtcGetProgramLogSize(prog, &logSize);
       std::string log(logSize, '\0');
-      if (logSize > 1) nvrtcGetProgramLog(prog, &log[0]);
+      if (logSize > 1)
+        nvrtcGetProgramLog(prog, &log[0]);
       fprintf(stderr, "NVRTC compile of %s failed:\n%s\n", srcName, log.c_str());
       nvrtcDestroyProgram(&prog);
       return false;
@@ -214,9 +232,9 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
 // ---------------------------------------------------------------------------
 
 CudaPeak::CudaPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false),
-    deviceIndex(-1),
-    initialised(false)
+    : warmupCount(2), specifiedIters(0), forceIters(false),
+      deviceIndex(-1),
+      initialised(false)
 {
   enabledTests.set();
 }
@@ -225,7 +243,8 @@ CudaPeak::~CudaPeak() {}
 
 bool CudaPeak::initDriver()
 {
-  if (initialised) return true;
+  if (initialised)
+    return true;
   CUresult r = cuInit(0);
   if (r != CUDA_SUCCESS)
   {
@@ -234,8 +253,10 @@ bool CudaPeak::initDriver()
   }
   int n = 0;
   r = cuDeviceGetCount(&n);
-  if (r != CUDA_SUCCESS) return false;
-  for (int i = 0; i < n; i++) devIndices.push_back(i);
+  if (r != CUDA_SUCCESS)
+    return false;
+  for (int i = 0; i < n; i++)
+    devIndices.push_back(i);
   initialised = true;
   return true;
 }
@@ -246,7 +267,7 @@ float CudaPeak::runKernel(CudaDevice &dev, CUfunction fn,
 {
   CUevent start, stop;
   cuEventCreate(&start, CU_EVENT_DEFAULT);
-  cuEventCreate(&stop,  CU_EVENT_DEFAULT);
+  cuEventCreate(&stop, CU_EVENT_DEFAULT);
 
   for (unsigned int w = 0; w < warmupCount; w++)
   {
@@ -308,8 +329,8 @@ int CudaPeak::runAll()
     benchmark_config_t cfg = benchmark_config_t::forDevice(CL_DEVICE_TYPE_GPU);
     if (forceIters)
     {
-      cfg.computeIters    = specifiedIters;
-      cfg.globalBWIters   = specifiedIters;
+      cfg.computeIters = specifiedIters;
+      cfg.globalBWIters = specifiedIters;
       cfg.transferBWIters = specifiedIters;
       cfg.kernelLatencyIters = specifiedIters;
     }
@@ -335,20 +356,25 @@ int CudaPeak::runAll()
     // the <compute-tflops> umbrella tag, mirroring cuBLASLt's split.
     {
       bool anyFP =
-        isTestEnabled(Benchmark::ComputeSP)   || isTestEnabled(Benchmark::ComputeHP) ||
-        isTestEnabled(Benchmark::ComputeDP)   || isTestEnabled(Benchmark::ComputeMP) ||
-        isTestEnabled(Benchmark::ComputeBF16);
+          isTestEnabled(Benchmark::ComputeSP) || isTestEnabled(Benchmark::ComputeHP) ||
+          isTestEnabled(Benchmark::ComputeDP) || isTestEnabled(Benchmark::ComputeMP) ||
+          isTestEnabled(Benchmark::ComputeBF16);
       if (anyFP)
       {
-        log->print(NEWLINE TAB "Compute peak (GFLOPS)" NEWLINE);
         log->xmlOpenTag("compute-tflops");
       }
-      if (isTestEnabled(Benchmark::ComputeSP))   runComputeSP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeHP))   runComputeHP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeDP))   runComputeDP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeMP))   runComputeMP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeBF16)) runComputeBF16(dev, cfg);
-      if (anyFP) log->xmlCloseTag();
+      if (isTestEnabled(Benchmark::ComputeSP))
+        runComputeSP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeHP))
+        runComputeHP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeDP))
+        runComputeDP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeMP))
+        runComputeMP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeBF16))
+        runComputeBF16(dev, cfg);
+      if (anyFP)
+        log->xmlCloseTag();
     }
 
     // Integer compute peak cluster -- everything reported in GOPS lives
@@ -357,26 +383,37 @@ int CudaPeak::runAll()
     // floating ops.
     {
       bool anyINT =
-        isTestEnabled(Benchmark::ComputeInt) || isTestEnabled(Benchmark::ComputeInt8DP) ||
-        isTestEnabled(Benchmark::ComputeInt4Packed);
+          isTestEnabled(Benchmark::ComputeInt) || isTestEnabled(Benchmark::ComputeInt8DP) ||
+          isTestEnabled(Benchmark::ComputeInt4Packed);
       if (anyINT)
       {
-        log->print(NEWLINE TAB "Compute peak (GOPS)" NEWLINE);
         log->xmlOpenTag("compute-tops");
       }
-      if (isTestEnabled(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
-      if (anyINT) log->xmlCloseTag();
+      if (isTestEnabled(Benchmark::ComputeInt))
+        runComputeInt32(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeInt8DP))
+        runComputeInt8DP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeInt4Packed))
+        runComputeInt4Packed(dev, cfg);
+      if (anyINT)
+        log->xmlCloseTag();
     }
-    if (isTestEnabled(Benchmark::Wmma))              runWmma(dev, cfg);
-    if (isTestEnabled(Benchmark::Cublas))            runCublas(dev, cfg);
-    if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
-    if (isTestEnabled(Benchmark::TransferBW))        runTransferBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
+    if (isTestEnabled(Benchmark::Wmma))
+      runWmma(dev, cfg);
+    if (isTestEnabled(Benchmark::Cublas))
+      runCublas(dev, cfg);
+    if (isTestEnabled(Benchmark::GlobalBW))
+      runGlobalBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::LocalBW))
+      runLocalBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::ImageBW))
+      runImageBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::AtomicThroughput))
+      runAtomicThroughput(dev, cfg);
+    if (isTestEnabled(Benchmark::TransferBW))
+      runTransferBandwidth(dev, cfg);
+    if (isTestEnabled(Benchmark::KernelLatency))
+      runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device
@@ -413,12 +450,18 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     return 0;
   }
 
-  struct Variant { const char *label; const char *kernelName; const char *src; const char *srcName; };
+  struct Variant
+  {
+    const char *label;
+    const char *kernelName;
+    const char *src;
+    const char *srcName;
+  };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
-                          d.variants[i].src,   d.variants[i].srcName});
+                          d.variants[i].src, d.variants[i].srcName});
   else
     variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName});
 
@@ -490,39 +533,39 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title       = "Single-precision compute (GFLOPS)";
-  d.xmlTag      = "single_precision_compute";
-  d.unit        = "gflops";
+  d.title = "Single-precision compute (GFLOPS)";
+  d.xmlTag = "single_precision_compute";
+  d.unit = "gflops";
   d.metricLabel = "float";
-  d.kernelName  = "compute_sp";
-  d.src         = cuda_kernels::compute_sp_src;
-  d.srcName     = cuda_kernels::compute_sp_name;
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
-  d.elemSize    = sizeof(float);
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
+  d.kernelName = "compute_sp";
+  d.src = cuda_kernels::compute_sp_src;
+  d.srcName = cuda_kernels::compute_sp_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
   return runComputeKernel(dev, cfg, d);
 }
 
 int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   static const cuda_compute_variant_t variants[] = {
-    { "half",  "compute_hp",  cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name },
-    { "half2", "compute_hp2", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name },
+      {"half", "compute_hp", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
+      {"half2", "compute_hp2", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
   };
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title       = "Half-precision compute (GFLOPS)";
-  d.xmlTag      = "half_precision_compute";
-  d.unit        = "gflops";
-  d.variants    = variants;
+  d.title = "Half-precision compute (GFLOPS)";
+  d.xmlTag = "half_precision_compute";
+  d.unit = "gflops";
+  d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
-  d.elemSize    = sizeof(float);    // 32-bit slot per thread; we store the reduced fp32 result
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
-  d.skip        = !dev.info.fp16Supported;
-  d.skipMsg     = "fp16 not supported on this compute capability! Skipped";
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float); // 32-bit slot per thread; we store the reduced fp32 result
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.fp16Supported;
+  d.skipMsg = "fp16 not supported on this compute capability! Skipped";
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -530,17 +573,17 @@ int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   double A = 1.3;
   cuda_compute_desc_t d = {};
-  d.title       = "Double-precision compute (GFLOPS)";
-  d.xmlTag      = "double_precision_compute";
-  d.unit        = "gflops";
+  d.title = "Double-precision compute (GFLOPS)";
+  d.xmlTag = "double_precision_compute";
+  d.unit = "gflops";
   d.metricLabel = "double";
-  d.kernelName  = "compute_dp";
-  d.src         = cuda_kernels::compute_dp_src;
-  d.srcName     = cuda_kernels::compute_dp_name;
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
-  d.elemSize    = sizeof(double);
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
+  d.kernelName = "compute_dp";
+  d.src = cuda_kernels::compute_dp_src;
+  d.srcName = cuda_kernels::compute_dp_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(double);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -550,19 +593,19 @@ int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
   // The packed (HFMA2) path is fp16xfp16+fp16 -- that's compute_hp2, not MP.
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
-  d.xmlTag      = "mixed_precision_compute";
-  d.unit        = "gflops";
+  d.title = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
+  d.xmlTag = "mixed_precision_compute";
+  d.unit = "gflops";
   d.metricLabel = "mp";
-  d.kernelName  = "compute_mp";
-  d.src         = cuda_kernels::compute_mp_src;
-  d.srcName     = cuda_kernels::compute_mp_name;
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
-  d.elemSize    = sizeof(float);
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
-  d.skip        = !dev.info.fp16Supported;
-  d.skipMsg     = "fp16 not supported on this compute capability! Skipped";
+  d.kernelName = "compute_mp";
+  d.src = cuda_kernels::compute_mp_src;
+  d.srcName = cuda_kernels::compute_mp_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.fp16Supported;
+  d.skipMsg = "fp16 not supported on this compute capability! Skipped";
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -574,19 +617,19 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   // be a different code path.
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
-  d.xmlTag      = "bfloat16_compute";
-  d.unit        = "gflops";
+  d.title = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
+  d.xmlTag = "bfloat16_compute";
+  d.unit = "gflops";
   d.metricLabel = "bf16";
-  d.kernelName  = "compute_bf16";
-  d.src         = cuda_kernels::compute_bf16_src;
-  d.srcName     = cuda_kernels::compute_bf16_name;
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
-  d.elemSize    = sizeof(float);
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
-  d.skip        = !dev.info.bf16Supported;
-  d.skipMsg     = "bf16 requires sm_80 or newer (Ampere+)! Skipped";
+  d.kernelName = "compute_bf16";
+  d.src = cuda_kernels::compute_bf16_src;
+  d.srcName = cuda_kernels::compute_bf16_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.bf16Supported;
+  d.skipMsg = "bf16 requires sm_80 or newer (Ampere+)! Skipped";
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -597,41 +640,41 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
   // in GOPS.
   int A = 3;
   cuda_compute_desc_t d = {};
-  d.title       = "Integer compute (32-bit IMAD) (GOPS)";
-  d.xmlTag      = "integer_compute";
-  d.unit        = "gops";
+  d.title = "Integer compute (32-bit IMAD) (GOPS)";
+  d.xmlTag = "integer_compute";
+  d.unit = "gops";
   d.metricLabel = "int";
-  d.kernelName  = "compute_int32";
-  d.src         = cuda_kernels::compute_int32_src;
-  d.srcName     = cuda_kernels::compute_int32_name;
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;  // 4096 ops/thread (same scaling)
-  d.elemSize    = sizeof(int);
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
+  d.kernelName = "compute_int32";
+  d.src = cuda_kernels::compute_int32_src;
+  d.srcName = cuda_kernels::compute_int32_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI; // 4096 ops/thread (same scaling)
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
   return runComputeKernel(dev, cfg, d);
 }
 
 int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   static const cuda_compute_variant_t variants[] = {
-    { "int8_dp",  "compute_int8_dp",  cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
-    { "int8_dp2", "compute_int8_dp2", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
-    { "int8_dp4", "compute_int8_dp4", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
-    { "int8_dp8", "compute_int8_dp8", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name },
+      {"int8_dp", "compute_int8_dp", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp2", "compute_int8_dp2", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp4", "compute_int8_dp4", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp8", "compute_int8_dp8", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
   };
   int A = 4;
   cuda_compute_desc_t d = {};
-  d.title       = "INT8 dot-product compute (__dp4a) (GOPS)";
-  d.xmlTag      = "integer_compute_int8_dp";
-  d.unit        = "gops";
-  d.variants    = variants;
+  d.title = "INT8 dot-product compute (__dp4a) (GOPS)";
+  d.xmlTag = "integer_compute_int8_dp";
+  d.unit = "gops";
+  d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;
-  d.elemSize    = sizeof(int);
-  d.scalarArg   = &A;
-  d.scalarSize  = sizeof(A);
-  d.skip        = !dev.info.dp4aSupported;
-  d.skipMsg     = "__dp4a requires sm_61 or newer (Pascal+)! Skipped";
+  d.workPerWI = COMPUTE_INT8_DP_WORK_PER_WI;
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.dp4aSupported;
+  d.skipMsg = "__dp4a requires sm_61 or newer (Pascal+)! Skipped";
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -639,19 +682,19 @@ int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
 {
   int A = 3;
   cuda_compute_desc_t d = {};
-  d.title           = "Packed INT4 compute (emulated) (GOPS)";
-  d.xmlTag          = "int4_packed_compute";
-  d.unit            = "gops";
-  d.metricLabel     = "int4_packed";
-  d.kernelName      = "compute_int4_packed";
-  d.src             = cuda_kernels::compute_int4_packed_src;
-  d.srcName         = cuda_kernels::compute_int4_packed_name;
-  d.workPerWI       = COMPUTE_INT4_PACKED_WORK_PER_WI;
-  d.elemSize        = sizeof(int);
-  d.scalarArg       = &A;
-  d.scalarSize      = sizeof(A);
-  d.extraAttribKey  = "emulated";
-  d.extraAttribVal  = "true";
+  d.title = "Packed INT4 compute (emulated) (GOPS)";
+  d.xmlTag = "int4_packed_compute";
+  d.unit = "gops";
+  d.metricLabel = "int4_packed";
+  d.kernelName = "compute_int4_packed";
+  d.src = cuda_kernels::compute_int4_packed_src;
+  d.srcName = cuda_kernels::compute_int4_packed_name;
+  d.workPerWI = COMPUTE_INT4_PACKED_WORK_PER_WI;
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.extraAttribKey = "emulated";
+  d.extraAttribVal = "true";
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -683,20 +726,20 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "wmma_fp16";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "wmma_fp16";
-    d.kernelName     = "wmma_fp16";
-    d.src            = cuda_kernels::wmma_fp16_src;
-    d.srcName        = cuda_kernels::wmma_fp16_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
-    d.elemSize       = sizeof(float);
-    d.blockSize      = warp;
+    d.title = "WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)";
+    d.xmlTag = "wmma_fp16";
+    d.unit = "tflops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "wmma_fp16";
+    d.kernelName = "wmma_fp16";
+    d.src = cuda_kernels::wmma_fp16_src;
+    d.srcName = cuda_kernels::wmma_fp16_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+    d.elemSize = sizeof(float);
+    d.blockSize = warp;
     d.outElemsPerBlock = outElems;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
     runComputeKernel(dev, cfg, d);
@@ -705,22 +748,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA bf16xbf16+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "wmma_bf16";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "wmma_bf16";
-    d.kernelName     = "wmma_bf16";
-    d.src            = cuda_kernels::wmma_bf16_src;
-    d.srcName        = cuda_kernels::wmma_bf16_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4;
-    d.elemSize       = sizeof(float);
-    d.blockSize      = warp;
+    d.title = "WMMA bf16xbf16+fp32 16x16x16 (TFLOPS)";
+    d.xmlTag = "wmma_bf16";
+    d.unit = "tflops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "wmma_bf16";
+    d.kernelName = "wmma_bf16";
+    d.src = cuda_kernels::wmma_bf16_src;
+    d.srcName = cuda_kernels::wmma_bf16_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(float);
+    d.blockSize = warp;
     d.outElemsPerBlock = outElems;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.bf16Supported;
-    d.skipMsg        = "bf16 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.bf16Supported;
+    d.skipMsg = "bf16 WMMA requires sm_80 or newer (Ampere+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
     runComputeKernel(dev, cfg, d);
@@ -729,22 +772,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA tf32xtf32+fp32 16x16x8 (TFLOPS)";
-    d.xmlTag         = "wmma_tf32";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "wmma_tf32";
-    d.kernelName     = "wmma_tf32";
-    d.src            = cuda_kernels::wmma_tf32_src;
-    d.srcName        = cuda_kernels::wmma_tf32_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
-    d.elemSize       = sizeof(float);
-    d.blockSize      = warp;
+    d.title = "WMMA tf32xtf32+fp32 16x16x8 (TFLOPS)";
+    d.xmlTag = "wmma_tf32";
+    d.unit = "tflops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "wmma_tf32";
+    d.kernelName = "wmma_tf32";
+    d.src = cuda_kernels::wmma_tf32_src;
+    d.srcName = cuda_kernels::wmma_tf32_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
+    d.elemSize = sizeof(float);
+    d.blockSize = warp;
     d.outElemsPerBlock = outElems;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.tf32GemmSupported;
-    d.skipMsg        = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.tf32GemmSupported;
+    d.skipMsg = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x8";
     runComputeKernel(dev, cfg, d);
@@ -753,22 +796,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     double A = 1.3;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA fp64xfp64+fp64 8x8x4 (TFLOPS)";
-    d.xmlTag         = "wmma_fp64";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "wmma_fp64";
-    d.kernelName     = "wmma_fp64";
-    d.src            = cuda_kernels::wmma_fp64_src;
-    d.srcName        = cuda_kernels::wmma_fp64_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
-    d.elemSize       = sizeof(double);
-    d.blockSize      = warp;
+    d.title = "WMMA fp64xfp64+fp64 8x8x4 (TFLOPS)";
+    d.xmlTag = "wmma_fp64";
+    d.unit = "tflops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "wmma_fp64";
+    d.kernelName = "wmma_fp64";
+    d.src = cuda_kernels::wmma_fp64_src;
+    d.srcName = cuda_kernels::wmma_fp64_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
+    d.elemSize = sizeof(double);
+    d.blockSize = warp;
     d.outElemsPerBlock = 8 * 8;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.dpTensorSupported;
-    d.skipMsg        = "FP64 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.dpTensorSupported;
+    d.skipMsg = "FP64 WMMA requires sm_80 or newer (Ampere+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "8x8x4";
     runComputeKernel(dev, cfg, d);
@@ -777,22 +820,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
-    d.xmlTag         = "wmma_fp8_e4m3";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "fp8_e4m3";
-    d.kernelName     = "wmma_fp8_e4m3";
-    d.src            = cuda_kernels::wmma_fp8_e4m3_src;
-    d.srcName        = cuda_kernels::wmma_fp8_e4m3_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
-    d.elemSize       = sizeof(float);
-    d.blockSize      = warp;
+    d.title = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
+    d.xmlTag = "wmma_fp8_e4m3";
+    d.unit = "tflops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "fp8_e4m3";
+    d.kernelName = "wmma_fp8_e4m3";
+    d.src = cuda_kernels::wmma_fp8_e4m3_src;
+    d.srcName = cuda_kernels::wmma_fp8_e4m3_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
+    d.elemSize = sizeof(float);
+    d.blockSize = warp;
     d.outElemsPerBlock = 16 * 8;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.fp8MmaSupported;
-    d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.fp8MmaSupported;
+    d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
@@ -801,22 +844,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     float A = 1.3f;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
-    d.xmlTag         = "wmma_fp8_e5m2";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "fp8_e5m2";
-    d.kernelName     = "wmma_fp8_e5m2";
-    d.src            = cuda_kernels::wmma_fp8_e5m2_src;
-    d.srcName        = cuda_kernels::wmma_fp8_e5m2_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 8;
-    d.elemSize       = sizeof(float);
-    d.blockSize      = warp;
+    d.title = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
+    d.xmlTag = "wmma_fp8_e5m2";
+    d.unit = "tflops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "fp8_e5m2";
+    d.kernelName = "wmma_fp8_e5m2";
+    d.src = cuda_kernels::wmma_fp8_e5m2_src;
+    d.srcName = cuda_kernels::wmma_fp8_e5m2_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 8;
+    d.elemSize = sizeof(float);
+    d.blockSize = warp;
     d.outElemsPerBlock = 16 * 8;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.fp8MmaSupported;
-    d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.fp8MmaSupported;
+    d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
@@ -836,22 +879,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "WMMA int8xint8+int32 16x16x16 (TOPS)";
-    d.xmlTag         = "wmma_int8";
-    d.unit           = "tops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "wmma_int8";
-    d.kernelName     = "wmma_int8";
-    d.src            = cuda_kernels::wmma_int8_src;
-    d.srcName        = cuda_kernels::wmma_int8_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4;
-    d.elemSize       = sizeof(int);
-    d.blockSize      = warp;
+    d.title = "WMMA int8xint8+int32 16x16x16 (TOPS)";
+    d.xmlTag = "wmma_int8";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "wmma_int8";
+    d.kernelName = "wmma_int8";
+    d.src = cuda_kernels::wmma_int8_src;
+    d.srcName = cuda_kernels::wmma_int8_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
     d.outElemsPerBlock = outElems;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.wmmaInt8Supported;
-    d.skipMsg        = "INT8 WMMA requires sm_72 or newer (Turing+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaInt8Supported;
+    d.skipMsg = "INT8 WMMA requires sm_72 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
     runComputeKernel(dev, cfg, d);
@@ -860,22 +903,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "INT8 mma.sync m16n8k32+int32 (TOPS)";
-    d.xmlTag         = "wmma_int8_k32";
-    d.unit           = "tops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "int8_k32";
-    d.kernelName     = "wmma_int8_k32";
-    d.src            = cuda_kernels::wmma_int8_k32_src;
-    d.srcName        = cuda_kernels::wmma_int8_k32_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4;
-    d.elemSize       = sizeof(int);
-    d.blockSize      = warp;
+    d.title = "INT8 mma.sync m16n8k32+int32 (TOPS)";
+    d.xmlTag = "wmma_int8_k32";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int8_k32";
+    d.kernelName = "wmma_int8_k32";
+    d.src = cuda_kernels::wmma_int8_k32_src;
+    d.srcName = cuda_kernels::wmma_int8_k32_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
     d.outElemsPerBlock = 16 * 8;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.wmmaInt8Supported;
-    d.skipMsg        = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaInt8Supported;
+    d.skipMsg = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
@@ -884,22 +927,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "INT4 mma.sync m8n8k32+int32 (TOPS)";
-    d.xmlTag         = "wmma_int4";
-    d.unit           = "tops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "int4";
-    d.kernelName     = "wmma_int4";
-    d.src            = cuda_kernels::wmma_int4_src;
-    d.srcName        = cuda_kernels::wmma_int4_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 2; // 256 outer * 4 chains * 8*8*32*2 / 32
-    d.elemSize       = sizeof(int);
-    d.blockSize      = warp;
+    d.title = "INT4 mma.sync m8n8k32+int32 (TOPS)";
+    d.xmlTag = "wmma_int4";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int4";
+    d.kernelName = "wmma_int4";
+    d.src = cuda_kernels::wmma_int4_src;
+    d.srcName = cuda_kernels::wmma_int4_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 256 outer * 4 chains * 8*8*32*2 / 32
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
     d.outElemsPerBlock = 8 * 8;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.int4MmaSupported;
-    d.skipMsg        = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.int4MmaSupported;
+    d.skipMsg = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m8n8k32";
     runComputeKernel(dev, cfg, d);
@@ -908,22 +951,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "BMMA b1 mma.sync m8n8k128+int32 xor.popc (TOPS)";
-    d.xmlTag         = "wmma_bmma_b1";
-    d.unit           = "tops";
-    d.unitDivider    = 1e12;
-    d.metricLabel    = "bmma_b1";
-    d.kernelName     = "wmma_bmma_b1";
-    d.src            = cuda_kernels::wmma_bmma_b1_src;
-    d.srcName        = cuda_kernels::wmma_bmma_b1_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 256 outer * 4 chains * 8*8*128*2 / 32
-    d.elemSize       = sizeof(int);
-    d.blockSize      = warp;
+    d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc (TOPS)";
+    d.xmlTag = "wmma_bmma_b1";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "bmma_b1";
+    d.kernelName = "wmma_bmma_b1";
+    d.src = cuda_kernels::wmma_bmma_b1_src;
+    d.srcName = cuda_kernels::wmma_bmma_b1_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 256 outer * 4 chains * 8*8*128*2 / 32
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
     d.outElemsPerBlock = 8 * 8;
-    d.scalarArg      = &A;
-    d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.bmmaSupported;
-    d.skipMsg        = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.bmmaSupported;
+    d.skipMsg = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m8n8k128";
     runComputeKernel(dev, cfg, d);
@@ -948,44 +991,69 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     numItems = (cfg.globalBWMaxSize / sizeof(float) / (blockSize * FETCH_PER_WI)) * (blockSize * FETCH_PER_WI);
 
   uint32_t numBlocks = (uint32_t)(numItems / FETCH_PER_WI / blockSize);
-  if (numBlocks == 0) numBlocks = 1;
+  if (numBlocks == 0)
+    numBlocks = 1;
 
   log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
   log->xmlOpenTag("global_memory_bandwidth");
   log->xmlAppendAttribs("unit", "gbps");
 
   CUdeviceptr inBuf = 0, outBuf = 0;
-  if (cuMemAlloc(&inBuf,  numItems * sizeof(float)) != CUDA_SUCCESS ||
+  if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||
       cuMemAlloc(&outBuf, numItems * sizeof(float)) != CUDA_SUCCESS)
   {
     log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
-    if (inBuf) cuMemFree(inBuf);
+    if (inBuf)
+      cuMemFree(inBuf);
     log->xmlCloseTag();
     return -1;
   }
   // Touch input so we measure DRAM not zero-page.
   cuMemsetD32(inBuf, 0x3f800000u, numItems);
 
-  CUfunction fn;
-  if (!dev.getKernel(cuda_kernels::global_bandwidth_src,
-                     cuda_kernels::global_bandwidth_name,
-                     "global_bandwidth", fn))
+  // Each variant takes input typed as floatN* so element index strides by
+  // V floats per iteration -- matching the OpenCL backend.  numBlocks
+  // shrinks accordingly so the total bytes touched remain the same.
+  struct Variant { const char *label; const char *kernelName; uint32_t width; };
+  static const Variant variants[] = {
+    { "float   ", "global_bandwidth_v1", 1 },
+    { "float2  ", "global_bandwidth_v2", 2 },
+    { "float4  ", "global_bandwidth_v4", 4 },
+  };
+
+  for (const auto &v : variants)
   {
-    cuMemFree(inBuf); cuMemFree(outBuf);
-    log->print(TAB TAB "Compile failed" NEWLINE);
-    log->xmlCloseTag();
-    return -1;
+    CUfunction fn;
+    if (!dev.getKernel(cuda_kernels::global_bandwidth_src,
+                       cuda_kernels::global_bandwidth_name,
+                       v.kernelName, fn))
+    {
+      log->print(TAB TAB);
+      log->print(v.label);
+      log->print(": compile failed" NEWLINE);
+      continue;
+    }
+
+    // Threads cover numItems/V elements: numBlocks = numItems / FETCH_PER_WI / V / blockSize.
+    uint64_t blocks = numItems / FETCH_PER_WI / v.width / blockSize;
+    if (blocks == 0) blocks = 1;
+    uint32_t blocksU = (uint32_t)blocks;
+
+    void *args[2] = {&inBuf, &outBuf};
+    log->print(TAB TAB);
+    log->print(v.label);
+    log->print(": ");
+    float us = runKernel(dev, fn, blocksU, blockSize, args, iters);
+    // Bytes touched = numBlocks * blockSize * FETCH_PER_WI * V * sizeof(float)
+    double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
+    float gbps = (float)(bytes / us / 1e3);
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->xmlRecord(v.kernelName, gbps);
   }
 
-  void *args[2] = { &inBuf, &outBuf };
-  log->print(TAB TAB "float   : ");
-  float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
-  float gbps = ((float)numItems * sizeof(float)) / us / 1e3f;
-  log->print(gbps);
-  log->print(NEWLINE);
-  log->xmlRecord("float", gbps);
-
-  cuMemFree(inBuf); cuMemFree(outBuf);
+  cuMemFree(inBuf);
+  cuMemFree(outBuf);
   log->xmlCloseTag();
   return 0;
 }
@@ -1021,28 +1089,34 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  auto timeXfer = [&](bool h2d) -> float {
+  auto timeXfer = [&](bool h2d) -> float
+  {
     CUevent s, e;
     cuEventCreate(&s, CU_EVENT_DEFAULT);
     cuEventCreate(&e, CU_EVENT_DEFAULT);
     // Warmup
     for (unsigned w = 0; w < warmupCount; w++)
     {
-      if (h2d) cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
-      else     cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      if (h2d)
+        cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
+      else
+        cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
     }
     cuStreamSynchronize(dev.stream);
     cuEventRecord(s, dev.stream);
     for (unsigned i = 0; i < iters; i++)
     {
-      if (h2d) cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
-      else     cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      if (h2d)
+        cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
+      else
+        cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
     }
     cuEventRecord(e, dev.stream);
     cuEventSynchronize(e);
     float ms = 0;
     cuEventElapsedTime(&ms, s, e);
-    cuEventDestroy(s); cuEventDestroy(e);
+    cuEventDestroy(s);
+    cuEventDestroy(e);
     return (ms / iters) * 1000.0f; // microseconds per transfer
   };
 
@@ -1088,7 +1162,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  void *args[1] = { nullptr };
+  void *args[1] = {nullptr};
 
   // CUDA's driver API has no primitive equivalent to OpenCL's QUEUED -> START
   // profiling info or VK_EXT_calibrated_timestamps -- cuEventRecord captures
@@ -1099,7 +1173,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
   {
-    cuLaunchKernel(fn, 1,1,1, 1,1,1, 0, dev.stream, args, nullptr);
+    cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
     cuStreamSynchronize(dev.stream);
   }
 
@@ -1107,7 +1181,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   for (unsigned int i = 0; i < iters; i++)
   {
     auto t0 = std::chrono::high_resolution_clock::now();
-    cuLaunchKernel(fn, 1,1,1, 1,1,1, 0, dev.stream, args, nullptr);
+    cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
     cuStreamSynchronize(dev.stream);
     auto t1 = std::chrono::high_resolution_clock::now();
     totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
@@ -1148,12 +1222,16 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  struct V { const char *label; const char *kname; uint32_t width; };
+  struct V
+  {
+    const char *label;
+    const char *kname;
+    uint32_t width;
+  };
   const V vs[] = {
-    {"float  ", "local_bandwidth_v1", 1},
-    {"float2 ", "local_bandwidth_v2", 2},
-    {"float4 ", "local_bandwidth_v4", 4},
-    {"float8 ", "local_bandwidth_v8", 8},
+      {"float  ", "local_bandwidth_v1", 1},
+      {"float2 ", "local_bandwidth_v2", 2},
+      {"float4 ", "local_bandwidth_v4", 4},
   };
   for (const auto &v : vs)
   {
@@ -1167,13 +1245,15 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
       log->print("compile/load failed" NEWLINE);
       continue;
     }
-    void *args[1] = { &outBuf };
+    void *args[1] = {&outBuf};
     float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
     float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps); log->print(NEWLINE);
+    log->print(gbps);
+    log->print(NEWLINE);
     std::string key(v.label);
-    while (!key.empty() && key.back() == ' ') key.pop_back();
+    while (!key.empty() && key.back() == ' ')
+      key.pop_back();
     log->xmlRecord(key, gbps);
   }
 
@@ -1200,7 +1280,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   // Create CUarray (RGBA float).
   CUDA_ARRAY_DESCRIPTOR adesc = {};
-  adesc.Width = imgW; adesc.Height = imgH;
+  adesc.Width = imgW;
+  adesc.Height = imgH;
   adesc.Format = CU_AD_FORMAT_FLOAT;
   adesc.NumChannels = 4;
   CUarray arr;
@@ -1220,7 +1301,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   td.addressMode[0] = CU_TR_ADDRESS_MODE_CLAMP;
   td.addressMode[1] = CU_TR_ADDRESS_MODE_CLAMP;
   td.filterMode = CU_TR_FILTER_MODE_POINT;
-  td.flags = CU_TRSF_READ_AS_INTEGER;        // we want raw float bits, no normalization
+  td.flags = CU_TRSF_READ_AS_INTEGER; // we want raw float bits, no normalization
   CUtexObject tex = 0;
   if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
   {
@@ -1239,18 +1320,21 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                      "image_bandwidth", fn))
   {
     log->print(TAB TAB "Compile failed" NEWLINE);
-    cuTexObjectDestroy(tex); cuArrayDestroy(arr); cuMemFree(outBuf);
+    cuTexObjectDestroy(tex);
+    cuArrayDestroy(arr);
+    cuMemFree(outBuf);
     log->xmlCloseTag();
     return -1;
   }
 
   int w = imgW, h = imgH;
-  void *args[4] = { &tex, &outBuf, &w, &h };
+  void *args[4] = {&tex, &outBuf, &w, &h};
   log->print(TAB TAB "float4 : ");
   float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
   uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
   float gbps = (float)bytes / us / 1e3f;
-  log->print(gbps); log->print(NEWLINE);
+  log->print(gbps);
+  log->print(NEWLINE);
   log->xmlRecord("float4", gbps);
 
   cuTexObjectDestroy(tex);
@@ -1287,10 +1371,11 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
                         cuda_kernels::atomic_throughput_name,
                         "atomic_throughput_global", fn))
       {
-        void *args[1] = { &buf };
+        void *args[1] = {&buf};
         float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-        log->print(gops); log->print(NEWLINE);
+        log->print(gops);
+        log->print(NEWLINE);
         log->xmlRecord("global", gops);
       }
       else
@@ -1312,10 +1397,11 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
                         cuda_kernels::atomic_throughput_name,
                         "atomic_throughput_local", fn))
       {
-        void *args[1] = { &buf };
+        void *args[1] = {&buf};
         float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-        log->print(gops); log->print(NEWLINE);
+        log->print(gops);
+        log->print(NEWLINE);
         log->xmlRecord("local", gops);
       }
       else
@@ -1337,19 +1423,22 @@ BackendInventory enumerateCuda()
   BackendInventory inv;
   inv.backend = "CUDA";
 
-  if (cuInit(0) != CUDA_SUCCESS) return inv;
+  if (cuInit(0) != CUDA_SUCCESS)
+    return inv;
   int n = 0;
-  if (cuDeviceGetCount(&n) != CUDA_SUCCESS || n == 0) return inv;
+  if (cuDeviceGetCount(&n) != CUDA_SUCCESS || n == 0)
+    return inv;
   inv.available = true;
 
   InventoryPlatform plat;
   plat.index = 0;
-  plat.name  = "CUDA";
+  plat.name = "CUDA";
 
   for (int i = 0; i < n; i++)
   {
     CUdevice d;
-    if (cuDeviceGet(&d, i) != CUDA_SUCCESS) continue;
+    if (cuDeviceGet(&d, i) != CUDA_SUCCESS)
+      continue;
     char name[256] = {0};
     cuDeviceGetName(name, sizeof(name), d);
     int maj = 0, min = 0;
@@ -1357,8 +1446,8 @@ BackendInventory enumerateCuda()
     cuDeviceGetAttribute(&min, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, d);
 
     InventoryDevice dev;
-    dev.index   = i;
-    dev.name    = name;
+    dev.index = i;
+    dev.name = name;
     dev.typeStr = "sm_" + std::to_string(maj) + std::to_string(min);
     plat.devices.push_back(std::move(dev));
   }
