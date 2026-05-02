@@ -55,9 +55,12 @@ set(CLPEAK_MTL_KERNELS
     ${CLPEAK_ROOT}/src/mtl_kernels/kernel_latency.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_fp16.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_bf16.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_int8.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/local_bandwidth.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/image_bandwidth.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput_float.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput_ulong.metal
 )
 
 set(CLPEAK_CUDA_KERNELS

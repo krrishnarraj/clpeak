@@ -52,3 +52,43 @@ kernel void compute_hp2(device float* out [[buffer(0)]],
     half2 r = x + y;
     out[tid] = (float)(r.x + r.y);
 }
+
+// 32 outer * 16 packed FMAs * 8 ops (4 lanes * 2 ops) = 4096 ops/thread.
+kernel void compute_hp4(device float* out [[buffer(0)]],
+                        constant float& A [[buffer(1)]],
+                        uint tid [[thread_position_in_grid]],
+                        uint lid [[thread_position_in_threadgroup]])
+{
+    half4 x = half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f));
+    half4 y = half4((half)lid);
+
+    for (int i = 0; i < 32; i++)
+    {
+        MAD_16(x, y)
+    }
+
+    half4 r = x + y;
+    out[tid] = (float)(r.x + r.y + r.z + r.w);
+}
+
+// MSL has no native half8.  Pair two half4 chains; 16 outer * 16 fmas * 8 ops
+// * 2 chains = 4096 ops/thread.
+kernel void compute_hp8(device float* out [[buffer(0)]],
+                        constant float& A [[buffer(1)]],
+                        uint tid [[thread_position_in_grid]],
+                        uint lid [[thread_position_in_threadgroup]])
+{
+    half4 xa = half4((half)A,        (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f));
+    half4 xb = half4((half)(A + 4.0f), (half)(A + 5.0f), (half)(A + 6.0f), (half)(A + 7.0f));
+    half4 ya = half4((half)lid);
+    half4 yb = half4((half)lid);
+
+    for (int i = 0; i < 16; i++)
+    {
+        MAD_16(xa, ya)
+        MAD_16(xb, yb)
+    }
+
+    half4 r = xa + ya + xb + yb;
+    out[tid] = (float)(r.x + r.y + r.z + r.w);
+}

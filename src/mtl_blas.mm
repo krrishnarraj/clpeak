@@ -328,10 +328,117 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
         reportUnsupported("bf16", "bf16 requires macOS 14 -- unsupported on this device");
     }
 
-    // int8, fp8, int4: not exposed by either MPS GEMM API, so we don't attempt
-    // them. (Not a device limitation; simply outside the MPS API's scope.)
-
     log->xmlCloseTag(); // mps-gemm
+    return 0;
+}
+
+// ----- Integer-domain MPS GEMM (TOPS) ---------------------------------------
+
+int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    log->print(NEWLINE TAB "MPS GEMM peak (TOPS)" NEWLINE);
+    log->xmlOpenTag("mps-gemm-int");
+
+    if (!dev.info.isAppleSilicon)
+    {
+        log->print(TAB TAB "MPS GEMM requires Apple silicon! Skipped" NEWLINE);
+        log->xmlCloseTag();
+        return 0;
+    }
+
+    const uint32_t D = pickGemmDim(dev.info);
+    const uint32_t M = D, N = D, K = D;
+    const double  ops_per_iter = 2.0 * (double)M * (double)N * (double)K;
+
+    {
+        std::stringstream ss; ss << M << "x" << N << "x" << K;
+        log->xmlAppendAttribs("dim", ss.str());
+    }
+    log->xmlAppendAttribs("layout", "row-major");
+
+    id<MTLDevice>       mtlDev = dev.impl->device;
+    id<MTLCommandQueue> queue  = dev.impl->queue;
+
+    // ---- int8 via MPSGraph (cast to int32 for the matmul) -----------------
+    log->print(TAB TAB "int8 : ");
+    if (!dev.info.simdgroupMatrixInt8Supported)
+    {
+        log->print("requires Apple9 (M3) or newer -- unsupported on this device" NEWLINE);
+        log->xmlRecord("int8", 0.0f);
+    }
+    else
+    {
+        @autoreleasepool {
+            const uint64_t inBytes  = (uint64_t)M * K; // int8 = 1 byte
+            const uint64_t outBytes = (uint64_t)M * N * 4; // int32 result
+
+            id<MTLBuffer> bufA = makePrivateBuffer(mtlDev, inBytes);
+            id<MTLBuffer> bufB = makePrivateBuffer(mtlDev, (uint64_t)K * N);
+            id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
+            if (!bufA || !bufB || !bufC)
+            {
+                log->print("buffer alloc failed" NEWLINE);
+                log->xmlRecord("int8", 0.0f);
+            }
+            else
+            {
+                {
+                    id<MTLCommandBuffer> cb = [queue commandBuffer];
+                    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+                    [blit fillBuffer:bufA range:NSMakeRange(0, bufA.length) value:1];
+                    [blit fillBuffer:bufB range:NSMakeRange(0, bufB.length) value:1];
+                    [blit endEncoding];
+                    [cb commit];
+                    [cb waitUntilCompleted];
+                }
+
+                MPSGraph *g = [MPSGraph new];
+                MPSGraphTensor *A8 = [g placeholderWithShape:@[@(M),@(K)]
+                                                    dataType:MPSDataTypeInt8 name:@"A"];
+                MPSGraphTensor *B8 = [g placeholderWithShape:@[@(K),@(N)]
+                                                    dataType:MPSDataTypeInt8 name:@"B"];
+                // MPSGraph matmul requires float-or-same-dtype operands; cast
+                // to int32 so the engine takes the int simdgroup_matrix path
+                // on Apple9+.
+                MPSGraphTensor *A32 = [g castTensor:A8 toType:MPSDataTypeInt32 name:@"A32"];
+                MPSGraphTensor *B32 = [g castTensor:B8 toType:MPSDataTypeInt32 name:@"B32"];
+                MPSGraphTensor *C   = [g matrixMultiplicationWithPrimaryTensor:A32
+                                                              secondaryTensor:B32
+                                                                          name:@"C"];
+
+                MPSGraphTensorData *aData = [[MPSGraphTensorData alloc]
+                    initWithMTLBuffer:bufA shape:@[@(M),@(K)] dataType:MPSDataTypeInt8];
+                MPSGraphTensorData *bData = [[MPSGraphTensorData alloc]
+                    initWithMTLBuffer:bufB shape:@[@(K),@(N)] dataType:MPSDataTypeInt8];
+                MPSGraphTensorData *cData = [[MPSGraphTensorData alloc]
+                    initWithMTLBuffer:bufC shape:@[@(M),@(N)] dataType:MPSDataTypeInt32];
+
+                NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds =
+                    @{ A8: aData, B8: bData };
+                NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results =
+                    @{ C: cData };
+
+                unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
+                double per_iter_us = timeMPSGraph(queue, g, feeds, results, warmup);
+                if (per_iter_us <= 0.0)
+                {
+                    log->print("timing probe failed" NEWLINE);
+                    log->xmlRecord("int8", 0.0f);
+                }
+                else
+                {
+                    unsigned int iters = pickIters(per_iter_us, forceIters, specifiedIters);
+                    double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
+                    double tops = ops_per_iter * 1.0e6 / mean_us / 1.0e12;
+                    log->print((float)tops);
+                    log->print(NEWLINE);
+                    log->xmlRecord("int8", (float)tops);
+                }
+            }
+        }
+    }
+
+    log->xmlCloseTag(); // mps-gemm-int
     return 0;
 }
 

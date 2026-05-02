@@ -88,6 +88,11 @@ bool MetalDevice::init(int devIndex)
     info.fp16Supported                = info.isAppleSilicon;
     info.simdgroupMatrixFP16Supported = info.appleFamily >= 7;
     info.simdgroupMatrixBF16Supported = info.appleFamily >= 9;
+    info.simdgroupMatrixInt8Supported = info.appleFamily >= 9;
+    // 64-bit integer atomics (atomic_ulong / atomic_long fetch_add) light up
+    // on Apple8 (M2) and newer.  Apple7 lacks the hardware path entirely; the
+    // MSL compile would succeed but the dispatch produces wrong results.
+    info.atomic64Supported            = info.appleFamily >= 8;
 
     // MPSGraph bf16 dtype was added in macOS 14 (Sonoma) and only lights up
     // on Apple9+ (M3); below that it falls back to a slow software path.
@@ -319,17 +324,24 @@ int MetalPeak::runAll()
             log->xmlAppendAttribs("family", ss.str());
         }
 
+        // ---- Float compute section (GFLOPS / TFLOPS / GBPS) ---------------
         if (isTestEnabled(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
         if (isTestEnabled(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
         if (isTestEnabled(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
-        if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
         if (isTestEnabled(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
         if (isTestEnabled(Benchmark::MpsGemm))           runMpsGemm(dev, cfg);
         if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
         if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
         if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+
+        // ---- Integer compute section (GOPS / TOPS) -------------------------
+        if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+        if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+        if (isTestEnabled(Benchmark::SimdgroupMatrix))   runSimdgroupMatrixInt(dev, cfg);
+        if (isTestEnabled(Benchmark::MpsGemm))           runMpsGemmInt(dev, cfg);
         if (isTestEnabled(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
+
+        // ---- Latency (separate, units in microseconds) --------------------
         if (isTestEnabled(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
@@ -430,15 +442,19 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 
 int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
 {
+    static const mtl_compute_variant_t variants[] = {
+        { "float ", "compute_sp",  mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name },
+        { "float2", "compute_sp2", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name },
+        { "float4", "compute_sp4", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name },
+        { "float8", "compute_sp8", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name },
+    };
     float A = 1.3f;
     mtl_compute_desc_t d = {};
     d.title       = "Single-precision compute (GFLOPS)";
     d.xmlTag      = "single_precision_compute";
     d.unit        = "gflops";
-    d.metricLabel = "float";
-    d.kernelName  = "compute_sp";
-    d.src         = mtl_kernels::compute_sp_src;
-    d.srcName     = mtl_kernels::compute_sp_name;
+    d.variants    = variants;
+    d.numVariants = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
     d.elemSize    = sizeof(float);
     d.scalarArg   = &A;
@@ -449,8 +465,10 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
 int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
 {
     static const mtl_compute_variant_t variants[] = {
-        { "half",  "compute_hp",  mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name },
+        { "half ", "compute_hp",  mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name },
         { "half2", "compute_hp2", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name },
+        { "half4", "compute_hp4", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name },
+        { "half8", "compute_hp8", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name },
     };
     float A = 1.3f;
     mtl_compute_desc_t d = {};
@@ -468,15 +486,18 @@ int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
 {
+    static const mtl_compute_variant_t variants[] = {
+        { "mp ", "compute_mp",  mtl_kernels::compute_mp_src, mtl_kernels::compute_mp_name },
+        { "mp2", "compute_mp2", mtl_kernels::compute_mp_src, mtl_kernels::compute_mp_name },
+        { "mp4", "compute_mp4", mtl_kernels::compute_mp_src, mtl_kernels::compute_mp_name },
+    };
     float A = 1.3f;
     mtl_compute_desc_t d = {};
     d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
     d.xmlTag      = "mixed_precision_compute";
     d.unit        = "gflops";
-    d.metricLabel = "mp";
-    d.kernelName  = "compute_mp";
-    d.src         = mtl_kernels::compute_mp_src;
-    d.srcName     = mtl_kernels::compute_mp_name;
+    d.variants    = variants;
+    d.numVariants = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
     d.elemSize    = sizeof(float);
     d.scalarArg   = &A;
@@ -486,15 +507,18 @@ int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
 {
+    static const mtl_compute_variant_t variants[] = {
+        { "int8_dp ", "compute_int8_dp",  mtl_kernels::compute_int8_dp_src, mtl_kernels::compute_int8_dp_name },
+        { "int8_dp2", "compute_int8_dp2", mtl_kernels::compute_int8_dp_src, mtl_kernels::compute_int8_dp_name },
+        { "int8_dp4", "compute_int8_dp4", mtl_kernels::compute_int8_dp_src, mtl_kernels::compute_int8_dp_name },
+    };
     int A = 4;
     mtl_compute_desc_t d = {};
     d.title          = "INT8 dot-product compute (emulated) (GOPS)";
     d.xmlTag         = "integer_compute_int8_dp";
     d.unit           = "gops";
-    d.metricLabel    = "int8_dp";
-    d.kernelName     = "compute_int8_dp";
-    d.src            = mtl_kernels::compute_int8_dp_src;
-    d.srcName        = mtl_kernels::compute_int8_dp_name;
+    d.variants       = variants;
+    d.numVariants    = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI      = COMPUTE_INT8_DP_WORK_PER_WI;
     d.elemSize       = sizeof(int);
     d.scalarArg      = &A;
@@ -506,21 +530,49 @@ int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg)
 {
+    static const mtl_compute_variant_t variants[] = {
+        { "int4_packed ", "compute_int4_packed",  mtl_kernels::compute_int4_packed_src, mtl_kernels::compute_int4_packed_name },
+        { "int4_packed2", "compute_int4_packed2", mtl_kernels::compute_int4_packed_src, mtl_kernels::compute_int4_packed_name },
+        { "int4_packed4", "compute_int4_packed4", mtl_kernels::compute_int4_packed_src, mtl_kernels::compute_int4_packed_name },
+    };
     int A = 3;
     mtl_compute_desc_t d = {};
     d.title          = "Packed INT4 compute (emulated) (GOPS)";
     d.xmlTag         = "int4_packed_compute";
     d.unit           = "gops";
-    d.metricLabel    = "int4_packed";
-    d.kernelName     = "compute_int4_packed";
-    d.src            = mtl_kernels::compute_int4_packed_src;
-    d.srcName        = mtl_kernels::compute_int4_packed_name;
+    d.variants       = variants;
+    d.numVariants    = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI      = COMPUTE_INT4_PACKED_WORK_PER_WI;
     d.elemSize       = sizeof(int);
     d.scalarArg      = &A;
     d.scalarSize     = sizeof(A);
     d.extraAttribKey = "emulated";
     d.extraAttribVal = "true";
+    return runComputeKernel(dev, cfg, d);
+}
+
+int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    int A = 1;
+    mtl_compute_desc_t d = {};
+    d.title            = "simdgroup_matrix int8xint8+int32 8x8x8 (TOPS)";
+    d.xmlTag           = "simdgroup_matrix_int8";
+    d.unit             = "tops";
+    d.unitDivider      = 1e12;
+    d.metricLabel      = "simdgroup_int8";
+    d.kernelName       = "simdgroup_matrix_int8";
+    d.src              = mtl_kernels::simdgroup_matrix_int8_src;
+    d.srcName          = mtl_kernels::simdgroup_matrix_int8_name;
+    d.workPerWI        = MTL_SIMDGROUP_WORK_PER_WI;
+    d.elemSize         = sizeof(int);
+    d.threadsPerGroup  = 32;
+    d.outElemsPerGroup = 64;
+    d.scalarArg        = &A;
+    d.scalarSize       = sizeof(A);
+    d.skip             = !dev.info.simdgroupMatrixInt8Supported;
+    d.skipMsg          = "int8 simdgroup_matrix requires Apple9 (M3) or newer! Skipped";
+    d.extraAttribKey   = "tile";
+    d.extraAttribVal   = "8x8x8";
     return runComputeKernel(dev, cfg, d);
 }
 
@@ -591,17 +643,18 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     unsigned int iters = cfg.globalBWIters;
     const uint32_t tgSize = 256;
 
-    uint64_t maxItems = dev.info.maxBufferLength / sizeof(float);
-    uint64_t numItems = (maxItems / (tgSize * FETCH_PER_WI)) * (tgSize * FETCH_PER_WI);
-    if (numItems > cfg.globalBWMaxSize / sizeof(float))
-        numItems = (cfg.globalBWMaxSize / sizeof(float) / (tgSize * FETCH_PER_WI)) * (tgSize * FETCH_PER_WI);
-
-    uint32_t numGroups = (uint32_t)(numItems / FETCH_PER_WI / tgSize);
-    if (numGroups == 0) numGroups = 1;
-
     log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
     log->xmlOpenTag("global_memory_bandwidth");
     log->xmlAppendAttribs("unit", "gbps");
+
+    // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
+    // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).
+    const uint32_t maxVecScale = 16;
+    uint64_t maxItems = dev.info.maxBufferLength / sizeof(float);
+    uint64_t align    = (uint64_t)tgSize * FETCH_PER_WI * maxVecScale;
+    uint64_t numItems = (maxItems / align) * align;
+    if (numItems > cfg.globalBWMaxSize / sizeof(float))
+        numItems = (cfg.globalBWMaxSize / sizeof(float) / align) * align;
 
     id<MTLBuffer> inBuf  = [dev.impl->device newBufferWithLength:numItems * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
@@ -616,27 +669,46 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     // Touch the input so we don't measure zero-page reads on copy-on-write.
     memset(inBuf.contents, 0x3f, numItems * sizeof(float));
 
-    id<MTLComputePipelineState> pso = getPipeline(dev,
-        mtl_kernels::global_bandwidth_src,
-        mtl_kernels::global_bandwidth_name,
-        "global_bandwidth");
-    if (!pso)
+    struct V { const char *label; const char *kname; uint32_t width; };
+    const V vs[] = {
+        { "float  ", "global_bandwidth",     1  },
+        { "float2 ", "global_bandwidth_v2",  2  },
+        { "float4 ", "global_bandwidth_v4",  4  },
+        { "float8 ", "global_bandwidth_v8",  8  },
+        { "float16", "global_bandwidth_v16", 16 },
+    };
+
+    MTLSize tgSizeM = MTLSizeMake(tgSize, 1, 1);
+
+    for (const auto &v : vs)
     {
-        log->print(TAB TAB "Pipeline create failed" NEWLINE);
-        log->xmlCloseTag();
-        return -1;
+        log->print(TAB TAB);
+        log->print(v.label);
+        log->print(": ");
+
+        id<MTLComputePipelineState> pso = getPipeline(dev,
+            mtl_kernels::global_bandwidth_src,
+            mtl_kernels::global_bandwidth_name,
+            v.kname);
+        if (!pso) { log->print("compile/load failed" NEWLINE); continue; }
+
+        // Each threadgroup reads FETCH_PER_WI * tgSize logical-vec elements,
+        // i.e. FETCH_PER_WI * tgSize * width scalar floats.
+        uint64_t scalarsPerGroup = (uint64_t)tgSize * FETCH_PER_WI * v.width;
+        uint32_t numGroups = (uint32_t)(numItems / scalarsPerGroup);
+        if (numGroups == 0) numGroups = 1;
+        MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
+
+        float us = runDispatches(dev, pso, inBuf, nullptr, 0, outBuf,
+                                 gridSize, tgSizeM, warmupCount, iters);
+        uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
+        float gbps = (float)bytesRead / us / 1e3f;
+        log->print(gbps);
+        log->print(NEWLINE);
+        std::string key(v.label);
+        while (!key.empty() && key.back() == ' ') key.pop_back();
+        log->xmlRecord(key, gbps);
     }
-
-    MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
-    MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
-
-    log->print(TAB TAB "float   : ");
-    float us = runDispatches(dev, pso, inBuf, nullptr, 0, outBuf,
-                             gridSize, tgSizeM, warmupCount, iters);
-    float gbps = ((float)numItems * sizeof(float)) / us / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->xmlRecord("float", gbps);
 
     log->xmlCloseTag();
     return 0;
@@ -792,29 +864,11 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     uint64_t globalThreads = 32ULL * 1024 * 1024;
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
 
-    MTLTextureDescriptor *td = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
-                                     width:imgW height:imgH mipmapped:NO];
-    td.usage = MTLTextureUsageShaderRead;
-    td.storageMode = MTLStorageModeShared;
-    id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
-    if (!tex)
-    {
-        log->print(TAB TAB "Texture create failed" NEWLINE);
-        log->xmlCloseTag();
-        return -1;
-    }
-    // Contents undefined is fine for a bandwidth measurement.
-
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
-
-    id<MTLComputePipelineState> pso = getPipeline(dev,
-        mtl_kernels::image_bandwidth_src,
-        mtl_kernels::image_bandwidth_name, "image_bandwidth");
-    if (!pso)
+    if (!outBuf)
     {
-        log->print(TAB TAB "Pipeline create failed" NEWLINE);
+        log->print(TAB TAB "Output buffer alloc failed" NEWLINE);
         log->xmlCloseTag();
         return -1;
     }
@@ -822,32 +876,69 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
 
-    log->print(TAB TAB "float4 : ");
-    // Custom dispatch -- runDispatches doesn't know about textures.
-    auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
-        id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:pso];
-        [enc setTexture:tex atIndex:0];
-        [enc setBuffer:outBuf offset:0 atIndex:0];
-        for (unsigned int i = 0; i < n; i++)
-            [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSizeM];
-        [enc endEncoding];
-        [cb commit];
-        return cb;
+    struct V {
+        const char     *label;
+        const char     *kname;
+        MTLPixelFormat  fmt;
+        uint32_t        bytesPerPixel;
     };
-    if (warmupCount > 0)
+    const V vs[] = {
+        { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16 },
+        { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8  },
+        { "rgba8  ", "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4  },
+        { "r32f   ", "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4  },
+    };
+
+    for (const auto &v : vs)
     {
-        id<MTLCommandBuffer> w = enqueue(warmupCount);
-        [w waitUntilCompleted];
+        log->print(TAB TAB);
+        log->print(v.label);
+        log->print(": ");
+
+        MTLTextureDescriptor *td = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:v.fmt
+                                         width:imgW height:imgH mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead;
+        td.storageMode = MTLStorageModeShared;
+        id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
+        if (!tex)
+        {
+            log->print("texture alloc failed" NEWLINE);
+            continue;
+        }
+
+        id<MTLComputePipelineState> pso = getPipeline(dev,
+            mtl_kernels::image_bandwidth_src,
+            mtl_kernels::image_bandwidth_name, v.kname);
+        if (!pso) { log->print("compile/load failed" NEWLINE); continue; }
+
+        auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
+            id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
+            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+            [enc setComputePipelineState:pso];
+            [enc setTexture:tex atIndex:0];
+            [enc setBuffer:outBuf offset:0 atIndex:0];
+            for (unsigned int i = 0; i < n; i++)
+                [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSizeM];
+            [enc endEncoding];
+            [cb commit];
+            return cb;
+        };
+        if (warmupCount > 0)
+        {
+            id<MTLCommandBuffer> w = enqueue(warmupCount);
+            [w waitUntilCompleted];
+        }
+        id<MTLCommandBuffer> t = enqueue(iters);
+        [t waitUntilCompleted];
+        float us = (float)((t.GPUEndTime - t.GPUStartTime) * 1e6 / iters);
+        uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
+        float gbps = (float)bytes / us / 1e3f;
+        log->print(gbps); log->print(NEWLINE);
+        std::string key(v.label);
+        while (!key.empty() && key.back() == ' ') key.pop_back();
+        log->xmlRecord(key, gbps);
     }
-    id<MTLCommandBuffer> t = enqueue(iters);
-    [t waitUntilCompleted];
-    float us = (float)((t.GPUEndTime - t.GPUStartTime) * 1e6 / iters);
-    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps); log->print(NEWLINE);
-    log->xmlRecord("float4", gbps);
 
     log->xmlCloseTag();
     return 0;
@@ -870,46 +961,85 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
 
-    auto runOne = [&](const char *fnName, NSUInteger bufBytes) -> float
+    auto runOne = [&](const char *src, const char *srcName, const char *fnName,
+                      NSUInteger bufBytes) -> float
     {
         id<MTLBuffer> buf = [dev.impl->device newBufferWithLength:bufBytes
                                                           options:MTLResourceStorageModeShared];
         if (!buf) return -1.0f;
         memset(buf.contents, 0, bufBytes);
-        id<MTLComputePipelineState> pso = getPipeline(dev,
-            mtl_kernels::atomic_throughput_src,
-            mtl_kernels::atomic_throughput_name, fnName);
+        id<MTLComputePipelineState> pso = getPipeline(dev, src, srcName, fnName);
         if (!pso) return -1.0f;
         float us = runDispatches(dev, pso, buf, nullptr, 0, nil,
                                  gridSize, tgSizeM, warmupCount, iters);
         return us;
     };
 
-    log->print(TAB TAB "global : ");
-    float us_g = runOne("atomic_throughput_global", globalThreads * sizeof(int));
-    if (us_g > 0)
+    auto reportOne = [&](const char *xmlKey, const char *src, const char *srcName,
+                         const char *fnName, NSUInteger bufBytes,
+                         bool skip, const char *skipMsg)
     {
-        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us_g / 1e3f;
-        log->print(gops); log->print(NEWLINE);
-        log->xmlRecord("global", gops);
-    }
-    else
-    {
-        log->print("failed" NEWLINE);
-    }
+        if (skip)
+        {
+            log->print(skipMsg); log->print(NEWLINE);
+            log->xmlRecord(xmlKey, 0.0f);
+            return;
+        }
+        float us = runOne(src, srcName, fnName, bufBytes);
+        if (us > 0)
+        {
+            float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+            log->print(gops); log->print(NEWLINE);
+            log->xmlRecord(xmlKey, gops);
+        }
+        else
+        {
+            log->print("compile/load failed" NEWLINE);
+            log->xmlRecord(xmlKey, 0.0f);
+        }
+    };
 
-    log->print(TAB TAB "local  : ");
-    float us_l = runOne("atomic_throughput_local", numGroups * sizeof(int));
-    if (us_l > 0)
+    auto report = [&](const char *label, const char *src, const char *srcName,
+                      const char *gFn, const char *lFn, uint32_t elemSize,
+                      bool skip, const char *skipMsg)
     {
-        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us_l / 1e3f;
-        log->print(gops); log->print(NEWLINE);
-        log->xmlRecord("local", gops);
-    }
-    else
-    {
-        log->print("failed" NEWLINE);
-    }
+        // Trim trailing/internal padding so the XML element name is valid.
+        std::string trimmed(label);
+        while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
+        log->print(TAB TAB); log->print(label); log->print("_global : ");
+        reportOne((trimmed + "_global").c_str(),
+                  src, srcName, gFn, globalThreads * elemSize, skip, skipMsg);
+        if (lFn)
+        {
+            log->print(TAB TAB); log->print(label); log->print("_local  : ");
+            reportOne((trimmed + "_local").c_str(),
+                      src, srcName, lFn, numGroups * elemSize, skip, skipMsg);
+        }
+    };
+
+    report("int  ",  mtl_kernels::atomic_throughput_src,
+           mtl_kernels::atomic_throughput_name,
+           "atomic_throughput_global",      "atomic_throughput_local",
+           sizeof(int), false, nullptr);
+    report("uint ",  mtl_kernels::atomic_throughput_src,
+           mtl_kernels::atomic_throughput_name,
+           "atomic_throughput_global_uint", "atomic_throughput_local_uint",
+           sizeof(uint32_t), false, nullptr);
+    // atomic_float: only the device-address-space variant is supported in MSL;
+    // there is no atomic_throughput_local_float kernel.
+    report("float",  mtl_kernels::atomic_throughput_float_src,
+           mtl_kernels::atomic_throughput_float_name,
+           "atomic_throughput_global_float", nullptr,
+           sizeof(float), false, nullptr);
+    // atomic_ulong: 64-bit atomic add isn't accepted by every MSL/SDK combo.
+    // Skipped on Apple7; on Apple8+ we still let getPipeline report
+    // compile/load failed if the SDK rejects it.
+    report("ulong",  mtl_kernels::atomic_throughput_ulong_src,
+           mtl_kernels::atomic_throughput_ulong_name,
+           "atomic_throughput_global_ulong", "atomic_throughput_local_ulong",
+           sizeof(uint64_t),
+           !dev.info.atomic64Supported,
+           "skipped (requires Apple8 / M2 or newer)");
 
     log->xmlCloseTag();
     return 0;
