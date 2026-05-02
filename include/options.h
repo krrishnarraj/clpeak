@@ -36,11 +36,16 @@ struct CliOptions {
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
 
-  // Test selection.  Default: every test enabled.  The first test-selection
-  // flag flips this to a "deny by default; enable picked" mode (matches the
-  // historic OpenCL behavior).
+  // Test selection.  Default: every category and every test enabled.  The
+  // first positive --<test> flag flips enabledTests to allow-list mode
+  // ("deny by default; enable picked"); --no-<test> always subtracts.
+  // The first positive --<category> flag flips enabledCategories the same
+  // way; --no-<category> always subtracts.  A test runs iff its primary
+  // category is enabled AND its own bit is set (see isAllowed).
   std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
-  bool forcedTests = false;
+  std::bitset<4>                                     enabledCategories;
+  bool forcedTests       = false;
+  bool forcedCategories  = false;
 
   // OpenCL-only timing knob.
   bool useEventTimer = false;
@@ -57,11 +62,24 @@ struct CliOptions {
   // Listing mode (no benchmarks run; just print devices).
   bool listDevices = false;
 
-  CliOptions() { enabledTests.set(); }
+  CliOptions()
+  {
+    enabledTests.set();
+    enabledCategories.set();
+  }
 
   bool isTestEnabled(Benchmark b) const
   {
     return enabledTests.test(static_cast<size_t>(b));
+  }
+  bool isCategoryEnabled(Category c) const
+  {
+    if (c == Category::Unknown) return false;
+    return enabledCategories.test(static_cast<size_t>(c));
+  }
+  bool isAllowed(Benchmark b) const
+  {
+    return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
   }
 };
 

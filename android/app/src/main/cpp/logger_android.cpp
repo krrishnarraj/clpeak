@@ -2,33 +2,34 @@
 #include <iomanip>
 #include <sstream>
 
-// Android logger: print() methods dispatch to the Java UI via JNI.
-// XML / JSON / CSV file output is not used on Android, but the context stack
-// (xmlOpenTag / xmlAppendAttribs / xmlCloseTag) is maintained in memory so
-// that recordMetric() can extract fully-qualified result entries and dispatch
-// them to the Kotlin layer via a second JNI callback.
+// Android logger: print() routes to the Kotlin UI via JNI; metric emission
+// fires record_metric_callback_from_c() on every Ok measurement.  File
+// outputs (XML / JSON / CSV) are unused on Android, but the result store
+// is still populated for parity with the desktop build.
+//
+// Stage 1 of the v2 schema refactor keeps the JNI callback signature as it
+// was (backend, platform, device, driver, test, metric, unit, value).
+// Stage 4 extends it with category / status / reason and updates Kotlin to
+// match.
 
-logger::logger(bool _enableXml,     std::string _xmlFileName,
-               bool _enableJson,    std::string _jsonFileName,
-               bool _enableCsv,     std::string _csvFileName,
-               std::string _compareFileName)
+logger::logger(bool, std::string,
+               bool, std::string,
+               bool, std::string,
+               std::string)
   : enableXml(false),
-    xw(nullptr),
     enableJson(false),
     enableCsv(false),
-    compareEnabled(false)
+    compareEnabled(false),
+    curCategory(Category::Unknown),
+    shimDepth(0)
 {
-  (void)_enableXml; (void)_xmlFileName;
-  (void)_enableJson; (void)_jsonFileName;
-  (void)_enableCsv;  (void)_csvFileName;
-  (void)_compareFileName;
 }
 
 logger::~logger()
 {
 }
 
-// ---- stdout -> JNI callbacks ----------------------------------------------
+// ---- print -> JNI ---------------------------------------------------------
 
 void logger::print(std::string str)
 {
@@ -63,87 +64,180 @@ void logger::print(unsigned int val)
   jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
 }
 
-// ---- Context stack -- maintained in memory for recordMetric() -------------
+// ---- High-level recording API --------------------------------------------
+
+void logger::deviceBegin(const std::string &backend,
+                         const std::string &platform,
+                         const std::string &device,
+                         const std::string &driver)
+{
+  curBackend  = backend;
+  curPlatform = platform;
+  curDevice   = device;
+  curDriver   = driver;
+}
+
+void logger::deviceEnd()
+{
+  curBackend.clear();
+  curPlatform.clear();
+  curDevice.clear();
+  curDriver.clear();
+  curCategory = Category::Unknown;
+  curTest.clear();
+  curUnit.clear();
+}
+
+void logger::categoryBegin(Category c)
+{
+  curCategory = c;
+}
+
+void logger::categoryEnd()
+{
+  curCategory = Category::Unknown;
+  curTest.clear();
+  curUnit.clear();
+}
+
+void logger::testBegin(const std::string &test, const std::string &unit)
+{
+  curTest = test;
+  curUnit = unit;
+  if (curCategory == Category::Unknown)
+    curCategory = categoryFromUnit(unit);
+}
+
+void logger::testEnd()
+{
+  curTest.clear();
+  curUnit.clear();
+}
+
+void logger::record(const std::string &metric, float value)
+{
+  emit(metric, ResultStatus::Ok, value, "");
+}
+
+void logger::recordSkip(const std::string &metric, ResultStatus status,
+                        const std::string &reason)
+{
+  emit(metric, status, 0.0f, reason);
+}
+
+// ---- Legacy XML shim ------------------------------------------------------
 
 void logger::xmlOpenTag(std::string tag)
 {
-  contextStack.push_back({tag, {}});
+  shimDepth++;
+  if (shimDepth == 4)
+  {
+    curTest = tag;
+    curUnit.clear();
+    curCategory = Category::Unknown;
+  }
 }
 
 void logger::xmlAppendAttribs(std::string key, std::string value)
 {
-  if (!contextStack.empty())
-    contextStack.back().attribs[key] = value;
+  switch (shimDepth)
+  {
+  case 2:
+    if      (key == "name")    curPlatform = value;
+    else if (key == "backend") curBackend  = value;
+    break;
+  case 3:
+    if      (key == "name")           curDevice = value;
+    else if (key == "driver_version") curDriver = value;
+    break;
+  case 4:
+    if (key == "unit")
+    {
+      curUnit     = value;
+      curCategory = categoryFromUnit(value);
+    }
+    break;
+  default:
+    break;
+  }
 }
 
 void logger::xmlAppendAttribs(std::string key, unsigned int value)
 {
-  if (!contextStack.empty())
-    contextStack.back().attribs[key] = std::to_string(value);
+  std::stringstream ss;
+  ss << value;
+  xmlAppendAttribs(key, ss.str());
 }
 
-void logger::xmlSetContent(std::string value)
+void logger::xmlSetContent(std::string)
 {
-  (void)value;
 }
 
 void logger::xmlSetContent(float value)
 {
-  // kernel_latency uses xmlSetContent instead of xmlRecord
-  recordMetric("latency", value);
+  if (shimDepth == 4 && !curTest.empty())
+    emit(curTest, ResultStatus::Ok, value, "");
 }
 
 void logger::xmlCloseTag()
 {
-  if (!contextStack.empty())
-    contextStack.pop_back();
+  if (shimDepth == 4)
+  {
+    curTest.clear();
+    curUnit.clear();
+    curCategory = Category::Unknown;
+  }
+  if (shimDepth > 0)
+    shimDepth--;
 }
 
-void logger::xmlRecord(std::string tag, std::string value)
+void logger::xmlRecord(std::string, std::string)
 {
-  (void)tag; (void)value;
 }
 
 void logger::xmlRecord(std::string tag, float value)
 {
-  // Called at context depth 4 (clpeak > platform > device > test_group)
-  recordMetric(tag, value);
+  if (shimDepth == 4)
+    emit(tag, ResultStatus::Ok, value, "");
 }
 
-// ---- Structured metric callback -> Kotlin ---------------------------------
+// ---- emit -> JNI ----------------------------------------------------------
 
-void logger::recordMetric(const std::string &metric, float value)
+void logger::emit(const std::string &metric, ResultStatus status,
+                  float value, const std::string &reason)
 {
-  if (contextStack.size() < 4 || !recordMetricCallback)
+  ResultEntry e;
+  e.backend  = curBackend;
+  e.platform = curPlatform;
+  e.device   = curDevice;
+  e.driver   = curDriver;
+  e.category = categoryString(curCategory);
+  e.test     = curTest;
+  e.metric   = metric;
+  e.unit     = curUnit;
+  e.status   = status;
+  e.value    = (status == ResultStatus::Ok) ? value : 0.0f;
+  e.reason   = reason;
+  results.push_back(e);
+
+  // v2 JNI signature carries `category` after `backend`.  Skip /
+  // unsupported / error rows are still recorded in `results` but don't
+  // fire the callback (Kotlin renders only Ok values).  A follow-up
+  // change can extend the signature to include status+reason and
+  // surface skipped rows in the UI.
+  if (status != ResultStatus::Ok || !recordMetricCallback)
     return;
-
-  auto getAttrib = [&](int idx, const char *key) -> std::string {
-    auto it = contextStack[idx].attribs.find(key);
-    return (it != contextStack[idx].attribs.end()) ? it->second : "";
-  };
-
-  // Outer frames (clpeak > platform > device) are at fixed positions; the
-  // test frame is always the innermost open tag.  Using back() instead of
-  // [3] keeps metrics attributed correctly even if a prior test leaked its
-  // xmlCloseTag -- otherwise all subsequent siblings would nest under the
-  // leaked parent and collapse into a single Android result card.
-  const size_t testIdx = contextStack.size() - 1;
-  const std::string backend  = getAttrib(1, "backend");
-  const std::string platform = getAttrib(1, "name");
-  const std::string device   = getAttrib(2, "name");
-  const std::string driver   = getAttrib(2, "driver_version");
-  const std::string test     = contextStack[testIdx].tag;
-  const std::string unit     = getAttrib(testIdx, "unit");
 
   jEnv->CallVoidMethod(
       (*jObj),
       recordMetricCallback,
-      jEnv->NewStringUTF(backend.c_str()),
-      jEnv->NewStringUTF(platform.c_str()),
-      jEnv->NewStringUTF(device.c_str()),
-      jEnv->NewStringUTF(driver.c_str()),
-      jEnv->NewStringUTF(test.c_str()),
-      jEnv->NewStringUTF(metric.c_str()),
-      jEnv->NewStringUTF(unit.c_str()),
+      jEnv->NewStringUTF(e.backend.c_str()),
+      jEnv->NewStringUTF(e.platform.c_str()),
+      jEnv->NewStringUTF(e.device.c_str()),
+      jEnv->NewStringUTF(e.driver.c_str()),
+      jEnv->NewStringUTF(e.category.c_str()),
+      jEnv->NewStringUTF(e.test.c_str()),
+      jEnv->NewStringUTF(e.metric.c_str()),
+      jEnv->NewStringUTF(e.unit.c_str()),
       static_cast<jfloat>(value));
 }

@@ -479,6 +479,7 @@ vkPeak::vkPeak()
     instance(VK_NULL_HANDLE)
 {
   enabledTests.set();
+  enabledCategories.set();
 }
 
 vkPeak::~vkPeak()
@@ -702,27 +703,38 @@ int vkPeak::runAll()
     log->xmlAppendAttribs("api", "vulkan");
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
 
-    if (isTestEnabled(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
+    // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
+    if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-    if (isTestEnabled(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
-#endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-    if (isTestEnabled(Benchmark::ComputeInt8DP))   runComputeInt8DP(dev, cfg);
-#endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
-    if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+    if (isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-    if (isTestEnabled(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
+    if (isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
-    if (isTestEnabled(Benchmark::CoopMatrix))      runCoopMatrix(dev, cfg);
+    // CoopMatrix emits both fp (tflops) and int (tops) variants in one call;
+    // the shim assigns each metric to its proper category by unit.
+    if (isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
+        isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+        runCoopMatrix(dev, cfg);
 #endif
-    if (isTestEnabled(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
-    if (isTestEnabled(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
+
+    // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+    if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+    if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+#endif
+    if (isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
+
+    // ---- Phase 3: bandwidth (GBPS) ---------------------------------
+    if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+
+    // ---- Phase 4: latency (us) -------------------------------------
+    if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device

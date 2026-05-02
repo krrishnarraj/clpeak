@@ -17,8 +17,10 @@ static void wireLoggerToJni(logger *lg, JNIEnv *jniEnv, jobject *jObj, jclass cl
       PRINT_CALLBACK, "(Ljava/lang/String;)V");
   lg->recordMetricCallback = jniEnv->GetMethodID(cls,
       RECORD_METRIC_CALLBACK,
+      // v2 signature: (backend, platform, device, driver, category, test,
+      // metric, unit, value).  Eight strings + one float.
       "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-      "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F)V");
+      "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F)V");
 }
 
 jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,

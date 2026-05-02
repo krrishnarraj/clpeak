@@ -213,6 +213,7 @@ MetalPeak::MetalPeak()
     impl(nullptr)
 {
   enabledTests.set();
+  enabledCategories.set();
 }
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
@@ -324,25 +325,31 @@ int MetalPeak::runAll()
             log->xmlAppendAttribs("family", ss.str());
         }
 
-        // ---- Float compute section (GFLOPS / TFLOPS / GBPS) ---------------
-        if (isTestEnabled(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
-        if (isTestEnabled(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
-        if (isTestEnabled(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isTestEnabled(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
-        if (isTestEnabled(Benchmark::MpsGemm))           runMpsGemm(dev, cfg);
-        if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
-        if (isTestEnabled(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
-        if (isTestEnabled(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+        // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -----------
+        if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
+        if (isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
+        if (isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
+        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::FpCompute))
+            runSimdgroupMatrix(dev, cfg);
+        if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
+            runMpsGemm(dev, cfg);
 
-        // ---- Integer compute section (GOPS / TOPS) -------------------------
-        if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
-        if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
-        if (isTestEnabled(Benchmark::SimdgroupMatrix))   runSimdgroupMatrixInt(dev, cfg);
-        if (isTestEnabled(Benchmark::MpsGemm))           runMpsGemmInt(dev, cfg);
-        if (isTestEnabled(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
+        // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
+        if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+        if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::IntCompute))
+            runSimdgroupMatrixInt(dev, cfg);
+        if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
+            runMpsGemmInt(dev, cfg);
+        if (isAllowed(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
 
-        // ---- Latency (separate, units in microseconds) --------------------
-        if (isTestEnabled(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
+        // ---- Phase 3: bandwidth (GBPS) -----------------------------------
+        if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
+        if (isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
+        if (isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+
+        // ---- Phase 4: latency (us) ---------------------------------------
+        if (isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
         log->xmlCloseTag(); // device
@@ -429,7 +436,14 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 
         log->print(value);
         log->print(NEWLINE);
-        log->xmlRecord(v.label, value);
+
+        // Strip the right-padding used for stdout column alignment so the
+        // metric tag stored in the dump (and shown in the Android UI) is
+        // a clean canonical label.
+        std::string metricTag(v.label);
+        while (!metricTag.empty() && metricTag.back() == ' ')
+            metricTag.pop_back();
+        log->xmlRecord(metricTag, value);
     }
 
     log->xmlCloseTag();

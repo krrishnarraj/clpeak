@@ -30,20 +30,24 @@ class BenchmarkRepository {
         _logChannel.trySend(str)
     }
 
-    // Called from C++ logger_android.cpp::recordMetric() on the benchmark thread.
+    // Called from C++ logger_android.cpp::emit() on the benchmark thread.
+    // Signature mirrors the v2 ResultEntry layout (backend, platform, device,
+    // driver, category, test, metric, unit, value) -- category is new in v2
+    // and replaces the static CATEGORY_META lookup the ViewModel used to do.
     @Suppress("unused")
     fun record_metric_callback_from_c(
         backend: String,
         platform: String,
         device: String,
         driver: String,
+        category: String,
         test: String,
         metric: String,
         unit: String,
         value: Float
     ) {
         _metricChannel.trySend(
-            ResultEntry(backend, platform, device, driver, test, metric, unit, value)
+            ResultEntry(backend, platform, device, driver, category, test, metric, unit, value)
         )
     }
 

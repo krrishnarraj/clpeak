@@ -30,10 +30,13 @@ class BenchmarkViewModel : ViewModel() {
     val selection:  LiveData<BenchmarkSelection>               = _selection
     val screen:     LiveData<Screen>                           = _screen
 
-    // Accumulate metrics preserving arrival order per (backend, test) so the
-    // UI cards stay in the sequence they first appeared in.
+    // Accumulate metrics preserving arrival order per (backend, category,
+    // test) so the UI cards stay in the sequence they first appeared in.
+    // Grouping key includes category because dual-category tests (wmma,
+    // simdgroup_matrix, etc.) appear under both fp_compute and int_compute
+    // and need to render as two separate cards.
     private val accumulated = mutableListOf<ResultEntry>()
-    private val expandedKeys = mutableSetOf<String>()  // "backend|test"
+    private val expandedKeys = mutableSetOf<String>()  // "backend|category|test"
 
     init {
         loadCatalog()
@@ -129,8 +132,8 @@ class BenchmarkViewModel : ViewModel() {
         }
     }
 
-    fun toggleCategory(backend: String, testName: String) {
-        val key = "$backend|$testName"
+    fun toggleCategory(backend: String, testName: String, category: String = "") {
+        val key = "$backend|$category|$testName"
         if (!expandedKeys.add(key)) expandedKeys.remove(key)
         rebuild()
     }
@@ -144,67 +147,76 @@ class BenchmarkViewModel : ViewModel() {
     }
 
     private fun rebuild() {
-        // Preserve arrival order: build a backend list and per-backend test list
-        // by first-seen position in accumulated.
+        // Preserve arrival order: build a backend list and per-(category,test)
+        // metric list keyed by first-seen position in accumulated.  The same
+        // test name (e.g. "wmma") may appear under both fp_compute and
+        // int_compute on a single device -- they render as two cards.
         val backendOrder = linkedSetOf<String>()
-        val perBackendTests = linkedMapOf<String, LinkedHashMap<String, MutableList<ResultEntry>>>()
+        val perBackendCards = linkedMapOf<String, LinkedHashMap<Pair<String, String>, MutableList<ResultEntry>>>()
 
         for (e in accumulated) {
             backendOrder.add(e.backend)
-            val tests = perBackendTests.getOrPut(e.backend) { linkedMapOf() }
-            tests.getOrPut(e.test) { mutableListOf() }.add(e)
+            val cards = perBackendCards.getOrPut(e.backend) { linkedMapOf() }
+            cards.getOrPut(e.category to e.test) { mutableListOf() }.add(e)
         }
 
         val result = linkedMapOf<String, List<BenchmarkCategory>>()
         for (backend in backendOrder) {
-            val tests = perBackendTests[backend] ?: continue
-            val cats = tests.map { (test, entries) ->
-                val meta = CATEGORY_META[test] ?: CategoryMeta(
-                    test.replace('_', ' ').replaceFirstChar { it.uppercase() },
-                    TestType.COMPUTE
-                )
+            val cards = perBackendCards[backend] ?: continue
+            val list = cards.map { (key, entries) ->
+                val (category, test) = key
                 BenchmarkCategory(
                     testName    = test,
-                    displayName = meta.displayName,
+                    displayName = displayNameOf(test),
+                    category    = category,
                     unit        = entries.firstOrNull()?.unit ?: "",
-                    testType    = meta.type,
+                    testType    = testTypeFromCategory(category),
                     metrics     = entries,
-                    isExpanded  = expandedKeys.contains("$backend|$test")
+                    isExpanded  = expandedKeys.contains("$backend|$category|$test")
                 )
             }
-            result[backend] = cats
+            result[backend] = list
         }
 
         _backends.value = backendOrder.toList()
         _categoriesByBackend.value = result
     }
 
-    private data class CategoryMeta(val displayName: String, val type: TestType)
-
     companion object {
-        private val CATEGORY_META = mapOf(
-            "global_memory_bandwidth"   to CategoryMeta("Global Memory Bandwidth",   TestType.BANDWIDTH),
-            "local_memory_bandwidth"    to CategoryMeta("Local Memory Bandwidth",    TestType.BANDWIDTH),
-            "image_memory_bandwidth"    to CategoryMeta("Image Memory Bandwidth",    TestType.BANDWIDTH),
-            "transfer_bandwidth"        to CategoryMeta("Transfer Bandwidth",        TestType.BANDWIDTH),
-            "single_precision_compute"  to CategoryMeta("Single-Precision Compute",  TestType.COMPUTE),
-            "double_precision_compute"  to CategoryMeta("Double-Precision Compute",  TestType.COMPUTE),
-            "half_precision_compute"    to CategoryMeta("Half-Precision Compute",    TestType.COMPUTE),
-            "mixed_precision_compute"   to CategoryMeta("Mixed-Precision Compute (fp16×fp16+fp32)", TestType.COMPUTE),
-            "integer_compute"           to CategoryMeta("Integer Compute",           TestType.COMPUTE),
-            "integer_24bit_compute"     to CategoryMeta("Integer 24-bit Compute",    TestType.COMPUTE),
-            "char_compute"              to CategoryMeta("Char Compute",              TestType.COMPUTE),
-            "short_compute"             to CategoryMeta("Short Compute",             TestType.COMPUTE),
-            "integer_compute_int8_dp"   to CategoryMeta("INT8 Dot-Product Compute",  TestType.COMPUTE),
-            "int4_packed_compute"       to CategoryMeta("Packed INT4 Compute (emulated)", TestType.COMPUTE),
-            "bfloat16_compute"          to CategoryMeta("BF16 Compute (bf16×bf16+fp32)", TestType.COMPUTE),
-            "coopmat_fp16"              to CategoryMeta("Coop-Matrix FP16 (tensor cores)", TestType.COMPUTE),
-            "coopmat_bf16"              to CategoryMeta("Coop-Matrix BF16 (tensor cores)", TestType.COMPUTE),
-            "coopmat_int8"              to CategoryMeta("Coop-Matrix INT8 (tensor cores)", TestType.COMPUTE),
-            "coopmat_fp8_e4m3"          to CategoryMeta("Coop-Matrix FP8 E4M3 (tensor cores)", TestType.COMPUTE),
-            "coopmat_fp8_e5m2"          to CategoryMeta("Coop-Matrix FP8 E5M2 (tensor cores)", TestType.COMPUTE),
-            "atomic_throughput"         to CategoryMeta("Atomic Throughput",         TestType.COMPUTE),
-            "kernel_launch_latency"     to CategoryMeta("Kernel Launch Latency",     TestType.LATENCY)
+        // Test-tag -> human label.  Much smaller than the previous
+        // CATEGORY_META because category lookup now comes from the C++
+        // emitter directly; this table is purely cosmetic.  Unknown tags
+        // fall back to a title-cased tag form.
+        private val DISPLAY_NAMES = mapOf(
+            "global_memory_bandwidth"     to "Global Memory Bandwidth",
+            "local_memory_bandwidth"      to "Local Memory Bandwidth",
+            "image_memory_bandwidth"      to "Image Memory Bandwidth",
+            "transfer_bandwidth"          to "Transfer Bandwidth",
+            "single_precision_compute"    to "Single-Precision Compute",
+            "double_precision_compute"    to "Double-Precision Compute",
+            "half_precision_compute"      to "Half-Precision Compute",
+            "mixed_precision_compute"     to "Mixed-Precision Compute (fp16×fp16+fp32)",
+            "bfloat16_compute"            to "BF16 Compute (bf16×bf16+fp32)",
+            "integer_compute"             to "Integer Compute",
+            "integer_compute_fast"        to "Integer Compute (Fast 24-bit)",
+            "integer_compute_char"        to "Char (8-bit) Integer Compute",
+            "integer_compute_short"       to "Short (16-bit) Integer Compute",
+            "integer_compute_int8_dp"     to "INT8 Dot-Product Compute",
+            "int4_packed_compute"         to "Packed INT4 Compute (emulated)",
+            "wmma"                        to "WMMA (tensor cores)",
+            "bmma"                        to "BMMA (binary tensor cores)",
+            "coopmat"                     to "Coop-Matrix (tensor cores)",
+            "simdgroup_matrix"            to "Simdgroup Matrix",
+            "cublas"                      to "cuBLASLt GEMM",
+            "mps_gemm"                    to "MPS GEMM",
+            "atomic_throughput"           to "Atomic Throughput",
+            "kernel_launch_latency"       to "Kernel Launch Latency"
         )
+
+        private fun displayNameOf(test: String): String =
+            DISPLAY_NAMES[test] ?: test
+                .replace('_', ' ')
+                .split(' ')
+                .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
     }
 }

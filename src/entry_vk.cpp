@@ -9,7 +9,8 @@ void vkPeak::applyOptions(const CliOptions &opts)
   specifiedIters = opts.iters;
   warmupCount    = opts.warmupCount;
   deviceIndex    = opts.vkDeviceIndex;
-  enabledTests   = opts.enabledTests;
+  enabledTests      = opts.enabledTests;
+  enabledCategories = opts.enabledCategories;
 
   log.reset(new logger(opts.enableXml,  opts.xmlFile,
                        opts.enableJson, opts.jsonFile,

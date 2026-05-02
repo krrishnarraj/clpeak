@@ -145,8 +145,18 @@ public:
   int  deviceIndex;  // -1 = run all
 
   std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
+  std::bitset<4> enabledCategories;
   bool isTestEnabled(Benchmark b) const
   { return enabledTests.test(static_cast<size_t>(b)); }
+  bool isCategoryEnabled(Category c) const
+  {
+    if (c == Category::Unknown) return false;
+    return enabledCategories.test(static_cast<size_t>(c));
+  }
+  bool isAllowed(Benchmark b) const
+  { return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b); }
+  bool isAllowedAs(Benchmark b, Category c) const
+  { return isCategoryEnabled(c) && isTestEnabled(b); }
 
   CudaPeak();
   ~CudaPeak();

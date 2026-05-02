@@ -237,6 +237,7 @@ CudaPeak::CudaPeak()
       initialised(false)
 {
   enabledTests.set();
+  enabledCategories.set();
 }
 
 CudaPeak::~CudaPeak() {}
@@ -352,68 +353,36 @@ int CudaPeak::runAll()
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
     log->xmlAppendAttribs("arch", dev.info.archName);
 
-    // FP compute peak cluster -- everything reported in GFLOPS lives under
-    // the <compute-tflops> umbrella tag, mirroring cuBLASLt's split.
-    {
-      bool anyFP =
-          isTestEnabled(Benchmark::ComputeSP) || isTestEnabled(Benchmark::ComputeHP) ||
-          isTestEnabled(Benchmark::ComputeDP) || isTestEnabled(Benchmark::ComputeMP) ||
-          isTestEnabled(Benchmark::ComputeBF16);
-      if (anyFP)
-      {
-        log->xmlOpenTag("compute-tflops");
-      }
-      if (isTestEnabled(Benchmark::ComputeSP))
-        runComputeSP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeHP))
-        runComputeHP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeDP))
-        runComputeDP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeMP))
-        runComputeMP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeBF16))
-        runComputeBF16(dev, cfg);
-      if (anyFP)
-        log->xmlCloseTag();
-    }
+    // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
+    if (isAllowed(Benchmark::ComputeSP))      runComputeSP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeHP))      runComputeHP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeDP))      runComputeDP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeMP))      runComputeMP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeBF16))    runComputeBF16(dev, cfg);
+    // Wmma / Cublas internally emit both fp (tflops) and int (tops)
+    // clusters; the shim assigns each metric to its proper category
+    // based on the unit attribute, so a single call here covers both.
+    if (isAllowedAs(Benchmark::Wmma,   Category::FpCompute) ||
+        isAllowedAs(Benchmark::Wmma,   Category::IntCompute))
+        runWmma(dev, cfg);
+    if (isAllowedAs(Benchmark::Cublas, Category::FpCompute) ||
+        isAllowedAs(Benchmark::Cublas, Category::IntCompute))
+        runCublas(dev, cfg);
 
-    // Integer compute peak cluster -- everything reported in GOPS lives
-    // under <compute-tops>.  GFLOPS and GOPS are kept in separate XML
-    // groups so consumers cannot accidentally aggregate integer ops with
-    // floating ops.
-    {
-      bool anyINT =
-          isTestEnabled(Benchmark::ComputeInt) || isTestEnabled(Benchmark::ComputeInt8DP) ||
-          isTestEnabled(Benchmark::ComputeInt4Packed);
-      if (anyINT)
-      {
-        log->xmlOpenTag("compute-tops");
-      }
-      if (isTestEnabled(Benchmark::ComputeInt))
-        runComputeInt32(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeInt8DP))
-        runComputeInt8DP(dev, cfg);
-      if (isTestEnabled(Benchmark::ComputeInt4Packed))
-        runComputeInt4Packed(dev, cfg);
-      if (anyINT)
-        log->xmlCloseTag();
-    }
-    if (isTestEnabled(Benchmark::Wmma))
-      runWmma(dev, cfg);
-    if (isTestEnabled(Benchmark::Cublas))
-      runCublas(dev, cfg);
-    if (isTestEnabled(Benchmark::GlobalBW))
-      runGlobalBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::LocalBW))
-      runLocalBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::ImageBW))
-      runImageBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::AtomicThroughput))
-      runAtomicThroughput(dev, cfg);
-    if (isTestEnabled(Benchmark::TransferBW))
-      runTransferBandwidth(dev, cfg);
-    if (isTestEnabled(Benchmark::KernelLatency))
-      runKernelLatency(dev, cfg);
+    // ---- Phase 2: integer compute (GOPS / TOPS) ------------------------
+    if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt8DP))      runComputeInt8DP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt4Packed))  runComputeInt4Packed(dev, cfg);
+    if (isAllowed(Benchmark::AtomicThroughput))   runAtomicThroughput(dev, cfg);
+
+    // ---- Phase 3: bandwidth (GBPS) -------------------------------------
+    if (isAllowed(Benchmark::GlobalBW))    runGlobalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::LocalBW))     runLocalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::ImageBW))     runImageBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::TransferBW))  runTransferBandwidth(dev, cfg);
+
+    // ---- Phase 4: latency (us) -----------------------------------------
+    if (isAllowed(Benchmark::KernelLatency)) runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     log->xmlCloseTag(); // device

@@ -50,6 +50,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    enableJson(false), enableCsv(false)
 {
   enableAll(); // all tests on by default
+  enabledCategories.set();
 }
 
 void clPeak::applyOptions(const CliOptions &opts)
@@ -69,8 +70,9 @@ void clPeak::applyOptions(const CliOptions &opts)
 
   useEventTimer = opts.useEventTimer;
 
-  // Test selection: copy bitset directly.
-  enabledTests = opts.enabledTests;
+  // Test / category selection: copy bitsets directly.
+  enabledTests      = opts.enabledTests;
+  enabledCategories = opts.enabledCategories;
   forceTest = false;
   specifiedTestName.clear();
 
@@ -221,11 +223,7 @@ int clPeak::runAll()
           useEventTimer = false;
         }
 
-        runGlobalBandwidthTest(queue, prog, devInfo, cfg);
-        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
-        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
-
-        // Compute tests via unified helper (main program — no __local args)
+        // ---- Phase 1: floating-point compute ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute (GFLOPS)", "single_precision_compute",
                        "compute_sp", "float", "gflops",
@@ -236,16 +234,17 @@ int clPeak::runAll()
                        "compute_hp", "half", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
-                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
-                       "compute_mp", "mp", "gflops",
-                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
-
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute (GFLOPS)", "double_precision_compute",
                        "compute_dp", "double", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
+                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
+                       "compute_mp", "mp", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+
+        // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute (GOPS)", "integer_compute",
                        "compute_integer", "int", "gops",
@@ -266,11 +265,6 @@ int clPeak::runAll()
                        "compute_short", "short", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
-                       "compute_int4_packed", "int4_packed", "gops",
-                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
-
 #ifdef CLPEAK_HAS_OPENCL_30
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute (GOPS)", "integer_compute_int8_dp",
@@ -278,11 +272,23 @@ int clPeak::runAll()
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 #endif
 
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
+                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
+                       "compute_int4_packed", "int4_packed", "gops",
+                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
+
         runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
+
+        // ---- Phase 3: bandwidth ----------------------------------------
+        runGlobalBandwidthTest(queue, prog, devInfo, cfg);
+        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
+        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
         runTransferBandwidthTest(queue, prog, devInfo, cfg);
+
+        // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
           runKernelLatency(queue, prog, devInfo, cfg);
-        else if (isTestEnabled(Benchmark::KernelLatency))
+        else if (isAllowed(Benchmark::KernelLatency))
           log->print(NEWLINE TAB TAB "Kernel launch latency         : Skipped (no profiling queue support)" NEWLINE);
 
         useEventTimer = savedUseEventTimer;
@@ -362,7 +368,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            const std::string &unit, unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
-  if (!isTestEnabled(which))
+  if (!isAllowed(which))
     return 0;
 
   // Feature gates

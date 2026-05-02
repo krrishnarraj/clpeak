@@ -33,8 +33,8 @@ class ResultsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        adapter = ResultAdapter { backend, testName ->
-            viewModel.toggleCategory(backend, testName)
+        adapter = ResultAdapter { backend, testName, category ->
+            viewModel.toggleCategory(backend, testName, category)
         }
         binding.recyclerResults.adapter = adapter
         binding.recyclerResults.layoutManager = LinearLayoutManager(requireContext())
