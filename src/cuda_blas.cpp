@@ -60,7 +60,9 @@ uint32_t pickGemmDim(const cuda_device_info_t &info)
     if (D > 16384) D = 16384;
 
     uint64_t budget = info.totalGlobalMem ? info.totalGlobalMem / 4 : ((uint64_t)4 << 30);
-    while (D > 1024 && 3ULL * D * D * 4 > budget)
+    // Worst-case element size is fp64 = 8 bytes (DGEMM); shrink D if the
+    // 3*D*D*8 footprint won't fit in 1/4 VRAM.
+    while (D > 1024 && 3ULL * D * D * 8 > budget)
         D /= 2;
     return (uint32_t)D;
 }
@@ -133,12 +135,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 
     // -----------------------------------------------------------------------
     // Allocate persistent buffers (A, B, C, workspace).  Worst-case input
-    // size is fp32 = 4 bytes/elem; smaller dtypes can alias the same buffers
-    // in later iterations.  All sizes are bytes for fp32.
+    // size is fp64 = 8 bytes/elem (DGEMM); smaller dtypes alias the same
+    // buffers.  All sizes are bytes for fp64.
     // -----------------------------------------------------------------------
-    const size_t aBytes = (size_t)M * K * sizeof(float);
-    const size_t bBytes = (size_t)K * N * sizeof(float);
-    const size_t cBytes = (size_t)M * N * sizeof(float);
+    const size_t aBytes = (size_t)M * K * sizeof(double);
+    const size_t bBytes = (size_t)K * N * sizeof(double);
+    const size_t cBytes = (size_t)M * N * sizeof(double);
     const size_t wsBytes = 256ULL * 1024 * 1024; // 256 MB workspace
 
     CUdeviceptr dA = 0, dB = 0, dC = 0, dWS = 0;
@@ -337,6 +339,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     //               pattern: 0x3c00 = 1.0, 0x0000 = 0.0)
     //   * R_32I  -> int32
     const float    alpha32   = 1.0f,  beta32   = 0.0f;
+    const double   alpha64   = 1.0,   beta64   = 0.0;
     const uint16_t alpha16   = 0x3c00, beta16  = 0x0000;
     const int32_t  alpha32i  = 1,     beta32i  = 0;
 
@@ -353,6 +356,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // tuned kernel set for fp32 + TN.
     runVariant("fp32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F,
                CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
+
+    // fp64: DGEMM on CUDA cores (tensor-core fp64 acceleration kicks in
+    // automatically on sm_80+; the heuristic picks the right algo).  NN
+    // layout matches fp32 -- DGEMM kernels are tuned for that shape.
+    runVariant("fp64", CUDA_R_64F,  CUDA_R_64F, CUBLAS_COMPUTE_64F,
+               CUDA_R_64F, &alpha64, &beta64, /*useTN=*/false);
 
     // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
     // tensor cores (Ampere+).  Inputs/outputs stay fp32.

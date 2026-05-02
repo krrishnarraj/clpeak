@@ -71,6 +71,7 @@ set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_bf16.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_int8_dp.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_int4_packed.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_int32.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/global_bandwidth.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/kernel_latency.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp16.cu
@@ -79,6 +80,10 @@ set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int8_k32.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e4m3.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e5m2.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_tf32.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp64.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int4.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_bmma_b1.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/local_bandwidth.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/image_bandwidth.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/atomic_throughput.cu

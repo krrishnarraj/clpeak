@@ -84,6 +84,14 @@ bool CudaDevice::init(int devIndex)
   info.tf32GemmSupported = (info.major >= 8);
   info.int8GemmSupported = (info.major >  7) || (info.major == 7 && info.minor >= 5);
   info.int4GemmSupported = (info.major >= 9);
+  info.dpTensorSupported = (info.major >= 8);
+  // s4 mma.sync was added on Turing (sm_75), kept on Ampere/Ada, removed on
+  // Hopper+ (sm_90+).  Allow 7.5..8.9 inclusive.
+  {
+    int cc = info.major * 10 + info.minor;
+    info.int4MmaSupported = (cc >= 75) && (cc <= 89);
+  }
+  info.bmmaSupported     = (info.major >  7) || (info.major == 7 && info.minor >= 5);
 
   // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
   // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
@@ -323,13 +331,44 @@ int CudaPeak::runAll()
     log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
     log->xmlAppendAttribs("arch", dev.info.archName);
 
-    if (isTestEnabled(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
-    if (isTestEnabled(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
-    if (isTestEnabled(Benchmark::ComputeDP))         runComputeDP(dev, cfg);
-    if (isTestEnabled(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-    if (isTestEnabled(Benchmark::ComputeBF16))       runComputeBF16(dev, cfg);
-    if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
-    if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+    // FP compute peak cluster -- everything reported in GFLOPS lives under
+    // the <compute-tflops> umbrella tag, mirroring cuBLASLt's split.
+    {
+      bool anyFP =
+        isTestEnabled(Benchmark::ComputeSP)   || isTestEnabled(Benchmark::ComputeHP) ||
+        isTestEnabled(Benchmark::ComputeDP)   || isTestEnabled(Benchmark::ComputeMP) ||
+        isTestEnabled(Benchmark::ComputeBF16);
+      if (anyFP)
+      {
+        log->print(NEWLINE TAB "Compute peak (GFLOPS)" NEWLINE);
+        log->xmlOpenTag("compute-tflops");
+      }
+      if (isTestEnabled(Benchmark::ComputeSP))   runComputeSP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeHP))   runComputeHP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeDP))   runComputeDP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeMP))   runComputeMP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeBF16)) runComputeBF16(dev, cfg);
+      if (anyFP) log->xmlCloseTag();
+    }
+
+    // Integer compute peak cluster -- everything reported in GOPS lives
+    // under <compute-tops>.  GFLOPS and GOPS are kept in separate XML
+    // groups so consumers cannot accidentally aggregate integer ops with
+    // floating ops.
+    {
+      bool anyINT =
+        isTestEnabled(Benchmark::ComputeInt) || isTestEnabled(Benchmark::ComputeInt8DP) ||
+        isTestEnabled(Benchmark::ComputeInt4Packed);
+      if (anyINT)
+      {
+        log->print(NEWLINE TAB "Compute peak (GOPS)" NEWLINE);
+        log->xmlOpenTag("compute-tops");
+      }
+      if (isTestEnabled(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+      if (isTestEnabled(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+      if (anyINT) log->xmlCloseTag();
+    }
     if (isTestEnabled(Benchmark::Wmma))              runWmma(dev, cfg);
     if (isTestEnabled(Benchmark::Cublas))            runCublas(dev, cfg);
     if (isTestEnabled(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
@@ -551,6 +590,27 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   return runComputeKernel(dev, cfg, d);
 }
 
+int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  // Scalar 32-bit integer IMAD chain throughput.  Distinct shader-core
+  // path from __dp4a (compute_int8_dp) and the int4 emulation; reported
+  // in GOPS.
+  int A = 3;
+  cuda_compute_desc_t d = {};
+  d.title       = "Integer compute (32-bit IMAD) (GOPS)";
+  d.xmlTag      = "integer_compute";
+  d.unit        = "gops";
+  d.metricLabel = "int";
+  d.kernelName  = "compute_int32";
+  d.src         = cuda_kernels::compute_int32_src;
+  d.srcName     = cuda_kernels::compute_int32_name;
+  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;  // 4096 ops/thread (same scaling)
+  d.elemSize    = sizeof(int);
+  d.scalarArg   = &A;
+  d.scalarSize  = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
+}
+
 int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   static const cuda_compute_variant_t variants[] = {
@@ -603,10 +663,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
 {
   if (!dev.info.wmmaSupported)
   {
-    log->print(NEWLINE TAB "WMMA tensor-core compute (TFLOPS/TOPS)" NEWLINE);
-    log->xmlOpenTag("wmma");
+    log->print(NEWLINE TAB "WMMA tensor-core compute" NEWLINE);
     log->print(TAB TAB "WMMA requires sm_70 or newer (Volta+)! Skipped" NEWLINE);
-    log->xmlCloseTag();
     return 0;
   }
 
@@ -614,6 +672,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   // wmma fragment, 256 outer iters → COOPMAT_WORK_PER_WI per thread.
   const uint32_t warp = 32;
   const uint32_t outElems = 16 * 16; // M*N
+
+  // ---------------------------------------------------------------------
+  // FP cluster -- everything reported in TFLOPS lives under <wmma-tflops>.
+  // ---------------------------------------------------------------------
+  log->print(NEWLINE TAB "WMMA tensor-core compute (TFLOPS)" NEWLINE);
+  log->xmlOpenTag("wmma-tflops");
 
   // FP16 WMMA
   {
@@ -649,7 +713,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.kernelName     = "wmma_bf16";
     d.src            = cuda_kernels::wmma_bf16_src;
     d.srcName        = cuda_kernels::wmma_bf16_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 4;
     d.elemSize       = sizeof(float);
     d.blockSize      = warp;
     d.outElemsPerBlock = outElems;
@@ -661,6 +725,113 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.extraAttribVal = "16x16x16";
     runComputeKernel(dev, cfg, d);
   }
+  // TF32 WMMA m16n16k8 -- Ampere+
+  {
+    float A = 1.3f;
+    cuda_compute_desc_t d = {};
+    d.title          = "WMMA tf32xtf32+fp32 16x16x8 (TFLOPS)";
+    d.xmlTag         = "wmma_tf32";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
+    d.metricLabel    = "wmma_tf32";
+    d.kernelName     = "wmma_tf32";
+    d.src            = cuda_kernels::wmma_tf32_src;
+    d.srcName        = cuda_kernels::wmma_tf32_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
+    d.elemSize       = sizeof(float);
+    d.blockSize      = warp;
+    d.outElemsPerBlock = outElems;
+    d.scalarArg      = &A;
+    d.scalarSize     = sizeof(A);
+    d.skip           = !dev.info.tf32GemmSupported;
+    d.skipMsg        = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "16x16x8";
+    runComputeKernel(dev, cfg, d);
+  }
+  // FP64 WMMA m8n8k4 -- Ampere+ DP tensor cores
+  {
+    double A = 1.3;
+    cuda_compute_desc_t d = {};
+    d.title          = "WMMA fp64xfp64+fp64 8x8x4 (TFLOPS)";
+    d.xmlTag         = "wmma_fp64";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
+    d.metricLabel    = "wmma_fp64";
+    d.kernelName     = "wmma_fp64";
+    d.src            = cuda_kernels::wmma_fp64_src;
+    d.srcName        = cuda_kernels::wmma_fp64_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
+    d.elemSize       = sizeof(double);
+    d.blockSize      = warp;
+    d.outElemsPerBlock = 8 * 8;
+    d.scalarArg      = &A;
+    d.scalarSize     = sizeof(A);
+    d.skip           = !dev.info.dpTensorSupported;
+    d.skipMsg        = "FP64 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "8x8x4";
+    runComputeKernel(dev, cfg, d);
+  }
+  // FP8 mma.sync E4M3 (PTX) - sm_89+
+  {
+    float A = 1.3f;
+    cuda_compute_desc_t d = {};
+    d.title          = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
+    d.xmlTag         = "wmma_fp8_e4m3";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
+    d.metricLabel    = "fp8_e4m3";
+    d.kernelName     = "wmma_fp8_e4m3";
+    d.src            = cuda_kernels::wmma_fp8_e4m3_src;
+    d.srcName        = cuda_kernels::wmma_fp8_e4m3_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
+    d.elemSize       = sizeof(float);
+    d.blockSize      = warp;
+    d.outElemsPerBlock = 16 * 8;
+    d.scalarArg      = &A;
+    d.scalarSize     = sizeof(A);
+    d.skip           = !dev.info.fp8MmaSupported;
+    d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "m16n8k32";
+    runComputeKernel(dev, cfg, d);
+  }
+  // FP8 mma.sync E5M2 (PTX) - sm_89+
+  {
+    float A = 1.3f;
+    cuda_compute_desc_t d = {};
+    d.title          = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
+    d.xmlTag         = "wmma_fp8_e5m2";
+    d.unit           = "tflops";
+    d.unitDivider    = 1e12;
+    d.metricLabel    = "fp8_e5m2";
+    d.kernelName     = "wmma_fp8_e5m2";
+    d.src            = cuda_kernels::wmma_fp8_e5m2_src;
+    d.srcName        = cuda_kernels::wmma_fp8_e5m2_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 8;
+    d.elemSize       = sizeof(float);
+    d.blockSize      = warp;
+    d.outElemsPerBlock = 16 * 8;
+    d.scalarArg      = &A;
+    d.scalarSize     = sizeof(A);
+    d.skip           = !dev.info.fp8MmaSupported;
+    d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "m16n8k32";
+    runComputeKernel(dev, cfg, d);
+  }
+
+  log->xmlCloseTag(); // wmma-tflops
+
+  // ---------------------------------------------------------------------
+  // Integer / binary cluster -- everything reported in TOPS lives under
+  // <wmma-tops>.  Kept in a separate XML group so consumers cannot
+  // accidentally aggregate integer ops with floating ops.
+  // ---------------------------------------------------------------------
+  log->print(NEWLINE TAB "WMMA tensor-core compute (TOPS)" NEWLINE);
+  log->xmlOpenTag("wmma-tops");
+
   // INT8 WMMA
   {
     int A = 3;
@@ -673,7 +844,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.kernelName     = "wmma_int8";
     d.src            = cuda_kernels::wmma_int8_src;
     d.srcName        = cuda_kernels::wmma_int8_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 4;
     d.elemSize       = sizeof(int);
     d.blockSize      = warp;
     d.outElemsPerBlock = outElems;
@@ -697,10 +868,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.kernelName     = "wmma_int8_k32";
     d.src            = cuda_kernels::wmma_int8_k32_src;
     d.srcName        = cuda_kernels::wmma_int8_k32_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 4; // 4 chains, K=32 doubles ops/issue vs K=16
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 4;
     d.elemSize       = sizeof(int);
     d.blockSize      = warp;
-    d.outElemsPerBlock = 16 * 8; // m16n8 tile
+    d.outElemsPerBlock = 16 * 8;
     d.scalarArg      = &A;
     d.scalarSize     = sizeof(A);
     d.skip           = !dev.info.wmmaInt8Supported;
@@ -709,54 +880,56 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
   }
-  // FP8 mma.sync E4M3 (PTX) - sm_89+
+  // INT4 mma.sync m8n8k32 -- sm_75..sm_89
   {
-    float A = 1.3f;
+    int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
-    d.xmlTag         = "wmma_fp8_e4m3";
-    d.unit           = "tflops";
+    d.title          = "INT4 mma.sync m8n8k32+int32 (TOPS)";
+    d.xmlTag         = "wmma_int4";
+    d.unit           = "tops";
     d.unitDivider    = 1e12;
-    d.metricLabel    = "fp8_e4m3";
-    d.kernelName     = "wmma_fp8_e4m3";
-    d.src            = cuda_kernels::wmma_fp8_e4m3_src;
-    d.srcName        = cuda_kernels::wmma_fp8_e4m3_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
-    d.elemSize       = sizeof(float);
+    d.metricLabel    = "int4";
+    d.kernelName     = "wmma_int4";
+    d.src            = cuda_kernels::wmma_int4_src;
+    d.srcName        = cuda_kernels::wmma_int4_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 2; // 256 outer * 4 chains * 8*8*32*2 / 32
+    d.elemSize       = sizeof(int);
     d.blockSize      = warp;
-    d.outElemsPerBlock = 16 * 8; // m16n8 output tile
+    d.outElemsPerBlock = 8 * 8;
     d.scalarArg      = &A;
     d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.fp8MmaSupported;
-    d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+    d.skip           = !dev.info.int4MmaSupported;
+    d.skipMsg        = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
     d.extraAttribKey = "tile";
-    d.extraAttribVal = "m16n8k32";
+    d.extraAttribVal = "m8n8k32";
     runComputeKernel(dev, cfg, d);
   }
-  // FP8 mma.sync E5M2 (PTX) - sm_89+
+  // BMMA b1 mma.sync m8n8k128 (XOR-popc) -- sm_75+
   {
-    float A = 1.3f;
+    int A = 3;
     cuda_compute_desc_t d = {};
-    d.title          = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
-    d.xmlTag         = "wmma_fp8_e5m2";
-    d.unit           = "tflops";
+    d.title          = "BMMA b1 mma.sync m8n8k128+int32 xor.popc (TOPS)";
+    d.xmlTag         = "wmma_bmma_b1";
+    d.unit           = "tops";
     d.unitDivider    = 1e12;
-    d.metricLabel    = "fp8_e5m2";
-    d.kernelName     = "wmma_fp8_e5m2";
-    d.src            = cuda_kernels::wmma_fp8_e5m2_src;
-    d.srcName        = cuda_kernels::wmma_fp8_e5m2_name;
-    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
-    d.elemSize       = sizeof(float);
+    d.metricLabel    = "bmma_b1";
+    d.kernelName     = "wmma_bmma_b1";
+    d.src            = cuda_kernels::wmma_bmma_b1_src;
+    d.srcName        = cuda_kernels::wmma_bmma_b1_name;
+    d.workPerWI      = COOPMAT_WORK_PER_WI * 8; // 256 outer * 4 chains * 8*8*128*2 / 32
+    d.elemSize       = sizeof(int);
     d.blockSize      = warp;
-    d.outElemsPerBlock = 16 * 8;
+    d.outElemsPerBlock = 8 * 8;
     d.scalarArg      = &A;
     d.scalarSize     = sizeof(A);
-    d.skip           = !dev.info.fp8MmaSupported;
-    d.skipMsg        = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+    d.skip           = !dev.info.bmmaSupported;
+    d.skipMsg        = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
-    d.extraAttribVal = "m16n8k32";
+    d.extraAttribVal = "m8n8k128";
     runComputeKernel(dev, cfg, d);
   }
+
+  log->xmlCloseTag(); // wmma-tops
   return 0;
 }
 

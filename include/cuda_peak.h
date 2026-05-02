@@ -40,6 +40,11 @@ struct cuda_device_info_t {
   bool tf32GemmSupported;        // cc >= 8.0 (Ampere) -- TF32 tensor cores
   bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
   bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
+  bool dpTensorSupported;        // cc >= 8.0 (Ampere) -- fp64 wmma m8n8k4
+  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
+                                 // dropped on sm_90+ (Hopper) where the s4 imma
+                                 // path was removed.
+  bool bmmaSupported;            // cc >= 7.5 (Turing) -- b1 XOR-popc bmma
 };
 
 // One CUDA device + the bookkeeping needed to launch kernels through the
@@ -156,6 +161,7 @@ public:
   int runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg);
@@ -197,6 +203,8 @@ namespace cuda_kernels {
   extern const char *compute_int8_dp_name;
   extern const char *compute_int4_packed_src;
   extern const char *compute_int4_packed_name;
+  extern const char *compute_int32_src;
+  extern const char *compute_int32_name;
   extern const char *global_bandwidth_src;
   extern const char *global_bandwidth_name;
   extern const char *kernel_latency_src;
@@ -213,6 +221,14 @@ namespace cuda_kernels {
   extern const char *wmma_fp8_e4m3_name;
   extern const char *wmma_fp8_e5m2_src;
   extern const char *wmma_fp8_e5m2_name;
+  extern const char *wmma_tf32_src;
+  extern const char *wmma_tf32_name;
+  extern const char *wmma_fp64_src;
+  extern const char *wmma_fp64_name;
+  extern const char *wmma_int4_src;
+  extern const char *wmma_int4_name;
+  extern const char *wmma_bmma_b1_src;
+  extern const char *wmma_bmma_b1_name;
   extern const char *local_bandwidth_src;
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
