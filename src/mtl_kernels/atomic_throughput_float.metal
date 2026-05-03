@@ -1,7 +1,6 @@
-// atomic_float: only the device-address-space form is valid in MSL.
-// threadgroup atomic_float is rejected by the compiler, so we expose the
-// global variant only.  Apple silicon Apple7+ on macOS 12+ has
-// atomic<float> fetch_add.
+// atomic_float: Metal exposes fetch_add for device address space only on this
+// SDK family. threadgroup/local atomic_float is rejected by the compiler, so
+// the float atomic throughput test has a global variant only.
 
 #include <metal_stdlib>
 #include <metal_atomic>

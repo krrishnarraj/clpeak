@@ -333,6 +333,8 @@ int MetalPeak::runAll()
             runSimdgroupMatrix(dev, cfg);
         if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
+        if (isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
+            runAtomicThroughputFp(dev, cfg);
 
         // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
         if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
@@ -341,7 +343,8 @@ int MetalPeak::runAll()
             runSimdgroupMatrixInt(dev, cfg);
         if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
             runMpsGemmInt(dev, cfg);
-        if (isAllowed(Benchmark::AtomicThroughput))  runAtomicThroughput(dev, cfg);
+        if (isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
+            runAtomicThroughput(dev, cfg);
 
         // ---- Phase 3: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
@@ -1020,12 +1023,12 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         // Trim trailing/internal padding so the persisted metric key is valid.
         std::string trimmed(label);
         while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
-        log->print(TAB TAB); log->print(label); log->print("_global : ");
+        log->print(TAB TAB); log->print(trimmed.c_str()); log->print("_global : ");
         reportOne((trimmed + "_global").c_str(),
                   src, srcName, gFn, globalThreads * elemSize, skip, skipMsg);
         if (lFn)
         {
-            log->print(TAB TAB); log->print(label); log->print("_local  : ");
+            log->print(TAB TAB); log->print(trimmed.c_str()); log->print("_local  : ");
             reportOne((trimmed + "_local").c_str(),
                       src, srcName, lFn, numGroups * elemSize, skip, skipMsg);
         }
@@ -1039,12 +1042,6 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
            mtl_kernels::atomic_throughput_name,
            "atomic_throughput_global_uint", "atomic_throughput_local_uint",
            sizeof(uint32_t), false, nullptr);
-    // atomic_float: only the device-address-space variant is supported in MSL;
-    // there is no atomic_throughput_local_float kernel.
-    report("float",  mtl_kernels::atomic_throughput_float_src,
-           mtl_kernels::atomic_throughput_float_name,
-           "atomic_throughput_global_float", nullptr,
-           sizeof(float), false, nullptr);
     // atomic_ulong: 64-bit atomic add isn't accepted by every MSL/SDK combo.
     // Skipped on Apple7; on Apple8+ we still let getPipeline report
     // compile/load failed if the SDK rejects it.
@@ -1055,6 +1052,58 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
            !dev.info.atomic64Supported,
            "skipped (requires Apple8 / M2 or newer)");
 
+    log->resultScopeEnd();
+    return 0;
+}
+
+int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    unsigned int iters = cfg.computeIters;
+    log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
+    log->resultScopeBegin("atomic_throughput");
+    log->resultScopeAttribute("unit", "gflops");
+
+    const uint32_t tgSize = 256;
+    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+    MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
+    MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
+    auto runOne = [&](const char *src, const char *srcName, const char *fnName,
+                      NSUInteger bufBytes) -> float
+    {
+        id<MTLBuffer> buf = [dev.impl->device newBufferWithLength:bufBytes
+                                                          options:MTLResourceStorageModeShared];
+        if (!buf) return -1.0f;
+        memset(buf.contents, 0, bufBytes);
+        id<MTLComputePipelineState> pso = getPipeline(dev, src, srcName, fnName);
+        if (!pso) return -1.0f;
+        return runDispatches(dev, pso, buf, nullptr, 0, nil,
+                             gridSize, tgSizeM, warmupCount, iters);
+    };
+
+    auto reportOne = [&](const char *resultKey, const char *src, const char *srcName,
+                         const char *fnName, NSUInteger bufBytes)
+    {
+        log->print(TAB TAB); log->print(resultKey); log->print(" : ");
+        float us = runOne(src, srcName, fnName, bufBytes);
+        if (us > 0)
+        {
+            float gflops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+            log->print(gflops); log->print(NEWLINE);
+            log->resultRecord(resultKey, gflops);
+        }
+        else
+        {
+            log->print("compile/load failed" NEWLINE);
+            log->resultRecord(resultKey, 0.0f);
+        }
+    };
+
+    reportOne("float_global",
+              mtl_kernels::atomic_throughput_float_src,
+              mtl_kernels::atomic_throughput_float_name,
+              "atomic_throughput_global_float",
+              globalThreads * sizeof(float));
     log->resultScopeEnd();
     return 0;
 }

@@ -139,6 +139,7 @@ public:
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.

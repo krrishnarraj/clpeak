@@ -47,7 +47,9 @@ enum class Benchmark : unsigned int {
 // run-order phase loop.  Tensor / vendor-library tests that span both fp
 // and int variants (Wmma, CoopMatrix, SimdgroupMatrix, Cublas, MpsGemm)
 // are listed under their fp form here; backends iterate them again in the
-// int_compute phase emitting only int variants there.
+// int_compute phase emitting only int variants there. AtomicThroughput is
+// primarily integer, with Metal's atomic_float variant emitted explicitly in
+// the fp_compute phase.
 inline Category categoryOf(Benchmark b)
 {
     switch (b) {
