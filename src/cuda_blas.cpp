@@ -120,7 +120,7 @@ double timeCublasLt(cublasLtHandle_t lt, CUstream stream,
 
 } // namespace
 
-int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
+int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category)
 {
     (void)cfg;
 
@@ -343,74 +343,84 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     const uint16_t alpha16   = 0x3c00, beta16  = 0x0000;
     const int32_t  alpha32i  = 1,     beta32i  = 0;
 
-    // -----------------------------------------------------------------------
-    // Floating-point variants -- reported in TFLOPS.
-    // -----------------------------------------------------------------------
-    log->print(NEWLINE TAB "cuBLASLt GEMM peak (TFLOPS)" NEWLINE);
-    // Test name carries no unit; the unit attribute is what the dump
-    // pipeline (and the legacy-shim category derivation) reads.
-    log->xmlOpenTag("cublas-fp");
-    log->xmlAppendAttribs("unit", "tflops");
-    log->xmlAppendAttribs("dim", dimStr.str());
-    log->xmlAppendAttribs("workspace", "256MB");
-
-    // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
-    // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
-    // tuned kernel set for fp32 + TN.
-    runVariant("fp32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F,
-               CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
-
-    // fp64: DGEMM on CUDA cores (tensor-core fp64 acceleration kicks in
-    // automatically on sm_80+; the heuristic picks the right algo).  NN
-    // layout matches fp32 -- DGEMM kernels are tuned for that shape.
-    runVariant("fp64", CUDA_R_64F,  CUDA_R_64F, CUBLAS_COMPUTE_64F,
-               CUDA_R_64F, &alpha64, &beta64, /*useTN=*/false);
-
-    // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
-    // tensor cores (Ampere+).  Inputs/outputs stay fp32.
-    if (dev.info.tf32GemmSupported)
-        runVariant("tf32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
-                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
-
-    // fp16: half inputs + half output + half compute.  scaleType is R_16F so
-    // alpha/beta must be 16-bit half values, not float.
-    if (dev.info.fp16Supported)
-        runVariant("fp16", CUDA_R_16F,  CUDA_R_16F, CUBLAS_COMPUTE_16F,
-                   CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
-
-    // bf16: bf16 inputs + fp32 output + fp32 compute (mixed-precision).
-    // bf16 has no native accumulator format -- compute is always fp32.
-    // R_32F output matches the dtype combo NVIDIA's published bf16 GEMM
-    // peaks are quoted against.
-    if (dev.info.bf16Supported)
-        runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
-                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
-
-    // fp8: cuBLASLt's fp8 matmul requires TN layout; inputs are 1-byte fp8,
-    // accumulator + output are bf16, scale is fp32.  Gated on cc >= 8.9
-    // (Ada / Hopper / Blackwell).
-    //
-    // cuBLASLt does NOT support both A and B being E5M2 -- the heuristic
-    // returns 0 results for that combo on every CUDA version we've tested
-    // (incl. 13.2 on sm_120).  The supported pairs are:
-    //     E4M3 x E4M3   -- canonical "training" fp8 path
-    //     E4M3 x E5M2   -- mixed
-    //     E5M2 x E4M3   -- mixed (typical inference: e5m2 activations,
-    //                              e4m3 weights)
-    // We label the second variant "fp8_e5m2" and run E5M2 x E4M3 to measure
-    // the throughput of fp8 paths that include an E5M2 input.  Hardware
-    // throughput is the same as E4M3 x E4M3; the asymmetry comes from
-    // cuBLASLt's algorithm coverage, not the tensor cores.
-    if (dev.info.fp8MmaSupported)
+    if (category == Category::FpCompute)
     {
-        runVariant("fp8_e4m3", CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
-                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
-        runVariantAB("fp8_e5m2", CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
-                     CUBLAS_COMPUTE_32F, CUDA_R_32F,
-                     &alpha32, &beta32, /*useTN=*/true);
+        // -----------------------------------------------------------------------
+        // Floating-point variants -- reported in TFLOPS.
+        // -----------------------------------------------------------------------
+        log->print(NEWLINE TAB "cuBLASLt GEMM peak (TFLOPS)" NEWLINE);
+        // Test name carries no unit; the unit attribute is what the dump
+        // pipeline (and the legacy-shim category derivation) reads.
+        log->xmlOpenTag("cublas-fp");
+        log->xmlAppendAttribs("unit", "tflops");
+        log->xmlAppendAttribs("dim", dimStr.str());
+        log->xmlAppendAttribs("workspace", "256MB");
+
+        // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
+        // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
+        // tuned kernel set for fp32 + TN.
+        runVariant("fp32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F,
+                   CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
+
+        // fp64: DGEMM on CUDA cores (tensor-core fp64 acceleration kicks in
+        // automatically on sm_80+; the heuristic picks the right algo).  NN
+        // layout matches fp32 -- DGEMM kernels are tuned for that shape.
+        runVariant("fp64", CUDA_R_64F,  CUDA_R_64F, CUBLAS_COMPUTE_64F,
+                   CUDA_R_64F, &alpha64, &beta64, /*useTN=*/false);
+
+        // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
+        // tensor cores (Ampere+).  Inputs/outputs stay fp32.
+        if (dev.info.tf32GemmSupported)
+            runVariant("tf32", CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
+                       CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+
+        // fp16: half inputs + half output + half compute.  scaleType is R_16F so
+        // alpha/beta must be 16-bit half values, not float.
+        if (dev.info.fp16Supported)
+            runVariant("fp16", CUDA_R_16F,  CUDA_R_16F, CUBLAS_COMPUTE_16F,
+                       CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
+
+        // bf16: bf16 inputs + fp32 output + fp32 compute (mixed-precision).
+        // bf16 has no native accumulator format -- compute is always fp32.
+        // R_32F output matches the dtype combo NVIDIA's published bf16 GEMM
+        // peaks are quoted against.
+        if (dev.info.bf16Supported)
+            runVariant("bf16", CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
+                       CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+
+        // fp8: cuBLASLt's fp8 matmul requires TN layout; inputs are 1-byte fp8,
+        // accumulator + output are bf16, scale is fp32.  Gated on cc >= 8.9
+        // (Ada / Hopper / Blackwell).
+        //
+        // cuBLASLt does NOT support both A and B being E5M2 -- the heuristic
+        // returns 0 results for that combo on every CUDA version we've tested
+        // (incl. 13.2 on sm_120).  The supported pairs are:
+        //     E4M3 x E4M3   -- canonical "training" fp8 path
+        //     E4M3 x E5M2   -- mixed
+        //     E5M2 x E4M3   -- mixed (typical inference: e5m2 activations,
+        //                              e4m3 weights)
+        // We label the second variant "fp8_e5m2" and run E5M2 x E4M3 to measure
+        // the throughput of fp8 paths that include an E5M2 input.  Hardware
+        // throughput is the same as E4M3 x E4M3; the asymmetry comes from
+        // cuBLASLt's algorithm coverage, not the tensor cores.
+        if (dev.info.fp8MmaSupported)
+        {
+            runVariant("fp8_e4m3", CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
+                       CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+            runVariantAB("fp8_e5m2", CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
+                         CUBLAS_COMPUTE_32F, CUDA_R_32F,
+                         &alpha32, &beta32, /*useTN=*/true);
+        }
+
+        log->xmlCloseTag(); // cublas-tflops
     }
 
-    log->xmlCloseTag(); // cublas-tflops
+    if (category != Category::IntCompute)
+    {
+        cublasLtDestroy(lt);
+        cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
+        return 0;
+    }
 
     // -----------------------------------------------------------------------
     // Integer variants -- reported in TOPS (numerically equivalent to TFLOPS;

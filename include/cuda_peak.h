@@ -175,8 +175,8 @@ public:
   int runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg);
-  int runWmma(CudaDevice &dev, benchmark_config_t &cfg);
-  int runCublas(CudaDevice &dev, benchmark_config_t &cfg);
+  int runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category);
+  int runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category);
   int runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg);
