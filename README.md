@@ -127,7 +127,7 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Global memory bandwidth | GB/s | &check; | &check; | &check; | &check; |
 | Local / shared memory bandwidth | GB/s | &check; | &check; | &check; | &check; |
 | Image / texture bandwidth | GB/s | &check; | &check; | &check; | &check; |
-| Transfer bandwidth (host&harr;device) | GB/s | &check; | &mdash; | &check; | &mdash; |
+| Transfer bandwidth (host&harr;device) | GB/s | &check; | &check; | &check; | &mdash; |
 | Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; |
 | Compute INT / INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
 | INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &check; (emul) |

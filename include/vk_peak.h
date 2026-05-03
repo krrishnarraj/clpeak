@@ -207,6 +207,7 @@ public:
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 

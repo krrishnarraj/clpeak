@@ -5,6 +5,7 @@
 #include <cstring>
 #include <sstream>
 #include <chrono>
+#include <cfloat>
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -689,6 +690,7 @@ int vkPeak::runAll()
     {
       cfg.computeIters = specifiedIters;
       cfg.globalBWIters = specifiedIters;
+      cfg.transferBWIters = specifiedIters;
     }
 
     log->print(NEWLINE "Vulkan Device: " + dev.info.deviceName + NEWLINE);
@@ -732,6 +734,7 @@ int vkPeak::runAll()
     if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
     if (isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
     if (isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -------------------------------------
     if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
@@ -1403,6 +1406,166 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkFreeMemory(dev.device, outputMem, nullptr);
 
   log->resultScopeEnd(); // global_memory_bandwidth
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Host<->device transfer bandwidth (Vulkan)
+// ---------------------------------------------------------------------------
+
+int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(dev.physicalDevice, &props);
+
+  uint32_t queueFamilyCount = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(dev.physicalDevice, &queueFamilyCount, nullptr);
+  std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+  vkGetPhysicalDeviceQueueFamilyProperties(dev.physicalDevice, &queueFamilyCount, queueFamilies.data());
+
+  const bool canUseTimestamps =
+      dev.info.computeQueueFamily < queueFamilies.size() &&
+      queueFamilies[dev.info.computeQueueFamily].timestampValidBits > 0 &&
+      props.limits.timestampPeriod > 0.0f;
+
+  uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
+  if (dev.info.maxAllocSize > 0)
+    bytes = std::min(bytes, dev.info.maxAllocSize);
+  bytes &= ~255ull;
+  if (bytes == 0)
+    bytes = 256;
+
+  unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
+
+  log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
+  log->resultScopeBegin("transfer_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
+  log->resultScopeAttribute("memory", "host_visible_staging");
+  log->resultScopeAttribute("timer", canUseTimestamps ? "gpu_timestamp" : "host_wall");
+
+  VkBuffer hostBuf = VK_NULL_HANDLE;
+  VkBuffer devBuf = VK_NULL_HANDLE;
+  VkDeviceMemory hostMem = VK_NULL_HANDLE;
+  VkDeviceMemory devMem = VK_NULL_HANDLE;
+
+  if (!dev.createBuffer(bytes,
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                        hostBuf, hostMem) ||
+      !dev.createBuffer(bytes,
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        devBuf, devMem))
+  {
+    log->print(TAB TAB "Failed to allocate transfer buffers" NEWLINE);
+    if (hostBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, hostBuf, nullptr);
+    if (hostMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, hostMem, nullptr);
+    if (devBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, devBuf, nullptr);
+    if (devMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, devMem, nullptr);
+    log->resultScopeEnd();
+    return -1;
+  }
+
+  VkCommandBufferAllocateInfo allocInfo = {};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = dev.commandPool;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = 1;
+
+  VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
+  vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
+
+  VkQueryPool queryPool = VK_NULL_HANDLE;
+  if (canUseTimestamps)
+  {
+    VkQueryPoolCreateInfo qpCI = {};
+    qpCI.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qpCI.queryCount = 2;
+    vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool);
+  }
+
+  auto runCopy = [&](VkBuffer src, VkBuffer dst) -> float
+  {
+    VkBufferCopy region = {};
+    region.size = bytes;
+
+    auto recordCopy = [&](bool timed) {
+      VkCommandBufferBeginInfo beginInfo = {};
+      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(cmdBuf, &beginInfo);
+      if (timed && queryPool != VK_NULL_HANDLE)
+      {
+        vkCmdResetQueryPool(cmdBuf, queryPool, 0, 2);
+        vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, 0);
+      }
+      vkCmdCopyBuffer(cmdBuf, src, dst, 1, &region);
+      if (timed && queryPool != VK_NULL_HANDLE)
+        vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, 1);
+      vkEndCommandBuffer(cmdBuf);
+    };
+
+    for (unsigned int w = 0; w < warmupCount; w++)
+    {
+      recordCopy(false);
+      dev.submitAndWait(cmdBuf);
+      vkResetCommandBuffer(cmdBuf, 0);
+    }
+
+    float totalUs = 0.0f;
+    for (unsigned int i = 0; i < iters; i++)
+    {
+      recordCopy(queryPool != VK_NULL_HANDLE);
+      auto start = std::chrono::high_resolution_clock::now();
+      dev.submitAndWait(cmdBuf);
+      auto end = std::chrono::high_resolution_clock::now();
+
+      if (queryPool != VK_NULL_HANDLE)
+      {
+        uint64_t ts[2] = {};
+        VkResult qr = vkGetQueryPoolResults(dev.device, queryPool, 0, 2, sizeof(ts), ts,
+                                            sizeof(uint64_t),
+                                            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        if (qr == VK_SUCCESS && ts[1] >= ts[0])
+          totalUs += (float)((double)(ts[1] - ts[0]) * props.limits.timestampPeriod / 1000.0);
+        else
+          totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+      }
+      else
+      {
+        totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+      }
+
+      vkResetCommandBuffer(cmdBuf, 0);
+    }
+
+    return std::max(totalUs / static_cast<float>(iters), FLT_EPSILON);
+  };
+
+  float usH2D = runCopy(hostBuf, devBuf);
+  float gbpsH2D = (float)bytes / usH2D / 1e3f;
+  log->print(TAB TAB "Host->Dev : ");
+  log->print(gbpsH2D);
+  log->print(NEWLINE);
+  log->resultRecord("h2d", gbpsH2D);
+
+  float usD2H = runCopy(devBuf, hostBuf);
+  float gbpsD2H = (float)bytes / usD2H / 1e3f;
+  log->print(TAB TAB "Dev->Host : ");
+  log->print(gbpsD2H);
+  log->print(NEWLINE);
+  log->resultRecord("d2h", gbpsD2H);
+
+  if (queryPool != VK_NULL_HANDLE)
+    vkDestroyQueryPool(dev.device, queryPool, nullptr);
+  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  vkDestroyBuffer(dev.device, hostBuf, nullptr);
+  vkFreeMemory(dev.device, hostMem, nullptr);
+  vkDestroyBuffer(dev.device, devBuf, nullptr);
+  vkFreeMemory(dev.device, devMem, nullptr);
+
+  log->resultScopeEnd(); // transfer_bandwidth
   return 0;
 }
 
