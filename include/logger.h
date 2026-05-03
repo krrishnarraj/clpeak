@@ -80,19 +80,19 @@ public:
   void recordSkip(const std::string &metric, ResultStatus status,
                   const std::string &reason);
 
-  // ---- Legacy XML shim API -----------------------------------------------
-  // Backends still use these directly today; they translate transparently
-  // into the high-level API via shim state below so dump rows pick up the
-  // new backend / category / status fields.  Stage 3 of the v2 refactor
-  // migrates each backend off these.
-  void xmlOpenTag(std::string tag);
-  void xmlAppendAttribs(std::string key, std::string value);
-  void xmlAppendAttribs(std::string key, unsigned int value);
-  void xmlSetContent(std::string value);
-  void xmlSetContent(float value);
-  void xmlCloseTag();
-  void xmlRecord(std::string tag, std::string value);
-  void xmlRecord(std::string tag, float value);
+  // ---- Result-scope recording API ----------------------------------------
+  // Backends use these for the historical nested result shape:
+  //   clpeak -> platform -> device -> test -> metric
+  // The logger translates that shape into ResultEntry rows; result_store then
+  // serializes those rows to every enabled dump format.
+  void resultScopeBegin(std::string name);
+  void resultScopeAttribute(std::string key, std::string value);
+  void resultScopeAttribute(std::string key, unsigned int value);
+  void resultSetContent(std::string value);
+  void resultSetContent(float value);
+  void resultScopeEnd();
+  void resultRecord(std::string metric, std::string value);
+  void resultRecord(std::string metric, float value);
 
 private:
   // Current run / category / test scope.  Updated by both APIs and read by
@@ -101,9 +101,9 @@ private:
   Category    curCategory;
   std::string curTest, curUnit;
 
-  // Legacy-shim cursor: depth in the implicit
+  // Result-scope cursor: depth in the implicit
   //   clpeak (1) > platform (2) > device (3) > test (4)
-  // tag stack as driven by xmlOpenTag / xmlCloseTag.
+  // stack as driven by resultScopeBegin / resultScopeEnd.
   int shimDepth;
 
   // Build a ResultEntry from the current scope plus the supplied metric

@@ -613,11 +613,11 @@ int vkPeak::runAll()
 
   // Mirror the OpenCL context stack so logger_android recordMetric() can
   // reach contextStack depth 4 (clpeak > platform > device > test_group).
-  log->xmlOpenTag("clpeak");
-  log->xmlAppendAttribs("os", OS_NAME);
-  log->xmlOpenTag("platform");
-  log->xmlAppendAttribs("name", "Vulkan");
-  log->xmlAppendAttribs("backend", "Vulkan");
+  log->resultScopeBegin("clpeak");
+  log->resultScopeAttribute("os", OS_NAME);
+  log->resultScopeBegin("platform");
+  log->resultScopeAttribute("name", "Vulkan");
+  log->resultScopeAttribute("backend", "Vulkan");
 
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
@@ -698,10 +698,10 @@ int vkPeak::runAll()
     log->print((unsigned int)(dev.info.heapSize / (1024 * 1024)));
     log->print(" MB" NEWLINE);
 
-    log->xmlOpenTag("device");
-    log->xmlAppendAttribs("name", dev.info.deviceName);
-    log->xmlAppendAttribs("api", "vulkan");
-    log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
+    log->resultScopeBegin("device");
+    log->resultScopeAttribute("name", dev.info.deviceName);
+    log->resultScopeAttribute("api", "vulkan");
+    log->resultScopeAttribute("driver_version", dev.info.driverVersion);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
     if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
@@ -737,11 +737,11 @@ int vkPeak::runAll()
     if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
-    log->xmlCloseTag(); // device
+    log->resultScopeEnd(); // device
   }
 
-  log->xmlCloseTag(); // platform
-  log->xmlCloseTag(); // clpeak
+  log->resultScopeEnd(); // platform
+  log->resultScopeEnd(); // clpeak
   return 0;
 }
 
@@ -754,7 +754,7 @@ int vkPeak::runAll()
 // pipeline from the shader's SPIR-V, dispatch repeatedly with a push
 // constant, and report work-per-WI / elapsed time.  The only differences
 // are the shader, the buffer-element size, the push-constant payload, and
-// the strings used for display / XML.  All of those are bundled into
+// the strings used for display / result output.  All of those are bundled into
 // vk_compute_desc_t so each concrete benchmark becomes a few-line wrapper.
 // ---------------------------------------------------------------------------
 
@@ -764,17 +764,17 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   log->print(NEWLINE TAB);
   log->print(d.title);
   log->print(NEWLINE);
-  log->xmlOpenTag(d.xmlTag);
-  log->xmlAppendAttribs("unit", d.unit);
+  log->resultScopeBegin(d.resultTag);
+  log->resultScopeAttribute("unit", d.unit);
   if (d.extraAttribKey && d.extraAttribVal)
-    log->xmlAppendAttribs(d.extraAttribKey, d.extraAttribVal);
+    log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
   if (d.skip)
   {
     log->print(TAB TAB);
     log->print(d.skipMsg ? d.skipMsg : "Skipped");
     log->print(NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
   }
 
@@ -818,7 +818,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         outputBuf, outputMem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -914,7 +914,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
     log->print(value);
     log->print(NEWLINE);
-    log->xmlRecord(v.label, value);
+    log->resultRecord(v.label, value);
 
     vkDestroyPipeline(dev.device, pipeline, nullptr);
   }
@@ -925,7 +925,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -939,7 +939,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Single-precision compute (GFLOPS)";
-  d.xmlTag      = "single_precision_compute";
+  d.resultTag      = "single_precision_compute";
   d.metricLabel = "float";
   d.unit        = "gflops";
   d.spirv       = vk_shaders::compute_sp_v1;
@@ -970,7 +970,7 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
-  d.xmlTag      = "mixed_precision_compute";
+  d.resultTag      = "mixed_precision_compute";
   d.unit        = "gflops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -990,7 +990,7 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
   int32_t A = 3;
   vk_compute_desc_t d = {};
   d.title           = "Packed INT4 compute (emulated) (GOPS)";
-  d.xmlTag          = "int4_packed_compute";
+  d.resultTag          = "int4_packed_compute";
   d.metricLabel     = "int4_packed";
   d.unit            = "gops";
   d.spirv           = vk_shaders::compute_int4_packed_v1;
@@ -1025,7 +1025,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   int32_t A = 4;
   vk_compute_desc_t d = {};
   d.title       = "INT8 dot-product compute (GOPS)";
-  d.xmlTag      = "integer_compute_int8_dp";
+  d.resultTag      = "integer_compute_int8_dp";
   d.unit        = "gops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -1056,7 +1056,7 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
-  d.xmlTag      = "bfloat16_compute";
+  d.resultTag      = "bfloat16_compute";
   d.unit        = "gflops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -1086,10 +1086,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.info.cooperativeMatrixSupported)
   {
     log->print(NEWLINE TAB "Cooperative matrix (TFLOPS/TOPS)" NEWLINE);
-    log->xmlOpenTag("cooperative_matrix");
-    log->xmlAppendAttribs("tile", "16x16x16");
+    log->resultScopeBegin("cooperative_matrix");
+    log->resultScopeAttribute("tile", "16x16x16");
     log->print(TAB TAB "VK_KHR_cooperative_matrix not supported! Skipped" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
   }
 
@@ -1104,7 +1104,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_fp16";
+    d.resultTag         = "coopmat_fp16";
     d.metricLabel    = "coopmat_fp16";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1128,7 +1128,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_bf16";
+    d.resultTag         = "coopmat_bf16";
     d.metricLabel    = "coopmat_bf16";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1152,7 +1152,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_fp8_e4m3";
+    d.resultTag         = "coopmat_fp8_e4m3";
     d.metricLabel    = "coopmat_fp8_e4m3";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1176,7 +1176,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_fp8_e5m2";
+    d.resultTag         = "coopmat_fp8_e5m2";
     d.metricLabel    = "coopmat_fp8_e5m2";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1201,7 +1201,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.
     int32_t A = 3;
     vk_compute_desc_t d = {};
-    d.xmlTag         = "coopmat_int8";
+    d.resultTag         = "coopmat_int8";
     d.metricLabel    = "coopmat_int8";
     d.unit           = "tops";
     d.unitDivider    = 1e12;
@@ -1277,8 +1277,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (numGroups == 0) numGroups = 1;
 
   log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("global_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("global_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;
@@ -1294,7 +1294,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         outputBuf, outputMem))
   {
     log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1336,7 +1336,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     vkFreeMemory(dev.device, inputMem, nullptr);
     vkDestroyBuffer(dev.device, outputBuf, nullptr);
     vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1390,7 +1390,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   log->print(gbps);
   log->print(NEWLINE);
-  log->xmlRecord("float", gbps);
+  log->resultRecord("float", gbps);
 
   // Cleanup
   vkDestroyPipeline(dev.device, pipeline, nullptr);
@@ -1402,7 +1402,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  log->xmlCloseTag(); // global_memory_bandwidth
+  log->resultScopeEnd(); // global_memory_bandwidth
   return 0;
 }
 
@@ -1418,8 +1418,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.computeIters;
 
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("local_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("local_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = 32ULL * 1024 * 1024;
@@ -1432,7 +1432,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1499,10 +1499,10 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    // strip padding from label for the xml record key
+    // Strip padding from the display label for the result metric key.
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ') key.pop_back();
-    log->xmlRecord(key, gbps);
+    log->resultRecord(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -1511,7 +1511,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
   vkDestroyBuffer(dev.device, outBuf, nullptr);
   vkFreeMemory(dev.device, outMem, nullptr);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1527,8 +1527,8 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.globalBWIters;
 
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("image_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("image_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
@@ -1553,7 +1553,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
   {
     log->print(TAB TAB "Image create failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1633,7 +1633,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     vkDestroyImageView(dev.device, imgView, nullptr);
     vkDestroyImage(dev.device, img, nullptr);
     vkFreeMemory(dev.device, imgMem, nullptr);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1700,7 +1700,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    log->xmlRecord("float4", gbps);
+    log->resultRecord("float4", gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -1713,7 +1713,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyImageView(dev.device, imgView, nullptr);
   vkDestroyImage(dev.device, img, nullptr);
   vkFreeMemory(dev.device, imgMem, nullptr);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1726,8 +1726,8 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.computeIters;
 
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  log->xmlOpenTag("atomic_throughput");
-  log->xmlAppendAttribs("unit", "gops");
+  log->resultScopeBegin("atomic_throughput");
+  log->resultScopeAttribute("unit", "gops");
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = 32ULL * 1024 * 1024;
@@ -1798,7 +1798,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->xmlRecord("global", gops);
+    log->resultRecord("global", gops);
   }
 
   // Local atomics: one int counter per workgroup.
@@ -1809,10 +1809,10 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->xmlRecord("local", gops);
+    log->resultRecord("local", gops);
   }
 
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1833,8 +1833,8 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
 
   log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-  log->xmlOpenTag("kernel_launch_latency");
-  log->xmlAppendAttribs("unit", "us");
+  log->resultScopeBegin("kernel_launch_latency");
+  log->resultScopeAttribute("unit", "us");
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};
@@ -1843,7 +1843,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
   {
     log->print(TAB TAB "pipeline layout creation failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1857,7 +1857,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
     log->print(TAB TAB "shader module creation failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1874,7 +1874,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     vkDestroyShaderModule(dev.device, shaderModule, nullptr);
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
     log->print(TAB TAB "compute pipeline creation failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -2059,7 +2059,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
     log->print(dispatchUs);
     log->print(NEWLINE);
-    log->xmlRecord("dispatch", dispatchUs);
+    log->resultRecord("dispatch", dispatchUs);
   }
   else
   {
@@ -2068,7 +2068,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   log->print(TAB TAB "roundtrip : ");
   log->print((float)avgRoundtripUs);
   log->print(NEWLINE);
-  log->xmlRecord("roundtrip", (float)avgRoundtripUs);
+  log->resultRecord("roundtrip", (float)avgRoundtripUs);
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
   if (queryPool != VK_NULL_HANDLE)
@@ -2077,7 +2077,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyShaderModule(dev.device, shaderModule, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
 
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 

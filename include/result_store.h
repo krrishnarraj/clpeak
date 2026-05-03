@@ -40,7 +40,7 @@ Category     categoryFromString(const std::string &s);
 ResultStatus statusFromString(const std::string &s);
 
 // Derive a category from a unit string (gflops/tflops -> FpCompute, etc.).
-// Used by the legacy xmlOpenTag-based logger path so existing benchmark
+// Used by the result-scope logger path so existing benchmark
 // code keeps producing correctly-categorised rows without per-test wiring.
 Category categoryFromUnit(const std::string &unit);
 

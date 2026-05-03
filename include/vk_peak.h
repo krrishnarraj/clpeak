@@ -113,7 +113,7 @@ private:
 // (metricLabel + spirv + spirvSize) fields.
 struct vk_compute_variant_t
 {
-  const char *label;         // column + xmlRecord key, e.g. "mp", "mp2", "mp4"
+  const char *label;         // column + result metric, e.g. "mp", "mp2", "mp4"
   const uint32_t *spirv;
   size_t spirvSize;
 };
@@ -122,7 +122,7 @@ struct vk_compute_desc_t
 {
   // Display / reporting
   const char *title;         // e.g. "Single-precision compute (GFLOPS)"
-  const char *xmlTag;        // e.g. "single_precision_compute"
+  const char *resultTag;        // e.g. "single_precision_compute"
   const char *metricLabel;   // used when variants==nullptr
   const char *unit;          // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;   // 1e9 = G* (default when 0), 1e12 = T*
@@ -153,7 +153,7 @@ struct vk_compute_desc_t
   bool skip;
   const char *skipMsg;
 
-  // Optional extra xml attribute (e.g. emulated="true" for packed INT4).
+  // Optional extra result attribute (e.g. emulated="true" for packed INT4).
   const char *extraAttribKey;
   const char *extraAttribVal;
 };

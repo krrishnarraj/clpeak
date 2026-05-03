@@ -59,10 +59,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   float peakRealTransferBW = 0;
 
   // Helper: run a timed transfer test with warmup, return measured gbps
-  auto runTransfer = [&](const std::string &label, const std::string &xmlName,
+  auto runTransfer = [&](const std::string &label, const std::string &resultName,
                          std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
   {
-    if (forceTest && specifiedTestName != xmlName)
+    if (forceTest && specifiedTestName != resultName)
       return 0;
 
     log->print(label);
@@ -102,7 +102,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     float gbps = (float)bytes / timed / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    log->xmlRecord(xmlName, gbps);
+    log->resultRecord(resultName, gbps);
     return gbps;
   };
 
@@ -115,19 +115,19 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   };
 
   // Helper: report a map/unmap result, detecting zero-copy
-  auto reportMapUnmap = [&](float gbps, const std::string &xmlName)
+  auto reportMapUnmap = [&](float gbps, const std::string &resultName)
   {
     if (isZeroCopy(gbps))
     {
       log->print("inf (zero-copy)");
       log->print(NEWLINE);
-      log->xmlRecord(xmlName, (float)0);
+      log->resultRecord(resultName, (float)0);
     }
     else
     {
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord(xmlName, gbps);
+      log->resultRecord(resultName, gbps);
     }
   };
 
@@ -143,8 +143,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), bytes);
 
     log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("transfer_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    log->resultScopeBegin("transfer_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     // enqueueWriteBuffer (blocking)
     float bw;
@@ -219,7 +219,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float gbps = (float)bytes / timed / 1e3f;
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("memcpy_from_mapped_ptr", gbps);
+      log->resultRecord("memcpy_from_mapped_ptr", gbps);
     }
 
     // enqueueUnmap(after write)
@@ -271,10 +271,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float gbps = (float)bytes / timed / 1e3f;
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("memcpy_to_mapped_ptr", gbps);
+      log->resultRecord("memcpy_to_mapped_ptr", gbps);
     }
 
-    log->xmlCloseTag(); // transfer_bandwidth
+    log->resultScopeEnd(); // transfer_bandwidth
 
     freeAligned(arr);
   }
@@ -285,10 +285,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
     // this test's result card.
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     freeAligned(arr);
     return -1;
   }

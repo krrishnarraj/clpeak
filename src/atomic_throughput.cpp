@@ -16,8 +16,8 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   try
   {
     log->print(NEWLINE TAB TAB "Atomic throughput (GOPS)" NEWLINE);
-    log->xmlOpenTag("atomic_throughput");
-    log->xmlAppendAttribs("unit", "gops");
+    log->resultScopeBegin("atomic_throughput");
+    log->resultScopeAttribute("unit", "gops");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
@@ -43,7 +43,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
       log->print(gops);
       log->print(NEWLINE);
-      log->xmlRecord("global", gops);
+      log->resultRecord("global", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
@@ -63,11 +63,11 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
       log->print(gops);
       log->print(NEWLINE);
-      log->xmlRecord("local", gops);
+      log->resultRecord("local", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
-    log->xmlCloseTag(); // atomic_throughput
+    log->resultScopeEnd(); // atomic_throughput
   }
   catch (cl::Error &error)
   {
@@ -75,10 +75,10 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
     // this test's result card.
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 

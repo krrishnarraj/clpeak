@@ -15,8 +15,8 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   try
   {
     log->print(NEWLINE TAB TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("local_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    log->resultScopeBegin("local_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));
@@ -56,10 +56,10 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord(labels[w], gbps);
+      log->resultRecord(labels[w], gbps);
     }
 
-    log->xmlCloseTag(); // local_memory_bandwidth
+    log->resultScopeEnd(); // local_memory_bandwidth
   }
   catch (cl::Error &error)
   {
@@ -67,10 +67,10 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
     // this test's result card.
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 

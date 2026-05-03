@@ -84,7 +84,7 @@ private:
 // (and possibly source file) differs.
 struct cuda_compute_variant_t
 {
-  const char *label;             // column / xmlRecord key, e.g. "mp", "mp2"
+  const char *label;             // column / result metric, e.g. "mp", "mp2"
   const char *kernelName;        // CUDA kernel symbol (extern "C")
   const char *src;               // .cu source text (may be shared by sibling
                                  // variants emitting from one file)
@@ -94,7 +94,7 @@ struct cuda_compute_variant_t
 struct cuda_compute_desc_t
 {
   const char *title;             // header line
-  const char *xmlTag;            // outer XML tag
+  const char *resultTag;            // persisted test name
   const char *unit;              // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;       // 1e9 = G* (default when 0), 1e12 = T*
 

@@ -143,7 +143,7 @@ public:
   // Unified compute benchmark helper -- replaces 7 nearly-identical runCompute* methods
   int runComputeTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo,
                      benchmark_config_t &cfg, Benchmark which,
-                     const std::string &displayName, const std::string &xmlTag,
+                     const std::string &displayName, const std::string &resultTag,
                      const std::string &kernelPrefix, const std::string &typeName,
                      const std::string &unit, unsigned int workPerWI,
                      unsigned int wgsPerCU, size_t elemSize);

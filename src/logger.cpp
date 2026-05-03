@@ -138,28 +138,29 @@ void logger::recordSkip(const std::string &metric, ResultStatus status,
   emit(metric, status, 0.0f, reason);
 }
 
-// ---- Legacy XML shim ------------------------------------------------------
-// Translates xmlOpenTag / xmlAppendAttribs / xmlRecord / xmlCloseTag into
-// updates of the current run / category / test scope so emit() can produce
-// fully-qualified ResultEntry rows without backend-side changes.
+// ---- Result-scope recording ----------------------------------------------
+// Translates resultScopeBegin / resultScopeAttribute / resultRecord /
+// resultScopeEnd into updates of the current run / category / test scope so
+// emit() can produce fully-qualified ResultEntry rows without backend-side
+// changes.
 //
-// Implicit tag depth:
+// Implicit scope depth:
 //   1 = <clpeak>
 //   2 = <platform>
 //   3 = <device>
 //   4 = <test_group>
 // Attribute side-effects fire on whichever frame is currently topmost.
 
-void logger::xmlOpenTag(std::string tag)
+void logger::resultScopeBegin(std::string name)
 {
   shimDepth++;
 
-  // Frame 4 = a test group -- remember the tag as the current test name.
-  // The unit attribute (if any) follows in subsequent xmlAppendAttribs
+  // Frame 4 = a test group -- remember the scope name as the current test.
+  // The unit attribute (if any) follows in subsequent resultScopeAttribute
   // calls and refines curUnit / curCategory.
   if (shimDepth == 4)
   {
-    curTest = tag;
+    curTest = name;
     curUnit.clear();
     if (curCategory == Category::Unknown ||
         curCategory == Category::Latency ||
@@ -175,7 +176,7 @@ void logger::xmlOpenTag(std::string tag)
   }
 }
 
-void logger::xmlAppendAttribs(std::string key, std::string value)
+void logger::resultScopeAttribute(std::string key, std::string value)
 {
   switch (shimDepth)
   {
@@ -199,29 +200,28 @@ void logger::xmlAppendAttribs(std::string key, std::string value)
   }
 }
 
-void logger::xmlAppendAttribs(std::string key, unsigned int value)
+void logger::resultScopeAttribute(std::string key, unsigned int value)
 {
   std::stringstream ss;
   ss << value;
-  xmlAppendAttribs(key, ss.str());
+  resultScopeAttribute(key, ss.str());
 }
 
-void logger::xmlSetContent(std::string)
+void logger::resultSetContent(std::string)
 {
   // Dead path historically: kept as a no-op for ABI compatibility.
 }
 
-void logger::xmlSetContent(float value)
+void logger::resultSetContent(float value)
 {
-  // Historical: a single-value test (unit on the test tag, no inner
-  // metric tags) called xmlSetContent with the measurement.  Translate
-  // into a record() using the test name as the metric so the row still
-  // carries a non-empty metric field.
+  // Historical: a single-value test called resultSetContent with the
+  // measurement.  Translate into a record() using the test name as the metric
+  // so the row still carries a non-empty metric field.
   if (shimDepth == 4 && !curTest.empty())
     emit(curTest, ResultStatus::Ok, value, "");
 }
 
-void logger::xmlCloseTag()
+void logger::resultScopeEnd()
 {
   if (shimDepth == 4)
   {
@@ -233,15 +233,15 @@ void logger::xmlCloseTag()
     shimDepth--;
 }
 
-void logger::xmlRecord(std::string, std::string)
+void logger::resultRecord(std::string, std::string)
 {
   // String-valued metrics are not represented in the result store.
 }
 
-void logger::xmlRecord(std::string tag, float value)
+void logger::resultRecord(std::string metric, float value)
 {
   if (shimDepth == 4)
-    emit(tag, ResultStatus::Ok, value, "");
+    emit(metric, ResultStatus::Ok, value, "");
 }
 
 // ---- Common emission ------------------------------------------------------

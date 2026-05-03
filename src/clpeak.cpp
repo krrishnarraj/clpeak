@@ -98,8 +98,8 @@ int clPeak::runAll()
     cl::Platform::get(&platforms);
 
     log->print(NEWLINE "=== OpenCL backend ===" NEWLINE);
-    log->xmlOpenTag("clpeak");
-    log->xmlAppendAttribs("os", OS_NAME);
+    log->resultScopeBegin("clpeak");
+    log->resultScopeAttribute("os", OS_NAME);
     for (size_t p = 0; p < platforms.size(); p++)
     {
       if (forcePlatform && (p != specifiedPlatform))
@@ -112,9 +112,9 @@ int clPeak::runAll()
         continue;
 
       log->print(NEWLINE "Platform: " + platformName + NEWLINE);
-      log->xmlOpenTag("platform");
-      log->xmlAppendAttribs("name", platformName);
-      log->xmlAppendAttribs("backend", "OpenCL");
+      log->resultScopeBegin("platform");
+      log->resultScopeAttribute("name", platformName);
+      log->resultScopeAttribute("backend", "OpenCL");
 
       cl_context_properties cps[3] = {
           CL_CONTEXT_PLATFORM,
@@ -157,12 +157,12 @@ int clPeak::runAll()
         log->print(" MHz" NEWLINE);
         if (useEventTimer)
           log->print(TAB TAB "Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation" NEWLINE);
-        log->xmlOpenTag("device");
-        log->xmlAppendAttribs("name", devInfo.deviceName);
-        log->xmlAppendAttribs("driver_version", devInfo.driverVersion);
-        log->xmlAppendAttribs("compute_units", devInfo.numCUs);
-        log->xmlAppendAttribs("clock_frequency", devInfo.maxClockFreq);
-        log->xmlAppendAttribs("clock_frequency_unit", "MHz");
+        log->resultScopeBegin("device");
+        log->resultScopeAttribute("name", devInfo.deviceName);
+        log->resultScopeAttribute("driver_version", devInfo.driverVersion);
+        log->resultScopeAttribute("compute_units", devInfo.numCUs);
+        log->resultScopeAttribute("clock_frequency", devInfo.maxClockFreq);
+        log->resultScopeAttribute("clock_frequency_unit", "MHz");
 
         cl::Program::Sources source(1, stringifiedKernels);
         cl::Program prog = cl::Program(ctx, source);
@@ -296,11 +296,11 @@ int clPeak::runAll()
         useEventTimer = savedUseEventTimer;
 
         log->print(NEWLINE);
-        log->xmlCloseTag(); // device
+        log->resultScopeEnd(); // device
       }
-      log->xmlCloseTag(); // platform
+      log->resultScopeEnd(); // platform
     }
-    log->xmlCloseTag(); // clpeak
+    log->resultScopeEnd(); // clpeak
   }
   catch (cl::Error &error)
   {
@@ -365,7 +365,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            device_info_t &devInfo, benchmark_config_t &cfg,
                            Benchmark which,
-                           const std::string &displayName, const std::string &xmlTag,
+                           const std::string &displayName, const std::string &resultTag,
                            const std::string &kernelPrefix, const std::string &typeName,
                            const std::string &unit, unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
@@ -415,8 +415,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   try
   {
     log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->xmlOpenTag(xmlTag);
-    log->xmlAppendAttribs("unit", unit);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
@@ -483,10 +483,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
       log->print(throughput);
       log->print(NEWLINE);
-      log->xmlRecord(labels[w], throughput);
+      log->resultRecord(labels[w], throughput);
     }
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
   }
   catch (cl::Error &error)
   {
@@ -494,10 +494,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // xmlOpenTag was already pushed above; close it so subsequent tests
+    // resultScopeBegin was already pushed above; close it so subsequent tests
     // don't nest under a leaked parent (manifests on Android as all later
     // tests collapsing into this test's result card).
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
   catch (std::exception &e)
@@ -506,7 +506,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << "Exception: " << e.what() << NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 

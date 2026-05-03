@@ -10,13 +10,13 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
 
   log->print(NEWLINE TAB TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("image_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("image_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   if (!devInfo.imageSupported)
   {
     log->print(TAB TAB TAB "Skipped (device has no image support)" NEWLINE);
-    log->xmlCloseTag(); // image_memory_bandwidth
+    log->resultScopeEnd(); // image_memory_bandwidth
     return 0;
   }
 
@@ -66,11 +66,11 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("float4", gbps);
+      log->resultRecord("float4", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
 
-    log->xmlCloseTag(); // image_memory_bandwidth
+    log->resultScopeEnd(); // image_memory_bandwidth
   }
   catch (cl::Error &error)
   {
@@ -78,10 +78,10 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
     // this test's result card.
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 

@@ -309,11 +309,11 @@ int CudaPeak::runAll()
   }
 
   // Mirror the OpenCL/Vulkan logger context stack (clpeak > platform > device).
-  log->xmlOpenTag("clpeak");
-  log->xmlAppendAttribs("os", OS_NAME);
-  log->xmlOpenTag("platform");
-  log->xmlAppendAttribs("name", "CUDA");
-  log->xmlAppendAttribs("backend", "CUDA");
+  log->resultScopeBegin("clpeak");
+  log->resultScopeAttribute("os", OS_NAME);
+  log->resultScopeBegin("platform");
+  log->resultScopeAttribute("name", "CUDA");
+  log->resultScopeAttribute("backend", "CUDA");
 
   for (int idx : devIndices)
   {
@@ -347,11 +347,11 @@ int CudaPeak::runAll()
     log->print((unsigned int)(dev.info.totalGlobalMem / (1024 * 1024)));
     log->print(" MB" NEWLINE);
 
-    log->xmlOpenTag("device");
-    log->xmlAppendAttribs("name", dev.info.deviceName);
-    log->xmlAppendAttribs("api", "cuda");
-    log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
-    log->xmlAppendAttribs("arch", dev.info.archName);
+    log->resultScopeBegin("device");
+    log->resultScopeAttribute("name", dev.info.deviceName);
+    log->resultScopeAttribute("api", "cuda");
+    log->resultScopeAttribute("driver_version", dev.info.driverVersion);
+    log->resultScopeAttribute("arch", dev.info.archName);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
     if (isAllowed(Benchmark::ComputeSP))      runComputeSP(dev, cfg);
@@ -384,11 +384,11 @@ int CudaPeak::runAll()
     if (isAllowed(Benchmark::KernelLatency)) runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
-    log->xmlCloseTag(); // device
+    log->resultScopeEnd(); // device
   }
 
-  log->xmlCloseTag(); // platform
-  log->xmlCloseTag(); // clpeak
+  log->resultScopeEnd(); // platform
+  log->resultScopeEnd(); // clpeak
   return 0;
 }
 
@@ -404,17 +404,17 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   log->print(NEWLINE TAB);
   log->print(d.title);
   log->print(NEWLINE);
-  log->xmlOpenTag(d.xmlTag);
-  log->xmlAppendAttribs("unit", d.unit);
+  log->resultScopeBegin(d.resultTag);
+  log->resultScopeAttribute("unit", d.unit);
   if (d.extraAttribKey && d.extraAttribVal)
-    log->xmlAppendAttribs(d.extraAttribKey, d.extraAttribVal);
+    log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
   if (d.skip)
   {
     log->print(TAB TAB);
     log->print(d.skipMsg ? d.skipMsg : "Skipped");
     log->print(NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
   }
 
@@ -450,7 +450,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   if (cuMemAlloc(&outputBuf, bufferBytes) != CUDA_SUCCESS)
   {
     log->print(TAB TAB "Failed to allocate output buffer" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -485,11 +485,11 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
 
     log->print(value);
     log->print(NEWLINE);
-    log->xmlRecord(v.label, value);
+    log->resultRecord(v.label, value);
   }
 
   cuMemFree(outputBuf);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -502,7 +502,7 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   cuda_compute_desc_t d = {};
   d.title = "Single-precision compute (GFLOPS)";
-  d.xmlTag = "single_precision_compute";
+  d.resultTag = "single_precision_compute";
   d.unit = "gflops";
   d.metricLabel = "float";
   d.kernelName = "compute_sp";
@@ -524,7 +524,7 @@ int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   cuda_compute_desc_t d = {};
   d.title = "Half-precision compute (GFLOPS)";
-  d.xmlTag = "half_precision_compute";
+  d.resultTag = "half_precision_compute";
   d.unit = "gflops";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -542,7 +542,7 @@ int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
   double A = 1.3;
   cuda_compute_desc_t d = {};
   d.title = "Double-precision compute (GFLOPS)";
-  d.xmlTag = "double_precision_compute";
+  d.resultTag = "double_precision_compute";
   d.unit = "gflops";
   d.metricLabel = "double";
   d.kernelName = "compute_dp";
@@ -562,7 +562,7 @@ int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   cuda_compute_desc_t d = {};
   d.title = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
-  d.xmlTag = "mixed_precision_compute";
+  d.resultTag = "mixed_precision_compute";
   d.unit = "gflops";
   d.metricLabel = "mp";
   d.kernelName = "compute_mp";
@@ -586,7 +586,7 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   cuda_compute_desc_t d = {};
   d.title = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
-  d.xmlTag = "bfloat16_compute";
+  d.resultTag = "bfloat16_compute";
   d.unit = "gflops";
   d.metricLabel = "bf16";
   d.kernelName = "compute_bf16";
@@ -609,7 +609,7 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
   int A = 3;
   cuda_compute_desc_t d = {};
   d.title = "Integer compute (32-bit IMAD) (GOPS)";
-  d.xmlTag = "integer_compute";
+  d.resultTag = "integer_compute";
   d.unit = "gops";
   d.metricLabel = "int";
   d.kernelName = "compute_int32";
@@ -633,7 +633,7 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
   int A = 4;
   cuda_compute_desc_t d = {};
   d.title = "INT8 dot-product compute (__dp4a) (GOPS)";
-  d.xmlTag = "integer_compute_int8_dp";
+  d.resultTag = "integer_compute_int8_dp";
   d.unit = "gops";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -651,7 +651,7 @@ int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
   int A = 3;
   cuda_compute_desc_t d = {};
   d.title = "Packed INT4 compute (emulated) (GOPS)";
-  d.xmlTag = "int4_packed_compute";
+  d.resultTag = "int4_packed_compute";
   d.unit = "gops";
   d.metricLabel = "int4_packed";
   d.kernelName = "compute_int4_packed";
@@ -698,7 +698,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.title = "WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)";
-      d.xmlTag = "wmma_fp16";
+      d.resultTag = "wmma_fp16";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_fp16";
@@ -720,7 +720,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.title = "WMMA bf16xbf16+fp32 16x16x16 (TFLOPS)";
-      d.xmlTag = "wmma_bf16";
+      d.resultTag = "wmma_bf16";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_bf16";
@@ -744,7 +744,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.title = "WMMA tf32xtf32+fp32 16x16x8 (TFLOPS)";
-      d.xmlTag = "wmma_tf32";
+      d.resultTag = "wmma_tf32";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_tf32";
@@ -768,7 +768,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       double A = 1.3;
       cuda_compute_desc_t d = {};
       d.title = "WMMA fp64xfp64+fp64 8x8x4 (TFLOPS)";
-      d.xmlTag = "wmma_fp64";
+      d.resultTag = "wmma_fp64";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_fp64";
@@ -792,7 +792,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.title = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
-      d.xmlTag = "wmma_fp8_e4m3";
+      d.resultTag = "wmma_fp8_e4m3";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp8_e4m3";
@@ -816,7 +816,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.title = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
-      d.xmlTag = "wmma_fp8_e5m2";
+      d.resultTag = "wmma_fp8_e5m2";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp8_e5m2";
@@ -852,7 +852,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     int A = 3;
     cuda_compute_desc_t d = {};
     d.title = "WMMA int8xint8+int32 16x16x16 (TOPS)";
-    d.xmlTag = "wmma_int8";
+    d.resultTag = "wmma_int8";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "wmma_int8";
@@ -876,7 +876,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     int A = 3;
     cuda_compute_desc_t d = {};
     d.title = "INT8 mma.sync m16n8k32+int32 (TOPS)";
-    d.xmlTag = "wmma_int8_k32";
+    d.resultTag = "wmma_int8_k32";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "int8_k32";
@@ -900,7 +900,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     int A = 3;
     cuda_compute_desc_t d = {};
     d.title = "INT4 mma.sync m8n8k32+int32 (TOPS)";
-    d.xmlTag = "wmma_int4";
+    d.resultTag = "wmma_int4";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "int4";
@@ -924,7 +924,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     int A = 3;
     cuda_compute_desc_t d = {};
     d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc (TOPS)";
-    d.xmlTag = "wmma_bmma_b1";
+    d.resultTag = "wmma_bmma_b1";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "bmma_b1";
@@ -966,8 +966,8 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     numBlocks = 1;
 
   log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("global_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("global_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   CUdeviceptr inBuf = 0, outBuf = 0;
   if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||
@@ -976,7 +976,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
     if (inBuf)
       cuMemFree(inBuf);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
   // Touch input so we measure DRAM not zero-page.
@@ -1026,12 +1026,12 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     float gbps = (float)(bytes / us / 1e3);
     log->print(gbps);
     log->print(NEWLINE);
-    log->xmlRecord(v.kernelName, gbps);
+    log->resultRecord(v.kernelName, gbps);
   }
 
   cuMemFree(inBuf);
   cuMemFree(outBuf);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1045,14 +1045,14 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
 
   log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("transfer_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("transfer_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   CUdeviceptr dBuf = 0;
   if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)
   {
     log->print(TAB TAB "Failed to allocate device buffer" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
   // Pinned host buffer -- the transfer-BW number we want is the pinned
@@ -1062,7 +1062,7 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   {
     cuMemFree(dBuf);
     log->print(TAB TAB "Failed to allocate pinned host buffer" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1102,18 +1102,18 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   log->print(TAB TAB "Host->Dev (pinned) : ");
   log->print(gbpsH2D);
   log->print(NEWLINE);
-  log->xmlRecord("h2d_pinned", gbpsH2D);
+  log->resultRecord("h2d_pinned", gbpsH2D);
 
   float usD2H = timeXfer(false);
   float gbpsD2H = (float)bytes / usD2H / 1e3f;
   log->print(TAB TAB "Dev->Host (pinned) : ");
   log->print(gbpsD2H);
   log->print(NEWLINE);
-  log->xmlRecord("d2h_pinned", gbpsD2H);
+  log->resultRecord("d2h_pinned", gbpsD2H);
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1126,8 +1126,8 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
 
   log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-  log->xmlOpenTag("kernel_launch_latency");
-  log->xmlAppendAttribs("unit", "us");
+  log->resultScopeBegin("kernel_launch_latency");
+  log->resultScopeAttribute("unit", "us");
 
   CUfunction fn;
   if (!dev.getKernel(cuda_kernels::kernel_latency_src,
@@ -1135,7 +1135,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
                      "kernel_latency_noop", fn))
   {
     log->print(TAB TAB "Compile failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1170,9 +1170,9 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   log->print(TAB TAB "roundtrip : ");
   log->print(roundtripUs);
   log->print(NEWLINE);
-  log->xmlRecord("roundtrip", roundtripUs);
+  log->resultRecord("roundtrip", roundtripUs);
 
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1184,8 +1184,8 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("local_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("local_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -1195,7 +1195,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (cuMemAlloc(&outBuf, globalThreads * sizeof(float)) != CUDA_SUCCESS)
   {
     log->print(TAB TAB "Buffer alloc failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1231,11 +1231,11 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
-    log->xmlRecord(key, gbps);
+    log->resultRecord(key, gbps);
   }
 
   cuMemFree(outBuf);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1247,8 +1247,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.globalBWIters;
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("image_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  log->resultScopeBegin("image_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
@@ -1265,7 +1265,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (cuArrayCreate(&arr, &adesc) != CUDA_SUCCESS)
   {
     log->print(TAB TAB "Image array create failed" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
   // Contents undefined is fine for a bandwidth measurement -- the cache
@@ -1284,7 +1284,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   {
     log->print(TAB TAB "Texture object create failed" NEWLINE);
     cuArrayDestroy(arr);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1300,7 +1300,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     cuTexObjectDestroy(tex);
     cuArrayDestroy(arr);
     cuMemFree(outBuf);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
@@ -1312,12 +1312,12 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   float gbps = (float)bytes / us / 1e3f;
   log->print(gbps);
   log->print(NEWLINE);
-  log->xmlRecord("float4", gbps);
+  log->resultRecord("float4", gbps);
 
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);
   cuMemFree(outBuf);
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 
@@ -1329,8 +1329,8 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  log->xmlOpenTag("atomic_throughput");
-  log->xmlAppendAttribs("unit", "gops");
+  log->resultScopeBegin("atomic_throughput");
+  log->resultScopeAttribute("unit", "gops");
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -1353,7 +1353,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
         log->print(gops);
         log->print(NEWLINE);
-        log->xmlRecord("global", gops);
+        log->resultRecord("global", gops);
       }
       else
       {
@@ -1379,7 +1379,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
         log->print(gops);
         log->print(NEWLINE);
-        log->xmlRecord("local", gops);
+        log->resultRecord("local", gops);
       }
       else
       {
@@ -1389,7 +1389,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
     }
   }
 
-  log->xmlCloseTag();
+  log->resultScopeEnd();
   return 0;
 }
 

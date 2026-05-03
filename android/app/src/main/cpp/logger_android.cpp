@@ -125,20 +125,20 @@ void logger::recordSkip(const std::string &metric, ResultStatus status,
   emit(metric, status, 0.0f, reason);
 }
 
-// ---- Legacy XML shim ------------------------------------------------------
+// ---- Result-scope recording ----------------------------------------------
 
-void logger::xmlOpenTag(std::string tag)
+void logger::resultScopeBegin(std::string name)
 {
   shimDepth++;
   if (shimDepth == 4)
   {
-    curTest = tag;
+    curTest = name;
     curUnit.clear();
     curCategory = Category::Unknown;
   }
 }
 
-void logger::xmlAppendAttribs(std::string key, std::string value)
+void logger::resultScopeAttribute(std::string key, std::string value)
 {
   switch (shimDepth)
   {
@@ -162,24 +162,24 @@ void logger::xmlAppendAttribs(std::string key, std::string value)
   }
 }
 
-void logger::xmlAppendAttribs(std::string key, unsigned int value)
+void logger::resultScopeAttribute(std::string key, unsigned int value)
 {
   std::stringstream ss;
   ss << value;
-  xmlAppendAttribs(key, ss.str());
+  resultScopeAttribute(key, ss.str());
 }
 
-void logger::xmlSetContent(std::string)
+void logger::resultSetContent(std::string)
 {
 }
 
-void logger::xmlSetContent(float value)
+void logger::resultSetContent(float value)
 {
   if (shimDepth == 4 && !curTest.empty())
     emit(curTest, ResultStatus::Ok, value, "");
 }
 
-void logger::xmlCloseTag()
+void logger::resultScopeEnd()
 {
   if (shimDepth == 4)
   {
@@ -191,14 +191,14 @@ void logger::xmlCloseTag()
     shimDepth--;
 }
 
-void logger::xmlRecord(std::string, std::string)
+void logger::resultRecord(std::string, std::string)
 {
 }
 
-void logger::xmlRecord(std::string tag, float value)
+void logger::resultRecord(std::string metric, float value)
 {
   if (shimDepth == 4)
-    emit(tag, ResultStatus::Ok, value, "");
+    emit(metric, ResultStatus::Ok, value, "");
 }
 
 // ---- emit -> JNI ----------------------------------------------------------

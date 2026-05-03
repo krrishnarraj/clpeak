@@ -21,8 +21,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     populate(arr, numItems);
 
     log->print(NEWLINE TAB TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("global_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    log->resultScopeBegin("global_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
@@ -83,10 +83,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord(labels[w], gbps);
+      log->resultRecord(labels[w], gbps);
     }
 
-    log->xmlCloseTag(); // global_memory_bandwidth
+    log->resultScopeEnd(); // global_memory_bandwidth
 
     delete[] arr;
   }
@@ -97,17 +97,17 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
 
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
+    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
     // this test's result card.
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     delete[] arr;
     return -1;
   }
   catch (std::bad_alloc &)
   {
     log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     delete[] arr;
     return -1;
   }

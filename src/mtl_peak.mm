@@ -270,11 +270,11 @@ int MetalPeak::runAll()
         return -1;
     }
 
-    log->xmlOpenTag("clpeak");
-    log->xmlAppendAttribs("os", OS_NAME);
-    log->xmlOpenTag("platform");
-    log->xmlAppendAttribs("name", "Metal");
-    log->xmlAppendAttribs("backend", "Metal");
+    log->resultScopeBegin("clpeak");
+    log->resultScopeAttribute("os", OS_NAME);
+    log->resultScopeBegin("platform");
+    log->resultScopeAttribute("name", "Metal");
+    log->resultScopeAttribute("backend", "Metal");
 
     for (NSUInteger d = 0; d < impl->allDevices.count; d++)
     {
@@ -317,12 +317,12 @@ int MetalPeak::runAll()
             log->print(NEWLINE);
         }
 
-        log->xmlOpenTag("device");
-        log->xmlAppendAttribs("name", dev.info.deviceName);
-        log->xmlAppendAttribs("api", "metal");
+        log->resultScopeBegin("device");
+        log->resultScopeAttribute("name", dev.info.deviceName);
+        log->resultScopeAttribute("api", "metal");
         {
             std::stringstream ss; ss << "Apple" << dev.info.appleFamily;
-            log->xmlAppendAttribs("family", ss.str());
+            log->resultScopeAttribute("family", ss.str());
         }
 
         // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -----------
@@ -352,11 +352,11 @@ int MetalPeak::runAll()
         if (isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
-        log->xmlCloseTag(); // device
+        log->resultScopeEnd(); // device
     }
 
-    log->xmlCloseTag(); // platform
-    log->xmlCloseTag(); // clpeak
+    log->resultScopeEnd(); // platform
+    log->resultScopeEnd(); // clpeak
     return 0;
 }
 
@@ -371,17 +371,17 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
     log->print(NEWLINE TAB);
     log->print(d.title);
     log->print(NEWLINE);
-    log->xmlOpenTag(d.xmlTag);
-    log->xmlAppendAttribs("unit", d.unit);
+    log->resultScopeBegin(d.resultTag);
+    log->resultScopeAttribute("unit", d.unit);
     if (d.extraAttribKey && d.extraAttribVal)
-        log->xmlAppendAttribs(d.extraAttribKey, d.extraAttribVal);
+        log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
     if (d.skip)
     {
         log->print(TAB TAB);
         log->print(d.skipMsg ? d.skipMsg : "Skipped");
         log->print(NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return 0;
     }
 
@@ -408,7 +408,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
     if (!outBuf)
     {
         log->print(TAB TAB "Failed to allocate output buffer" NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return -1;
     }
 
@@ -443,10 +443,10 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         std::string metricTag(v.label);
         while (!metricTag.empty() && metricTag.back() == ' ')
             metricTag.pop_back();
-        log->xmlRecord(metricTag, value);
+        log->resultRecord(metricTag, value);
     }
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
 }
 
@@ -465,7 +465,7 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     mtl_compute_desc_t d = {};
     d.title       = "Single-precision compute (GFLOPS)";
-    d.xmlTag      = "single_precision_compute";
+    d.resultTag      = "single_precision_compute";
     d.unit        = "gflops";
     d.variants    = variants;
     d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -487,7 +487,7 @@ int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     mtl_compute_desc_t d = {};
     d.title       = "Half-precision compute (GFLOPS)";
-    d.xmlTag      = "half_precision_compute";
+    d.resultTag      = "half_precision_compute";
     d.unit        = "gflops";
     d.variants    = variants;
     d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -508,7 +508,7 @@ int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     mtl_compute_desc_t d = {};
     d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
-    d.xmlTag      = "mixed_precision_compute";
+    d.resultTag      = "mixed_precision_compute";
     d.unit        = "gflops";
     d.variants    = variants;
     d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -529,7 +529,7 @@ int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
     int A = 4;
     mtl_compute_desc_t d = {};
     d.title          = "INT8 dot-product compute (emulated) (GOPS)";
-    d.xmlTag         = "integer_compute_int8_dp";
+    d.resultTag         = "integer_compute_int8_dp";
     d.unit           = "gops";
     d.variants       = variants;
     d.numVariants    = sizeof(variants) / sizeof(variants[0]);
@@ -552,7 +552,7 @@ int MetalPeak::runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg)
     int A = 3;
     mtl_compute_desc_t d = {};
     d.title          = "Packed INT4 compute (emulated) (GOPS)";
-    d.xmlTag         = "int4_packed_compute";
+    d.resultTag         = "int4_packed_compute";
     d.unit           = "gops";
     d.variants       = variants;
     d.numVariants    = sizeof(variants) / sizeof(variants[0]);
@@ -570,7 +570,7 @@ int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
     int A = 1;
     mtl_compute_desc_t d = {};
     d.title            = "simdgroup_matrix int8xint8+int32 8x8x8 (TOPS)";
-    d.xmlTag           = "simdgroup_matrix_int8";
+    d.resultTag           = "simdgroup_matrix_int8";
     d.unit             = "tops";
     d.unitDivider      = 1e12;
     d.metricLabel      = "simdgroup_int8";
@@ -595,9 +595,9 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     if (!dev.info.simdgroupMatrixFP16Supported)
     {
         log->print(NEWLINE TAB "simdgroup_matrix tensor compute (TFLOPS)" NEWLINE);
-        log->xmlOpenTag("simdgroup_matrix");
+        log->resultScopeBegin("simdgroup_matrix");
         log->print(TAB TAB "simdgroup_matrix requires Apple7 (M1) or newer! Skipped" NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return 0;
     }
 
@@ -605,7 +605,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         float A = 1.3f;
         mtl_compute_desc_t d = {};
         d.title            = "simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)";
-        d.xmlTag           = "simdgroup_matrix_fp16";
+        d.resultTag           = "simdgroup_matrix_fp16";
         d.unit             = "tflops";
         d.unitDivider      = 1e12;
         d.metricLabel      = "simdgroup_fp16";
@@ -626,7 +626,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         float A = 1.3f;
         mtl_compute_desc_t d = {};
         d.title            = "simdgroup_matrix bf16xbf16+fp32 8x8x8 (TFLOPS)";
-        d.xmlTag           = "simdgroup_matrix_bf16";
+        d.resultTag           = "simdgroup_matrix_bf16";
         d.unit             = "tflops";
         d.unitDivider      = 1e12;
         d.metricLabel      = "simdgroup_bf16";
@@ -658,8 +658,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t tgSize = 256;
 
     log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("global_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    log->resultScopeBegin("global_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).
@@ -677,7 +677,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (!inBuf || !outBuf)
     {
         log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return -1;
     }
     // Touch the input so we don't measure zero-page reads on copy-on-write.
@@ -721,10 +721,10 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->print(NEWLINE);
         std::string key(v.label);
         while (!key.empty() && key.back() == ' ') key.pop_back();
-        log->xmlRecord(key, gbps);
+        log->resultRecord(key, gbps);
     }
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
 }
 
@@ -737,8 +737,8 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
 
     log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-    log->xmlOpenTag("kernel_launch_latency");
-    log->xmlAppendAttribs("unit", "us");
+    log->resultScopeBegin("kernel_launch_latency");
+    log->resultScopeAttribute("unit", "us");
 
     id<MTLComputePipelineState> pso = getPipeline(dev,
         mtl_kernels::kernel_latency_src,
@@ -747,7 +747,7 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     if (!pso)
     {
         log->print(TAB TAB "Pipeline create failed" NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return -1;
     }
 
@@ -799,10 +799,10 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     log->print(NEWLINE TAB TAB TAB "roundtrip : ");
     log->print(roundtripUs);
     log->print(NEWLINE);
-    log->xmlRecord("dispatch",  dispatchUs);
-    log->xmlRecord("roundtrip", roundtripUs);
+    log->resultRecord("dispatch",  dispatchUs);
+    log->resultRecord("roundtrip", roundtripUs);
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
 }
 
@@ -814,8 +814,8 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.computeIters;
     log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("local_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    log->resultScopeBegin("local_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -826,7 +826,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (!outBuf)
     {
         log->print(TAB TAB "Buffer alloc failed" NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return -1;
     }
 
@@ -855,10 +855,10 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->print(gbps); log->print(NEWLINE);
         std::string key(v.label);
         while (!key.empty() && key.back() == ' ') key.pop_back();
-        log->xmlRecord(key, gbps);
+        log->resultRecord(key, gbps);
     }
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
 }
 
@@ -870,8 +870,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.globalBWIters;
     log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("image_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    log->resultScopeBegin("image_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
@@ -883,7 +883,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (!outBuf)
     {
         log->print(TAB TAB "Output buffer alloc failed" NEWLINE);
-        log->xmlCloseTag();
+        log->resultScopeEnd();
         return -1;
     }
 
@@ -951,10 +951,10 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->print(gbps); log->print(NEWLINE);
         std::string key(v.label);
         while (!key.empty() && key.back() == ' ') key.pop_back();
-        log->xmlRecord(key, gbps);
+        log->resultRecord(key, gbps);
     }
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
 }
 
@@ -966,8 +966,8 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.computeIters;
     log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-    log->xmlOpenTag("atomic_throughput");
-    log->xmlAppendAttribs("unit", "gops");
+    log->resultScopeBegin("atomic_throughput");
+    log->resultScopeAttribute("unit", "gops");
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -989,14 +989,14 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         return us;
     };
 
-    auto reportOne = [&](const char *xmlKey, const char *src, const char *srcName,
+    auto reportOne = [&](const char *resultKey, const char *src, const char *srcName,
                          const char *fnName, NSUInteger bufBytes,
                          bool skip, const char *skipMsg)
     {
         if (skip)
         {
             log->print(skipMsg); log->print(NEWLINE);
-            log->xmlRecord(xmlKey, 0.0f);
+            log->resultRecord(resultKey, 0.0f);
             return;
         }
         float us = runOne(src, srcName, fnName, bufBytes);
@@ -1004,12 +1004,12 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         {
             float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
             log->print(gops); log->print(NEWLINE);
-            log->xmlRecord(xmlKey, gops);
+            log->resultRecord(resultKey, gops);
         }
         else
         {
             log->print("compile/load failed" NEWLINE);
-            log->xmlRecord(xmlKey, 0.0f);
+            log->resultRecord(resultKey, 0.0f);
         }
     };
 
@@ -1017,7 +1017,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
                       const char *gFn, const char *lFn, uint32_t elemSize,
                       bool skip, const char *skipMsg)
     {
-        // Trim trailing/internal padding so the XML element name is valid.
+        // Trim trailing/internal padding so the persisted metric key is valid.
         std::string trimmed(label);
         while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
         log->print(TAB TAB); log->print(label); log->print("_global : ");
@@ -1055,7 +1055,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
            !dev.info.atomic64Supported,
            "skipped (requires Apple8 / M2 or newer)");
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return 0;
 }
 

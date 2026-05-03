@@ -2,7 +2,7 @@
 // intrinsic in 2026, so we hand-roll: unpack four signed int8 lanes from
 // a packed int32, multiply-accumulate against another packed int32 into a
 // scalar int accumulator.  Reported as int8_dp for cross-backend comparison
-// but tagged emulated="true" in XML so users don't mistake it for hardware
+// but marked emulated="true" in result output so users don't mistake it for hardware
 // peak.
 //
 // Each emulated dot4: 4 int8 multiplies + 3 adds + xor feedback ~ 8 ops.

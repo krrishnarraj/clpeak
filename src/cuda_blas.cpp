@@ -205,7 +205,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             cublasLtMatrixLayoutCreate(&Cdesc, cType, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
             log->print("descriptor create failed" NEWLINE);
-            log->xmlRecord(label, 0.0f);
+            log->resultRecord(label, 0.0f);
             if (opDesc) cublasLtMatmulDescDestroy(opDesc);
             if (Adesc)  cublasLtMatrixLayoutDestroy(Adesc);
             if (Bdesc)  cublasLtMatrixLayoutDestroy(Bdesc);
@@ -242,7 +242,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             log->print("unsupported on ");
             log->print(dev.info.archName);
             log->print(NEWLINE);
-            log->xmlRecord(label, 0.0f);
+            log->resultRecord(label, 0.0f);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -269,7 +269,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (bestIdx < 0)
         {
             log->print("all candidate algos failed" NEWLINE);
-            log->xmlRecord(label, 0.0f);
+            log->resultRecord(label, 0.0f);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -288,7 +288,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (per_iter_us <= 0.0)
         {
             log->print("timing probe failed" NEWLINE);
-            log->xmlRecord(label, 0.0f);
+            log->resultRecord(label, 0.0f);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -305,7 +305,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
         log->print((float)tops);
         log->print(NEWLINE);
-        log->xmlRecord(label, (float)tops);
+        log->resultRecord(label, (float)tops);
 
         cublasLtMatmulDescDestroy(opDesc);
         cublasLtMatrixLayoutDestroy(Adesc);
@@ -351,10 +351,10 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         log->print(NEWLINE TAB "cuBLASLt GEMM peak (TFLOPS)" NEWLINE);
         // Test name carries no unit; the unit attribute is what the dump
         // pipeline (and the legacy-shim category derivation) reads.
-        log->xmlOpenTag("cublas-fp");
-        log->xmlAppendAttribs("unit", "tflops");
-        log->xmlAppendAttribs("dim", dimStr.str());
-        log->xmlAppendAttribs("workspace", "256MB");
+        log->resultScopeBegin("cublas-fp");
+        log->resultScopeAttribute("unit", "tflops");
+        log->resultScopeAttribute("dim", dimStr.str());
+        log->resultScopeAttribute("workspace", "256MB");
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
         // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
@@ -412,7 +412,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
                          &alpha32, &beta32, /*useTN=*/true);
         }
 
-        log->xmlCloseTag(); // cublas-tflops
+        log->resultScopeEnd(); // cublas-tflops
     }
 
     if (category != Category::IntCompute)
@@ -427,10 +427,10 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     // the unit just signals integer ops).
     // -----------------------------------------------------------------------
     log->print(NEWLINE TAB "cuBLASLt GEMM peak (TOPS)" NEWLINE);
-    log->xmlOpenTag("cublas-int");
-    log->xmlAppendAttribs("unit", "tops");
-    log->xmlAppendAttribs("dim", dimStr.str());
-    log->xmlAppendAttribs("workspace", "256MB");
+    log->resultScopeBegin("cublas-int");
+    log->resultScopeAttribute("unit", "tops");
+    log->resultScopeAttribute("dim", dimStr.str());
+    log->resultScopeAttribute("workspace", "256MB");
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
     // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.
@@ -447,7 +447,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         runVariant("int4", CUDA_R_4I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
-    log->xmlCloseTag(); // cublas-tops
+    log->resultScopeEnd(); // cublas-tops
 
     cublasLtDestroy(lt);
     cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);

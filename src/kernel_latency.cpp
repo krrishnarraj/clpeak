@@ -28,8 +28,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   try
   {
     log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
-    log->xmlOpenTag("kernel_launch_latency");
-    log->xmlAppendAttribs("unit", "us");
+    log->resultScopeBegin("kernel_launch_latency");
+    log->resultScopeAttribute("unit", "us");
 
     cl::Buffer inputBuf  = cl::Buffer(ctx, CL_MEM_READ_ONLY,  (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
@@ -67,9 +67,9 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     log->print(NEWLINE TAB TAB TAB "roundtrip : ");
     log->print(roundtripUs);
     log->print(NEWLINE);
-    log->xmlRecord("dispatch",  dispatchUs);
-    log->xmlRecord("roundtrip", roundtripUs);
-    log->xmlCloseTag();
+    log->resultRecord("dispatch",  dispatchUs);
+    log->resultRecord("roundtrip", roundtripUs);
+    log->resultScopeEnd();
   }
   catch (cl::Error &error)
   {
@@ -77,7 +77,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    log->xmlCloseTag();
+    log->resultScopeEnd();
     return -1;
   }
 
