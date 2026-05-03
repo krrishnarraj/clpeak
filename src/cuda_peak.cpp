@@ -686,10 +686,11 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   const uint32_t outElems = 16 * 16; // M*N
 
   // ---------------------------------------------------------------------
-  // FP cluster -- everything reported in TFLOPS lives under <wmma-tflops>.
+  // FP cluster -- each variant opens its own <wmma_*> group with the
+  // proper unit attribute via runComputeKernel; no umbrella tag here
+  // (depth-5 nesting under one would break the v2 logger shim).
   // ---------------------------------------------------------------------
   log->print(NEWLINE TAB "WMMA tensor-core compute (TFLOPS)" NEWLINE);
-  log->xmlOpenTag("wmma-tflops");
 
   // FP16 WMMA
   {
@@ -834,14 +835,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     runComputeKernel(dev, cfg, d);
   }
 
-  log->xmlCloseTag(); // wmma-tflops
-
   // ---------------------------------------------------------------------
-  // Integer / binary cluster -- everything reported in TOPS lives under
-  // <wmma-tops>.  Kept in a separate XML group so consumers cannot
-  // accidentally aggregate integer ops with floating ops.
+  // Integer / binary cluster -- each variant opens its own <wmma_*> group
+  // with the proper unit attribute via runComputeKernel; no umbrella tag.
+  // The fp/int split is preserved by the per-variant unit -> category
+  // derivation in the dump pipeline.
   // ---------------------------------------------------------------------
-  log->xmlOpenTag("wmma-tops");
 
   // INT8 WMMA
   {
@@ -940,7 +939,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     runComputeKernel(dev, cfg, d);
   }
 
-  log->xmlCloseTag(); // wmma-tops
   return 0;
 }
 

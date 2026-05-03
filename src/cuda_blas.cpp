@@ -347,7 +347,10 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // Floating-point variants -- reported in TFLOPS.
     // -----------------------------------------------------------------------
     log->print(NEWLINE TAB "cuBLASLt GEMM peak (TFLOPS)" NEWLINE);
-    log->xmlOpenTag("cublas-tflops");
+    // Test name carries no unit; the unit attribute is what the dump
+    // pipeline (and the legacy-shim category derivation) reads.
+    log->xmlOpenTag("cublas-fp");
+    log->xmlAppendAttribs("unit", "tflops");
     log->xmlAppendAttribs("dim", dimStr.str());
     log->xmlAppendAttribs("workspace", "256MB");
 
@@ -414,7 +417,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // the unit just signals integer ops).
     // -----------------------------------------------------------------------
     log->print(NEWLINE TAB "cuBLASLt GEMM peak (TOPS)" NEWLINE);
-    log->xmlOpenTag("cublas-tops");
+    log->xmlOpenTag("cublas-int");
+    log->xmlAppendAttribs("unit", "tops");
     log->xmlAppendAttribs("dim", dimStr.str());
     log->xmlAppendAttribs("workspace", "256MB");
 

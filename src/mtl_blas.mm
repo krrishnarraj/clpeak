@@ -142,7 +142,8 @@ unsigned int pickIters(double per_iter_us, bool forced, unsigned int forcedVal)
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
     log->print(NEWLINE TAB "MPS GEMM peak (TFLOPS)" NEWLINE);
-    log->xmlOpenTag("mps-gemm");
+    log->xmlOpenTag("mps-gemm-fp");
+    log->xmlAppendAttribs("unit", "tflops");
 
     if (!dev.info.isAppleSilicon)
     {
@@ -338,6 +339,7 @@ int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
 {
     log->print(NEWLINE TAB "MPS GEMM peak (TOPS)" NEWLINE);
     log->xmlOpenTag("mps-gemm-int");
+    log->xmlAppendAttribs("unit", "tops");
 
     if (!dev.info.isAppleSilicon)
     {
