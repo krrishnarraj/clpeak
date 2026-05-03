@@ -12,9 +12,9 @@ void CudaPeak::applyOptions(const CliOptions &opts)
   enabledTests      = opts.enabledTests;
   enabledCategories = opts.enabledCategories;
 
-  log.reset(new logger(opts.enableXml,  opts.xmlFile,
-                       opts.enableJson, opts.jsonFile,
-                       opts.enableCsv,  opts.csvFile,
+  // File output is centralized in entry.cpp::main(); see the comment in
+  // clpeak.cpp::applyOptions().
+  log.reset(new logger(false, "", false, "", false, "",
                        opts.compareFile));
 }
 

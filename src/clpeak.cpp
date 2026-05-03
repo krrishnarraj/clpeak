@@ -82,9 +82,11 @@ void clPeak::applyOptions(const CliOptions &opts)
   csvFileName = opts.csvFile;
   compareFileName = opts.compareFile;
 
-  log.reset(new logger(opts.enableXml, opts.xmlFile,
-                       opts.enableJson, opts.jsonFile,
-                       opts.enableCsv, opts.csvFile,
+  // Per-backend loggers handle stdout + baseline-compare deltas only.
+  // File output is centralized in entry.cpp::main() after every backend
+  // has run, so a single dump file aggregates rows from all backends
+  // (otherwise each backend's destructor would overwrite the same file).
+  log.reset(new logger(false, "", false, "", false, "",
                        opts.compareFile));
 }
 
