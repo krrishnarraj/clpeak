@@ -62,9 +62,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   auto runTransfer = [&](const std::string &label, const std::string &resultName,
                          std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
   {
-    if (forceTest && specifiedTestName != resultName)
-      return 0;
-
     log->print(label);
 
     // Warmup
@@ -181,7 +178,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     // Always use wall-clock for map/unmap: CL events measure only GPU command
     // processing time, which is zero on unified-memory platforms (Apple Silicon),
     // causing division-by-zero / inf with --use-event-timer.
-    if (!forceTest || specifiedTestName == "enqueuemapbuffer")
     {
       log->print(TAB TAB TAB "enqueueMapBuffer(for read)      : ");
       queue.finish();
@@ -205,7 +201,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
 
     // memcpy from mapped ptr
-    if (!forceTest || specifiedTestName == "memcpy_from_mapped_ptr")
     {
       log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
       queue.finish();
@@ -233,7 +228,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
 
     // enqueueUnmap(after write)
-    if (!forceTest || specifiedTestName == "enqueueunmap")
     {
       log->print(TAB TAB TAB "enqueueUnmap(after write)       : ");
       queue.finish();
@@ -257,7 +251,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
 
     // memcpy to mapped ptr
-    if (!forceTest || specifiedTestName == "memcpy_to_mapped_ptr")
     {
       log->print(TAB TAB TAB TAB "memcpy to mapped ptr          : ");
       queue.finish();

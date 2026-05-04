@@ -39,9 +39,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
     for (int w = 0; w < 4; w++)
     {
-      if (forceTest && specifiedTestName != labels[w])
-        continue;
-
       // float8 requires enough local memory
       if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
         continue;

@@ -26,7 +26,6 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
 
     ///////////////////////////////////////////////////////////////////////////
     // Global atomics -- independent per-WI counters (no cross-WI contention)
-    if (!forceTest || specifiedTestName == "global")
     {
       log->print(TAB TAB TAB "global  : ");
 
@@ -48,7 +47,6 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     ///////////////////////////////////////////////////////////////////////////
 
     // Local atomics -- all WIs in a WG contend on one shared counter
-    if (!forceTest || specifiedTestName == "local")
     {
       log->print(TAB TAB TAB "local   : ");
 

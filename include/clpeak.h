@@ -98,12 +98,11 @@ inline Category categoryOf(Benchmark b)
 class clPeak
 {
 public:
-  bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, forceIters, useEventTimer;
+  bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceIters, useEventTimer;
   BackendGating gating;
   unsigned long specifiedPlatform, specifiedDevice;
   std::string specifiedPlatformName;
   std::string specifiedDeviceName;
-  std::string specifiedTestName;
   unsigned int specifiedIters;
   unsigned int warmupCount;
 

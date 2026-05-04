@@ -43,7 +43,7 @@ static const std::string stringifiedImageKernels =
     ;
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
-                   forceDeviceName(false), forceTest(false), forceIters(false), useEventTimer(false),
+                   forceDeviceName(false), forceIters(false), useEventTimer(false),
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedIters(0),
                    warmupCount(2),
@@ -71,8 +71,6 @@ void clPeak::applyOptions(const CliOptions &opts)
 
   // Test / category selection: copy through centralized gating.
   gating.copyFrom(opts);
-  forceTest = false;
-  specifiedTestName.clear();
 
   enableJson = opts.enableJson;
   jsonFileName = opts.jsonFile;
@@ -497,13 +495,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     }
 
-    // Run each vector width
-    for (int w = 0; w < 5; w++)
-    {
-      if (forceTest && specifiedTestName != labels[w])
-        continue;
-
-      // Padding for aligned output
+  // Run each vector width
+  for (int w = 0; w < 5; w++)
+  {
+    // Padding for aligned output
       std::string padded = labels[w];
       while (padded.size() < 8)
         padded += ' ';

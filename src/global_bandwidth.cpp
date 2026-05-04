@@ -68,9 +68,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     for (int w = 0; w < 5; w++)
     {
-      if (forceTest && specifiedTestName != labels[w])
-        continue;
-
       log->print(TAB TAB TAB + std::string(display[w]) + ": ");
 
       globalSize = numItems / widths[w] / FETCH_PER_WI;

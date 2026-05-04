@@ -51,7 +51,6 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
     ///////////////////////////////////////////////////////////////////////////
     // float4 -- read_imagef always returns float4 (RGBA)
-    if (!forceTest || specifiedTestName == "float4")
     {
       log->print(TAB TAB TAB "float4  : ");
 
