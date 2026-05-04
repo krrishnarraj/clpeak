@@ -308,9 +308,9 @@ int CudaPeak::runAll()
   }
 
   // Mirror the OpenCL/Vulkan logger context stack (clpeak > platform > device).
-  log->resultScopeBegin("clpeak");
+  auto clpeakScope = log->resultScope("clpeak");
   log->resultScopeAttribute("os", OS_NAME);
-  log->resultScopeBegin("platform");
+  auto platformScope = log->resultScope("platform");
   log->resultScopeAttribute("name", "CUDA");
   log->resultScopeAttribute("backend", "CUDA");
 
@@ -346,7 +346,7 @@ int CudaPeak::runAll()
     log->print((unsigned int)(dev.info.totalGlobalMem / (1024 * 1024)));
     log->print(" MB" NEWLINE);
 
-    log->resultScopeBegin("device");
+    auto deviceScope = log->resultScope("device");
     log->resultScopeAttribute("name", dev.info.deviceName);
     log->resultScopeAttribute("api", "cuda");
     log->resultScopeAttribute("driver_version", dev.info.driverVersion);
@@ -383,11 +383,8 @@ int CudaPeak::runAll()
     if (gating.isAllowed(Benchmark::KernelLatency)) runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
-    log->resultScopeEnd(); // device
   }
 
-  log->resultScopeEnd(); // platform
-  log->resultScopeEnd(); // clpeak
   return 0;
 }
 
@@ -403,7 +400,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   log->print(NEWLINE TAB);
   log->print(d.title);
   log->print(NEWLINE);
-  log->resultScopeBegin(d.resultTag);
+  auto scope = log->resultScope(d.resultTag);
   log->resultScopeAttribute("unit", d.unit);
   if (d.extraAttribKey && d.extraAttribVal)
     log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
@@ -427,7 +424,6 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     for (const auto &sv : skipVariants)
       log->recordSkip(sv.label, ResultStatus::Unsupported,
                        d.skipMsg ? d.skipMsg : "Skipped");
-    log->resultScopeEnd();
     return 0;
   }
 
@@ -463,7 +459,6 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   if (cuMemAlloc(&outputBuf, bufferBytes) != CUDA_SUCCESS)
   {
     log->print(TAB TAB "Failed to allocate output buffer" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -502,7 +497,6 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   }
 
   cuMemFree(outputBuf);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -974,7 +968,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     numBlocks = 1;
 
   log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("global_memory_bandwidth");
+  auto scope = log->resultScope("global_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   CUdeviceptr inBuf = 0, outBuf = 0;
@@ -987,7 +981,6 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
       log->recordSkip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
     if (inBuf)
       cuMemFree(inBuf);
-    log->resultScopeEnd();
     return -1;
   }
   // Touch input so we measure DRAM not zero-page.
@@ -1043,7 +1036,6 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   cuMemFree(inBuf);
   cuMemFree(outBuf);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1057,7 +1049,7 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
 
   log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("transfer_bandwidth");
+  auto scope = log->resultScope("transfer_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   CUdeviceptr dBuf = 0;
@@ -1066,7 +1058,6 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     log->print(TAB TAB "Failed to allocate device buffer" NEWLINE);
     log->recordSkip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer");
     log->recordSkip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer");
-    log->resultScopeEnd();
     return -1;
   }
   // Pinned host buffer -- the transfer-BW number we want is the pinned
@@ -1129,7 +1120,6 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1142,7 +1132,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
 
   log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-  log->resultScopeBegin("kernel_launch_latency");
+  auto scope = log->resultScope("kernel_launch_latency");
   log->resultScopeAttribute("unit", "us");
 
   CUfunction fn;
@@ -1153,7 +1143,6 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
     log->print(TAB TAB "Compile failed" NEWLINE);
     log->recordSkip("dispatch", ResultStatus::Error, "Kernel compile failed");
     log->recordSkip("roundtrip", ResultStatus::Error, "Kernel compile failed");
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1192,7 +1181,6 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   log->print(NEWLINE);
   log->resultRecord("roundtrip", roundtripUs);
 
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1204,7 +1192,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("local_memory_bandwidth");
+  auto scope = log->resultScope("local_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t blockSize = 256;
@@ -1218,7 +1206,6 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     log->recordSkip("float", ResultStatus::Error, "Buffer alloc failed");
     log->recordSkip("float2", ResultStatus::Error, "Buffer alloc failed");
     log->recordSkip("float4", ResultStatus::Error, "Buffer alloc failed");
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1262,7 +1249,6 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   }
 
   cuMemFree(outBuf);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1274,7 +1260,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.globalBWIters;
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("image_memory_bandwidth");
+  auto scope = log->resultScope("image_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   const int imgW = 4096, imgH = 4096;
@@ -1293,7 +1279,6 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   {
     log->print(TAB TAB "Image array create failed" NEWLINE);
     log->recordSkip("float4", ResultStatus::Error, "Image array create failed");
-    log->resultScopeEnd();
     return -1;
   }
   // Contents undefined is fine for a bandwidth measurement -- the cache
@@ -1312,7 +1297,6 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   {
     log->print(TAB TAB "Texture object create failed" NEWLINE);
     cuArrayDestroy(arr);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1329,7 +1313,6 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     cuTexObjectDestroy(tex);
     cuArrayDestroy(arr);
     cuMemFree(outBuf);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1346,7 +1329,6 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);
   cuMemFree(outBuf);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1358,7 +1340,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = cfg.computeIters;
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  log->resultScopeBegin("atomic_throughput");
+  auto scope = log->resultScope("atomic_throughput");
   log->resultScopeAttribute("unit", "gops");
 
   const uint32_t blockSize = 256;
@@ -1428,7 +1410,6 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
     }
   }
 
-  log->resultScopeEnd();
   return 0;
 }
 

@@ -613,9 +613,9 @@ int vkPeak::runAll()
 
   // Mirror the OpenCL context stack so logger_android recordMetric() can
   // reach contextStack depth 4 (clpeak > platform > device > test_group).
-  log->resultScopeBegin("clpeak");
+  auto clpeakScope = log->resultScope("clpeak");
   log->resultScopeAttribute("os", OS_NAME);
-  log->resultScopeBegin("platform");
+  auto platformScope = log->resultScope("platform");
   log->resultScopeAttribute("name", "Vulkan");
   log->resultScopeAttribute("backend", "Vulkan");
 
@@ -700,7 +700,7 @@ int vkPeak::runAll()
     log->print((unsigned int)(dev.info.heapSize / (1024 * 1024)));
     log->print(" MB" NEWLINE);
 
-    log->resultScopeBegin("device");
+    auto deviceScope = log->resultScope("device");
     log->resultScopeAttribute("name", dev.info.deviceName);
     log->resultScopeAttribute("api", "vulkan");
     log->resultScopeAttribute("driver_version", dev.info.driverVersion);
@@ -740,11 +740,11 @@ int vkPeak::runAll()
     if (gating.isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
-    log->resultScopeEnd(); // device
+    // device
   }
 
-  log->resultScopeEnd(); // platform
-  log->resultScopeEnd(); // clpeak
+  // platform
+  // clpeak
   return 0;
 }
 
@@ -767,7 +767,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   log->print(NEWLINE TAB);
   log->print(d.title);
   log->print(NEWLINE);
-  log->resultScopeBegin(d.resultTag);
+  auto scope = log->resultScope(d.resultTag);
   log->resultScopeAttribute("unit", d.unit);
   if (d.extraAttribKey && d.extraAttribVal)
     log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
@@ -791,7 +791,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     for (const auto &sv : skipVariants)
       log->recordSkip(sv.label, ResultStatus::Unsupported,
                        d.skipMsg ? d.skipMsg : "Skipped");
-    log->resultScopeEnd();
     return 0;
   }
 
@@ -835,7 +834,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         outputBuf, outputMem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -944,7 +942,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1286,7 +1283,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (numGroups == 0) numGroups = 1;
 
   log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("global_memory_bandwidth");
+  auto scope_1 = log->resultScope("global_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   // Create input + output buffers
@@ -1303,7 +1300,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         outputBuf, outputMem))
   {
     log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1345,7 +1341,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     vkFreeMemory(dev.device, inputMem, nullptr);
     vkDestroyBuffer(dev.device, outputBuf, nullptr);
     vkFreeMemory(dev.device, outputMem, nullptr);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1411,7 +1406,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  log->resultScopeEnd(); // global_memory_bandwidth
+  // global_memory_bandwidth
   return 0;
 }
 
@@ -1444,7 +1439,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
 
   log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("transfer_bandwidth");
+  auto scope_2 = log->resultScope("transfer_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
   log->resultScopeAttribute("memory", "host_visible_staging");
   log->resultScopeAttribute("timer", canUseTimestamps ? "gpu_timestamp" : "host_wall");
@@ -1468,7 +1463,6 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     if (hostMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, hostMem, nullptr);
     if (devBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, devBuf, nullptr);
     if (devMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, devMem, nullptr);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1571,7 +1565,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyBuffer(dev.device, devBuf, nullptr);
   vkFreeMemory(dev.device, devMem, nullptr);
 
-  log->resultScopeEnd(); // transfer_bandwidth
+  // transfer_bandwidth
   return 0;
 }
 
@@ -1587,7 +1581,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.computeIters;
 
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("local_memory_bandwidth");
+  auto scope_3 = log->resultScope("local_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t wgSize = 256;
@@ -1601,7 +1595,6 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1680,7 +1673,6 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
   vkDestroyBuffer(dev.device, outBuf, nullptr);
   vkFreeMemory(dev.device, outMem, nullptr);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1696,7 +1688,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.globalBWIters;
 
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("image_memory_bandwidth");
+  auto scope_4 = log->resultScope("image_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t imgW = 4096, imgH = 4096;
@@ -1722,7 +1714,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
   {
     log->print(TAB TAB "Image create failed" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1802,7 +1793,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     vkDestroyImageView(dev.device, imgView, nullptr);
     vkDestroyImage(dev.device, img, nullptr);
     vkFreeMemory(dev.device, imgMem, nullptr);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -1882,7 +1872,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyImageView(dev.device, imgView, nullptr);
   vkDestroyImage(dev.device, img, nullptr);
   vkFreeMemory(dev.device, imgMem, nullptr);
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -1895,7 +1884,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.computeIters;
 
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  log->resultScopeBegin("atomic_throughput");
+  auto scope_5 = log->resultScope("atomic_throughput");
   log->resultScopeAttribute("unit", "gops");
 
   const uint32_t wgSize = 256;
@@ -1981,7 +1970,6 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
     log->resultRecord("local", gops);
   }
 
-  log->resultScopeEnd();
   return 0;
 }
 
@@ -2002,7 +1990,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
 
   log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-  log->resultScopeBegin("kernel_launch_latency");
+  auto scope_6 = log->resultScope("kernel_launch_latency");
   log->resultScopeAttribute("unit", "us");
 
   // Pipeline layout with no descriptor sets and no push constants.
@@ -2012,7 +2000,6 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
   {
     log->print(TAB TAB "pipeline layout creation failed" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -2026,7 +2013,6 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
     log->print(TAB TAB "shader module creation failed" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -2043,7 +2029,6 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     vkDestroyShaderModule(dev.device, shaderModule, nullptr);
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
     log->print(TAB TAB "compute pipeline creation failed" NEWLINE);
-    log->resultScopeEnd();
     return -1;
   }
 
@@ -2248,7 +2233,6 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyShaderModule(dev.device, shaderModule, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
 
-  log->resultScopeEnd();
   return 0;
 }
 

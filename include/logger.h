@@ -94,6 +94,23 @@ public:
   void resultRecord(std::string metric, std::string value);
   void resultRecord(std::string metric, float value);
 
+  // ---- RAII scope guard --------------------------------------------------
+  // Use resultScope(name) to get a guard that calls resultScopeEnd() on
+  // destruction, eliminating scope leaks on early returns and exceptions.
+  class ResultScope {
+  public:
+    ResultScope(logger *log, std::string name) : log(log) { log->resultScopeBegin(std::move(name)); }
+    ~ResultScope() { if (log) log->resultScopeEnd(); }
+    ResultScope(const ResultScope &) = delete;
+    ResultScope &operator=(const ResultScope &) = delete;
+    ResultScope(ResultScope &&other) noexcept : log(other.log) { other.log = nullptr; }
+    ResultScope &operator=(ResultScope &&) = delete;
+  private:
+    logger *log;
+  };
+
+  ResultScope resultScope(std::string name) { return ResultScope(this, std::move(name)); }
+
 private:
   // Current run / category / test scope.  Updated by both APIs and read by
   // emit() to qualify each ResultEntry.

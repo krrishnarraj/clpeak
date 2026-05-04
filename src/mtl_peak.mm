@@ -269,9 +269,9 @@ int MetalPeak::runAll()
         return -1;
     }
 
-    log->resultScopeBegin("clpeak");
+    auto clpeakScope = log->resultScope("clpeak");
     log->resultScopeAttribute("os", OS_NAME);
-    log->resultScopeBegin("platform");
+    auto platformScope = log->resultScope("platform");
     log->resultScopeAttribute("name", "Metal");
     log->resultScopeAttribute("backend", "Metal");
 
@@ -316,7 +316,7 @@ int MetalPeak::runAll()
             log->print(NEWLINE);
         }
 
-        log->resultScopeBegin("device");
+        auto deviceScope = log->resultScope("device");
         log->resultScopeAttribute("name", dev.info.deviceName);
         log->resultScopeAttribute("api", "metal");
         {
@@ -354,11 +354,11 @@ int MetalPeak::runAll()
         if (gating.isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
-        log->resultScopeEnd(); // device
+        // device
     }
 
-    log->resultScopeEnd(); // platform
-    log->resultScopeEnd(); // clpeak
+    // platform
+    // clpeak
     return 0;
 }
 
@@ -373,7 +373,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
     log->print(NEWLINE TAB);
     log->print(d.title);
     log->print(NEWLINE);
-    log->resultScopeBegin(d.resultTag);
+    auto scope = log->resultScope(d.resultTag);
     log->resultScopeAttribute("unit", d.unit);
     if (d.extraAttribKey && d.extraAttribVal)
         log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
@@ -397,7 +397,6 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         for (const auto &sv : skipVariants)
             log->recordSkip(sv.label, ResultStatus::Unsupported,
                              d.skipMsg ? d.skipMsg : "Skipped");
-        log->resultScopeEnd();
         return 0;
     }
 
@@ -437,7 +436,6 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         }
         for (const auto &sv : skipVariants)
             log->recordSkip(sv.label, ResultStatus::Error, "Failed to allocate output buffer");
-        log->resultScopeEnd();
         return -1;
     }
 
@@ -479,7 +477,6 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         log->resultRecord(metricTag, value);
     }
 
-    log->resultScopeEnd();
     return 0;
 }
 
@@ -684,7 +681,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t tgSize = 256;
 
     log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    log->resultScopeBegin("global_memory_bandwidth");
+    auto scope_1 = log->resultScope("global_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
@@ -706,7 +703,6 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
         for (int i = 0; i < 5; i++)
             log->recordSkip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
-        log->resultScopeEnd();
         return -1;
     }
     // Touch the input so we don't measure zero-page reads on copy-on-write.
@@ -759,7 +755,6 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->resultRecord(key, gbps);
     }
 
-    log->resultScopeEnd();
     return 0;
 }
 
@@ -772,7 +767,7 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
 
     log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-    log->resultScopeBegin("kernel_launch_latency");
+    auto scope_2 = log->resultScope("kernel_launch_latency");
     log->resultScopeAttribute("unit", "us");
 
     id<MTLComputePipelineState> pso = getPipeline(dev,
@@ -784,7 +779,6 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         log->print(TAB TAB "Pipeline create failed" NEWLINE);
         log->recordSkip("dispatch", ResultStatus::Error, "Pipeline create failed");
         log->recordSkip("roundtrip", ResultStatus::Error, "Pipeline create failed");
-        log->resultScopeEnd();
         return -1;
     }
 
@@ -839,7 +833,6 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     log->resultRecord("dispatch",  dispatchUs);
     log->resultRecord("roundtrip", roundtripUs);
 
-    log->resultScopeEnd();
     return 0;
 }
 
@@ -851,7 +844,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.computeIters;
     log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    log->resultScopeBegin("local_memory_bandwidth");
+    auto scope_3 = log->resultScope("local_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
 
     const uint32_t tgSize = 256;
@@ -867,7 +860,6 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->recordSkip("float2", ResultStatus::Error, "Buffer alloc failed");
         log->recordSkip("float4", ResultStatus::Error, "Buffer alloc failed");
         log->recordSkip("float8", ResultStatus::Error, "Buffer alloc failed");
-        log->resultScopeEnd();
         return -1;
     }
 
@@ -905,7 +897,6 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->resultRecord(key, gbps);
     }
 
-    log->resultScopeEnd();
     return 0;
 }
 
@@ -917,7 +908,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.globalBWIters;
     log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-    log->resultScopeBegin("image_memory_bandwidth");
+    auto scope_4 = log->resultScope("image_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
 
     const NSUInteger imgW = 4096, imgH = 4096;
@@ -934,7 +925,6 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->recordSkip("rgba16f", ResultStatus::Error, "Output buffer alloc failed");
         log->recordSkip("rgba8", ResultStatus::Error, "Output buffer alloc failed");
         log->recordSkip("r32f", ResultStatus::Error, "Output buffer alloc failed");
-        log->resultScopeEnd();
         return -1;
     }
 
@@ -1014,7 +1004,6 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         log->resultRecord(key, gbps);
     }
 
-    log->resultScopeEnd();
     return 0;
 }
 
@@ -1026,7 +1015,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.computeIters;
     log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-    log->resultScopeBegin("atomic_throughput");
+    auto scope_5 = log->resultScope("atomic_throughput");
     log->resultScopeAttribute("unit", "gops");
 
     const uint32_t tgSize = 256;
@@ -1110,7 +1099,6 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
            !dev.info.atomic64Supported,
            "skipped (requires Apple8 / M2 or newer)");
 
-    log->resultScopeEnd();
     return 0;
 }
 
@@ -1118,7 +1106,7 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
 {
     unsigned int iters = cfg.computeIters;
     log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
-    log->resultScopeBegin("atomic_throughput");
+    auto scope_6 = log->resultScope("atomic_throughput");
     log->resultScopeAttribute("unit", "gflops");
 
     const uint32_t tgSize = 256;
@@ -1162,7 +1150,6 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
               mtl_kernels::atomic_throughput_float_name,
               "atomic_throughput_global_float",
               globalThreads * sizeof(float));
-    log->resultScopeEnd();
     return 0;
 }
 

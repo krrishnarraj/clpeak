@@ -28,7 +28,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   try
   {
     log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
-    log->resultScopeBegin("kernel_launch_latency");
+    auto scope = log->resultScope("kernel_launch_latency");
     log->resultScopeAttribute("unit", "us");
 
     cl::Buffer inputBuf  = cl::Buffer(ctx, CL_MEM_READ_ONLY,  (numItems * sizeof(float)));
@@ -69,7 +69,6 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     log->print(NEWLINE);
     log->resultRecord("dispatch",  dispatchUs);
     log->resultRecord("roundtrip", roundtripUs);
-    log->resultScopeEnd();
   }
   catch (cl::Error &error)
   {
@@ -80,7 +79,6 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     log->recordSkip("dispatch", ResultStatus::Error, reason);
     log->recordSkip("roundtrip", ResultStatus::Error, reason);
-    log->resultScopeEnd();
     return -1;
   }
 

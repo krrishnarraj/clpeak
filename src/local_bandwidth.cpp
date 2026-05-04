@@ -15,7 +15,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   try
   {
     log->print(NEWLINE TAB TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    log->resultScopeBegin("local_memory_bandwidth");
+    auto scope = log->resultScope("local_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -58,8 +58,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       log->print(NEWLINE);
       log->resultRecord(labels[w], gbps);
     }
-
-    log->resultScopeEnd(); // local_memory_bandwidth
   }
   catch (cl::Error &error)
   {
@@ -71,10 +69,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 4; w++)
       log->recordSkip(labels[w], ResultStatus::Error, reason);
-    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
-    // a leaked parent -- manifests on Android as later tests collapsing into
-    // this test's result card.
-    log->resultScopeEnd();
     return -1;
   }
 

@@ -10,15 +10,14 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
 
   log->print(NEWLINE TAB TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->resultScopeBegin("image_memory_bandwidth");
+  auto scope = log->resultScope("image_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
 
-  if (!devInfo.imageSupported)
+    if (!devInfo.imageSupported)
   {
     log->print(TAB TAB TAB "Skipped (device has no image support)" NEWLINE);
     log->recordSkip("float4", ResultStatus::Unsupported,
                      "Device has no image support");
-    log->resultScopeEnd();
     return 0;
   }
 
@@ -71,8 +70,6 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       log->resultRecord("float4", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
-
-    log->resultScopeEnd(); // image_memory_bandwidth
   }
   catch (cl::Error &error)
   {
@@ -82,10 +79,6 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     log->recordSkip("float4", ResultStatus::Error, reason);
-    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
-    // a leaked parent -- manifests on Android as later tests collapsing into
-    // this test's result card.
-    log->resultScopeEnd();
     return -1;
   }
 

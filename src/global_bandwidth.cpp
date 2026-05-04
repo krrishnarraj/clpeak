@@ -21,7 +21,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     populate(arr, numItems);
 
     log->print(NEWLINE TAB TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    log->resultScopeBegin("global_memory_bandwidth");
+    auto scope = log->resultScope("global_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
 
     cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
@@ -84,9 +84,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       log->print(gbps);
       log->print(NEWLINE);
       log->resultRecord(labels[w], gbps);
-    }
-
-    log->resultScopeEnd(); // global_memory_bandwidth
+     }
 
     delete[] arr;
   }
@@ -101,10 +99,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     for (int w = 0; w < 5; w++)
       log->recordSkip(labels[w], ResultStatus::Error, reason);
 
-    // Close the resultScopeBegin pushed above so subsequent tests don't nest under
-    // a leaked parent -- manifests on Android as later tests collapsing into
-    // this test's result card.
-    log->resultScopeEnd();
     delete[] arr;
     return -1;
   }
@@ -114,7 +108,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
     for (int w = 0; w < 5; w++)
       log->recordSkip(labels[w], ResultStatus::Error, "Out of memory");
-    log->resultScopeEnd();
     delete[] arr;
     return -1;
   }
