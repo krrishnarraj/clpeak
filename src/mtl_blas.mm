@@ -148,6 +148,12 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     if (!dev.info.isAppleSilicon)
     {
         log->print(TAB TAB "MPS GEMM requires Apple silicon! Skipped" NEWLINE);
+        log->recordSkip("fp32", ResultStatus::Unsupported,
+                         "MPS GEMM requires Apple silicon");
+        log->recordSkip("fp16", ResultStatus::Unsupported,
+                         "MPS GEMM requires Apple silicon");
+        log->recordSkip("bf16", ResultStatus::Unsupported,
+                         "MPS GEMM requires Apple silicon");
         log->resultScopeEnd();
         return 0;
     }
@@ -344,6 +350,8 @@ int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
     if (!dev.info.isAppleSilicon)
     {
         log->print(TAB TAB "MPS GEMM requires Apple silicon! Skipped" NEWLINE);
+        log->recordSkip("int8", ResultStatus::Unsupported,
+                         "MPS GEMM requires Apple silicon");
         log->resultScopeEnd();
         return 0;
     }

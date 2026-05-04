@@ -777,6 +777,20 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     log->print(TAB TAB);
     log->print(d.skipMsg ? d.skipMsg : "Skipped");
     log->print(NEWLINE);
+    struct SkipVariant { const char *label; };
+    std::vector<SkipVariant> skipVariants;
+    if (d.variants && d.numVariants > 0)
+    {
+      for (uint32_t i = 0; i < d.numVariants; i++)
+        skipVariants.push_back({d.variants[i].label});
+    }
+    else
+    {
+      skipVariants.push_back({d.metricLabel});
+    }
+    for (const auto &sv : skipVariants)
+      log->recordSkip(sv.label, ResultStatus::Unsupported,
+                       d.skipMsg ? d.skipMsg : "Skipped");
     log->resultScopeEnd();
     return 0;
   }
@@ -907,6 +921,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline))
     {
       log->print("pipeline creation failed (driver may not honor extension)" NEWLINE);
+      log->recordSkip(v.label, ResultStatus::Error,
+                       "Pipeline creation failed");
       continue;
     }
 
@@ -1086,16 +1102,6 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  if (!dev.info.cooperativeMatrixSupported)
-  {
-    log->print(NEWLINE TAB "Cooperative matrix (TFLOPS/TOPS)" NEWLINE);
-    log->resultScopeBegin("cooperative_matrix");
-    log->resultScopeAttribute("tile", "16x16x16");
-    log->print(TAB TAB "VK_KHR_cooperative_matrix not supported! Skipped" NEWLINE);
-    log->resultScopeEnd();
-    return 0;
-  }
-
   // Coopmat shape constants: shaders hard-code 16x16x16 with 256 iters and
   // local_size_x=32 (one subgroup per work-group).  See COOPMAT_WORK_PER_WI.
   const uint32_t coopWGSize  = 32;
@@ -2227,6 +2233,8 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     log->print("skipped (needs VK_EXT_calibrated_timestamps)" NEWLINE);
+    log->recordSkip("dispatch", ResultStatus::Unsupported,
+                     "Needs VK_EXT_calibrated_timestamps");
   }
   log->print(TAB TAB "roundtrip : ");
   log->print((float)avgRoundtripUs);

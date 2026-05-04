@@ -137,6 +137,17 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     if (!arr)
     {
       log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
+      log->resultScopeBegin("transfer_bandwidth");
+      log->resultScopeAttribute("unit", "gbps");
+      log->recordSkip("enqueuewritebuffer", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuereadbuffer", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuemapbuffer", ResultStatus::Error, "Out of memory");
+      log->recordSkip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueueunmap", ResultStatus::Error, "Out of memory");
+      log->recordSkip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory");
+      log->resultScopeEnd();
       return -1;
     }
     memset(arr, 0, bytes);
@@ -284,6 +295,15 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    log->recordSkip("enqueuewritebuffer", ResultStatus::Error, reason);
+    log->recordSkip("enqueuereadbuffer", ResultStatus::Error, reason);
+    log->recordSkip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason);
+    log->recordSkip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason);
+    log->recordSkip("enqueuemapbuffer", ResultStatus::Error, reason);
+    log->recordSkip("memcpy_from_mapped_ptr", ResultStatus::Error, reason);
+    log->recordSkip("enqueueunmap", ResultStatus::Error, reason);
+    log->recordSkip("memcpy_to_mapped_ptr", ResultStatus::Error, reason);
 
     // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into

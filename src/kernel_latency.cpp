@@ -77,6 +77,9 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    log->recordSkip("dispatch", ResultStatus::Error, reason);
+    log->recordSkip("roundtrip", ResultStatus::Error, reason);
     log->resultScopeEnd();
     return -1;
   }

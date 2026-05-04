@@ -96,6 +96,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, reason);
 
     // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
@@ -107,6 +111,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   catch (std::bad_alloc &)
   {
     log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
+    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, "Out of memory");
     log->resultScopeEnd();
     delete[] arr;
     return -1;

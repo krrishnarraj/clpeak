@@ -291,7 +291,16 @@ int clPeak::runAll()
         if (supportsProfilingQueue)
           runKernelLatency(queue, prog, devInfo, cfg);
         else if (isAllowed(Benchmark::KernelLatency))
-          log->print(NEWLINE TAB TAB "Kernel launch latency         : Skipped (no profiling queue support)" NEWLINE);
+        {
+          log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
+          log->resultScopeBegin("kernel_launch_latency");
+          log->resultScopeAttribute("unit", "us");
+          log->recordSkip("dispatch", ResultStatus::Unsupported,
+                           "No profiling queue support");
+          log->recordSkip("roundtrip", ResultStatus::Unsupported,
+                           "No profiling queue support");
+          log->resultScopeEnd();
+        }
 
         useEventTimer = savedUseEventTimer;
 
@@ -373,30 +382,6 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   if (!isAllowed(which))
     return 0;
 
-  // Feature gates
-  if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
-  {
-    log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
-    return 0;
-  }
-  if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
-  {
-    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
-    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
-    return 0;
-  }
-  if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
-  {
-    log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
-    return 0;
-  }
-  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
-  {
-    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->print(TAB TAB TAB "cl_khr_integer_dot_product not supported! Skipped" NEWLINE);
-    return 0;
-  }
-
   unsigned int iters = cfg.computeIters;
 
   // Vector width suffixes and display labels
@@ -410,6 +395,54 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     labels[w] = typeName;
     if (widths[w] > 1)
       labels[w] += std::to_string(widths[w]);
+  }
+
+  // Feature gates
+  if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
+  {
+    log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "No half precision support");
+    log->resultScopeEnd();
+    return 0;
+  }
+  if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
+  {
+    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
+    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "No half precision support");
+    log->resultScopeEnd();
+    return 0;
+  }
+  if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
+  {
+    log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "No double precision support");
+    log->resultScopeEnd();
+    return 0;
+  }
+  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
+  {
+    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
+    log->print(TAB TAB TAB "cl_khr_integer_dot_product not supported! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "cl_khr_integer_dot_product not supported");
+    log->resultScopeEnd();
+    return 0;
   }
 
   try
@@ -494,9 +527,9 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // resultScopeBegin was already pushed above; close it so subsequent tests
-    // don't nest under a leaked parent (manifests on Android as all later
-    // tests collapsing into this test's result card).
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, reason);
     log->resultScopeEnd();
     return -1;
   }
@@ -506,6 +539,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << "Exception: " << e.what() << NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, e.what());
     log->resultScopeEnd();
     return -1;
   }

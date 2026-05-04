@@ -16,7 +16,9 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   if (!devInfo.imageSupported)
   {
     log->print(TAB TAB TAB "Skipped (device has no image support)" NEWLINE);
-    log->resultScopeEnd(); // image_memory_bandwidth
+    log->recordSkip("float4", ResultStatus::Unsupported,
+                     "Device has no image support");
+    log->resultScopeEnd();
     return 0;
   }
 
@@ -78,6 +80,8 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    log->recordSkip("float4", ResultStatus::Error, reason);
     // Close the resultScopeBegin pushed above so subsequent tests don't nest under
     // a leaked parent -- manifests on Android as later tests collapsing into
     // this test's result card.

@@ -384,6 +384,20 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         log->print(TAB TAB);
         log->print(d.skipMsg ? d.skipMsg : "Skipped");
         log->print(NEWLINE);
+        struct SkipVariant { const char *label; };
+        std::vector<SkipVariant> skipVariants;
+        if (d.variants && d.numVariants > 0)
+        {
+            for (uint32_t i = 0; i < d.numVariants; i++)
+                skipVariants.push_back({d.variants[i].label});
+        }
+        else
+        {
+            skipVariants.push_back({d.metricLabel});
+        }
+        for (const auto &sv : skipVariants)
+            log->recordSkip(sv.label, ResultStatus::Unsupported,
+                             d.skipMsg ? d.skipMsg : "Skipped");
         log->resultScopeEnd();
         return 0;
     }
@@ -411,6 +425,19 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
     if (!outBuf)
     {
         log->print(TAB TAB "Failed to allocate output buffer" NEWLINE);
+        struct SkipVariant { const char *label; };
+        std::vector<SkipVariant> skipVariants;
+        if (d.variants && d.numVariants > 0)
+        {
+            for (uint32_t i = 0; i < d.numVariants; i++)
+                skipVariants.push_back({d.variants[i].label});
+        }
+        else
+        {
+            skipVariants.push_back({d.metricLabel});
+        }
+        for (const auto &sv : skipVariants)
+            log->recordSkip(sv.label, ResultStatus::Error, "Failed to allocate output buffer");
         log->resultScopeEnd();
         return -1;
     }
@@ -428,6 +455,10 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         if (!pso)
         {
             log->print("compile/load failed" NEWLINE);
+            std::string metricTag(v.label);
+            while (!metricTag.empty() && metricTag.back() == ' ')
+                metricTag.pop_back();
+            log->recordSkip(metricTag, ResultStatus::Error, "Kernel compile failed");
             continue;
         }
 
@@ -595,15 +626,6 @@ int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    if (!dev.info.simdgroupMatrixFP16Supported)
-    {
-        log->print(NEWLINE TAB "simdgroup_matrix tensor compute (TFLOPS)" NEWLINE);
-        log->resultScopeBegin("simdgroup_matrix");
-        log->print(TAB TAB "simdgroup_matrix requires Apple7 (M1) or newer! Skipped" NEWLINE);
-        log->resultScopeEnd();
-        return 0;
-    }
-
     {
         float A = 1.3f;
         mtl_compute_desc_t d = {};
@@ -617,10 +639,12 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.srcName          = mtl_kernels::simdgroup_matrix_fp16_name;
         d.workPerWI        = MTL_SIMDGROUP_WORK_PER_WI;
         d.elemSize         = sizeof(float);
-        d.threadsPerGroup  = 32;          // one simdgroup
-        d.outElemsPerGroup = 64;          // 8x8 tile
+        d.threadsPerGroup  = 32;
+        d.outElemsPerGroup = 64;
         d.scalarArg        = &A;
         d.scalarSize       = sizeof(A);
+        d.skip             = !dev.info.simdgroupMatrixFP16Supported;
+        d.skipMsg          = "simdgroup_matrix requires Apple7 (M1) or newer! Skipped";
         d.extraAttribKey   = "tile";
         d.extraAttribVal   = "8x8x8";
         runComputeKernel(dev, cfg, d);
@@ -642,7 +666,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.outElemsPerGroup = 64;
         d.scalarArg        = &A;
         d.scalarSize       = sizeof(A);
-        d.skip             = !dev.info.simdgroupMatrixBF16Supported;
+        d.skip             = !dev.info.simdgroupMatrixFP16Supported || !dev.info.simdgroupMatrixBF16Supported;
         d.skipMsg          = "bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped";
         d.extraAttribKey   = "tile";
         d.extraAttribVal   = "8x8x8";
@@ -680,6 +704,9 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (!inBuf || !outBuf)
     {
         log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
+        const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+        for (int i = 0; i < 5; i++)
+            log->recordSkip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
         log->resultScopeEnd();
         return -1;
     }
@@ -707,7 +734,13 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::global_bandwidth_src,
             mtl_kernels::global_bandwidth_name,
             v.kname);
-        if (!pso) { log->print("compile/load failed" NEWLINE); continue; }
+        if (!pso) {
+            log->print("compile/load failed" NEWLINE);
+            std::string key(v.label);
+            while (!key.empty() && key.back() == ' ') key.pop_back();
+            log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+            continue;
+        }
 
         // Each threadgroup reads FETCH_PER_WI * tgSize logical-vec elements,
         // i.e. FETCH_PER_WI * tgSize * width scalar floats.
@@ -750,6 +783,8 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     if (!pso)
     {
         log->print(TAB TAB "Pipeline create failed" NEWLINE);
+        log->recordSkip("dispatch", ResultStatus::Error, "Pipeline create failed");
+        log->recordSkip("roundtrip", ResultStatus::Error, "Pipeline create failed");
         log->resultScopeEnd();
         return -1;
     }
@@ -829,6 +864,10 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (!outBuf)
     {
         log->print(TAB TAB "Buffer alloc failed" NEWLINE);
+        log->recordSkip("float", ResultStatus::Error, "Buffer alloc failed");
+        log->recordSkip("float2", ResultStatus::Error, "Buffer alloc failed");
+        log->recordSkip("float4", ResultStatus::Error, "Buffer alloc failed");
+        log->recordSkip("float8", ResultStatus::Error, "Buffer alloc failed");
         log->resultScopeEnd();
         return -1;
     }
@@ -850,7 +889,13 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLComputePipelineState> pso = getPipeline(dev,
             mtl_kernels::local_bandwidth_src,
             mtl_kernels::local_bandwidth_name, v.kname);
-        if (!pso) { log->print("compile/load failed" NEWLINE); continue; }
+        if (!pso) {
+            log->print("compile/load failed" NEWLINE);
+            std::string key(v.label);
+            while (!key.empty() && key.back() == ' ') key.pop_back();
+            log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+            continue;
+        }
         float us = runDispatches(dev, pso, outBuf, nullptr, 0, nil,
                                  gridSize, tgSizeM, warmupCount, iters);
         uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
@@ -886,6 +931,10 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (!outBuf)
     {
         log->print(TAB TAB "Output buffer alloc failed" NEWLINE);
+        log->recordSkip("rgba32f", ResultStatus::Error, "Output buffer alloc failed");
+        log->recordSkip("rgba16f", ResultStatus::Error, "Output buffer alloc failed");
+        log->recordSkip("rgba8", ResultStatus::Error, "Output buffer alloc failed");
+        log->recordSkip("r32f", ResultStatus::Error, "Output buffer alloc failed");
         log->resultScopeEnd();
         return -1;
     }
@@ -921,13 +970,22 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         if (!tex)
         {
             log->print("texture alloc failed" NEWLINE);
+            std::string key(v.label);
+            while (!key.empty() && key.back() == ' ') key.pop_back();
+            log->recordSkip(key, ResultStatus::Error, "Texture alloc failed");
             continue;
         }
 
         id<MTLComputePipelineState> pso = getPipeline(dev,
             mtl_kernels::image_bandwidth_src,
             mtl_kernels::image_bandwidth_name, v.kname);
-        if (!pso) { log->print("compile/load failed" NEWLINE); continue; }
+        if (!pso) {
+            log->print("compile/load failed" NEWLINE);
+            std::string key(v.label);
+            while (!key.empty() && key.back() == ' ') key.pop_back();
+            log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+            continue;
+        }
 
         auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
             id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
@@ -999,7 +1057,8 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         if (skip)
         {
             log->print(skipMsg); log->print(NEWLINE);
-            log->resultRecord(resultKey, 0.0f);
+            log->recordSkip(resultKey, ResultStatus::Unsupported,
+                             skipMsg ? skipMsg : "Skipped");
             return;
         }
         float us = runOne(src, srcName, fnName, bufBytes);
@@ -1012,7 +1071,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         else
         {
             log->print("compile/load failed" NEWLINE);
-            log->resultRecord(resultKey, 0.0f);
+            log->recordSkip(resultKey, ResultStatus::Error, "Kernel compile failed");
         }
     };
 
@@ -1095,7 +1154,7 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
         else
         {
             log->print("compile/load failed" NEWLINE);
-            log->resultRecord(resultKey, 0.0f);
+            log->recordSkip(resultKey, ResultStatus::Error, "Kernel compile failed");
         }
     };
 
