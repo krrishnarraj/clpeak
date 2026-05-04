@@ -1,4 +1,6 @@
 #include <clpeak.h>
+#include <inventory.h>
+#include <options.h>
 #include <cstring>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
@@ -40,74 +42,60 @@ static const std::string stringifiedImageKernels =
 #include "image_bandwidth_kernels.cl"
     ;
 
-#ifdef USE_STUB_OPENCL
-// Prototype
-extern "C"
-{
-  void stubOpenclReset();
-}
-#endif
-
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
-                   forceDeviceName(false), forceTest(false), forceIters(false), useEventTimer(false),
+                   forceDeviceName(false), forceIters(false), useEventTimer(false),
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedIters(0),
                    warmupCount(2),
-                   enableJson(false), enableCsv(false),
-                   listDevices(false)
+                   enableJson(false), enableCsv(false)
 {
-  enableAll(); // all tests on by default
+  gating.enableAll();
+}
+
+void clPeak::applyOptions(const CliOptions &opts)
+{
+  forcePlatform = opts.forcePlatform;
+  specifiedPlatform = opts.platformIndex;
+  forcePlatformName = opts.forcePlatformName;
+  specifiedPlatformName = opts.platformName;
+  forceDevice = opts.forceDevice;
+  specifiedDevice = opts.deviceIndex;
+  forceDeviceName = opts.forceDeviceName;
+  specifiedDeviceName = opts.deviceName;
+
+  forceIters = opts.forceIters;
+  specifiedIters = opts.iters;
+  warmupCount = opts.warmupCount;
+
+  useEventTimer = opts.useEventTimer;
+
+  // Test / category selection: copy through centralized gating.
+  gating.copyFrom(opts);
+
+  enableJson = opts.enableJson;
+  jsonFileName = opts.jsonFile;
+  enableCsv = opts.enableCsv;
+  csvFileName = opts.csvFile;
+  compareFileName = opts.compareFile;
+
+  // Per-backend loggers handle stdout + baseline-compare deltas only.
+  // File output is centralized in entry.cpp::main() after every backend
+  // has run, so a single dump file aggregates rows from all backends
+  // (otherwise each backend's destructor would overwrite the same file).
+  log.reset(new logger(false, "", false, "", false, "",
+                       opts.compareFile));
 }
 
 int clPeak::runAll()
 {
   try
   {
-#ifdef USE_STUB_OPENCL
-    stubOpenclReset();
-#endif
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
 
-    // --list-devices mode: print platforms/devices and exit
-    if (listDevices)
-    {
-      for (size_t p = 0; p < platforms.size(); p++)
-      {
-        std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
-        trimString(platformName);
-        std::cout << "Platform " << p << ": " << platformName << "\n";
-
-        cl_context_properties cps[3] = {
-            CL_CONTEXT_PLATFORM,
-            (cl_context_properties)(platforms[p])(),
-            0};
-        cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
-        std::vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-
-        for (size_t d = 0; d < devices.size(); d++)
-        {
-          device_info_t info = getDeviceInfo(devices[d]);
-          const char *typeStr = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU" : (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
-                                                                                                                        : "Other";
-          std::cout << "  Device " << d << ": " << info.deviceName
-                    << " [" << typeStr << "]"
-                    << "\n";
-          std::cout << "    Driver    : " << info.driverVersion << "\n";
-          std::cout << "    CUs       : " << info.numCUs << "\n";
-          std::cout << "    Clock     : " << info.maxClockFreq << " MHz\n";
-          std::cout << "    Global mem: " << (info.maxGlobalSize / (1024 * 1024)) << " MB\n";
-          std::cout << "    Max alloc : " << (info.maxAllocSize / (1024 * 1024)) << " MB\n";
-          std::cout << "    FP16      : " << (info.halfSupported ? "yes" : "no") << "\n";
-          std::cout << "    FP64      : " << (info.doubleSupported ? "yes" : "no") << "\n";
-        }
-      }
-      return 0;
-    }
-
     log->print(NEWLINE "=== OpenCL backend ===" NEWLINE);
-    log->xmlOpenTag("clpeak");
-    log->xmlAppendAttribs("os", OS_NAME);
+    log->resultScopeBegin("clpeak");
+    log->resultScopeAttribute("os", OS_NAME);
     for (size_t p = 0; p < platforms.size(); p++)
     {
       if (forcePlatform && (p != specifiedPlatform))
@@ -120,9 +108,9 @@ int clPeak::runAll()
         continue;
 
       log->print(NEWLINE "Platform: " + platformName + NEWLINE);
-      log->xmlOpenTag("platform");
-      log->xmlAppendAttribs("name", platformName);
-      log->xmlAppendAttribs("backend", "OpenCL");
+      log->resultScopeBegin("platform");
+      log->resultScopeAttribute("name", platformName);
+      log->resultScopeAttribute("backend", "OpenCL");
 
       cl_context_properties cps[3] = {
           CL_CONTEXT_PLATFORM,
@@ -165,12 +153,12 @@ int clPeak::runAll()
         log->print(" MHz" NEWLINE);
         if (useEventTimer)
           log->print(TAB TAB "Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation" NEWLINE);
-        log->xmlOpenTag("device");
-        log->xmlAppendAttribs("name", devInfo.deviceName);
-        log->xmlAppendAttribs("driver_version", devInfo.driverVersion);
-        log->xmlAppendAttribs("compute_units", devInfo.numCUs);
-        log->xmlAppendAttribs("clock_frequency", devInfo.maxClockFreq);
-        log->xmlAppendAttribs("clock_frequency_unit", "MHz");
+        log->resultScopeBegin("device");
+        log->resultScopeAttribute("name", devInfo.deviceName);
+        log->resultScopeAttribute("driver_version", devInfo.driverVersion);
+        log->resultScopeAttribute("compute_units", devInfo.numCUs);
+        log->resultScopeAttribute("clock_frequency", devInfo.maxClockFreq);
+        log->resultScopeAttribute("clock_frequency_unit", "MHz");
 
         cl::Program::Sources source(1, stringifiedKernels);
         cl::Program prog = cl::Program(ctx, source);
@@ -233,11 +221,7 @@ int clPeak::runAll()
           useEventTimer = false;
         }
 
-        runGlobalBandwidthTest(queue, prog, devInfo, cfg);
-        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
-        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
-
-        // Compute tests via unified helper (main program — no __local args)
+        // ---- Phase 1: floating-point compute ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute (GFLOPS)", "single_precision_compute",
                        "compute_sp", "float", "gflops",
@@ -248,16 +232,17 @@ int clPeak::runAll()
                        "compute_hp", "half", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
-                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
-                       "compute_mp", "mp", "gflops",
-                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
-
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute (GFLOPS)", "double_precision_compute",
                        "compute_dp", "double", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
+                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
+                       "compute_mp", "mp", "gflops",
+                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+
+        // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute (GOPS)", "integer_compute",
                        "compute_integer", "int", "gops",
@@ -278,11 +263,6 @@ int clPeak::runAll()
                        "compute_short", "short", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
-                       "compute_int4_packed", "int4_packed", "gops",
-                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
-
 #ifdef CLPEAK_HAS_OPENCL_30
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute (GOPS)", "integer_compute_int8_dp",
@@ -290,21 +270,42 @@ int clPeak::runAll()
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 #endif
 
+        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
+                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
+                       "compute_int4_packed", "int4_packed", "gops",
+                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
+
         runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
+
+        // ---- Phase 3: bandwidth ----------------------------------------
+        runGlobalBandwidthTest(queue, prog, devInfo, cfg);
+        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
+        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
         runTransferBandwidthTest(queue, prog, devInfo, cfg);
+
+        // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
           runKernelLatency(queue, prog, devInfo, cfg);
-        else if (isTestEnabled(Benchmark::KernelLatency))
-          log->print(NEWLINE TAB TAB "Kernel launch latency         : Skipped (no profiling queue support)" NEWLINE);
+        else if (gating.isAllowed(Benchmark::KernelLatency))
+        {
+          log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
+          log->resultScopeBegin("kernel_launch_latency");
+          log->resultScopeAttribute("unit", "us");
+          log->recordSkip("dispatch", ResultStatus::Unsupported,
+                           "No profiling queue support");
+          log->recordSkip("roundtrip", ResultStatus::Unsupported,
+                           "No profiling queue support");
+          log->resultScopeEnd();
+        }
 
         useEventTimer = savedUseEventTimer;
 
         log->print(NEWLINE);
-        log->xmlCloseTag(); // device
+        log->resultScopeEnd(); // device
       }
-      log->xmlCloseTag(); // platform
+      log->resultScopeEnd(); // platform
     }
-    log->xmlCloseTag(); // clpeak
+    log->resultScopeEnd(); // clpeak
   }
   catch (cl::Error &error)
   {
@@ -369,37 +370,13 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
 int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            device_info_t &devInfo, benchmark_config_t &cfg,
                            Benchmark which,
-                           const std::string &displayName, const std::string &xmlTag,
+                           const std::string &displayName, const std::string &resultTag,
                            const std::string &kernelPrefix, const std::string &typeName,
                            const std::string &unit, unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
-  if (!isTestEnabled(which))
+  if (!gating.isAllowed(which))
     return 0;
-
-  // Feature gates
-  if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
-  {
-    log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
-    return 0;
-  }
-  if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
-  {
-    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
-    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
-    return 0;
-  }
-  if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
-  {
-    log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
-    return 0;
-  }
-  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
-  {
-    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->print(TAB TAB TAB "cl_khr_integer_dot_product not supported! Skipped" NEWLINE);
-    return 0;
-  }
 
   unsigned int iters = cfg.computeIters;
 
@@ -416,11 +393,59 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       labels[w] += std::to_string(widths[w]);
   }
 
+  // Feature gates
+  if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
+  {
+    log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "No half precision support");
+    log->resultScopeEnd();
+    return 0;
+  }
+  if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
+  {
+    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
+    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "No half precision support");
+    log->resultScopeEnd();
+    return 0;
+  }
+  if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
+  {
+    log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "No double precision support");
+    log->resultScopeEnd();
+    return 0;
+  }
+  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
+  {
+    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
+    log->print(TAB TAB TAB "cl_khr_integer_dot_product not supported! Skipped" NEWLINE);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Unsupported,
+                       "cl_khr_integer_dot_product not supported");
+    log->resultScopeEnd();
+    return 0;
+  }
+
   try
   {
     log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->xmlOpenTag(xmlTag);
-    log->xmlAppendAttribs("unit", unit);
+    log->resultScopeBegin(resultTag);
+    log->resultScopeAttribute("unit", unit);
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
@@ -470,13 +495,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     }
 
-    // Run each vector width
-    for (int w = 0; w < 5; w++)
-    {
-      if (forceTest && specifiedTestName != labels[w])
-        continue;
-
-      // Padding for aligned output
+  // Run each vector width
+  for (int w = 0; w < 5; w++)
+  {
+    // Padding for aligned output
       std::string padded = labels[w];
       while (padded.size() < 8)
         padded += ' ';
@@ -487,10 +509,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
       log->print(throughput);
       log->print(NEWLINE);
-      log->xmlRecord(labels[w], throughput);
+      log->resultRecord(labels[w], throughput);
     }
 
-    log->xmlCloseTag();
+    log->resultScopeEnd();
   }
   catch (cl::Error &error)
   {
@@ -498,10 +520,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // xmlOpenTag was already pushed above; close it so subsequent tests
-    // don't nest under a leaked parent (manifests on Android as all later
-    // tests collapsing into this test's result card).
-    log->xmlCloseTag();
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, reason);
+    log->resultScopeEnd();
     return -1;
   }
   catch (std::exception &e)
@@ -510,9 +532,77 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << "Exception: " << e.what() << NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    log->xmlCloseTag();
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, e.what());
+    log->resultScopeEnd();
     return -1;
   }
 
   return 0;
+}
+
+// Free-function enumeration used by --list-devices (desktop) and the Android
+// JNI surface. Mirrors the device-listing logic that previously lived inside
+// runAll() but populates a backend-neutral structure instead of printing.
+BackendInventory enumerateOpenCL()
+{
+  BackendInventory inv;
+  inv.backend = "OpenCL";
+
+  try
+  {
+    std::vector<cl::Platform> platforms;
+    cl::Platform::get(&platforms);
+    inv.available = !platforms.empty();
+
+    for (size_t p = 0; p < platforms.size(); p++)
+    {
+      InventoryPlatform plat;
+      plat.index = static_cast<int>(p);
+      plat.name  = platforms[p].getInfo<CL_PLATFORM_NAME>();
+      trimString(plat.name);
+
+      try
+      {
+        cl_context_properties cps[3] = {
+            CL_CONTEXT_PLATFORM,
+            (cl_context_properties)(platforms[p])(),
+            0};
+        cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
+        std::vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+
+        for (size_t d = 0; d < devices.size(); d++)
+        {
+          device_info_t info = getDeviceInfo(devices[d]);
+          InventoryDevice dev;
+          dev.index           = static_cast<int>(d);
+          dev.name            = info.deviceName;
+          dev.typeStr         = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU"
+                              : (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
+                                                                       : "Other";
+          dev.driverVersion   = info.driverVersion;
+          dev.numComputeUnits = info.numCUs;
+          dev.maxClockMHz     = info.maxClockFreq;
+          dev.globalMemBytes  = info.maxGlobalSize;
+          dev.maxAllocBytes   = info.maxAllocSize;
+          dev.hasFp16         = info.halfSupported;
+          dev.hasFp64         = info.doubleSupported;
+          plat.devices.push_back(std::move(dev));
+        }
+      }
+      catch (cl::Error &)
+      {
+        // No usable devices on this platform — leave plat.devices empty.
+      }
+
+      inv.platforms.push_back(std::move(plat));
+    }
+  }
+  catch (cl::Error &)
+  {
+    inv.available = false;
+    inv.platforms.clear();
+  }
+
+  return inv;
 }

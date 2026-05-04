@@ -13,7 +13,7 @@ import kr.clpeak.databinding.ItemBenchmarkCategoryBinding
 import kr.clpeak.databinding.ItemBenchmarkMetricBinding
 
 class ResultAdapter(
-    private val onToggle: (String, String) -> Unit
+    private val onToggle: (backend: String, testName: String, category: String) -> Unit
 ) : ListAdapter<BenchmarkCategory, ResultAdapter.CategoryViewHolder>(DIFF_CALLBACK) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CategoryViewHolder {
@@ -40,19 +40,24 @@ class ResultAdapter(
             binding.tvPeakValue.text    = "%.2f".format(category.peakValue)
             binding.tvUnit.text         = category.unit.uppercase()
 
-            // Tonal card background based on test type
+            // Tonal card background based on test type.  UNKNOWN reuses the
+            // fp_compute palette (a soft warm orange) as a generic fallback.
             val containerColor = when (category.testType) {
-                TestType.BANDWIDTH -> R.color.test_bandwidth_container
-                TestType.COMPUTE   -> R.color.test_compute_container
-                TestType.LATENCY   -> R.color.test_latency_container
+                TestType.BANDWIDTH    -> R.color.test_bandwidth_container
+                TestType.FP_COMPUTE   -> R.color.test_fp_compute_container
+                TestType.INT_COMPUTE  -> R.color.test_int_compute_container
+                TestType.LATENCY      -> R.color.test_latency_container
+                TestType.UNKNOWN      -> R.color.test_fp_compute_container
             }
             binding.root.setCardBackgroundColor(ctx.getColor(containerColor))
 
             // Type indicator dot color
             val indicatorColor = when (category.testType) {
-                TestType.BANDWIDTH -> R.color.test_bandwidth
-                TestType.COMPUTE   -> R.color.test_compute
-                TestType.LATENCY   -> R.color.test_latency
+                TestType.BANDWIDTH    -> R.color.test_bandwidth
+                TestType.FP_COMPUTE   -> R.color.test_fp_compute
+                TestType.INT_COMPUTE  -> R.color.test_int_compute
+                TestType.LATENCY      -> R.color.test_latency
+                TestType.UNKNOWN      -> R.color.test_fp_compute
             }
             val dot = binding.viewTypeIndicator.background
             if (dot is GradientDrawable) {
@@ -66,9 +71,11 @@ class ResultAdapter(
 
             // Text color on the tonal container
             val onContainerColor = when (category.testType) {
-                TestType.BANDWIDTH -> R.color.test_bandwidth_on_container
-                TestType.COMPUTE   -> R.color.test_compute_on_container
-                TestType.LATENCY   -> R.color.test_latency_on_container
+                TestType.BANDWIDTH    -> R.color.test_bandwidth_on_container
+                TestType.FP_COMPUTE   -> R.color.test_fp_compute_on_container
+                TestType.INT_COMPUTE  -> R.color.test_int_compute_on_container
+                TestType.LATENCY      -> R.color.test_latency_on_container
+                TestType.UNKNOWN      -> R.color.test_fp_compute_on_container
             }
             binding.tvCategoryName.setTextColor(ctx.getColor(onContainerColor))
 
@@ -93,7 +100,9 @@ class ResultAdapter(
                 binding.ivExpand.rotation = if (expanded) 180f else 0f
             }
 
-            binding.root.setOnClickListener { onToggle(category.backend, category.testName) }
+            binding.root.setOnClickListener {
+                onToggle(category.backend, category.testName, category.category)
+            }
         }
 
         private fun animateExpandCollapse(view: View, expand: Boolean) {
@@ -156,9 +165,11 @@ class ResultAdapter(
             val inflater = LayoutInflater.from(container.context)
 
             val barColorRes = when (category.testType) {
-                TestType.BANDWIDTH -> R.color.test_bandwidth
-                TestType.COMPUTE   -> R.color.test_compute
-                TestType.LATENCY   -> R.color.test_latency
+                TestType.BANDWIDTH    -> R.color.test_bandwidth
+                TestType.FP_COMPUTE   -> R.color.test_fp_compute
+                TestType.INT_COMPUTE  -> R.color.test_int_compute
+                TestType.LATENCY      -> R.color.test_latency
+                TestType.UNKNOWN      -> R.color.test_fp_compute
             }
             val barColor = container.context.getColor(barColorRes)
 
@@ -189,7 +200,9 @@ class ResultAdapter(
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<BenchmarkCategory>() {
             override fun areItemsTheSame(a: BenchmarkCategory, b: BenchmarkCategory) =
-                a.backend == b.backend && a.testName == b.testName
+                a.backend == b.backend &&
+                a.category == b.category &&
+                a.testName == b.testName
             override fun areContentsTheSame(a: BenchmarkCategory, b: BenchmarkCategory) =
                 a == b
         }

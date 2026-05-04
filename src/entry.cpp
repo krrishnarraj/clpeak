@@ -1,5 +1,9 @@
 #include <clpeak.h>
-#include <cstring>
+#include <inventory.h>
+#include <options.h>
+#include <result_store.h>
+
+#include <iostream>
 
 #ifdef ENABLE_VULKAN
 #include <vk_peak.h>
@@ -11,82 +15,90 @@
 #include <mtl_peak.h>
 #endif
 
+// Append `src` to the end of `dst` in arrival order.  Used to merge each
+// backend's accumulated metrics into a single store before serialization,
+// so a `--json-file out.json` run that hits multiple backends produces one
+// file containing every row (rather than the last backend's rows
+// overwriting the previous one).
+static void mergeResults(ResultStore &dst, const ResultStore &src)
+{
+  dst.insert(dst.end(), src.begin(), src.end());
+}
+
 int main(int argc, char **argv)
 {
-  bool skipOpenCL = false;
-  bool skipVulkan = false;
-  bool skipCuda   = false;
-  bool skipMetal  = false;
-  for (int i = 1; i < argc; i++)
+  CliOptions opts;
+  parseCliOptions(argc, argv, opts);
+
+  // --list-devices: print every backend's inventory via the shared enumerator.
+  if (opts.listDevices)
   {
-    if (strcmp(argv[i], "--no-opencl") == 0)
-      skipOpenCL = true;
-    else if (strcmp(argv[i], "--no-vulkan") == 0)
-      skipVulkan = true;
-    else if (strcmp(argv[i], "--no-cuda") == 0)
-      skipCuda = true;
-    else if (strcmp(argv[i], "--no-metal") == 0)
-      skipMetal = true;
+    printInventory(enumerateAllBackends(opts), std::cout);
+    return 0;
   }
 
+  ResultStore combined;
+
   int clStatus = 0;
-  if (!skipOpenCL)
+  if (!opts.skipOpenCL)
   {
     clPeak clObj;
-    clObj.parseArgs(argc, argv);
+    clObj.applyOptions(opts);
     clStatus = clObj.runAll();
+    mergeResults(combined, clObj.log->results);
   }
 
   int vkStatus = 0;
 #ifdef ENABLE_VULKAN
-  if (!skipVulkan)
+  if (!opts.skipVulkan)
   {
     vkPeak vkObj;
-    vkObj.parseArgs(argc, argv);
+    vkObj.applyOptions(opts);
     vkStatus = vkObj.runAll();
+    mergeResults(combined, vkObj.log->results);
     // Vulkan failure (e.g. no loader or no physical devices) is non-fatal when
     // OpenCL ran successfully. Treat it as a warning.
-    if (vkStatus != 0 && !skipOpenCL && clStatus == 0)
+    if (vkStatus != 0 && !opts.skipOpenCL && clStatus == 0)
       vkStatus = 0;
   }
-#else
-  (void)skipVulkan;
 #endif
 
   int cuStatus = 0;
 #ifdef ENABLE_CUDA
-  if (!skipCuda)
+  if (!opts.skipCuda)
   {
     CudaPeak cuObj;
-    cuObj.parseArgs(argc, argv);
+    cuObj.applyOptions(opts);
     cuStatus = cuObj.runAll();
-    // Same non-fatal policy as Vulkan: a missing CUDA driver / no devices
-    // shouldn't fail the run if another backend already produced numbers.
-    if (cuStatus != 0 && ((!skipOpenCL && clStatus == 0) || (!skipVulkan && vkStatus == 0)))
+    mergeResults(combined, cuObj.log->results);
+    if (cuStatus != 0 && ((!opts.skipOpenCL && clStatus == 0) ||
+                          (!opts.skipVulkan && vkStatus == 0)))
       cuStatus = 0;
   }
-#else
-  (void)skipCuda;
 #endif
 
   int mtlStatus = 0;
 #ifdef ENABLE_METAL
-  if (!skipMetal)
+  if (!opts.skipMetal)
   {
     MetalPeak mtlObj;
-    mtlObj.parseArgs(argc, argv);
+    mtlObj.applyOptions(opts);
     mtlStatus = mtlObj.runAll();
-    // Same non-fatal policy: a missing Apple-silicon device shouldn't fail
-    // the run if another backend already produced numbers.
+    mergeResults(combined, mtlObj.log->results);
     if (mtlStatus != 0 &&
-        ((!skipOpenCL && clStatus == 0) ||
-         (!skipVulkan && vkStatus == 0) ||
-         (!skipCuda   && cuStatus == 0)))
+        ((!opts.skipOpenCL && clStatus  == 0) ||
+         (!opts.skipVulkan && vkStatus  == 0) ||
+         (!opts.skipCuda   && cuStatus  == 0)))
       mtlStatus = 0;
   }
-#else
-  (void)skipMetal;
 #endif
+
+  // Centralised dump: write one file per enabled format, containing rows
+  // from every backend that ran.  Per-backend loggers no longer write
+  // files (see clpeak.cpp::applyOptions).
+  if (opts.enableJson) saveJson(combined, opts.jsonFile);
+  if (opts.enableCsv)  saveCsv (combined, opts.csvFile);
+  if (opts.enableXml)  saveXml (combined, opts.xmlFile);
 
   if (clStatus  != 0) return clStatus;
   if (vkStatus  != 0) return vkStatus;

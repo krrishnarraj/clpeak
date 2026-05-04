@@ -6,7 +6,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   cl::NDRange globalSize, localSize;
   float *arr = nullptr;
 
-  if (!isTestEnabled(Benchmark::GlobalBW))
+  if (!gating.isAllowed(Benchmark::GlobalBW))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -21,8 +21,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     populate(arr, numItems);
 
     log->print(NEWLINE TAB TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("global_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    auto scope = log->resultScope("global_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
@@ -68,9 +68,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     for (int w = 0; w < 5; w++)
     {
-      if (forceTest && specifiedTestName != labels[w])
-        continue;
-
       log->print(TAB TAB TAB + std::string(display[w]) + ": ");
 
       globalSize = numItems / widths[w] / FETCH_PER_WI;
@@ -83,10 +80,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord(labels[w], gbps);
-    }
-
-    log->xmlCloseTag(); // global_memory_bandwidth
+      log->resultRecord(labels[w], gbps);
+     }
 
     delete[] arr;
   }
@@ -96,18 +91,20 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, reason);
 
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
-    // a leaked parent -- manifests on Android as later tests collapsing into
-    // this test's result card.
-    log->xmlCloseTag();
     delete[] arr;
     return -1;
   }
   catch (std::bad_alloc &)
   {
     log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
-    log->xmlCloseTag();
+    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    for (int w = 0; w < 5; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, "Out of memory");
     delete[] arr;
     return -1;
   }

@@ -1,2 +1,5 @@
 build/
 .vscode/
+.claude/
+.opencode/
+TODO

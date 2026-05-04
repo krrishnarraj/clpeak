@@ -7,9 +7,14 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
+#include <clpeak.h>      // Benchmark enum
+#include <backend_gating.h>  // centralized benchmark gating
+
+struct CliOptions; // forward decl
 
 // Forward-declare the implementation as opaque pointers so this header can
 // be included from pure C++ TUs (entry.cpp).  All Objective-C / Metal
@@ -29,7 +34,11 @@ struct mtl_device_info_t {
   bool fp16Supported;             // always true on Apple silicon
   bool simdgroupMatrixFP16Supported; // M1+ (Apple7)
   bool simdgroupMatrixBF16Supported; // M3+ (Apple9)
+  bool simdgroupMatrixInt8Supported; // M3+ (Apple9) -- int8 simdgroup_matrix
+  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: macOS 14 + Apple9 (M3)
+  bool atomic64Supported;         // 64-bit int atomics: Apple8+ (M2)
   uint32_t appleFamily;           // largest MTLGPUFamilyApple<N> the device supports
+  uint32_t gpuCoreCount;          // GPU core count (e.g. 8 on M1 base, 32 on M1 Max). 0 = unknown.
 };
 
 class MetalDevice
@@ -59,7 +68,7 @@ struct mtl_compute_variant_t
 struct mtl_compute_desc_t
 {
   const char *title;
-  const char *xmlTag;
+  const char *resultTag;
   const char *unit;                // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;         // 1e9 = G* (default when 0), 1e12 = T*
 
@@ -95,12 +104,14 @@ public:
   unsigned int warmupCount;
   unsigned int specifiedIters;
   bool forceIters;
-  bool listDevices;
+  int  deviceIndex; // -1 = run all
+
+  BackendGating gating;
 
   MetalPeak();
   ~MetalPeak();
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
   int runAll();
 
   int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);
@@ -111,9 +122,13 @@ public:
   int runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
   int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
+  int runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg);
+  int runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg);
+  int runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
@@ -145,12 +160,18 @@ namespace mtl_kernels {
   extern const char *simdgroup_matrix_fp16_name;
   extern const char *simdgroup_matrix_bf16_src;
   extern const char *simdgroup_matrix_bf16_name;
+  extern const char *simdgroup_matrix_int8_src;
+  extern const char *simdgroup_matrix_int8_name;
   extern const char *local_bandwidth_src;
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
   extern const char *image_bandwidth_name;
   extern const char *atomic_throughput_src;
   extern const char *atomic_throughput_name;
+  extern const char *atomic_throughput_float_src;
+  extern const char *atomic_throughput_float_name;
+  extern const char *atomic_throughput_ulong_src;
+  extern const char *atomic_throughput_ulong_name;
 }
 
 #endif // ENABLE_METAL

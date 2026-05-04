@@ -6,6 +6,8 @@ set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/common.cpp
     ${CLPEAK_ROOT}/src/result_store.cpp
     ${CLPEAK_ROOT}/src/clpeak.cpp
+    ${CLPEAK_ROOT}/src/backend_gating.cpp
+    ${CLPEAK_ROOT}/src/inventory.cpp
     ${CLPEAK_ROOT}/src/options.cpp
     ${CLPEAK_ROOT}/src/global_bandwidth.cpp
     ${CLPEAK_ROOT}/src/local_bandwidth.cpp
@@ -13,7 +15,7 @@ set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/atomic_throughput.cpp
     ${CLPEAK_ROOT}/src/transfer_bandwidth.cpp
     ${CLPEAK_ROOT}/src/kernel_latency.cpp
-)
+ )
 
 set(CLPEAK_CORE_INCLUDE_DIRS
     ${CLPEAK_ROOT}/include
@@ -31,6 +33,7 @@ set(CLPEAK_VK_SOURCES
 # embedded as C++ string literals via embed_cuda_kernels().
 set(CLPEAK_CUDA_SOURCES
     ${CLPEAK_ROOT}/src/cuda_peak.cpp
+    ${CLPEAK_ROOT}/src/cuda_blas.cpp
     ${CLPEAK_ROOT}/src/entry_cuda.cpp
 )
 
@@ -39,6 +42,7 @@ set(CLPEAK_CUDA_SOURCES
 # Macs but the runtime refuses non-Apple-silicon devices.
 set(CLPEAK_MTL_SOURCES
     ${CLPEAK_ROOT}/src/mtl_peak.mm
+    ${CLPEAK_ROOT}/src/mtl_blas.mm
     ${CLPEAK_ROOT}/src/entry_mtl.mm
 )
 
@@ -52,9 +56,12 @@ set(CLPEAK_MTL_KERNELS
     ${CLPEAK_ROOT}/src/mtl_kernels/kernel_latency.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_fp16.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_bf16.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/simdgroup_matrix_int8.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/local_bandwidth.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/image_bandwidth.metal
     ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput_float.metal
+    ${CLPEAK_ROOT}/src/mtl_kernels/atomic_throughput_ulong.metal
 )
 
 set(CLPEAK_CUDA_KERNELS
@@ -65,6 +72,7 @@ set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_bf16.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_int8_dp.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/compute_int4_packed.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/compute_int32.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/global_bandwidth.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/kernel_latency.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp16.cu
@@ -73,6 +81,10 @@ set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int8_k32.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e4m3.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e5m2.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_tf32.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp64.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int4.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_bmma_b1.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/local_bandwidth.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/image_bandwidth.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/atomic_throughput.cu
@@ -107,4 +119,5 @@ set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/image_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_local.comp
+    ${CLPEAK_ROOT}/src/shaders/kernel_latency.comp
 )

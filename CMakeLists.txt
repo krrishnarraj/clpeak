@@ -65,14 +65,24 @@ set(CLPEAK_SOURCE_FILES
     src/entry.cpp
 )
 
+# ---- Per-backend opt-out flags (all default ON; auto-detection still runs
+#      but is skipped when the flag is OFF).
+option(CLPEAK_ENABLE_VULKAN "Build the Vulkan backend (requires Vulkan SDK/loader)" ON)
+option(CLPEAK_ENABLE_CUDA   "Build the CUDA backend (requires CUDA Toolkit)"        ON)
+option(CLPEAK_ENABLE_METAL  "Build the Metal/MPS backend (Apple only)"              ON)
+
 # ---- Optional backends: Vulkan (default-on if Vulkan loader present)
 #      and CUDA (default-on if CUDA Toolkit driver API + NVRTC are present).
-find_package(Vulkan)
+if(CLPEAK_ENABLE_VULKAN)
+  find_package(Vulkan)
+else()
+  message(STATUS "Vulkan backend disabled by CLPEAK_ENABLE_VULKAN=OFF")
+endif()
 find_package(CUDAToolkit)
-if(Vulkan_FOUND)
+if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
   message(STATUS "Vulkan found: ${Vulkan_LIBRARIES} -- Vulkan backend enabled")
   list(APPEND CLPEAK_SOURCE_FILES ${CLPEAK_VK_SOURCES})
-else()
+elseif(CLPEAK_ENABLE_VULKAN)
   message(WARNING "Vulkan SDK/loader not found -- Vulkan tests will be disabled. Install the Vulkan SDK to enable the Vulkan backend.")
 endif()
 # CUDA sources are appended to the target after add_executable below, since
@@ -88,7 +98,11 @@ if(CLPEAK_HAS_OPENCL_30)
   target_compile_definitions(clpeak PRIVATE CLPEAK_HAS_OPENCL_30)
 endif()
 
-if(Vulkan_FOUND)
+if(WIN32)
+  target_compile_definitions(clpeak PRIVATE NOMINMAX)
+endif()
+
+if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
   target_link_libraries(clpeak ${Vulkan_LIBRARIES})
   target_include_directories(clpeak PRIVATE ${Vulkan_INCLUDE_DIRS})
   target_compile_definitions(clpeak PRIVATE ENABLE_VULKAN)
@@ -105,10 +119,10 @@ endif()
 #      Toolkit is present).  No nvcc / cubin / fatbin: kernels are .cu
 #      source text embedded into the binary and compiled at runtime by
 #      NVRTC, mirroring the OpenCL string-kernel pattern.
-if(CUDAToolkit_FOUND)
+if(CLPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
   message(STATUS "CUDA Toolkit found (${CUDAToolkit_VERSION}) -- CUDA backend enabled")
   target_sources(clpeak PRIVATE ${CLPEAK_CUDA_SOURCES})
-  target_link_libraries(clpeak CUDA::cuda_driver CUDA::nvrtc)
+  target_link_libraries(clpeak CUDA::cuda_driver CUDA::nvrtc CUDA::cublasLt)
   target_include_directories(clpeak PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
   target_compile_definitions(clpeak PRIVATE ENABLE_CUDA)
   # NVRTC needs the toolkit include dir to resolve <mma.h>, <cuda_fp16.h>
@@ -123,20 +137,27 @@ if(CUDAToolkit_FOUND)
     TARGET clpeak
     KERNELS ${CLPEAK_CUDA_KERNELS}
   )
-else()
+elseif(CLPEAK_ENABLE_CUDA)
   message(STATUS "CUDA Toolkit not found -- CUDA backend disabled")
+else()
+  message(STATUS "CUDA backend disabled by CLPEAK_ENABLE_CUDA=OFF")
 endif()
 
 # ---- Metal backend (Apple silicon only).  Source text is embedded as
 #      string literals; the runtime hands it to MTLDevice newLibraryWithSource:
 #      so there's no offline metal/metallib step.
-if(APPLE)
+if(APPLE AND CLPEAK_ENABLE_METAL)
   find_library(METAL_FRAMEWORK Metal)
   find_library(FOUNDATION_FRAMEWORK Foundation)
-  if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
-    message(STATUS "Metal framework found -- Metal backend enabled")
+  find_library(IOKIT_FRAMEWORK IOKit)
+  find_library(MPS_FRAMEWORK MetalPerformanceShaders)
+  find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
+  if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK AND MPS_FRAMEWORK AND MPSGRAPH_FRAMEWORK)
+    message(STATUS "Metal + MPSGraph frameworks found -- Metal backend enabled")
     target_sources(clpeak PRIVATE ${CLPEAK_MTL_SOURCES})
-    target_link_libraries(clpeak ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+    target_link_libraries(clpeak ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
+                                  ${IOKIT_FRAMEWORK}
+                                  ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
     target_compile_definitions(clpeak PRIVATE ENABLE_METAL)
     # Compile .mm files with ObjC ARC -- saves us from sprinkling release
     # calls on autoreleased Metal objects.
@@ -149,6 +170,8 @@ if(APPLE)
       KERNELS ${CLPEAK_MTL_KERNELS}
     )
   endif()
+elseif(APPLE AND NOT CLPEAK_ENABLE_METAL)
+  message(STATUS "Metal backend disabled by CLPEAK_ENABLE_METAL=OFF")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
@@ -162,22 +185,28 @@ endif()
 # glance which backends will be built into the resulting clpeak binary.
 set(_clpeak_summary "")
 string(APPEND _clpeak_summary "  OpenCL : ENABLED  (target ${CLPEAK_OPENCL_TARGET_VERSION}, runtime ${OpenCL_VERSION_STRING})\n")
-if(Vulkan_FOUND)
+if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
   string(APPEND _clpeak_summary "  Vulkan : ENABLED  (${Vulkan_VERSION})\n")
-else()
+elseif(CLPEAK_ENABLE_VULKAN)
   string(APPEND _clpeak_summary "  Vulkan : disabled (Vulkan SDK / loader not found)\n")
+else()
+  string(APPEND _clpeak_summary "  Vulkan : disabled (CLPEAK_ENABLE_VULKAN=OFF)\n")
 endif()
-if(CUDAToolkit_FOUND)
+if(CLPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
   string(APPEND _clpeak_summary "  CUDA   : ENABLED  (Toolkit ${CUDAToolkit_VERSION})\n")
-else()
+elseif(CLPEAK_ENABLE_CUDA)
   string(APPEND _clpeak_summary "  CUDA   : disabled (CUDA Toolkit not found)\n")
-endif()
-if(APPLE AND METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
-  string(APPEND _clpeak_summary "  Metal  : ENABLED  (Apple silicon target)\n")
-elseif(APPLE)
-  string(APPEND _clpeak_summary "  Metal  : disabled (Metal/Foundation framework not found)\n")
 else()
+  string(APPEND _clpeak_summary "  CUDA   : disabled (CLPEAK_ENABLE_CUDA=OFF)\n")
+endif()
+if(CLPEAK_ENABLE_METAL AND APPLE AND METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK AND MPS_FRAMEWORK AND MPSGRAPH_FRAMEWORK)
+  string(APPEND _clpeak_summary "  Metal  : ENABLED  (Apple silicon target, MPSGraph linked)\n")
+elseif(CLPEAK_ENABLE_METAL AND APPLE)
+  string(APPEND _clpeak_summary "  Metal  : disabled (Metal/Foundation/MPSGraph framework not found)\n")
+elseif(CLPEAK_ENABLE_METAL)
   string(APPEND _clpeak_summary "  Metal  : disabled (non-Apple host)\n")
+else()
+  string(APPEND _clpeak_summary "  Metal  : disabled (CLPEAK_ENABLE_METAL=OFF)\n")
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")

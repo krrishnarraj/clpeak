@@ -8,9 +8,14 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
+#include <clpeak.h>      // Benchmark enum
+#include <backend_gating.h>  // centralized benchmark gating
+
+struct CliOptions; // forward decl
 
 // CUDA device info (mirrors vk_device_info_t for display + per-test gating).
 struct cuda_device_info_t {
@@ -33,6 +38,14 @@ struct cuda_device_info_t {
   bool wmmaSupported;            // cc >= 7.0 (Volta) -- fp16 wmma
   bool wmmaInt8Supported;        // cc >= 7.2 (Turing) -- int8 wmma fragments
   bool fp8MmaSupported;          // cc >= 8.9 (Ada) -- inline mma.sync.e4m3/e5m2
+  bool tf32GemmSupported;        // cc >= 8.0 (Ampere) -- TF32 tensor cores
+  bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
+  bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
+  bool dpTensorSupported;        // cc >= 8.0 (Ampere) -- fp64 wmma m8n8k4
+  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
+                                 // dropped on sm_90+ (Hopper) where the s4 imma
+                                 // path was removed.
+  bool bmmaSupported;            // cc >= 7.5 (Turing) -- b1 XOR-popc bmma
 };
 
 // One CUDA device + the bookkeeping needed to launch kernels through the
@@ -72,7 +85,7 @@ private:
 // (and possibly source file) differs.
 struct cuda_compute_variant_t
 {
-  const char *label;             // column / xmlRecord key, e.g. "mp", "mp2"
+  const char *label;             // column / result metric, e.g. "mp", "mp2"
   const char *kernelName;        // CUDA kernel symbol (extern "C")
   const char *src;               // .cu source text (may be shared by sibling
                                  // variants emitting from one file)
@@ -82,7 +95,7 @@ struct cuda_compute_variant_t
 struct cuda_compute_desc_t
 {
   const char *title;             // header line
-  const char *xmlTag;            // outer XML tag
+  const char *resultTag;            // persisted test name
   const char *unit;              // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;       // 1e9 = G* (default when 0), 1e12 = T*
 
@@ -130,12 +143,14 @@ public:
   unsigned int warmupCount;
   unsigned int specifiedIters;
   bool forceIters;
-  bool listDevices;
+  int  deviceIndex;  // -1 = run all
+
+  BackendGating gating;
 
   CudaPeak();
   ~CudaPeak();
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
   int runAll();
 
   int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg);
@@ -145,10 +160,12 @@ public:
   int runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg);
-  int runWmma(CudaDevice &dev, benchmark_config_t &cfg);
+  int runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category);
+  int runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category);
   int runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg);
@@ -185,6 +202,8 @@ namespace cuda_kernels {
   extern const char *compute_int8_dp_name;
   extern const char *compute_int4_packed_src;
   extern const char *compute_int4_packed_name;
+  extern const char *compute_int32_src;
+  extern const char *compute_int32_name;
   extern const char *global_bandwidth_src;
   extern const char *global_bandwidth_name;
   extern const char *kernel_latency_src;
@@ -201,6 +220,14 @@ namespace cuda_kernels {
   extern const char *wmma_fp8_e4m3_name;
   extern const char *wmma_fp8_e5m2_src;
   extern const char *wmma_fp8_e5m2_name;
+  extern const char *wmma_tf32_src;
+  extern const char *wmma_tf32_name;
+  extern const char *wmma_fp64_src;
+  extern const char *wmma_fp64_name;
+  extern const char *wmma_int4_src;
+  extern const char *wmma_int4_name;
+  extern const char *wmma_bmma_b1_src;
+  extern const char *wmma_bmma_b1_name;
   extern const char *local_bandwidth_src;
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;

@@ -7,9 +7,15 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
+#include <clpeak.h>      // Benchmark enum
+#include <backend_gating.h>  // centralized benchmark gating
+
+struct CliOptions;       // forward decl
+struct BackendInventory; // forward decl
 
 // Convenience: defined if any cooperative-matrix shader compiled.  Used by
 // vk_peak.cpp to gate extension / feature enablement and dispatch.
@@ -41,6 +47,7 @@ struct vk_device_info_t {
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
+  bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
 
   // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
   // to gate individual coopmat dtype tests.  Each flag means "a subgroup-
@@ -107,7 +114,7 @@ private:
 // (metricLabel + spirv + spirvSize) fields.
 struct vk_compute_variant_t
 {
-  const char *label;         // column + xmlRecord key, e.g. "mp", "mp2", "mp4"
+  const char *label;         // column + result metric, e.g. "mp", "mp2", "mp4"
   const uint32_t *spirv;
   size_t spirvSize;
 };
@@ -116,7 +123,7 @@ struct vk_compute_desc_t
 {
   // Display / reporting
   const char *title;         // e.g. "Single-precision compute (GFLOPS)"
-  const char *xmlTag;        // e.g. "single_precision_compute"
+  const char *resultTag;        // e.g. "single_precision_compute"
   const char *metricLabel;   // used when variants==nullptr
   const char *unit;          // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;   // 1e9 = G* (default when 0), 1e12 = T*
@@ -147,7 +154,7 @@ struct vk_compute_desc_t
   bool skip;
   const char *skipMsg;
 
-  // Optional extra xml attribute (e.g. emulated="true" for packed INT4).
+  // Optional extra result attribute (e.g. emulated="true" for packed INT4).
   const char *extraAttribKey;
   const char *extraAttribVal;
 };
@@ -160,12 +167,14 @@ public:
   unsigned int warmupCount;
   unsigned int specifiedIters;
   bool forceIters;
-  bool listDevices;
+  int  deviceIndex; // -1 = run all
+
+  BackendGating gating;
 
   vkPeak();
   ~vkPeak();
 
-  int parseArgs(int argc, char **argv);
+  void applyOptions(const CliOptions &opts);
   int runAll();
 
   // Individual benchmarks
@@ -187,9 +196,15 @@ public:
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
+  // enumerateVulkan() in vk_peak.cpp drives a throwaway vkPeak through
+  // initInstance() to read physicalDevices for --list-devices / Android JNI.
+  friend BackendInventory enumerateVulkan();
+
   VkInstance instance;
   std::vector<VkPhysicalDevice> physicalDevices;
 
@@ -230,6 +245,8 @@ namespace vk_shaders {
   extern const size_t   atomic_throughput_global_size;
   extern const uint32_t atomic_throughput_local[];
   extern const size_t   atomic_throughput_local_size;
+  extern const uint32_t kernel_latency[];
+  extern const size_t   kernel_latency_size;
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;

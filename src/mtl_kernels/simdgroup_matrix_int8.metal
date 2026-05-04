@@ -1,0 +1,55 @@
+// Apple simdgroup_matrix int8 -- Apple9+ (M3+) only.  Mirrors the fp16 / bf16
+// kernels: 4 independent accumulator chains over 1024 outer iters, 8x8x8
+// tile, int accumulator.
+//
+// Per simdgroup ops = 1024 outer * 4 chains * 8*8*8*2 = 4,194,304;
+// per thread = 131,072 (= MTL_SIMDGROUP_WORK_PER_WI in mtl_peak.mm).
+
+#include <metal_stdlib>
+#include <metal_simdgroup_matrix>
+using namespace metal;
+
+kernel void simdgroup_matrix_int8(
+    device int* out [[buffer(0)]],
+    constant int& A [[buffer(1)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint lid   [[thread_position_in_threadgroup]])
+{
+    threadgroup char tg_a[64];
+    threadgroup char tg_b[64];
+
+    tg_a[lid * 2 + 0] = (char)A;
+    tg_a[lid * 2 + 1] = (char)A;
+    tg_b[lid * 2 + 0] = (char)A;
+    tg_b[lid * 2 + 1] = (char)A;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    simdgroup_matrix<char, 8, 8> a;
+    simdgroup_matrix<char, 8, 8> b;
+    simdgroup_load(a, tg_a, 8);
+    simdgroup_load(b, tg_b, 8);
+
+    simdgroup_matrix<int, 8, 8> c0 = simdgroup_matrix<int, 8, 8>(0);
+    simdgroup_matrix<int, 8, 8> c1 = simdgroup_matrix<int, 8, 8>(0);
+    simdgroup_matrix<int, 8, 8> c2 = simdgroup_matrix<int, 8, 8>(0);
+    simdgroup_matrix<int, 8, 8> c3 = simdgroup_matrix<int, 8, 8>(0);
+
+    for (int i = 0; i < 1024; i++)
+    {
+        simdgroup_multiply_accumulate(c0, a, b, c0);
+        simdgroup_multiply_accumulate(c1, a, b, c1);
+        simdgroup_multiply_accumulate(c2, a, b, c2);
+        simdgroup_multiply_accumulate(c3, a, b, c3);
+    }
+
+    simdgroup_multiply_accumulate(c0, a, b, c1);
+    simdgroup_multiply_accumulate(c2, a, b, c3);
+    simdgroup_multiply_accumulate(c0, a, b, c2);
+
+    threadgroup int tg_out[64];
+    simdgroup_store(c0, tg_out, 8);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    out[tg_id * 64 + lid * 2 + 0] = tg_out[lid * 2 + 0];
+    out[tg_id * 64 + lid * 2 + 1] = tg_out[lid * 2 + 1];
+}

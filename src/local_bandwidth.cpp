@@ -5,7 +5,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, gbps;
   cl::NDRange globalSize, localSize;
 
-  if (!isTestEnabled(Benchmark::LocalBW))
+  if (!gating.isAllowed(Benchmark::LocalBW))
     return 0;
 
   unsigned int iters = cfg.localBWIters;
@@ -15,8 +15,8 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   try
   {
     log->print(NEWLINE TAB TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("local_memory_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    auto scope = log->resultScope("local_memory_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));
@@ -39,9 +39,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
     for (int w = 0; w < 4; w++)
     {
-      if (forceTest && specifiedTestName != labels[w])
-        continue;
-
       // float8 requires enough local memory
       if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
         continue;
@@ -56,10 +53,8 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord(labels[w], gbps);
+      log->resultRecord(labels[w], gbps);
     }
-
-    log->xmlCloseTag(); // local_memory_bandwidth
   }
   catch (cl::Error &error)
   {
@@ -67,10 +62,10 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
-    // a leaked parent -- manifests on Android as later tests collapsing into
-    // this test's result card.
-    log->xmlCloseTag();
+    const char *labels[] = {"float", "float2", "float4", "float8"};
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    for (int w = 0; w < 4; w++)
+      log->recordSkip(labels[w], ResultStatus::Error, reason);
     return -1;
   }
 

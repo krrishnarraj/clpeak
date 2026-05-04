@@ -1,41 +1,32 @@
 package kr.clpeak
 
-import android.content.Intent
-import android.content.res.ColorStateList
-import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
-import android.view.View
-import android.view.WindowManager
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.tabs.TabLayout
 import kr.clpeak.databinding.ActivityMainBinding
-import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: BenchmarkViewModel by viewModels()
-    private lateinit var adapter: ResultAdapter
-    private var selectedBackend: String? = null
 
-    // Parallel lists: display names and their library paths
-    private val openclDisplayNames = mutableListOf<String>()
-    private val openclLibPaths     = mutableListOf<String>()
-    private var selectedLibIndex   = 0
-
-    private external fun nativeSetenv(key: String, value: String)
+    // Consumes back presses while a benchmark is running. Native code has no
+    // cooperative cancel, so once a run starts the user must wait for it
+    // to finish — there is nothing useful to navigate to.
+    private val blockBackWhileRunning = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { /* swallow */ }
+    }
 
     companion object {
         init { System.loadLibrary("clpeak") }
+        private const val TAG_RESULTS = "results"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,131 +36,60 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
-        // Apply window insets for edge-to-edge
-        ViewCompat.setOnApplyWindowInsetsListener(binding.coordinator) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(binding.coordinator) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.fabRun.updatePadding(bottom = bars.bottom)
-            // Let CoordinatorLayout handle the rest
+            binding.fragmentContainer.updatePadding(bottom = bars.bottom)
             insets
         }
 
-        adapter = ResultAdapter { backend, testName ->
-            viewModel.toggleCategory(backend, testName)
+        if (savedInstanceState == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, SetupFragment())
+                .commit()
         }
-        binding.recyclerResults.adapter = adapter
-        binding.recyclerResults.layoutManager = LinearLayoutManager(this)
 
-        binding.backendTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: TabLayout.Tab) {
-                selectedBackend = tab.text?.toString()
-                refreshCurrentTab()
+        supportFragmentManager.addOnBackStackChangedListener { updateUpAffordance() }
+        onBackPressedDispatcher.addCallback(this, blockBackWhileRunning)
+
+        viewModel.screen.observe(this) { screen ->
+            when (screen) {
+                BenchmarkViewModel.Screen.RESULTS -> showResultsIfNotShown()
+                BenchmarkViewModel.Screen.SETUP   -> popToSetup()
+                null -> {}
             }
-            override fun onTabUnselected(tab: TabLayout.Tab) {}
-            override fun onTabReselected(tab: TabLayout.Tab) {}
-        })
-
-        buildOpenclLibraryList()
-        if (openclLibPaths.isNotEmpty()) {
-            nativeSetenv("LIBOPENCL_SO_PATH", openclLibPaths[0])
         }
 
-        binding.fabRun.setOnClickListener {
-            if (viewModel.isRunning.value == true) return@setOnClickListener
-            viewModel.runBenchmarks()
-        }
-
-        observeViewModel()
-    }
-
-    private fun observeViewModel() {
         viewModel.isRunning.observe(this) { running ->
-            updateFabState(running)
-            binding.progressIndicator.visibility = if (running) View.VISIBLE else View.GONE
-            if (running) {
-                binding.idleState.visibility = View.GONE
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        }
-
-        viewModel.backends.observe(this) { list ->
-            syncTabs(list)
-            refreshCurrentTab()
-        }
-
-        viewModel.categoriesByBackend.observe(this) {
-            refreshCurrentTab()
-        }
-
-        viewModel.deviceInfoByBackend.observe(this) {
-            refreshCurrentTab()
-        }
-
-        viewModel.errorMsg.observe(this) { msg ->
-            if (msg != null) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle("Benchmark error")
-                    .setMessage(msg)
-                    .setPositiveButton("OK", null)
-                    .show()
-            }
+            blockBackWhileRunning.isEnabled = running
+            updateUpAffordance()
         }
     }
 
-    private fun syncTabs(backends: List<String>) {
-        val tabs = binding.backendTabs
-        val currentLabels = (0 until tabs.tabCount).map { tabs.getTabAt(it)?.text?.toString() }
-        if (currentLabels == backends) return
-
-        tabs.removeAllTabs()
-        for (b in backends) {
-            tabs.addTab(tabs.newTab().setText(b), false)
-        }
-        tabs.visibility = if (backends.isEmpty()) View.GONE else View.VISIBLE
-
-        // Preserve previous selection if still present, otherwise default to first.
-        val target = backends.indexOf(selectedBackend).takeIf { it >= 0 } ?: 0
-        if (backends.isNotEmpty()) {
-            tabs.getTabAt(target)?.select()
-            selectedBackend = backends[target]
-        } else {
-            selectedBackend = null
-        }
+    private fun showResultsIfNotShown() {
+        if (supportFragmentManager.findFragmentByTag(TAG_RESULTS) != null) return
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, ResultsFragment(), TAG_RESULTS)
+            .addToBackStack(TAG_RESULTS)
+            .commit()
+        binding.toolbar.title = getString(R.string.results_title)
     }
 
-    private fun refreshCurrentTab() {
-        val backend = selectedBackend
-        val cats = viewModel.categoriesByBackend.value?.get(backend) ?: emptyList()
-        adapter.submitList(cats.toList())
-
-        val info = viewModel.deviceInfoByBackend.value?.get(backend)
-        if (info != null) {
-            binding.cardDeviceInfo.visibility = View.VISIBLE
-            binding.tvPlatform.text = info.platformName
-            binding.tvDevice.text   = info.deviceName
-            binding.tvDriver.text   = info.driverVersion
-        } else {
-            binding.cardDeviceInfo.visibility = View.GONE
+    private fun popToSetup() {
+        if (supportFragmentManager.backStackEntryCount > 0) {
+            supportFragmentManager.popBackStack(
+                TAG_RESULTS,
+                androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE
+            )
         }
+        binding.toolbar.title = getString(R.string.app_name)
     }
 
-    private fun updateFabState(running: Boolean) {
-        binding.fabRun.isEnabled = !running
-        if (running) {
-            binding.fabRun.text = getString(R.string.running_state_text)
-            binding.fabRun.icon = null
-            binding.fabRun.backgroundTintList =
-                ColorStateList.valueOf(getColor(R.color.md_theme_surface_container_high))
-            binding.fabRun.setTextColor(getColor(R.color.md_theme_on_surface_variant))
-        } else {
-            binding.fabRun.text = getString(R.string.run_button_text)
-            binding.fabRun.setIconResource(R.drawable.ic_play_arrow)
-            binding.fabRun.backgroundTintList =
-                ColorStateList.valueOf(getColor(R.color.md_theme_primary))
-            binding.fabRun.setTextColor(getColor(R.color.md_theme_on_primary))
-            binding.fabRun.iconTint =
-                ColorStateList.valueOf(getColor(R.color.md_theme_on_primary))
+    private fun updateUpAffordance() {
+        val hasBackStack = supportFragmentManager.backStackEntryCount > 0
+        val running = viewModel.isRunning.value == true
+        supportActionBar?.setDisplayHomeAsUpEnabled(hasBackStack && !running)
+        if (!hasBackStack) {
+            binding.toolbar.title = getString(R.string.app_name)
         }
     }
 
@@ -180,70 +100,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.menu_opencl_lib -> { showOpenclLibraryPicker(); true }
-            R.id.menu_about      -> { showAbout(); true }
-            else                 -> super.onOptionsItemSelected(item)
+            android.R.id.home -> { viewModel.returnToSetup(); true }
+            R.id.menu_about   -> { showAbout(); true }
+            else              -> super.onOptionsItemSelected(item)
         }
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        viewModel.returnToSetup()
+        return true
     }
 
     private fun showAbout() {
         AboutBottomSheet().show(supportFragmentManager, AboutBottomSheet.TAG)
-    }
-
-    private fun buildOpenclLibraryList() {
-        val allPaths = listOf(
-            "/vendor/lib64/libOpenCL.so"              to "vendor lib64",
-            "/system/lib64/libOpenCL.so"              to "system lib64",
-            "/system/vendor/lib64/libOpenCL.so"       to "system vendor lib64",
-            "/system/lib/libOpenCL.so"                to "system lib",
-            "/system/vendor/lib/libOpenCL.so"         to "system vendor lib",
-            "/system/vendor/lib64/egl/libGLES_mali.so" to "Mali",
-            "/system/vendor/lib/egl/libGLES_mali.so"  to "Mali (32-bit)",
-            "/system/vendor/lib/libPVROCL.so"         to "PowerVR",
-            "/data/data/org.pocl.libs/files/lib/libpocl.so" to "POCL"
-        )
-
-        for ((path, label) in allPaths) {
-            if (File(path).exists()) {
-                openclLibPaths.add(path)
-                openclDisplayNames.add(label)
-            }
-        }
-
-        // Always include the system default
-        openclLibPaths.add("libOpenCL.so")
-        openclDisplayNames.add("Default")
-    }
-
-    private fun showOpenclLibraryPicker() {
-        if (openclLibPaths.isEmpty()) return
-
-        val items = openclDisplayNames.toTypedArray()
-        val pocl = openclDisplayNames.indexOf("POCL")
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.menu_opencl_lib)
-            .setSingleChoiceItems(items, selectedLibIndex) { dialog, which ->
-                // POCL special case: prompt to install if library file is missing
-                if (which == pocl && !File(openclLibPaths[which]).exists()) {
-                    dialog.dismiss()
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("POCL not installed")
-                        .setMessage("Install POCL from the Play Store?")
-                        .setPositiveButton("Install") { _, _ ->
-                            startActivity(
-                                Intent(Intent.ACTION_VIEW,
-                                    Uri.parse("market://details?id=org.pocl.libs"))
-                            )
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                    return@setSingleChoiceItems
-                }
-                selectedLibIndex = which
-                nativeSetenv("LIBOPENCL_SO_PATH", openclLibPaths[which])
-                dialog.dismiss()
-            }
-            .show()
     }
 }

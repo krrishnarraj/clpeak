@@ -21,38 +21,44 @@ class BenchmarkRepository {
 
     private external fun launchClpeak(argc: Int, argv: Array<String>): Int
 
+    /** Non-destructive enumeration. Safe to call from any thread. */
+    external fun nativeEnumerateBackends(): String
+
     // Called from C++ logger_android.cpp::print() on the benchmark thread.
     @Suppress("unused")
     fun print_callback_from_c(str: String) {
         _logChannel.trySend(str)
     }
 
-    // Called from C++ logger_android.cpp::recordMetric() on the benchmark thread.
+    // Called from C++ logger_android.cpp::emit() on the benchmark thread.
+    // Signature mirrors the v2 ResultEntry layout (backend, platform, device,
+    // driver, category, test, metric, unit, value) -- category is new in v2
+    // and replaces the static CATEGORY_META lookup the ViewModel used to do.
     @Suppress("unused")
     fun record_metric_callback_from_c(
         backend: String,
         platform: String,
         device: String,
         driver: String,
+        category: String,
         test: String,
         metric: String,
         unit: String,
         value: Float
     ) {
         _metricChannel.trySend(
-            ResultEntry(backend, platform, device, driver, test, metric, unit, value)
+            ResultEntry(backend, platform, device, driver, category, test, metric, unit, value)
         )
     }
 
     // ---- Run ---------------------------------------------------------------
 
     /**
-     * Blocking call — runs the full benchmark suite via JNI, then closes both
+     * Blocking call — runs the benchmark suite via JNI, then closes both
      * channels so that collector coroutines terminate cleanly.
      * Must be called on a background dispatcher (e.g. Dispatchers.IO).
      */
-    fun runBenchmark(): Int {
-        val argv = arrayOf("clpeak", "--all-tests")
+    fun runBenchmark(argv: Array<String>): Int {
         return try {
             launchClpeak(argv.size, argv)
         } finally {

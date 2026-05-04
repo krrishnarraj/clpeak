@@ -32,12 +32,15 @@
 
     <!-- Semantic colors for benchmark test types (dark tonal) -->
     <color name="test_bandwidth">#A0C9FF</color>
-    <color name="test_compute">#FFB690</color>
+    <color name="test_fp_compute">#FFB690</color>
+    <color name="test_int_compute">#CDB7FF</color>
     <color name="test_latency">#A7D474</color>
     <color name="test_bandwidth_container">#004880</color>
-    <color name="test_compute_container">#6E3000</color>
+    <color name="test_fp_compute_container">#6E3000</color>
+    <color name="test_int_compute_container">#3E2178</color>
     <color name="test_latency_container">#275100</color>
     <color name="test_bandwidth_on_container">#D2E4FF</color>
-    <color name="test_compute_on_container">#FFDCC8</color>
+    <color name="test_fp_compute_on_container">#FFDCC8</color>
+    <color name="test_int_compute_on_container">#E8DDFF</color>
     <color name="test_latency_on_container">#C2F18D</color>
 </resources>

@@ -43,7 +43,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 {
   UNUSED(prog);
 
-  if (!isTestEnabled(Benchmark::TransferBW))
+  if (!gating.isAllowed(Benchmark::TransferBW))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -59,12 +59,9 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   float peakRealTransferBW = 0;
 
   // Helper: run a timed transfer test with warmup, return measured gbps
-  auto runTransfer = [&](const std::string &label, const std::string &xmlName,
+  auto runTransfer = [&](const std::string &label, const std::string &resultName,
                          std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
   {
-    if (forceTest && specifiedTestName != xmlName)
-      return 0;
-
     log->print(label);
 
     // Warmup
@@ -102,7 +99,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     float gbps = (float)bytes / timed / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    log->xmlRecord(xmlName, gbps);
+    log->resultRecord(resultName, gbps);
     return gbps;
   };
 
@@ -115,19 +112,19 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   };
 
   // Helper: report a map/unmap result, detecting zero-copy
-  auto reportMapUnmap = [&](float gbps, const std::string &xmlName)
+  auto reportMapUnmap = [&](float gbps, const std::string &resultName)
   {
     if (isZeroCopy(gbps))
     {
       log->print("inf (zero-copy)");
       log->print(NEWLINE);
-      log->xmlRecord(xmlName, (float)0);
+      log->resultRecord(resultName, (float)0);
     }
     else
     {
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord(xmlName, gbps);
+      log->resultRecord(resultName, gbps);
     }
   };
 
@@ -137,14 +134,24 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     if (!arr)
     {
       log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
+      auto scope = log->resultScope("transfer_bandwidth");
+      log->resultScopeAttribute("unit", "gbps");
+      log->recordSkip("enqueuewritebuffer", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuereadbuffer", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueuemapbuffer", ResultStatus::Error, "Out of memory");
+      log->recordSkip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory");
+      log->recordSkip("enqueueunmap", ResultStatus::Error, "Out of memory");
+      log->recordSkip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory");
       return -1;
     }
     memset(arr, 0, bytes);
     cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), bytes);
 
     log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
-    log->xmlOpenTag("transfer_bandwidth");
-    log->xmlAppendAttribs("unit", "gbps");
+    auto scope = log->resultScope("transfer_bandwidth");
+    log->resultScopeAttribute("unit", "gbps");
 
     // enqueueWriteBuffer (blocking)
     float bw;
@@ -171,7 +178,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     // Always use wall-clock for map/unmap: CL events measure only GPU command
     // processing time, which is zero on unified-memory platforms (Apple Silicon),
     // causing division-by-zero / inf with --use-event-timer.
-    if (!forceTest || specifiedTestName == "enqueuemapbuffer")
     {
       log->print(TAB TAB TAB "enqueueMapBuffer(for read)      : ");
       queue.finish();
@@ -195,7 +201,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
 
     // memcpy from mapped ptr
-    if (!forceTest || specifiedTestName == "memcpy_from_mapped_ptr")
     {
       log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
       queue.finish();
@@ -219,11 +224,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float gbps = (float)bytes / timed / 1e3f;
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("memcpy_from_mapped_ptr", gbps);
+      log->resultRecord("memcpy_from_mapped_ptr", gbps);
     }
 
     // enqueueUnmap(after write)
-    if (!forceTest || specifiedTestName == "enqueueunmap")
     {
       log->print(TAB TAB TAB "enqueueUnmap(after write)       : ");
       queue.finish();
@@ -247,7 +251,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
 
     // memcpy to mapped ptr
-    if (!forceTest || specifiedTestName == "memcpy_to_mapped_ptr")
     {
       log->print(TAB TAB TAB TAB "memcpy to mapped ptr          : ");
       queue.finish();
@@ -271,10 +274,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float gbps = (float)bytes / timed / 1e3f;
       log->print(gbps);
       log->print(NEWLINE);
-      log->xmlRecord("memcpy_to_mapped_ptr", gbps);
+       log->resultRecord("memcpy_to_mapped_ptr", gbps);
     }
-
-    log->xmlCloseTag(); // transfer_bandwidth
 
     freeAligned(arr);
   }
@@ -284,11 +285,16 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     ss << error.what() << " (" << error.err() << ")" NEWLINE
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
+    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+    log->recordSkip("enqueuewritebuffer", ResultStatus::Error, reason);
+    log->recordSkip("enqueuereadbuffer", ResultStatus::Error, reason);
+    log->recordSkip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason);
+    log->recordSkip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason);
+    log->recordSkip("enqueuemapbuffer", ResultStatus::Error, reason);
+    log->recordSkip("memcpy_from_mapped_ptr", ResultStatus::Error, reason);
+    log->recordSkip("enqueueunmap", ResultStatus::Error, reason);
+    log->recordSkip("memcpy_to_mapped_ptr", ResultStatus::Error, reason);
 
-    // Close the xmlOpenTag pushed above so subsequent tests don't nest under
-    // a leaked parent -- manifests on Android as later tests collapsing into
-    // this test's result card.
-    log->xmlCloseTag();
     freeAligned(arr);
     return -1;
   }

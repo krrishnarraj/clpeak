@@ -1,9 +1,16 @@
 #ifdef ENABLE_VULKAN
 
 #include <vk_peak.h>
+#include <inventory.h>
 #include <cstring>
 #include <sstream>
 #include <chrono>
+#include <cfloat>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // VulkanDevice
@@ -94,6 +101,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   info.coopmatINT8K = 0;
   info.coopmatFP8E4M3Supported = false;
   info.coopmatFP8E5M2Supported = false;
+  info.calibratedTimestampsSupported = false;
 
   // Feature query for optional shader types.  Uses vkGetPhysicalDeviceFeatures2
   // (Vulkan 1.1 core).  Each optional shader's feature struct gets chained
@@ -262,6 +270,16 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   if (hasExt("VK_KHR_portability_subset"))
     enabledExts.push_back("VK_KHR_portability_subset");
 #endif
+
+  // VK_EXT_calibrated_timestamps lets us pin a host time into the GPU
+  // timestamp domain, which is exactly what's needed to measure one-way
+  // dispatch latency (host submit -> GPU kernel start) the same way
+  // OpenCL does via CL_PROFILING_COMMAND_QUEUED.  Optional.
+  if (hasExt("VK_EXT_calibrated_timestamps"))
+  {
+    enabledExts.push_back("VK_EXT_calibrated_timestamps");
+    info.calibratedTimestampsSupported = true;
+  }
 
   // Create logical device
   float queuePriority = 1.0f;
@@ -457,9 +475,11 @@ uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags
 // ---------------------------------------------------------------------------
 
 vkPeak::vkPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false), listDevices(false),
+  : warmupCount(2), specifiedIters(0), forceIters(false),
+    deviceIndex(-1),
     instance(VK_NULL_HANDLE)
 {
+  gating.enableAll();
 }
 
 vkPeak::~vkPeak()
@@ -591,35 +611,19 @@ int vkPeak::runAll()
     return -1;
   }
 
-  if (listDevices)
-  {
-    for (size_t i = 0; i < physicalDevices.size(); i++)
-    {
-      VkPhysicalDeviceProperties props;
-      vkGetPhysicalDeviceProperties(physicalDevices[i], &props);
-      const char *typeStr = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ? "Discrete GPU" :
-                            (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) ? "Integrated GPU" :
-                            (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? "CPU" : "Other";
-      std::stringstream ss;
-      ss << "  Vulkan Device " << i << ": " << props.deviceName << " [" << typeStr << "]" << NEWLINE
-         << "    API       : " << VK_VERSION_MAJOR(props.apiVersion) << "."
-         << VK_VERSION_MINOR(props.apiVersion) << "."
-         << VK_VERSION_PATCH(props.apiVersion) << NEWLINE;
-      log->print(ss.str());
-    }
-    return 0;
-  }
-
   // Mirror the OpenCL context stack so logger_android recordMetric() can
   // reach contextStack depth 4 (clpeak > platform > device > test_group).
-  log->xmlOpenTag("clpeak");
-  log->xmlAppendAttribs("os", OS_NAME);
-  log->xmlOpenTag("platform");
-  log->xmlAppendAttribs("name", "Vulkan");
-  log->xmlAppendAttribs("backend", "Vulkan");
+  auto clpeakScope = log->resultScope("clpeak");
+  log->resultScopeAttribute("os", OS_NAME);
+  auto platformScope = log->resultScope("platform");
+  log->resultScopeAttribute("name", "Vulkan");
+  log->resultScopeAttribute("backend", "Vulkan");
 
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
+    if (deviceIndex >= 0 && static_cast<size_t>(deviceIndex) != d)
+      continue;
+
     VulkanDevice dev;
     if (!dev.init(instance, physicalDevices[d]))
     {
@@ -685,6 +689,8 @@ int vkPeak::runAll()
     {
       cfg.computeIters = specifiedIters;
       cfg.globalBWIters = specifiedIters;
+      cfg.transferBWIters = specifiedIters;
+      cfg.kernelLatencyIters = specifiedIters;
     }
 
     log->print(NEWLINE "Vulkan Device: " + dev.info.deviceName + NEWLINE);
@@ -694,38 +700,51 @@ int vkPeak::runAll()
     log->print((unsigned int)(dev.info.heapSize / (1024 * 1024)));
     log->print(" MB" NEWLINE);
 
-    log->xmlOpenTag("device");
-    log->xmlAppendAttribs("name", dev.info.deviceName);
-    log->xmlAppendAttribs("api", "vulkan");
-    log->xmlAppendAttribs("driver_version", dev.info.driverVersion);
+    auto deviceScope = log->resultScope("device");
+    log->resultScopeAttribute("name", dev.info.deviceName);
+    log->resultScopeAttribute("api", "vulkan");
+    log->resultScopeAttribute("driver_version", dev.info.driverVersion);
 
-    runComputeSP(dev, cfg);
+    // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
+    if (gating.isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-    runComputeMP(dev, cfg);
-#endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-    runComputeInt8DP(dev, cfg);
-#endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
-    runComputeInt4Packed(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-    runComputeBF16(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
-    runCoopMatrix(dev, cfg);
+    // CoopMatrix emits both fp (tflops) and int (tops) variants in one call;
+    // the shim assigns each metric to its proper category by unit.
+    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
+        gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+        runCoopMatrix(dev, cfg);
 #endif
-    runGlobalBandwidth(dev, cfg);
-    runLocalBandwidth(dev, cfg);
-    runImageBandwidth(dev, cfg);
-    runAtomicThroughput(dev, cfg);
+
+    // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+    if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+    if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+#endif
+    if (gating.isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
+
+    // ---- Phase 3: bandwidth (GBPS) ---------------------------------
+    if (gating.isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
+
+    // ---- Phase 4: latency (us) -------------------------------------
+    if (gating.isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
-    log->xmlCloseTag(); // device
+    // device
   }
 
-  log->xmlCloseTag(); // platform
-  log->xmlCloseTag(); // clpeak
+  // platform
+  // clpeak
   return 0;
 }
 
@@ -738,7 +757,7 @@ int vkPeak::runAll()
 // pipeline from the shader's SPIR-V, dispatch repeatedly with a push
 // constant, and report work-per-WI / elapsed time.  The only differences
 // are the shader, the buffer-element size, the push-constant payload, and
-// the strings used for display / XML.  All of those are bundled into
+// the strings used for display / result output.  All of those are bundled into
 // vk_compute_desc_t so each concrete benchmark becomes a few-line wrapper.
 // ---------------------------------------------------------------------------
 
@@ -748,17 +767,30 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   log->print(NEWLINE TAB);
   log->print(d.title);
   log->print(NEWLINE);
-  log->xmlOpenTag(d.xmlTag);
-  log->xmlAppendAttribs("unit", d.unit);
+  auto scope = log->resultScope(d.resultTag);
+  log->resultScopeAttribute("unit", d.unit);
   if (d.extraAttribKey && d.extraAttribVal)
-    log->xmlAppendAttribs(d.extraAttribKey, d.extraAttribVal);
+    log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
   if (d.skip)
   {
     log->print(TAB TAB);
     log->print(d.skipMsg ? d.skipMsg : "Skipped");
     log->print(NEWLINE);
-    log->xmlCloseTag();
+    struct SkipVariant { const char *label; };
+    std::vector<SkipVariant> skipVariants;
+    if (d.variants && d.numVariants > 0)
+    {
+      for (uint32_t i = 0; i < d.numVariants; i++)
+        skipVariants.push_back({d.variants[i].label});
+    }
+    else
+    {
+      skipVariants.push_back({d.metricLabel});
+    }
+    for (const auto &sv : skipVariants)
+      log->recordSkip(sv.label, ResultStatus::Unsupported,
+                       d.skipMsg ? d.skipMsg : "Skipped");
     return 0;
   }
 
@@ -802,7 +834,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         outputBuf, outputMem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
     return -1;
   }
 
@@ -888,6 +919,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline))
     {
       log->print("pipeline creation failed (driver may not honor extension)" NEWLINE);
+      log->recordSkip(v.label, ResultStatus::Error,
+                       "Pipeline creation failed");
       continue;
     }
 
@@ -898,7 +931,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
     log->print(value);
     log->print(NEWLINE);
-    log->xmlRecord(v.label, value);
+    log->resultRecord(v.label, value);
 
     vkDestroyPipeline(dev.device, pipeline, nullptr);
   }
@@ -909,7 +942,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  log->xmlCloseTag();
   return 0;
 }
 
@@ -923,7 +955,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Single-precision compute (GFLOPS)";
-  d.xmlTag      = "single_precision_compute";
+  d.resultTag      = "single_precision_compute";
   d.metricLabel = "float";
   d.unit        = "gflops";
   d.spirv       = vk_shaders::compute_sp_v1;
@@ -954,7 +986,7 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
-  d.xmlTag      = "mixed_precision_compute";
+  d.resultTag      = "mixed_precision_compute";
   d.unit        = "gflops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -974,7 +1006,7 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
   int32_t A = 3;
   vk_compute_desc_t d = {};
   d.title           = "Packed INT4 compute (emulated) (GOPS)";
-  d.xmlTag          = "int4_packed_compute";
+  d.resultTag          = "int4_packed_compute";
   d.metricLabel     = "int4_packed";
   d.unit            = "gops";
   d.spirv           = vk_shaders::compute_int4_packed_v1;
@@ -1009,7 +1041,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   int32_t A = 4;
   vk_compute_desc_t d = {};
   d.title       = "INT8 dot-product compute (GOPS)";
-  d.xmlTag      = "integer_compute_int8_dp";
+  d.resultTag      = "integer_compute_int8_dp";
   d.unit        = "gops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -1040,7 +1072,7 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
-  d.xmlTag      = "bfloat16_compute";
+  d.resultTag      = "bfloat16_compute";
   d.unit        = "gflops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -1067,16 +1099,6 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  if (!dev.info.cooperativeMatrixSupported)
-  {
-    log->print(NEWLINE TAB "Cooperative matrix (TFLOPS/TOPS)" NEWLINE);
-    log->xmlOpenTag("cooperative_matrix");
-    log->xmlAppendAttribs("tile", "16x16x16");
-    log->print(TAB TAB "VK_KHR_cooperative_matrix not supported! Skipped" NEWLINE);
-    log->xmlCloseTag();
-    return 0;
-  }
-
   // Coopmat shape constants: shaders hard-code 16x16x16 with 256 iters and
   // local_size_x=32 (one subgroup per work-group).  See COOPMAT_WORK_PER_WI.
   const uint32_t coopWGSize  = 32;
@@ -1088,7 +1110,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_fp16";
+    d.resultTag         = "coopmat_fp16";
     d.metricLabel    = "coopmat_fp16";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1112,7 +1134,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_bf16";
+    d.resultTag         = "coopmat_bf16";
     d.metricLabel    = "coopmat_bf16";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1136,7 +1158,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_fp8_e4m3";
+    d.resultTag         = "coopmat_fp8_e4m3";
     d.metricLabel    = "coopmat_fp8_e4m3";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1160,7 +1182,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     float A = 1.3f;
     vk_compute_desc_t d = {};
     d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
-    d.xmlTag         = "coopmat_fp8_e5m2";
+    d.resultTag         = "coopmat_fp8_e5m2";
     d.metricLabel    = "coopmat_fp8_e5m2";
     d.unit           = "tflops";
     d.unitDivider    = 1e12;
@@ -1185,7 +1207,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.
     int32_t A = 3;
     vk_compute_desc_t d = {};
-    d.xmlTag         = "coopmat_int8";
+    d.resultTag         = "coopmat_int8";
     d.metricLabel    = "coopmat_int8";
     d.unit           = "tops";
     d.unitDivider    = 1e12;
@@ -1261,8 +1283,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (numGroups == 0) numGroups = 1;
 
   log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("global_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  auto scope_1 = log->resultScope("global_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;
@@ -1278,7 +1300,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         outputBuf, outputMem))
   {
     log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
-    log->xmlCloseTag();
     return -1;
   }
 
@@ -1320,7 +1341,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     vkFreeMemory(dev.device, inputMem, nullptr);
     vkDestroyBuffer(dev.device, outputBuf, nullptr);
     vkFreeMemory(dev.device, outputMem, nullptr);
-    log->xmlCloseTag();
     return -1;
   }
 
@@ -1374,7 +1394,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   log->print(gbps);
   log->print(NEWLINE);
-  log->xmlRecord("float", gbps);
+  log->resultRecord("float", gbps);
 
   // Cleanup
   vkDestroyPipeline(dev.device, pipeline, nullptr);
@@ -1386,7 +1406,166 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  log->xmlCloseTag(); // global_memory_bandwidth
+  // global_memory_bandwidth
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Host<->device transfer bandwidth (Vulkan)
+// ---------------------------------------------------------------------------
+
+int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(dev.physicalDevice, &props);
+
+  uint32_t queueFamilyCount = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(dev.physicalDevice, &queueFamilyCount, nullptr);
+  std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+  vkGetPhysicalDeviceQueueFamilyProperties(dev.physicalDevice, &queueFamilyCount, queueFamilies.data());
+
+  const bool canUseTimestamps =
+      dev.info.computeQueueFamily < queueFamilies.size() &&
+      queueFamilies[dev.info.computeQueueFamily].timestampValidBits > 0 &&
+      props.limits.timestampPeriod > 0.0f;
+
+  uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
+  if (dev.info.maxAllocSize > 0)
+    bytes = std::min(bytes, dev.info.maxAllocSize);
+  bytes &= ~255ull;
+  if (bytes == 0)
+    bytes = 256;
+
+  unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
+
+  log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
+  auto scope_2 = log->resultScope("transfer_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
+  log->resultScopeAttribute("memory", "host_visible_staging");
+  log->resultScopeAttribute("timer", canUseTimestamps ? "gpu_timestamp" : "host_wall");
+
+  VkBuffer hostBuf = VK_NULL_HANDLE;
+  VkBuffer devBuf = VK_NULL_HANDLE;
+  VkDeviceMemory hostMem = VK_NULL_HANDLE;
+  VkDeviceMemory devMem = VK_NULL_HANDLE;
+
+  if (!dev.createBuffer(bytes,
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                        hostBuf, hostMem) ||
+      !dev.createBuffer(bytes,
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        devBuf, devMem))
+  {
+    log->print(TAB TAB "Failed to allocate transfer buffers" NEWLINE);
+    if (hostBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, hostBuf, nullptr);
+    if (hostMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, hostMem, nullptr);
+    if (devBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, devBuf, nullptr);
+    if (devMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, devMem, nullptr);
+    return -1;
+  }
+
+  VkCommandBufferAllocateInfo allocInfo = {};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = dev.commandPool;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = 1;
+
+  VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
+  vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
+
+  VkQueryPool queryPool = VK_NULL_HANDLE;
+  if (canUseTimestamps)
+  {
+    VkQueryPoolCreateInfo qpCI = {};
+    qpCI.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qpCI.queryCount = 2;
+    vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool);
+  }
+
+  auto runCopy = [&](VkBuffer src, VkBuffer dst) -> float
+  {
+    VkBufferCopy region = {};
+    region.size = bytes;
+
+    auto recordCopy = [&](bool timed) {
+      VkCommandBufferBeginInfo beginInfo = {};
+      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(cmdBuf, &beginInfo);
+      if (timed && queryPool != VK_NULL_HANDLE)
+      {
+        vkCmdResetQueryPool(cmdBuf, queryPool, 0, 2);
+        vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, 0);
+      }
+      vkCmdCopyBuffer(cmdBuf, src, dst, 1, &region);
+      if (timed && queryPool != VK_NULL_HANDLE)
+        vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, 1);
+      vkEndCommandBuffer(cmdBuf);
+    };
+
+    for (unsigned int w = 0; w < warmupCount; w++)
+    {
+      recordCopy(false);
+      dev.submitAndWait(cmdBuf);
+      vkResetCommandBuffer(cmdBuf, 0);
+    }
+
+    float totalUs = 0.0f;
+    for (unsigned int i = 0; i < iters; i++)
+    {
+      recordCopy(queryPool != VK_NULL_HANDLE);
+      auto start = std::chrono::high_resolution_clock::now();
+      dev.submitAndWait(cmdBuf);
+      auto end = std::chrono::high_resolution_clock::now();
+
+      if (queryPool != VK_NULL_HANDLE)
+      {
+        uint64_t ts[2] = {};
+        VkResult qr = vkGetQueryPoolResults(dev.device, queryPool, 0, 2, sizeof(ts), ts,
+                                            sizeof(uint64_t),
+                                            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        if (qr == VK_SUCCESS && ts[1] >= ts[0])
+          totalUs += (float)((double)(ts[1] - ts[0]) * props.limits.timestampPeriod / 1000.0);
+        else
+          totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+      }
+      else
+      {
+        totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+      }
+
+      vkResetCommandBuffer(cmdBuf, 0);
+    }
+
+    return std::max(totalUs / static_cast<float>(iters), FLT_EPSILON);
+  };
+
+  float usH2D = runCopy(hostBuf, devBuf);
+  float gbpsH2D = (float)bytes / usH2D / 1e3f;
+  log->print(TAB TAB "Host->Dev : ");
+  log->print(gbpsH2D);
+  log->print(NEWLINE);
+  log->resultRecord("h2d", gbpsH2D);
+
+  float usD2H = runCopy(devBuf, hostBuf);
+  float gbpsD2H = (float)bytes / usD2H / 1e3f;
+  log->print(TAB TAB "Dev->Host : ");
+  log->print(gbpsD2H);
+  log->print(NEWLINE);
+  log->resultRecord("d2h", gbpsD2H);
+
+  if (queryPool != VK_NULL_HANDLE)
+    vkDestroyQueryPool(dev.device, queryPool, nullptr);
+  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  vkDestroyBuffer(dev.device, hostBuf, nullptr);
+  vkFreeMemory(dev.device, hostMem, nullptr);
+  vkDestroyBuffer(dev.device, devBuf, nullptr);
+  vkFreeMemory(dev.device, devMem, nullptr);
+
+  // transfer_bandwidth
   return 0;
 }
 
@@ -1402,8 +1581,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.computeIters;
 
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("local_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  auto scope_3 = log->resultScope("local_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = 32ULL * 1024 * 1024;
@@ -1416,7 +1595,6 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
-    log->xmlCloseTag();
     return -1;
   }
 
@@ -1483,10 +1661,10 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    // strip padding from label for the xml record key
+    // Strip padding from the display label for the result metric key.
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ') key.pop_back();
-    log->xmlRecord(key, gbps);
+    log->resultRecord(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -1495,7 +1673,6 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
   vkDestroyBuffer(dev.device, outBuf, nullptr);
   vkFreeMemory(dev.device, outMem, nullptr);
-  log->xmlCloseTag();
   return 0;
 }
 
@@ -1511,8 +1688,8 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.globalBWIters;
 
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  log->xmlOpenTag("image_memory_bandwidth");
-  log->xmlAppendAttribs("unit", "gbps");
+  auto scope_4 = log->resultScope("image_memory_bandwidth");
+  log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
@@ -1537,7 +1714,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
   {
     log->print(TAB TAB "Image create failed" NEWLINE);
-    log->xmlCloseTag();
     return -1;
   }
 
@@ -1617,7 +1793,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     vkDestroyImageView(dev.device, imgView, nullptr);
     vkDestroyImage(dev.device, img, nullptr);
     vkFreeMemory(dev.device, imgMem, nullptr);
-    log->xmlCloseTag();
     return -1;
   }
 
@@ -1684,7 +1859,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    log->xmlRecord("float4", gbps);
+    log->resultRecord("float4", gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -1697,7 +1872,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyImageView(dev.device, imgView, nullptr);
   vkDestroyImage(dev.device, img, nullptr);
   vkFreeMemory(dev.device, imgMem, nullptr);
-  log->xmlCloseTag();
   return 0;
 }
 
@@ -1710,8 +1884,8 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = cfg.computeIters;
 
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  log->xmlOpenTag("atomic_throughput");
-  log->xmlAppendAttribs("unit", "gops");
+  auto scope_5 = log->resultScope("atomic_throughput");
+  log->resultScopeAttribute("unit", "gops");
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = 32ULL * 1024 * 1024;
@@ -1782,7 +1956,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->xmlRecord("global", gops);
+    log->resultRecord("global", gops);
   }
 
   // Local atomics: one int counter per workgroup.
@@ -1793,11 +1967,317 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->xmlRecord("local", gops);
+    log->resultRecord("local", gops);
   }
 
-  log->xmlCloseTag();
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Kernel launch latency (Vulkan) -- two metrics:
+//
+//   dispatch  : one-way host-submit -> GPU-kernel-start.  Requires
+//               VK_EXT_calibrated_timestamps to map host time into the GPU
+//               clock domain.  Skipped (with note) when the extension is
+//               unavailable.
+//   roundtrip : std::chrono around vkQueueSubmit + vkQueueWaitIdle.  Always
+//               reported, directly comparable to the same metric on
+//               OpenCL/CUDA/Metal.
+// ---------------------------------------------------------------------------
+
+int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
+
+  log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
+  auto scope_6 = log->resultScope("kernel_launch_latency");
+  log->resultScopeAttribute("unit", "us");
+
+  // Pipeline layout with no descriptor sets and no push constants.
+  VkPipelineLayoutCreateInfo plCI = {};
+  plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
+  if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
+  {
+    log->print(TAB TAB "pipeline layout creation failed" NEWLINE);
+    return -1;
+  }
+
+  // Shader module from the embedded no-op SPIR-V.
+  VkShaderModuleCreateInfo smCI = {};
+  smCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  smCI.codeSize = vk_shaders::kernel_latency_size;
+  smCI.pCode    = vk_shaders::kernel_latency;
+  VkShaderModule shaderModule = VK_NULL_HANDLE;
+  if (vkCreateShaderModule(dev.device, &smCI, nullptr, &shaderModule) != VK_SUCCESS)
+  {
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    log->print(TAB TAB "shader module creation failed" NEWLINE);
+    return -1;
+  }
+
+  VkComputePipelineCreateInfo pCI = {};
+  pCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  pCI.layout = pipeLayout;
+  pCI.stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  pCI.stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+  pCI.stage.module = shaderModule;
+  pCI.stage.pName  = "main";
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  if (vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &pCI, nullptr, &pipeline) != VK_SUCCESS)
+  {
+    vkDestroyShaderModule(dev.device, shaderModule, nullptr);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    log->print(TAB TAB "compute pipeline creation failed" NEWLINE);
+    return -1;
+  }
+
+  // GPU timestamp query pool used by the dispatch-latency path: a single
+  // TOP_OF_PIPE timestamp tells us when the GPU started executing.
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(dev.physicalDevice, &props);
+  float timestampPeriodNs = props.limits.timestampPeriod;
+  bool haveTimestamps = (timestampPeriodNs > 0.0f) && dev.info.calibratedTimestampsSupported;
+
+  // Resolve VK_EXT_calibrated_timestamps function pointers.  These let us
+  // capture a (host_t, gpu_t) pair "at the same instant" so we can convert
+  // GPU timestamps into the host clock domain and measure exact one-way
+  // dispatch latency, the same way OpenCL profiling reports QUEUED -> START.
+  PFN_vkGetCalibratedTimestampsEXT pfnGetCalTs = nullptr;
+  VkTimeDomainEXT hostDomain = VK_TIME_DOMAIN_DEVICE_EXT; // sentinel: unset
+  if (haveTimestamps)
+  {
+    pfnGetCalTs = (PFN_vkGetCalibratedTimestampsEXT)
+        vkGetDeviceProcAddr(dev.device, "vkGetCalibratedTimestampsEXT");
+    auto pfnGetDomains = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)
+        vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
+    if (pfnGetCalTs && pfnGetDomains)
+    {
+      uint32_t n = 0;
+      pfnGetDomains(dev.physicalDevice, &n, nullptr);
+      std::vector<VkTimeDomainEXT> domains(n);
+      pfnGetDomains(dev.physicalDevice, &n, domains.data());
+      // Prefer a host monotonic clock so we can read it cheaply with
+      // std::chrono::steady_clock (CLOCK_MONOTONIC on POSIX, QPC on Windows).
+      VkTimeDomainEXT preferred[] = {
+#if defined(_WIN32)
+        VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT,
+#else
+        VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT,
+        VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT,
+#endif
+      };
+      for (auto p : preferred)
+      {
+        for (auto d : domains) if (d == p) { hostDomain = p; break; }
+        if (hostDomain != VK_TIME_DOMAIN_DEVICE_EXT) break;
+      }
+    }
+    if (hostDomain == VK_TIME_DOMAIN_DEVICE_EXT)
+      haveTimestamps = false; // can't pin host<->device clocks; skip dispatch
+  }
+
+  VkQueryPool queryPool = VK_NULL_HANDLE;
+  if (haveTimestamps)
+  {
+    VkQueryPoolCreateInfo qpCI = {};
+    qpCI.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qpCI.queryCount = 1;
+    if (vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool) != VK_SUCCESS)
+      haveTimestamps = false;
+  }
+
+  // Pre-record a 1x1x1 dispatch.  Reusing one command buffer across iters
+  // keeps record overhead out of the timing loop.
+  VkCommandBufferAllocateInfo allocInfo = {};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = dev.commandPool;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = 1;
+  VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
+  vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
+
+  VkCommandBufferBeginInfo beginInfo = {};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+  vkBeginCommandBuffer(cmdBuf, &beginInfo);
+  if (haveTimestamps)
+  {
+    vkCmdResetQueryPool(cmdBuf, queryPool, 0, 1);
+    vkCmdWriteTimestamp(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, 0);
+  }
+  vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdDispatch(cmdBuf, 1, 1, 1);
+  vkEndCommandBuffer(cmdBuf);
+
+  // Get a calibrated (host, gpu) pair.  Stored in driver-domain units:
+  //   ns since CLOCK_MONOTONIC epoch (POSIX) or QPC ticks (Windows).
+  // We re-read the matching host timestamp in the SAME domain inside the
+  // hot loop, so the units always match across the subtraction.
+  auto getCalibrated = [&](uint64_t &hostOut, uint64_t &gpuOut) -> bool {
+    VkCalibratedTimestampInfoEXT infos[2] = {};
+    infos[0].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
+    infos[0].timeDomain = hostDomain;
+    infos[1].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT;
+    infos[1].timeDomain = VK_TIME_DOMAIN_DEVICE_EXT;
+    uint64_t ts[2] = {0, 0};
+    uint64_t maxDev = 0;
+    if (pfnGetCalTs(dev.device, 2, infos, ts, &maxDev) != VK_SUCCESS)
+      return false;
+    hostOut = ts[0];
+    gpuOut  = ts[1];
+    return true;
+  };
+
+  // Read the host clock in the same domain as `hostDomain`.  POSIX:
+  // CLOCK_MONOTONIC nanoseconds; Windows: QPC ticks.  Matches what the
+  // driver returns for VK_TIME_DOMAIN_CLOCK_MONOTONIC{,_RAW}_EXT and
+  // VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT respectively, so the
+  // raw uint64 can be subtracted directly from `hostCalib`.
+  auto hostNowInDriverDomain = [&]() -> uint64_t {
+#if defined(_WIN32)
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return (uint64_t)c.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime((hostDomain == VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT)
+                    ? CLOCK_MONOTONIC_RAW : CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+  };
+
+  // Conversion factor from host driver-domain "ticks" to nanoseconds.
+  // POSIX: ticks ARE nanoseconds, factor = 1.  Windows: ticks are QPC,
+  // factor = 1e9 / QPC_frequency.
+  double hostTickNs = 1.0;
+#if defined(_WIN32)
+  {
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    hostTickNs = 1e9 / (double)freq.QuadPart;
+  }
+#endif
+
+  // Calibrate ONCE before the loop.  vkGetCalibratedTimestampsEXT itself
+  // costs a few microseconds; doing it per-iter pollutes the dispatch
+  // measurement by exactly that cost.  Clock drift over our short
+  // measurement window is negligible (<<1us across thousands of iters
+  // on every modern OS clock).
+  uint64_t hostCalib = 0, gpuCalib = 0;
+  if (haveTimestamps && !getCalibrated(hostCalib, gpuCalib))
+    haveTimestamps = false;
+
+  // Warmup
+  for (unsigned int w = 0; w < warmupCount; w++)
+    dev.submitAndWait(cmdBuf);
+
+  double totalDispatchUs  = 0;
+  double totalRoundtripUs = 0;
+  unsigned int dispatchSamples = 0;
+  for (unsigned int i = 0; i < iters; i++)
+  {
+    uint64_t hostSubmit = haveTimestamps ? hostNowInDriverDomain() : 0;
+    auto chronoStart = std::chrono::high_resolution_clock::now();
+    dev.submitAndWait(cmdBuf);
+    auto chronoEnd = std::chrono::high_resolution_clock::now();
+    totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(chronoEnd - chronoStart).count() / 1000.0;
+
+    if (haveTimestamps)
+    {
+      uint64_t gpuStart = 0;
+      if (vkGetQueryPoolResults(dev.device, queryPool, 0, 1,
+                                sizeof(gpuStart), &gpuStart, sizeof(uint64_t),
+                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+      {
+        // Convert everything to nanoseconds, then to microseconds.
+        double hostSubmitNs = (double)hostSubmit * hostTickNs;
+        double hostCalibNs  = (double)hostCalib  * hostTickNs;
+        double gpuDeltaNs   = (double)((int64_t)gpuStart - (int64_t)gpuCalib) * (double)timestampPeriodNs;
+        double hostStartNs  = hostCalibNs + gpuDeltaNs;
+        double dispatchUs   = (hostStartNs - hostSubmitNs) / 1000.0;
+        if (dispatchUs > 0)
+        {
+          totalDispatchUs += dispatchUs;
+          dispatchSamples++;
+        }
+      }
+    }
+  }
+
+  double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
+  log->print(TAB TAB "dispatch  : ");
+  if (dispatchSamples > 0)
+  {
+    float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
+    log->print(dispatchUs);
+    log->print(NEWLINE);
+    log->resultRecord("dispatch", dispatchUs);
+  }
+  else
+  {
+    log->print("skipped (needs VK_EXT_calibrated_timestamps)" NEWLINE);
+    log->recordSkip("dispatch", ResultStatus::Unsupported,
+                     "Needs VK_EXT_calibrated_timestamps");
+  }
+  log->print(TAB TAB "roundtrip : ");
+  log->print((float)avgRoundtripUs);
+  log->print(NEWLINE);
+  log->resultRecord("roundtrip", (float)avgRoundtripUs);
+
+  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  if (queryPool != VK_NULL_HANDLE)
+    vkDestroyQueryPool(dev.device, queryPool, nullptr);
+  vkDestroyPipeline(dev.device, pipeline, nullptr);
+  vkDestroyShaderModule(dev.device, shaderModule, nullptr);
+  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+
+  return 0;
+}
+
+// Free-function enumeration used by --list-devices (desktop) and the Android
+// JNI surface. Spins up a throwaway VkInstance just long enough to read
+// physical-device properties, then tears it down.
+BackendInventory enumerateVulkan()
+{
+  BackendInventory inv;
+  inv.backend = "Vulkan";
+
+  vkPeak vk;
+  if (!vk.initInstance())
+    return inv;  // available stays false
+
+  inv.available = !vk.physicalDevices.empty();
+
+  InventoryPlatform plat;
+  plat.index = 0;
+  plat.name  = "Vulkan";
+
+  for (size_t i = 0; i < vk.physicalDevices.size(); i++)
+  {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(vk.physicalDevices[i], &props);
+
+    InventoryDevice dev;
+    dev.index   = static_cast<int>(i);
+    dev.name    = props.deviceName;
+    dev.typeStr = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)   ? "Discrete GPU"
+                : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) ? "Integrated GPU"
+                : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)            ? "CPU"
+                                                                               : "Other";
+    {
+      std::ostringstream api;
+      api << VK_VERSION_MAJOR(props.apiVersion) << "."
+          << VK_VERSION_MINOR(props.apiVersion) << "."
+          << VK_VERSION_PATCH(props.apiVersion);
+      dev.apiVersion = api.str();
+    }
+    plat.devices.push_back(std::move(dev));
+  }
+
+  inv.platforms.push_back(std::move(plat));
+  return inv;
 }
 
 #endif // ENABLE_VULKAN

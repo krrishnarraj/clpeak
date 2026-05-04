@@ -1,41 +1,42 @@
+#include <options.h>
 #include <clpeak.h>
 #include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <iostream>
 #include <limits>
+#include <sstream>
 #include <version.h>
 
+// Help text.  Backend-specific flags are gated by the same ENABLE_* macros
+// as the runtime so the help reflects the binary's actual capability.  v2
+// flag surface: 4 category flags, canonical test names, --no-<x> for both.
 static const char *helpStr =
     "\n clpeak [OPTIONS]"
     "\n"
-    "\n OPTIONS:"
-    "\n  -p, --platform num          choose platform (num starts with 0)"
-    "\n  -d, --device num            choose device (num starts with 0)"
-    "\n  -pn, --platformName name    choose platform name"
-    "\n  -dn, --deviceName name      choose device name"
-    "\n  -tn, --testName name        choose test name"
-    "\n  -i, --iters                 choose the number of iterations per kernel (default: CPU=10, GPU=30)"
+    "\n GLOBAL OPTIONS:"
+    "\n  -h, --help                  display help message"
+    "\n  -v, --version               display version"
+    "\n  -i, --iters num             number of iterations per kernel (default: CPU=10, GPU=30)"
     "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
-    "\n  --use-event-timer           time using cl events instead of std chrono timer"
-    "\n                              hide driver latencies [default: No]"
-    "\n  --global-bandwidth          selectively run global bandwidth test"
-    "\n  --local-bandwidth           selectively run local memory bandwidth test"
-    "\n  --image-bandwidth           selectively run image (texture) bandwidth test"
-    "\n  --atomic-throughput         selectively run atomic throughput test"
-    "\n  --compute-hp                selectively run half precision compute test"
-    "\n  --compute-mp                selectively run mixed-precision (fp16xfp16+fp32) compute test"
-    "\n  --compute-sp                selectively run single precision compute test"
-    "\n  --compute-dp                selectively run double precision compute test"
-    "\n  --compute-integer           selectively run integer compute test"
-    "\n  --compute-intfast           selectively run integer 24bit compute test"
-    "\n  --compute-char              selectively run char (integer 8bit) compute test"
-    "\n  --compute-short             selectively run short (integer 16bit) compute test"
-    "\n  --compute-int8-dp           selectively run INT8 dot-product (DP4a) compute test"
-    "\n  --compute-int4-packed       selectively run packed INT4 compute test (emulated)"
-    "\n  --compute-bf16              selectively run BF16 compute test (Vulkan only)"
-    "\n  --coop-matrix               selectively run cooperative-matrix tensor-core tests (Vulkan only)"
-    "\n  --transfer-bandwidth        selectively run transfer bandwidth test"
-    "\n  --kernel-latency            selectively run kernel latency test"
-    "\n  --all-tests                 run all above tests [default]"
-    "\n  --list-devices              list available platforms/devices and exit"
+    "\n  --list-devices              list available devices for every backend and exit"
+    "\n  --xml-file file             save results to an XML file"
+    "\n  --json-file file            save results to a JSON file"
+    "\n  --csv-file file             save results to a CSV file"
+    "\n  --compare file              compare results against a baseline (JSON / CSV / XML)"
+    "\n"
+    "\n BACKEND SELECTION (default: run every available backend):"
+    "\n  --opencl                    run only the OpenCL backend"
+#ifdef ENABLE_VULKAN
+    "\n  --vulkan                    run only the Vulkan backend"
+#endif
+#ifdef ENABLE_CUDA
+    "\n  --cuda                      run only the CUDA backend"
+#endif
+#ifdef ENABLE_METAL
+    "\n  --metal                     run only the Metal backend"
+#endif
+    "\n  (multiple --<backend> flags can be combined: --cuda --vulkan)"
 #if defined(ENABLE_VULKAN) || defined(ENABLE_CUDA) || defined(ENABLE_METAL)
     "\n  --no-opencl                 skip the OpenCL backend"
 #endif
@@ -44,282 +45,402 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CUDA
     "\n  --no-cuda                   skip the CUDA backend"
-    "\n  --wmma                      selectively run CUDA WMMA tensor-core tests"
 #endif
 #ifdef ENABLE_METAL
     "\n  --no-metal                  skip the Metal backend"
-    "\n  --simdgroup-matrix          selectively run Metal simdgroup_matrix tensor tests"
 #endif
-    "\n  --xml-file file_name        save results to an XML file"
-    "\n  --json-file file_name       save results to a JSON file"
-    "\n  --csv-file file_name        save results to a CSV file"
-    "\n  --compare file_name         compare results against a baseline file"
-    "\n                              (supports JSON, CSV, and XML formats)"
-    "\n  -v, --version               display version"
-    "\n  -h, --help                  display help message"
+    "\n"
+    "\n DEVICE SELECTION:"
+    "\n  --cl-platform num           OpenCL platform index (0-based)"
+    "\n  --cl-device num             OpenCL device index within the platform"
+    "\n  --cl-platform-name str      match OpenCL platform by name"
+    "\n  --cl-device-name str        match OpenCL device by name"
+#ifdef ENABLE_VULKAN
+    "\n  --vk-device num             Vulkan physical-device index (0-based)"
+#endif
+#ifdef ENABLE_CUDA
+    "\n  --cuda-device num           CUDA device ordinal (0-based)"
+#endif
+#ifdef ENABLE_METAL
+    "\n  --mtl-device num            Metal device index (0-based)"
+#endif
+    "\n"
+    "\n TEST CATEGORY SELECTION (default: run every category):"
+    "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
+    "\n  --int-compute / --no-int-compute     integer compute (gops / tops)"
+    "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (gbps)"
+    "\n  --latency     / --no-latency         kernel-launch latency (us)"
+    "\n  Any positive --<category> flag switches to allow-list mode."
+    "\n"
+    "\n TEST SELECTION (default: every test the backend supports;"
+    "\n any positive --<test> flag switches to allow-list mode;"
+    "\n --no-<test> always subtracts):"
+    "\n  --single-precision-compute        | --no-single-precision-compute"
+    "\n  --half-precision-compute          | --no-half-precision-compute"
+    "\n  --double-precision-compute        | --no-double-precision-compute"
+    "\n  --mixed-precision-compute         | --no-mixed-precision-compute"
+    "\n  --bfloat16-compute                | --no-bfloat16-compute"
+    "\n  --integer-compute                 | --no-integer-compute"
+    "\n  --integer-compute-fast            | --no-integer-compute-fast      [OpenCL]"
+    "\n  --integer-compute-char            | --no-integer-compute-char      [OpenCL]"
+    "\n  --integer-compute-short           | --no-integer-compute-short     [OpenCL]"
+    "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
+    "\n  --int4-packed-compute             | --no-int4-packed-compute"
+#ifdef ENABLE_CUDA
+    "\n  --wmma                            | --no-wmma                      [CUDA]"
+    "\n  --bmma                            | --no-bmma                      [CUDA]"
+    "\n  --cublas                          | --no-cublas                    [CUDA]"
+#endif
+#ifdef ENABLE_VULKAN
+    "\n  --coopmat                         | --no-coopmat                   [Vulkan]"
+#endif
+#ifdef ENABLE_METAL
+    "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
+    "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
+#endif
+    "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
+    "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
+    "\n  --image-memory-bandwidth          | --no-image-memory-bandwidth"
+    "\n  --transfer-bandwidth              | --no-transfer-bandwidth"
+    "\n  --atomic-throughput               | --no-atomic-throughput"
+    "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
+    "\n"
+    "\n OPENCL-SPECIFIC:"
+    "\n  --use-event-timer           time using cl events instead of std chrono"
     "\n";
 
-static void printParseErrorAndExit()
+// ---- Flag tables ----------------------------------------------------------
+
+struct TestFlag {
+  const char *name;        // flag suffix; e.g. "wmma" matches --wmma / --no-wmma
+  Benchmark   test;
+};
+
+static const TestFlag testFlags[] = {
+  {"single-precision-compute",  Benchmark::ComputeSP},
+  {"half-precision-compute",    Benchmark::ComputeHP},
+  {"double-precision-compute",  Benchmark::ComputeDP},
+  {"mixed-precision-compute",   Benchmark::ComputeMP},
+  {"bfloat16-compute",          Benchmark::ComputeBF16},
+  {"integer-compute",           Benchmark::ComputeInt},
+  {"integer-compute-fast",      Benchmark::ComputeIntFast},
+  {"integer-compute-char",      Benchmark::ComputeChar},
+  {"integer-compute-short",     Benchmark::ComputeShort},
+  {"int8-dot-product-compute",  Benchmark::ComputeInt8DP},
+  {"int4-packed-compute",       Benchmark::ComputeInt4Packed},
+  {"wmma",                      Benchmark::Wmma},
+  {"bmma",                      Benchmark::Bmma},
+  {"coopmat",                   Benchmark::CoopMatrix},
+  {"simdgroup-matrix",          Benchmark::SimdgroupMatrix},
+  {"cublas",                    Benchmark::Cublas},
+  {"mps-gemm",                  Benchmark::MpsGemm},
+  {"global-memory-bandwidth",   Benchmark::GlobalBW},
+  {"local-memory-bandwidth",    Benchmark::LocalBW},
+  {"image-memory-bandwidth",    Benchmark::ImageBW},
+  {"transfer-bandwidth",        Benchmark::TransferBW},
+  {"atomic-throughput",         Benchmark::AtomicThroughput},
+  {"kernel-launch-latency",     Benchmark::KernelLatency},
+};
+static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
+
+struct CategoryFlag {
+  const char *name;
+  Category    cat;
+};
+
+static const CategoryFlag categoryFlags[] = {
+  {"fp-compute",  Category::FpCompute},
+  {"int-compute", Category::IntCompute},
+  {"bandwidth",   Category::Bandwidth},
+  {"latency",     Category::Latency},
+};
+static const int numCategoryFlags = sizeof(categoryFlags) / sizeof(categoryFlags[0]);
+
+// ---- Helpers --------------------------------------------------------------
+
+static void printHelpAndExit(int code)
 {
-  std::cout << helpStr;
-  std::cout << NEWLINE;
+  std::cout << helpStr << "\n";
   std::cout.flush();
-  exit(-1);
+  std::exit(code);
 }
 
 static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
 {
   char *end = nullptr;
   errno = 0;
-
   value = strtoul(arg, &end, 0);
-
   return (errno != ERANGE) && (end != arg) && (*end == '\0');
 }
 
 static bool parseUIntArg(const char *arg, unsigned int &value, bool allowZero = true)
 {
   unsigned long parsed;
-
-  if (!parseUnsignedLongArg(arg, parsed) || (parsed > std::numeric_limits<unsigned int>::max()) || (!allowZero && (parsed == 0)))
+  if (!parseUnsignedLongArg(arg, parsed) ||
+      parsed > std::numeric_limits<unsigned int>::max() ||
+      (!allowZero && parsed == 0))
     return false;
-
   value = static_cast<unsigned int>(parsed);
   return true;
 }
 
-static void printParseMessage(const std::string &message)
+static bool parseIntArg(const char *arg, int &value)
 {
-  std::cout << message;
-  std::cout.flush();
+  unsigned long parsed;
+  if (!parseUnsignedLongArg(arg, parsed) ||
+      parsed > static_cast<unsigned long>(std::numeric_limits<int>::max()))
+    return false;
+  value = static_cast<int>(parsed);
+  return true;
 }
 
-// Map from CLI flag to Benchmark enum
-struct TestFlag {
-  const char *flag;
-  Benchmark test;
-};
-
-static const TestFlag testFlags[] = {
-  {"--global-bandwidth",  Benchmark::GlobalBW},
-  {"--local-bandwidth",   Benchmark::LocalBW},
-  {"--image-bandwidth",   Benchmark::ImageBW},
-  {"--atomic-throughput",  Benchmark::AtomicThroughput},
-  {"--compute-hp",        Benchmark::ComputeHP},
-  {"--compute-mp",        Benchmark::ComputeMP},
-  {"--compute-sp",        Benchmark::ComputeSP},
-  {"--compute-dp",        Benchmark::ComputeDP},
-  {"--compute-integer",   Benchmark::ComputeInt},
-  {"--compute-intfast",   Benchmark::ComputeIntFast},
-  {"--compute-char",      Benchmark::ComputeChar},
-  {"--compute-short",     Benchmark::ComputeShort},
-  {"--compute-int8-dp",   Benchmark::ComputeInt8DP},
-  {"--compute-int4-packed", Benchmark::ComputeInt4Packed},
-  {"--compute-bf16",      Benchmark::ComputeBF16},
-  {"--coop-matrix",       Benchmark::CoopMatrix},
-  {"--wmma",              Benchmark::Wmma},
-  {"--simdgroup-matrix",  Benchmark::SimdgroupMatrix},
-  {"--transfer-bandwidth", Benchmark::TransferBW},
-  {"--kernel-latency",    Benchmark::KernelLatency},
-};
-static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
-
-int clPeak::parseArgs(int argc, char **argv)
+static const char *requireArg(int argc, char **argv, int &i, const char *flag)
 {
-  bool forcedTests = false;
-  bool enableXml = false;
-  std::string xmlFileName;
-  std::string jsonFile;
-  std::string csvFile;
-  std::string compareFile;
+  if (i + 1 >= argc)
+  {
+    std::cerr << "clpeak: missing argument for " << flag << "\n";
+    printHelpAndExit(-1);
+  }
+  return argv[++i];
+}
+
+// Return true if `flag` matches "--<name>" or "--no-<name>".  In the latter
+// case `out_negated` is set; otherwise it's cleared.
+static bool matchFlag(const char *flag, const char *name, bool &out_negated)
+{
+  // strip leading '--'
+  if (flag[0] != '-' || flag[1] != '-') return false;
+  const char *body = flag + 2;
+  if (strncmp(body, "no-", 3) == 0)
+  {
+    if (strcmp(body + 3, name) == 0) { out_negated = true; return true; }
+    return false;
+  }
+  if (strcmp(body, name) == 0) { out_negated = false; return true; }
+  return false;
+}
+
+// Apply one test-selection flip.  Honours allow-list semantics.
+static void applyTestFlag(CliOptions &out, Benchmark b, bool negated)
+{
+  if (negated)
+  {
+    out.enabledTests.reset(static_cast<size_t>(b));
+    return;
+  }
+  if (!out.forcedTests)
+  {
+    out.enabledTests.reset();
+    out.forcedTests = true;
+  }
+  out.enabledTests.set(static_cast<size_t>(b));
+}
+
+static void applyCategoryFlag(CliOptions &out, Category c, bool negated)
+{
+  if (negated)
+  {
+    out.enabledCategories.reset(static_cast<size_t>(c));
+    return;
+  }
+  if (!out.forcedCategories)
+  {
+    out.enabledCategories.reset();
+    out.forcedCategories = true;
+  }
+  out.enabledCategories.set(static_cast<size_t>(c));
+}
+
+int parseCliOptions(int argc, char **argv, CliOptions &out)
+{
+  // Positive backend includes.  When any --<backend> flag is present, only
+  // listed backends run; everything else gets skipped at the end of parsing.
+  bool includeAny = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incMetal = false;
 
   for (int i = 1; i < argc; i++)
   {
-    if ((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))
-    {
-      printParseMessage(helpStr);
-      printParseMessage(NEWLINE);
-      exit(0);
-    }
-    else if ((strcmp(argv[i], "-v") == 0) || (strcmp(argv[i], "--version") == 0))
-    {
-      std::stringstream versionStr;
-      versionStr << "clpeak version: " << CLPEAK_VERSION_STR;
+    const char *a = argv[i];
+    bool negated = false;
 
-      printParseMessage(versionStr.str());
-      printParseMessage(NEWLINE);
-      exit(0);
-    }
-    else if ((strcmp(argv[i], "-p") == 0) || (strcmp(argv[i], "--platform") == 0))
+    // ---- help / version ---------------------------------------------------
+    if (!strcmp(a, "-h") || !strcmp(a, "--help"))
     {
-      if ((i + 1) < argc)
-      {
-        unsigned long parsed;
+      printHelpAndExit(0);
+    }
+    else if (!strcmp(a, "-v") || !strcmp(a, "--version"))
+    {
+      std::cout << "clpeak version: " << CLPEAK_VERSION_STR << "\n";
+      std::exit(0);
+    }
+    // ---- backend selection ----------------------------------------------
+    else if (!strcmp(a, "--no-opencl")) out.skipOpenCL = true;
+    else if (!strcmp(a, "--no-vulkan")) out.skipVulkan = true;
+    else if (!strcmp(a, "--no-cuda"))   out.skipCuda   = true;
+    else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
+    else if (!strcmp(a, "--opencl"))    { incOpenCL = true; includeAny = true; }
+    else if (!strcmp(a, "--vulkan"))    { incVulkan = true; includeAny = true; }
+    else if (!strcmp(a, "--cuda"))      { incCuda   = true; includeAny = true; }
+    else if (!strcmp(a, "--metal"))     { incMetal  = true; includeAny = true; }
 
-        if (!parseUnsignedLongArg(argv[i + 1], parsed))
-          printParseErrorAndExit();
+    // ---- iters / warmup -------------------------------------------------
+    else if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      unsigned int parsed;
+      if (!parseUIntArg(v, parsed, /*allowZero=*/false))
+      {
+        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
+        printHelpAndExit(-1);
+      }
+      out.forceIters = true;
+      out.iters = parsed;
+    }
+    else if (!strcmp(a, "-w") || !strcmp(a, "--warmup"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      unsigned int parsed;
+      if (!parseUIntArg(v, parsed))
+      {
+        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
+        printHelpAndExit(-1);
+      }
+      out.warmupCount = parsed;
+    }
 
-        forcePlatform = true;
-        specifiedPlatform = parsed;
-        i++;
-      }
-    }
-    else if ((strcmp(argv[i], "-d") == 0) || (strcmp(argv[i], "--device") == 0))
+    // ---- OpenCL device selection ----------------------------------------
+    else if (!strcmp(a, "--cl-platform"))
     {
-      if ((i + 1) < argc)
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseUnsignedLongArg(v, out.platformIndex))
       {
-        unsigned long parsed;
+        std::cerr << "clpeak: invalid platform index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+      out.forcePlatform = true;
+    }
+    else if (!strcmp(a, "--cl-device"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseUnsignedLongArg(v, out.deviceIndex))
+      {
+        std::cerr << "clpeak: invalid device index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+      out.forceDevice = true;
+    }
+    else if (!strcmp(a, "--cl-platform-name"))
+    {
+      out.platformName = requireArg(argc, argv, i, a);
+      out.forcePlatformName = true;
+    }
+    else if (!strcmp(a, "--cl-device-name"))
+    {
+      out.deviceName = requireArg(argc, argv, i, a);
+      out.forceDeviceName = true;
+    }
 
-        if (!parseUnsignedLongArg(argv[i + 1], parsed))
-          printParseErrorAndExit();
+    // ---- Per-backend device selection -----------------------------------
+    else if (!strcmp(a, "--vk-device"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseIntArg(v, out.vkDeviceIndex))
+      {
+        std::cerr << "clpeak: invalid Vulkan device index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+    }
+    else if (!strcmp(a, "--cuda-device"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseIntArg(v, out.cudaDeviceIndex))
+      {
+        std::cerr << "clpeak: invalid CUDA device index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+    }
+    else if (!strcmp(a, "--mtl-device"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseIntArg(v, out.mtlDeviceIndex))
+      {
+        std::cerr << "clpeak: invalid Metal device index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+    }
 
-        forceDevice = true;
-        specifiedDevice = parsed;
-        i++;
-      }
-    }
-    else if ((strcmp(argv[i], "-pn") == 0) || (strcmp(argv[i], "--platformName") == 0))
+    // ---- OpenCL-specific timer ------------------------------------------
+    else if (!strcmp(a, "--use-event-timer"))
     {
-      if ((i + 1) < argc)
-      {
-        forcePlatformName = true;
-        specifiedPlatformName = argv[i + 1];
-        i++;
-      }
+      out.useEventTimer = true;
     }
-    else if ((strcmp(argv[i], "-dn") == 0) || (strcmp(argv[i], "--deviceName") == 0))
-    {
-      if ((i + 1) < argc)
-      {
-        forceDeviceName = true;
-        specifiedDeviceName = argv[i + 1];
-        i++;
-      }
-    }
-    else if ((strcmp(argv[i], "-tn") == 0) || (strcmp(argv[i], "--testName") == 0))
-    {
-      if ((i + 1) < argc)
-      {
-        forceTest = true;
-        specifiedTestName = argv[i + 1];
-        i++;
-      }
-    }
-    else if ((strcmp(argv[i], "-i") == 0) || (strcmp(argv[i], "--iters") == 0))
-    {
-      if ((i + 1) < argc)
-      {
-        unsigned int parsed;
 
-        if (!parseUIntArg(argv[i + 1], parsed, false))
-          printParseErrorAndExit();
+    // ---- Modes ----------------------------------------------------------
+    else if (!strcmp(a, "--list-devices"))
+    {
+      out.listDevices = true;
+    }
 
-        forceIters = true;
-        specifiedIters = parsed;
-        i++;
-      }
-    }
-    else if ((strcmp(argv[i], "-w") == 0) || (strcmp(argv[i], "--warmup") == 0))
+    // ---- Output ---------------------------------------------------------
+    else if (!strcmp(a, "--xml-file"))
     {
-      if ((i + 1) < argc)
-      {
-        unsigned int parsed;
+      out.xmlFile    = requireArg(argc, argv, i, a);
+      out.enableXml  = true;
+    }
+    else if (!strcmp(a, "--json-file"))
+    {
+      out.jsonFile   = requireArg(argc, argv, i, a);
+      out.enableJson = true;
+    }
+    else if (!strcmp(a, "--csv-file"))
+    {
+      out.csvFile    = requireArg(argc, argv, i, a);
+      out.enableCsv  = true;
+    }
+    else if (!strcmp(a, "--compare"))
+    {
+      out.compareFile = requireArg(argc, argv, i, a);
+    }
 
-        if (!parseUIntArg(argv[i + 1], parsed))
-          printParseErrorAndExit();
-
-        warmupCount = parsed;
-        i++;
-      }
-    }
-    else if (strcmp(argv[i], "--use-event-timer") == 0)
-    {
-      useEventTimer = true;
-    }
-    else if (strcmp(argv[i], "--list-devices") == 0)
-    {
-      listDevices = true;
-    }
-    else if (strcmp(argv[i], "--all-tests") == 0)
-    {
-      enableAll();
-    }
-    else if (strcmp(argv[i], "--xml-file") == 0)
-    {
-      if ((i + 1) < argc)
-      {
-        enableXml = true;
-        xmlFileName = argv[i + 1];
-        i++;
-      }
-    }
-    else if (strcmp(argv[i], "--json-file") == 0)
-    {
-      if ((i + 1) < argc)
-      {
-        enableJson = true;
-        jsonFile = argv[i + 1];
-        i++;
-      }
-    }
-    else if (strcmp(argv[i], "--csv-file") == 0)
-    {
-      if ((i + 1) < argc)
-      {
-        enableCsv = true;
-        csvFile = argv[i + 1];
-        i++;
-      }
-    }
-    else if (strcmp(argv[i], "--compare") == 0)
-    {
-      if ((i + 1) < argc)
-      {
-        compareFileName = argv[i + 1];
-        i++;
-      }
-    }
-    else if (strcmp(argv[i], "--no-opencl") == 0 ||
-             strcmp(argv[i], "--no-vulkan") == 0 ||
-             strcmp(argv[i], "--no-cuda")   == 0 ||
-             strcmp(argv[i], "--no-metal")  == 0)
-    {
-      // Backend-selection flags consumed in entry.cpp; ignore here.
-    }
+    // ---- Category / test selection --------------------------------------
     else
     {
-      // Check if it's a test selection flag
       bool matched = false;
-      for (int t = 0; t < numTestFlags; t++)
+
+      for (int t = 0; t < numCategoryFlags && !matched; t++)
       {
-        if (strcmp(argv[i], testFlags[t].flag) == 0)
+        if (matchFlag(a, categoryFlags[t].name, negated))
         {
-          if (!forcedTests)
-          {
-            disableAll();
-            forcedTests = true;
-          }
-          enableTest(testFlags[t].test);
+          applyCategoryFlag(out, categoryFlags[t].cat, negated);
           matched = true;
-          break;
         }
       }
-      if (!matched)
+
+      for (int t = 0; t < numTestFlags && !matched; t++)
       {
-        printParseMessage(helpStr);
-        printParseMessage(NEWLINE);
-        exit(-1);
+        if (matchFlag(a, testFlags[t].name, negated))
+        {
+          applyTestFlag(out, testFlags[t].test, negated);
+          matched = true;
+        }
       }
+
+      if (matched) continue;
+
+      std::cerr << "clpeak: unknown option '" << a << "'\n";
+      printHelpAndExit(-1);
     }
   }
 
-  jsonFileName = jsonFile;
-  csvFileName  = csvFile;
+  // Apply positive backend selection: any --<backend> flag means "only run
+  // the listed backends".  Skips set by --no-<backend> still apply.
+  if (includeAny)
+  {
+    if (!incOpenCL) out.skipOpenCL = true;
+    if (!incVulkan) out.skipVulkan = true;
+    if (!incCuda)   out.skipCuda   = true;
+    if (!incMetal)  out.skipMetal  = true;
+  }
 
-  // Allocate logger after parsing (not needed for --list-devices but harmless)
-  log.reset(new logger(enableXml, xmlFileName,
-                       enableJson, jsonFileName,
-                       enableCsv,  csvFileName,
-                       compareFileName));
   return 0;
 }
