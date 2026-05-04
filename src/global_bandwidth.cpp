@@ -6,7 +6,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   cl::NDRange globalSize, localSize;
   float *arr = nullptr;
 
-  if (!isTestEnabled(Benchmark::GlobalBW))
+  if (!isAllowed(Benchmark::GlobalBW))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();

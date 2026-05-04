@@ -16,7 +16,7 @@
 
 int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  if (!isTestEnabled(Benchmark::KernelLatency))
+  if (!isAllowed(Benchmark::KernelLatency))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();

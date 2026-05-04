@@ -6,7 +6,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, gbps;
   cl::NDRange globalSize, localSize;
 
-  if (!isTestEnabled(Benchmark::ImageBW))
+  if (!isAllowed(Benchmark::ImageBW))
     return 0;
 
   log->print(NEWLINE TAB TAB "Image memory bandwidth (GBPS)" NEWLINE);

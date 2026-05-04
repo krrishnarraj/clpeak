@@ -5,7 +5,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, gbps;
   cl::NDRange globalSize, localSize;
 
-  if (!isTestEnabled(Benchmark::LocalBW))
+  if (!isAllowed(Benchmark::LocalBW))
     return 0;
 
   unsigned int iters = cfg.localBWIters;

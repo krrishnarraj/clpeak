@@ -43,7 +43,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 {
   UNUSED(prog);
 
-  if (!isTestEnabled(Benchmark::TransferBW))
+  if (!isAllowed(Benchmark::TransferBW))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
