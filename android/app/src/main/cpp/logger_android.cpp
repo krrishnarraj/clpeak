@@ -33,35 +33,45 @@ logger::~logger()
 
 void logger::print(std::string str)
 {
-  jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(str.c_str()));
+  jstring jstr = jEnv->NewStringUTF(str.c_str());
+  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
+  jEnv->DeleteLocalRef(jstr);
 }
 
 void logger::print(double val)
 {
   std::stringstream ss;
   ss << std::setprecision(2) << std::fixed << val;
-  jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
+  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
+  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
+  jEnv->DeleteLocalRef(jstr);
 }
 
 void logger::print(float val)
 {
   std::stringstream ss;
   ss << std::setprecision(2) << std::fixed << val;
-  jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
+  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
+  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
+  jEnv->DeleteLocalRef(jstr);
 }
 
 void logger::print(int val)
 {
   std::stringstream ss;
   ss << val;
-  jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
+  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
+  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
+  jEnv->DeleteLocalRef(jstr);
 }
 
 void logger::print(unsigned int val)
 {
   std::stringstream ss;
   ss << val;
-  jEnv->CallVoidMethod((*jObj), printCallback, jEnv->NewStringUTF(ss.str().c_str()));
+  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
+  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
+  jEnv->DeleteLocalRef(jstr);
 }
 
 // ---- High-level recording API --------------------------------------------
@@ -228,16 +238,34 @@ void logger::emit(const std::string &metric, ResultStatus status,
   if (status != ResultStatus::Ok || !recordMetricCallback)
     return;
 
+  jstring jBackend  = jEnv->NewStringUTF(e.backend.c_str());
+  jstring jPlatform = jEnv->NewStringUTF(e.platform.c_str());
+  jstring jDevice   = jEnv->NewStringUTF(e.device.c_str());
+  jstring jDriver   = jEnv->NewStringUTF(e.driver.c_str());
+  jstring jCategory = jEnv->NewStringUTF(e.category.c_str());
+  jstring jTest     = jEnv->NewStringUTF(e.test.c_str());
+  jstring jMetric   = jEnv->NewStringUTF(e.metric.c_str());
+  jstring jUnit     = jEnv->NewStringUTF(e.unit.c_str());
+
   jEnv->CallVoidMethod(
       (*jObj),
       recordMetricCallback,
-      jEnv->NewStringUTF(e.backend.c_str()),
-      jEnv->NewStringUTF(e.platform.c_str()),
-      jEnv->NewStringUTF(e.device.c_str()),
-      jEnv->NewStringUTF(e.driver.c_str()),
-      jEnv->NewStringUTF(e.category.c_str()),
-      jEnv->NewStringUTF(e.test.c_str()),
-      jEnv->NewStringUTF(e.metric.c_str()),
-      jEnv->NewStringUTF(e.unit.c_str()),
+      jBackend,
+      jPlatform,
+      jDevice,
+      jDriver,
+      jCategory,
+      jTest,
+      jMetric,
+      jUnit,
       static_cast<jfloat>(value));
+
+  jEnv->DeleteLocalRef(jBackend);
+  jEnv->DeleteLocalRef(jPlatform);
+  jEnv->DeleteLocalRef(jDevice);
+  jEnv->DeleteLocalRef(jDriver);
+  jEnv->DeleteLocalRef(jCategory);
+  jEnv->DeleteLocalRef(jTest);
+  jEnv->DeleteLocalRef(jMetric);
+  jEnv->DeleteLocalRef(jUnit);
 }
