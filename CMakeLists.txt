@@ -98,6 +98,10 @@ if(CLPEAK_HAS_OPENCL_30)
   target_compile_definitions(clpeak PRIVATE CLPEAK_HAS_OPENCL_30)
 endif()
 
+if(WIN32)
+  target_compile_definitions(clpeak PRIVATE NOMINMAX)
+endif()
+
 if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
   target_link_libraries(clpeak ${Vulkan_LIBRARIES})
   target_include_directories(clpeak PRIVATE ${Vulkan_INCLUDE_DIRS})
