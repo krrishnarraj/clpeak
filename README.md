@@ -132,7 +132,7 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Compute INT / INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
 | INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &check; (emul) |
 | Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coop-matrix`) | TFLOPS / TOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
+| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`) | TFLOPS / TOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
 | Vendor-SDK GEMM peak (`--cublas`, `--mps-gemm`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | MPS: fp32/fp16/bf16 |
 | Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; |
 | Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; |
@@ -157,7 +157,7 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 
 ```console
 ./clpeak                              # run every test on every available backend
-./clpeak --compute-sp                 # run only single-precision compute, on every backend
+./clpeak --single-precision-compute   # run only single-precision compute, on every backend
 ./clpeak --metal                      # run only one backend
 ./clpeak --cuda --vulkan              # combine multiple --<backend> flags
 ./clpeak --no-opencl --no-cuda        # or skip the ones you don't want
@@ -165,7 +165,7 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 ./clpeak --cublas                     # CUDA vendor-SDK GEMM peak (cuBLASLt, all dtypes)
 ./clpeak --simdgroup-matrix           # Apple matrix-engine tests (hand-rolled simdgroup_matrix)
 ./clpeak --mps-gemm                   # Apple vendor-SDK GEMM peak (MPS / MPSGraph)
-./clpeak --coop-matrix                # Vulkan tensor-core tests
+./clpeak --coopmat                    # Vulkan tensor-core tests
 ./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
 ./clpeak --compare baseline.json      # diff against a previous run
 ./clpeak --list-devices               # enumerate devices for every backend, no benchmarks
@@ -181,8 +181,6 @@ Multi-GPU machines pick devices per-backend:
 ./clpeak --cuda-device 0                 # CUDA device ordinal
 ./clpeak --mtl-device 0                  # Metal device index
 ```
-
-`--cl-platform` / `--cl-device` / `--cl-platform-name` / `--cl-device-name` are the new spellings of `-p` / `-d` / `-pn` / `-dn`; the short forms still work and emit a deprecation warning.
 
 ## License
 

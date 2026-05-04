@@ -16,7 +16,7 @@ struct CliOptions {
   bool skipMetal  = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
-  // applyOptions can copy it).  -p / --platform / --cl-platform.
+  // applyOptions can copy it).
   bool          forcePlatform     = false;
   unsigned long platformIndex     = 0;
   bool          forcePlatformName = false;

@@ -204,12 +204,6 @@ static const char *requireArg(int argc, char **argv, int &i, const char *flag)
   return argv[++i];
 }
 
-static void deprecate(const char *oldFlag, const char *newFlag)
-{
-  std::cerr << "warning: " << oldFlag
-            << " is deprecated; use " << newFlag << "\n";
-}
-
 // Return true if `flag` matches "--<name>" or "--no-<name>".  In the latter
 // case `out_negated` is set; otherwise it's cleared.
 static bool matchFlag(const char *flag, const char *name, bool &out_negated)
@@ -314,11 +308,9 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       out.warmupCount = parsed;
     }
 
-    // ---- OpenCL device selection (canonical + deprecated aliases) -------
-    else if (!strcmp(a, "--cl-platform") ||
-             !strcmp(a, "-p") || !strcmp(a, "--platform"))
+    // ---- OpenCL device selection ----------------------------------------
+    else if (!strcmp(a, "--cl-platform"))
     {
-      if (strcmp(a, "--cl-platform")) deprecate(a, "--cl-platform");
       const char *v = requireArg(argc, argv, i, a);
       if (!parseUnsignedLongArg(v, out.platformIndex))
       {
@@ -327,10 +319,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       }
       out.forcePlatform = true;
     }
-    else if (!strcmp(a, "--cl-device") ||
-             !strcmp(a, "-d") || !strcmp(a, "--device"))
+    else if (!strcmp(a, "--cl-device"))
     {
-      if (strcmp(a, "--cl-device")) deprecate(a, "--cl-device");
       const char *v = requireArg(argc, argv, i, a);
       if (!parseUnsignedLongArg(v, out.deviceIndex))
       {
@@ -339,17 +329,13 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       }
       out.forceDevice = true;
     }
-    else if (!strcmp(a, "--cl-platform-name") ||
-             !strcmp(a, "-pn") || !strcmp(a, "--platformName"))
+    else if (!strcmp(a, "--cl-platform-name"))
     {
-      if (strcmp(a, "--cl-platform-name")) deprecate(a, "--cl-platform-name");
       out.platformName = requireArg(argc, argv, i, a);
       out.forcePlatformName = true;
     }
-    else if (!strcmp(a, "--cl-device-name") ||
-             !strcmp(a, "-dn") || !strcmp(a, "--deviceName"))
+    else if (!strcmp(a, "--cl-device-name"))
     {
-      if (strcmp(a, "--cl-device-name")) deprecate(a, "--cl-device-name");
       out.deviceName = requireArg(argc, argv, i, a);
       out.forceDeviceName = true;
     }
@@ -440,15 +426,6 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       }
 
       if (matched) continue;
-
-      // Drop --testName (was parsed by OpenCL, never plumbed end-to-end).
-      if (!strcmp(a, "-tn") || !strcmp(a, "--testName"))
-      {
-        std::cerr << "warning: " << a
-                  << " is deprecated and ignored; use individual --<test> flags\n";
-        if (i + 1 < argc && argv[i + 1][0] != '-') i++;
-        continue;
-      }
 
       std::cerr << "clpeak: unknown option '" << a << "'\n";
       printHelpAndExit(-1);
