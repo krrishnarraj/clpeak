@@ -12,35 +12,38 @@
 #include <benchmark_constants.h>
 #include <logger.h>
 
+#include <result_store.h>  // Category enum
+
 struct CliOptions; // forward decl
 
 #define BUILD_OPTIONS " -cl-mad-enable "
 
+// Benchmark enum must be defined early (before backend_gating.h uses it).
 enum class Benchmark : unsigned int {
-  GlobalBW = 0,
-  LocalBW,
-  ImageBW,
-  ComputeHP,
-  ComputeMP,
-  ComputeSP,
-  ComputeDP,
-  ComputeInt,
-  ComputeIntFast,
-  ComputeChar,
-  ComputeShort,
-  ComputeInt8DP,
-  ComputeInt4Packed,
-  ComputeBF16,
-  CoopMatrix,
-  Wmma,
-  Bmma,                 // CUDA binary tensor cores (BMMA), int_compute primary
-  SimdgroupMatrix,
-  MpsGemm,
-  Cublas,
-  AtomicThroughput,
-  TransferBW,
-  KernelLatency,
-  COUNT
+    GlobalBW = 0,
+    LocalBW,
+    ImageBW,
+    ComputeHP,
+    ComputeMP,
+    ComputeSP,
+    ComputeDP,
+    ComputeInt,
+    ComputeIntFast,
+    ComputeChar,
+    ComputeShort,
+    ComputeInt8DP,
+    ComputeInt4Packed,
+    ComputeBF16,
+    CoopMatrix,
+    Wmma,
+    Bmma,                 // CUDA binary tensor cores (BMMA), int_compute primary
+    SimdgroupMatrix,
+    MpsGemm,
+    Cublas,
+    AtomicThroughput,
+    TransferBW,
+    KernelLatency,
+    COUNT
 };
 
 // Primary category of a benchmark.  Used for both CLI gating and the
@@ -90,14 +93,13 @@ inline Category categoryOf(Benchmark b)
     return Category::Unknown;
 }
 
+#include <backend_gating.h>  // centralized benchmark gates (uses Benchmark & Category)
+
 class clPeak
 {
 public:
   bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, forceTest, forceIters, useEventTimer;
-  std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
-  // 4-element bitset indexed by static_cast<size_t>(Category): FpCompute,
-  // IntCompute, Bandwidth, Latency.  isAllowed() requires both gates open.
-  std::bitset<4> enabledCategories;
+  BackendGating gating;
   unsigned long specifiedPlatform, specifiedDevice;
   std::string specifiedPlatformName;
   std::string specifiedDeviceName;
@@ -121,24 +123,13 @@ public:
 
   void applyOptions(const CliOptions &opts);
 
-  bool isTestEnabled(Benchmark b) const { return enabledTests.test(static_cast<size_t>(b)); }
-  bool isCategoryEnabled(Category c) const
-  {
-    if (c == Category::Unknown) return false;
-    return enabledCategories.test(static_cast<size_t>(c));
-  }
-  // Combined gate: a benchmark runs iff its primary category is enabled and
-  // its own bit is set.  Backends call this in runAll instead of isTestEnabled.
-  bool isAllowed(Benchmark b) const
-  { return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b); }
-  // Gate a dual-category test (e.g. wmma, simdgroup_matrix) against an
-  // explicit category instead of its primary one.  Used by phase loops
-  // that re-run the test for its int variants in the int_compute phase.
-  bool isAllowedAs(Benchmark b, Category c) const
-  { return isCategoryEnabled(c) && isTestEnabled(b); }
-  void enableTest(Benchmark b)  { enabledTests.set(static_cast<size_t>(b)); }
-  void disableAll()             { enabledTests.reset(); }
-  void enableAll()              { enabledTests.set(); }
+  bool isTestEnabled(Benchmark b) const { return gating.isTestEnabled(b); }
+  bool isCategoryEnabled(Category c) const { return gating.isCategoryEnabled(c); }
+  bool isAllowed(Benchmark b) const { return gating.isAllowed(b); }
+  bool isAllowedAs(Benchmark b, Category c) const { return gating.isAllowedAs(b, c); }
+  void enableTest(Benchmark b)  { gating.enabledTests.set(static_cast<size_t>(b)); }
+  void disableAll()             { gating.enabledTests.reset(); }
+  void enableAll()              { gating.enabledTests.set(); }
 
   float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, unsigned int iters);
 

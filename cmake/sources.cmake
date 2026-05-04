@@ -6,6 +6,7 @@ set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/common.cpp
     ${CLPEAK_ROOT}/src/result_store.cpp
     ${CLPEAK_ROOT}/src/clpeak.cpp
+    ${CLPEAK_ROOT}/src/backend_gating.cpp
     ${CLPEAK_ROOT}/src/inventory.cpp
     ${CLPEAK_ROOT}/src/options.cpp
     ${CLPEAK_ROOT}/src/global_bandwidth.cpp
@@ -14,7 +15,7 @@ set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/atomic_throughput.cpp
     ${CLPEAK_ROOT}/src/transfer_bandwidth.cpp
     ${CLPEAK_ROOT}/src/kernel_latency.cpp
-)
+ )
 
 set(CLPEAK_CORE_INCLUDE_DIRS
     ${CLPEAK_ROOT}/include

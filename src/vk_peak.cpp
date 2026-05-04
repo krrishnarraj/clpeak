@@ -479,8 +479,7 @@ vkPeak::vkPeak()
     deviceIndex(-1),
     instance(VK_NULL_HANDLE)
 {
-  enabledTests.set();
-  enabledCategories.set();
+  gating.enableAll();
 }
 
 vkPeak::~vkPeak()
@@ -707,38 +706,38 @@ int vkPeak::runAll()
     log->resultScopeAttribute("driver_version", dev.info.driverVersion);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
-    if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-    if (isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-    if (isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
     // CoopMatrix emits both fp (tflops) and int (tops) variants in one call;
     // the shim assigns each metric to its proper category by unit.
-    if (isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
-        isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
+        gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
         runCoopMatrix(dev, cfg);
 #endif
 
     // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
-    if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
-    if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
 #endif
-    if (isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
+    if (gating.isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
 
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
-    if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -------------------------------------
-    if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
+    if (gating.isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     log->resultScopeEnd(); // device

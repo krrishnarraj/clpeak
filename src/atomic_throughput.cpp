@@ -5,7 +5,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   float timed, gops;
   cl::NDRange globalSize, localSize;
 
-  if (!isAllowed(Benchmark::AtomicThroughput))
+  if (!gating.isAllowed(Benchmark::AtomicThroughput))
     return 0;
 
   unsigned int iters = cfg.computeIters;

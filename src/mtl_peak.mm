@@ -212,8 +212,7 @@ MetalPeak::MetalPeak()
     deviceIndex(-1),
     impl(nullptr)
 {
-  enabledTests.set();
-  enabledCategories.set();
+  gating.enableAll();
 }
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
@@ -326,33 +325,33 @@ int MetalPeak::runAll()
         }
 
         // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -----------
-        if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
-        if (isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
-        if (isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::FpCompute))
+        if (gating.isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
+        if (gating.isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
+        if (gating.isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
+        if (gating.isAllowedAs(Benchmark::SimdgroupMatrix, Category::FpCompute))
             runSimdgroupMatrix(dev, cfg);
-        if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
+        if (gating.isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
-        if (isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
+        if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
             runAtomicThroughputFp(dev, cfg);
 
         // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
-        if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
-        if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
-        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::IntCompute))
+        if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+        if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+        if (gating.isAllowedAs(Benchmark::SimdgroupMatrix, Category::IntCompute))
             runSimdgroupMatrixInt(dev, cfg);
-        if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
+        if (gating.isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
             runMpsGemmInt(dev, cfg);
-        if (isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
+        if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
             runAtomicThroughput(dev, cfg);
 
         // ---- Phase 3: bandwidth (GBPS) -----------------------------------
-        if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
-        if (isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
-        if (isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+        if (gating.isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
+        if (gating.isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
+        if (gating.isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
 
         // ---- Phase 4: latency (us) ---------------------------------------
-        if (isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
+        if (gating.isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         log->print(NEWLINE);
         log->resultScopeEnd(); // device

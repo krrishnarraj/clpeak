@@ -9,8 +9,7 @@ void MetalPeak::applyOptions(const CliOptions &opts)
   specifiedIters = opts.iters;
   warmupCount    = opts.warmupCount;
   deviceIndex    = opts.mtlDeviceIndex;
-  enabledTests      = opts.enabledTests;
-  enabledCategories = opts.enabledCategories;
+  gating.copyFrom(opts);
 
   // File output is centralized in entry.cpp::main(); see the comment in
   // clpeak.cpp::applyOptions().

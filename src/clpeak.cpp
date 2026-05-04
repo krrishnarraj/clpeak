@@ -49,8 +49,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    warmupCount(2),
                    enableJson(false), enableCsv(false)
 {
-  enableAll(); // all tests on by default
-  enabledCategories.set();
+  gating.enableAll();
 }
 
 void clPeak::applyOptions(const CliOptions &opts)
@@ -70,9 +69,8 @@ void clPeak::applyOptions(const CliOptions &opts)
 
   useEventTimer = opts.useEventTimer;
 
-  // Test / category selection: copy bitsets directly.
-  enabledTests      = opts.enabledTests;
-  enabledCategories = opts.enabledCategories;
+  // Test / category selection: copy through centralized gating.
+  gating.copyFrom(opts);
   forceTest = false;
   specifiedTestName.clear();
 
@@ -290,7 +288,7 @@ int clPeak::runAll()
         // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
           runKernelLatency(queue, prog, devInfo, cfg);
-        else if (isAllowed(Benchmark::KernelLatency))
+        else if (gating.isAllowed(Benchmark::KernelLatency))
         {
           log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
           log->resultScopeBegin("kernel_launch_latency");
@@ -379,7 +377,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            const std::string &unit, unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
-  if (!isAllowed(which))
+  if (!gating.isAllowed(which))
     return 0;
 
   unsigned int iters = cfg.computeIters;
