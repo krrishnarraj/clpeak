@@ -21,7 +21,8 @@ logger::logger(bool, std::string,
     enableCsv(false),
     compareEnabled(false),
     curCategory(Category::Unknown),
-    shimDepth(0)
+    shimDepth(0),
+    inTestScope(false)
 {
 }
 
@@ -142,6 +143,7 @@ void logger::resultScopeBegin(std::string name)
   shimDepth++;
   if (shimDepth == 4)
   {
+    inTestScope = true;
     curTest = name;
     curUnit.clear();
     curCategory = Category::Unknown;
@@ -196,8 +198,9 @@ void logger::resultScopeEnd()
     curTest.clear();
     curUnit.clear();
     curCategory = Category::Unknown;
+    inTestScope = false;
   }
-  if (shimDepth > 0)
+  if (inTestScope || shimDepth > 3)
     shimDepth--;
 }
 

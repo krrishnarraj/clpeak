@@ -106,6 +106,11 @@ private:
   // stack as driven by resultScopeBegin / resultScopeEnd.
   int shimDepth;
 
+  // Tracks whether we are inside a depth-4 (test-group) scope.
+  // resultScopeEnd() becomes a no-op when called before the matching
+  // resultScopeBegin() was reached, preventing shimDepth corruption.
+  bool inTestScope;
+
   // Build a ResultEntry from the current scope plus the supplied metric
   // and append to `results`.  Also prints a baseline-delta line to stdout
   // when compare mode is on and the metric matches a baseline key.

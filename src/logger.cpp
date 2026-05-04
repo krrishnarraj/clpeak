@@ -20,7 +20,8 @@ logger::logger(bool _enableXml,     std::string _xmlFileName,
     csvFileName(_csvFileName),
     compareEnabled(!_compareFileName.empty()),
     curCategory(Category::Unknown),
-    shimDepth(0)
+    shimDepth(0),
+    inTestScope(false)
 {
   if (compareEnabled)
   {
@@ -160,6 +161,7 @@ void logger::resultScopeBegin(std::string name)
   // calls and refines curUnit / curCategory.
   if (shimDepth == 4)
   {
+    inTestScope = true;
     curTest = name;
     curUnit.clear();
     if (curCategory == Category::Unknown ||
@@ -228,8 +230,9 @@ void logger::resultScopeEnd()
     curTest.clear();
     curUnit.clear();
     curCategory = Category::Unknown;
+    inTestScope = false;
   }
-  if (shimDepth > 0)
+  if (inTestScope || shimDepth > 3)
     shimDepth--;
 }
 
