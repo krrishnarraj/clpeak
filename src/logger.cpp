@@ -232,7 +232,7 @@ void logger::resultScopeEnd()
     curCategory = Category::Unknown;
     inTestScope = false;
   }
-  if (inTestScope || shimDepth > 3)
+  if (shimDepth > 0)
     shimDepth--;
 }
 
