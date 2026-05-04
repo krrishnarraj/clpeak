@@ -691,6 +691,7 @@ int vkPeak::runAll()
       cfg.computeIters = specifiedIters;
       cfg.globalBWIters = specifiedIters;
       cfg.transferBWIters = specifiedIters;
+      cfg.kernelLatencyIters = specifiedIters;
     }
 
     log->print(NEWLINE "Vulkan Device: " + dev.info.deviceName + NEWLINE);
