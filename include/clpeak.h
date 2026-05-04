@@ -123,14 +123,6 @@ public:
 
   void applyOptions(const CliOptions &opts);
 
-  bool isTestEnabled(Benchmark b) const { return gating.isTestEnabled(b); }
-  bool isCategoryEnabled(Category c) const { return gating.isCategoryEnabled(c); }
-  bool isAllowed(Benchmark b) const { return gating.isAllowed(b); }
-  bool isAllowedAs(Benchmark b, Category c) const { return gating.isAllowedAs(b, c); }
-  void enableTest(Benchmark b)  { gating.enabledTests.set(static_cast<size_t>(b)); }
-  void disableAll()             { gating.enabledTests.reset(); }
-  void enableAll()              { gating.enabledTests.set(); }
-
   float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, unsigned int iters);
 
   // Unified compute benchmark helper -- replaces 7 nearly-identical runCompute* methods
