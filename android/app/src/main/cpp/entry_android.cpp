@@ -53,7 +53,8 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
     vkPeak vkObj;
     vkObj.applyOptions(opts);
     wireLoggerToJni(vkObj.log.get(), _jniEnv, &_jObject, cls);
-    vkObj.runAll();
+    int vkStatus = vkObj.runAll();
+    clStatus |= vkStatus;
   }
 #endif
 
