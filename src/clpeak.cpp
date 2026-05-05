@@ -350,14 +350,14 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRang
   }
   else // std timer
   {
+    // Batch N dispatches before a single synchronization to measure steady-state
+    // throughput, matching the CUDA / Metal timing methodology.
+    Timer timer;
+    timer.start();
     for (unsigned int i = 0; i < iters; i++)
-    {
-      Timer timer;
-      timer.start();
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
-      queue.finish();
-      timed += timer.stopAndTime();
-    }
+    queue.finish();
+    timed = timer.stopAndTime();
   }
 
   return (timed / static_cast<float>(iters));

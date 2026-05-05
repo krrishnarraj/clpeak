@@ -561,10 +561,10 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
   {
-    VkCommandBufferBeginInfo beginInfo = {};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdBuf, &beginInfo);
+    VkCommandBufferBeginInfo warmBeginInfo = {};
+    warmBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    warmBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuf, &warmBeginInfo);
     vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &descriptorSet, 0, nullptr);
     if (pushData && pushSize > 0)
@@ -575,28 +575,25 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
     vkResetCommandBuffer(cmdBuf, 0);
   }
 
-  // Timed runs
-  float timed = 0;
+  // Record all dispatches into one command buffer, submit once, and measure
+  // the total GPU execution time.  This gives steady-state throughput by
+  // amortizing submit / driver overhead across all iterations.
+  VkCommandBufferBeginInfo beginInfo = {};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmdBuf, &beginInfo);
+  vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &descriptorSet, 0, nullptr);
+  if (pushData && pushSize > 0)
+    vkCmdPushConstants(cmdBuf, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
   for (unsigned int i = 0; i < iters; i++)
-  {
-    VkCommandBufferBeginInfo beginInfo = {};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdBuf, &beginInfo);
-    vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-    vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &descriptorSet, 0, nullptr);
-    if (pushData && pushSize > 0)
-      vkCmdPushConstants(cmdBuf, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
     vkCmdDispatch(cmdBuf, groupCountX, 1, 1);
-    vkEndCommandBuffer(cmdBuf);
+  vkEndCommandBuffer(cmdBuf);
 
-    auto start = std::chrono::high_resolution_clock::now();
-    dev.submitAndWait(cmdBuf);
-    auto end = std::chrono::high_resolution_clock::now();
-    timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-
-    vkResetCommandBuffer(cmdBuf, 0);
-  }
+  auto start = std::chrono::high_resolution_clock::now();
+  dev.submitAndWait(cmdBuf);
+  auto end = std::chrono::high_resolution_clock::now();
+  float timed = (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
   return timed / static_cast<float>(iters);
