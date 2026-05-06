@@ -1,5 +1,5 @@
 name: clpeak
-base: core24
+base: core26
 adopt-info: clpeak
 summary: Benchmarking tool to measure peak capabilities of GPU compute devices
 description: |
