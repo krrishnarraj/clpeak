@@ -353,34 +353,48 @@ int CudaPeak::runAll()
     log->resultScopeAttribute("arch", dev.info.archName);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
-    if (gating.isAllowed(Benchmark::ComputeSP))      runComputeSP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeHP))      runComputeHP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeDP))      runComputeDP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeMP))      runComputeMP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeBF16))    runComputeBF16(dev, cfg);
-    if (gating.isAllowedAs(Benchmark::Wmma,   Category::FpCompute))
-        runWmma(dev, cfg, Category::FpCompute);
+    if (gating.isAllowed(Benchmark::ComputeSP))
+      runComputeSP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeHP))
+      runComputeHP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeDP))
+      runComputeDP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeMP))
+      runComputeMP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeBF16))
+      runComputeBF16(dev, cfg);
+    if (gating.isAllowedAs(Benchmark::Wmma, Category::FpCompute))
+      runWmma(dev, cfg, Category::FpCompute);
     if (gating.isAllowedAs(Benchmark::Cublas, Category::FpCompute))
-        runCublas(dev, cfg, Category::FpCompute);
+      runCublas(dev, cfg, Category::FpCompute);
 
     // ---- Phase 2: integer compute (GOPS / TOPS) ------------------------
-    if (gating.isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeInt8DP))      runComputeInt8DP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeInt4Packed))  runComputeInt4Packed(dev, cfg);
-    if (gating.isAllowedAs(Benchmark::Wmma,   Category::IntCompute))
-        runWmma(dev, cfg, Category::IntCompute);
+    if (gating.isAllowed(Benchmark::ComputeInt))
+      runComputeInt32(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeInt8DP))
+      runComputeInt8DP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeInt4Packed))
+      runComputeInt4Packed(dev, cfg);
+    if (gating.isAllowedAs(Benchmark::Wmma, Category::IntCompute))
+      runWmma(dev, cfg, Category::IntCompute);
     if (gating.isAllowedAs(Benchmark::Cublas, Category::IntCompute))
-        runCublas(dev, cfg, Category::IntCompute);
-    if (gating.isAllowed(Benchmark::AtomicThroughput))   runAtomicThroughput(dev, cfg);
+      runCublas(dev, cfg, Category::IntCompute);
+    if (gating.isAllowed(Benchmark::AtomicThroughput))
+      runAtomicThroughput(dev, cfg);
 
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
-    if (gating.isAllowed(Benchmark::GlobalBW))    runGlobalBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::LocalBW))     runLocalBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::ImageBW))     runImageBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::TransferBW))  runTransferBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::GlobalBW))
+      runGlobalBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::LocalBW))
+      runLocalBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::ImageBW))
+      runImageBandwidth(dev, cfg);
+    if (gating.isAllowed(Benchmark::TransferBW))
+      runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -----------------------------------------
-    if (gating.isAllowed(Benchmark::KernelLatency)) runKernelLatency(dev, cfg);
+    if (gating.isAllowed(Benchmark::KernelLatency))
+      runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
   }
@@ -410,7 +424,10 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     log->print(TAB TAB);
     log->print(d.skipMsg ? d.skipMsg : "Skipped");
     log->print(NEWLINE);
-    struct SkipVariant { const char *label; };
+    struct SkipVariant
+    {
+      const char *label;
+    };
     std::vector<SkipVariant> skipVariants;
     if (d.variants && d.numVariants > 0)
     {
@@ -423,7 +440,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     }
     for (const auto &sv : skipVariants)
       log->recordSkip(sv.label, ResultStatus::Unsupported,
-                       d.skipMsg ? d.skipMsg : "Skipped");
+                      d.skipMsg ? d.skipMsg : "Skipped");
     return 0;
   }
 
@@ -442,12 +459,11 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   else
     variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName});
 
-  // Size to saturate: target ~32M output elements like the Vulkan path.
-  // numSMs * 2048 threads is the canonical "lots of warps in flight"
-  // upper bound; clamp by total global memory just to be safe.
+  // Scale to numSMs so high-SM parts (H100, B200, …) don't get under-saturated;
+  // floor at 32M preserves behavior on small dev cards.  Clamp by VRAM below.
   const uint32_t blockSize = d.blockSize ? d.blockSize : 256;
   const uint32_t outPerBlock = d.outElemsPerBlock ? d.outElemsPerBlock : blockSize;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint64_t bytesPerBlock = (uint64_t)outPerBlock * d.elemSize;
   uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock; // cap at 1/4 VRAM
   uint64_t wantBlocks = globalThreads / blockSize;
@@ -691,8 +707,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   // ---------------------------------------------------------------------
   if (category == Category::FpCompute)
   {
-    log->print(NEWLINE TAB "WMMA tensor-core compute (TFLOPS)" NEWLINE);
-
     // FP16 WMMA
     {
       float A = 1.3f;
@@ -1175,7 +1189,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
 
   log->print(TAB TAB "dispatch  : not measurable via CUDA driver API" NEWLINE);
   log->recordSkip("dispatch", ResultStatus::Unsupported,
-                   "Not measurable via CUDA driver API");
+                  "Not measurable via CUDA driver API");
   log->print(TAB TAB "roundtrip : ");
   log->print(roundtripUs);
   log->print(NEWLINE);
@@ -1196,7 +1210,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
 
   CUdeviceptr outBuf = 0;
@@ -1265,7 +1279,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
 
   // Create CUarray (RGBA float).
@@ -1344,7 +1358,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gops");
 
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
 
   // Global: per-thread counter (128 MB).
