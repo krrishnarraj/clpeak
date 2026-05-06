@@ -1,10 +1,19 @@
 name: clpeak
-base: core20
+base: core24
 adopt-info: clpeak
-summary: Benchmarking tool to measure peak capabilities of opencl devices
+summary: Benchmarking tool to measure peak capabilities of GPU compute devices
 description: |
-  A synthetic benchmarking tool to measure peak capabilities of opencl devices.
-  It only measures the peak metrics that can be achieved using vector operations and does not represent a real-world use case
+  clpeak is a synthetic micro-benchmark that measures the peak achievable
+  performance of GPU compute devices. It exercises tight vector/MAD/MMA loops
+  and vendor-SDK GEMM libraries across multiple backends.
+
+  Supported backends: OpenCL, Vulkan, CUDA, Metal
+
+  Benchmarks include: global/local/image memory bandwidth, single/half/double
+  precision compute, integer throughput, tensor operations (WMMA, cooperative
+  matrices), vendor GEMM peaks, atomic throughput, and kernel launch latency.
+
+  Output formats: plain text, XML, JSON, CSV
 
 grade: stable
 confinement: classic
@@ -20,6 +29,8 @@ parts:
     build-packages:
       - build-essential
       - git
-    override-pull: |
-      snapcraftctl pull
-      snapcraftctl set-version "`grep 'VERSION_MAJOR ' cmake/common.cmake | awk -F'[() ]' '{print $3}'`.`grep 'VERSION_MINOR ' cmake/common.cmake | awk -F'[() ]' '{print $3}'`.`grep 'VERSION_PATCH ' cmake/common.cmake | awk -F'[() ]' '{print $3}'`"
+      - ocl-icd-opencl-dev
+      - opencl-headers
+      - libvulkan-dev
+      - glslang-tools
+      - spirv-tools
