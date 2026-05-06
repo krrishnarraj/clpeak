@@ -13,21 +13,10 @@
 #include <logger.h>
 
 #include <result_store.h>  // Category enum
-#include <precision.h>
 
 struct CliOptions; // forward decl
 
-// Default builds with no fast-math flags (truly precise IEEE peak).
-// Relaxed enables -cl-fast-relaxed-math which implies -cl-mad-enable,
-// -cl-finite-math-only, -cl-no-signed-zeros, -cl-unsafe-math-optimizations.
-// fp32->fp16 demotion is NOT enabled (no -cl-single-precision-constant abuse).
-static const char *kClBuildOptsDefault = "";
-static const char *kClBuildOptsRelaxed = " -cl-fast-relaxed-math ";
-
-inline const char *clBuildOptions(PrecisionMode m)
-{
-  return m == PrecisionMode::Relaxed ? kClBuildOptsRelaxed : kClBuildOptsDefault;
-}
+#define BUILD_OPTIONS " -cl-mad-enable "
 
 // Benchmark enum must be defined early (before backend_gating.h uses it).
 enum class Benchmark : unsigned int {
@@ -141,8 +130,7 @@ public:
                      const std::string &displayName, const std::string &resultTag,
                      const std::string &kernelPrefix, const std::string &typeName,
                      const std::string &unit, unsigned int workPerWI,
-                     unsigned int wgsPerCU, size_t elemSize,
-                     PrecisionMode mode = PrecisionMode::Default);
+                     unsigned int wgsPerCU, size_t elemSize);
 
   int runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg);
 

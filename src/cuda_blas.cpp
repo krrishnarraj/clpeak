@@ -120,17 +120,9 @@ double timeCublasLt(cublasLtHandle_t lt, CUstream stream,
 
 } // namespace
 
-int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category, PrecisionMode mode)
+int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category)
 {
     (void)cfg;
-
-    // cuBLASLt picks its own kernels; we don't compile any source, so there
-    // is no fast-math flag to toggle.  The "relaxed math" version of fp32
-    // GEMM is already reported as the tf32 variant in the default pass
-    // (TF32 tensor cores trade precision for throughput).  Skip the relaxed
-    // pass to avoid duplicating identical numbers.
-    if (mode == PrecisionMode::Relaxed)
-        return 0;
 
     const uint32_t D = pickGemmDim(dev.info);
     const uint32_t M = D, N = D, K = D;

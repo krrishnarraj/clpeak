@@ -14,7 +14,6 @@
 #include <logger.h>
 #include <clpeak.h>      // Benchmark enum
 #include <backend_gating.h>  // centralized benchmark gating
-#include <precision.h>
 
 struct CliOptions; // forward decl
 
@@ -72,20 +71,13 @@ public:
   // and returns false.
   bool getKernel(const char *src, const char *srcName,
                  const char *kernelName, CUfunction &fn,
-                 const std::vector<const char *> &extraOpts = {},
-                 PrecisionMode mode = PrecisionMode::Default);
+                 const std::vector<const char *> &extraOpts = {});
 
 private:
   // moduleCache key = source pointer (string identity is the simplest
   // viable cache key because every .cu blob is a unique extern in the
-  // generated cpp).  Each source is compiled twice -- once at default
-  // precision and once with --use_fast_math -- so the value holds both
-  // module handles.
-  struct CachedModules {
-    CUmodule defaultMod = nullptr;
-    CUmodule relaxedMod = nullptr;
-  };
-  std::unordered_map<const char *, CachedModules> moduleCache;
+  // generated cpp).  Value = loaded module handle.
+  std::unordered_map<const char *, CUmodule> moduleCache;
 };
 
 // Variant of a single compute-peak kernel.  All variants of one benchmark
@@ -161,19 +153,19 @@ public:
   void applyOptions(const CliOptions &opts);
   int runAll();
 
-  int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
-  int runComputeHP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
-  int runComputeDP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
-  int runComputeMP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
-  int runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
+  int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeHP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeDP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeMP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg);
-  int runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category, PrecisionMode mode = PrecisionMode::Default);
-  int runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category, PrecisionMode mode = PrecisionMode::Default);
+  int runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category);
+  int runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category);
   int runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg);
@@ -191,8 +183,7 @@ private:
                   void **args, unsigned int iters);
 
   int runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
-                       const cuda_compute_desc_t &d,
-                       PrecisionMode mode = PrecisionMode::Default);
+                       const cuda_compute_desc_t &d);
 };
 
 // Embedded CUDA kernel source text (generated at build time).

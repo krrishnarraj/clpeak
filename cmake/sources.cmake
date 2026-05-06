@@ -93,33 +93,25 @@ set(CLPEAK_CUDA_KERNELS
 # SPIR-V compute shaders shared by both the main CLI build and the Android
 # build.  compile_shaders() turns each .comp into an embedded C++ array and
 # defines CLPEAK_VK_HAS_<NAME> for per-shader gating in vk_peak.cpp.
-# Floating-point shaders.  Each gets an additional `_relaxed` SPIR-V binary
-# (default SPIR-V passed through `spirv-opt --relax-float-ops -O`, which
-# decorates every float op with RelaxedPrecision) used by vk_peak.cpp for
-# the "(relaxed math)" pass of each FP test.
-set(CLPEAK_VK_FP_SHADERS
+set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/compute_sp_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v4.comp
     ${CLPEAK_ROOT}/src/shaders/compute_mp_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_mp_v2.comp
     ${CLPEAK_ROOT}/src/shaders/compute_mp_v4.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int4_packed_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_bf16_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_bf16_v2.comp
     ${CLPEAK_ROOT}/src/shaders/compute_bf16_v4.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_fp16.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_bf16.comp
-    ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e4m3.comp
-    ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e5m2.comp
-)
-
-set(CLPEAK_VK_SHADERS
-    ${CLPEAK_VK_FP_SHADERS}
-    ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v1.comp
-    ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v1.comp
-    ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v2.comp
-    ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v4.comp
-    ${CLPEAK_ROOT}/src/shaders/compute_int4_packed_v1.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_int8.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_int8_k32.comp
+    ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e4m3.comp
+    ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e5m2.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v2.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v4.comp
