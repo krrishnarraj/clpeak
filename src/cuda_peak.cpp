@@ -459,12 +459,11 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   else
     variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName});
 
-  // Size to saturate: target ~32M output elements like the Vulkan path.
-  // numSMs * 2048 threads is the canonical "lots of warps in flight"
-  // upper bound; clamp by total global memory just to be safe.
+  // Scale to numSMs so high-SM parts (H100, B200, …) don't get under-saturated;
+  // floor at 32M preserves behavior on small dev cards.  Clamp by VRAM below.
   const uint32_t blockSize = d.blockSize ? d.blockSize : 256;
   const uint32_t outPerBlock = d.outElemsPerBlock ? d.outElemsPerBlock : blockSize;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint64_t bytesPerBlock = (uint64_t)outPerBlock * d.elemSize;
   uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock; // cap at 1/4 VRAM
   uint64_t wantBlocks = globalThreads / blockSize;
@@ -1211,7 +1210,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
 
   CUdeviceptr outBuf = 0;
@@ -1280,7 +1279,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
 
   // Create CUarray (RGBA float).
@@ -1359,7 +1358,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gops");
 
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = 32ULL * 1024 * 1024;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
 
   // Global: per-thread counter (128 MB).

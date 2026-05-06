@@ -1,6 +1,9 @@
 #ifndef BENCHMARK_CONSTANTS_H
 #define BENCHMARK_CONSTANTS_H
 
+#include <algorithm>
+#include <cstdint>
+
 // Centralized tuning constants that MUST match the corresponding values
 // hard-coded in the OpenCL kernel source files (.cl).
 //
@@ -46,5 +49,22 @@ static const unsigned int COOPMAT_WORK_PER_WI = 65536;
 // clEnqueueNDRangeKernel to fail with CL_OUT_OF_RESOURCES.  256 matches
 // clpeak's historical cap and leaves broad headroom across all devices.
 static const unsigned int MAX_WG_SIZE = 256;
+
+// Scale per-launch global thread count to the device's compute-unit count so
+// modern high-CU GPUs (H100 132 SMs, MI300X 304 CUs, M3 Ultra 80 cores, etc.)
+// don't get under-saturated by a fixed dispatch.  Mirrors the OpenCL backend's
+// numCUs * computeWgsPerCU(=2048) * MAX_WG_SIZE(=256) formula.
+//
+// Floor = 32M to (1) preserve historical behavior on small/low-CU devices and
+// (2) keep a safe target when CU count is unknown (e.g. Vulkan on Intel /
+// MoltenVK where no vendor property extension is advertised -- pass 0 and the
+// floor takes over).  Realized dispatches are still clamped from above by
+// per-test buffer / heap budgets.
+static inline uint64_t targetGlobalThreads(uint32_t numCUs)
+{
+  const uint64_t kFloor = 32ULL << 20;            // 32M
+  const uint64_t scaled = (uint64_t)numCUs * 2048ULL * (uint64_t)MAX_WG_SIZE;
+  return std::max(kFloor, scaled);
+}
 
 #endif // BENCHMARK_CONSTANTS_H

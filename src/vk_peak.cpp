@@ -46,8 +46,10 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   info.maxAllocSize = props.limits.maxStorageBufferRange;
   info.deviceType = props.deviceType;
 
-  // Estimate CUs from maxComputeWorkGroupCount (rough proxy)
-  info.numCUs = 0; // Vulkan doesn't expose CU count directly
+  // CU/SM count is filled in below from vendor property extensions if the
+  // implementation advertises them.  When unavailable (Intel, MoltenVK, older
+  // drivers) the dispatch helpers fall back to a fixed 32M-thread floor.
+  info.numCUs = 0;
 
   // Get memory heap size (device-local)
   VkPhysicalDeviceMemoryProperties memProps;
@@ -89,6 +91,50 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       if (strcmp(e.extensionName, name) == 0) return true;
     return false;
   };
+
+  // Probe vendor property extensions for CU/SM count.  These are query-only
+  // (no feature bits, no need to chain at vkCreateDevice -- the spec lets us
+  // read them via vkGetPhysicalDeviceProperties2 as long as the extension is
+  // advertised).  Order matters: prefer the most specific count.
+  {
+    VkPhysicalDeviceProperties2 p2 = {};
+    p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+
+    if (hasExt("VK_NV_shader_sm_builtins"))
+    {
+      VkPhysicalDeviceShaderSMBuiltinsPropertiesNV smProps = {};
+      smProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV;
+      p2.pNext = &smProps;
+      vkGetPhysicalDeviceProperties2(physDev, &p2);
+      info.numCUs = smProps.shaderSMCount;
+    }
+    else if (hasExt("VK_AMD_shader_core_properties2"))
+    {
+      VkPhysicalDeviceShaderCoreProperties2AMD coreProps2 = {};
+      coreProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_2_AMD;
+      p2.pNext = &coreProps2;
+      vkGetPhysicalDeviceProperties2(physDev, &p2);
+      info.numCUs = coreProps2.activeComputeUnitCount;
+    }
+    else if (hasExt("VK_AMD_shader_core_properties"))
+    {
+      VkPhysicalDeviceShaderCorePropertiesAMD coreProps = {};
+      coreProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_AMD;
+      p2.pNext = &coreProps;
+      vkGetPhysicalDeviceProperties2(physDev, &p2);
+      info.numCUs = coreProps.shaderEngineCount *
+                    coreProps.shaderArraysPerEngineCount *
+                    coreProps.computeUnitsPerShaderArray;
+    }
+    else if (hasExt("VK_ARM_shader_core_builtins"))
+    {
+      VkPhysicalDeviceShaderCoreBuiltinsPropertiesARM armProps = {};
+      armProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_BUILTINS_PROPERTIES_ARM;
+      p2.pNext = &armProps;
+      vkGetPhysicalDeviceProperties2(physDev, &p2);
+      info.numCUs = armProps.shaderCoreCount;
+    }
+  }
 
   std::vector<const char *> enabledExts;
   info.int8DotProductSupported = false;
@@ -696,6 +742,12 @@ int vkPeak::runAll()
     log->print(TAB "VRAM          : ");
     log->print((unsigned int)(dev.info.heapSize / (1024 * 1024)));
     log->print(" MB" NEWLINE);
+    if (dev.info.numCUs > 0)
+    {
+      log->print(TAB "Compute units : ");
+      log->print(dev.info.numCUs);
+      log->print(NEWLINE);
+    }
 
     auto deviceScope = log->resultScope("device");
     log->resultScopeAttribute("name", dev.info.deviceName);
@@ -814,7 +866,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // compute kernels use the classic 256.
   const uint32_t wgSize = d.wgSize ? d.wgSize : 256;
   const uint32_t outPerWG = d.outElemsPerWG ? d.outElemsPerWG : wgSize;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
   // Buffer footprint = numGroups * outPerWG * elemSize.  Bound by allocation.
   uint64_t bytesPerWG = (uint64_t)outPerWG * d.elemSize;
   uint64_t maxWGs = dev.info.maxAllocSize / bytesPerWG;
@@ -1582,7 +1634,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t bufferBytes = (uint64_t)globalWIs * sizeof(float);
 
@@ -1690,7 +1742,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t outBytes  = globalWIs * sizeof(float);
 
@@ -1885,7 +1937,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gops");
 
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = 32ULL * 1024 * 1024;
+  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
 
   // Helper: allocate a single-storage-buffer descriptor + dispatch + time.

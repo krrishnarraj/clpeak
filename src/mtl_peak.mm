@@ -411,7 +411,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 
     const uint32_t tgSize = d.threadsPerGroup ? d.threadsPerGroup : 256;
     const uint32_t outPerGroup = d.outElemsPerGroup ? d.outElemsPerGroup : tgSize;
-    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
     uint64_t bytesPerGroup = (uint64_t)outPerGroup * d.elemSize;
     uint64_t maxGroups  = dev.info.maxBufferLength / bytesPerGroup;
     uint64_t wantGroups = globalThreads / tgSize;
@@ -848,7 +848,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     log->resultScopeAttribute("unit", "gbps");
 
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
 
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
@@ -913,7 +913,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
 
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
@@ -1019,7 +1019,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
     log->resultScopeAttribute("unit", "gops");
 
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
@@ -1110,7 +1110,7 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
     log->resultScopeAttribute("unit", "gflops");
 
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = 32ULL * 1024 * 1024;
+    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
