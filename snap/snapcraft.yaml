@@ -34,3 +34,4 @@ parts:
       - libvulkan-dev
       - glslang-tools
       - spirv-tools
+      - glslc
