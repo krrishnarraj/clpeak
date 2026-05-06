@@ -10,7 +10,7 @@ android {
         applicationId = "kr.clpeak"
         minSdk = 33
         targetSdk = 36
-        versionCode = 7
+        versionCode = 13
         versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

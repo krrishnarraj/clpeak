@@ -23,5 +23,5 @@
 # Keep JNI callback method names unobfuscated; native code looks up by name.
 -keepclasseswithmembernames class kr.clpeak.BenchmarkRepository {
   void print_callback_from_c(java.lang.String);
-  void record_metric_callback_from_c(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, float);
+  void record_metric_callback_from_c(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, float);
 }
