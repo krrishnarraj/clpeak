@@ -13,6 +13,7 @@
 #include <logger.h>
 #include <clpeak.h>      // Benchmark enum
 #include <backend_gating.h>  // centralized benchmark gating
+#include <precision.h>
 
 struct CliOptions;       // forward decl
 struct BackendInventory; // forward decl
@@ -178,9 +179,9 @@ public:
   int runAll();
 
   // Individual benchmarks
-  int runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-  int runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
   int runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg);
@@ -189,10 +190,10 @@ public:
   int runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-  int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
 #endif
   // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
-  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
@@ -222,7 +223,8 @@ private:
   // used by every runCompute* benchmark.  Returns 0 on success (including
   // a clean skip) and -1 if buffer allocation itself failed.
   int runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
-                       const vk_compute_desc_t &d);
+                       const vk_compute_desc_t &d,
+                       PrecisionMode mode = PrecisionMode::Default);
 };
 
 // Embedded SPIR-V shader data (generated at build time)
@@ -270,6 +272,54 @@ namespace vk_shaders {
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4
   extern const uint32_t compute_mp_v4[];
   extern const size_t   compute_mp_v4_size;
+#endif
+
+// Relaxed-math variants of the FP shaders.  Compiled with -DRELAXED_MATH=1
+// alongside the default at CMake time; vk_peak.cpp picks them when emitting
+// the "(relaxed math)" pass for an FP test.
+#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V1_RELAXED
+  extern const uint32_t compute_sp_v1_relaxed[];
+  extern const size_t   compute_sp_v1_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1_RELAXED
+  extern const uint32_t compute_mp_v1_relaxed[];
+  extern const size_t   compute_mp_v1_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2_RELAXED
+  extern const uint32_t compute_mp_v2_relaxed[];
+  extern const size_t   compute_mp_v2_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4_RELAXED
+  extern const uint32_t compute_mp_v4_relaxed[];
+  extern const size_t   compute_mp_v4_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1_RELAXED
+  extern const uint32_t compute_bf16_v1_relaxed[];
+  extern const size_t   compute_bf16_v1_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2_RELAXED
+  extern const uint32_t compute_bf16_v2_relaxed[];
+  extern const size_t   compute_bf16_v2_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V4_RELAXED
+  extern const uint32_t compute_bf16_v4_relaxed[];
+  extern const size_t   compute_bf16_v4_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP16_RELAXED
+  extern const uint32_t coopmat_fp16_relaxed[];
+  extern const size_t   coopmat_fp16_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_BF16_RELAXED
+  extern const uint32_t coopmat_bf16_relaxed[];
+  extern const size_t   coopmat_bf16_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3_RELAXED
+  extern const uint32_t coopmat_fp8_e4m3_relaxed[];
+  extern const size_t   coopmat_fp8_e4m3_relaxed_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2_RELAXED
+  extern const uint32_t coopmat_fp8_e5m2_relaxed[];
+  extern const size_t   coopmat_fp8_e5m2_relaxed_size;
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
   extern const uint32_t compute_int4_packed_v1[];

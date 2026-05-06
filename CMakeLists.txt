@@ -112,6 +112,7 @@ if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
   compile_shaders(
     TARGET clpeak
     SHADERS ${CLPEAK_VK_SHADERS}
+    FP_SHADERS ${CLPEAK_VK_FP_SHADERS}
   )
 endif()
 

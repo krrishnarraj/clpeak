@@ -703,19 +703,39 @@ int vkPeak::runAll()
     log->resultScopeAttribute("driver_version", dev.info.driverVersion);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
-    if (gating.isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
+    // Each FP test runs default-then-relaxed in immediate succession.
+    // (Vulkan's relaxed variants currently fall back to the default SPIR-V
+    // until spirv-tools supports FPFastMathDefault; the framework is in
+    // place so future shader-level fast-math hooks plug in cleanly.)
+    if (gating.isAllowed(Benchmark::ComputeSP))
+    {
+      runComputeSP(dev, cfg, PrecisionMode::Default);
+      runComputeSP(dev, cfg, PrecisionMode::Relaxed);
+    }
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-    if (gating.isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeMP))
+    {
+      runComputeMP(dev, cfg, PrecisionMode::Default);
+      runComputeMP(dev, cfg, PrecisionMode::Relaxed);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-    if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
+    if (gating.isAllowed(Benchmark::ComputeBF16))
+    {
+      runComputeBF16(dev, cfg, PrecisionMode::Default);
+      runComputeBF16(dev, cfg, PrecisionMode::Relaxed);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
     // CoopMatrix emits both fp (tflops) and int (tops) variants in one call;
-    // the shim assigns each metric to its proper category by unit.
+    // the shim assigns each metric to its proper category by unit.  FP coopmat
+    // dtypes are paired with relaxed; int8 coopmat is emitted only at default.
     if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
         gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
-        runCoopMatrix(dev, cfg);
+    {
+      runCoopMatrix(dev, cfg, PrecisionMode::Default);
+      runCoopMatrix(dev, cfg, PrecisionMode::Relaxed);
+    }
 #endif
 
     // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
@@ -759,13 +779,17 @@ int vkPeak::runAll()
 // ---------------------------------------------------------------------------
 
 int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
-                             const vk_compute_desc_t &d)
+                             const vk_compute_desc_t &d,
+                             PrecisionMode mode)
 {
+  std::string fullTitle = std::string(d.title) + precisionLabelSuffix(mode);
+  std::string fullTag   = std::string(d.resultTag) + precisionResultSuffix(mode);
   log->print(NEWLINE TAB);
-  log->print(d.title);
+  log->print(fullTitle);
   log->print(NEWLINE);
-  auto scope = log->resultScope(d.resultTag);
+  auto scope = log->resultScope(fullTag);
   log->resultScopeAttribute("unit", d.unit);
+  log->resultScopeAttribute("math_mode", precisionAttribute(mode));
   if (d.extraAttribKey && d.extraAttribVal)
     log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
@@ -947,7 +971,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 // vk_compute_desc_t and delegates to runComputeKernel above.
 // ---------------------------------------------------------------------------
 
-int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
+int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   float A = 1.3f;
   vk_compute_desc_t d = {};
@@ -957,21 +981,28 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.unit        = "gflops";
   d.spirv       = vk_shaders::compute_sp_v1;
   d.spirvSize   = vk_shaders::compute_sp_v1_size;
+#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V1_RELAXED
+  if (mode == PrecisionMode::Relaxed)
+  {
+    d.spirv     = vk_shaders::compute_sp_v1_relaxed;
+    d.spirvSize = vk_shaders::compute_sp_v1_relaxed_size;
+  }
+#endif
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
   d.pushSize    = sizeof(A);
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
-int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
+int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   // v1 = scalar fp16 (baseline; no HFMA2 packing).
   // v2 = f16vec2  (unlocks NVIDIA HFMA2 at 2x FP32 rate on shader cores).
   // v4 = f16vec4  (wider packing; informs AMD/Intel where issue rate
   //                exceeds two lanes per slot).
-  static const vk_compute_variant_t variants[] = {
+  static const vk_compute_variant_t variants_default[] = {
     { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size },
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2
     { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size },
@@ -980,20 +1011,38 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
     { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size },
 #endif
   };
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1_RELAXED
+  static const vk_compute_variant_t variants_relaxed[] = {
+    { "mp",  vk_shaders::compute_mp_v1_relaxed, vk_shaders::compute_mp_v1_relaxed_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2_RELAXED
+    { "mp2", vk_shaders::compute_mp_v2_relaxed, vk_shaders::compute_mp_v2_relaxed_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4_RELAXED
+    { "mp4", vk_shaders::compute_mp_v4_relaxed, vk_shaders::compute_mp_v4_relaxed_size },
+#endif
+  };
+#endif
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
   d.resultTag      = "mixed_precision_compute";
   d.unit        = "gflops";
-  d.variants    = variants;
-  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.variants    = variants_default;
+  d.numVariants = sizeof(variants_default) / sizeof(variants_default[0]);
+#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1_RELAXED
+  if (mode == PrecisionMode::Relaxed)
+  {
+    d.variants    = variants_relaxed;
+    d.numVariants = sizeof(variants_relaxed) / sizeof(variants_relaxed[0]);
+  }
+#endif
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
   d.pushSize    = sizeof(A);
   d.skip        = !dev.info.float16Supported;
   d.skipMsg     = "shaderFloat16 not supported! Skipped";
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 #endif
 
@@ -1053,11 +1102,11 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 #endif
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
-int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
+int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   // v1 / v2 / v4: same packing story as MP.  NVIDIA shader-core BF16
   // peaks at bf16vec2 via BMMA2-style packed multiply.
-  static const vk_compute_variant_t variants[] = {
+  static const vk_compute_variant_t variants_default[] = {
     { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size },
 #ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2
     { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size },
@@ -1066,20 +1115,38 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
     { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size },
 #endif
   };
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1_RELAXED
+  static const vk_compute_variant_t variants_relaxed[] = {
+    { "bf16",  vk_shaders::compute_bf16_v1_relaxed, vk_shaders::compute_bf16_v1_relaxed_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2_RELAXED
+    { "bf16_2", vk_shaders::compute_bf16_v2_relaxed, vk_shaders::compute_bf16_v2_relaxed_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V4_RELAXED
+    { "bf16_4", vk_shaders::compute_bf16_v4_relaxed, vk_shaders::compute_bf16_v4_relaxed_size },
+#endif
+  };
+#endif
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
   d.resultTag      = "bfloat16_compute";
   d.unit        = "gflops";
-  d.variants    = variants;
-  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.variants    = variants_default;
+  d.numVariants = sizeof(variants_default) / sizeof(variants_default[0]);
+#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1_RELAXED
+  if (mode == PrecisionMode::Relaxed)
+  {
+    d.variants    = variants_relaxed;
+    d.numVariants = sizeof(variants_relaxed) / sizeof(variants_relaxed[0]);
+  }
+#endif
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
   d.pushSize    = sizeof(A);
   d.skip        = !dev.info.bfloat16Supported;
   d.skipMsg     = "VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped";
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 #endif
 
@@ -1094,13 +1161,16 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 // component-type enums, and add one more entry here.
 // ---------------------------------------------------------------------------
 
-int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
+int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   // Coopmat shape constants: shaders hard-code 16x16x16 with 256 iters and
   // local_size_x=32 (one subgroup per work-group).  See COOPMAT_WORK_PER_WI.
   const uint32_t coopWGSize  = 32;
   const uint32_t coopOutElems = 16 * 16;  // M*N tile written per WG
   const uint32_t coopWork    = COOPMAT_WORK_PER_WI;
+
+  // FP coopmat dtypes pair default and relaxed; the int8 block below gates
+  // on `mode == Default` since integer coopmat has no fast-math notion.
 
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP16
   {
@@ -1113,6 +1183,12 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_fp16;
     d.spirvSize      = vk_shaders::coopmat_fp16_size;
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP16_RELAXED
+    if (mode == PrecisionMode::Relaxed) {
+      d.spirv     = vk_shaders::coopmat_fp16_relaxed;
+      d.spirvSize = vk_shaders::coopmat_fp16_relaxed_size;
+    }
+#endif
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(float);
     d.wgSize         = coopWGSize;
@@ -1123,7 +1199,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_BF16
@@ -1137,6 +1213,12 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_bf16;
     d.spirvSize      = vk_shaders::coopmat_bf16_size;
+#ifdef CLPEAK_VK_HAS_COOPMAT_BF16_RELAXED
+    if (mode == PrecisionMode::Relaxed) {
+      d.spirv     = vk_shaders::coopmat_bf16_relaxed;
+      d.spirvSize = vk_shaders::coopmat_bf16_relaxed_size;
+    }
+#endif
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(float);
     d.wgSize         = coopWGSize;
@@ -1147,7 +1229,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
@@ -1161,6 +1243,12 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_fp8_e4m3;
     d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3_RELAXED
+    if (mode == PrecisionMode::Relaxed) {
+      d.spirv     = vk_shaders::coopmat_fp8_e4m3_relaxed;
+      d.spirvSize = vk_shaders::coopmat_fp8_e4m3_relaxed_size;
+    }
+#endif
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(float);
     d.wgSize         = coopWGSize;
@@ -1171,7 +1259,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
@@ -1185,6 +1273,12 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.unitDivider    = 1e12;
     d.spirv          = vk_shaders::coopmat_fp8_e5m2;
     d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2_RELAXED
+    if (mode == PrecisionMode::Relaxed) {
+      d.spirv     = vk_shaders::coopmat_fp8_e5m2_relaxed;
+      d.spirvSize = vk_shaders::coopmat_fp8_e5m2_relaxed_size;
+    }
+#endif
     d.workPerWI      = coopWork;
     d.elemSize       = sizeof(float);
     d.wgSize         = coopWGSize;
@@ -1195,10 +1289,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
 #endif
 #if defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_COOPMAT_INT8_K32)
+  if (mode == PrecisionMode::Default)
   {
     // Select the shader variant matching whichever INT8 tile the driver
     // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.

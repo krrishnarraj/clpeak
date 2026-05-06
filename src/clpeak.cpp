@@ -160,12 +160,18 @@ int clPeak::runAll()
         log->resultScopeAttribute("clock_frequency", devInfo.maxClockFreq);
         log->resultScopeAttribute("clock_frequency_unit", "MHz");
 
-        cl::Program::Sources source(1, stringifiedKernels);
-        cl::Program prog = cl::Program(ctx, source);
+        // Build the main program twice: once with default (precise) build
+        // options and once with relaxed-math options, so every FP test can
+        // be reported in both modes.
+        cl::Program prog;        // default: no fast-math
+        cl::Program progRelaxed; // -cl-fast-relaxed-math
+        bool relaxedAvailable = true;
         try
         {
+          cl::Program::Sources source(1, stringifiedKernels);
+          prog = cl::Program(ctx, source);
           std::vector<cl::Device> dev = {devices[d]};
-          prog.build(dev, BUILD_OPTIONS);
+          prog.build(dev, clBuildOptions(PrecisionMode::Default));
         }
         catch (cl::Error &error)
         {
@@ -173,8 +179,22 @@ int clPeak::runAll()
           log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]) + NEWLINE NEWLINE);
           continue;
         }
+        try
+        {
+          cl::Program::Sources source(1, stringifiedKernels);
+          progRelaxed = cl::Program(ctx, source);
+          std::vector<cl::Device> dev = {devices[d]};
+          progRelaxed.build(dev, clBuildOptions(PrecisionMode::Relaxed));
+        }
+        catch (cl::Error &)
+        {
+          log->print(TAB TAB "Relaxed-math program build failed, relaxed-math tests skipped" NEWLINE);
+          relaxedAvailable = false;
+        }
 
         // Helper: build an auxiliary program, silently skip on failure.
+        // Auxiliary programs only host integer/bandwidth/latency tests, so
+        // they only need the default build.
         auto buildAuxProg = [&](const std::string &src, const std::string &label) -> cl::Program
         {
           cl::Program p;
@@ -183,7 +203,7 @@ int clPeak::runAll()
             cl::Program::Sources s(1, src);
             p = cl::Program(ctx, s);
             std::vector<cl::Device> dev = {devices[d]};
-            p.build(dev, BUILD_OPTIONS);
+            p.build(dev, clBuildOptions(PrecisionMode::Default));
           }
           catch (cl::Error &)
           {
@@ -222,25 +242,35 @@ int clPeak::runAll()
         }
 
         // ---- Phase 1: floating-point compute ---------------------------
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
-                       "Single-precision compute (GFLOPS)", "single_precision_compute",
-                       "compute_sp", "float", "gflops",
-                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+        // Each FP test runs twice: once with the default (precise) build and
+        // once with -cl-fast-relaxed-math, labeled "(relaxed math)".
+        auto runFpPair = [&](Benchmark which, const char *displayName, const char *resultTag,
+                             const char *kernelPrefix, const char *typeName, unsigned int wgsPerCU,
+                             size_t elemSize) {
+          runComputeTest(queue, prog, devInfo, cfg, which,
+                         displayName, resultTag, kernelPrefix, typeName, "gflops",
+                         COMPUTE_FP_WORK_PER_WI, wgsPerCU, elemSize, PrecisionMode::Default);
+          if (relaxedAvailable)
+            runComputeTest(queue, progRelaxed, devInfo, cfg, which,
+                           displayName, resultTag, kernelPrefix, typeName, "gflops",
+                           COMPUTE_FP_WORK_PER_WI, wgsPerCU, elemSize, PrecisionMode::Relaxed);
+        };
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
-                       "Half-precision compute (GFLOPS)", "half_precision_compute",
-                       "compute_hp", "half", "gflops",
-                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
+        runFpPair(Benchmark::ComputeSP, "Single-precision compute (GFLOPS)",
+                  "single_precision_compute", "compute_sp", "float",
+                  cfg.computeWgsPerCU, sizeof(cl_float));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
-                       "Double-precision compute (GFLOPS)", "double_precision_compute",
-                       "compute_dp", "double", "gflops",
-                       COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
+        runFpPair(Benchmark::ComputeHP, "Half-precision compute (GFLOPS)",
+                  "half_precision_compute", "compute_hp", "half",
+                  cfg.computeWgsPerCU, sizeof(cl_half));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
-                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
-                       "compute_mp", "mp", "gflops",
-                       COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
+        runFpPair(Benchmark::ComputeDP, "Double-precision compute (GFLOPS)",
+                  "double_precision_compute", "compute_dp", "double",
+                  cfg.computeDPWgsPerCU, sizeof(cl_double));
+
+        runFpPair(Benchmark::ComputeMP, "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)",
+                  "mixed_precision_compute", "compute_mp", "mp",
+                  cfg.computeWgsPerCU, sizeof(cl_float));
 
         // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
@@ -373,10 +403,16 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            const std::string &displayName, const std::string &resultTag,
                            const std::string &kernelPrefix, const std::string &typeName,
                            const std::string &unit, unsigned int workPerWI,
-                           unsigned int wgsPerCU, size_t elemSize)
+                           unsigned int wgsPerCU, size_t elemSize,
+                           PrecisionMode mode)
 {
   if (!gating.isAllowed(which))
     return 0;
+
+  // FP tests get a (relaxed math) suffix on the second pass; integer tests
+  // are always called with PrecisionMode::Default and get no suffix.
+  const std::string fullDisplay = displayName + std::string(precisionLabelSuffix(mode));
+  const std::string fullResultTag = resultTag + std::string(precisionResultSuffix(mode));
 
   unsigned int iters = cfg.computeIters;
 
@@ -396,9 +432,11 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   // Feature gates
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
   {
-    log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
+    log->print(NEWLINE TAB TAB + fullDisplay + NEWLINE);
+    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(fullResultTag);
     log->resultScopeAttribute("unit", unit);
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
     for (int w = 0; w < 5; w++)
       log->recordSkip(labels[w], ResultStatus::Unsupported,
                        "No half precision support");
@@ -407,10 +445,11 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
   if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
   {
-    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
+    log->print(NEWLINE TAB TAB + fullDisplay + NEWLINE);
     log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
+    log->resultScopeBegin(fullResultTag);
     log->resultScopeAttribute("unit", unit);
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
     for (int w = 0; w < 5; w++)
       log->recordSkip(labels[w], ResultStatus::Unsupported,
                        "No half precision support");
@@ -419,9 +458,11 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
   if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
   {
-    log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
+    log->print(NEWLINE TAB TAB + fullDisplay + NEWLINE);
+    log->print(TAB TAB TAB "No double precision support! Skipped" NEWLINE);
+    log->resultScopeBegin(fullResultTag);
     log->resultScopeAttribute("unit", unit);
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
     for (int w = 0; w < 5; w++)
       log->recordSkip(labels[w], ResultStatus::Unsupported,
                        "No double precision support");
@@ -430,10 +471,11 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
   if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
   {
-    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
+    log->print(NEWLINE TAB TAB + fullDisplay + NEWLINE);
     log->print(TAB TAB TAB "cl_khr_integer_dot_product not supported! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
+    log->resultScopeBegin(fullResultTag);
     log->resultScopeAttribute("unit", unit);
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
     for (int w = 0; w < 5; w++)
       log->recordSkip(labels[w], ResultStatus::Unsupported,
                        "cl_khr_integer_dot_product not supported");
@@ -443,9 +485,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
   try
   {
-    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->resultScopeBegin(resultTag);
+    log->print(NEWLINE TAB TAB + fullDisplay + NEWLINE);
+    log->resultScopeBegin(fullResultTag);
     log->resultScopeAttribute("unit", unit);
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
 
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 

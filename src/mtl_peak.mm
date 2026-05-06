@@ -24,7 +24,7 @@ static const uint32_t MTL_SIMDGROUP_WORK_PER_WI = 131072;
 struct MetalDeviceImpl {
     id<MTLDevice>             device;
     id<MTLCommandQueue>       queue;
-    NSMutableDictionary<NSValue*, id<MTLLibrary>>           *libraryCache;
+    NSMutableDictionary<NSString*, id<MTLLibrary>>          *libraryCache;
     NSMutableDictionary<NSString*, id<MTLComputePipelineState>> *pipelineCache;
 };
 
@@ -149,10 +149,16 @@ void MetalDevice::cleanup()
 }
 
 // Get an MTLLibrary for the given source text, compiling on first miss.
-static id<MTLLibrary> getLibrary(MetalDevice &dev, const char *src, const char *srcName)
+// One library per (src, mode) pair: relaxed-math libraries are compiled with
+// MTLMathModeFast (or fastMathEnabled on older SDKs), giving the optimizer
+// permission for aggressive associativity / contraction transforms.  No
+// fp32->fp16 demotion is applied -- the half-precision tests cover that.
+static id<MTLLibrary> getLibrary(MetalDevice &dev, const char *src, const char *srcName,
+                                 PrecisionMode mode = PrecisionMode::Default)
 {
-    NSValue *key = [NSValue valueWithPointer:src];
-    id<MTLLibrary> lib = dev.impl->libraryCache[key];
+    NSString *cacheKey = [NSString stringWithFormat:@"%p#%d",
+                          (void*)src, (mode == PrecisionMode::Relaxed) ? 1 : 0];
+    id<MTLLibrary> lib = dev.impl->libraryCache[cacheKey];
     if (lib) return lib;
 
     NSError *err = nil;
@@ -165,24 +171,39 @@ static id<MTLLibrary> getLibrary(MetalDevice &dev, const char *src, const char *
     if (@available(macOS 14.0, *))
         opts.languageVersion = MTLLanguageVersion3_1;
 
+    if (@available(macOS 15.0, iOS 18.0, *))
+    {
+        opts.mathMode = (mode == PrecisionMode::Relaxed) ? MTLMathModeFast : MTLMathModeSafe;
+    }
+    else
+    {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        opts.fastMathEnabled = (mode == PrecisionMode::Relaxed) ? YES : NO;
+#pragma clang diagnostic pop
+    }
+
     lib = [dev.impl->device newLibraryWithSource:srcStr options:opts error:&err];
     if (!lib)
     {
         NSLog(@"Metal compile of %s failed: %@", srcName, err);
         return nil;
     }
-    dev.impl->libraryCache[key] = lib;
+    dev.impl->libraryCache[cacheKey] = lib;
     return lib;
 }
 
 static id<MTLComputePipelineState> getPipeline(MetalDevice &dev, const char *src,
-                                               const char *srcName, const char *fnName)
+                                               const char *srcName, const char *fnName,
+                                               PrecisionMode mode = PrecisionMode::Default)
 {
-    NSString *cacheKey = [NSString stringWithFormat:@"%p#%s", (void*)src, fnName];
+    NSString *cacheKey = [NSString stringWithFormat:@"%p#%s#%d",
+                          (void*)src, fnName,
+                          (mode == PrecisionMode::Relaxed) ? 1 : 0];
     id<MTLComputePipelineState> pso = dev.impl->pipelineCache[cacheKey];
     if (pso) return pso;
 
-    id<MTLLibrary> lib = getLibrary(dev, src, srcName);
+    id<MTLLibrary> lib = getLibrary(dev, src, srcName, mode);
     if (!lib) return nil;
 
     id<MTLFunction> fn = [lib newFunctionWithName:[NSString stringWithUTF8String:fnName]];
@@ -325,15 +346,36 @@ int MetalPeak::runAll()
         }
 
         // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -----------
-        if (gating.isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
-        if (gating.isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
-        if (gating.isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
+        // Each FP test runs default-then-relaxed in immediate succession
+        // so the two numbers sit next to each other.  MPS GEMM has no
+        // fast-math toggle and runs only at default.
+        if (gating.isAllowed(Benchmark::ComputeSP))
+        {
+            runComputeSP(dev, cfg, PrecisionMode::Default);
+            runComputeSP(dev, cfg, PrecisionMode::Relaxed);
+        }
+        if (gating.isAllowed(Benchmark::ComputeHP))
+        {
+            runComputeHP(dev, cfg, PrecisionMode::Default);
+            runComputeHP(dev, cfg, PrecisionMode::Relaxed);
+        }
+        if (gating.isAllowed(Benchmark::ComputeMP))
+        {
+            runComputeMP(dev, cfg, PrecisionMode::Default);
+            runComputeMP(dev, cfg, PrecisionMode::Relaxed);
+        }
         if (gating.isAllowedAs(Benchmark::SimdgroupMatrix, Category::FpCompute))
-            runSimdgroupMatrix(dev, cfg);
+        {
+            runSimdgroupMatrix(dev, cfg, PrecisionMode::Default);
+            runSimdgroupMatrix(dev, cfg, PrecisionMode::Relaxed);
+        }
         if (gating.isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
         if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
-            runAtomicThroughputFp(dev, cfg);
+        {
+            runAtomicThroughputFp(dev, cfg, PrecisionMode::Default);
+            runAtomicThroughputFp(dev, cfg, PrecisionMode::Relaxed);
+        }
 
         // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
         if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
@@ -368,13 +410,17 @@ int MetalPeak::runAll()
 // ---------------------------------------------------------------------------
 
 int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
-                                const mtl_compute_desc_t &d)
+                                const mtl_compute_desc_t &d,
+                                PrecisionMode mode)
 {
+    std::string fullTitle = std::string(d.title) + precisionLabelSuffix(mode);
+    std::string fullTag   = std::string(d.resultTag) + precisionResultSuffix(mode);
     log->print(NEWLINE TAB);
-    log->print(d.title);
+    log->print(fullTitle);
     log->print(NEWLINE);
-    auto scope = log->resultScope(d.resultTag);
+    auto scope = log->resultScope(fullTag);
     log->resultScopeAttribute("unit", d.unit);
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
     if (d.extraAttribKey && d.extraAttribVal)
         log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
@@ -448,7 +494,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         log->print(v.label);
         log->print(" : ");
 
-        id<MTLComputePipelineState> pso = getPipeline(dev, v.src, v.srcName, v.kernelName);
+        id<MTLComputePipelineState> pso = getPipeline(dev, v.src, v.srcName, v.kernelName, mode);
         if (!pso)
         {
             log->print("compile/load failed" NEWLINE);
@@ -484,7 +530,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 // Per-benchmark methods
 // ---------------------------------------------------------------------------
 
-int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
+int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
     static const mtl_compute_variant_t variants[] = {
         { "float ", "compute_sp",  mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name },
@@ -503,10 +549,10 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
     d.elemSize    = sizeof(float);
     d.scalarArg   = &A;
     d.scalarSize  = sizeof(A);
-    return runComputeKernel(dev, cfg, d);
+    return runComputeKernel(dev, cfg, d, mode);
 }
 
-int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
+int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
     static const mtl_compute_variant_t variants[] = {
         { "half ", "compute_hp",  mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name },
@@ -525,10 +571,10 @@ int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
     d.elemSize    = sizeof(float);
     d.scalarArg   = &A;
     d.scalarSize  = sizeof(A);
-    return runComputeKernel(dev, cfg, d);
+    return runComputeKernel(dev, cfg, d, mode);
 }
 
-int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
+int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
     static const mtl_compute_variant_t variants[] = {
         { "mp ", "compute_mp",  mtl_kernels::compute_mp_src, mtl_kernels::compute_mp_name },
@@ -546,7 +592,7 @@ int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
     d.elemSize    = sizeof(float);
     d.scalarArg   = &A;
     d.scalarSize  = sizeof(A);
-    return runComputeKernel(dev, cfg, d);
+    return runComputeKernel(dev, cfg, d, mode);
 }
 
 int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
@@ -620,7 +666,7 @@ int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
     return runComputeKernel(dev, cfg, d);
 }
 
-int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
+int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
     {
         float A = 1.3f;
@@ -643,7 +689,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.skipMsg          = "simdgroup_matrix requires Apple7 (M1) or newer! Skipped";
         d.extraAttribKey   = "tile";
         d.extraAttribVal   = "8x8x8";
-        runComputeKernel(dev, cfg, d);
+        runComputeKernel(dev, cfg, d, mode);
     }
     {
         float A = 1.3f;
@@ -666,7 +712,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.skipMsg          = "bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped";
         d.extraAttribKey   = "tile";
         d.extraAttribVal   = "8x8x8";
-        runComputeKernel(dev, cfg, d);
+        runComputeKernel(dev, cfg, d, mode);
     }
     return 0;
 }
@@ -1102,12 +1148,17 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
     return 0;
 }
 
-int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
+int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
     unsigned int iters = cfg.computeIters;
-    log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
-    auto scope_6 = log->resultScope("atomic_throughput");
+    std::string fullTitle = std::string("Atomic throughput (GFLOPS)") + precisionLabelSuffix(mode);
+    std::string fullTag   = std::string("atomic_throughput") + precisionResultSuffix(mode);
+    log->print(NEWLINE TAB);
+    log->print(fullTitle);
+    log->print(NEWLINE);
+    auto scope_6 = log->resultScope(fullTag);
     log->resultScopeAttribute("unit", "gflops");
+    log->resultScopeAttribute("math_mode", precisionAttribute(mode));
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = 32ULL * 1024 * 1024;
@@ -1121,7 +1172,7 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
                                                           options:MTLResourceStorageModeShared];
         if (!buf) return -1.0f;
         memset(buf.contents, 0, bufBytes);
-        id<MTLComputePipelineState> pso = getPipeline(dev, src, srcName, fnName);
+        id<MTLComputePipelineState> pso = getPipeline(dev, src, srcName, fnName, mode);
         if (!pso) return -1.0f;
         return runDispatches(dev, pso, buf, nullptr, 0, nil,
                              gridSize, tgSizeM, warmupCount, iters);

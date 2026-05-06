@@ -13,6 +13,7 @@
 #include <logger.h>
 #include <clpeak.h>      // Benchmark enum
 #include <backend_gating.h>  // centralized benchmark gating
+#include <precision.h>
 
 struct CliOptions; // forward decl
 
@@ -114,21 +115,21 @@ public:
   void applyOptions(const CliOptions &opts);
   int runAll();
 
-  int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);
-  int runComputeHP(MetalDevice &dev, benchmark_config_t &cfg);
-  int runComputeMP(MetalDevice &dev, benchmark_config_t &cfg);
+  int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
+  int runComputeHP(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
+  int runComputeMP(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
   int runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg);
   int runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
-  int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
+  int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
   int runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg);
   int runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg);
   int runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg, PrecisionMode mode = PrecisionMode::Default);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
@@ -136,7 +137,8 @@ public:
 
 private:
   int runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
-                       const mtl_compute_desc_t &d);
+                       const mtl_compute_desc_t &d,
+                       PrecisionMode mode = PrecisionMode::Default);
 };
 
 // Embedded Metal kernel source text (generated at build time by

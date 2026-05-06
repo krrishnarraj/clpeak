@@ -117,7 +117,10 @@ bool CudaDevice::init(int devIndex)
 void CudaDevice::cleanup()
 {
   for (auto &kv : moduleCache)
-    cuModuleUnload(kv.second);
+  {
+    if (kv.second.defaultMod) cuModuleUnload(kv.second.defaultMod);
+    if (kv.second.relaxedMod) cuModuleUnload(kv.second.relaxedMod);
+  }
   moduleCache.clear();
 
   if (stream)
@@ -134,15 +137,19 @@ void CudaDevice::cleanup()
 
 bool CudaDevice::getKernel(const char *src, const char *srcName,
                            const char *kernelName, CUfunction &fn,
-                           const std::vector<const char *> &extraOpts)
+                           const std::vector<const char *> &extraOpts,
+                           PrecisionMode mode)
 {
   // Cache by source-pointer identity: every embedded .cu blob is a distinct
   // extern in cuda_kernels_generated.cpp, so pointer equality is sufficient.
-  auto it = moduleCache.find(src);
+  // Each source is compiled twice -- once at default precision and once with
+  // --use_fast_math -- and cached in separate slots.
+  CachedModules &slot = moduleCache[src];
+  CUmodule &cached = (mode == PrecisionMode::Relaxed) ? slot.relaxedMod : slot.defaultMod;
   CUmodule mod = nullptr;
-  if (it != moduleCache.end())
+  if (cached != nullptr)
   {
-    mod = it->second;
+    mod = cached;
   }
   else
   {
@@ -167,6 +174,8 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
     std::vector<const char *> opts;
     opts.push_back(archStr.c_str());
     opts.push_back(incOpt.c_str());
+    if (mode == PrecisionMode::Relaxed)
+      opts.push_back("--use_fast_math");
     for (auto *e : extraOpts)
       opts.push_back(e);
 
@@ -214,7 +223,7 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
       }
     }
     nvrtcDestroyProgram(&prog);
-    moduleCache[src] = mod;
+    cached = mod;
   }
 
   CUresult r = cuModuleGetFunction(&fn, mod, kernelName);
@@ -353,13 +362,40 @@ int CudaPeak::runAll()
     log->resultScopeAttribute("arch", dev.info.archName);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
-    if (gating.isAllowed(Benchmark::ComputeSP))      runComputeSP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeHP))      runComputeHP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeDP))      runComputeDP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeMP))      runComputeMP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeBF16))    runComputeBF16(dev, cfg);
-    if (gating.isAllowedAs(Benchmark::Wmma,   Category::FpCompute))
-        runWmma(dev, cfg, Category::FpCompute);
+    // Each FP test runs default-then-relaxed in immediate succession via
+    // --use_fast_math, so the two numbers sit next to each other in the
+    // output.  cuBLAS GEMM runs only at default; its relaxed-fp32 path is
+    // already reported as the tf32 variant.
+    if (gating.isAllowed(Benchmark::ComputeSP))
+    {
+      runComputeSP(dev, cfg, PrecisionMode::Default);
+      runComputeSP(dev, cfg, PrecisionMode::Relaxed);
+    }
+    if (gating.isAllowed(Benchmark::ComputeHP))
+    {
+      runComputeHP(dev, cfg, PrecisionMode::Default);
+      runComputeHP(dev, cfg, PrecisionMode::Relaxed);
+    }
+    if (gating.isAllowed(Benchmark::ComputeDP))
+    {
+      runComputeDP(dev, cfg, PrecisionMode::Default);
+      runComputeDP(dev, cfg, PrecisionMode::Relaxed);
+    }
+    if (gating.isAllowed(Benchmark::ComputeMP))
+    {
+      runComputeMP(dev, cfg, PrecisionMode::Default);
+      runComputeMP(dev, cfg, PrecisionMode::Relaxed);
+    }
+    if (gating.isAllowed(Benchmark::ComputeBF16))
+    {
+      runComputeBF16(dev, cfg, PrecisionMode::Default);
+      runComputeBF16(dev, cfg, PrecisionMode::Relaxed);
+    }
+    if (gating.isAllowedAs(Benchmark::Wmma, Category::FpCompute))
+    {
+      runWmma(dev, cfg, Category::FpCompute, PrecisionMode::Default);
+      runWmma(dev, cfg, Category::FpCompute, PrecisionMode::Relaxed);
+    }
     if (gating.isAllowedAs(Benchmark::Cublas, Category::FpCompute))
         runCublas(dev, cfg, Category::FpCompute);
 
@@ -395,13 +431,17 @@ int CudaPeak::runAll()
 // ---------------------------------------------------------------------------
 
 int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
-                               const cuda_compute_desc_t &d)
+                               const cuda_compute_desc_t &d,
+                               PrecisionMode mode)
 {
+  std::string fullTitle = std::string(d.title) + precisionLabelSuffix(mode);
+  std::string fullTag   = std::string(d.resultTag) + precisionResultSuffix(mode);
   log->print(NEWLINE TAB);
-  log->print(d.title);
+  log->print(fullTitle);
   log->print(NEWLINE);
-  auto scope = log->resultScope(d.resultTag);
+  auto scope = log->resultScope(fullTag);
   log->resultScopeAttribute("unit", d.unit);
+  log->resultScopeAttribute("math_mode", precisionAttribute(mode));
   if (d.extraAttribKey && d.extraAttribVal)
     log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
 
@@ -473,7 +513,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     log->print(" : ");
 
     CUfunction fn;
-    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, nvrtcOpts))
+    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, nvrtcOpts, mode))
     {
       log->print("compile/load failed" NEWLINE);
       continue;
@@ -504,7 +544,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
 // Concrete compute benchmarks.
 // ---------------------------------------------------------------------------
 
-int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
+int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   float A = 1.3f;
   cuda_compute_desc_t d = {};
@@ -519,10 +559,10 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
   d.elemSize = sizeof(float);
   d.scalarArg = &A;
   d.scalarSize = sizeof(A);
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 
-int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
+int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   static const cuda_compute_variant_t variants[] = {
       {"half", "compute_hp", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
@@ -541,10 +581,10 @@ int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
   d.scalarSize = sizeof(A);
   d.skip = !dev.info.fp16Supported;
   d.skipMsg = "fp16 not supported on this compute capability! Skipped";
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 
-int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
+int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   double A = 1.3;
   cuda_compute_desc_t d = {};
@@ -559,10 +599,10 @@ int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
   d.elemSize = sizeof(double);
   d.scalarArg = &A;
   d.scalarSize = sizeof(A);
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 
-int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
+int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   // Single variant: NVIDIA shader-core fp16xfp16+fp32 issues at FP32 rate.
   // The packed (HFMA2) path is fp16xfp16+fp16 -- that's compute_hp2, not MP.
@@ -581,10 +621,10 @@ int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
   d.scalarSize = sizeof(A);
   d.skip = !dev.info.fp16Supported;
   d.skipMsg = "fp16 not supported on this compute capability! Skipped";
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 
-int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
+int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg, PrecisionMode mode)
 {
   // Single variant: shader-core bf16xbf16+fp32 issues at FP32 rate on
   // Ampere+.  Packed BF16 is reachable through tensor cores (wmma), not
@@ -605,7 +645,7 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   d.scalarSize = sizeof(A);
   d.skip = !dev.info.bf16Supported;
   d.skipMsg = "bf16 requires sm_80 or newer (Ampere+)! Skipped";
-  return runComputeKernel(dev, cfg, d);
+  return runComputeKernel(dev, cfg, d, mode);
 }
 
 int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
@@ -677,7 +717,7 @@ int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
 // ---------------------------------------------------------------------------
 
-int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category)
+int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category, PrecisionMode mode)
 {
   // Shared geometry: one warp (32 threads) per block, m16n16k16 tile per
   // wmma fragment, 256 outer iters → COOPMAT_WORK_PER_WI per thread.
@@ -715,7 +755,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.extraAttribVal = "16x16x16";
       d.skip = !dev.info.wmmaSupported;
       d.skipMsg = "WMMA requires sm_70 or newer (Volta+)! Skipped";
-      runComputeKernel(dev, cfg, d);
+      runComputeKernel(dev, cfg, d, mode);
     }
     // BF16 WMMA
     {
@@ -739,7 +779,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "bf16 WMMA requires sm_80 or newer (Ampere+)! Skipped";
       d.extraAttribKey = "tile";
       d.extraAttribVal = "16x16x16";
-      runComputeKernel(dev, cfg, d);
+      runComputeKernel(dev, cfg, d, mode);
     }
     // TF32 WMMA m16n16k8 -- Ampere+
     {
@@ -763,7 +803,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
       d.extraAttribKey = "tile";
       d.extraAttribVal = "16x16x8";
-      runComputeKernel(dev, cfg, d);
+      runComputeKernel(dev, cfg, d, mode);
     }
     // FP64 WMMA m8n8k4 -- Ampere+ DP tensor cores
     {
@@ -787,7 +827,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "FP64 WMMA requires sm_80 or newer (Ampere+)! Skipped";
       d.extraAttribKey = "tile";
       d.extraAttribVal = "8x8x4";
-      runComputeKernel(dev, cfg, d);
+      runComputeKernel(dev, cfg, d, mode);
     }
     // FP8 mma.sync E4M3 (PTX) - sm_89+
     {
@@ -811,7 +851,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
       d.extraAttribKey = "tile";
       d.extraAttribVal = "m16n8k32";
-      runComputeKernel(dev, cfg, d);
+      runComputeKernel(dev, cfg, d, mode);
     }
     // FP8 mma.sync E5M2 (PTX) - sm_89+
     {
@@ -835,7 +875,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
       d.extraAttribKey = "tile";
       d.extraAttribVal = "m16n8k32";
-      runComputeKernel(dev, cfg, d);
+      runComputeKernel(dev, cfg, d, mode);
     }
   }
 
@@ -871,7 +911,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.skipMsg = "INT8 WMMA requires sm_72 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
   // INT8 mma.sync K=32 (NVIDIA-native tile via inline PTX)
   {
@@ -895,7 +935,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.skipMsg = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m16n8k32";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
   // INT4 mma.sync m8n8k32 -- sm_75..sm_89
   {
@@ -919,7 +959,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.skipMsg = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m8n8k32";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
   // BMMA b1 mma.sync m8n8k128 (XOR-popc) -- sm_75+
   {
@@ -943,7 +983,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.skipMsg = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m8n8k128";
-    runComputeKernel(dev, cfg, d);
+    runComputeKernel(dev, cfg, d, mode);
   }
 
   return 0;
