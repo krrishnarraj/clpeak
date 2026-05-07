@@ -6,7 +6,7 @@ set(CLPEAK_VERSION_STR "${FALLBACK}")
 
 if(GIT_EXECUTABLE AND EXISTS "${SOURCE_DIR}/.git")
   execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty --long
+    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
     WORKING_DIRECTORY ${SOURCE_DIR}
     OUTPUT_VARIABLE _git_version
     OUTPUT_STRIP_TRAILING_WHITESPACE

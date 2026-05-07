@@ -10,7 +10,7 @@ find_package(Git QUIET)
 # Re-run version detection with correct working directory
 if(GIT_FOUND AND EXISTS "${_GIT_ROOT}/.git")
   execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty --long
+    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
     WORKING_DIRECTORY ${_GIT_ROOT}
     OUTPUT_VARIABLE _git_version
     OUTPUT_STRIP_TRAILING_WHITESPACE
