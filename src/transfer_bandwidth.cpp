@@ -5,9 +5,9 @@
 
 // If map/unmap bandwidth exceeds this multiplier of the peak real-transfer
 // bandwidth measured earlier in the same run, it's a zero-copy / shared-memory
-// operation with no actual data movement.  5x is conservative: on M1 the ratio
+// operation with no actual data movement.  3x is conservative: on M1 the ratio
 // is ~15000x, on Mali ~10x; on discrete GPUs the ratio is ~1x.
-static const float ZERO_COPY_MULTIPLIER = 5.0f;
+static const float ZERO_COPY_MULTIPLIER = 3.0f;
 
 // Absolute floor: if no real-transfer baselines were measured (e.g. user ran
 // only the map sub-test), fall back to this.  Well above any real hardware.
