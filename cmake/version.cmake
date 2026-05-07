@@ -10,7 +10,7 @@ find_package(Git QUIET)
 # --- Configure-time: seed an initial version.h so the tree always has one ---
 if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
   execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty --long
+    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_VARIABLE _git_version
     OUTPUT_STRIP_TRAILING_WHITESPACE
