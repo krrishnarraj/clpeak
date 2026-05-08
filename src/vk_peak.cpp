@@ -849,11 +849,8 @@ int vkPeak::runAll()
     if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
-    // CoopMatrix emits both fp (tflops) and int (tops) variants in one call;
-    // the shim assigns each metric to its proper category by unit.
-    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
-        gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
-        runCoopMatrix(dev, cfg);
+    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
+        runCoopMatrix(dev, cfg, /*intPart=*/false);
 #endif
 #ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
     // Float atomic add is reported in the fp-compute phase (mirrors Metal).
@@ -870,6 +867,10 @@ int vkPeak::runAll()
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
     if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+        runCoopMatrix(dev, cfg, /*intPart=*/true);
 #endif
     if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
         runAtomicThroughput(dev, cfg);
@@ -1334,7 +1335,7 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 // component-type enums, and add one more entry here.
 // ---------------------------------------------------------------------------
 
-int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
+int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart)
 {
   // Coopmat shape constants: shaders hard-code 16x16x16 with 256 iters and
   // local_size_x=32 (one subgroup per work-group).  See COOPMAT_WORK_PER_WI.
@@ -1342,128 +1343,131 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   const uint32_t coopOutElems = 16 * 16;  // M*N tile written per WG
   const uint32_t coopWork    = COOPMAT_WORK_PER_WI;
 
+  if (!intPart) {
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP32
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp32xfp32+fp32 16x16x16 (TFLOPS)";
-    d.resultTag      = "coopmat_fp32";
-    d.metricLabel    = "coopmat_fp32";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp32;
-    d.spirvSize      = vk_shaders::coopmat_fp32_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !dev.info.coopmatFP32Supported;
-    d.skipMsg        = "No 16x16x16 fp32xfp32+fp32 coopmat property! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp32xfp32+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp32";
+      d.metricLabel    = "coopmat_fp32";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp32;
+      d.spirvSize      = vk_shaders::coopmat_fp32_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !dev.info.coopmatFP32Supported;
+      d.skipMsg        = "No 16x16x16 fp32xfp32+fp32 coopmat property! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP16
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_fp16";
-    d.metricLabel    = "coopmat_fp16";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp16;
-    d.spirvSize      = vk_shaders::coopmat_fp16_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !dev.info.coopmatFP16Supported;
-    d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp16";
+      d.metricLabel    = "coopmat_fp16";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp16;
+      d.spirvSize      = vk_shaders::coopmat_fp16_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !dev.info.coopmatFP16Supported;
+      d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_BF16
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_bf16";
-    d.metricLabel    = "coopmat_bf16";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_bf16;
-    d.spirvSize      = vk_shaders::coopmat_bf16_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !dev.info.coopmatBF16Supported;
-    d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_bf16";
+      d.metricLabel    = "coopmat_bf16";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_bf16;
+      d.spirvSize      = vk_shaders::coopmat_bf16_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !dev.info.coopmatBF16Supported;
+      d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_fp8_e4m3";
-    d.metricLabel    = "coopmat_fp8_e4m3";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp8_e4m3;
-    d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E4M3Supported);
-    d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp8_e4m3";
+      d.metricLabel    = "coopmat_fp8_e4m3";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp8_e4m3;
+      d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E4M3Supported);
+      d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_fp8_e5m2";
-    d.metricLabel    = "coopmat_fp8_e5m2";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp8_e5m2;
-    d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E5M2Supported);
-    d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp8_e5m2";
+      d.metricLabel    = "coopmat_fp8_e5m2";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp8_e5m2;
+      d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E5M2Supported);
+      d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
+  } // !intPart
+
 #if defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_COOPMAT_INT8_K32)
-  {
+  if (intPart) {
     // Select the shader variant matching whichever INT8 tile the driver
     // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.
     int32_t A = 3;
@@ -1521,7 +1525,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.spirvSize      = 0;
     }
     runComputeKernel(dev, cfg, d);
-  }
+  } // if (intPart)
 #endif
   return 0;
 }

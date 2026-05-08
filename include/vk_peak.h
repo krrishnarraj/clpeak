@@ -205,7 +205,7 @@ public:
   int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
   // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
-  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart = false);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
