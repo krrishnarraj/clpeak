@@ -567,15 +567,16 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   return result == VK_SUCCESS;
 }
 
-void VulkanDevice::submitAndWait(VkCommandBuffer cmdBuf)
+VkResult VulkanDevice::submitAndWait(VkCommandBuffer cmdBuf)
 {
   VkSubmitInfo submitInfo = {};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmdBuf;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(computeQueue);
+  VkResult sr = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  VkResult wr = vkQueueWaitIdle(computeQueue);
+  return sr != VK_SUCCESS ? sr : wr;
 }
 
 uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
@@ -715,11 +716,20 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
   vkEndCommandBuffer(cmdBuf);
 
   auto start = std::chrono::high_resolution_clock::now();
-  dev.submitAndWait(cmdBuf);
+  VkResult submitRes = dev.submitAndWait(cmdBuf);
   auto end = std::chrono::high_resolution_clock::now();
   float timed = (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+
+  // Driver/device failure (e.g. Adreno+Turnip losing the device on a
+  // shader that uses an advertised-but-unsupported feature): vkQueueWaitIdle
+  // returns instantly with VK_ERROR_DEVICE_LOST, leaving timed ~= 0 which
+  // would otherwise propagate as "inf" GFLOPS/GBPS into the report.
+  if (submitRes != VK_SUCCESS)
+    return -1.0f;
+  if (timed <= 0.0f)
+    return -1.0f;
   return timed / static_cast<float>(iters);
 }
 
@@ -1071,6 +1081,14 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
                             cfg.computeIters, d.pushData, d.pushSize);
+    if (timed <= 0.0f)
+    {
+      log->print("submit failed (driver lost the device or rejected the dispatch)" NEWLINE);
+      log->recordSkip(v.label, ResultStatus::Error,
+                       "vkQueueSubmit/WaitIdle failed");
+      vkDestroyPipeline(dev.device, pipeline, nullptr);
+      continue;
+    }
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
 
@@ -1667,11 +1685,18 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     uint32_t variantGroups = numGroups / v.width;
     if (variantGroups == 0) variantGroups = 1;
     float timed = runKernel(dev, pipe, pipeLayout, descSet, variantGroups, iters);
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ') key.pop_back();
+    if (timed <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      vkDestroyPipeline(dev.device, pipe, nullptr);
+      continue;
+    }
     float gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    std::string key(v.label);
-    while (!key.empty() && key.back() == ' ') key.pop_back();
     log->resultRecord(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
@@ -1793,48 +1818,74 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     }
 
     float totalUs = 0.0f;
+    bool   submitFailed = false;
     for (unsigned int i = 0; i < iters; i++)
     {
       recordCopy(queryPool != VK_NULL_HANDLE);
       auto start = std::chrono::high_resolution_clock::now();
-      dev.submitAndWait(cmdBuf);
+      VkResult sr = dev.submitAndWait(cmdBuf);
       auto end = std::chrono::high_resolution_clock::now();
+      if (sr != VK_SUCCESS)
+      {
+        submitFailed = true;
+        vkResetCommandBuffer(cmdBuf, 0);
+        break;
+      }
 
+      double iterUs = (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
       if (queryPool != VK_NULL_HANDLE)
       {
         uint64_t ts[2] = {};
         VkResult qr = vkGetQueryPoolResults(dev.device, queryPool, 0, 2, sizeof(ts), ts,
                                             sizeof(uint64_t),
                                             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-        if (qr == VK_SUCCESS && ts[1] >= ts[0])
+        // Strict > (not >=): some drivers (e.g. Adreno+Turnip) return both
+        // timestamps with the same value for buffer-copy ranges instead of
+        // failing the query.  Treat equality as "timer didn't tick" and
+        // fall back to the host wall clock.
+        if (qr == VK_SUCCESS && ts[1] > ts[0])
           totalUs += (float)((double)(ts[1] - ts[0]) * props.limits.timestampPeriod / 1000.0);
         else
-          totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+          totalUs += (float)iterUs;
       }
       else
       {
-        totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        totalUs += (float)iterUs;
       }
 
       vkResetCommandBuffer(cmdBuf, 0);
     }
 
-    return std::max(totalUs / static_cast<float>(iters), FLT_EPSILON);
+    if (submitFailed)
+      return -1.0f;
+    // A genuine zero reading (no measurable wall-clock time AND no
+    // timestamp delta) is the timer-broken case -- don't paper over it
+    // with FLT_EPSILON, since (bytes / FLT_EPSILON / 1e3) prints 1.13e12
+    // GBPS and looks like a real result.
+    if (totalUs <= 0.0f)
+      return -1.0f;
+    return totalUs / static_cast<float>(iters);
   };
 
-  float usH2D = runCopy(hostBuf, devBuf);
-  float gbpsH2D = (float)bytes / usH2D / 1e3f;
-  log->print(TAB TAB "Host->Dev : ");
-  log->print(gbpsH2D);
-  log->print(NEWLINE);
-  log->resultRecord("h2d", gbpsH2D);
+  auto reportCopy = [&](const char *label, const char *metric, float us)
+  {
+    log->print(TAB TAB);
+    log->print(label);
+    if (us <= 0.0f)
+    {
+      log->print("submit failed (timer/device unreliable)" NEWLINE);
+      log->recordSkip(metric, ResultStatus::Error,
+                       "vkQueueSubmit/WaitIdle failed or timer returned zero");
+      return;
+    }
+    float gbps = (float)bytes / us / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->resultRecord(metric, gbps);
+  };
 
-  float usD2H = runCopy(devBuf, hostBuf);
-  float gbpsD2H = (float)bytes / usD2H / 1e3f;
-  log->print(TAB TAB "Dev->Host : ");
-  log->print(gbpsD2H);
-  log->print(NEWLINE);
-  log->resultRecord("d2h", gbpsD2H);
+  reportCopy("Host->Dev : ", "h2d", runCopy(hostBuf, devBuf));
+  reportCopy("Dev->Host : ", "d2h", runCopy(devBuf, hostBuf));
 
   if (queryPool != VK_NULL_HANDLE)
     vkDestroyQueryPool(dev.device, queryPool, nullptr);
@@ -1935,14 +1986,21 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
+    // Strip padding from the display label for the result metric key.
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ') key.pop_back();
+    if (us <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      vkDestroyPipeline(dev.device, pipe, nullptr);
+      continue;
+    }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    // Strip padding from the display label for the result metric key.
-    std::string key(v.label);
-    while (!key.empty() && key.back() == ' ') key.pop_back();
     log->resultRecord(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
@@ -2134,11 +2192,19 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
-    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
-    float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord("float4", gbps);
+    if (us <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    }
+    else
+    {
+      uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
+      float gbps = (float)bytes / us / 1e3f;
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->resultRecord("float4", gbps);
+    }
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -2237,6 +2303,11 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
     log->print(gops); log->print(NEWLINE);
     log->resultRecord("int_global", gops);
   }
+  else
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("int_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+  }
 
 #ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   if (dev.info.atomicInt64Supported)
@@ -2250,6 +2321,11 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
       log->print(gops); log->print(NEWLINE);
       log->resultRecord("ulong_global", gops);
     }
+    else
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip("ulong_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    }
   }
 #endif
 
@@ -2262,6 +2338,11 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
     log->print(gops); log->print(NEWLINE);
     log->resultRecord("int_local", gops);
+  }
+  else
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("int_local", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
 
   return 0;
@@ -2340,9 +2421,17 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     float us = runKernel(dev, pipe, pl, ds, numGroups, iters);
-    float gflops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
-    log->print(gflops); log->print(NEWLINE);
-    log->resultRecord("float_global", gflops);
+    if (us <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip("float_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    }
+    else
+    {
+      float gflops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
+      log->print(gflops); log->print(NEWLINE);
+      log->resultRecord("float_global", gflops);
+    }
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

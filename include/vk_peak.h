@@ -99,8 +99,11 @@ public:
                              VkPipelineLayout pipeLayout,
                              VkPipeline &pipeline);
 
-  // Submit a command buffer and wait
-  void submitAndWait(VkCommandBuffer cmdBuf);
+  // Submit a command buffer and wait.  Returns the worst VkResult seen
+  // across vkQueueSubmit / vkQueueWaitIdle so callers can detect and skip
+  // out-of-spec drivers (e.g. Adreno/Turnip silently losing the device on
+  // shaders that use advertised-but-unsupported features).
+  VkResult submitAndWait(VkCommandBuffer cmdBuf);
 
 private:
   uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
