@@ -84,6 +84,7 @@ struct benchmark_config_t {
   unsigned int computeWgsPerCU;
   unsigned int computeDPWgsPerCU;
   unsigned int computeIters;
+  unsigned int atomicIters;
   unsigned int localBWIters;
   unsigned int imageBWIters;
   unsigned int transferBWIters;

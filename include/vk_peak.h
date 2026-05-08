@@ -22,7 +22,7 @@ struct BackendInventory; // forward decl
 #if defined(CLPEAK_VK_HAS_COOPMAT_FP8_E4M3) || defined(CLPEAK_VK_HAS_COOPMAT_FP8_E5M2)
 #define CLPEAK_VK_HAS_ANY_COOPMAT_FP8 1
 #endif
-#if defined(CLPEAK_VK_HAS_COOPMAT_FP16) || defined(CLPEAK_VK_HAS_COOPMAT_BF16) || defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_ANY_COOPMAT_FP8)
+#if defined(CLPEAK_VK_HAS_COOPMAT_FP16) || defined(CLPEAK_VK_HAS_COOPMAT_BF16) || defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_ANY_COOPMAT_FP8) || defined(CLPEAK_VK_HAS_COOPMAT_FP32)
 #define CLPEAK_VK_HAS_ANY_COOPMAT 1
 #endif
 
@@ -44,9 +44,12 @@ struct vk_device_info_t {
   // Optional feature / extension gates
   bool int8DotProductSupported;   // VK_KHR_shader_integer_dot_product + shaderInt8
   bool float16Supported;          // VK_KHR_shader_float16_int8::shaderFloat16
+  bool float64Supported;          // VkPhysicalDeviceFeatures::shaderFloat64
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
+  bool atomicFloat32Supported;    // VK_EXT_shader_atomic_float + shaderBufferFloat32AtomicAdd
+  bool atomicInt64Supported;      // VK_KHR_shader_atomic_int64 + shaderBufferInt64Atomics
   bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
 
   // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
@@ -63,6 +66,7 @@ struct vk_device_info_t {
   bool coopmatBF16Supported;      // bf16 A/B, fp32 C  @ 16x16x16
   bool coopmatFP8E4M3Supported;   // fp8 E4M3 A/B, fp32 C  @ 16x16x16
   bool coopmatFP8E5M2Supported;   // fp8 E5M2 A/B, fp32 C  @ 16x16x16
+  bool coopmatFP32Supported;      // fp32 A/B/C  @ 16x16x16
   // INT8: store the selected K so host can pick the right shader variant.
   // 0 = unsupported; 16 or 32 = supported at 16x16xK.
   uint32_t coopmatINT8K;
@@ -95,8 +99,11 @@ public:
                              VkPipelineLayout pipeLayout,
                              VkPipeline &pipeline);
 
-  // Submit a command buffer and wait
-  void submitAndWait(VkCommandBuffer cmdBuf);
+  // Submit a command buffer and wait.  Returns the worst VkResult seen
+  // across vkQueueSubmit / vkQueueWaitIdle so callers can detect and skip
+  // out-of-spec drivers (e.g. Adreno/Turnip silently losing the device on
+  // shaders that use advertised-but-unsupported features).
+  VkResult submitAndWait(VkCommandBuffer cmdBuf);
 
 private:
   uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
@@ -179,6 +186,15 @@ public:
 
   // Individual benchmarks
   int runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg);
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+  int runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+  int runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+  int runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg);
+#endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
   int runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
@@ -192,12 +208,15 @@ public:
   int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
   // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
-  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg);
+  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart = false);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+  int runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg);
+#endif
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
 private:
@@ -229,8 +248,60 @@ private:
 namespace vk_shaders {
   extern const uint32_t compute_sp_v1[];
   extern const size_t   compute_sp_v1_size;
+#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V2
+  extern const uint32_t compute_sp_v2[];
+  extern const size_t   compute_sp_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V4
+  extern const uint32_t compute_sp_v4[];
+  extern const size_t   compute_sp_v4_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+  extern const uint32_t compute_hp_v1[];
+  extern const size_t   compute_hp_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V2
+  extern const uint32_t compute_hp_v2[];
+  extern const size_t   compute_hp_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V4
+  extern const uint32_t compute_hp_v4[];
+  extern const size_t   compute_hp_v4_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+  extern const uint32_t compute_dp_v1[];
+  extern const size_t   compute_dp_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V2
+  extern const uint32_t compute_dp_v2[];
+  extern const size_t   compute_dp_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V4
+  extern const uint32_t compute_dp_v4[];
+  extern const size_t   compute_dp_v4_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+  extern const uint32_t compute_int32_v1[];
+  extern const size_t   compute_int32_v1_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V2
+  extern const uint32_t compute_int32_v2[];
+  extern const size_t   compute_int32_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V4
+  extern const uint32_t compute_int32_v4[];
+  extern const size_t   compute_int32_v4_size;
+#endif
   extern const uint32_t global_bandwidth_v1[];
   extern const size_t   global_bandwidth_v1_size;
+#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V2
+  extern const uint32_t global_bandwidth_v2[];
+  extern const size_t   global_bandwidth_v2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V4
+  extern const uint32_t global_bandwidth_v4[];
+  extern const size_t   global_bandwidth_v4_size;
+#endif
   extern const uint32_t local_bandwidth_v1[];
   extern const size_t   local_bandwidth_v1_size;
   extern const uint32_t local_bandwidth_v2[];
@@ -243,6 +314,14 @@ namespace vk_shaders {
   extern const size_t   image_bandwidth_v1_size;
   extern const uint32_t atomic_throughput_global[];
   extern const size_t   atomic_throughput_global_size;
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+  extern const uint32_t atomic_throughput_global_float[];
+  extern const size_t   atomic_throughput_global_float_size;
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+  extern const uint32_t atomic_throughput_global_uint64[];
+  extern const size_t   atomic_throughput_global_uint64_size;
+#endif
   extern const uint32_t atomic_throughput_local[];
   extern const size_t   atomic_throughput_local_size;
   extern const uint32_t kernel_latency[];
@@ -308,6 +387,10 @@ namespace vk_shaders {
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
   extern const uint32_t coopmat_fp8_e5m2[];
   extern const size_t   coopmat_fp8_e5m2_size;
+#endif
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP32
+  extern const uint32_t coopmat_fp32[];
+  extern const size_t   coopmat_fp32_size;
 #endif
 }
 

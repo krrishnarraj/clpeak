@@ -139,14 +139,18 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   std::vector<const char *> enabledExts;
   info.int8DotProductSupported = false;
   info.float16Supported = false;
+  info.float64Supported = false;
   info.bfloat16Supported = false;
   info.cooperativeMatrixSupported = false;
   info.fp8Supported = false;
+  info.atomicFloat32Supported = false;
+  info.atomicInt64Supported = false;
   info.coopmatFP16Supported = false;
   info.coopmatBF16Supported = false;
   info.coopmatINT8K = 0;
   info.coopmatFP8E4M3Supported = false;
   info.coopmatFP8E5M2Supported = false;
+  info.coopmatFP32Supported = false;
   info.calibratedTimestampsSupported = false;
 
   // Feature query for optional shader types.  Uses vkGetPhysicalDeviceFeatures2
@@ -159,7 +163,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   // On Android API < 28 Features2 isn't in the stub loader, so none of the
   // optional shader defines should be active unless the NDK provides a
   // modern-enough loader (see CompileShaders.cmake).
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT)
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT) || defined(CLPEAK_VK_HAS_COMPUTE_DP_V1) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
@@ -183,6 +187,17 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
 #endif
 #endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {};
+  atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+  VkPhysicalDeviceShaderAtomicInt64Features atomicInt64Features = {};
+  atomicInt64Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
+#endif
+  // Base features (shaderFloat64 etc.) come back inside Features2.features.
+  VkPhysicalDeviceFeatures2 baseFeatures2 = {};
+  baseFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 
   // Small helper: prepend a features struct onto a pNext chain.
   // All VkPhysicalDevice*Features* structs begin with the (sType, pNext)
@@ -194,10 +209,23 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   };
 
   bool f16i8ExtEnabled = false;
-  if (hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
+  bool hasF16I8Ext = hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+  bool hasCoopmatExt = false;
+#endif
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+  bool hasFP8Ext = false;
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+  bool hasAtomicFloatExt = false;
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+  bool hasAtomicInt64Ext = false;
+#endif
   {
     void *chain = nullptr;
-    chain = chainPNext(chain, &f16i8Features);
+    if (hasF16I8Ext)
+      chain = chainPNext(chain, &f16i8Features);
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
     if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME))
       chain = chainPNext(chain, &dpFeatures);
@@ -210,17 +238,27 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
     // Cooperative-matrix requires vulkanMemoryModel.  Chain both feature
     // structs whenever the coopmat extension is present; the memory-model
     // struct is core-1.2 and is what drivers advertising coopmat expose.
-    bool hasCoopmatExt = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    hasCoopmatExt = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
     if (hasCoopmatExt)
     {
       chain = chainPNext(chain, &coopmatFeatures);
       chain = chainPNext(chain, &vmmFeatures);
     }
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
-    bool hasFP8Ext = hasExt(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+    hasFP8Ext = hasExt(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
     if (hasFP8Ext)
       chain = chainPNext(chain, &fp8Features);
 #endif
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+    hasAtomicFloatExt = hasExt("VK_EXT_shader_atomic_float");
+    if (hasAtomicFloatExt)
+      chain = chainPNext(chain, &atomicFloatFeatures);
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+    hasAtomicInt64Ext = hasExt(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
+    if (hasAtomicInt64Ext)
+      chain = chainPNext(chain, &atomicInt64Features);
 #endif
 
     VkPhysicalDeviceFeatures2 features2 = {};
@@ -238,7 +276,26 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
           vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceFeatures2KHR");
     if (pfnGetFeat2)
       pfnGetFeat2(physDev, &features2);
+    baseFeatures2.features = features2.features;
 
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+    if (features2.features.shaderFloat64)
+      info.float64Supported = true;
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+    if (hasAtomicFloatExt && atomicFloatFeatures.shaderBufferFloat32AtomicAdd)
+    {
+      enabledExts.push_back("VK_EXT_shader_atomic_float");
+      info.atomicFloat32Supported = true;
+    }
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+    if (hasAtomicInt64Ext && atomicInt64Features.shaderBufferInt64Atomics)
+    {
+      enabledExts.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
+      info.atomicInt64Supported = true;
+    }
+#endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
     if (f16i8Features.shaderFloat16)
     {
@@ -342,13 +399,17 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT)
+#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT) || defined(CLPEAK_VK_HAS_COMPUTE_DP_V1) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
   // Re-chain the feature structs we actually enabled for vkCreateDevice.
   // The query-phase chain is discarded; these are the features we ask the
   // driver to turn on.
   VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
   enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
   void *enabledChain = nullptr;
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+  if (info.float64Supported)
+    enabledFeatures2.features.shaderFloat64 = VK_TRUE;
+#endif
   if (info.float16Supported || info.int8DotProductSupported)
   {
     f16i8Features.pNext = nullptr;
@@ -384,11 +445,28 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   }
 #endif
 #endif
-  if (enabledChain)
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+  if (info.atomicFloat32Supported)
+  {
+    atomicFloatFeatures.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &atomicFloatFeatures);
+  }
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+  if (info.atomicInt64Supported)
+  {
+    atomicInt64Features.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &atomicInt64Features);
+  }
+#endif
+  // Always pass enabledFeatures2 if any enabled state present (chain or base feats).
+  bool haveBaseFeats = enabledFeatures2.features.shaderFloat64 != VK_FALSE;
+  if (enabledChain || haveBaseFeats)
   {
     enabledFeatures2.pNext = enabledChain;
     deviceCI.pNext = &enabledFeatures2;
   }
+  (void)baseFeatures2;
 #endif
 
   if (vkCreateDevice(physDev, &deviceCI, nullptr, &device) != VK_SUCCESS)
@@ -489,15 +567,16 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   return result == VK_SUCCESS;
 }
 
-void VulkanDevice::submitAndWait(VkCommandBuffer cmdBuf)
+VkResult VulkanDevice::submitAndWait(VkCommandBuffer cmdBuf)
 {
   VkSubmitInfo submitInfo = {};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmdBuf;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(computeQueue);
+  VkResult sr = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  VkResult wr = vkQueueWaitIdle(computeQueue);
+  return sr != VK_SUCCESS ? sr : wr;
 }
 
 uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
@@ -637,11 +716,20 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
   vkEndCommandBuffer(cmdBuf);
 
   auto start = std::chrono::high_resolution_clock::now();
-  dev.submitAndWait(cmdBuf);
+  VkResult submitRes = dev.submitAndWait(cmdBuf);
   auto end = std::chrono::high_resolution_clock::now();
   float timed = (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+
+  // Driver/device failure (e.g. Adreno+Turnip losing the device on a
+  // shader that uses an advertised-but-unsupported feature): vkQueueWaitIdle
+  // returns instantly with VK_ERROR_DEVICE_LOST, leaving timed ~= 0 which
+  // would otherwise propagate as "inf" GFLOPS/GBPS into the report.
+  if (submitRes != VK_SUCCESS)
+    return -1.0f;
+  if (timed <= 0.0f)
+    return -1.0f;
   return timed / static_cast<float>(iters);
 }
 
@@ -705,6 +793,8 @@ int vkPeak::runAll()
           {
             if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
               dev.info.coopmatFP16Supported = true;
+            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT32_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
+              dev.info.coopmatFP32Supported = true;
             if (matches(p, 16,16,16, VK_COMPONENT_TYPE_BFLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
               dev.info.coopmatBF16Supported = true;
             if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
@@ -756,6 +846,12 @@ int vkPeak::runAll()
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
     if (gating.isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+    if (gating.isAllowed(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+    if (gating.isAllowed(Benchmark::ComputeDP))       runComputeDP(dev, cfg);
+#endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
     if (gating.isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
@@ -763,21 +859,31 @@ int vkPeak::runAll()
     if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_ANY_COOPMAT
-    // CoopMatrix emits both fp (tflops) and int (tops) variants in one call;
-    // the shim assigns each metric to its proper category by unit.
-    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute) ||
-        gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
-        runCoopMatrix(dev, cfg);
+    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
+        runCoopMatrix(dev, cfg, /*intPart=*/false);
+#endif
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+    // Float atomic add is reported in the fp-compute phase (mirrors Metal).
+    if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
+        runAtomicThroughputFp(dev, cfg);
 #endif
 
     // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+    if (gating.isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
+#endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
     if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
     if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
 #endif
-    if (gating.isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(dev, cfg);
+#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+        runCoopMatrix(dev, cfg, /*intPart=*/true);
+#endif
+    if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
+        runAtomicThroughput(dev, cfg);
 
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
     if (gating.isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
@@ -975,6 +1081,14 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
                             cfg.computeIters, d.pushData, d.pushSize);
+    if (timed <= 0.0f)
+    {
+      log->print("submit failed (driver lost the device or rejected the dispatch)" NEWLINE);
+      log->recordSkip(v.label, ResultStatus::Error,
+                       "vkQueueSubmit/WaitIdle failed");
+      vkDestroyPipeline(dev.device, pipeline, nullptr);
+      continue;
+    }
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
 
@@ -1001,20 +1115,113 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
 int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
+  static const vk_compute_variant_t variants[] = {
+    { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V2
+    { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V4
+    { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size },
+#endif
+  };
   float A = 1.3f;
   vk_compute_desc_t d = {};
   d.title       = "Single-precision compute (GFLOPS)";
-  d.resultTag      = "single_precision_compute";
-  d.metricLabel = "float";
+  d.resultTag   = "single_precision_compute";
   d.unit        = "gflops";
-  d.spirv       = vk_shaders::compute_sp_v1;
-  d.spirvSize   = vk_shaders::compute_sp_v1_size;
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
   d.pushSize    = sizeof(A);
   return runComputeKernel(dev, cfg, d);
 }
+
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  static const vk_compute_variant_t variants[] = {
+    { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V2
+    { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V4
+    { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size },
+#endif
+  };
+  float A = 1.3f;
+  vk_compute_desc_t d = {};
+  d.title       = "Half-precision compute fp16xfp16+fp16 (GFLOPS)";
+  d.resultTag   = "half_precision_compute";
+  d.unit        = "gflops";
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize    = sizeof(float);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  d.skip        = !dev.info.float16Supported;
+  d.skipMsg     = "shaderFloat16 not supported! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+#endif
+
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  static const vk_compute_variant_t variants[] = {
+    { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V2
+    { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V4
+    { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size },
+#endif
+  };
+  double A = 1.3;
+  vk_compute_desc_t d = {};
+  d.title       = "Double-precision compute (GFLOPS)";
+  d.resultTag   = "double_precision_compute";
+  d.unit        = "gflops";
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize    = sizeof(double);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  d.skip        = !dev.info.float64Supported;
+  d.skipMsg     = "shaderFloat64 not supported! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+#endif
+
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  static const vk_compute_variant_t variants[] = {
+    { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size },
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V2
+    { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size },
+#endif
+#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V4
+    { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size },
+#endif
+  };
+  int32_t A = 4;
+  vk_compute_desc_t d = {};
+  d.title       = "Integer compute int32 (GOPS)";
+  d.resultTag   = "integer_compute";
+  d.unit        = "gops";
+  d.variants    = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.workPerWI   = COMPUTE_INT_WORK_PER_WI;
+  d.elemSize    = sizeof(int32_t);
+  d.pushData    = &A;
+  d.pushSize    = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
+}
+#endif
 
 #ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
 int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
@@ -1146,7 +1353,7 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 // component-type enums, and add one more entry here.
 // ---------------------------------------------------------------------------
 
-int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
+int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart)
 {
   // Coopmat shape constants: shaders hard-code 16x16x16 with 256 iters and
   // local_size_x=32 (one subgroup per work-group).  See COOPMAT_WORK_PER_WI.
@@ -1154,104 +1361,131 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   const uint32_t coopOutElems = 16 * 16;  // M*N tile written per WG
   const uint32_t coopWork    = COOPMAT_WORK_PER_WI;
 
+  if (!intPart) {
+#ifdef CLPEAK_VK_HAS_COOPMAT_FP32
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp32xfp32+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp32";
+      d.metricLabel    = "coopmat_fp32";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp32;
+      d.spirvSize      = vk_shaders::coopmat_fp32_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !dev.info.coopmatFP32Supported;
+      d.skipMsg        = "No 16x16x16 fp32xfp32+fp32 coopmat property! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
+#endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP16
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_fp16";
-    d.metricLabel    = "coopmat_fp16";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp16;
-    d.spirvSize      = vk_shaders::coopmat_fp16_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !dev.info.coopmatFP16Supported;
-    d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp16";
+      d.metricLabel    = "coopmat_fp16";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp16;
+      d.spirvSize      = vk_shaders::coopmat_fp16_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !dev.info.coopmatFP16Supported;
+      d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_BF16
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_bf16";
-    d.metricLabel    = "coopmat_bf16";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_bf16;
-    d.spirvSize      = vk_shaders::coopmat_bf16_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !dev.info.coopmatBF16Supported;
-    d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_bf16";
+      d.metricLabel    = "coopmat_bf16";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_bf16;
+      d.spirvSize      = vk_shaders::coopmat_bf16_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !dev.info.coopmatBF16Supported;
+      d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_fp8_e4m3";
-    d.metricLabel    = "coopmat_fp8_e4m3";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp8_e4m3;
-    d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E4M3Supported);
-    d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp8_e4m3";
+      d.metricLabel    = "coopmat_fp8_e4m3";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp8_e4m3;
+      d.spirvSize      = vk_shaders::coopmat_fp8_e4m3_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E4M3Supported);
+      d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
 #ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
-  {
-    float A = 1.3f;
-    vk_compute_desc_t d = {};
-    d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
-    d.resultTag         = "coopmat_fp8_e5m2";
-    d.metricLabel    = "coopmat_fp8_e5m2";
-    d.unit           = "tflops";
-    d.unitDivider    = 1e12;
-    d.spirv          = vk_shaders::coopmat_fp8_e5m2;
-    d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
-    d.workPerWI      = coopWork;
-    d.elemSize       = sizeof(float);
-    d.wgSize         = coopWGSize;
-    d.outElemsPerWG  = coopOutElems;
-    d.pushData       = &A;
-    d.pushSize       = sizeof(A);
-    d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E5M2Supported);
-    d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
-    runComputeKernel(dev, cfg, d);
-  }
+    {
+      float A = 1.3f;
+      vk_compute_desc_t d = {};
+      d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
+      d.resultTag      = "coopmat_fp8_e5m2";
+      d.metricLabel    = "coopmat_fp8_e5m2";
+      d.unit           = "tflops";
+      d.unitDivider    = 1e12;
+      d.spirv          = vk_shaders::coopmat_fp8_e5m2;
+      d.spirvSize      = vk_shaders::coopmat_fp8_e5m2_size;
+      d.workPerWI      = coopWork;
+      d.elemSize       = sizeof(float);
+      d.wgSize         = coopWGSize;
+      d.outElemsPerWG  = coopOutElems;
+      d.pushData       = &A;
+      d.pushSize       = sizeof(A);
+      d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E5M2Supported);
+      d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "16x16x16";
+      runComputeKernel(dev, cfg, d);
+    }
 #endif
+  } // !intPart
+
 #if defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_COOPMAT_INT8_K32)
-  {
+  if (intPart) {
     // Select the shader variant matching whichever INT8 tile the driver
     // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.
     int32_t A = 3;
@@ -1309,7 +1543,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.spirvSize      = 0;
     }
     runComputeKernel(dev, cfg, d);
-  }
+  } // if (intPart)
 #endif
   return 0;
 }
@@ -1379,19 +1613,16 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   VkPipelineLayout pipeLayout;
   vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
 
-  VkPipeline pipeline;
-  if (!dev.createComputePipeline(vk_shaders::global_bandwidth_v1, vk_shaders::global_bandwidth_v1_size,
-                                  dsLayout, pipeLayout, pipeline))
-  {
-    log->print(TAB TAB "Failed to create pipeline" NEWLINE);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-    vkDestroyBuffer(dev.device, inputBuf, nullptr);
-    vkFreeMemory(dev.device, inputMem, nullptr);
-    vkDestroyBuffer(dev.device, outputBuf, nullptr);
-    vkFreeMemory(dev.device, outputMem, nullptr);
-    return -1;
-  }
+  struct GBVar { const char *label; const uint32_t *spv; size_t sz; uint32_t width; };
+  const GBVar variants[] = {
+    {"float ",  vk_shaders::global_bandwidth_v1, vk_shaders::global_bandwidth_v1_size, 1},
+#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V2
+    {"float2",  vk_shaders::global_bandwidth_v2, vk_shaders::global_bandwidth_v2_size, 2},
+#endif
+#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V4
+    {"float4",  vk_shaders::global_bandwidth_v4, vk_shaders::global_bandwidth_v4_size, 4},
+#endif
+  };
 
   // Descriptor pool + set
   VkDescriptorPoolSize poolSize = {};
@@ -1436,17 +1667,41 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   }
   vkUpdateDescriptorSets(dev.device, 2, writes, 0, nullptr);
 
-  // Run
-  log->print(TAB TAB "float   : ");
-  float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups, iters);
-  float gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-
-  log->print(gbps);
-  log->print(NEWLINE);
-  log->resultRecord("float", gbps);
+  // Run each variant.  Same buffer + descriptor set; only the pipeline
+  // (i.e. the loaded shader) changes per row.
+  for (const auto &v : variants)
+  {
+    log->print(TAB TAB);
+    log->print(v.label);
+    log->print("  : ");
+    VkPipeline pipe;
+    if (!dev.createComputePipeline(v.spv, v.sz, dsLayout, pipeLayout, pipe))
+    {
+      log->print("pipeline creation failed" NEWLINE);
+      continue;
+    }
+    // Match OpenCL: reduce work-group count by vector width so total bytes
+    // touched stays at numItems * sizeof(float) across all variants.
+    uint32_t variantGroups = numGroups / v.width;
+    if (variantGroups == 0) variantGroups = 1;
+    float timed = runKernel(dev, pipe, pipeLayout, descSet, variantGroups, iters);
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ') key.pop_back();
+    if (timed <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      vkDestroyPipeline(dev.device, pipe, nullptr);
+      continue;
+    }
+    float gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->resultRecord(key, gbps);
+    vkDestroyPipeline(dev.device, pipe, nullptr);
+  }
 
   // Cleanup
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
@@ -1563,48 +1818,74 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     }
 
     float totalUs = 0.0f;
+    bool   submitFailed = false;
     for (unsigned int i = 0; i < iters; i++)
     {
       recordCopy(queryPool != VK_NULL_HANDLE);
       auto start = std::chrono::high_resolution_clock::now();
-      dev.submitAndWait(cmdBuf);
+      VkResult sr = dev.submitAndWait(cmdBuf);
       auto end = std::chrono::high_resolution_clock::now();
+      if (sr != VK_SUCCESS)
+      {
+        submitFailed = true;
+        vkResetCommandBuffer(cmdBuf, 0);
+        break;
+      }
 
+      double iterUs = (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
       if (queryPool != VK_NULL_HANDLE)
       {
         uint64_t ts[2] = {};
         VkResult qr = vkGetQueryPoolResults(dev.device, queryPool, 0, 2, sizeof(ts), ts,
                                             sizeof(uint64_t),
                                             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-        if (qr == VK_SUCCESS && ts[1] >= ts[0])
+        // Strict > (not >=): some drivers (e.g. Adreno+Turnip) return both
+        // timestamps with the same value for buffer-copy ranges instead of
+        // failing the query.  Treat equality as "timer didn't tick" and
+        // fall back to the host wall clock.
+        if (qr == VK_SUCCESS && ts[1] > ts[0])
           totalUs += (float)((double)(ts[1] - ts[0]) * props.limits.timestampPeriod / 1000.0);
         else
-          totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+          totalUs += (float)iterUs;
       }
       else
       {
-        totalUs += (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        totalUs += (float)iterUs;
       }
 
       vkResetCommandBuffer(cmdBuf, 0);
     }
 
-    return std::max(totalUs / static_cast<float>(iters), FLT_EPSILON);
+    if (submitFailed)
+      return -1.0f;
+    // A genuine zero reading (no measurable wall-clock time AND no
+    // timestamp delta) is the timer-broken case -- don't paper over it
+    // with FLT_EPSILON, since (bytes / FLT_EPSILON / 1e3) prints 1.13e12
+    // GBPS and looks like a real result.
+    if (totalUs <= 0.0f)
+      return -1.0f;
+    return totalUs / static_cast<float>(iters);
   };
 
-  float usH2D = runCopy(hostBuf, devBuf);
-  float gbpsH2D = (float)bytes / usH2D / 1e3f;
-  log->print(TAB TAB "Host->Dev : ");
-  log->print(gbpsH2D);
-  log->print(NEWLINE);
-  log->resultRecord("h2d", gbpsH2D);
+  auto reportCopy = [&](const char *label, const char *metric, float us)
+  {
+    log->print(TAB TAB);
+    log->print(label);
+    if (us <= 0.0f)
+    {
+      log->print("submit failed (timer/device unreliable)" NEWLINE);
+      log->recordSkip(metric, ResultStatus::Error,
+                       "vkQueueSubmit/WaitIdle failed or timer returned zero");
+      return;
+    }
+    float gbps = (float)bytes / us / 1e3f;
+    log->print(gbps);
+    log->print(NEWLINE);
+    log->resultRecord(metric, gbps);
+  };
 
-  float usD2H = runCopy(devBuf, hostBuf);
-  float gbpsD2H = (float)bytes / usD2H / 1e3f;
-  log->print(TAB TAB "Dev->Host : ");
-  log->print(gbpsD2H);
-  log->print(NEWLINE);
-  log->resultRecord("d2h", gbpsD2H);
+  reportCopy("Host->Dev : ", "h2d", runCopy(hostBuf, devBuf));
+  reportCopy("Dev->Host : ", "d2h", runCopy(devBuf, hostBuf));
 
   if (queryPool != VK_NULL_HANDLE)
     vkDestroyQueryPool(dev.device, queryPool, nullptr);
@@ -1705,14 +1986,21 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
+    // Strip padding from the display label for the result metric key.
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ') key.pop_back();
+    if (us <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      vkDestroyPipeline(dev.device, pipe, nullptr);
+      continue;
+    }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
     log->print(NEWLINE);
-    // Strip padding from the display label for the result metric key.
-    std::string key(v.label);
-    while (!key.empty() && key.back() == ' ') key.pop_back();
     log->resultRecord(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
@@ -1904,11 +2192,19 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
-    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
-    float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord("float4", gbps);
+    if (us <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    }
+    else
+    {
+      uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
+      float gbps = (float)bytes / us / 1e3f;
+      log->print(gbps);
+      log->print(NEWLINE);
+      log->resultRecord("float4", gbps);
+    }
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -1930,7 +2226,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
+  unsigned int iters = cfg.atomicIters;
 
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   auto scope_5 = log->resultScope("atomic_throughput");
@@ -1998,29 +2294,155 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   };
 
   // Global atomics: one int counter per WI -> 128 MB output.
-  log->print(TAB TAB "global : ");
-  float us_g = runOne("global", vk_shaders::atomic_throughput_global,
+  log->print(TAB TAB "int_global   : ");
+  float us_g = runOne("int_global", vk_shaders::atomic_throughput_global,
       vk_shaders::atomic_throughput_global_size, globalWIs * sizeof(int32_t));
   if (us_g > 0)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->resultRecord("global", gops);
+    log->resultRecord("int_global", gops);
+  }
+  else
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("int_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
 
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+  if (dev.info.atomicInt64Supported)
+  {
+    log->print(TAB TAB "ulong_global : ");
+    float us = runOne("ulong_global", vk_shaders::atomic_throughput_global_uint64,
+        vk_shaders::atomic_throughput_global_uint64_size, globalWIs * sizeof(uint64_t));
+    if (us > 0)
+    {
+      float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
+      log->print(gops); log->print(NEWLINE);
+      log->resultRecord("ulong_global", gops);
+    }
+    else
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip("ulong_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    }
+  }
+#endif
+
   // Local atomics: one int counter per workgroup.
-  log->print(TAB TAB "local  : ");
-  float us_l = runOne("local", vk_shaders::atomic_throughput_local,
+  log->print(TAB TAB "int_local    : ");
+  float us_l = runOne("int_local", vk_shaders::atomic_throughput_local,
       vk_shaders::atomic_throughput_local_size, (uint64_t)numGroups * sizeof(int32_t));
   if (us_l > 0)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->resultRecord("local", gops);
+    log->resultRecord("int_local", gops);
+  }
+  else
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("int_local", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
 
   return 0;
 }
+
+// ---------------------------------------------------------------------------
+// FP atomic throughput (Vulkan) -- emitted in the FpCompute phase, mirroring
+// Metal's runAtomicThroughputFp.  Currently a single global_float row, gated
+// on VK_EXT_shader_atomic_float + shaderBufferFloat32AtomicAdd.
+// ---------------------------------------------------------------------------
+
+#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = cfg.atomicIters;
+
+  log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
+  auto scope = log->resultScope("atomic_throughput");
+  log->resultScopeAttribute("unit", "gflops");
+
+  if (!dev.info.atomicFloat32Supported)
+  {
+    log->print(TAB TAB "VK_EXT_shader_atomic_float / shaderBufferFloat32AtomicAdd not supported! Skipped" NEWLINE);
+    log->recordSkip("float_global", ResultStatus::Unsupported,
+                    "VK_EXT_shader_atomic_float not supported");
+    return 0;
+  }
+
+  const uint32_t wgSize = 256;
+  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
+  uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
+  uint64_t bufBytes = globalWIs * sizeof(float);
+
+  VkBuffer buf; VkDeviceMemory mem;
+  if (!dev.createBuffer(bufBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buf, mem))
+  {
+    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    return -1;
+  }
+  VkDescriptorSetLayoutBinding b = {};
+  b.binding = 0; b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  b.descriptorCount = 1; b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  VkDescriptorSetLayoutCreateInfo dslCI = {};
+  dslCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dslCI.bindingCount = 1; dslCI.pBindings = &b;
+  VkDescriptorSetLayout dsl; vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsl);
+  VkPipelineLayoutCreateInfo plCI = {};
+  plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsl;
+  VkPipelineLayout pl; vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pl);
+  VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+  VkDescriptorPoolCreateInfo dpCI = {};
+  dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpCI.maxSets = 1; dpCI.poolSizeCount = 1; dpCI.pPoolSizes = &ps;
+  VkDescriptorPool dp; vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &dp);
+  VkDescriptorSetAllocateInfo dsAI = {};
+  dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsAI.descriptorPool = dp; dsAI.descriptorSetCount = 1; dsAI.pSetLayouts = &dsl;
+  VkDescriptorSet ds; vkAllocateDescriptorSets(dev.device, &dsAI, &ds);
+  VkDescriptorBufferInfo bi = {buf, 0, bufBytes};
+  VkWriteDescriptorSet w = {};
+  w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  w.dstSet = ds; w.dstBinding = 0; w.descriptorCount = 1;
+  w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.pBufferInfo = &bi;
+  vkUpdateDescriptorSets(dev.device, 1, &w, 0, nullptr);
+
+  log->print(TAB TAB "float_global : ");
+  VkPipeline pipe;
+  if (!dev.createComputePipeline(vk_shaders::atomic_throughput_global_float,
+                                  vk_shaders::atomic_throughput_global_float_size,
+                                  dsl, pl, pipe))
+  {
+    log->print("pipeline failed" NEWLINE);
+  }
+  else
+  {
+    float us = runKernel(dev, pipe, pl, ds, numGroups, iters);
+    if (us <= 0.0f)
+    {
+      log->print("submit failed" NEWLINE);
+      log->recordSkip("float_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    }
+    else
+    {
+      float gflops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
+      log->print(gflops); log->print(NEWLINE);
+      log->resultRecord("float_global", gflops);
+    }
+    vkDestroyPipeline(dev.device, pipe, nullptr);
+  }
+
+  vkDestroyDescriptorPool(dev.device, dp, nullptr);
+  vkDestroyPipelineLayout(dev.device, pl, nullptr);
+  vkDestroyDescriptorSetLayout(dev.device, dsl, nullptr);
+  vkDestroyBuffer(dev.device, buf, nullptr);
+  vkFreeMemory(dev.device, mem, nullptr);
+  return 0;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Kernel launch latency (Vulkan) -- two metrics:

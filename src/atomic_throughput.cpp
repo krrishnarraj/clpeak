@@ -8,7 +8,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   if (!gating.isAllowed(Benchmark::AtomicThroughput))
     return 0;
 
-  unsigned int iters = cfg.computeIters;
+  unsigned int iters = cfg.atomicIters;
 
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
   uint64_t numWGs    = globalWIs / devInfo.maxWGSize;
@@ -27,7 +27,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     ///////////////////////////////////////////////////////////////////////////
     // Global atomics -- independent per-WI counters (no cross-WI contention)
     {
-      log->print(TAB TAB TAB "global  : ");
+      log->print(TAB TAB TAB "int_global : ");
 
       cl::Buffer globalBuf = cl::Buffer(ctx, CL_MEM_READ_WRITE, globalWIs * sizeof(cl_int));
       cl_int zero = 0;
@@ -42,13 +42,13 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
       log->print(gops);
       log->print(NEWLINE);
-      log->resultRecord("global", gops);
+      log->resultRecord("int_global", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Local atomics -- all WIs in a WG contend on one shared counter
     {
-      log->print(TAB TAB TAB "local   : ");
+      log->print(TAB TAB TAB "int_local  : ");
 
       cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, numWGs * sizeof(cl_int));
 
@@ -61,7 +61,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
       log->print(gops);
       log->print(NEWLINE);
-      log->resultRecord("local", gops);
+      log->resultRecord("int_local", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
   }
@@ -72,8 +72,8 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
        << TAB TAB TAB "Tests skipped" NEWLINE;
     log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    log->recordSkip("global", ResultStatus::Error, reason);
-    log->recordSkip("local", ResultStatus::Error, reason);
+    log->recordSkip("int_global", ResultStatus::Error, reason);
+    log->recordSkip("int_local", ResultStatus::Error, reason);
     return -1;
   }
 

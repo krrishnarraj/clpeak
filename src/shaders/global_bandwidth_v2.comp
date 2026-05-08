@@ -1,0 +1,32 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) readonly buffer Input {
+    vec2 data[];
+} inputBuf;
+
+layout(set = 0, binding = 1) writeonly buffer Output {
+    float data[];
+} outputBuf;
+
+#define FETCH_PER_WI 16
+
+void main()
+{
+    uint gid = gl_GlobalInvocationID.x;
+    uint lid = gl_LocalInvocationID.x;
+    uint wid = gl_WorkGroupID.x;
+    uint lsz = gl_WorkGroupSize.x;
+
+    uint offset = wid * lsz * FETCH_PER_WI + lid;
+
+    vec2 sum = vec2(0.0);
+    for (int i = 0; i < FETCH_PER_WI; i++)
+    {
+        sum += inputBuf.data[offset];
+        offset += lsz;
+    }
+
+    outputBuf.data[gid] = sum.x + sum.y;
+}

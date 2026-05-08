@@ -1013,7 +1013,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.computeIters;
+    unsigned int iters = cfg.atomicIters;
     log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
     auto scope_5 = log->resultScope("atomic_throughput");
     log->resultScopeAttribute("unit", "gops");
@@ -1104,7 +1104,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.computeIters;
+    unsigned int iters = cfg.atomicIters;
     log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
     auto scope_6 = log->resultScope("atomic_throughput");
     log->resultScopeAttribute("unit", "gflops");

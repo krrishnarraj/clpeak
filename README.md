@@ -129,10 +129,11 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Image / texture bandwidth | GB/s | &check; | &check; | &check; | &check; |
 | Transfer bandwidth (host&harr;device) | GB/s | &check; | &check; | &check; | &mdash; |
 | Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; |
-| Compute INT / INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
+| Compute INT (int32) | GOPS | &check; | &check; | &check; | &mdash; |
+| Compute INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
 | INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &check; (emul) |
 | Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`) | TFLOPS / TOPS | &mdash; | coopmat fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
+| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
 | Vendor-SDK GEMM peak (`--cublas`, `--mps-gemm`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | MPS: fp32/fp16/bf16 |
 | Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; |
 | Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; |

@@ -1,0 +1,22 @@
+#version 450
+#extension GL_EXT_shader_atomic_float : require
+
+// Global atomic float throughput: each WI hammers its own counter (no
+// cross-WI contention) with 512 serial atomicAdds.  Mirrors the int
+// global-atomic test.  Requires VK_EXT_shader_atomic_float +
+// shaderBufferFloat32AtomicAdd.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Counter {
+    float data[];
+} counter;
+
+void main()
+{
+    uint gid = gl_GlobalInvocationID.x;
+    for (int i = 0; i < 512; i++)
+    {
+        atomicAdd(counter.data[gid], 1.0);
+    }
+}

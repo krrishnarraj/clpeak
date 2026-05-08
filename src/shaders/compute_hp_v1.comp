@@ -1,0 +1,34 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+// Half-precision MAC: fp16 x fp16 + fp16 accumulator.  Distinct from
+// compute_mp (fp16 x fp16 + fp32) -- some hardware (NVIDIA shader-core
+// HFMA2) only reaches the 2x-FP32 rate when the accumulator is also
+// fp16.  Requires VK_KHR_shader_float16_int8 + shaderFloat16.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+
+void main()
+{
+    float16_t x = float16_t(pc.A);
+    float16_t y = float16_t(gl_LocalInvocationID.x);
+
+    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (matches COMPUTE_FP_WORK_PER_WI).
+    for (int i = 0; i < 128; i++)
+    {
+        MAD_16(x, y)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = float(x + y);
+}

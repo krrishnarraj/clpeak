@@ -1,0 +1,31 @@
+#version 450
+
+// Signed int32 MAC throughput.  Mirrors compute_sp_v1 with `*` + `+` in
+// place of `fma` since GLSL's fma is fp-only.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define MAD_4(x, y)  x = (y * x) + y; y = (x * y) + x; x = (y * x) + y; y = (x * y) + x;
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+
+void main()
+{
+    int x = pc.A;
+    int y = int(gl_LocalInvocationID.x);
+
+    // 64 iters * 16 MADs * 2 ops = 2048 per WI (matches COMPUTE_INT_WORK_PER_WI).
+    for (int i = 0; i < 64; i++)
+    {
+        MAD_16(x, y)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = y;
+}

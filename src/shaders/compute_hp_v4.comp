@@ -1,0 +1,33 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+// Half-precision MAC v4: f16vec4 lanes.  See compute_hp_v1 for rationale.
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    float data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    float A;
+} pc;
+
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+
+void main()
+{
+    f16vec4 x = f16vec4(float16_t(pc.A),       float16_t(pc.A + 1.0),
+                        float16_t(pc.A + 2.0), float16_t(pc.A + 3.0));
+    f16vec4 y = f16vec4(float16_t(gl_LocalInvocationID.x));
+
+    // 32 iters * 16 FMAs * 2 ops * 4 lanes = 4096 per WI.
+    for (int i = 0; i < 32; i++)
+    {
+        MAD_16(x, y)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] =
+        float(x.x + x.y + x.z + x.w + y.x + y.y + y.z + y.w);
+}
