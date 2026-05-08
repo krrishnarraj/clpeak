@@ -1,0 +1,28 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    int data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    int A;
+} pc;
+
+#define MAD_4(x, y)  x = (y * x) + y; y = (x * y) + x; x = (y * x) + y; y = (x * y) + x;
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+
+void main()
+{
+    ivec2 x = ivec2(pc.A, pc.A + 1);
+    ivec2 y = ivec2(gl_LocalInvocationID.x);
+
+    // 32 iters * 16 MADs * 2 ops * 2 lanes = 2048 per WI.
+    for (int i = 0; i < 32; i++)
+    {
+        MAD_16(x, y)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = y.x + y.y;
+}

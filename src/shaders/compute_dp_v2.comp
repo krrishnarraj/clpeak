@@ -1,0 +1,29 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Output {
+    double data[];
+} outputBuf;
+
+layout(push_constant) uniform PushConstants {
+    double A;
+} pc;
+
+#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
+#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+
+void main()
+{
+    dvec2 x = dvec2(pc.A, pc.A + 1.0lf);
+    dvec2 y = dvec2(gl_LocalInvocationID.x);
+
+    // 64 iters * 16 FMAs * 2 ops * 2 lanes = 4096 per WI.
+    for (int i = 0; i < 64; i++)
+    {
+        MAD_16(x, y)
+    }
+
+    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y + y.x + y.y;
+}

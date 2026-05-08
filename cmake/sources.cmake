@@ -95,7 +95,20 @@ set(CLPEAK_CUDA_KERNELS
 # defines CLPEAK_VK_HAS_<NAME> for per-shader gating in vk_peak.cpp.
 set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/compute_sp_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_sp_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_sp_v4.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_hp_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_hp_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_hp_v4.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_dp_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_dp_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_dp_v4.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int32_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int32_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/compute_int32_v4.comp
     ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v1.comp
+    ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v2.comp
+    ${CLPEAK_ROOT}/src/shaders/global_bandwidth_v4.comp
     ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v2.comp
     ${CLPEAK_ROOT}/src/shaders/compute_int8_dp_v4.comp
@@ -112,12 +125,15 @@ set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/coopmat_int8_k32.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e4m3.comp
     ${CLPEAK_ROOT}/src/shaders/coopmat_fp8_e5m2.comp
+    ${CLPEAK_ROOT}/src/shaders/coopmat_fp32.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v2.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v4.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v8.comp
     ${CLPEAK_ROOT}/src/shaders/image_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global.comp
+    ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global_float.comp
+    ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global_uint64.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_local.comp
     ${CLPEAK_ROOT}/src/shaders/kernel_latency.comp
 )
