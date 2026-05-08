@@ -15,6 +15,7 @@ benchmark_config_t benchmark_config_t::forDevice(cl_device_type type)
     cfg.computeWgsPerCU = 512;
     cfg.computeDPWgsPerCU = 256;
     cfg.computeIters = 10;
+    cfg.atomicIters = 3;
     cfg.localBWIters = 20;
     cfg.imageBWIters = 20;
     cfg.transferBWMaxSize = 1 << 27;
@@ -26,6 +27,11 @@ benchmark_config_t benchmark_config_t::forDevice(cl_device_type type)
     cfg.computeWgsPerCU = 2048;
     cfg.computeDPWgsPerCU = 512;
     cfg.computeIters = 30;
+    // Atomic tests are heavily contended on some drivers (Vulkan / MoltenVK
+    // local atomics run at ~1/2 of OpenCL/CUDA throughput on NVIDIA), so iters
+    // is set lower than computeIters to keep total wall time reasonable when
+    // multiple dtype variants run (e.g. Metal: int/uint/ulong x global/local).
+    cfg.atomicIters = 8;
     cfg.localBWIters = 50;
     cfg.imageBWIters = 50;
     cfg.transferBWMaxSize = 1 << 29;

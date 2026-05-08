@@ -2160,7 +2160,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
+  unsigned int iters = cfg.atomicIters;
 
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   auto scope_5 = log->resultScope("atomic_throughput");
@@ -2228,40 +2228,40 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   };
 
   // Global atomics: one int counter per WI -> 128 MB output.
-  log->print(TAB TAB "global : ");
-  float us_g = runOne("global", vk_shaders::atomic_throughput_global,
+  log->print(TAB TAB "int_global   : ");
+  float us_g = runOne("int_global", vk_shaders::atomic_throughput_global,
       vk_shaders::atomic_throughput_global_size, globalWIs * sizeof(int32_t));
   if (us_g > 0)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->resultRecord("global", gops);
+    log->resultRecord("int_global", gops);
   }
 
 #ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   if (dev.info.atomicInt64Supported)
   {
-    log->print(TAB TAB "global_uint64 : ");
-    float us = runOne("global_uint64", vk_shaders::atomic_throughput_global_uint64,
+    log->print(TAB TAB "ulong_global : ");
+    float us = runOne("ulong_global", vk_shaders::atomic_throughput_global_uint64,
         vk_shaders::atomic_throughput_global_uint64_size, globalWIs * sizeof(uint64_t));
     if (us > 0)
     {
       float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
       log->print(gops); log->print(NEWLINE);
-      log->resultRecord("global_uint64", gops);
+      log->resultRecord("ulong_global", gops);
     }
   }
 #endif
 
   // Local atomics: one int counter per workgroup.
-  log->print(TAB TAB "local  : ");
-  float us_l = runOne("local", vk_shaders::atomic_throughput_local,
+  log->print(TAB TAB "int_local    : ");
+  float us_l = runOne("int_local", vk_shaders::atomic_throughput_local,
       vk_shaders::atomic_throughput_local_size, (uint64_t)numGroups * sizeof(int32_t));
   if (us_l > 0)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
     log->print(gops); log->print(NEWLINE);
-    log->resultRecord("local", gops);
+    log->resultRecord("int_local", gops);
   }
 
   return 0;
@@ -2276,7 +2276,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
 int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
+  unsigned int iters = cfg.atomicIters;
 
   log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
   auto scope = log->resultScope("atomic_throughput");
@@ -2285,7 +2285,7 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.info.atomicFloat32Supported)
   {
     log->print(TAB TAB "VK_EXT_shader_atomic_float / shaderBufferFloat32AtomicAdd not supported! Skipped" NEWLINE);
-    log->recordSkip("global_float", ResultStatus::Unsupported,
+    log->recordSkip("float_global", ResultStatus::Unsupported,
                     "VK_EXT_shader_atomic_float not supported");
     return 0;
   }
@@ -2329,7 +2329,7 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.pBufferInfo = &bi;
   vkUpdateDescriptorSets(dev.device, 1, &w, 0, nullptr);
 
-  log->print(TAB TAB "global_float : ");
+  log->print(TAB TAB "float_global : ");
   VkPipeline pipe;
   if (!dev.createComputePipeline(vk_shaders::atomic_throughput_global_float,
                                   vk_shaders::atomic_throughput_global_float_size,
@@ -2342,7 +2342,7 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
     float us = runKernel(dev, pipe, pl, ds, numGroups, iters);
     float gflops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
     log->print(gflops); log->print(NEWLINE);
-    log->resultRecord("global_float", gflops);
+    log->resultRecord("float_global", gflops);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

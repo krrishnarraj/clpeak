@@ -1352,7 +1352,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
+  unsigned int iters = cfg.atomicIters;
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   auto scope = log->resultScope("atomic_throughput");
   log->resultScopeAttribute("unit", "gops");
@@ -1368,7 +1368,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
     {
       cuMemsetD32(buf, 0, globalThreads);
       CUfunction fn;
-      log->print(TAB TAB "global : ");
+      log->print(TAB TAB "int_global : ");
       if (dev.getKernel(cuda_kernels::atomic_throughput_src,
                         cuda_kernels::atomic_throughput_name,
                         "atomic_throughput_global", fn))
@@ -1378,18 +1378,18 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
         log->print(gops);
         log->print(NEWLINE);
-        log->resultRecord("global", gops);
+        log->resultRecord("int_global", gops);
       }
       else
       {
         log->print("compile failed" NEWLINE);
-        log->recordSkip("global", ResultStatus::Error, "Kernel compile failed");
+        log->recordSkip("int_global", ResultStatus::Error, "Kernel compile failed");
       }
       cuMemFree(buf);
     }
     else
     {
-      log->recordSkip("global", ResultStatus::Error, "Buffer alloc failed");
+      log->recordSkip("int_global", ResultStatus::Error, "Buffer alloc failed");
     }
   }
 
@@ -1399,7 +1399,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
     if (cuMemAlloc(&buf, (uint64_t)numBlocks * sizeof(int)) == CUDA_SUCCESS)
     {
       CUfunction fn;
-      log->print(TAB TAB "local  : ");
+      log->print(TAB TAB "int_local  : ");
       if (dev.getKernel(cuda_kernels::atomic_throughput_src,
                         cuda_kernels::atomic_throughput_name,
                         "atomic_throughput_local", fn))
@@ -1409,18 +1409,18 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
         log->print(gops);
         log->print(NEWLINE);
-        log->resultRecord("local", gops);
+        log->resultRecord("int_local", gops);
       }
       else
       {
         log->print("compile failed" NEWLINE);
-        log->recordSkip("local", ResultStatus::Error, "Kernel compile failed");
+        log->recordSkip("int_local", ResultStatus::Error, "Kernel compile failed");
       }
       cuMemFree(buf);
     }
     else
     {
-      log->recordSkip("local", ResultStatus::Error, "Buffer alloc failed");
+      log->recordSkip("int_local", ResultStatus::Error, "Buffer alloc failed");
     }
   }
 
