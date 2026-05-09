@@ -21,8 +21,8 @@ void main()
     double x = pc.A;
     double y = double(gl_LocalInvocationID.x);
 
-    // 128 iters * 16 FMAs * 2 ops = 4096 per WI.
-    for (int i = 0; i < 128; i++)
+    // 16 iters * 16 FMAs * 2 ops = 512 per WI (matches COMPUTE_DP_WORK_PER_WI).
+    for (int i = 0; i < 16; i++)
     {
         MAD_16(x, y)
     }

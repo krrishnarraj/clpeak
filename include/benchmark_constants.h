@@ -24,6 +24,12 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
 static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
 
+// fp64 runs at 1/16-1/64 of fp32 on most consumer GPUs, so the same per-WI
+// budget as fp32 produces a kernel that's long enough to trip the GPU
+// watchdog on some drivers (RDNA4 + RADV was hard-recovering on dvec2/dvec4
+// fma loops at the fp32 budget).  Vulkan compute_dp_v* shaders use this.
+static const unsigned int COMPUTE_DP_WORK_PER_WI = 512;
+
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 

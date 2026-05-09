@@ -1186,7 +1186,7 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.unit        = "gflops";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
+  d.workPerWI   = COMPUTE_DP_WORK_PER_WI;
   d.elemSize    = sizeof(double);
   d.pushData    = &A;
   d.pushSize    = sizeof(A);

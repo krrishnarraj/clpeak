@@ -19,8 +19,8 @@ void main()
     dvec2 x = dvec2(pc.A, pc.A + 1.0lf);
     dvec2 y = dvec2(gl_LocalInvocationID.x);
 
-    // 64 iters * 16 FMAs * 2 ops * 2 lanes = 4096 per WI.
-    for (int i = 0; i < 64; i++)
+    // 8 iters * 16 FMAs * 2 ops * 2 lanes = 512 per WI (matches COMPUTE_DP_WORK_PER_WI).
+    for (int i = 0; i < 8; i++)
     {
         MAD_16(x, y)
     }
