@@ -803,6 +803,8 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         return cb;
     };
 
+    bool submitFailed = false;
+
     // Warmup
     for (unsigned int w = 0; w < warmupCount; w++)
     {
@@ -810,28 +812,50 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLCommandBuffer> cb = enqueueOne(t);
         [cb waitUntilCompleted];
         (void)t;
+        if (cb.status != MTLCommandBufferStatusCompleted) { submitFailed = true; break; }
     }
 
     double totalDispatchSec  = 0;
     double totalRoundtripSec = 0;
-    for (unsigned int i = 0; i < iters; i++)
+    if (!submitFailed)
     {
-        double commitTime = 0;
-        id<MTLCommandBuffer> cb = enqueueOne(commitTime);
-        [cb waitUntilCompleted];
-        double doneTime = pi.systemUptime;
-        totalDispatchSec  += (cb.kernelStartTime - commitTime);
-        totalRoundtripSec += (doneTime - commitTime);
+        for (unsigned int i = 0; i < iters; i++)
+        {
+            double commitTime = 0;
+            id<MTLCommandBuffer> cb = enqueueOne(commitTime);
+            [cb waitUntilCompleted];
+            if (cb.status != MTLCommandBufferStatusCompleted) { submitFailed = true; break; }
+            double doneTime = pi.systemUptime;
+            totalDispatchSec  += (cb.kernelStartTime - commitTime);
+            totalRoundtripSec += (doneTime - commitTime);
+        }
     }
-    float dispatchUs  = (float)(totalDispatchSec  * 1e6 / iters);
-    float roundtripUs = (float)(totalRoundtripSec * 1e6 / iters);
     log->print(TAB TAB TAB "dispatch  : ");
-    log->print(dispatchUs);
-    log->print(NEWLINE TAB TAB TAB "roundtrip : ");
-    log->print(roundtripUs);
-    log->print(NEWLINE);
-    log->resultRecord("dispatch",  dispatchUs);
-    log->resultRecord("roundtrip", roundtripUs);
+    if (submitFailed)
+    {
+        log->print("submit failed" NEWLINE);
+        log->recordSkip("dispatch",  ResultStatus::Error, "MTLCommandBuffer execution failed");
+    }
+    else
+    {
+        float dispatchUs = (float)(totalDispatchSec * 1e6 / iters);
+        log->print(dispatchUs);
+        log->print(NEWLINE);
+        log->resultRecord("dispatch", dispatchUs);
+    }
+    log->print(TAB TAB TAB "roundtrip : ");
+    if (submitFailed)
+    {
+        log->print("submit failed" NEWLINE);
+        log->recordSkip("roundtrip", ResultStatus::Error, "MTLCommandBuffer execution failed");
+    }
+    else
+    {
+        float roundtripUs = (float)(totalRoundtripSec * 1e6 / iters);
+        log->print(roundtripUs);
+        log->print(NEWLINE);
+        log->resultRecord("roundtrip", roundtripUs);
+    }
 
     return 0;
 }

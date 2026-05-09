@@ -2640,46 +2640,58 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (haveTimestamps && !getCalibrated(hostCalib, gpuCalib))
     haveTimestamps = false;
 
+  bool submitFailed = false;
+
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
-    dev.submitAndWait(cmdBuf);
+  {
+    if (dev.submitAndWait(cmdBuf) != VK_SUCCESS) { submitFailed = true; break; }
+  }
 
   double totalDispatchUs  = 0;
   double totalRoundtripUs = 0;
   unsigned int dispatchSamples = 0;
-  for (unsigned int i = 0; i < iters; i++)
+  if (!submitFailed)
   {
-    uint64_t hostSubmit = haveTimestamps ? hostNowInDriverDomain() : 0;
-    auto chronoStart = std::chrono::high_resolution_clock::now();
-    dev.submitAndWait(cmdBuf);
-    auto chronoEnd = std::chrono::high_resolution_clock::now();
-    totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(chronoEnd - chronoStart).count() / 1000.0;
-
-    if (haveTimestamps)
+    for (unsigned int i = 0; i < iters; i++)
     {
-      uint64_t gpuStart = 0;
-      if (vkGetQueryPoolResults(dev.device, queryPool, 0, 1,
-                                sizeof(gpuStart), &gpuStart, sizeof(uint64_t),
-                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+      uint64_t hostSubmit = haveTimestamps ? hostNowInDriverDomain() : 0;
+      auto chronoStart = std::chrono::high_resolution_clock::now();
+      VkResult sr = dev.submitAndWait(cmdBuf);
+      auto chronoEnd = std::chrono::high_resolution_clock::now();
+      if (sr != VK_SUCCESS) { submitFailed = true; break; }
+      totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(chronoEnd - chronoStart).count() / 1000.0;
+
+      if (haveTimestamps)
       {
-        // Convert everything to nanoseconds, then to microseconds.
-        double hostSubmitNs = (double)hostSubmit * hostTickNs;
-        double hostCalibNs  = (double)hostCalib  * hostTickNs;
-        double gpuDeltaNs   = (double)((int64_t)gpuStart - (int64_t)gpuCalib) * (double)timestampPeriodNs;
-        double hostStartNs  = hostCalibNs + gpuDeltaNs;
-        double dispatchUs   = (hostStartNs - hostSubmitNs) / 1000.0;
-        if (dispatchUs > 0)
+        uint64_t gpuStart = 0;
+        if (vkGetQueryPoolResults(dev.device, queryPool, 0, 1,
+                                  sizeof(gpuStart), &gpuStart, sizeof(uint64_t),
+                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
         {
-          totalDispatchUs += dispatchUs;
-          dispatchSamples++;
+          // Convert everything to nanoseconds, then to microseconds.
+          double hostSubmitNs = (double)hostSubmit * hostTickNs;
+          double hostCalibNs  = (double)hostCalib  * hostTickNs;
+          double gpuDeltaNs   = (double)((int64_t)gpuStart - (int64_t)gpuCalib) * (double)timestampPeriodNs;
+          double hostStartNs  = hostCalibNs + gpuDeltaNs;
+          double dispatchUs   = (hostStartNs - hostSubmitNs) / 1000.0;
+          if (dispatchUs > 0)
+          {
+            totalDispatchUs += dispatchUs;
+            dispatchSamples++;
+          }
         }
       }
     }
   }
 
-  double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
   log->print(TAB TAB "dispatch  : ");
-  if (dispatchSamples > 0)
+  if (submitFailed)
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("dispatch", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+  }
+  else if (dispatchSamples > 0)
   {
     float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
     log->print(dispatchUs);
@@ -2693,9 +2705,18 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
                      "Needs VK_EXT_calibrated_timestamps");
   }
   log->print(TAB TAB "roundtrip : ");
-  log->print((float)avgRoundtripUs);
-  log->print(NEWLINE);
-  log->resultRecord("roundtrip", (float)avgRoundtripUs);
+  if (submitFailed)
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("roundtrip", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+  }
+  else
+  {
+    double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
+    log->print((float)avgRoundtripUs);
+    log->print(NEWLINE);
+    log->resultRecord("roundtrip", (float)avgRoundtripUs);
+  }
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
   if (queryPool != VK_NULL_HANDLE)

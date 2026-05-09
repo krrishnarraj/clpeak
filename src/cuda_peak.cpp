@@ -1168,32 +1168,46 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   // the same domain.  So we report only the round-trip metric here, leaving
   // dispatch latency as "not measurable" rather than a misleading estimate.
 
+  bool submitFailed = false;
+
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
   {
-    cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
-    cuStreamSynchronize(dev.stream);
+    CUresult lr = cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
+    CUresult sr = cuStreamSynchronize(dev.stream);
+    if (lr != CUDA_SUCCESS || sr != CUDA_SUCCESS) { submitFailed = true; break; }
   }
 
   double totalRoundtripUs = 0;
-  for (unsigned int i = 0; i < iters; i++)
+  if (!submitFailed)
   {
-    auto t0 = std::chrono::high_resolution_clock::now();
-    cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
-    cuStreamSynchronize(dev.stream);
-    auto t1 = std::chrono::high_resolution_clock::now();
-    totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
+    for (unsigned int i = 0; i < iters; i++)
+    {
+      auto t0 = std::chrono::high_resolution_clock::now();
+      CUresult lr = cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
+      CUresult sr = cuStreamSynchronize(dev.stream);
+      auto t1 = std::chrono::high_resolution_clock::now();
+      if (lr != CUDA_SUCCESS || sr != CUDA_SUCCESS) { submitFailed = true; break; }
+      totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
+    }
   }
-
-  float roundtripUs = (float)(totalRoundtripUs / iters);
 
   log->print(TAB TAB "dispatch  : not measurable via CUDA driver API" NEWLINE);
   log->recordSkip("dispatch", ResultStatus::Unsupported,
                   "Not measurable via CUDA driver API");
   log->print(TAB TAB "roundtrip : ");
-  log->print(roundtripUs);
-  log->print(NEWLINE);
-  log->resultRecord("roundtrip", roundtripUs);
+  if (submitFailed)
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("roundtrip", ResultStatus::Error, "cuLaunchKernel/cuStreamSynchronize failed");
+  }
+  else
+  {
+    float roundtripUs = (float)(totalRoundtripUs / iters);
+    log->print(roundtripUs);
+    log->print(NEWLINE);
+    log->resultRecord("roundtrip", roundtripUs);
+  }
 
   return 0;
 }
