@@ -48,7 +48,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedIters(0),
                    warmupCount(2),
-                   targetTimeUs(250000),
+                   targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
                    enableJson(false), enableCsv(false)
 {
   gating.enableAll();

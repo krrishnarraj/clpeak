@@ -1,6 +1,14 @@
 #ifndef CLPEAK_CALIBRATE_H
 #define CLPEAK_CALIBRATE_H
 
+// Default --max-time budget (microseconds).  500 ms is comfortably above
+// the empirical M1 clock-ramp window (220-440 ms) so peak-frequency steady
+// state is reached, while still leaving usable headroom under Adreno's
+// 500 ms hangcheck.  This is the single source of truth -- CliOptions,
+// benchmark_config_t::forDevice, and the backend constructors all read it.
+// Keep the "500 ms" mention in the --help text in src/options.cpp in sync.
+static const unsigned int CLPEAK_DEFAULT_TARGET_TIME_US = 500000;
+
 // Pick an iteration count from a measured per-iter time and a per-test
 // time budget.  Used by every backend's runKernel/runDispatches helper to
 // size the timed batch so it lands at ~target_us regardless of device

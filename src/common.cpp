@@ -1,5 +1,6 @@
 #include <common.h>
 #include <benchmark_constants.h>
+#include <calibrate.h>
 #include <iostream>
 #include <string>
 #include <cctype>
@@ -22,14 +23,15 @@ benchmark_config_t benchmark_config_t::forDevice(cl_device_type type)
     cfg.computeDPWgsPerCU = 512;
     cfg.transferBWMaxSize = 1 << 29;
   }
-  // Per-test budget for the timed phase.  250 ms gives 2x headroom under
-  // Adreno's 500 ms hangcheck and ~8x under Windows TDR (2 s).  Long enough
-  // that desktop GPU clock-scaling reaches peak (M1 ramp completes 220-440
-  // ms empirically).
-  cfg.targetTimeUs = 250000;
+  // Per-test budget for the timed phase.  Initialized to the canonical
+  // default; entry-side applyOptions overwrites with the (possibly
+  // user-supplied) CliOptions value before any test runs.
+  cfg.targetTimeUs = CLPEAK_DEFAULT_TARGET_TIME_US;
   // Kernel-launch latency stays static: each iter is its own enqueue->finish,
-  // so the watchdog only sees one dispatch.  20000 amortizes submit overhead.
-  cfg.kernelLatencyIters = 20000;
+  // so the watchdog only sees one dispatch.  2000 amortizes submit overhead
+  // without dominating overall test wall-time at typical 100-300 us
+  // roundtrip latencies.
+  cfg.kernelLatencyIters = 2000;
 
   return cfg;
 }

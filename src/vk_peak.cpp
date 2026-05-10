@@ -601,7 +601,7 @@ uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags
 // ---------------------------------------------------------------------------
 
 vkPeak::vkPeak()
-  : warmupCount(2), specifiedIters(0), targetTimeUs(250000),
+  : warmupCount(2), specifiedIters(0), targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
     forceIters(false),
     deviceIndex(-1),
     instance(VK_NULL_HANDLE)

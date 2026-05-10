@@ -209,7 +209,7 @@ static id<MTLComputePipelineState> getPipeline(MetalDevice &dev, const char *src
 // ---------------------------------------------------------------------------
 
 MetalPeak::MetalPeak()
-  : warmupCount(2), specifiedIters(0), targetTimeUs(250000),
+  : warmupCount(2), specifiedIters(0), targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
     forceIters(false),
     deviceIndex(-1),
     impl(nullptr)

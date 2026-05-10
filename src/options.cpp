@@ -19,7 +19,7 @@ static const char *helpStr =
     "\n  -v, --version               display version"
     "\n  -i, --iters num             force a fixed iter count (overrides --max-time calibration)"
     "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
-    "\n  --max-time ms               per-test time budget for the timed phase (default: 250 ms)"
+    "\n  --max-time ms               per-test time budget for the timed phase (default: 500 ms)"
     "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
     "\n  --list-devices              list available devices for every backend and exit"
     "\n  --xml-file file             save results to an XML file"
