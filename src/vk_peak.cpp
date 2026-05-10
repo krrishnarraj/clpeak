@@ -1993,7 +1993,6 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     {"float  ", vk_shaders::local_bandwidth_v1, vk_shaders::local_bandwidth_v1_size, 1},
     {"float2 ", vk_shaders::local_bandwidth_v2, vk_shaders::local_bandwidth_v2_size, 2},
     {"float4 ", vk_shaders::local_bandwidth_v4, vk_shaders::local_bandwidth_v4_size, 4},
-    {"float8 ", vk_shaders::local_bandwidth_v8, vk_shaders::local_bandwidth_v8_size, 8},
   };
   for (const auto &v : variants)
   {

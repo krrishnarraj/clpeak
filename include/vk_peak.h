@@ -313,8 +313,6 @@ namespace vk_shaders {
   extern const size_t   local_bandwidth_v2_size;
   extern const uint32_t local_bandwidth_v4[];
   extern const size_t   local_bandwidth_v4_size;
-  extern const uint32_t local_bandwidth_v8[];
-  extern const size_t   local_bandwidth_v8_size;
   extern const uint32_t image_bandwidth_v1[];
   extern const size_t   image_bandwidth_v1_size;
   extern const uint32_t atomic_throughput_global[];
