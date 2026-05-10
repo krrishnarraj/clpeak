@@ -3,7 +3,8 @@
 
 #include <bitset>
 #include <string>
-#include <clpeak.h> // Benchmark enum
+#include <clpeak.h>     // Benchmark enum
+#include <calibrate.h>  // CLPEAK_DEFAULT_TARGET_TIME_US
 
 // Shared CLI options populated once in entry.cpp and consumed by every
 // backend.  Each backend's applyOptions() copies the relevant fields into
@@ -31,10 +32,13 @@ struct CliOptions {
   int cudaDeviceIndex = -1;
   int mtlDeviceIndex  = -1;
 
-  // Iters / warmup
+  // Iters / warmup.  When forceIters is false, each backend's runKernel
+  // calibrates iters from a one-shot timed warmup so the timed phase lands
+  // at ~targetTimeUs regardless of device speed.
   bool         forceIters    = false;
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
+  unsigned int targetTimeUs  = CLPEAK_DEFAULT_TARGET_TIME_US; // --max-time, in us
 
   // Test selection.  Default: every category and every test enabled.  The
   // first positive --<test> flag flips enabledTests to allow-list mode

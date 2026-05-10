@@ -8,7 +8,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   if (!gating.isAllowed(Benchmark::AtomicThroughput))
     return 0;
 
-  unsigned int iters = cfg.atomicIters;
+  unsigned int forced = forceIters ? specifiedIters : 0;
 
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
   uint64_t numWGs    = globalWIs / devInfo.maxWGSize;
@@ -37,7 +37,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       cl::Kernel kernel_global(prog, "atomic_throughput_global");
       kernel_global.setArg(0, globalBuf);
 
-      timed = run_kernel(queue, kernel_global, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_global, globalSize, localSize, cfg.targetTimeUs, forced);
 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
       log->print(gops);
@@ -56,7 +56,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       kernel_local.setArg(0, outputBuf);
       kernel_local.setArg(1, cl::Local(sizeof(cl_int)));
 
-      timed = run_kernel(queue, kernel_local, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_local, globalSize, localSize, cfg.targetTimeUs, forced);
 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
       log->print(gops);

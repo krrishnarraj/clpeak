@@ -17,8 +17,10 @@ static const char *helpStr =
     "\n GLOBAL OPTIONS:"
     "\n  -h, --help                  display help message"
     "\n  -v, --version               display version"
-    "\n  -i, --iters num             number of iterations per kernel (default: CPU=10, GPU=30)"
+    "\n  -i, --iters num             force a fixed iter count (overrides --max-time calibration)"
     "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
+    "\n  --max-time ms               per-test time budget for the timed phase (default: 500 ms)"
+    "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
     "\n  --list-devices              list available devices for every backend and exit"
     "\n  --xml-file file             save results to an XML file"
     "\n  --json-file file            save results to a JSON file"
@@ -306,6 +308,17 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
         printHelpAndExit(-1);
       }
       out.warmupCount = parsed;
+    }
+    else if (!strcmp(a, "--max-time"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      unsigned int parsed;
+      if (!parseUIntArg(v, parsed, /*allowZero=*/false))
+      {
+        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
+        printHelpAndExit(-1);
+      }
+      out.targetTimeUs = parsed * 1000u; // ms -> us
     }
 
     // ---- OpenCL device selection ----------------------------------------

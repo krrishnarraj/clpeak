@@ -1,5 +1,6 @@
 #include <common.h>
 #include <benchmark_constants.h>
+#include <calibrate.h>
 #include <iostream>
 #include <string>
 #include <cctype>
@@ -10,34 +11,27 @@ benchmark_config_t benchmark_config_t::forDevice(cl_device_type type)
 
   if (type & CL_DEVICE_TYPE_CPU)
   {
-    cfg.globalBWIters = 20;
     cfg.globalBWMaxSize = 1 << 27;
     cfg.computeWgsPerCU = 512;
     cfg.computeDPWgsPerCU = 256;
-    cfg.computeIters = 10;
-    cfg.atomicIters = 3;
-    cfg.localBWIters = 20;
-    cfg.imageBWIters = 20;
     cfg.transferBWMaxSize = 1 << 27;
   }
   else
   { // GPU
-    cfg.globalBWIters = 50;
     cfg.globalBWMaxSize = 1 << 29;
     cfg.computeWgsPerCU = 2048;
     cfg.computeDPWgsPerCU = 512;
-    cfg.computeIters = 30;
-    // Atomic tests are heavily contended on some drivers (Vulkan / MoltenVK
-    // local atomics run at ~1/2 of OpenCL/CUDA throughput on NVIDIA), so iters
-    // is set lower than computeIters to keep total wall time reasonable when
-    // multiple dtype variants run (e.g. Metal: int/uint/ulong x global/local).
-    cfg.atomicIters = 8;
-    cfg.localBWIters = 50;
-    cfg.imageBWIters = 50;
     cfg.transferBWMaxSize = 1 << 29;
   }
-  cfg.transferBWIters = 20;
-  cfg.kernelLatencyIters = 20000;
+  // Per-test budget for the timed phase.  Initialized to the canonical
+  // default; entry-side applyOptions overwrites with the (possibly
+  // user-supplied) CliOptions value before any test runs.
+  cfg.targetTimeUs = CLPEAK_DEFAULT_TARGET_TIME_US;
+  // Kernel-launch latency stays static: each iter is its own enqueue->finish,
+  // so the watchdog only sees one dispatch.  2000 amortizes submit overhead
+  // without dominating overall test wall-time at typical 100-300 us
+  // roundtrip latencies.
+  cfg.kernelLatencyIters = 2000;
 
   return cfg;
 }

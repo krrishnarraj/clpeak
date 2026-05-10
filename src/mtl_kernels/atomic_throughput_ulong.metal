@@ -13,7 +13,7 @@ kernel void atomic_throughput_global_ulong(device atomic_ulong* counter [[buffer
                                            uint tid [[thread_position_in_grid]])
 {
     device atomic_ulong* cnt = counter + tid;
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(cnt, 1ul, memory_order_relaxed);
     }
@@ -28,7 +28,7 @@ kernel void atomic_throughput_local_ulong(device ulong* out [[buffer(0)]],
         atomic_store_explicit(&scratch, 0ul, memory_order_relaxed);
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(&scratch, 1ul, memory_order_relaxed);
     }

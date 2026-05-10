@@ -23,6 +23,7 @@
 // convolutions, not a general GEMM, so they're outside scope here.
 
 #include <mtl_peak.h>
+#include <calibrate.h>
 
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
@@ -123,18 +124,6 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
         double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
         return us / (double)n;
     }
-}
-
-// ---- Auto-tune ------------------------------------------------------------
-
-// Pick iter count from a calibration time, targeting ~5s steady-state.
-unsigned int pickIters(double per_iter_us, bool forced, unsigned int forcedVal)
-{
-    if (forced && forcedVal > 0) return forcedVal;
-    double want = 5.0e6 / per_iter_us;
-    if (want < 8.0)     want = 8.0;
-    if (want > 2000.0)  want = 2000.0;
-    return (unsigned int)want;
 }
 
 } // namespace
@@ -243,7 +232,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
                 return;
             }
 
-            unsigned int iters = pickIters(per_iter_us, forceIters, specifiedIters);
+            unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
             double mean_us = timeMPSMatMul(queue, mm, matA, matB, matC, iters);
             double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
 
@@ -296,7 +285,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
                 return;
             }
 
-            unsigned int iters = pickIters(per_iter_us, forceIters, specifiedIters);
+            unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
             double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
             double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
 
@@ -437,7 +426,7 @@ int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
                 }
                 else
                 {
-                    unsigned int iters = pickIters(per_iter_us, forceIters, specifiedIters);
+                    unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
                     double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
                     double tops = ops_per_iter * 1.0e6 / mean_us / 1.0e12;
                     log->print((float)tops);

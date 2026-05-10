@@ -16,13 +16,28 @@ static const unsigned int FETCH_PER_WI = 16;
 static const unsigned int LMEM_REPS = 64;
 
 // atomic_throughput_kernels.cl
-static const unsigned int ATOMIC_REPS = 512;
+// Was 512.  Cut to 256 because float atomicAdd on AMD/RADV (and likely other
+// vendors lacking native fp32 atomic add) is emitted as a shader CAS loop:
+// each "atomic add" can run 5-20x slower than int_atomic, which at the old
+// 512 reps * 33M WIs * 8 iters pushed the dispatch past the GPU watchdog
+// (RX 9070 XT was hard-recovering on the float_global variant).  256 keeps
+// the per-dispatch window long enough that GPU frequency scaling can ramp
+// to peak (cutting further to 64 under-measured M1 by ~20%) while still
+// giving 2x headroom against TDR on the slowest atomic_float path.
+// Hardcoded inside each shader/kernel -- keep all sites in sync.
+static const unsigned int ATOMIC_REPS = 256;
 
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 
 // compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
 static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
+
+// fp64 runs at 1/16-1/64 of fp32 on most consumer GPUs, so the same per-WI
+// budget as fp32 produces a kernel that's long enough to trip the GPU
+// watchdog on some drivers (RDNA4 + RADV was hard-recovering on dvec2/dvec4
+// fma loops at the fp32 budget).  Vulkan compute_dp_v* shaders use this.
+static const unsigned int COMPUTE_DP_WORK_PER_WI = 512;
 
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;

@@ -1,4 +1,5 @@
 #include <clpeak.h>
+#include <calibrate.h>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -47,7 +48,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  unsigned int iters = cfg.transferBWIters;
+  unsigned int forced = forceIters ? specifiedIters : 0;
   float *arr = nullptr;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
@@ -58,43 +59,50 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   // map/unmap can be compared against it to detect zero-copy.
   float peakRealTransferBW = 0;
 
-  // Helper: run a timed transfer test with warmup, return measured gbps
+  // Helper: run a timed transfer test with warmup + calibration, return
+  // measured gbps.  Calibrates iters from a one-iteration timed probe so the
+  // measurement window lands at ~cfg.targetTimeUs regardless of bus speed.
   auto runTransfer = [&](const std::string &label, const std::string &resultName,
                          std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
   {
     log->print(label);
 
-    // Warmup
+    // Phase 1: untimed warmup
     for (unsigned int w = 0; w < warmupCount; w++)
     {
       op(nullptr);
       queue.finish();
     }
 
-    float timed = 0;
-
-    if (useEventTimer && !forceWallClock)
-    {
-      for (unsigned int i = 0; i < iters; i++)
+    auto runBatch = [&](unsigned int n) -> float {
+      float total = 0;
+      if (useEventTimer && !forceWallClock)
       {
-        cl::Event timeEvent;
-        op(&timeEvent);
-        queue.finish();
-        timed += timeInUS(timeEvent);
+        for (unsigned int i = 0; i < n; i++)
+        {
+          cl::Event timeEvent;
+          op(&timeEvent);
+          queue.finish();
+          total += timeInUS(timeEvent);
+        }
+        return total;
       }
-    }
-    else
-    {
       Timer timer;
       timer.start();
-      for (unsigned int i = 0; i < iters; i++)
-      {
+      for (unsigned int i = 0; i < n; i++)
         op(nullptr);
-      }
       queue.finish();
-      timed = timer.stopAndTime();
-    }
-    timed /= static_cast<float>(iters);
+      return timer.stopAndTime();
+    };
+
+    // Phase 2: timed probe -> per-iter time -> calibrated iters.
+    unsigned int probeIters = 1;
+    float probeUs = runBatch(probeIters);
+    double per_iter_us = (double)probeUs / (double)probeIters;
+    unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);
+
+    // Phase 3: real timed run.
+    float timed = runBatch(iters) / static_cast<float>(iters);
 
     float gbps = (float)bytes / timed / 1e3f;
     log->print(gbps);
@@ -174,6 +182,19 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
+    // Helper: calibrate iter count for the open-coded map/unmap loops below.
+    // Each loop runs `iter()` per iteration (one full setup+timed-segment+
+    // teardown) but only times a sub-segment.  We probe full-iter wall-clock
+    // so calibration sizes total runtime to ~cfg.targetTimeUs.
+    auto calibrateMapIters = [&](std::function<void()> iter) -> unsigned int {
+      for (unsigned int w = 0; w < warmupCount; w++) iter();
+      unsigned int probe = 1;
+      Timer probeT; probeT.start();
+      for (unsigned int i = 0; i < probe; i++) iter();
+      float probeUs = probeT.stopAndTime();
+      return pickIters((double)probeUs / (double)probe, cfg.targetTimeUs, forced);
+    };
+
     // enqueueMapBuffer(for read)
     // Always use wall-clock for map/unmap: CL events measure only GPU command
     // processing time, which is zero on unified-memory platforms (Apple Silicon),
@@ -181,6 +202,13 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB "enqueueMapBuffer(for read)      : ");
       queue.finish();
+
+      unsigned int iters = calibrateMapIters([&]() {
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
+        queue.finish();
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+      });
 
       float timed = 0;
       for (unsigned int i = 0; i < iters; i++)
@@ -204,6 +232,14 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
       queue.finish();
+
+      unsigned int iters = calibrateMapIters([&]() {
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
+        queue.finish();
+        memcpy(arr, mapPtr, bytes);
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+      });
 
       float timed = 0;
       for (unsigned int i = 0; i < iters; i++)
@@ -232,6 +268,13 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       log->print(TAB TAB TAB "enqueueUnmap(after write)       : ");
       queue.finish();
 
+      unsigned int iters = calibrateMapIters([&]() {
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
+        queue.finish();
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+      });
+
       float timed = 0;
       for (unsigned int i = 0; i < iters; i++)
       {
@@ -254,6 +297,14 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       log->print(TAB TAB TAB TAB "memcpy to mapped ptr          : ");
       queue.finish();
+
+      unsigned int iters = calibrateMapIters([&]() {
+        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
+        queue.finish();
+        memcpy(mapPtr, arr, bytes);
+        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
+        queue.finish();
+      });
 
       float timed = 0;
       for (unsigned int i = 0; i < iters; i++)

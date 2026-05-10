@@ -1,6 +1,7 @@
 #include <clpeak.h>
 #include <inventory.h>
 #include <options.h>
+#include <calibrate.h>
 #include <cstring>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
@@ -47,6 +48,7 @@ clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(f
                    specifiedPlatform(0), specifiedDevice(0),
                    specifiedIters(0),
                    warmupCount(2),
+                   targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
                    enableJson(false), enableCsv(false)
 {
   gating.enableAll();
@@ -66,6 +68,7 @@ void clPeak::applyOptions(const CliOptions &opts)
   forceIters = opts.forceIters;
   specifiedIters = opts.iters;
   warmupCount = opts.warmupCount;
+  targetTimeUs = opts.targetTimeUs;
 
   useEventTimer = opts.useEventTimer;
 
@@ -127,16 +130,9 @@ int clPeak::runAll()
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
         benchmark_config_t cfg = benchmark_config_t::forDevice(devInfo.deviceType);
-
+        cfg.targetTimeUs = targetTimeUs;
         if (forceIters)
-        {
-          cfg.computeIters = specifiedIters;
-          cfg.globalBWIters = specifiedIters;
-          cfg.localBWIters = specifiedIters;
-          cfg.imageBWIters = specifiedIters;
-          cfg.transferBWIters = specifiedIters;
           cfg.kernelLatencyIters = specifiedIters;
-        }
 
         if (forceDeviceName && specifiedDeviceName != devInfo.deviceName)
           continue;
@@ -328,38 +324,51 @@ int clPeak::runAll()
   return 0;
 }
 
-float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, unsigned int iters)
+float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
+                         cl::NDRange &globalSize, cl::NDRange &localSize,
+                         unsigned int targetTimeUsLocal, unsigned int forcedIters)
 {
-  float timed = 0;
-
-  // Warm-up runs
-  for (unsigned int w = 0; w < warmupCount; w++)
-    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
-  queue.finish();
-
-  if (useEventTimer)
-  {
-    for (unsigned int i = 0; i < iters; i++)
+  // Time `n` dispatches batched into one submit; returns total time in us.
+  // Used for both the calibration probe and the real timed run so the timing
+  // methodology matches in both phases.
+  auto runBatch = [&](unsigned int n) -> float {
+    if (useEventTimer)
     {
-      cl::Event timeEvent;
-
-      queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, nullptr, &timeEvent);
-      queue.finish();
-      timed += timeInUS(timeEvent);
+      float total = 0;
+      for (unsigned int i = 0; i < n; i++)
+      {
+        cl::Event timeEvent;
+        queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, nullptr, &timeEvent);
+        queue.finish();
+        total += timeInUS(timeEvent);
+      }
+      return total;
     }
-  }
-  else // std timer
-  {
-    // Batch N dispatches before a single synchronization to measure steady-state
-    // throughput, matching the CUDA / Metal timing methodology.
     Timer timer;
     timer.start();
-    for (unsigned int i = 0; i < iters; i++)
+    for (unsigned int i = 0; i < n; i++)
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
     queue.finish();
-    timed = timer.stopAndTime();
+    return timer.stopAndTime();
+  };
+
+  // Phase 1: untimed warmup (cache + clock ramp). Keep each warmup as its own
+  // completed submission so slow kernels do not get batched before calibration.
+  for (unsigned int w = 0; w < warmupCount; w++)
+  {
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+    queue.finish();
   }
 
+  // Phase 2: timed calibration probe. Keep this to one dispatch so warmupCount
+  // does not force a multi-dispatch submit on slow kernels.
+  unsigned int probeIters = 1;
+  float probeUs = runBatch(probeIters);
+  double per_iter_us = (double)probeUs / (double)probeIters;
+
+  // Phase 3: real timed run with calibrated iter count.
+  unsigned int iters = pickIters(per_iter_us, targetTimeUsLocal, forcedIters);
+  float timed = runBatch(iters);
   return (timed / static_cast<float>(iters));
 }
 
@@ -377,8 +386,6 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 {
   if (!gating.isAllowed(which))
     return 0;
-
-  unsigned int iters = cfg.computeIters;
 
   // Vector width suffixes and display labels
   const int widths[] = {1, 2, 4, 8, 16};
@@ -504,7 +511,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
         padded += ' ';
       log->print(TAB TAB TAB + padded + ": ");
 
-      float timed = run_kernel(queue, kernels[w], globalSize, localSize, iters);
+      float timed = run_kernel(queue, kernels[w], globalSize, localSize,
+                               cfg.targetTimeUs, forceIters ? specifiedIters : 0);
       float throughput = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
       log->print(throughput);

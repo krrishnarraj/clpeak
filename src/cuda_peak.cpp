@@ -2,6 +2,7 @@
 
 #include <cuda_peak.h>
 #include <inventory.h>
+#include <calibrate.h>
 #include <nvrtc.h>
 #include <cstring>
 #include <cstdio>
@@ -232,7 +233,8 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
 // ---------------------------------------------------------------------------
 
 CudaPeak::CudaPeak()
-    : warmupCount(2), specifiedIters(0), forceIters(false),
+    : warmupCount(2), specifiedIters(0), targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
+      forceIters(false),
       deviceIndex(-1),
       initialised(false)
 {
@@ -263,34 +265,47 @@ bool CudaPeak::initDriver()
 
 float CudaPeak::runKernel(CudaDevice &dev, CUfunction fn,
                           uint32_t gridX, uint32_t blockX,
-                          void **args, unsigned int iters)
+                          void **args,
+                          unsigned int targetTimeUsLocal, unsigned int forcedIters)
 {
   CUevent start, stop;
   cuEventCreate(&start, CU_EVENT_DEFAULT);
   cuEventCreate(&stop, CU_EVENT_DEFAULT);
 
+  // Time `n` launches batched as one stream submit; returns total us.
+  auto runBatch = [&](unsigned int n) -> float {
+    cuEventRecord(start, dev.stream);
+    for (unsigned int i = 0; i < n; i++)
+      cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1, 0, dev.stream, args, nullptr);
+    cuEventRecord(stop, dev.stream);
+    cuEventSynchronize(stop);
+    float ms = 0;
+    cuEventElapsedTime(&ms, start, stop);
+    return ms * 1000.0f;
+  };
+
+  // Phase 1: untimed warmup. Keep each warmup as its own completed launch so
+  // slow kernels do not get batched before calibration.
   for (unsigned int w = 0; w < warmupCount; w++)
   {
     cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1, 0, dev.stream, args, nullptr);
+    cuStreamSynchronize(dev.stream);
   }
-  cuStreamSynchronize(dev.stream);
 
-  // Time iters launches as one batch.  Per-iter event pairs would multiply
-  // the host-side event overhead by `iters`; one pair around the full batch
-  // gives a cleaner mean and matches how clpeak's OpenCL path totals iters.
-  cuEventRecord(start, dev.stream);
-  for (unsigned int i = 0; i < iters; i++)
-    cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1, 0, dev.stream, args, nullptr);
-  cuEventRecord(stop, dev.stream);
-  cuEventSynchronize(stop);
+  // Phase 2: timed calibration probe. Keep this to one launch so warmupCount
+  // does not force a multi-launch batch on slow kernels.
+  unsigned int probeIters = 1;
+  float probeUs = runBatch(probeIters);
+  double per_iter_us = (double)probeUs / (double)probeIters;
 
-  float ms = 0;
-  cuEventElapsedTime(&ms, start, stop);
+  // Phase 3: real timed run with calibrated iter count.
+  unsigned int iters = pickIters(per_iter_us, targetTimeUsLocal, forcedIters);
+  float totalUs = runBatch(iters);
 
   cuEventDestroy(start);
   cuEventDestroy(stop);
 
-  return (ms * 1000.0f) / static_cast<float>(iters); // microseconds / iter
+  return totalUs / static_cast<float>(iters); // microseconds / iter
 }
 
 int CudaPeak::runAll()
@@ -327,13 +342,9 @@ int CudaPeak::runAll()
     }
 
     benchmark_config_t cfg = benchmark_config_t::forDevice(CL_DEVICE_TYPE_GPU);
+    cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
-    {
-      cfg.computeIters = specifiedIters;
-      cfg.globalBWIters = specifiedIters;
-      cfg.transferBWIters = specifiedIters;
       cfg.kernelLatencyIters = specifiedIters;
-    }
 
     log->print(NEWLINE "CUDA Device: " + dev.info.deviceName + NEWLINE);
     log->print(TAB "Arch          : " + dev.info.archName + NEWLINE);
@@ -502,7 +513,8 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     args[0] = &outputBuf;
     args[1] = const_cast<void *>(d.scalarArg);
 
-    float us = runKernel(dev, fn, numBlocks, blockSize, args, cfg.computeIters);
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
@@ -969,7 +981,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
 
 int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.globalBWIters;
   const uint32_t blockSize = 256;
 
   uint64_t maxItems = dev.info.totalGlobalMem / sizeof(float) / 4; // input+output, plus margin
@@ -1039,7 +1050,8 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     log->print(TAB TAB);
     log->print(v.label);
     log->print(": ");
-    float us = runKernel(dev, fn, blocksU, blockSize, args, iters);
+    float us = runKernel(dev, fn, blocksU, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     // Bytes touched = numBlocks * blockSize * FETCH_PER_WI * V * sizeof(float)
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float gbps = (float)(bytes / us / 1e3);
@@ -1060,7 +1072,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   const uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
-  unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
+  unsigned int forced = forceIters ? specifiedIters : 0;
 
   log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
   auto scope = log->resultScope("transfer_bandwidth");
@@ -1092,30 +1104,45 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     CUevent s, e;
     cuEventCreate(&s, CU_EVENT_DEFAULT);
     cuEventCreate(&e, CU_EVENT_DEFAULT);
-    // Warmup
+
+    auto runBatch = [&](unsigned int n) -> float {
+      cuEventRecord(s, dev.stream);
+      for (unsigned i = 0; i < n; i++)
+      {
+        if (h2d)
+          cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
+        else
+          cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      }
+      cuEventRecord(e, dev.stream);
+      cuEventSynchronize(e);
+      float ms = 0;
+      cuEventElapsedTime(&ms, s, e);
+      return ms * 1000.0f; // total us
+    };
+
+    // Phase 1: untimed warmup.
     for (unsigned w = 0; w < warmupCount; w++)
     {
       if (h2d)
         cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
       else
         cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      cuStreamSynchronize(dev.stream);
     }
-    cuStreamSynchronize(dev.stream);
-    cuEventRecord(s, dev.stream);
-    for (unsigned i = 0; i < iters; i++)
-    {
-      if (h2d)
-        cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
-      else
-        cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
-    }
-    cuEventRecord(e, dev.stream);
-    cuEventSynchronize(e);
-    float ms = 0;
-    cuEventElapsedTime(&ms, s, e);
+
+    // Phase 2: timed probe -> per-iter time -> calibrated iters.
+    unsigned int probeIters = 1;
+    float probeUs = runBatch(probeIters);
+    double per_iter_us = (double)probeUs / (double)probeIters;
+    unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);
+
+    // Phase 3: real timed run.
+    float totalUs = runBatch(iters);
+
     cuEventDestroy(s);
     cuEventDestroy(e);
-    return (ms / iters) * 1000.0f; // microseconds per transfer
+    return totalUs / iters; // microseconds per transfer
   };
 
   float usH2D = timeXfer(true);
@@ -1143,7 +1170,8 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
+  unsigned int iters = forceIters ? specifiedIters
+                                  : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
   auto scope = log->resultScope("kernel_launch_latency");
@@ -1168,32 +1196,46 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   // the same domain.  So we report only the round-trip metric here, leaving
   // dispatch latency as "not measurable" rather than a misleading estimate.
 
+  bool submitFailed = false;
+
   // Warmup
   for (unsigned int w = 0; w < warmupCount; w++)
   {
-    cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
-    cuStreamSynchronize(dev.stream);
+    CUresult lr = cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
+    CUresult sr = cuStreamSynchronize(dev.stream);
+    if (lr != CUDA_SUCCESS || sr != CUDA_SUCCESS) { submitFailed = true; break; }
   }
 
   double totalRoundtripUs = 0;
-  for (unsigned int i = 0; i < iters; i++)
+  if (!submitFailed)
   {
-    auto t0 = std::chrono::high_resolution_clock::now();
-    cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
-    cuStreamSynchronize(dev.stream);
-    auto t1 = std::chrono::high_resolution_clock::now();
-    totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
+    for (unsigned int i = 0; i < iters; i++)
+    {
+      auto t0 = std::chrono::high_resolution_clock::now();
+      CUresult lr = cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
+      CUresult sr = cuStreamSynchronize(dev.stream);
+      auto t1 = std::chrono::high_resolution_clock::now();
+      if (lr != CUDA_SUCCESS || sr != CUDA_SUCCESS) { submitFailed = true; break; }
+      totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
+    }
   }
-
-  float roundtripUs = (float)(totalRoundtripUs / iters);
 
   log->print(TAB TAB "dispatch  : not measurable via CUDA driver API" NEWLINE);
   log->recordSkip("dispatch", ResultStatus::Unsupported,
                   "Not measurable via CUDA driver API");
   log->print(TAB TAB "roundtrip : ");
-  log->print(roundtripUs);
-  log->print(NEWLINE);
-  log->resultRecord("roundtrip", roundtripUs);
+  if (submitFailed)
+  {
+    log->print("submit failed" NEWLINE);
+    log->recordSkip("roundtrip", ResultStatus::Error, "cuLaunchKernel/cuStreamSynchronize failed");
+  }
+  else
+  {
+    float roundtripUs = (float)(totalRoundtripUs / iters);
+    log->print(roundtripUs);
+    log->print(NEWLINE);
+    log->resultRecord("roundtrip", roundtripUs);
+  }
 
   return 0;
 }
@@ -1204,7 +1246,6 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
   auto scope = log->resultScope("local_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
@@ -1251,7 +1292,8 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
     float gbps = (float)bytes / us / 1e3f;
     log->print(gbps);
@@ -1272,7 +1314,6 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.globalBWIters;
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
   auto scope = log->resultScope("image_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
@@ -1333,7 +1374,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   int w = imgW, h = imgH;
   void *args[4] = {&tex, &outBuf, &w, &h};
   log->print(TAB TAB "float4 : ");
-  float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+  float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                       cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
   float gbps = (float)bytes / us / 1e3f;
   log->print(gbps);
@@ -1352,7 +1394,6 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.atomicIters;
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   auto scope = log->resultScope("atomic_throughput");
   log->resultScopeAttribute("unit", "gops");
@@ -1374,7 +1415,8 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
                         "atomic_throughput_global", fn))
       {
         void *args[1] = {&buf};
-        float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+        float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                             cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
         log->print(gops);
         log->print(NEWLINE);
@@ -1405,7 +1447,8 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
                         "atomic_throughput_local", fn))
       {
         void *args[1] = {&buf};
-        float us = runKernel(dev, fn, numBlocks, blockSize, args, iters);
+        float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                             cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
         log->print(gops);
         log->print(NEWLINE);

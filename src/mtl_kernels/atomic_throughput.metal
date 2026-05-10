@@ -12,7 +12,7 @@ kernel void atomic_throughput_global(device atomic_int* counter [[buffer(0)]],
                                      uint tid [[thread_position_in_grid]])
 {
     device atomic_int* cnt = counter + tid;
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(cnt, 1, memory_order_relaxed);
     }
@@ -27,7 +27,7 @@ kernel void atomic_throughput_local(device int* out [[buffer(0)]],
         atomic_store_explicit(&scratch, 0, memory_order_relaxed);
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(&scratch, 1, memory_order_relaxed);
     }
@@ -42,7 +42,7 @@ kernel void atomic_throughput_global_uint(device atomic_uint* counter [[buffer(0
                                           uint tid [[thread_position_in_grid]])
 {
     device atomic_uint* cnt = counter + tid;
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(cnt, 1u, memory_order_relaxed);
     }
@@ -57,7 +57,7 @@ kernel void atomic_throughput_local_uint(device uint* out [[buffer(0)]],
         atomic_store_explicit(&scratch, 0u, memory_order_relaxed);
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(&scratch, 1u, memory_order_relaxed);
     }

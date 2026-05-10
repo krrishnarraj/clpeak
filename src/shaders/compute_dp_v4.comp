@@ -19,8 +19,8 @@ void main()
     dvec4 x = dvec4(pc.A, pc.A + 1.0lf, pc.A + 2.0lf, pc.A + 3.0lf);
     dvec4 y = dvec4(gl_LocalInvocationID.x);
 
-    // 32 iters * 16 FMAs * 2 ops * 4 lanes = 4096 per WI.
-    for (int i = 0; i < 32; i++)
+    // 4 iters * 16 FMAs * 2 ops * 4 lanes = 512 per WI (matches COMPUTE_DP_WORK_PER_WI).
+    for (int i = 0; i < 4; i++)
     {
         MAD_16(x, y)
     }

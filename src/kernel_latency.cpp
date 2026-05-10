@@ -23,7 +23,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
   cl::NDRange globalSize = (numItems / FETCH_PER_WI);
   cl::NDRange localSize  = devInfo.maxWGSize;
-  unsigned int iters = cfg.kernelLatencyIters;
+  unsigned int iters = forceIters ? specifiedIters : cfg.kernelLatencyIters;
 
   try
   {

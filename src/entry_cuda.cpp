@@ -8,6 +8,7 @@ void CudaPeak::applyOptions(const CliOptions &opts)
   forceIters     = opts.forceIters;
   specifiedIters = opts.iters;
   warmupCount    = opts.warmupCount;
+  targetTimeUs   = opts.targetTimeUs;
   deviceIndex    = opts.cudaDeviceIndex;
   gating.copyFrom(opts);
 

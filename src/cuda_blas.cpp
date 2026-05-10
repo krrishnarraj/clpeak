@@ -20,6 +20,7 @@
 
 #include <cuda_peak.h>
 #include <cublasLt.h>
+#include <calibrate.h>
 #include <chrono>
 #include <sstream>
 #include <vector>
@@ -65,16 +66,6 @@ uint32_t pickGemmDim(const cuda_device_info_t &info)
     while (D > 1024 && 3ULL * D * D * 8 > budget)
         D /= 2;
     return (uint32_t)D;
-}
-
-// Auto-tune iter count from a calibration time, targeting ~5s steady-state.
-unsigned int pickIters(double per_iter_us, bool forced, unsigned int forcedVal)
-{
-    if (forced && forcedVal > 0) return forcedVal;
-    double want = 5.0e6 / per_iter_us;
-    if (want < 8.0)     want = 8.0;
-    if (want > 2000.0)  want = 2000.0;
-    return (unsigned int)want;
 }
 
 // One-shot timing helper: run `n` cublasLtMatmul calls between an event pair.
@@ -296,7 +287,11 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             return -1;
         }
 
-        unsigned int iters = pickIters(per_iter_us, forceIters, specifiedIters);
+        // BLAS uses a 5 s budget (vs 250 ms for shader-path tests) -- cuBLAS
+        // GEMMs aren't subject to the watchdog rules that drive the shader
+        // budget, and the longer window stabilises tensor-core throughput.
+        unsigned int iters = pickIters(per_iter_us, 5000000u,
+                                       forceIters ? specifiedIters : 0);
         double mean_us = timeCublasLt(lt, dev.stream, opDesc,
             alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
             betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,

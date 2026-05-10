@@ -105,6 +105,10 @@ public:
   // shaders that use advertised-but-unsupported features).
   VkResult submitAndWait(VkCommandBuffer cmdBuf);
 
+  // Clear a transfer-dst buffer to zero and make the writes visible to
+  // following compute shader dispatches.
+  bool zeroBuffer(VkBuffer buffer);
+
 private:
   uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 };
@@ -173,6 +177,7 @@ public:
   std::unique_ptr<logger> log;
   unsigned int warmupCount;
   unsigned int specifiedIters;
+  unsigned int targetTimeUs;
   bool forceIters;
   int  deviceIndex; // -1 = run all
 
@@ -230,11 +235,15 @@ private:
   bool initInstance();
   void cleanup();
 
-  // Timing helper: run a compute dispatch iters times, return avg time in us
+  // Time a compute dispatch batched as `iters` dispatches, where `iters` is
+  // calibrated from a one-shot warmup so the timed phase lands at
+  // ~targetTimeUs.  Returns mean per-iter time in microseconds.  forcedIters
+  // != 0 short-circuits calibration (matches --iters).
   float runKernel(VulkanDevice &dev, VkPipeline pipeline,
                   VkPipelineLayout pipeLayout,
                   VkDescriptorSet descriptorSet,
-                  uint32_t groupCountX, unsigned int iters,
+                  uint32_t groupCountX,
+                  unsigned int targetTimeUs, unsigned int forcedIters,
                   const void *pushData = nullptr, uint32_t pushSize = 0);
 
   // Shared implementation of the single-buffer compute-peak pattern
@@ -308,8 +317,6 @@ namespace vk_shaders {
   extern const size_t   local_bandwidth_v2_size;
   extern const uint32_t local_bandwidth_v4[];
   extern const size_t   local_bandwidth_v4_size;
-  extern const uint32_t local_bandwidth_v8[];
-  extern const size_t   local_bandwidth_v8_size;
   extern const uint32_t image_bandwidth_v1[];
   extern const size_t   image_bandwidth_v1_size;
   extern const uint32_t atomic_throughput_global[];

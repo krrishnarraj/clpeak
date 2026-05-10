@@ -4,6 +4,7 @@
 
 set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/common.cpp
+    ${CLPEAK_ROOT}/src/calibrate.cpp
     ${CLPEAK_ROOT}/src/result_store.cpp
     ${CLPEAK_ROOT}/src/clpeak.cpp
     ${CLPEAK_ROOT}/src/backend_gating.cpp
@@ -129,7 +130,6 @@ set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v2.comp
     ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v4.comp
-    ${CLPEAK_ROOT}/src/shaders/local_bandwidth_v8.comp
     ${CLPEAK_ROOT}/src/shaders/image_bandwidth_v1.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global.comp
     ${CLPEAK_ROOT}/src/shaders/atomic_throughput_global_float.comp
