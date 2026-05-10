@@ -103,6 +103,7 @@ public:
   std::unique_ptr<logger> log;
   unsigned int warmupCount;
   unsigned int specifiedIters;
+  unsigned int targetTimeUs;
   bool forceIters;
   int  deviceIndex; // -1 = run all
 

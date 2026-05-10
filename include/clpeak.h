@@ -105,6 +105,7 @@ public:
   std::string specifiedDeviceName;
   unsigned int specifiedIters;
   unsigned int warmupCount;
+  unsigned int targetTimeUs;
 
   // Output format options
   bool enableJson;
@@ -122,7 +123,13 @@ public:
 
   void applyOptions(const CliOptions &opts);
 
-  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel, cl::NDRange &globalSize, cl::NDRange &localSize, unsigned int iters);
+  // Time a kernel batched as `iters` dispatches, where `iters` is calibrated
+  // from a one-shot warmup so the timed phase lands at ~targetTimeUs.  Returns
+  // mean per-iter time in microseconds.  forcedIters != 0 short-circuits
+  // calibration (matches --iters).
+  float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
+                   cl::NDRange &globalSize, cl::NDRange &localSize,
+                   unsigned int targetTimeUs, unsigned int forcedIters);
 
   // Unified compute benchmark helper -- replaces 7 nearly-identical runCompute* methods
   int runComputeTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo,

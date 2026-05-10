@@ -10,33 +10,25 @@ benchmark_config_t benchmark_config_t::forDevice(cl_device_type type)
 
   if (type & CL_DEVICE_TYPE_CPU)
   {
-    cfg.globalBWIters = 20;
     cfg.globalBWMaxSize = 1 << 27;
     cfg.computeWgsPerCU = 512;
     cfg.computeDPWgsPerCU = 256;
-    cfg.computeIters = 10;
-    cfg.atomicIters = 3;
-    cfg.localBWIters = 20;
-    cfg.imageBWIters = 20;
     cfg.transferBWMaxSize = 1 << 27;
   }
   else
   { // GPU
-    cfg.globalBWIters = 50;
     cfg.globalBWMaxSize = 1 << 29;
     cfg.computeWgsPerCU = 2048;
     cfg.computeDPWgsPerCU = 512;
-    cfg.computeIters = 30;
-    // Atomic tests are heavily contended on some drivers (Vulkan / MoltenVK
-    // local atomics run at ~1/2 of OpenCL/CUDA throughput on NVIDIA), so iters
-    // is set lower than computeIters to keep total wall time reasonable when
-    // multiple dtype variants run (e.g. Metal: int/uint/ulong x global/local).
-    cfg.atomicIters = 8;
-    cfg.localBWIters = 50;
-    cfg.imageBWIters = 50;
     cfg.transferBWMaxSize = 1 << 29;
   }
-  cfg.transferBWIters = 20;
+  // Per-test budget for the timed phase.  250 ms gives 2x headroom under
+  // Adreno's 500 ms hangcheck and ~8x under Windows TDR (2 s).  Long enough
+  // that desktop GPU clock-scaling reaches peak (M1 ramp completes 220-440
+  // ms empirically).
+  cfg.targetTimeUs = 250000;
+  // Kernel-launch latency stays static: each iter is its own enqueue->finish,
+  // so the watchdog only sees one dispatch.  20000 amortizes submit overhead.
   cfg.kernelLatencyIters = 20000;
 
   return cfg;

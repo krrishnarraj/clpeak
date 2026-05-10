@@ -2,6 +2,7 @@
 
 #include <mtl_peak.h>
 #include <inventory.h>
+#include <calibrate.h>
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
@@ -208,7 +209,8 @@ static id<MTLComputePipelineState> getPipeline(MetalDevice &dev, const char *src
 // ---------------------------------------------------------------------------
 
 MetalPeak::MetalPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false),
+  : warmupCount(2), specifiedIters(0), targetTimeUs(250000),
+    forceIters(false),
     deviceIndex(-1),
     impl(nullptr)
 {
@@ -217,13 +219,17 @@ MetalPeak::MetalPeak()
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
 
-// Time `iters` dispatches batched into one MTLCommandBuffer.  Returns mean
-// per-iter GPU time in microseconds (uses cmdBuf.GPUStartTime/GPUEndTime).
+// Time a kernel batched as `iters` dispatches inside one MTLCommandBuffer,
+// where `iters` is calibrated from a one-shot warmup so the timed phase lands
+// at ~targetTimeUs.  Returns mean per-iter GPU time in microseconds (uses
+// cmdBuf.GPUStartTime/GPUEndTime).  forcedIters != 0 short-circuits
+// calibration (matches --iters).
 static float runDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
                            id<MTLBuffer> outBuf, const void *scalarArg, uint32_t scalarSize,
                            id<MTLBuffer> secondBuf,
                            MTLSize gridSize, MTLSize tgSize,
-                           unsigned int warmup, unsigned int iters)
+                           unsigned int warmup,
+                           unsigned int targetTimeUs, unsigned int forcedIters)
 {
     auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
         id<MTLCommandBuffer> cmdBuf = [dev.impl->queue commandBuffer];
@@ -240,16 +246,29 @@ static float runDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
         return cmdBuf;
     };
 
+    auto runBatch = [&](unsigned int n) -> float {
+        id<MTLCommandBuffer> b = enqueue(n);
+        [b waitUntilCompleted];
+        CFTimeInterval gpuTime = b.GPUEndTime - b.GPUStartTime;
+        return (float)(gpuTime * 1e6); // total us
+    };
+
+    // Phase 1: untimed warmup.
     if (warmup > 0)
     {
         id<MTLCommandBuffer> w = enqueue(warmup);
         [w waitUntilCompleted];
     }
-    id<MTLCommandBuffer> t = enqueue(iters);
-    [t waitUntilCompleted];
 
-    CFTimeInterval gpuTime = t.GPUEndTime - t.GPUStartTime;
-    return (float)(gpuTime * 1e6 / (double)iters);
+    // Phase 2: timed calibration probe.
+    unsigned int probeIters = warmup > 0 ? warmup : 1;
+    float probeUs = runBatch(probeIters);
+    double per_iter_us = (double)probeUs / (double)probeIters;
+
+    // Phase 3: real timed run with calibrated iter count.
+    unsigned int iters = pickIters(per_iter_us, targetTimeUs, forcedIters);
+    float totalUs = runBatch(iters);
+    return totalUs / (float)iters;
 }
 
 int MetalPeak::runAll()
@@ -294,12 +313,9 @@ int MetalPeak::runAll()
         }
 
         benchmark_config_t cfg = benchmark_config_t::forDevice(CL_DEVICE_TYPE_GPU);
+        cfg.targetTimeUs = targetTimeUs;
         if (forceIters)
-        {
-            cfg.computeIters       = specifiedIters;
-            cfg.globalBWIters      = specifiedIters;
             cfg.kernelLatencyIters = specifiedIters;
-        }
 
         log->print(NEWLINE "Metal Device: " + dev.info.deviceName + NEWLINE);
         log->print(TAB "OS            : " + dev.info.osVersion + NEWLINE);
@@ -460,7 +476,8 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         }
 
         float us = runDispatches(dev, pso, outBuf, d.scalarArg, d.scalarSize, nil,
-                                 gridSize, tgSizeM, warmupCount, cfg.computeIters);
+                                 gridSize, tgSizeM, warmupCount,
+                                 cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t totalThreads = (uint64_t)numGroups * tgSize;
         double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
         float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
@@ -677,7 +694,6 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.globalBWIters;
     const uint32_t tgSize = 256;
 
     log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
@@ -745,7 +761,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
 
         float us = runDispatches(dev, pso, inBuf, nullptr, 0, outBuf,
-                                 gridSize, tgSizeM, warmupCount, iters);
+                                 gridSize, tgSizeM, warmupCount,
+                                 cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
         float gbps = (float)bytesRead / us / 1e3f;
         log->print(gbps);
@@ -764,7 +781,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
+    unsigned int iters = forceIters ? specifiedIters
+                                    : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
     log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
     auto scope_2 = log->resultScope("kernel_launch_latency");
@@ -866,7 +884,6 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.computeIters;
     log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
     auto scope_3 = log->resultScope("local_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
@@ -912,7 +929,8 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             continue;
         }
         float us = runDispatches(dev, pso, outBuf, nullptr, 0, nil,
-                                 gridSize, tgSizeM, warmupCount, iters);
+                                 gridSize, tgSizeM, warmupCount,
+                                 cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
         float gbps = (float)bytes / us / 1e3f;
         log->print(gbps); log->print(NEWLINE);
@@ -930,7 +948,6 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.globalBWIters;
     log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
     auto scope_4 = log->resultScope("image_memory_bandwidth");
     log->resultScopeAttribute("unit", "gbps");
@@ -1012,11 +1029,20 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             [cb commit];
             return cb;
         };
+        // Phase 1: untimed warmup.
         if (warmupCount > 0)
         {
             id<MTLCommandBuffer> w = enqueue(warmupCount);
             [w waitUntilCompleted];
         }
+        // Phase 2: timed calibration probe.
+        unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+        id<MTLCommandBuffer> p = enqueue(probeIters);
+        [p waitUntilCompleted];
+        double per_iter_us = (p.GPUEndTime - p.GPUStartTime) * 1e6 / (double)probeIters;
+        unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs,
+                                       forceIters ? specifiedIters : 0);
+        // Phase 3: real timed run.
         id<MTLCommandBuffer> t = enqueue(iters);
         [t waitUntilCompleted];
         float us = (float)((t.GPUEndTime - t.GPUStartTime) * 1e6 / iters);
@@ -1037,7 +1063,6 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.atomicIters;
     log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
     auto scope_5 = log->resultScope("atomic_throughput");
     log->resultScopeAttribute("unit", "gops");
@@ -1058,7 +1083,8 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLComputePipelineState> pso = getPipeline(dev, src, srcName, fnName);
         if (!pso) return -1.0f;
         float us = runDispatches(dev, pso, buf, nullptr, 0, nil,
-                                 gridSize, tgSizeM, warmupCount, iters);
+                                 gridSize, tgSizeM, warmupCount,
+                                 cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         return us;
     };
 
@@ -1128,7 +1154,6 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    unsigned int iters = cfg.atomicIters;
     log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
     auto scope_6 = log->resultScope("atomic_throughput");
     log->resultScopeAttribute("unit", "gflops");
@@ -1148,7 +1173,8 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLComputePipelineState> pso = getPipeline(dev, src, srcName, fnName);
         if (!pso) return -1.0f;
         return runDispatches(dev, pso, buf, nullptr, 0, nil,
-                             gridSize, tgSizeM, warmupCount, iters);
+                             gridSize, tgSizeM, warmupCount,
+                             cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     };
 
     auto reportOne = [&](const char *resultKey, const char *src, const char *srcName,

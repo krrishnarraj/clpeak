@@ -10,7 +10,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  unsigned int iters = cfg.globalBWIters;
+  unsigned int forced = forceIters ? specifiedIters : 0;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
   uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize);
@@ -72,8 +72,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       globalSize = numItems / widths[w] / FETCH_PER_WI;
 
-      timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, iters);
-      timed_go = run_kernel(queue, *go_kernels[w], globalSize, localSize, iters);
+      timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
+      timed_go = run_kernel(queue, *go_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;

@@ -173,6 +173,7 @@ public:
   std::unique_ptr<logger> log;
   unsigned int warmupCount;
   unsigned int specifiedIters;
+  unsigned int targetTimeUs;
   bool forceIters;
   int  deviceIndex; // -1 = run all
 
@@ -230,11 +231,15 @@ private:
   bool initInstance();
   void cleanup();
 
-  // Timing helper: run a compute dispatch iters times, return avg time in us
+  // Time a compute dispatch batched as `iters` dispatches, where `iters` is
+  // calibrated from a one-shot warmup so the timed phase lands at
+  // ~targetTimeUs.  Returns mean per-iter time in microseconds.  forcedIters
+  // != 0 short-circuits calibration (matches --iters).
   float runKernel(VulkanDevice &dev, VkPipeline pipeline,
                   VkPipelineLayout pipeLayout,
                   VkDescriptorSet descriptorSet,
-                  uint32_t groupCountX, unsigned int iters,
+                  uint32_t groupCountX,
+                  unsigned int targetTimeUs, unsigned int forcedIters,
                   const void *pushData = nullptr, uint32_t pushSize = 0);
 
   // Shared implementation of the single-buffer compute-peak pattern

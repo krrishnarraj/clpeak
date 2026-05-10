@@ -21,7 +21,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
   }
 
-  unsigned int iters = cfg.imageBWIters;
+  unsigned int forced = forceIters ? specifiedIters : 0;
 
   // Choose image dimensions: up to 4096x4096, bounded by device limits and maxAllocSize
   uint64_t imgW = std::min((uint64_t)4096, devInfo.image2dMaxWidth);
@@ -58,7 +58,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       kernel_v1.setArg(0, img);
       kernel_v1.setArg(1, outputBuf);
 
-      timed = run_kernel(queue, kernel_v1, globalSize, localSize, iters);
+      timed = run_kernel(queue, kernel_v1, globalSize, localSize, cfg.targetTimeUs, forced);
 
       // Each WI reads IMAGE_FETCH_PER_WI float4 pixels = IMAGE_FETCH_PER_WI * 4 * sizeof(float) bytes
       uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * globalWIs;

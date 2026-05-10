@@ -31,10 +31,13 @@ struct CliOptions {
   int cudaDeviceIndex = -1;
   int mtlDeviceIndex  = -1;
 
-  // Iters / warmup
+  // Iters / warmup.  When forceIters is false, each backend's runKernel
+  // calibrates iters from a one-shot timed warmup so the timed phase lands
+  // at ~targetTimeUs regardless of device speed.
   bool         forceIters    = false;
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
+  unsigned int targetTimeUs  = 250000; // --max-time, in microseconds
 
   // Test selection.  Default: every category and every test enabled.  The
   // first positive --<test> flag flips enabledTests to allow-list mode

@@ -1,0 +1,21 @@
+#ifndef CLPEAK_CALIBRATE_H
+#define CLPEAK_CALIBRATE_H
+
+// Pick an iteration count from a measured per-iter time and a per-test
+// time budget.  Used by every backend's runKernel/runDispatches helper to
+// size the timed batch so it lands at ~target_us regardless of device
+// speed (avoids GPU watchdog hits on slow paths and clock-ramp
+// under-measurement on fast paths).
+//
+//   per_iter_us  measured time per dispatch from a calibration run
+//   target_us    per-test budget (cfg.targetTimeUs); 0 => fall back to
+//                a 5 s budget (matches the legacy BLAS pickIters
+//                behaviour)
+//   forced       if non-zero, short-circuit and return this value (the
+//                user passed --iters)
+//
+// Result is clamped to [2, 10000] to keep at least one batched submit
+// for cache averaging and to bound command-buffer / event-pool size.
+unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int forced);
+
+#endif // CLPEAK_CALIBRATE_H

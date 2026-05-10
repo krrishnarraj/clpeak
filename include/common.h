@@ -77,18 +77,17 @@ struct device_info_t {
   uint64_t image2dMaxHeight;
 };
 
-// Per-device benchmark tuning knobs (CPU vs GPU defaults, overridable via --iters)
+// Per-device benchmark tuning knobs.  All per-test iteration counts are now
+// derived from `targetTimeUs` via runtime calibration (see include/calibrate.h);
+// the only static iter field left is kernelLatencyIters because that test is
+// structurally different (one separately-submitted dispatch per iter, so the
+// watchdog only ever sees a single dispatch).
 struct benchmark_config_t {
-  unsigned int globalBWIters;
   uint64_t globalBWMaxSize;
   unsigned int computeWgsPerCU;
   unsigned int computeDPWgsPerCU;
-  unsigned int computeIters;
-  unsigned int atomicIters;
-  unsigned int localBWIters;
-  unsigned int imageBWIters;
-  unsigned int transferBWIters;
-  unsigned int kernelLatencyIters;
+  unsigned int targetTimeUs;          // per-test budget for the timed phase
+  unsigned int kernelLatencyIters;    // separately-submitted dispatch count
   uint64_t transferBWMaxSize;
 
   static benchmark_config_t forDevice(cl_device_type type);

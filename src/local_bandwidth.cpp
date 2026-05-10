@@ -8,7 +8,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   if (!gating.isAllowed(Benchmark::LocalBW))
     return 0;
 
-  unsigned int iters = cfg.localBWIters;
+  unsigned int forced = forceIters ? specifiedIters : 0;
 
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
@@ -45,7 +45,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       log->print(TAB TAB TAB + std::string(display[w]) + ": ");
 
-      timed = run_kernel(queue, kernels[w], globalSize, localSize, iters);
+      timed = run_kernel(queue, kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
 
       // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * globalWIs;

@@ -142,6 +142,7 @@ public:
   std::unique_ptr<logger> log;
   unsigned int warmupCount;
   unsigned int specifiedIters;
+  unsigned int targetTimeUs;
   bool forceIters;
   int  deviceIndex;  // -1 = run all
 
@@ -176,11 +177,14 @@ private:
 
   bool initDriver();
 
-  // Event-timed launch helper.  Runs the kernel iters times after warmup,
-  // returns mean per-launch time in microseconds.
+  // Time a kernel batched as `iters` dispatches, where `iters` is calibrated
+  // from a one-shot warmup so the timed phase lands at ~targetTimeUs.  Returns
+  // mean per-launch time in microseconds.  forcedIters != 0 short-circuits
+  // calibration (matches --iters).
   float runKernel(CudaDevice &dev, CUfunction fn,
                   uint32_t gridX, uint32_t blockX,
-                  void **args, unsigned int iters);
+                  void **args,
+                  unsigned int targetTimeUs, unsigned int forcedIters);
 
   int runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
                        const cuda_compute_desc_t &d);

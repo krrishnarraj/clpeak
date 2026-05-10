@@ -4,6 +4,7 @@
 
 set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/common.cpp
+    ${CLPEAK_ROOT}/src/calibrate.cpp
     ${CLPEAK_ROOT}/src/result_store.cpp
     ${CLPEAK_ROOT}/src/clpeak.cpp
     ${CLPEAK_ROOT}/src/backend_gating.cpp

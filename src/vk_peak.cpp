@@ -2,6 +2,7 @@
 
 #include <vk_peak.h>
 #include <inventory.h>
+#include <calibrate.h>
 #include <cstring>
 #include <sstream>
 #include <chrono>
@@ -600,7 +601,8 @@ uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags
 // ---------------------------------------------------------------------------
 
 vkPeak::vkPeak()
-  : warmupCount(2), specifiedIters(0), forceIters(false),
+  : warmupCount(2), specifiedIters(0), targetTimeUs(250000),
+    forceIters(false),
     deviceIndex(-1),
     instance(VK_NULL_HANDLE)
 {
@@ -670,7 +672,8 @@ void vkPeak::cleanup()
 float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
                         VkPipelineLayout pipeLayout,
                         VkDescriptorSet descriptorSet,
-                        uint32_t groupCountX, unsigned int iters,
+                        uint32_t groupCountX,
+                        unsigned int targetTimeUsLocal, unsigned int forcedIters,
                         const void *pushData, uint32_t pushSize)
 {
   // Allocate command buffer
@@ -683,42 +686,54 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
   VkCommandBuffer cmdBuf;
   vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
 
-  // Warmup
-  for (unsigned int w = 0; w < warmupCount; w++)
-  {
-    VkCommandBufferBeginInfo warmBeginInfo = {};
-    warmBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    warmBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdBuf, &warmBeginInfo);
+  // Record `n` dispatches into cmdBuf, submit once, return total wall-time
+  // in us (or -1 on submit failure).
+  auto runBatch = [&](unsigned int n) -> float {
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuf, &beginInfo);
     vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &descriptorSet, 0, nullptr);
     if (pushData && pushSize > 0)
       vkCmdPushConstants(cmdBuf, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
-    vkCmdDispatch(cmdBuf, groupCountX, 1, 1);
+    for (unsigned int i = 0; i < n; i++)
+      vkCmdDispatch(cmdBuf, groupCountX, 1, 1);
     vkEndCommandBuffer(cmdBuf);
-    dev.submitAndWait(cmdBuf);
+
+    auto start = std::chrono::high_resolution_clock::now();
+    VkResult submitRes = dev.submitAndWait(cmdBuf);
+    auto end = std::chrono::high_resolution_clock::now();
     vkResetCommandBuffer(cmdBuf, 0);
+    if (submitRes != VK_SUCCESS) return -1.0f;
+    return (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  };
+
+  // Phase 1: untimed warmup (cache + clock ramp).  One dispatch per submit
+  // so the first dispatch's compile/load cost amortizes naturally.
+  for (unsigned int w = 0; w < warmupCount; w++)
+  {
+    if (runBatch(1) < 0.0f)
+    {
+      vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+      return -1.0f;
+    }
   }
 
-  // Record all dispatches into one command buffer, submit once, and measure
-  // the total GPU execution time.  This gives steady-state throughput by
-  // amortizing submit / driver overhead across all iterations.
-  VkCommandBufferBeginInfo beginInfo = {};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmdBuf, &beginInfo);
-  vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-  vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &descriptorSet, 0, nullptr);
-  if (pushData && pushSize > 0)
-    vkCmdPushConstants(cmdBuf, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
-  for (unsigned int i = 0; i < iters; i++)
-    vkCmdDispatch(cmdBuf, groupCountX, 1, 1);
-  vkEndCommandBuffer(cmdBuf);
+  // Phase 2: timed calibration probe.
+  unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+  float probeUs = runBatch(probeIters);
+  if (probeUs < 0.0f)
+  {
+    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+    return -1.0f;
+  }
+  if (probeUs <= 0.0f) probeUs = 1.0f; // floor for very fast paths
+  double per_iter_us = (double)probeUs / (double)probeIters;
 
-  auto start = std::chrono::high_resolution_clock::now();
-  VkResult submitRes = dev.submitAndWait(cmdBuf);
-  auto end = std::chrono::high_resolution_clock::now();
-  float timed = (float)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  // Phase 3: real timed run with calibrated iter count.
+  unsigned int iters = pickIters(per_iter_us, targetTimeUsLocal, forcedIters);
+  float timed = runBatch(iters);
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
 
@@ -726,7 +741,7 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
   // shader that uses an advertised-but-unsupported feature): vkQueueWaitIdle
   // returns instantly with VK_ERROR_DEVICE_LOST, leaving timed ~= 0 which
   // would otherwise propagate as "inf" GFLOPS/GBPS into the report.
-  if (submitRes != VK_SUCCESS)
+  if (timed < 0.0f)
     return -1.0f;
   if (timed <= 0.0f)
     return -1.0f;
@@ -817,14 +832,9 @@ int vkPeak::runAll()
 
     benchmark_config_t cfg = benchmark_config_t::forDevice(
         (dev.info.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU);
-
+    cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
-    {
-      cfg.computeIters = specifiedIters;
-      cfg.globalBWIters = specifiedIters;
-      cfg.transferBWIters = specifiedIters;
       cfg.kernelLatencyIters = specifiedIters;
-    }
 
     log->print(NEWLINE "Vulkan Device: " + dev.info.deviceName + NEWLINE);
     log->print(TAB "API version   : " + dev.info.apiVersion + NEWLINE);
@@ -1080,7 +1090,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     }
 
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
-                            cfg.computeIters, d.pushData, d.pushSize);
+                            cfg.targetTimeUs, forceIters ? specifiedIters : 0,
+                            d.pushData, d.pushSize);
     if (timed <= 0.0f)
     {
       log->print("submit failed (driver lost the device or rejected the dispatch)" NEWLINE);
@@ -1554,7 +1565,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 
 int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.globalBWIters;
   const uint32_t wgSize = 256;
 
   uint64_t maxItems = dev.info.maxAllocSize / sizeof(float) / 2;
@@ -1684,7 +1694,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     // touched stays at numItems * sizeof(float) across all variants.
     uint32_t variantGroups = numGroups / v.width;
     if (variantGroups == 0) variantGroups = 1;
-    float timed = runKernel(dev, pipe, pipeLayout, descSet, variantGroups, iters);
+    float timed = runKernel(dev, pipe, pipeLayout, descSet, variantGroups,
+                            cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ') key.pop_back();
     if (timed <= 0.0f)
@@ -1740,7 +1751,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (bytes == 0)
     bytes = 256;
 
-  unsigned int iters = cfg.transferBWIters ? cfg.transferBWIters : 10;
+  unsigned int forced = forceIters ? specifiedIters : 0;
 
   log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
   auto scope_2 = log->resultScope("transfer_bandwidth");
@@ -1810,6 +1821,48 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       vkEndCommandBuffer(cmdBuf);
     };
 
+    // Run `n` timed copies, returning total us (or -1 on submit failure).
+    auto runIters = [&](unsigned int n) -> float {
+      float totalUs = 0.0f;
+      for (unsigned int i = 0; i < n; i++)
+      {
+        recordCopy(queryPool != VK_NULL_HANDLE);
+        auto start = std::chrono::high_resolution_clock::now();
+        VkResult sr = dev.submitAndWait(cmdBuf);
+        auto end = std::chrono::high_resolution_clock::now();
+        if (sr != VK_SUCCESS)
+        {
+          vkResetCommandBuffer(cmdBuf, 0);
+          return -1.0f;
+        }
+
+        double iterUs = (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        if (queryPool != VK_NULL_HANDLE)
+        {
+          uint64_t ts[2] = {};
+          VkResult qr = vkGetQueryPoolResults(dev.device, queryPool, 0, 2, sizeof(ts), ts,
+                                              sizeof(uint64_t),
+                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+          // Strict > (not >=): some drivers (e.g. Adreno+Turnip) return both
+          // timestamps with the same value for buffer-copy ranges instead of
+          // failing the query.  Treat equality as "timer didn't tick" and
+          // fall back to the host wall clock.
+          if (qr == VK_SUCCESS && ts[1] > ts[0])
+            totalUs += (float)((double)(ts[1] - ts[0]) * props.limits.timestampPeriod / 1000.0);
+          else
+            totalUs += (float)iterUs;
+        }
+        else
+        {
+          totalUs += (float)iterUs;
+        }
+
+        vkResetCommandBuffer(cmdBuf, 0);
+      }
+      return totalUs;
+    };
+
+    // Phase 1: untimed warmup.
     for (unsigned int w = 0; w < warmupCount; w++)
     {
       recordCopy(false);
@@ -1817,47 +1870,17 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       vkResetCommandBuffer(cmdBuf, 0);
     }
 
-    float totalUs = 0.0f;
-    bool   submitFailed = false;
-    for (unsigned int i = 0; i < iters; i++)
-    {
-      recordCopy(queryPool != VK_NULL_HANDLE);
-      auto start = std::chrono::high_resolution_clock::now();
-      VkResult sr = dev.submitAndWait(cmdBuf);
-      auto end = std::chrono::high_resolution_clock::now();
-      if (sr != VK_SUCCESS)
-      {
-        submitFailed = true;
-        vkResetCommandBuffer(cmdBuf, 0);
-        break;
-      }
+    // Phase 2: timed probe -> per-iter time -> calibrated iters.
+    unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+    float probeUs = runIters(probeIters);
+    if (probeUs < 0.0f) return -1.0f;
+    if (probeUs <= 0.0f) probeUs = 1.0f;
+    double per_iter_us = (double)probeUs / (double)probeIters;
+    unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);
 
-      double iterUs = (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-      if (queryPool != VK_NULL_HANDLE)
-      {
-        uint64_t ts[2] = {};
-        VkResult qr = vkGetQueryPoolResults(dev.device, queryPool, 0, 2, sizeof(ts), ts,
-                                            sizeof(uint64_t),
-                                            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-        // Strict > (not >=): some drivers (e.g. Adreno+Turnip) return both
-        // timestamps with the same value for buffer-copy ranges instead of
-        // failing the query.  Treat equality as "timer didn't tick" and
-        // fall back to the host wall clock.
-        if (qr == VK_SUCCESS && ts[1] > ts[0])
-          totalUs += (float)((double)(ts[1] - ts[0]) * props.limits.timestampPeriod / 1000.0);
-        else
-          totalUs += (float)iterUs;
-      }
-      else
-      {
-        totalUs += (float)iterUs;
-      }
-
-      vkResetCommandBuffer(cmdBuf, 0);
-    }
-
-    if (submitFailed)
-      return -1.0f;
+    // Phase 3: real timed run.
+    float totalUs = runIters(iters);
+    if (totalUs < 0.0f) return -1.0f;
     // A genuine zero reading (no measurable wall-clock time AND no
     // timestamp delta) is the timer-broken case -- don't paper over it
     // with FLT_EPSILON, since (bytes / FLT_EPSILON / 1e3) prints 1.13e12
@@ -1908,8 +1931,6 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.computeIters;
-
   log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
   auto scope_3 = log->resultScope("local_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
@@ -1985,7 +2006,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       log->print("pipeline failed" NEWLINE);
       continue;
     }
-    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
+    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     // Strip padding from the display label for the result metric key.
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ') key.pop_back();
@@ -2022,8 +2044,6 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.globalBWIters;
-
   log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
   auto scope_4 = log->resultScope("image_memory_bandwidth");
   log->resultScopeAttribute("unit", "gbps");
@@ -2191,7 +2211,8 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   }
   else
   {
-    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups, iters);
+    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
       log->print("submit failed" NEWLINE);
@@ -2226,8 +2247,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.atomicIters;
-
   log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
   auto scope_5 = log->resultScope("atomic_throughput");
   log->resultScopeAttribute("unit", "gops");
@@ -2282,7 +2301,8 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
       vkFreeMemory(dev.device, mem, nullptr);
       return -1.0f;
     }
-    float us = runKernel(dev, pipe, pl, ds, numGroups, iters);
+    float us = runKernel(dev, pipe, pl, ds, numGroups,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     vkDestroyPipeline(dev.device, pipe, nullptr);
     vkDestroyDescriptorPool(dev.device, dp, nullptr);
     vkDestroyPipelineLayout(dev.device, pl, nullptr);
@@ -2357,8 +2377,6 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
 int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.atomicIters;
-
   log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
   auto scope = log->resultScope("atomic_throughput");
   log->resultScopeAttribute("unit", "gflops");
@@ -2420,7 +2438,8 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   }
   else
   {
-    float us = runKernel(dev, pipe, pl, ds, numGroups, iters);
+    float us = runKernel(dev, pipe, pl, ds, numGroups,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
       log->print("submit failed" NEWLINE);
@@ -2458,7 +2477,8 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  unsigned int iters = cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000;
+  unsigned int iters = forceIters ? specifiedIters
+                                  : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
   auto scope_6 = log->resultScope("kernel_launch_latency");
