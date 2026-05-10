@@ -352,14 +352,17 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
     return timer.stopAndTime();
   };
 
-  // Phase 1: untimed warmup (cache + clock ramp).
+  // Phase 1: untimed warmup (cache + clock ramp). Keep each warmup as its own
+  // completed submission so slow kernels do not get batched before calibration.
   for (unsigned int w = 0; w < warmupCount; w++)
+  {
     queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
-  queue.finish();
+    queue.finish();
+  }
 
-  // Phase 2: timed calibration probe -- run another `warmupCount` dispatches
-  // through the same path used for the real run, derive per-iter time.
-  unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+  // Phase 2: timed calibration probe. Keep this to one dispatch so warmupCount
+  // does not force a multi-dispatch submit on slow kernels.
+  unsigned int probeIters = 1;
   float probeUs = runBatch(probeIters);
   double per_iter_us = (double)probeUs / (double)probeIters;
 

@@ -253,15 +253,17 @@ static float runDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
         return (float)(gpuTime * 1e6); // total us
     };
 
-    // Phase 1: untimed warmup.
-    if (warmup > 0)
+    // Phase 1: untimed warmup. Keep each warmup as its own completed command
+    // buffer so slow kernels do not get batched before calibration.
+    for (unsigned int i = 0; i < warmup; i++)
     {
-        id<MTLCommandBuffer> w = enqueue(warmup);
+        id<MTLCommandBuffer> w = enqueue(1);
         [w waitUntilCompleted];
     }
 
-    // Phase 2: timed calibration probe.
-    unsigned int probeIters = warmup > 0 ? warmup : 1;
+    // Phase 2: timed calibration probe. Keep this to one dispatch so warmup
+    // does not force a multi-dispatch command buffer on slow kernels.
+    unsigned int probeIters = 1;
     float probeUs = runBatch(probeIters);
     double per_iter_us = (double)probeUs / (double)probeIters;
 
@@ -1030,13 +1032,13 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             return cb;
         };
         // Phase 1: untimed warmup.
-        if (warmupCount > 0)
+        for (unsigned int i = 0; i < warmupCount; i++)
         {
-            id<MTLCommandBuffer> w = enqueue(warmupCount);
+            id<MTLCommandBuffer> w = enqueue(1);
             [w waitUntilCompleted];
         }
         // Phase 2: timed calibration probe.
-        unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+        unsigned int probeIters = 1;
         id<MTLCommandBuffer> p = enqueue(probeIters);
         [p waitUntilCompleted];
         double per_iter_us = (p.GPUEndTime - p.GPUStartTime) * 1e6 / (double)probeIters;

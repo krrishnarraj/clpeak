@@ -22,8 +22,9 @@ static const unsigned int CLPEAK_DEFAULT_TARGET_TIME_US = 500000;
 //   forced       if non-zero, short-circuit and return this value (the
 //                user passed --iters)
 //
-// Result is clamped to [2, 10000] to keep at least one batched submit
-// for cache averaging and to bound command-buffer / event-pool size.
+// Result is clamped to [1, 10000] so a single dispatch/copy can be used when
+// one iteration already exceeds the target budget, while still bounding
+// command-buffer / event-pool size on fast paths.
 unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int forced);
 
 #endif // CLPEAK_CALIBRATE_H

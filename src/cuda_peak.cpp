@@ -284,13 +284,17 @@ float CudaPeak::runKernel(CudaDevice &dev, CUfunction fn,
     return ms * 1000.0f;
   };
 
-  // Phase 1: untimed warmup.
+  // Phase 1: untimed warmup. Keep each warmup as its own completed launch so
+  // slow kernels do not get batched before calibration.
   for (unsigned int w = 0; w < warmupCount; w++)
+  {
     cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1, 0, dev.stream, args, nullptr);
-  cuStreamSynchronize(dev.stream);
+    cuStreamSynchronize(dev.stream);
+  }
 
-  // Phase 2: timed calibration probe.
-  unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+  // Phase 2: timed calibration probe. Keep this to one launch so warmupCount
+  // does not force a multi-launch batch on slow kernels.
+  unsigned int probeIters = 1;
   float probeUs = runBatch(probeIters);
   double per_iter_us = (double)probeUs / (double)probeIters;
 
@@ -1124,11 +1128,11 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
         cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
       else
         cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      cuStreamSynchronize(dev.stream);
     }
-    cuStreamSynchronize(dev.stream);
 
     // Phase 2: timed probe -> per-iter time -> calibrated iters.
-    unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+    unsigned int probeIters = 1;
     float probeUs = runBatch(probeIters);
     double per_iter_us = (double)probeUs / (double)probeIters;
     unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);

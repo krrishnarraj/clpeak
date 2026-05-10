@@ -60,7 +60,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   float peakRealTransferBW = 0;
 
   // Helper: run a timed transfer test with warmup + calibration, return
-  // measured gbps.  Calibrates iters from one warmup-sized timed probe so the
+  // measured gbps.  Calibrates iters from a one-iteration timed probe so the
   // measurement window lands at ~cfg.targetTimeUs regardless of bus speed.
   auto runTransfer = [&](const std::string &label, const std::string &resultName,
                          std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
@@ -96,7 +96,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     };
 
     // Phase 2: timed probe -> per-iter time -> calibrated iters.
-    unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+    unsigned int probeIters = 1;
     float probeUs = runBatch(probeIters);
     double per_iter_us = (double)probeUs / (double)probeIters;
     unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);
@@ -188,7 +188,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     // so calibration sizes total runtime to ~cfg.targetTimeUs.
     auto calibrateMapIters = [&](std::function<void()> iter) -> unsigned int {
       for (unsigned int w = 0; w < warmupCount; w++) iter();
-      unsigned int probe = warmupCount > 0 ? warmupCount : 1;
+      unsigned int probe = 1;
       Timer probeT; probeT.start();
       for (unsigned int i = 0; i < probe; i++) iter();
       float probeUs = probeT.stopAndTime();

@@ -720,8 +720,9 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
     }
   }
 
-  // Phase 2: timed calibration probe.
-  unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+  // Phase 2: timed calibration probe. Keep this to one dispatch so warmupCount
+  // does not force a multi-dispatch submit on slow kernels.
+  unsigned int probeIters = 1;
   float probeUs = runBatch(probeIters);
   if (probeUs < 0.0f)
   {
@@ -1871,7 +1872,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     }
 
     // Phase 2: timed probe -> per-iter time -> calibrated iters.
-    unsigned int probeIters = warmupCount > 0 ? warmupCount : 1;
+    unsigned int probeIters = 1;
     float probeUs = runIters(probeIters);
     if (probeUs < 0.0f) return -1.0f;
     if (probeUs <= 0.0f) probeUs = 1.0f;
