@@ -4,14 +4,14 @@
 //   local:  every thread in the block contends on a single __shared__
 //           counter (histogram / reduction pattern).
 //
-// 512 atomicAdd calls per thread; the loop dependency prevents the
-// compiler from hoisting / eliminating.
+// 64 atomicAdd calls per thread (= ATOMIC_REPS); the loop dependency
+// prevents the compiler from hoisting / eliminating.
 
 extern "C" __global__ void atomic_throughput_global(int *counter)
 {
     int *cnt = counter + blockIdx.x * blockDim.x + threadIdx.x;
     #pragma unroll 1
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 64; i++)
     {
         atomicAdd(cnt, 1);
     }
@@ -24,7 +24,7 @@ extern "C" __global__ void atomic_throughput_local(int *out)
     __syncthreads();
 
     #pragma unroll 1
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 64; i++)
     {
         atomicAdd(&scratch, 1);
     }

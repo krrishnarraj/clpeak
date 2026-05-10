@@ -2,9 +2,11 @@
 #extension GL_EXT_shader_atomic_float : require
 
 // Global atomic float throughput: each WI hammers its own counter (no
-// cross-WI contention) with 512 serial atomicAdds.  Mirrors the int
-// global-atomic test.  Requires VK_EXT_shader_atomic_float +
-// shaderBufferFloat32AtomicAdd.
+// cross-WI contention) with 64 serial atomicAdds (= ATOMIC_REPS).  Mirrors
+// the int global-atomic test.  Requires VK_EXT_shader_atomic_float +
+// shaderBufferFloat32AtomicAdd.  Note: AMD/RADV (and most non-NVIDIA HW)
+// emulates this via a CAS loop, so the per-rep cost is 5-20x int_atomic --
+// keeping reps low avoids tripping the GPU watchdog.
 
 layout(local_size_x = 256) in;
 
@@ -15,7 +17,7 @@ layout(set = 0, binding = 0) buffer Counter {
 void main()
 {
     uint gid = gl_GlobalInvocationID.x;
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 64; i++)
     {
         atomicAdd(counter.data[gid], 1.0);
     }

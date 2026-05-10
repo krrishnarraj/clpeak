@@ -2,13 +2,13 @@ MSTRINGIFY(
 
 // Global atomics: each work-item adds to its own counter (independent, no cross-WI
 // contention). Measures peak global-memory atomic throughput. Each WI executes
-// 512 serial atomic_add calls; the loop dependency prevents the compiler from
-// hoisting or eliminating them.
+// 64 serial atomic_add calls (= ATOMIC_REPS); the loop dependency prevents the
+// compiler from hoisting or eliminating them.
 __kernel void atomic_throughput_global(__global int* counter)
 {
     __global int* cnt = counter + get_global_id(0);
 
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < 64; i++) {
         atomic_add(cnt, 1);
     }
 }
@@ -25,7 +25,7 @@ __kernel void atomic_throughput_local(__global int* output, __local int* scratch
         *scratch = 0;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < 64; i++) {
         atomic_add(scratch, 1);
     }
 

@@ -16,7 +16,15 @@ static const unsigned int FETCH_PER_WI = 16;
 static const unsigned int LMEM_REPS = 64;
 
 // atomic_throughput_kernels.cl
-static const unsigned int ATOMIC_REPS = 512;
+// Was 512.  Cut to 64 because float atomicAdd on AMD/RADV (and likely other
+// vendors lacking native fp32 atomic add) is emitted as a shader CAS loop:
+// each "atomic add" can run 5-20x slower than int_atomic, which at the old
+// 512 reps * 33M WIs * 8 iters pushed the dispatch past the GPU watchdog
+// (RX 9070 XT was hard-recovering on the float_global variant).  64 reps is
+// still well above dispatch-overhead noise and gives identical GOPS within
+// run-to-run noise on int_global / int_local.  Hardcoded inside each
+// shader/kernel -- keep all sites in sync (see grep "i < 64" in src/*).
+static const unsigned int ATOMIC_REPS = 64;
 
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
