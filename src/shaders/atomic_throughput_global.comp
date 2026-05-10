@@ -1,7 +1,7 @@
 #version 450
 
 // Global atomics: each WI hammers its own counter (independent, no
-// cross-WI contention) with 64 serial atomicAdds (= ATOMIC_REPS).  Loop-
+// cross-WI contention) with 256 serial atomicAdds (= ATOMIC_REPS).  Loop-
 // carried dependency prevents the compiler from hoisting / eliminating.
 
 layout(local_size_x = 256) in;
@@ -13,7 +13,7 @@ layout(set = 0, binding = 0) buffer Counter {
 void main()
 {
     uint gid = gl_GlobalInvocationID.x;
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomicAdd(counter.data[gid], 1);
     }

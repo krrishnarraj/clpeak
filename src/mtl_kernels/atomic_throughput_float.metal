@@ -10,7 +10,7 @@ kernel void atomic_throughput_global_float(device atomic_float* counter [[buffer
                                            uint tid [[thread_position_in_grid]])
 {
     device atomic_float* cnt = counter + tid;
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomic_fetch_add_explicit(cnt, 1.0f, memory_order_relaxed);
     }

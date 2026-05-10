@@ -18,7 +18,7 @@ void main()
         scratch = 0;
     barrier();
 
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < 256; i++)
     {
         atomicAdd(scratch, 1);
     }
