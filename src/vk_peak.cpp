@@ -580,6 +580,45 @@ VkResult VulkanDevice::submitAndWait(VkCommandBuffer cmdBuf)
   return sr != VK_SUCCESS ? sr : wr;
 }
 
+bool VulkanDevice::zeroBuffer(VkBuffer buffer)
+{
+  VkCommandBufferAllocateInfo allocInfo = {};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = commandPool;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = 1;
+
+  VkCommandBuffer cmdBuf;
+  if (vkAllocateCommandBuffers(device, &allocInfo, &cmdBuf) != VK_SUCCESS)
+    return false;
+
+  VkCommandBufferBeginInfo beginInfo = {};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmdBuf, &beginInfo);
+
+  vkCmdFillBuffer(cmdBuf, buffer, 0, VK_WHOLE_SIZE, 0);
+
+  VkBufferMemoryBarrier barrier = {};
+  barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.buffer = buffer;
+  barrier.offset = 0;
+  barrier.size = VK_WHOLE_SIZE;
+  vkCmdPipelineBarrier(cmdBuf,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       0, 0, nullptr, 1, &barrier, 0, nullptr);
+
+  vkEndCommandBuffer(cmdBuf);
+  VkResult result = submitAndWait(cmdBuf);
+  vkFreeCommandBuffers(device, commandPool, 1, &cmdBuf);
+  return result == VK_SUCCESS;
+}
+
 uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
 {
   VkPhysicalDeviceMemoryProperties memProps;
@@ -2260,9 +2299,16 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
                     uint64_t bufBytes) -> float
   {
     VkBuffer buf; VkDeviceMemory mem;
-    if (!dev.createBuffer(bufBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    if (!dev.createBuffer(bufBytes,
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buf, mem))
       return -1.0f;
+    if (!dev.zeroBuffer(buf))
+    {
+      vkDestroyBuffer(dev.device, buf, nullptr);
+      vkFreeMemory(dev.device, mem, nullptr);
+      return -1.0f;
+    }
     VkDescriptorSetLayoutBinding b = {};
     b.binding = 0; b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     b.descriptorCount = 1; b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -2395,10 +2441,18 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   uint64_t bufBytes = globalWIs * sizeof(float);
 
   VkBuffer buf; VkDeviceMemory mem;
-  if (!dev.createBuffer(bufBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+  if (!dev.createBuffer(bufBytes,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buf, mem))
   {
     log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    return -1;
+  }
+  if (!dev.zeroBuffer(buf))
+  {
+    log->print(TAB TAB "Failed to zero buffer" NEWLINE);
+    vkDestroyBuffer(dev.device, buf, nullptr);
+    vkFreeMemory(dev.device, mem, nullptr);
     return -1;
   }
   VkDescriptorSetLayoutBinding b = {};

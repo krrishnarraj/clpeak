@@ -105,6 +105,10 @@ public:
   // shaders that use advertised-but-unsupported features).
   VkResult submitAndWait(VkCommandBuffer cmdBuf);
 
+  // Clear a transfer-dst buffer to zero and make the writes visible to
+  // following compute shader dispatches.
+  bool zeroBuffer(VkBuffer buffer);
+
 private:
   uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 };
