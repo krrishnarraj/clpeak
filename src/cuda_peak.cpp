@@ -958,8 +958,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.outElemsPerBlock = 1;
       d.scalarArg = &A;
       d.scalarSize = sizeof(A);
-      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
-      d.skipMsg = "TCGEN05 MXFP4 sparse requires Blackwell arch-specific target! Skipped";
+      // tcgen05.* instructions are only supported on Blackwell datacenter
+      // targets (sm_100a / sm_101a / sm_103a). Consumer Blackwell (sm_120a)
+      // implements FP4 mma.sync but not tcgen05, so skip there.
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported ||
+               dev.info.major != 10;
+      d.skipMsg = "TCGEN05 MXFP4 sparse requires Blackwell sm_100a/101a/103a! Skipped";
       d.extraAttribKey = "tile";
       d.extraAttribVal = "m128n128k128_sparse";
       d.extraNvrtcOpts = tcgen05Opts;
