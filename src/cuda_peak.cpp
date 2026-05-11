@@ -101,6 +101,7 @@ bool CudaDevice::init(int devIndex)
     info.int4MmaSupported = (cc >= 75) && (cc <= 89);
   }
   info.bmmaSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
+  info.int8MmaSparseSupported = (info.major >= 8);
 
   // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
   // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
@@ -919,6 +920,30 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.wmmaInt8Supported;
     d.skipMsg = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "m16n8k32";
+    runComputeKernel(dev, cfg, d);
+  }
+  // INT8 mma.sp 2:4 structured sparsity m16n8k32 -- sm_80+
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "INT8 mma.sp 2:4 sparsity m16n8k32+int32 (TOPS)";
+    d.resultTag = "wmma_int8_sparse";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int8_sparse";
+    d.kernelName = "wmma_int8_sparse";
+    d.src = cuda_kernels::wmma_int8_sparse_src;
+    d.srcName = cuda_kernels::wmma_int8_sparse_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = 16 * 8;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.int8MmaSparseSupported;
+    d.skipMsg = "INT8 mma.sp 2:4 sparsity requires sm_80 or newer (Ampere+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);

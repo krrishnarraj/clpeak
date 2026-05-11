@@ -45,6 +45,7 @@ struct cuda_device_info_t {
   bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
                                  // dropped on sm_90+ (Hopper) where the s4 imma
                                  // path was removed.
+  bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
   bool bmmaSupported;            // cc >= 7.5 (Turing) -- b1 XOR-popc bmma
 };
 
@@ -220,6 +221,8 @@ namespace cuda_kernels {
   extern const char *wmma_int8_name;
   extern const char *wmma_int8_k32_src;
   extern const char *wmma_int8_k32_name;
+  extern const char *wmma_int8_sparse_src;
+  extern const char *wmma_int8_sparse_name;
   extern const char *wmma_fp8_e4m3_src;
   extern const char *wmma_fp8_e4m3_name;
   extern const char *wmma_fp8_e5m2_src;
