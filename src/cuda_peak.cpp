@@ -936,7 +936,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.kernelName = "wmma_int8_sparse";
     d.src = cuda_kernels::wmma_int8_sparse_src;
     d.srcName = cuda_kernels::wmma_int8_sparse_name;
-    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains
     d.elemSize = sizeof(int);
     d.blockSize = warp;
     d.outElemsPerBlock = 16 * 8;
