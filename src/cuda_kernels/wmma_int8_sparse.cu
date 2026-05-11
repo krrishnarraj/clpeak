@@ -1,6 +1,14 @@
 // INT8 tensor-core with 2:4 structured sparsity via inline mma.sp PTX.
 // Tile m16n8k32, s8 x s8 + s32.  Requires sm_80+ (Ampere/Ada/Hopper/Blackwell).
 //
+// Uses the `mma.sp::ordered_metadata` qualifier (PTX ISA 8.5+).  Plain
+// `mma.sp` still assembles on sm_90+ but maps to a much slower path on
+// Hopper/Blackwell -- measured 35 TOPS on RTX 5060 (sm_120) with plain
+// mma.sp vs the expected ~2x dense.  Ordered-metadata is the hardware-
+// accelerated form on those arches.  On sm_80..sm_89 either qualifier
+// gives the same throughput; pinning to ordered_metadata keeps one
+// kernel for the whole sm_80+ range.
+//
 // Per-thread fragment layout (32 threads/warp, A=row-major sparse,
 // B=col-major dense):
 //   A: m16 x k32 with 2:4 (half non-zero) = 16*16 bytes / 32 threads
@@ -44,13 +52,13 @@ extern "C" __global__ void wmma_int8_sparse(int *out, int A)
     for (int i = 0; i < 256; i++)
     {
         asm(
-          "mma.sp.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
               "{%0,%1,%2,%3}, {%16,%17}, {%18,%19}, {%0,%1,%2,%3}, %20, 0x0;\n"
-          "mma.sp.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
               "{%4,%5,%6,%7}, {%16,%17}, {%18,%19}, {%4,%5,%6,%7}, %20, 0x0;\n"
-          "mma.sp.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
               "{%8,%9,%10,%11}, {%16,%17}, {%18,%19}, {%8,%9,%10,%11}, %20, 0x0;\n"
-          "mma.sp.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
               "{%12,%13,%14,%15}, {%16,%17}, {%18,%19}, {%12,%13,%14,%15}, %20, 0x0;\n"
           : "+r"(c00),"+r"(c01),"+r"(c02),"+r"(c03),
             "+r"(c10),"+r"(c11),"+r"(c12),"+r"(c13),
