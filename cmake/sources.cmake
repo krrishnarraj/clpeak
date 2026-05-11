@@ -85,6 +85,7 @@ set(CLPEAK_CUDA_KERNELS
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp8_e5m2.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp4_e2m1.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_mxf4_e2m1.cu
+    ${CLPEAK_ROOT}/src/cuda_kernels/wmma_tcgen05_mxf4_sparse.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_tf32.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_fp64.cu
     ${CLPEAK_ROOT}/src/cuda_kernels/wmma_int4.cu

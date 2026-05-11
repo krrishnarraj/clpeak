@@ -936,6 +936,36 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
+    // Sparse MXFP4 tcgen05.mma.sp - experimental Blackwell 5th-gen Tensor Core path
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *tcgen05Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "TCGEN05 MXFP4(E2M1) sparse m128n128k128+fp32 (TFLOPS)";
+      d.resultTag = "wmma_tcgen05_mxf4_sparse";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "tcgen05_mxf4_sp";
+      d.kernelName = "wmma_tcgen05_mxf4_sparse";
+      d.src = cuda_kernels::wmma_tcgen05_mxf4_sparse_src;
+      d.srcName = cuda_kernels::wmma_tcgen05_mxf4_sparse_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 64;
+      d.elemSize = sizeof(float);
+      d.blockSize = 128;
+      d.outElemsPerBlock = 1;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
+      d.skipMsg = "TCGEN05 MXFP4 sparse requires Blackwell arch-specific target! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "m128n128k128_sparse";
+      d.extraNvrtcOpts = tcgen05Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
   }
 
   // ---------------------------------------------------------------------
