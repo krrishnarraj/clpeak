@@ -13,6 +13,22 @@
 #include <time.h>
 #endif
 
+static uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
+{
+  if (info.numCUs > 0)
+    return targetGlobalThreads(info.numCUs);
+
+  // Mobile/integrated Vulkan drivers often do not expose a vendor CU-count
+  // property.  The desktop 32M fallback can make the calibration probe itself
+  // a multi-second dispatch on those GPUs, so start smaller and let timed
+  // calibration batch more dispatches when the kernel is fast enough.
+  if (info.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+      info.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+    return 2ULL << 20;
+
+  return targetGlobalThreads(0);
+}
+
 // ---------------------------------------------------------------------------
 // VulkanDevice
 // ---------------------------------------------------------------------------
@@ -48,8 +64,8 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   info.deviceType = props.deviceType;
 
   // CU/SM count is filled in below from vendor property extensions if the
-  // implementation advertises them.  When unavailable (Intel, MoltenVK, older
-  // drivers) the dispatch helpers fall back to a fixed 32M-thread floor.
+  // implementation advertises them.  When unavailable, dispatch helpers pick a
+  // device-type-specific fallback.
   info.numCUs = 0;
 
   // Get memory heap size (device-local)
@@ -1015,14 +1031,15 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   }
 
   // Size the dispatch to saturate the device and amortize submit overhead.
-  // Vulkan doesn't expose a CU count, so target 32M work-items (matches
-  // OpenCL's numCUs*2048*maxWGSize on most GPUs once clamped), bounded
-  // by maxStorageBufferRange.  Cooperative-matrix shaders run one subgroup
-  // per work-group (32 threads on NVIDIA / AMD RDNA3+ / Intel Arc); other
-  // compute kernels use the classic 256.
+  // When Vulkan exposes a CU count, mirror OpenCL's
+  // numCUs*2048*maxWGSize formula.  Unknown integrated/mobile GPUs use a
+  // smaller floor so the calibration probe does not become a watchdog-sized
+  // dispatch.  Cooperative-matrix shaders run one subgroup per work-group
+  // (32 threads on NVIDIA / AMD RDNA3+ / Intel Arc); other compute kernels
+  // use the classic 256.
   const uint32_t wgSize = d.wgSize ? d.wgSize : 256;
   const uint32_t outPerWG = d.outElemsPerWG ? d.outElemsPerWG : wgSize;
-  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
+  uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
   // Buffer footprint = numGroups * outPerWG * elemSize.  Bound by allocation.
   uint64_t bytesPerWG = (uint64_t)outPerWG * d.elemSize;
   uint64_t maxWGs = dev.info.maxAllocSize / bytesPerWG;
@@ -1976,7 +1993,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gbps");
 
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
+  uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t bufferBytes = (uint64_t)globalWIs * sizeof(float);
 
@@ -2089,7 +2106,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
+  uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t outBytes  = globalWIs * sizeof(float);
 
@@ -2291,7 +2308,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   log->resultScopeAttribute("unit", "gops");
 
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
+  uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
 
   // Helper: allocate a single-storage-buffer descriptor + dispatch + time.
@@ -2436,7 +2453,7 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   }
 
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = targetGlobalThreads(dev.info.numCUs);
+  uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t bufBytes = globalWIs * sizeof(float);
 
