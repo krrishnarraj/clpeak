@@ -181,10 +181,6 @@ void logger::resultScopeAttribute(std::string key, unsigned int value)
   resultScopeAttribute(key, ss.str());
 }
 
-void logger::resultSetContent(std::string)
-{
-}
-
 void logger::resultSetContent(float value)
 {
   if (shimDepth == 4 && !curTest.empty())
@@ -202,10 +198,6 @@ void logger::resultScopeEnd()
   }
   if (inTestScope || shimDepth > 3)
     shimDepth--;
-}
-
-void logger::resultRecord(std::string, std::string)
-{
 }
 
 void logger::resultRecord(std::string metric, float value)

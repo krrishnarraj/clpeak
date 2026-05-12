@@ -88,10 +88,8 @@ public:
   void resultScopeBegin(std::string name);
   void resultScopeAttribute(std::string key, std::string value);
   void resultScopeAttribute(std::string key, unsigned int value);
-  void resultSetContent(std::string value);
   void resultSetContent(float value);
   void resultScopeEnd();
-  void resultRecord(std::string metric, std::string value);
   void resultRecord(std::string metric, float value);
 
   // ---- RAII scope guard --------------------------------------------------
