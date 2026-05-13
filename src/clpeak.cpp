@@ -22,9 +22,6 @@ static const std::string stringifiedKernels =
 #include "compute_char_kernels.cl"
 #include "compute_short_kernels.cl"
 #include "compute_int4_packed_kernels.cl"
-#ifdef CLPEAK_HAS_OPENCL_30
-#include "compute_int8_dp_kernels.cl"
-#endif
     ;
 
 // Separate programs for kernels that use __local pointer arguments or
@@ -41,6 +38,10 @@ static const std::string stringifiedAtomicKernels =
 
 static const std::string stringifiedImageKernels =
 #include "image_bandwidth_kernels.cl"
+    ;
+
+static const std::string stringifiedInt8DpKernels =
+#include "compute_int8_dp_kernels.cl"
     ;
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
@@ -201,6 +202,10 @@ int clPeak::runAll()
         if (devInfo.imageSupported)
           imgProg = buildAuxProg(stringifiedImageKernels, "Image bandwidth");
 
+        cl::Program int8DpProg;
+        if (devInfo.int8DotProductSupported)
+          int8DpProg = buildAuxProg(stringifiedInt8DpKernels, "INT8 dot-product compute");
+
         cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
         bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
 
@@ -259,12 +264,10 @@ int clPeak::runAll()
                        "compute_short", "short", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
-#ifdef CLPEAK_HAS_OPENCL_30
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt8DP,
+        runComputeTest(queue, int8DpProg, devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute (GOPS)", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
-#endif
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
                        "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
