@@ -90,6 +90,7 @@ bool CudaDevice::init(int devIndex)
   info.wmmaSupported = (info.major >= 7);
   info.wmmaInt8Supported = (info.major > 7) || (info.major == 7 && info.minor >= 2);
   info.fp8MmaSupported = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
+  info.fp4MmaSupported = (info.major >= 12);
   info.tf32GemmSupported = (info.major >= 8);
   info.int8GemmSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int4GemmSupported = (info.major >= 9);
@@ -101,6 +102,7 @@ bool CudaDevice::init(int devIndex)
     info.int4MmaSupported = (cc >= 75) && (cc <= 89);
   }
   info.bmmaSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
+  info.int8MmaSparseSupported = (info.major >= 8);
 
   // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
   // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
@@ -166,7 +168,18 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
     std::string incOpt = std::string("-I") + CLPEAK_CUDA_INCLUDE_DIR;
 
     std::vector<const char *> opts;
-    opts.push_back(archStr.c_str());
+    bool hasArchOverride = false;
+    for (auto *e : extraOpts)
+    {
+      if (e && (std::strncmp(e, "--gpu-architecture=", 19) == 0 ||
+                std::strncmp(e, "-arch=", 6) == 0))
+      {
+        hasArchOverride = true;
+        break;
+      }
+    }
+    if (!hasArchOverride)
+      opts.push_back(archStr.c_str());
     opts.push_back(incOpt.c_str());
     for (auto *e : extraOpts)
       opts.push_back(e);
@@ -863,6 +876,66 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.extraAttribVal = "m16n8k32";
       runComputeKernel(dev, cfg, d);
     }
+    // FP4 mma.sync E2M1 (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "FP4(E2M1) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.resultTag = "wmma_fp4_e2m1";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp4_e2m1";
+      d.kernelName = "wmma_fp4_e2m1";
+      d.src = cuda_kernels::wmma_fp4_e2m1_src;
+      d.srcName = cuda_kernels::wmma_fp4_e2m1_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
+      d.skipMsg = "FP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "m16n8k32";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
+    // MXFP4 mma.sync E2M1 + UE8M0 block scale (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)";
+      d.resultTag = "wmma_mxf4_e2m1";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "mxf4_e2m1";
+      d.kernelName = "wmma_mxf4_e2m1";
+      d.src = cuda_kernels::wmma_mxf4_e2m1_src;
+      d.srcName = cuda_kernels::wmma_mxf4_e2m1_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 16;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
+      d.skipMsg = "MXFP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
+      d.extraAttribKey = "tile";
+      d.extraAttribVal = "m16n8k64";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -919,6 +992,30 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.wmmaInt8Supported;
     d.skipMsg = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
+    d.extraAttribKey = "tile";
+    d.extraAttribVal = "m16n8k32";
+    runComputeKernel(dev, cfg, d);
+  }
+  // INT8 mma.sp 2:4 structured sparsity m16n8k32 -- sm_80+
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "INT8 mma.sp 2:4 sparsity m16n8k32+int32 (TOPS)";
+    d.resultTag = "wmma_int8_sparse";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int8_sparse";
+    d.kernelName = "wmma_int8_sparse";
+    d.src = cuda_kernels::wmma_int8_sparse_src;
+    d.srcName = cuda_kernels::wmma_int8_sparse_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = 16 * 8;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.int8MmaSparseSupported;
+    d.skipMsg = "INT8 mma.sp 2:4 sparsity requires sm_80 or newer (Ampere+)! Skipped";
     d.extraAttribKey = "tile";
     d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);

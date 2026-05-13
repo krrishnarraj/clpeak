@@ -38,6 +38,7 @@ struct cuda_device_info_t {
   bool wmmaSupported;            // cc >= 7.0 (Volta) -- fp16 wmma
   bool wmmaInt8Supported;        // cc >= 7.2 (Turing) -- int8 wmma fragments
   bool fp8MmaSupported;          // cc >= 8.9 (Ada) -- inline mma.sync.e4m3/e5m2
+  bool fp4MmaSupported;          // cc >= 12.0 (Blackwell) -- sm_120a mma FP4/MXFP4
   bool tf32GemmSupported;        // cc >= 8.0 (Ampere) -- TF32 tensor cores
   bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
   bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
@@ -45,6 +46,7 @@ struct cuda_device_info_t {
   bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
                                  // dropped on sm_90+ (Hopper) where the s4 imma
                                  // path was removed.
+  bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
   bool bmmaSupported;            // cc >= 7.5 (Turing) -- b1 XOR-popc bmma
 };
 
@@ -220,10 +222,16 @@ namespace cuda_kernels {
   extern const char *wmma_int8_name;
   extern const char *wmma_int8_k32_src;
   extern const char *wmma_int8_k32_name;
+  extern const char *wmma_int8_sparse_src;
+  extern const char *wmma_int8_sparse_name;
   extern const char *wmma_fp8_e4m3_src;
   extern const char *wmma_fp8_e4m3_name;
   extern const char *wmma_fp8_e5m2_src;
   extern const char *wmma_fp8_e5m2_name;
+  extern const char *wmma_fp4_e2m1_src;
+  extern const char *wmma_fp4_e2m1_name;
+  extern const char *wmma_mxf4_e2m1_src;
+  extern const char *wmma_mxf4_e2m1_name;
   extern const char *wmma_tf32_src;
   extern const char *wmma_tf32_name;
   extern const char *wmma_fp64_src;

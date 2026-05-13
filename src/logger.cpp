@@ -209,11 +209,6 @@ void logger::resultScopeAttribute(std::string key, unsigned int value)
   resultScopeAttribute(key, ss.str());
 }
 
-void logger::resultSetContent(std::string)
-{
-  // Dead path historically: kept as a no-op for ABI compatibility.
-}
-
 void logger::resultSetContent(float value)
 {
   // Historical: a single-value test called resultSetContent with the
@@ -234,11 +229,6 @@ void logger::resultScopeEnd()
   }
   if (shimDepth > 0)
     shimDepth--;
-}
-
-void logger::resultRecord(std::string, std::string)
-{
-  // String-valued metrics are not represented in the result store.
 }
 
 void logger::resultRecord(std::string metric, float value)
