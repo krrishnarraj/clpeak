@@ -2,7 +2,9 @@ if(NOT CLPEAK_ENABLE_OPENCL)
     return()
 endif()
 
-# ---- Find OpenCL (same logic as original root CMakeLists.txt) -----------
+# ---- Find OpenCL --------------------------------------------------------
+# Allow callers (Android) to pre-define OpenCL_LIBRARIES / OpenCL_INCLUDE_DIRS.
+if(NOT DEFINED CLPEAK_OPENCL_PREDEFINED)
 find_package(OpenCL)
 FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
 if(NOT OpenCL_FOUND OR NOT HPP_FOUND)
@@ -45,6 +47,7 @@ if(UNIX AND ${OpenCL_LIBRARIES} MATCHES "libOpenCL.a")
 elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
     set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib runtimeobject.lib)
 endif()
+endif()  # CLPEAK_OPENCL_PREDEFINED
 
 # ---- peak_opencl static library -----------------------------------------
 add_library(peak_opencl STATIC

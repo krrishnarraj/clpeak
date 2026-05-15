@@ -1,16 +1,18 @@
 # src/common — Shared Backend-Neutral Code
 
 Base classes, utilities, result store, calibration, and inventory shared
-by every backend.
+by every backend. Does NOT contain a logger implementation — each consumer
+(desktop CLI, Android) provides its own (`src/cli/logger.cpp` or
+`android/.../logger_android.cpp`).
 
 ## Quick Lookups
 
-- Looking for the Peak base class? → `peak.cpp` + `include/peak.h`
-- Understanding result recording? → `logger.cpp` + `include/logger.h`
-- Understanding result output format? → `result_store.cpp` + `include/result_store.h`
-- Understanding CLI option gating? → `backend_gating.cpp` + `include/backend_gating.h`
-- Understanding calibration? → `calibrate.cpp` + `include/calibrate.h`
-- Adding a new backend? → The `Peak` interface is in `include/peak.h`
+- Looking for the Peak base class? → `peak.cpp` + `include/common/peak.h`
+- Understanding result recording API? → `include/common/logger.h` (header only)
+- Understanding result output format? → `result_store.cpp` + `include/common/result_store.h`
+- Understanding CLI option gating? → `backend_gating.cpp` + `include/common/backend_gating.h`
+- Understanding calibration? → `calibrate.cpp` + `include/common/calibrate.h`
+- Adding a new backend? → The `Peak` interface is in `include/common/peak.h`
 - Understanding device inventory structs / JSON? → `inventory.cpp` + `include/common/inventory.h`
 
 ## Key Files
@@ -19,7 +21,6 @@ by every backend.
 |------|---------|
 | `peak.cpp` | `Peak` base class: constructor, `applyOptions()` common logic |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `Timer`, `populate()`, utilities |
-| `logger.cpp` | `logger` class: result-scope API, `recordSkip`, stdout printing |
 | `result_store.cpp` | `ResultEntry`/`ResultStore` serialization: JSON, CSV, XML |
 | `backend_gating.cpp` | `BackendGating::copyFrom()` — copies CLI gating state |
 | `calibrate.cpp` | `pickIters()` — runtime iteration calibration |
@@ -28,7 +29,7 @@ by every backend.
 
 ## When You Change This Directory
 
-- If you change the `Peak` interface → update `include/peak.h` + all backend `AGENTS.md` files.
+- If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.
 - If you add a utility function → update this file's Key Files table.
-- If you change the result format → update `include/result_store.h` and bump `RESULT_FORMAT_VERSION`.
-- If you add/remove a file → update the root `cmake/sources.cmake` and this file.
+- If you change the result format → update `include/common/result_store.h` and bump `RESULT_FORMAT_VERSION`.
+- If you add/remove a file → update `src/common/CMakeLists.txt` and this file.

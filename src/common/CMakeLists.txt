@@ -4,10 +4,11 @@ add_library(peak_common STATIC
     backend_gating.cpp
     calibrate.cpp
     inventory.cpp
-    logger.cpp
     options.cpp
     result_store.cpp
 )
+# logger.cpp lives in src/cli/ (desktop) or android/ (Android JNI) —
+# each consumer brings its own output implementation.
 target_include_directories(peak_common PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/common

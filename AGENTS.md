@@ -6,46 +6,48 @@ across OpenCL, Vulkan, CUDA, and Metal backends from a single binary.
 ## Architecture
 
 ```
-Peak (src/common/peak.cpp, include/peak.h)   ← abstract base
-├── clPeak    → src/opencl/                  ← OpenCL backend
-├── vkPeak    → src/vulkan/                  ← Vulkan backend
-├── CudaPeak  → src/cuda/                    ← CUDA backend
-└── MetalPeak → src/metal/                   ← Metal backend
+Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
+├── clPeak    → src/opencl/                         ← OpenCL backend
+├── vkPeak    → src/vulkan/                         ← Vulkan backend
+├── CudaPeak  → src/cuda/                           ← CUDA backend
+└── MetalPeak → src/metal/                          ← Metal backend
 ```
 
-Shared code lives in `src/common/`. CLI entry point is `src/cli/main.cpp`.
+Shared code lives in `src/common/` and `include/common/`. Each backend has its
+own `CMakeLists.txt` that builds a static library (`peak_opencl`, etc.).
+The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 
 ## Directory Map
 
 | Path | Purpose |
 |------|---------|
-| `include/` | All public headers — neutral headers flat, backend headers in `include/<backend>/` |
-| `include/benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums — shared by all backends |
-| `include/peak.h` | `Peak` abstract base class |
-| `include/common.h` | OS macros, `Timer`, utility functions |
-| `include/backend_gating.h` | `BackendGating` — test/category enable/disable |
-| `src/common/` | `Peak` base, logger, gating, result store, calibration, inventory |
+| `include/common/` | All neutral headers — `peak.h`, `benchmark_enums.h`, `logger.h`, etc. |
+| `include/opencl/` | OpenCL backend headers — `cl_peak.h`, `cl_common.h` |
+| `include/vulkan/` | Vulkan backend header — `vk_peak.h` |
+| `include/cuda/` | CUDA backend header — `cuda_peak.h` |
+| `include/metal/` | Metal backend header — `mtl_peak.h` |
+| `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
 | `src/cuda/` | CUDA backend: `CudaPeak` class + `.cu` kernels (NVRTC-compiled at runtime) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
-| `src/cli/` | Desktop CLI entry point (`main.cpp`) |
-| `android/` | Android app with JNI native module |
+| `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
+| `android/` | Android app with JNI native module, its own `logger_android.cpp` |
 | `cmake/` | Shared cmake: version handling (`version.cmake`, `GenVersion.cmake`) |
 
 ## Build
 
 - Desktop: `cmake -B build && cmake --build build`
-- Each backend: `-DCLPEAK_ENABLE_OPENCL=OFF`, etc.
-- Android: open `android/` in Android Studio
+- Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
+- Android: open `android/` in Android Studio (reuses `src/common/`, `src/opencl/`, `src/vulkan/` CMakeLists.txt via `add_subdirectory`)
 
 ## Quick Lookups
 
-- **Adding a new benchmark?** → See the backend's `AGENTS.md` + `include/benchmark_enums.h`
+- **Adding a new benchmark?** → See the backend's `AGENTS.md` + `include/common/benchmark_enums.h`
 - **Adding a new backend?** → See `src/common/AGENTS.md` for the `Peak` interface
 - **Fixing a Metal test?** → See `src/metal/AGENTS.md`
-- **Understanding result output?** → See `include/result_store.h` + `src/common/AGENTS.md`
-- **Understanding CLI options?** → See `include/options.h`
+- **Understanding result output?** → See `include/common/result_store.h` + `src/common/AGENTS.md`
+- **Understanding CLI options?** → See `include/common/options.h`
 
 ## AGENTS.md System
 

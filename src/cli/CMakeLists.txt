@@ -1,5 +1,6 @@
 add_executable(clpeak
     main.cpp
+    logger.cpp
 )
 target_link_libraries(clpeak PRIVATE peak_common)
 
