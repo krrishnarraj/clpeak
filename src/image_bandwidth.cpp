@@ -1,4 +1,4 @@
-#include <clpeak.h>
+#include <opencl/cl_peak.h>
 #include <algorithm>
 
 int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)

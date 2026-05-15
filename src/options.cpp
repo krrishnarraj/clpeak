@@ -1,5 +1,5 @@
 #include <options.h>
-#include <clpeak.h>
+#include <benchmark_enums.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -223,32 +223,32 @@ static bool matchFlag(const char *flag, const char *name, bool &out_negated)
 }
 
 // Apply one test-selection flip.  Honours allow-list semantics.
-static void applyTestFlag(CliOptions &out, Benchmark b, bool negated)
+static void applyTestFlag(CliOptions &out, Benchmark b, bool negated, bool &forcedTests)
 {
   if (negated)
   {
     out.enabledTests.reset(static_cast<size_t>(b));
     return;
   }
-  if (!out.forcedTests)
+  if (!forcedTests)
   {
     out.enabledTests.reset();
-    out.forcedTests = true;
+    forcedTests = true;
   }
   out.enabledTests.set(static_cast<size_t>(b));
 }
 
-static void applyCategoryFlag(CliOptions &out, Category c, bool negated)
+static void applyCategoryFlag(CliOptions &out, Category c, bool negated, bool &forcedCategories)
 {
   if (negated)
   {
     out.enabledCategories.reset(static_cast<size_t>(c));
     return;
   }
-  if (!out.forcedCategories)
+  if (!forcedCategories)
   {
     out.enabledCategories.reset();
-    out.forcedCategories = true;
+    forcedCategories = true;
   }
   out.enabledCategories.set(static_cast<size_t>(c));
 }
@@ -259,6 +259,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
   bool incOpenCL = false, incVulkan = false, incCuda = false, incMetal = false;
+  bool forcedTests = false;
+  bool forcedCategories = false;
 
   for (int i = 1; i < argc; i++)
   {
@@ -424,7 +426,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       {
         if (matchFlag(a, categoryFlags[t].name, negated))
         {
-          applyCategoryFlag(out, categoryFlags[t].cat, negated);
+          applyCategoryFlag(out, categoryFlags[t].cat, negated, forcedCategories);
           matched = true;
         }
       }
@@ -433,7 +435,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       {
         if (matchFlag(a, testFlags[t].name, negated))
         {
-          applyTestFlag(out, testFlags[t].test, negated);
+          applyTestFlag(out, testFlags[t].test, negated, forcedTests);
           matched = true;
         }
       }

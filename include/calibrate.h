@@ -7,7 +7,7 @@
 // 500 ms hangcheck.  This is the single source of truth -- CliOptions,
 // benchmark_config_t::forDevice, and the backend constructors all read it.
 // Keep the "500 ms" mention in the --help text in src/options.cpp in sync.
-static const unsigned int CLPEAK_DEFAULT_TARGET_TIME_US = 500000;
+static const unsigned int DEFAULT_TARGET_TIME_US = 500000;
 
 // Pick an iteration count from a measured per-iter time and a per-test
 // time budget.  Used by every backend's runKernel/runDispatches helper to

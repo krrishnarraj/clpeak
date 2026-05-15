@@ -3,8 +3,8 @@
 
 #include <bitset>
 #include <string>
-#include <clpeak.h>     // Benchmark enum
-#include <calibrate.h>  // CLPEAK_DEFAULT_TARGET_TIME_US
+#include <benchmark_enums.h>  // Benchmark, Category
+#include <calibrate.h>
 
 // Shared CLI options populated once in entry.cpp and consumed by every
 // backend.  Each backend's applyOptions() copies the relevant fields into
@@ -38,7 +38,7 @@ struct CliOptions {
   bool         forceIters    = false;
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
-  unsigned int targetTimeUs  = CLPEAK_DEFAULT_TARGET_TIME_US; // --max-time, in us
+  unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time, in us
 
   // Test selection.  Default: every category and every test enabled.  The
   // first positive --<test> flag flips enabledTests to allow-list mode
@@ -48,9 +48,6 @@ struct CliOptions {
   // category is enabled AND its own bit is set (see isAllowed).
   std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
   std::bitset<4>                                     enabledCategories;
-  bool forcedTests       = false;
-  bool forcedCategories  = false;
-
   // OpenCL-only timing knob.
   bool useEventTimer = false;
 
@@ -72,19 +69,6 @@ struct CliOptions {
     enabledCategories.set();
   }
 
-  bool isTestEnabled(Benchmark b) const
-  {
-    return enabledTests.test(static_cast<size_t>(b));
-  }
-  bool isCategoryEnabled(Category c) const
-  {
-    if (c == Category::Unknown) return false;
-    return enabledCategories.test(static_cast<size_t>(c));
-  }
-  bool isAllowed(Benchmark b) const
-  {
-    return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
-  }
 };
 
 // Parse argv into out.  On --help / --version / parse error this calls

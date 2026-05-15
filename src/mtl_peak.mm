@@ -1,6 +1,7 @@
 #ifdef ENABLE_METAL
 
 #include <mtl_peak.h>
+#include <options.h>
 #include <inventory.h>
 #include <calibrate.h>
 #import <Metal/Metal.h>
@@ -87,6 +88,7 @@ bool MetalDevice::init(int devIndex)
     // Capability bits.  Apple silicon always has fp16; fp16 simdgroup_matrix
     // is M1+; bf16 simdgroup_matrix is M3+ (Apple9).
     info.fp16Supported                = info.isAppleSilicon;
+    info.deviceType                   = DeviceType::Gpu;  // Apple Silicon GPU
     info.simdgroupMatrixFP16Supported = info.appleFamily >= 7;
     info.simdgroupMatrixBF16Supported = info.appleFamily >= 9;
     info.simdgroupMatrixInt8Supported = info.appleFamily >= 9;
@@ -209,15 +211,18 @@ static id<MTLComputePipelineState> getPipeline(MetalDevice &dev, const char *src
 // ---------------------------------------------------------------------------
 
 MetalPeak::MetalPeak()
-  : warmupCount(2), specifiedIters(0), targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
-    forceIters(false),
-    deviceIndex(-1),
+  : deviceIndex(-1),
     impl(nullptr)
 {
-  gating.enableAll();
 }
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
+
+void MetalPeak::applyOptions(const CliOptions &opts)
+{
+    Peak::applyOptions(opts);
+    deviceIndex = opts.mtlDeviceIndex;
+}
 
 // Time a kernel batched as `iters` dispatches inside one MTLCommandBuffer,
 // where `iters` is calibrated from a one-shot warmup so the timed phase lands
@@ -314,7 +319,7 @@ int MetalPeak::runAll()
             continue;
         }
 
-        benchmark_config_t cfg = benchmark_config_t::forDevice(CL_DEVICE_TYPE_GPU);
+        benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu);
         cfg.targetTimeUs = targetTimeUs;
         if (forceIters)
             cfg.kernelLatencyIters = specifiedIters;
@@ -1208,7 +1213,7 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
 // Free-function enumeration used by --list-devices and the Android JNI surface.
 // Mirrors the device-discovery logic at the top of MetalPeak::runAll() but
 // stops at name extraction.
-BackendInventory enumerateMetal()
+BackendInventory MetalPeak::enumerate()
 {
     BackendInventory inv;
     inv.backend = "Metal";
@@ -1236,6 +1241,19 @@ BackendInventory enumerateMetal()
 
     inv.platforms.push_back(std::move(plat));
     return inv;
+}
+
+void MetalPeak::printInventory(const BackendInventory &b, std::ostream &os)
+{
+    os << "\n=== Metal backend ===\n";
+    if (!b.available)
+    {
+        os << "Metal: no devices found\n";
+        return;
+    }
+    for (const auto &plat : b.platforms)
+        for (const auto &d : plat.devices)
+            os << "  Metal Device " << d.index << ": " << d.name << "\n";
 }
 
 #endif // ENABLE_METAL

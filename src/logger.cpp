@@ -1,6 +1,7 @@
 #include <logger.h>
 #include <iomanip>
 #include <sstream>
+#include <result_store.h>
 
 // All output formats (JSON, CSV, XML) are produced from the in-memory
 // `results` store at program exit -- this guarantees identical ordering and
@@ -8,40 +9,17 @@
 // new backend / category / status fields uniformly.  Live stdout still
 // streams during execution via print().
 
-logger::logger(bool _enableXml,     std::string _xmlFileName,
-               bool _enableJson,    std::string _jsonFileName,
-               bool _enableCsv,     std::string _csvFileName,
-               std::string _compareFileName)
-  : enableXml(_enableXml),
-    xmlFileName(_xmlFileName),
-    enableJson(_enableJson),
-    jsonFileName(_jsonFileName),
-    enableCsv(_enableCsv),
-    csvFileName(_csvFileName),
-    compareEnabled(!_compareFileName.empty()),
-    curCategory(Category::Unknown),
-    shimDepth(0),
-    inTestScope(false)
+logger::logger(std::string compareFileName)
+    : compareEnabled(!compareFileName.empty()),
+      curCategory(Category::Unknown),
+      shimDepth(0),
+      inTestScope(false)
 {
-  if (compareEnabled)
-  {
-    ResultStore base = loadResultFile(_compareFileName);
-    baseline = buildBaselineMap(base);
-    if (!baseline.empty())
-    {
-      std::cout << "clpeak: comparing against baseline: " << _compareFileName
-                << " (" << baseline.size() << " entries)" << "\n";
-      std::cout.flush();
-    }
-  }
+    if (compareEnabled)
+        baseline = buildBaselineMap(loadResultFile(compareFileName));
 }
 
-logger::~logger()
-{
-  if (enableJson) saveJson(results, jsonFileName);
-  if (enableCsv)  saveCsv (results, csvFileName);
-  if (enableXml)  saveXml (results, xmlFileName);
-}
+logger::~logger() = default;
 
 // ---- stdout output --------------------------------------------------------
 
@@ -76,62 +54,6 @@ void logger::print(unsigned int val)
 }
 
 // ---- High-level recording API --------------------------------------------
-
-void logger::deviceBegin(const std::string &backend,
-                         const std::string &platform,
-                         const std::string &device,
-                         const std::string &driver)
-{
-  curBackend  = backend;
-  curPlatform = platform;
-  curDevice   = device;
-  curDriver   = driver;
-}
-
-void logger::deviceEnd()
-{
-  curBackend.clear();
-  curPlatform.clear();
-  curDevice.clear();
-  curDriver.clear();
-  curCategory = Category::Unknown;
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::categoryBegin(Category c)
-{
-  curCategory = c;
-}
-
-void logger::categoryEnd()
-{
-  curCategory = Category::Unknown;
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::testBegin(const std::string &test, const std::string &unit)
-{
-  curTest = test;
-  curUnit = unit;
-  // Derive category from unit if the caller hasn't already set one via
-  // categoryBegin.  Stage 3 backends will always call categoryBegin, but
-  // the legacy shim path relies on this fallback.
-  if (curCategory == Category::Unknown)
-    curCategory = categoryFromUnit(unit);
-}
-
-void logger::testEnd()
-{
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::record(const std::string &metric, float value)
-{
-  emit(metric, ResultStatus::Ok, value, "");
-}
 
 void logger::recordSkip(const std::string &metric, ResultStatus status,
                         const std::string &reason)

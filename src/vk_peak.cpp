@@ -1,6 +1,7 @@
 #ifdef ENABLE_VULKAN
 
 #include <vk_peak.h>
+#include <options.h>
 #include <inventory.h>
 #include <calibrate.h>
 #include <cstring>
@@ -22,8 +23,8 @@ static uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
   // property.  The desktop 32M fallback can make the calibration probe itself
   // a multi-second dispatch on those GPUs, so start smaller and let timed
   // calibration batch more dispatches when the kernel is fast enough.
-  if (info.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
-      info.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+  if (info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+      info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
     return 2ULL << 20;
 
   return targetGlobalThreads(0);
@@ -61,7 +62,15 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
                        std::to_string(VK_VERSION_PATCH(props.driverVersion));
   info.maxWGSize = std::min(props.limits.maxComputeWorkGroupSize[0], (uint32_t)MAX_WG_SIZE);
   info.maxAllocSize = props.limits.maxStorageBufferRange;
-  info.deviceType = props.deviceType;
+  info.vkDeviceType = props.deviceType;
+  // Set neutral DeviceType
+  if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+      info.deviceType = DeviceType::Cpu;
+  else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+           props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+      info.deviceType = DeviceType::Gpu;
+  else
+      info.deviceType = DeviceType::Unknown;
 
   // CU/SM count is filled in below from vendor property extensions if the
   // implementation advertises them.  When unavailable, dispatch helpers pick a
@@ -656,17 +665,20 @@ uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags
 // ---------------------------------------------------------------------------
 
 vkPeak::vkPeak()
-  : warmupCount(2), specifiedIters(0), targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
-    forceIters(false),
-    deviceIndex(-1),
+  : deviceIndex(-1),
     instance(VK_NULL_HANDLE)
 {
-  gating.enableAll();
 }
 
 vkPeak::~vkPeak()
 {
   cleanup();
+}
+
+void vkPeak::applyOptions(const CliOptions &opts)
+{
+    Peak::applyOptions(opts);
+    deviceIndex = opts.vkDeviceIndex;
 }
 
 bool vkPeak::initInstance()
@@ -887,7 +899,7 @@ int vkPeak::runAll()
 #endif
 
     benchmark_config_t cfg = benchmark_config_t::forDevice(
-        (dev.info.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU);
+            (dev.info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? DeviceType::Cpu : DeviceType::Gpu);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
@@ -2822,7 +2834,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
 // Free-function enumeration used by --list-devices (desktop) and the Android
 // JNI surface. Spins up a throwaway VkInstance just long enough to read
 // physical-device properties, then tears it down.
-BackendInventory enumerateVulkan()
+BackendInventory vkPeak::enumerate()
 {
   BackendInventory inv;
   inv.backend = "Vulkan";
@@ -2861,6 +2873,26 @@ BackendInventory enumerateVulkan()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
+}
+
+void vkPeak::printInventory(const BackendInventory &b, std::ostream &os)
+{
+    os << "\n=== Vulkan backend ===\n";
+    if (!b.available)
+    {
+        os << "Vulkan: failed to create instance or no devices found\n";
+        return;
+    }
+    for (const auto &plat : b.platforms)
+        for (const auto &d : plat.devices)
+        {
+            os << "  Vulkan Device " << d.index << ": " << d.name;
+            if (!d.typeStr.empty())
+                os << " [" << d.typeStr << "]";
+            os << "\n";
+            if (!d.apiVersion.empty())
+                os << "    API       : " << d.apiVersion << "\n";
+        }
 }
 
 #endif // ENABLE_VULKAN

@@ -1,4 +1,4 @@
-#include <clpeak.h>
+#include <opencl/cl_peak.h>
 #include <chrono>
 
 // ---------------------------------------------------------------------------

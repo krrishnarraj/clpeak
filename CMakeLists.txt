@@ -67,6 +67,7 @@ set(CLPEAK_SOURCE_FILES
 
 # ---- Per-backend opt-out flags (all default ON; auto-detection still runs
 #      but is skipped when the flag is OFF).
+option(CLPEAK_ENABLE_OPENCL "Build OpenCL backend" ON)
 option(CLPEAK_ENABLE_VULKAN "Build the Vulkan backend (requires Vulkan SDK/loader)" ON)
 option(CLPEAK_ENABLE_CUDA   "Build the CUDA backend (requires CUDA Toolkit)"        ON)
 option(CLPEAK_ENABLE_METAL  "Build the Metal/MPS backend (Apple only)"              ON)
@@ -92,7 +93,7 @@ endif()
 add_executable(clpeak ${CLPEAK_SOURCE_FILES})
 clpeak_setup_version(clpeak)
 target_link_libraries(clpeak ${OpenCL_LIBRARIES})
-target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} ${CLPEAK_CORE_INCLUDE_DIRS})
+target_include_directories(clpeak PRIVATE ${OpenCL_INCLUDE_DIRS} ${CLPEAK_CORE_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/include)
 target_compile_definitions(clpeak PRIVATE CL_TARGET_OPENCL_VERSION=${CLPEAK_OPENCL_TARGET_VERSION})
 
 if(WIN32)

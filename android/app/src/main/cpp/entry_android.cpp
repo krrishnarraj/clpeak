@@ -1,4 +1,5 @@
-#include <clpeak.h>
+#include <opencl/cl_peak.h>
+#include <peak.h>
 #include <options.h>
 #include "jni_entry.h"
 

@@ -11,7 +11,9 @@
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
-#include <clpeak.h>      // Benchmark enum
+#include <benchmark_enums.h>
+#include <peak.h>
+#include <inventory.h>
 #include <backend_gating.h>  // centralized benchmark gating
 
 struct CliOptions;       // forward decl
@@ -19,11 +21,11 @@ struct BackendInventory; // forward decl
 
 // Convenience: defined if any cooperative-matrix shader compiled.  Used by
 // vk_peak.cpp to gate extension / feature enablement and dispatch.
-#if defined(CLPEAK_VK_HAS_COOPMAT_FP8_E4M3) || defined(CLPEAK_VK_HAS_COOPMAT_FP8_E5M2)
-#define CLPEAK_VK_HAS_ANY_COOPMAT_FP8 1
+#if defined(VK_HAS_COOPMAT_FP8_E4M3) || defined(VK_HAS_COOPMAT_FP8_E5M2)
+#define VK_HAS_ANY_COOPMAT_FP8 1
 #endif
-#if defined(CLPEAK_VK_HAS_COOPMAT_FP16) || defined(CLPEAK_VK_HAS_COOPMAT_BF16) || defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_ANY_COOPMAT_FP8) || defined(CLPEAK_VK_HAS_COOPMAT_FP32)
-#define CLPEAK_VK_HAS_ANY_COOPMAT 1
+#if defined(VK_HAS_COOPMAT_FP16) || defined(VK_HAS_COOPMAT_BF16) || defined(VK_HAS_COOPMAT_INT8) || defined(VK_HAS_ANY_COOPMAT_FP8) || defined(VK_HAS_COOPMAT_FP32)
+#define VK_HAS_ANY_COOPMAT 1
 #endif
 
 // Vulkan device info (mirrors OpenCL device_info_t for display)
@@ -38,7 +40,8 @@ struct vk_device_info_t {
   uint64_t heapSize;              // device-local heap
   unsigned int maxClockFreq;      // not always available (0 if unknown)
 
-  VkPhysicalDeviceType deviceType;
+  VkPhysicalDeviceType vkDeviceType;
+  DeviceType deviceType = DeviceType::Unknown;
   uint32_t computeQueueFamily;
 
   // Optional feature / extension gates
@@ -171,45 +174,38 @@ struct vk_compute_desc_t
 };
 
 // Top-level Vulkan benchmark runner
-class vkPeak
+class vkPeak : public Peak
 {
 public:
-  std::unique_ptr<logger> log;
-  unsigned int warmupCount;
-  unsigned int specifiedIters;
-  unsigned int targetTimeUs;
-  bool forceIters;
   int  deviceIndex; // -1 = run all
-
-  BackendGating gating;
 
   vkPeak();
   ~vkPeak();
 
-  void applyOptions(const CliOptions &opts);
-  int runAll();
+  void applyOptions(const CliOptions &opts) override;
+  int runAll() override;
 
   // Individual benchmarks
   int runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg);
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+#ifdef VK_HAS_COMPUTE_HP_V1
   int runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+#ifdef VK_HAS_COMPUTE_DP_V1
   int runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+#ifdef VK_HAS_COMPUTE_INT32_V1
   int runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+#ifdef VK_HAS_COMPUTE_MP_V1
   int runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
   int runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
   int runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#ifdef VK_HAS_COMPUTE_BF16_V1
   int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
   // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
@@ -219,16 +215,15 @@ public:
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
   int runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
-private:
-  // enumerateVulkan() in vk_peak.cpp drives a throwaway vkPeak through
-  // initInstance() to read physicalDevices for --list-devices / Android JNI.
-  friend BackendInventory enumerateVulkan();
+  static BackendInventory enumerate();
+  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
+private:
   VkInstance instance;
   std::vector<VkPhysicalDevice> physicalDevices;
 
@@ -257,57 +252,57 @@ private:
 namespace vk_shaders {
   extern const uint32_t compute_sp_v1[];
   extern const size_t   compute_sp_v1_size;
-#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V2
+#ifdef VK_HAS_COMPUTE_SP_V2
   extern const uint32_t compute_sp_v2[];
   extern const size_t   compute_sp_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V4
+#ifdef VK_HAS_COMPUTE_SP_V4
   extern const uint32_t compute_sp_v4[];
   extern const size_t   compute_sp_v4_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+#ifdef VK_HAS_COMPUTE_HP_V1
   extern const uint32_t compute_hp_v1[];
   extern const size_t   compute_hp_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V2
+#ifdef VK_HAS_COMPUTE_HP_V2
   extern const uint32_t compute_hp_v2[];
   extern const size_t   compute_hp_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V4
+#ifdef VK_HAS_COMPUTE_HP_V4
   extern const uint32_t compute_hp_v4[];
   extern const size_t   compute_hp_v4_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+#ifdef VK_HAS_COMPUTE_DP_V1
   extern const uint32_t compute_dp_v1[];
   extern const size_t   compute_dp_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V2
+#ifdef VK_HAS_COMPUTE_DP_V2
   extern const uint32_t compute_dp_v2[];
   extern const size_t   compute_dp_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V4
+#ifdef VK_HAS_COMPUTE_DP_V4
   extern const uint32_t compute_dp_v4[];
   extern const size_t   compute_dp_v4_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+#ifdef VK_HAS_COMPUTE_INT32_V1
   extern const uint32_t compute_int32_v1[];
   extern const size_t   compute_int32_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V2
+#ifdef VK_HAS_COMPUTE_INT32_V2
   extern const uint32_t compute_int32_v2[];
   extern const size_t   compute_int32_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V4
+#ifdef VK_HAS_COMPUTE_INT32_V4
   extern const uint32_t compute_int32_v4[];
   extern const size_t   compute_int32_v4_size;
 #endif
   extern const uint32_t global_bandwidth_v1[];
   extern const size_t   global_bandwidth_v1_size;
-#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V2
+#ifdef VK_HAS_GLOBAL_BANDWIDTH_V2
   extern const uint32_t global_bandwidth_v2[];
   extern const size_t   global_bandwidth_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V4
+#ifdef VK_HAS_GLOBAL_BANDWIDTH_V4
   extern const uint32_t global_bandwidth_v4[];
   extern const size_t   global_bandwidth_v4_size;
 #endif
@@ -321,11 +316,11 @@ namespace vk_shaders {
   extern const size_t   image_bandwidth_v1_size;
   extern const uint32_t atomic_throughput_global[];
   extern const size_t   atomic_throughput_global_size;
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
   extern const uint32_t atomic_throughput_global_float[];
   extern const size_t   atomic_throughput_global_float_size;
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   extern const uint32_t atomic_throughput_global_uint64[];
   extern const size_t   atomic_throughput_global_uint64_size;
 #endif
@@ -333,69 +328,69 @@ namespace vk_shaders {
   extern const size_t   atomic_throughput_local_size;
   extern const uint32_t kernel_latency[];
   extern const size_t   kernel_latency_size;
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V2
+#ifdef VK_HAS_COMPUTE_INT8_DP_V2
   extern const uint32_t compute_int8_dp_v2[];
   extern const size_t   compute_int8_dp_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V4
+#ifdef VK_HAS_COMPUTE_INT8_DP_V4
   extern const uint32_t compute_int8_dp_v4[];
   extern const size_t   compute_int8_dp_v4_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+#ifdef VK_HAS_COMPUTE_MP_V1
   extern const uint32_t compute_mp_v1[];
   extern const size_t   compute_mp_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2
+#ifdef VK_HAS_COMPUTE_MP_V2
   extern const uint32_t compute_mp_v2[];
   extern const size_t   compute_mp_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4
+#ifdef VK_HAS_COMPUTE_MP_V4
   extern const uint32_t compute_mp_v4[];
   extern const size_t   compute_mp_v4_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
   extern const uint32_t compute_int4_packed_v1[];
   extern const size_t   compute_int4_packed_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#ifdef VK_HAS_COMPUTE_BF16_V1
   extern const uint32_t compute_bf16_v1[];
   extern const size_t   compute_bf16_v1_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2
+#ifdef VK_HAS_COMPUTE_BF16_V2
   extern const uint32_t compute_bf16_v2[];
   extern const size_t   compute_bf16_v2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V4
+#ifdef VK_HAS_COMPUTE_BF16_V4
   extern const uint32_t compute_bf16_v4[];
   extern const size_t   compute_bf16_v4_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP16
+#ifdef VK_HAS_COOPMAT_FP16
   extern const uint32_t coopmat_fp16[];
   extern const size_t   coopmat_fp16_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_BF16
+#ifdef VK_HAS_COOPMAT_BF16
   extern const uint32_t coopmat_bf16[];
   extern const size_t   coopmat_bf16_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+#ifdef VK_HAS_COOPMAT_INT8
   extern const uint32_t coopmat_int8[];       // 16x16x16 tile (AMD/Intel path)
   extern const size_t   coopmat_int8_size;
   extern const uint32_t coopmat_int8_k32[];   // 16x16x32 tile (NVIDIA tensor-core INT8)
   extern const size_t   coopmat_int8_k32_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
+#ifdef VK_HAS_COOPMAT_FP8_E4M3
   extern const uint32_t coopmat_fp8_e4m3[];
   extern const size_t   coopmat_fp8_e4m3_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
+#ifdef VK_HAS_COOPMAT_FP8_E5M2
   extern const uint32_t coopmat_fp8_e5m2[];
   extern const size_t   coopmat_fp8_e5m2_size;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP32
+#ifdef VK_HAS_COOPMAT_FP32
   extern const uint32_t coopmat_fp32[];
   extern const size_t   coopmat_fp32_size;
 #endif

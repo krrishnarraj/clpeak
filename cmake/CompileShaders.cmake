@@ -57,12 +57,12 @@ function(compile_shaders)
       # product) that older glslc versions (notably the one bundled with
       # the Android NDK) don't support. Skip with a warning so the build
       # still produces a functional binary; host code is gated with
-      # CLPEAK_VK_HAS_<SHADER_NAME_UPPER> defines (see below).
+      # VK_HAS_<SHADER_NAME_UPPER> defines (see below).
       message(WARNING "glslc could not build ${SHADER_NAME}.comp; skipping it. Error:\n${GLSLC_ERROR}")
       continue()
     endif()
     string(TOUPPER "${SHADER_NAME}" SHADER_NAME_UPPER)
-    target_compile_definitions(${CS_TARGET} PRIVATE CLPEAK_VK_HAS_${SHADER_NAME_UPPER})
+    target_compile_definitions(${CS_TARGET} PRIVATE VK_HAS_${SHADER_NAME_UPPER})
 
     # Read SPIR-V binary as a hex string (two chars per byte)
     file(READ "${SPV_FILE}" SPV_HEX HEX)

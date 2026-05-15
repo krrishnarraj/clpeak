@@ -1,4 +1,4 @@
-#include <clpeak.h>
+#include <opencl/cl_peak.h>
 #include <inventory.h>
 #include <options.h>
 #include <calibrate.h>
@@ -45,49 +45,26 @@ static const std::string stringifiedInt8DpKernels =
     ;
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
-                   forceDeviceName(false), forceIters(false), useEventTimer(false),
-                   specifiedPlatform(0), specifiedDevice(0),
-                   specifiedIters(0),
-                   warmupCount(2),
-                   targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
-                   enableJson(false), enableCsv(false)
+                   forceDeviceName(false), useEventTimer(false),
+                   specifiedPlatform(0), specifiedDevice(0)
 {
-  gating.enableAll();
 }
 
 void clPeak::applyOptions(const CliOptions &opts)
 {
-  forcePlatform = opts.forcePlatform;
-  specifiedPlatform = opts.platformIndex;
-  forcePlatformName = opts.forcePlatformName;
-  specifiedPlatformName = opts.platformName;
-  forceDevice = opts.forceDevice;
-  specifiedDevice = opts.deviceIndex;
-  forceDeviceName = opts.forceDeviceName;
-  specifiedDeviceName = opts.deviceName;
+    // Common fields handled by base class
+    Peak::applyOptions(opts);
 
-  forceIters = opts.forceIters;
-  specifiedIters = opts.iters;
-  warmupCount = opts.warmupCount;
-  targetTimeUs = opts.targetTimeUs;
-
-  useEventTimer = opts.useEventTimer;
-
-  // Test / category selection: copy through centralized gating.
-  gating.copyFrom(opts);
-
-  enableJson = opts.enableJson;
-  jsonFileName = opts.jsonFile;
-  enableCsv = opts.enableCsv;
-  csvFileName = opts.csvFile;
-  compareFileName = opts.compareFile;
-
-  // Per-backend loggers handle stdout + baseline-compare deltas only.
-  // File output is centralized in entry.cpp::main() after every backend
-  // has run, so a single dump file aggregates rows from all backends
-  // (otherwise each backend's destructor would overwrite the same file).
-  log.reset(new logger(false, "", false, "", false, "",
-                       opts.compareFile));
+    // OpenCL-specific device selection
+    forcePlatform     = opts.forcePlatform;
+    specifiedPlatform = opts.platformIndex;
+    forcePlatformName = opts.forcePlatformName;
+    specifiedPlatformName = opts.platformName;
+    forceDevice       = opts.forceDevice;
+    specifiedDevice   = opts.deviceIndex;
+    forceDeviceName   = opts.forceDeviceName;
+    specifiedDeviceName = opts.deviceName;
+    useEventTimer     = opts.useEventTimer;
 }
 
 int clPeak::runAll()
@@ -552,10 +529,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   return 0;
 }
 
-// Free-function enumeration used by --list-devices (desktop) and the Android
-// JNI surface. Mirrors the device-listing logic that previously lived inside
-// runAll() but populates a backend-neutral structure instead of printing.
-BackendInventory enumerateOpenCL()
+BackendInventory clPeak::enumerate()
 {
   BackendInventory inv;
   inv.backend = "OpenCL";
@@ -588,8 +562,9 @@ BackendInventory enumerateOpenCL()
           InventoryDevice dev;
           dev.index           = static_cast<int>(d);
           dev.name            = info.deviceName;
-          dev.typeStr         = (info.deviceType & CL_DEVICE_TYPE_CPU) ? "CPU"
-                              : (info.deviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
+          dev.typeStr         = (info.clDeviceType & CL_DEVICE_TYPE_CPU) ? "CPU"
+                              : (info.clDeviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
+                              : (info.clDeviceType & CL_DEVICE_TYPE_ACCELERATOR) ? "Accelerator"
                                                                        : "Other";
           dev.driverVersion   = info.driverVersion;
           dev.numComputeUnits = info.numCUs;
@@ -616,4 +591,32 @@ BackendInventory enumerateOpenCL()
   }
 
   return inv;
+}
+
+void clPeak::printInventory(const BackendInventory &b, std::ostream &os)
+{
+    os << "\n=== OpenCL backend ===\n";
+    for (const auto &plat : b.platforms)
+    {
+        os << "Platform " << plat.index << ": " << plat.name << "\n";
+        for (const auto &d : plat.devices)
+        {
+            os << "  Device " << d.index << ": " << d.name;
+            if (!d.typeStr.empty())
+                os << " [" << d.typeStr << "]";
+            os << "\n";
+            if (!d.driverVersion.empty())
+                os << "    Driver    : " << d.driverVersion << "\n";
+            if (d.numComputeUnits)
+                os << "    CUs       : " << d.numComputeUnits << "\n";
+            if (d.maxClockMHz)
+                os << "    Clock     : " << d.maxClockMHz << " MHz\n";
+            if (d.globalMemBytes)
+                os << "    Global mem: " << (d.globalMemBytes / (1024 * 1024)) << " MB\n";
+            if (d.maxAllocBytes)
+                os << "    Max alloc : " << (d.maxAllocBytes / (1024 * 1024)) << " MB\n";
+            os << "    FP16      : " << (d.hasFp16 ? "yes" : "no") << "\n";
+            os << "    FP64      : " << (d.hasFp64 ? "yes" : "no") << "\n";
+        }
+    }
 }

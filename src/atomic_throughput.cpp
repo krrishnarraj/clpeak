@@ -1,4 +1,4 @@
-#include <clpeak.h>
+#include <opencl/cl_peak.h>
 
 int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {

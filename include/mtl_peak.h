@@ -7,11 +7,12 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
-#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
-#include <clpeak.h>      // Benchmark enum
+#include <benchmark_enums.h>
+#include <peak.h>
+#include <inventory.h>
 #include <backend_gating.h>  // centralized benchmark gating
 
 struct CliOptions; // forward decl
@@ -23,6 +24,7 @@ struct MetalDeviceImpl;
 struct MetalPeakImpl;
 
 struct mtl_device_info_t {
+  DeviceType deviceType = DeviceType::Unknown;
   std::string deviceName;
   std::string osVersion;          // "macOS 26.4.1"
 
@@ -97,23 +99,18 @@ struct mtl_compute_desc_t
   const char *extraAttribVal;
 };
 
-class MetalPeak
+class MetalPeak : public Peak
 {
 public:
-  std::unique_ptr<logger> log;
-  unsigned int warmupCount;
-  unsigned int specifiedIters;
-  unsigned int targetTimeUs;
-  bool forceIters;
   int  deviceIndex; // -1 = run all
-
-  BackendGating gating;
 
   MetalPeak();
   ~MetalPeak();
 
-  void applyOptions(const CliOptions &opts);
-  int runAll();
+  void applyOptions(const CliOptions &opts) override;
+  static BackendInventory enumerate();
+  static void printInventory(const BackendInventory &inv, std::ostream &os);
+  int runAll() override;
 
   int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(MetalDevice &dev, benchmark_config_t &cfg);

@@ -8,11 +8,12 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
-#include <bitset>
 #include <common.h>
 #include <benchmark_constants.h>
 #include <logger.h>
-#include <clpeak.h>      // Benchmark enum
+#include <benchmark_enums.h>
+#include <peak.h>
+#include <inventory.h>
 #include <backend_gating.h>  // centralized benchmark gating
 
 struct CliOptions; // forward decl
@@ -23,6 +24,8 @@ struct cuda_device_info_t {
   std::string driverVersion;     // e.g. "12.6"
   std::string runtimeVersion;    // NVRTC version
   std::string archName;          // "sm_120" etc.
+
+  DeviceType deviceType = DeviceType::Unknown;
 
   int major;                     // compute-capability major
   int minor;                     // compute-capability minor
@@ -138,23 +141,20 @@ struct cuda_compute_desc_t
   uint32_t           numExtraNvrtcOpts;
 };
 
-class CudaPeak
+class CudaPeak : public Peak
 {
 public:
-  std::unique_ptr<logger> log;
-  unsigned int warmupCount;
-  unsigned int specifiedIters;
-  unsigned int targetTimeUs;
-  bool forceIters;
   int  deviceIndex;  // -1 = run all
-
-  BackendGating gating;
 
   CudaPeak();
   ~CudaPeak();
 
-  void applyOptions(const CliOptions &opts);
-  int runAll();
+  void applyOptions(const CliOptions &opts) override;
+  int runAll() override;
+
+  // Inventory.
+  static BackendInventory enumerate();
+  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(CudaDevice &dev, benchmark_config_t &cfg);

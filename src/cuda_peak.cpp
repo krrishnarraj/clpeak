@@ -1,6 +1,7 @@
 #ifdef ENABLE_CUDA
 
 #include <cuda_peak.h>
+#include <options.h>
 #include <inventory.h>
 #include <calibrate.h>
 #include <nvrtc.h>
@@ -103,6 +104,8 @@ bool CudaDevice::init(int devIndex)
   }
   info.bmmaSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int8MmaSparseSupported = (info.major >= 8);
+
+  info.deviceType = DeviceType::Gpu;   // CUDA devices are always GPUs
 
   // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
   // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
@@ -246,15 +249,18 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
 // ---------------------------------------------------------------------------
 
 CudaPeak::CudaPeak()
-    : warmupCount(2), specifiedIters(0), targetTimeUs(CLPEAK_DEFAULT_TARGET_TIME_US),
-      forceIters(false),
-      deviceIndex(-1),
+    : deviceIndex(-1),
       initialised(false)
 {
-  gating.enableAll();
 }
 
 CudaPeak::~CudaPeak() {}
+
+void CudaPeak::applyOptions(const CliOptions &opts)
+{
+    Peak::applyOptions(opts);
+    deviceIndex = opts.cudaDeviceIndex;
+}
 
 bool CudaPeak::initDriver()
 {
@@ -354,7 +360,7 @@ int CudaPeak::runAll()
       continue;
     }
 
-    benchmark_config_t cfg = benchmark_config_t::forDevice(CL_DEVICE_TYPE_GPU);
+    benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
@@ -1569,7 +1575,7 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 
 // Free-function enumeration used by --list-devices and the Android JNI surface.
 // Uses the static driver API directly — no CudaPeak instance required.
-BackendInventory enumerateCuda()
+BackendInventory CudaPeak::enumerate()
 {
   BackendInventory inv;
   inv.backend = "CUDA";
@@ -1605,6 +1611,24 @@ BackendInventory enumerateCuda()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
+}
+
+void CudaPeak::printInventory(const BackendInventory &b, std::ostream &os)
+{
+    os << "\n=== CUDA backend ===\n";
+    if (!b.available)
+    {
+        os << "CUDA: driver init failed or no devices found\n";
+        return;
+    }
+    for (const auto &plat : b.platforms)
+        for (const auto &d : plat.devices)
+        {
+            os << "  CUDA Device " << d.index << ": " << d.name;
+            if (!d.typeStr.empty())
+                os << " [" << d.typeStr << "]";
+            os << "\n";
+        }
 }
 
 #endif // ENABLE_CUDA

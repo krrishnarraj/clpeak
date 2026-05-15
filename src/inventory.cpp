@@ -1,6 +1,17 @@
 #include <inventory.h>
 #include <options.h>
 
+#include <opencl/cl_peak.h>
+#ifdef ENABLE_VULKAN
+#include <vk_peak.h>
+#endif
+#ifdef ENABLE_CUDA
+#include <cuda_peak.h>
+#endif
+#ifdef ENABLE_METAL
+#include <mtl_peak.h>
+#endif
+
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -71,124 +82,26 @@ namespace
     os << "}";
   }
 
-  void printOpenCLBackend(const BackendInventory &b, std::ostream &os)
-  {
-    os << "\n=== OpenCL backend ===\n";
-    for (const auto &plat : b.platforms)
-    {
-      os << "Platform " << plat.index << ": " << plat.name << "\n";
-      for (const auto &d : plat.devices)
-      {
-        os << "  Device " << d.index << ": " << d.name;
-        if (!d.typeStr.empty())
-          os << " [" << d.typeStr << "]";
-        os << "\n";
-        if (!d.driverVersion.empty())
-          os << "    Driver    : " << d.driverVersion << "\n";
-        if (d.numComputeUnits)
-          os << "    CUs       : " << d.numComputeUnits << "\n";
-        if (d.maxClockMHz)
-          os << "    Clock     : " << d.maxClockMHz << " MHz\n";
-        if (d.globalMemBytes)
-          os << "    Global mem: " << (d.globalMemBytes / (1024 * 1024)) << " MB\n";
-        if (d.maxAllocBytes)
-          os << "    Max alloc : " << (d.maxAllocBytes / (1024 * 1024)) << " MB\n";
-        os << "    FP16      : " << (d.hasFp16 ? "yes" : "no") << "\n";
-        os << "    FP64      : " << (d.hasFp64 ? "yes" : "no") << "\n";
-      }
-    }
-  }
-
-  void printVulkanBackend(const BackendInventory &b, std::ostream &os)
-  {
-    os << "\n=== Vulkan backend ===\n";
-    if (!b.available)
-    {
-      os << "Vulkan: failed to create instance or no devices found\n";
-      return;
-    }
-    for (const auto &plat : b.platforms)
-    {
-      for (const auto &d : plat.devices)
-      {
-        os << "  Vulkan Device " << d.index << ": " << d.name;
-        if (!d.typeStr.empty())
-          os << " [" << d.typeStr << "]";
-        os << "\n";
-        if (!d.apiVersion.empty())
-          os << "    API       : " << d.apiVersion << "\n";
-      }
-    }
-  }
-
-  void printCudaBackend(const BackendInventory &b, std::ostream &os)
-  {
-    os << "\n=== CUDA backend ===\n";
-    if (!b.available)
-    {
-      os << "CUDA: driver init failed or no devices found\n";
-      return;
-    }
-    for (const auto &plat : b.platforms)
-    {
-      for (const auto &d : plat.devices)
-      {
-        os << "  CUDA Device " << d.index << ": " << d.name;
-        if (!d.typeStr.empty())
-          os << " [" << d.typeStr << "]";
-        os << "\n";
-      }
-    }
-  }
-
-  void printMetalBackend(const BackendInventory &b, std::ostream &os)
-  {
-    os << "\n=== Metal backend ===\n";
-    if (!b.available)
-    {
-      os << "Metal: no devices found\n";
-      return;
-    }
-    for (const auto &plat : b.platforms)
-      for (const auto &d : plat.devices)
-        os << "  Metal Device " << d.index << ": " << d.name << "\n";
-  }
-
 } // namespace
 
 std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
 {
   std::vector<BackendInventory> out;
   if (!opts.skipOpenCL)
-    out.push_back(enumerateOpenCL());
+    out.push_back(clPeak::enumerate());
 #ifdef ENABLE_VULKAN
   if (!opts.skipVulkan)
-    out.push_back(enumerateVulkan());
+    out.push_back(vkPeak::enumerate());
 #endif
 #ifdef ENABLE_CUDA
   if (!opts.skipCuda)
-    out.push_back(enumerateCuda());
+    out.push_back(CudaPeak::enumerate());
 #endif
 #ifdef ENABLE_METAL
   if (!opts.skipMetal)
-    out.push_back(enumerateMetal());
+    out.push_back(MetalPeak::enumerate());
 #endif
   return out;
-}
-
-void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os)
-{
-  for (const auto &b : inv)
-  {
-    if (b.backend == "OpenCL")
-      printOpenCLBackend(b, os);
-    else if (b.backend == "Vulkan")
-      printVulkanBackend(b, os);
-    else if (b.backend == "CUDA")
-      printCudaBackend(b, os);
-    else if (b.backend == "Metal")
-      printMetalBackend(b, os);
-  }
 }
 
 std::string inventoryToJson(const std::vector<BackendInventory> &inv)

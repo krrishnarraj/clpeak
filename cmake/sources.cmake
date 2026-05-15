@@ -3,7 +3,8 @@
 # Set CLPEAK_ROOT before including this file.
 
 set(CLPEAK_CORE_SOURCES
-    ${CLPEAK_ROOT}/src/common.cpp
+    ${CLPEAK_ROOT}/src/common/peak.cpp
+    ${CLPEAK_ROOT}/src/common/common.cpp
     ${CLPEAK_ROOT}/src/calibrate.cpp
     ${CLPEAK_ROOT}/src/result_store.cpp
     ${CLPEAK_ROOT}/src/clpeak.cpp
@@ -16,6 +17,7 @@ set(CLPEAK_CORE_SOURCES
     ${CLPEAK_ROOT}/src/atomic_throughput.cpp
     ${CLPEAK_ROOT}/src/transfer_bandwidth.cpp
     ${CLPEAK_ROOT}/src/kernel_latency.cpp
+    ${CLPEAK_ROOT}/src/opencl/cl_common.cpp
  )
 
 set(CLPEAK_CORE_INCLUDE_DIRS
@@ -26,7 +28,6 @@ set(CLPEAK_CORE_INCLUDE_DIRS
 # Vulkan backend sources -- included when a Vulkan loader is available.
 set(CLPEAK_VK_SOURCES
     ${CLPEAK_ROOT}/src/vk_peak.cpp
-    ${CLPEAK_ROOT}/src/entry_vk.cpp
 )
 
 # CUDA backend sources -- included when CUDA Toolkit (driver API + NVRTC)
@@ -35,7 +36,6 @@ set(CLPEAK_VK_SOURCES
 set(CLPEAK_CUDA_SOURCES
     ${CLPEAK_ROOT}/src/cuda_peak.cpp
     ${CLPEAK_ROOT}/src/cuda_blas.cpp
-    ${CLPEAK_ROOT}/src/entry_cuda.cpp
 )
 
 # Metal backend sources -- enabled on APPLE only.  Apple silicon (M1+)
@@ -44,7 +44,6 @@ set(CLPEAK_CUDA_SOURCES
 set(CLPEAK_MTL_SOURCES
     ${CLPEAK_ROOT}/src/mtl_peak.mm
     ${CLPEAK_ROOT}/src/mtl_blas.mm
-    ${CLPEAK_ROOT}/src/entry_mtl.mm
 )
 
 set(CLPEAK_MTL_KERNELS
@@ -96,7 +95,7 @@ set(CLPEAK_CUDA_KERNELS
 
 # SPIR-V compute shaders shared by both the main CLI build and the Android
 # build.  compile_shaders() turns each .comp into an embedded C++ array and
-# defines CLPEAK_VK_HAS_<NAME> for per-shader gating in vk_peak.cpp.
+# defines VK_HAS_<NAME> for per-shader gating in vk_peak.cpp.
 set(CLPEAK_VK_SHADERS
     ${CLPEAK_ROOT}/src/shaders/compute_sp_v1.comp
     ${CLPEAK_ROOT}/src/shaders/compute_sp_v2.comp

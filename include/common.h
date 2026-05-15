@@ -1,12 +1,6 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#define CL_HPP_ENABLE_EXCEPTIONS
-#define CL_HPP_MINIMUM_OPENCL_VERSION 120
-#define CL_HPP_TARGET_OPENCL_VERSION 120
-
-#include <CL/opencl.hpp>
-
 #if defined(__APPLE__) || defined(__MACOSX) || defined(__FreeBSD__)
 #include <sys/types.h>
 #endif
@@ -16,6 +10,7 @@
 #include <string>
 #include <cstdint>
 #include <algorithm>
+#include <benchmark_enums.h>
 
 #define TAB             "  "
 #define NEWLINE         "\n"
@@ -53,30 +48,6 @@
 #define OS_NAME     "Unknown"
 #endif
 
-
-// Immutable device properties queried from OpenCL
-struct device_info_t {
-  std::string deviceName;
-  std::string driverVersion;
-
-  unsigned int numCUs;
-  unsigned int maxWGSize;
-  uint64_t maxAllocSize;
-  uint64_t maxGlobalSize;
-  unsigned int maxClockFreq;
-
-  bool halfSupported;
-  bool doubleSupported;
-  bool int8DotProductSupported;
-  cl_device_type  deviceType;
-
-  uint64_t localMemSize;
-
-  bool imageSupported;
-  uint64_t image2dMaxWidth;
-  uint64_t image2dMaxHeight;
-};
-
 // Per-device benchmark tuning knobs.  All per-test iteration counts are now
 // derived from `targetTimeUs` via runtime calibration (see include/calibrate.h);
 // the only static iter field left is kernelLatencyIters because that test is
@@ -90,7 +61,7 @@ struct benchmark_config_t {
   unsigned int kernelLatencyIters;    // separately-submitted dispatch count
   uint64_t transferBWMaxSize;
 
-  static benchmark_config_t forDevice(cl_device_type type);
+  static benchmark_config_t forDevice(DeviceType type);
 };
 
 class Timer
@@ -104,11 +75,6 @@ public:
   // Stop and return time in micro-seconds
   float stopAndTime();
 };
-
-device_info_t getDeviceInfo(cl::Device &d);
-
-// Return time in us for the given event
-float timeInUS(cl::Event &timeEvent);
 
 // Round down to next multiple of the given base with an optional maximum value
 uint64_t roundToMultipleOf(uint64_t number, uint64_t base, uint64_t maxValue = UINT64_MAX);

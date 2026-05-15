@@ -42,30 +42,8 @@ struct BackendInventory
   std::vector<InventoryPlatform> platforms;   // Vulkan/CUDA: a single synthetic platform
 };
 
-// Implemented in clpeak.cpp.
-BackendInventory enumerateOpenCL();
-
-#ifdef ENABLE_VULKAN
-// Implemented in vk_peak.cpp.
-BackendInventory enumerateVulkan();
-#endif
-
-#ifdef ENABLE_CUDA
-// Implemented in cuda_peak.cpp.
-BackendInventory enumerateCuda();
-#endif
-
-#ifdef ENABLE_METAL
-// Implemented in mtl_peak.mm.
-BackendInventory enumerateMetal();
-#endif
-
 // Aggregator: enumerates every backend not skipped in opts.
 std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts);
-
-// Pretty-printer used by the desktop --list-devices flow. Output format
-// matches the legacy per-backend listDevices output.
-void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os);
 
 // JSON serializer used by the Android JNI surface. Schema is stable and
 // consumed by BackendCatalog.kt.

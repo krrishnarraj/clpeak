@@ -176,7 +176,7 @@ void saveJson(const ResultStore &store, const std::string &filename)
         std::cerr << "clpeak: cannot open JSON output file: " << filename << "\n";
         return;
     }
-    f << "{\"format_version\":" << CLPEAK_FORMAT_VERSION
+    f << "{\"format_version\":" << RESULT_FORMAT_VERSION
       << ",\"clpeak_version\":\"" << jsonEscape(CLPEAK_VERSION_STR) << "\""
       << ",\"os\":\"" << jsonEscape(osName()) << "\""
       << ",\"entries\":[\n";
@@ -229,7 +229,7 @@ void saveCsv(const ResultStore &store, const std::string &filename)
     f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason\n";
     for (const ResultEntry &e : store)
     {
-        f << CLPEAK_FORMAT_VERSION   << ","
+        f << RESULT_FORMAT_VERSION   << ","
           << csvField(e.backend)     << ","
           << csvField(e.platform)    << ","
           << csvField(e.device)      << ","
@@ -318,7 +318,7 @@ void saveXml(const ResultStore &store, const std::string &filename)
     }
 
     f << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-      << "<clpeak format_version=\"" << CLPEAK_FORMAT_VERSION << "\""
+      << "<clpeak format_version=\"" << RESULT_FORMAT_VERSION << "\""
       << " clpeak_version=\""        << xmlEscape(CLPEAK_VERSION_STR) << "\""
       << " os=\""                    << xmlEscape(osName()) << "\">\n";
 
@@ -383,10 +383,10 @@ void saveXml(const ResultStore &store, const std::string &filename)
 
 static bool checkVersion(int got, const std::string &filename)
 {
-    if (got == CLPEAK_FORMAT_VERSION) return true;
+    if (got == RESULT_FORMAT_VERSION) return true;
     std::cerr << "clpeak: " << filename
               << " is format_version=" << got
-              << "; this build expects v" << CLPEAK_FORMAT_VERSION
+              << "; this build expects v" << RESULT_FORMAT_VERSION
               << ". Regenerate the file with this version of clpeak.\n";
     return false;
 }

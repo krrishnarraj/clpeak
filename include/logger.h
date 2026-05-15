@@ -9,7 +9,6 @@
 
 #include <iostream>
 #include <string>
-#include <fstream>
 #include <vector>
 #include <result_store.h>
 #include "common.h"
@@ -21,14 +20,6 @@
 class logger
 {
 public:
-  // ---- Output sinks (file paths) -----------------------------------------
-  bool        enableXml;
-  std::string xmlFileName;
-  bool        enableJson;
-  std::string jsonFileName;
-  bool        enableCsv;
-  std::string csvFileName;
-
   // ---- Baseline compare ---------------------------------------------------
   bool        compareEnabled;
   BaselineMap baseline;
@@ -44,10 +35,10 @@ public:
   jmethodID recordMetricCallback;
 #endif
 
-  logger(bool _enableXml      = false, std::string _xmlFileName     = "",
-         bool _enableJson     = false, std::string _jsonFileName    = "",
-         bool _enableCsv      = false, std::string _csvFileName     = "",
-         std::string _compareFileName = "");
+  // Construct with optional baseline-compare file path.
+  // File output is centralized in the CLI entry point; per-backend loggers
+  // handle stdout + baseline deltas only.
+  explicit logger(std::string compareFileName = "");
   ~logger();
 
   // ---- stdout / Android UI ------------------------------------------------
@@ -56,29 +47,6 @@ public:
   void print(float val);
   void print(int val);
   void print(unsigned int val);
-
-  // ---- High-level recording API ------------------------------------------
-  // Backends call these in nested scopes:
-  //   deviceBegin -> categoryBegin -> testBegin -> record* -> testEnd ->
-  //                  categoryEnd  -> deviceEnd
-  // Each backend's runAll iterates the four categories in fixed order
-  // (FpCompute, IntCompute, Bandwidth, Latency).  Within a test, every
-  // measured variant gets one record() or recordSkip() call.
-  void deviceBegin(const std::string &backend,
-                   const std::string &platform,
-                   const std::string &device,
-                   const std::string &driver);
-  void deviceEnd();
-
-  void categoryBegin(Category c);
-  void categoryEnd();
-
-  void testBegin(const std::string &test, const std::string &unit);
-  void testEnd();
-
-  void record    (const std::string &metric, float value);
-  void recordSkip(const std::string &metric, ResultStatus status,
-                  const std::string &reason);
 
   // ---- Result-scope recording API ----------------------------------------
   // Backends use these for the historical nested result shape:
@@ -91,6 +59,10 @@ public:
   void resultSetContent(float value);
   void resultScopeEnd();
   void resultRecord(std::string metric, float value);
+
+  // Record a skipped/unsupported/error metric.
+  void recordSkip(const std::string &metric, ResultStatus status,
+                  const std::string &reason);
 
   // ---- RAII scope guard --------------------------------------------------
   // Use resultScope(name) to get a guard that calls resultScopeEnd() on

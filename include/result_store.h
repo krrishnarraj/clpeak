@@ -5,21 +5,12 @@
 #include <vector>
 #include <map>
 
+#include <benchmark_enums.h>
+
 // Dump-file schema version.  Loaders reject files written by older clpeak
 // versions (v1) with a clear error.  Bumped on any breaking change to the
 // fields or layout of saveJson / saveCsv / saveXml output.
-constexpr int CLPEAK_FORMAT_VERSION = 2;
-
-// Test category: every benchmark falls into exactly one of these.  Drives
-// run order (fp -> int -> bandwidth -> latency on every backend) and the
-// unit class (gflops/tflops, gops/tops, gbps, us).
-enum class Category {
-    FpCompute,
-    IntCompute,
-    Bandwidth,
-    Latency,
-    Unknown   // sentinel for back-compat paths and unknown dump-file values
-};
+constexpr int RESULT_FORMAT_VERSION = 2;
 
 // Result status: an emitted row may carry no measurement when the test
 // could not run.  `value` is meaningful only for `Ok` rows.  Non-Ok rows

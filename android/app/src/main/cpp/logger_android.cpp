@@ -12,18 +12,14 @@
 // Stage 4 extends it with category / status / reason and updates Kotlin to
 // match.
 
-logger::logger(bool, std::string,
-               bool, std::string,
-               bool, std::string,
-               std::string)
-  : enableXml(false),
-    enableJson(false),
-    enableCsv(false),
-    compareEnabled(false),
-    curCategory(Category::Unknown),
-    shimDepth(0),
-    inTestScope(false)
+logger::logger(std::string compareFileName)
+    : compareEnabled(!compareFileName.empty()),
+      curCategory(Category::Unknown),
+      shimDepth(0),
+      inTestScope(false)
 {
+    if (compareEnabled)
+        baseline = buildBaselineMap(loadResultFile(compareFileName));
 }
 
 logger::~logger()
@@ -75,61 +71,6 @@ void logger::print(unsigned int val)
   jEnv->DeleteLocalRef(jstr);
 }
 
-// ---- High-level recording API --------------------------------------------
-
-void logger::deviceBegin(const std::string &backend,
-                         const std::string &platform,
-                         const std::string &device,
-                         const std::string &driver)
-{
-  curBackend  = backend;
-  curPlatform = platform;
-  curDevice   = device;
-  curDriver   = driver;
-}
-
-void logger::deviceEnd()
-{
-  curBackend.clear();
-  curPlatform.clear();
-  curDevice.clear();
-  curDriver.clear();
-  curCategory = Category::Unknown;
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::categoryBegin(Category c)
-{
-  curCategory = c;
-}
-
-void logger::categoryEnd()
-{
-  curCategory = Category::Unknown;
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::testBegin(const std::string &test, const std::string &unit)
-{
-  curTest = test;
-  curUnit = unit;
-  if (curCategory == Category::Unknown)
-    curCategory = categoryFromUnit(unit);
-}
-
-void logger::testEnd()
-{
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::record(const std::string &metric, float value)
-{
-  emit(metric, ResultStatus::Ok, value, "");
-}
-
 void logger::recordSkip(const std::string &metric, ResultStatus status,
                         const std::string &reason)
 {
@@ -141,12 +82,20 @@ void logger::recordSkip(const std::string &metric, ResultStatus status,
 void logger::resultScopeBegin(std::string name)
 {
   shimDepth++;
+
   if (shimDepth == 4)
   {
     inTestScope = true;
     curTest = name;
     curUnit.clear();
-    curCategory = Category::Unknown;
+    if (curCategory == Category::Unknown ||
+        curCategory == Category::Latency ||
+        curCategory == Category::Bandwidth ||
+        curCategory == Category::FpCompute ||
+        curCategory == Category::IntCompute)
+    {
+      curCategory = Category::Unknown;
+    }
   }
 }
 
@@ -196,7 +145,7 @@ void logger::resultScopeEnd()
     curCategory = Category::Unknown;
     inTestScope = false;
   }
-  if (inTestScope || shimDepth > 3)
+  if (shimDepth > 0)
     shimDepth--;
 }
 
