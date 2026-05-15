@@ -105,6 +105,7 @@ cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
 
 | CMake option | Default | Effect when `OFF` |
 |---|---|---|
+| `CLPEAK_ENABLE_OPENCL` | `ON` | Skip OpenCL backend |
 | `CLPEAK_ENABLE_VULKAN` | `ON` | Skip Vulkan even if Vulkan SDK is present |
 | `CLPEAK_ENABLE_CUDA` | `ON` | Skip CUDA even if CUDA Toolkit is present |
 | `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
@@ -113,7 +114,7 @@ cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
 
 | Backend | Default | Compile path | Targets |
 |---|---|---|---|
-| **OpenCL** | always built | C++ host + .cl strings | OpenCL 1.2 baseline; 3.0 features when headers expose them |
+| **OpenCL** | on (optional) | C++ host + .cl strings | OpenCL 1.2 baseline; 3.0 features when headers expose them |
 | **Vulkan** | on, if Vulkan SDK present | GLSL .comp &rarr; SPIR-V at configure time | Vulkan 1.1+ |
 | **CUDA** | on, if CUDA Toolkit present | .cu source embedded as raw strings, NVRTC at runtime; cuBLASLt for GEMM peak | CUDA driver API + NVRTC + cuBLASLt (all part of CUDA Toolkit) |
 | **Metal** | on, on Apple silicon | .metal source embedded as raw strings, runtime compile; MPS / MPSGraph for GEMM peak | Apple7 (M1) and newer (MPSGraph bf16 requires Apple9 / M3+) |
@@ -186,3 +187,11 @@ Multi-GPU machines pick devices per-backend:
 ## License
 
 See [LICENSE](LICENSE).
+
+## For AI agents
+
+This tree is documented with `AGENTS.md` files. Start at the
+[root `AGENTS.md`](AGENTS.md) for architecture, directory map, build
+instructions, and the self-maintaining documentation conventions.
+Every subdirectory has its own `AGENTS.md` with local details — open
+the one closest to the code you're touching.
