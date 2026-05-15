@@ -1,10 +1,12 @@
 #include <peak.h>
-#include <opencl/cl_peak.h>
 #include <options.h>
 #include <inventory.h>
 #include <result_store.h>
 #include <iostream>
 
+#ifdef ENABLE_OPENCL
+#include <opencl/cl_peak.h>
+#endif
 #ifdef ENABLE_VULKAN
 #include <vulkan/vk_peak.h>
 #endif
@@ -20,6 +22,30 @@ static void mergeResults(ResultStore &dst, const ResultStore &src)
     dst.insert(dst.end(), src.begin(), src.end());
 }
 
+// Aggregate every backend not skipped in opts.  Lives here (not in common)
+// because it needs every backend header.
+static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
+{
+    std::vector<BackendInventory> out;
+#ifdef ENABLE_OPENCL
+    if (!opts.skipOpenCL)
+        out.push_back(clPeak::enumerate());
+#endif
+#ifdef ENABLE_VULKAN
+    if (!opts.skipVulkan)
+        out.push_back(vkPeak::enumerate());
+#endif
+#ifdef ENABLE_CUDA
+    if (!opts.skipCuda)
+        out.push_back(CudaPeak::enumerate());
+#endif
+#ifdef ENABLE_METAL
+    if (!opts.skipMetal)
+        out.push_back(MetalPeak::enumerate());
+#endif
+    return out;
+}
+
 int main(int argc, char **argv)
 {
     CliOptions opts;
@@ -31,18 +57,20 @@ int main(int argc, char **argv)
         auto invs = enumerateAllBackends(opts);
         for (const auto &inv : invs)
         {
+#ifdef ENABLE_OPENCL
             if (inv.backend == "OpenCL")
                 clPeak::printInventory(inv, std::cout);
+#endif
 #ifdef ENABLE_VULKAN
-            else if (inv.backend == "Vulkan")
+            if (inv.backend == "Vulkan")
                 vkPeak::printInventory(inv, std::cout);
 #endif
 #ifdef ENABLE_CUDA
-            else if (inv.backend == "CUDA")
+            if (inv.backend == "CUDA")
                 CudaPeak::printInventory(inv, std::cout);
 #endif
 #ifdef ENABLE_METAL
-            else if (inv.backend == "Metal")
+            if (inv.backend == "Metal")
                 MetalPeak::printInventory(inv, std::cout);
 #endif
         }
@@ -52,6 +80,7 @@ int main(int argc, char **argv)
     ResultStore combined;
 
     int clStatus = 0;
+#ifdef ENABLE_OPENCL
     if (!opts.skipOpenCL)
     {
         clPeak clObj;
@@ -59,6 +88,7 @@ int main(int argc, char **argv)
         clStatus = clObj.runAll();
         mergeResults(combined, clObj.log->results);
     }
+#endif
 
     int vkStatus = 0;
 #ifdef ENABLE_VULKAN

@@ -1,17 +1,4 @@
 #include <inventory.h>
-#include <options.h>
-
-#include <opencl/cl_peak.h>
-#ifdef ENABLE_VULKAN
-#include <vulkan/vk_peak.h>
-#endif
-#ifdef ENABLE_CUDA
-#include <cuda/cuda_peak.h>
-#endif
-#ifdef ENABLE_METAL
-#include <metal/mtl_peak.h>
-#endif
-
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -83,26 +70,6 @@ namespace
   }
 
 } // namespace
-
-std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
-{
-  std::vector<BackendInventory> out;
-  if (!opts.skipOpenCL)
-    out.push_back(clPeak::enumerate());
-#ifdef ENABLE_VULKAN
-  if (!opts.skipVulkan)
-    out.push_back(vkPeak::enumerate());
-#endif
-#ifdef ENABLE_CUDA
-  if (!opts.skipCuda)
-    out.push_back(CudaPeak::enumerate());
-#endif
-#ifdef ENABLE_METAL
-  if (!opts.skipMetal)
-    out.push_back(MetalPeak::enumerate());
-#endif
-  return out;
-}
 
 std::string inventoryToJson(const std::vector<BackendInventory> &inv)
 {

@@ -6,8 +6,6 @@
 #include <string>
 #include <vector>
 
-struct CliOptions;
-
 // Backend-neutral description of one device. Per-backend enumerators fill the
 // fields that make sense for them and leave the rest at their defaults; the
 // printer / JSON serializer skip empty fields. This keeps a single struct
@@ -42,11 +40,8 @@ struct BackendInventory
   std::vector<InventoryPlatform> platforms;   // Vulkan/CUDA: a single synthetic platform
 };
 
-// Aggregator: enumerates every backend not skipped in opts.
-std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts);
-
-// JSON serializer used by the Android JNI surface. Schema is stable and
-// consumed by BackendCatalog.kt.
+// JSON serializer used by the Android JNI surface and --list-devices.
+// Schema is stable and consumed by BackendCatalog.kt.
 std::string inventoryToJson(const std::vector<BackendInventory> &inv);
 
 #endif // CLPEAK_INVENTORY_H

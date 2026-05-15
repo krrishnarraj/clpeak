@@ -1,12 +1,27 @@
-// Thin JNI wrapper around the shared backend enumeration in src/inventory.cpp.
-// All real enumeration work lives in core (clpeak.cpp / vk_peak.cpp) so the
-// desktop --list-devices flow and this Kotlin-facing JSON come from the same
-// source of truth.
+// Thin JNI wrapper around backend enumeration.  All real enumeration work
+// lives in the backend classes (clPeak / vkPeak); this file just aggregates
+// the per-backend inventories and serializes them to JSON for Kotlin.
 
 #include <jni.h>
 
 #include <inventory.h>
 #include <options.h>
+#include <opencl/cl_peak.h>
+#ifdef ENABLE_VULKAN
+#include <vulkan/vk_peak.h>
+#endif
+
+static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
+{
+  std::vector<BackendInventory> out;
+  if (!opts.skipOpenCL)
+    out.push_back(clPeak::enumerate());
+#ifdef ENABLE_VULKAN
+  if (!opts.skipVulkan)
+    out.push_back(vkPeak::enumerate());
+#endif
+  return out;
+}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_kr_clpeak_BenchmarkRepository_nativeEnumerateBackends(JNIEnv *env, jobject)

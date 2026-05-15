@@ -11,7 +11,7 @@ by every backend.
 - Understanding CLI option gating? → `backend_gating.cpp` + `include/backend_gating.h`
 - Understanding calibration? → `calibrate.cpp` + `include/calibrate.h`
 - Adding a new backend? → The `Peak` interface is in `include/peak.h`
-- Understanding device enumeration? → `inventory.cpp` + `include/inventory.h`
+- Understanding device inventory structs / JSON? → `inventory.cpp` + `include/common/inventory.h`
 
 ## Key Files
 
@@ -23,7 +23,7 @@ by every backend.
 | `result_store.cpp` | `ResultEntry`/`ResultStore` serialization: JSON, CSV, XML |
 | `backend_gating.cpp` | `BackendGating::copyFrom()` — copies CLI gating state |
 | `calibrate.cpp` | `pickIters()` — runtime iteration calibration |
-| `inventory.cpp` | `enumerateAllBackends()`, `inventoryToJson()` — device listing |
+| `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
 | `options.cpp` | `parseCliOptions()` — CLI argument parsing |
 
 ## When You Change This Directory
