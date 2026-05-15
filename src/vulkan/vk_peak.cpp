@@ -1,6 +1,6 @@
 #ifdef ENABLE_VULKAN
 
-#include <vk_peak.h>
+#include <vulkan/vk_peak.h>
 #include <options.h>
 #include <inventory.h>
 #include <calibrate.h>

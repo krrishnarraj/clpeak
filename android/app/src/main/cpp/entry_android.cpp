@@ -4,7 +4,7 @@
 #include "jni_entry.h"
 
 #ifdef ENABLE_VULKAN
-#include <vk_peak.h>
+#include <vulkan/vk_peak.h>
 #endif
 
 #define PRINT_CALLBACK         "print_callback_from_c"

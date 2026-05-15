@@ -12,16 +12,16 @@
 // resources, which would shrink the register budget and break the v16 kernels
 // (global_bandwidth_v16 / compute_dp_v16) with CL_OUT_OF_RESOURCES.
 static const std::string stringifiedKernels =
-#include "global_bandwidth_kernels.cl"
-#include "compute_sp_kernels.cl"
-#include "compute_hp_kernels.cl"
-#include "compute_mp_kernels.cl"
-#include "compute_dp_kernels.cl"
-#include "compute_int24_kernels.cl"
-#include "compute_integer_kernels.cl"
-#include "compute_char_kernels.cl"
-#include "compute_short_kernels.cl"
-#include "compute_int4_packed_kernels.cl"
+#include "kernels/global_bandwidth_kernels.cl"
+#include "kernels/compute_sp_kernels.cl"
+#include "kernels/compute_hp_kernels.cl"
+#include "kernels/compute_mp_kernels.cl"
+#include "kernels/compute_dp_kernels.cl"
+#include "kernels/compute_int24_kernels.cl"
+#include "kernels/compute_integer_kernels.cl"
+#include "kernels/compute_char_kernels.cl"
+#include "kernels/compute_short_kernels.cl"
+#include "kernels/compute_int4_packed_kernels.cl"
     ;
 
 // Separate programs for kernels that use __local pointer arguments or
@@ -29,19 +29,19 @@ static const std::string stringifiedKernels =
 // resource reservations that spill into every other kernel in the same
 // program, so they must be isolated from the main benchmark kernels.
 static const std::string stringifiedLocalKernels =
-#include "local_bandwidth_kernels.cl"
+#include "kernels/local_bandwidth_kernels.cl"
     ;
 
 static const std::string stringifiedAtomicKernels =
-#include "atomic_throughput_kernels.cl"
+#include "kernels/atomic_throughput_kernels.cl"
     ;
 
 static const std::string stringifiedImageKernels =
-#include "image_bandwidth_kernels.cl"
+#include "kernels/image_bandwidth_kernels.cl"
     ;
 
 static const std::string stringifiedInt8DpKernels =
-#include "compute_int8_dp_kernels.cl"
+#include "kernels/compute_int8_dp_kernels.cl"
     ;
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),

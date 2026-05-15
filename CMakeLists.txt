@@ -16,7 +16,7 @@ endif()
 find_package(OpenCL)
 FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
 if(NOT OpenCL_FOUND OR NOT HPP_FOUND)
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/opencl/cmake")
   include(BuildSdk)
   set(OpenCL_ROOT "${SDK_ROOT}")
   find_package(OpenCL REQUIRED)
@@ -62,7 +62,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CLPEAK_SOURCE_FILES
     ${CLPEAK_CORE_SOURCES}
     src/logger.cpp
-    src/entry.cpp
+    src/cli/main.cpp
 )
 
 # ---- Per-backend opt-out flags (all default ON; auto-detection still runs
@@ -106,7 +106,7 @@ if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
   target_compile_definitions(clpeak PRIVATE ENABLE_VULKAN)
 
   # Compile GLSL shaders to SPIR-V and embed as C++ arrays
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan/cmake/CompileShaders.cmake)
   compile_shaders(
     TARGET clpeak
     SHADERS ${CLPEAK_VK_SHADERS}
@@ -130,7 +130,7 @@ if(CLPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
   target_compile_definitions(clpeak PRIVATE
     CLPEAK_CUDA_INCLUDE_DIR="${_clpeak_cuda_inc}")
 
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/cmake/EmbedCudaKernels.cmake)
   embed_cuda_kernels(
     TARGET clpeak
     KERNELS ${CLPEAK_CUDA_KERNELS}
@@ -162,7 +162,7 @@ if(APPLE AND CLPEAK_ENABLE_METAL)
     set_source_files_properties(${CLPEAK_MTL_SOURCES}
       PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMetalKernels.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/src/metal/cmake/EmbedMetalKernels.cmake)
     embed_metal_kernels(
       TARGET clpeak
       KERNELS ${CLPEAK_MTL_KERNELS}

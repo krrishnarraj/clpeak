@@ -45,7 +45,7 @@ target_link_libraries(clpeak log atomic dl OpenCL)
 if(ANDROID_VULKAN_LIB)
   target_compile_definitions(clpeak PRIVATE ENABLE_VULKAN)
   target_link_libraries(clpeak ${ANDROID_VULKAN_LIB})
-  include(${CLPEAK_ROOT}/cmake/CompileShaders.cmake)
+  include(${CLPEAK_ROOT}/src/vulkan/cmake/CompileShaders.cmake)
   compile_shaders(
     TARGET clpeak
     SHADERS ${CLPEAK_VK_SHADERS}

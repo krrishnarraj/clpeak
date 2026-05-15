@@ -6,13 +6,13 @@
 #include <iostream>
 
 #ifdef ENABLE_VULKAN
-#include <vk_peak.h>
+#include <vulkan/vk_peak.h>
 #endif
 #ifdef ENABLE_CUDA
-#include <cuda_peak.h>
+#include <cuda/cuda_peak.h>
 #endif
 #ifdef ENABLE_METAL
-#include <mtl_peak.h>
+#include <metal/mtl_peak.h>
 #endif
 
 static void mergeResults(ResultStore &dst, const ResultStore &src)

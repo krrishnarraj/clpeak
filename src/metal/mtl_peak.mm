@@ -1,6 +1,6 @@
 #ifdef ENABLE_METAL
 
-#include <mtl_peak.h>
+#include <metal/mtl_peak.h>
 #include <options.h>
 #include <inventory.h>
 #include <calibrate.h>

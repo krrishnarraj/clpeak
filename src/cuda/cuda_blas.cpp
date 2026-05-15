@@ -18,7 +18,7 @@
 // once the dtype/algo combo is correct.  Don't try to "fix" bf16 ~ 1/2 fp16
 // on these cards.
 
-#include <cuda_peak.h>
+#include <cuda/cuda_peak.h>
 #include <cublasLt.h>
 #include <calibrate.h>
 #include <chrono>

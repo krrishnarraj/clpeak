@@ -22,7 +22,7 @@
 // Apple silicon's hw int8 path is exposed via Core ML / MPSCNN
 // convolutions, not a general GEMM, so they're outside scope here.
 
-#include <mtl_peak.h>
+#include <metal/mtl_peak.h>
 #include <calibrate.h>
 
 #import <Metal/Metal.h>

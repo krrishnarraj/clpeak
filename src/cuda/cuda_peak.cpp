@@ -1,6 +1,6 @@
 #ifdef ENABLE_CUDA
 
-#include <cuda_peak.h>
+#include <cuda/cuda_peak.h>
 #include <options.h>
 #include <inventory.h>
 #include <calibrate.h>
