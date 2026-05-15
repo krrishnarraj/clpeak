@@ -189,18 +189,18 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   // On Android API < 28 Features2 isn't in the stub loader, so none of the
   // optional shader defines should be active unless the NDK provides a
   // modern-enough loader (see CompileShaders.cmake).
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT) || defined(CLPEAK_VK_HAS_COMPUTE_DP_V1) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
+#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
   VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR dpFeatures = {};
   dpFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR;
 #endif
-#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
+#if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
   VkPhysicalDeviceShaderBfloat16FeaturesKHR bf16Features = {};
   bf16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR;
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
   VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopmatFeatures = {};
   coopmatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
   // Cooperative-matrix shaders emitted by glslang use MemoryModel Vulkan via
@@ -208,16 +208,16 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   // feature bit (core in 1.2, otherwise VK_KHR_vulkan_memory_model).
   VkPhysicalDeviceVulkanMemoryModelFeatures vmmFeatures = {};
   vmmFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+#ifdef VK_HAS_ANY_COOPMAT_FP8
   VkPhysicalDeviceShaderFloat8FeaturesEXT fp8Features = {};
   fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
 #endif
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {};
   atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   VkPhysicalDeviceShaderAtomicInt64Features atomicInt64Features = {};
   atomicInt64Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
 #endif
@@ -236,31 +236,31 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
 
   bool f16i8ExtEnabled = false;
   bool hasF16I8Ext = hasExt(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
   bool hasCoopmatExt = false;
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+#ifdef VK_HAS_ANY_COOPMAT_FP8
   bool hasFP8Ext = false;
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
   bool hasAtomicFloatExt = false;
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   bool hasAtomicInt64Ext = false;
 #endif
   {
     void *chain = nullptr;
     if (hasF16I8Ext)
       chain = chainPNext(chain, &f16i8Features);
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
     if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME))
       chain = chainPNext(chain, &dpFeatures);
 #endif
-#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
+#if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
     if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME))
       chain = chainPNext(chain, &bf16Features);
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
     // Cooperative-matrix requires vulkanMemoryModel.  Chain both feature
     // structs whenever the coopmat extension is present; the memory-model
     // struct is core-1.2 and is what drivers advertising coopmat expose.
@@ -270,18 +270,18 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       chain = chainPNext(chain, &coopmatFeatures);
       chain = chainPNext(chain, &vmmFeatures);
     }
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+#ifdef VK_HAS_ANY_COOPMAT_FP8
     hasFP8Ext = hasExt(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
     if (hasFP8Ext)
       chain = chainPNext(chain, &fp8Features);
 #endif
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
     hasAtomicFloatExt = hasExt("VK_EXT_shader_atomic_float");
     if (hasAtomicFloatExt)
       chain = chainPNext(chain, &atomicFloatFeatures);
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
     hasAtomicInt64Ext = hasExt(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
     if (hasAtomicInt64Ext)
       chain = chainPNext(chain, &atomicInt64Features);
@@ -304,25 +304,25 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       pfnGetFeat2(physDev, &features2);
     baseFeatures2.features = features2.features;
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+#ifdef VK_HAS_COMPUTE_DP_V1
     if (features2.features.shaderFloat64)
       info.float64Supported = true;
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
     if (hasAtomicFloatExt && atomicFloatFeatures.shaderBufferFloat32AtomicAdd)
     {
       enabledExts.push_back("VK_EXT_shader_atomic_float");
       info.atomicFloat32Supported = true;
     }
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
     if (hasAtomicInt64Ext && atomicInt64Features.shaderBufferInt64Atomics)
     {
       enabledExts.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
       info.atomicInt64Supported = true;
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+#ifdef VK_HAS_COMPUTE_MP_V1
     if (f16i8Features.shaderFloat16)
     {
       enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
@@ -330,7 +330,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       info.float16Supported = true;
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
     if (hasExt(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME) &&
         dpFeatures.shaderIntegerDotProduct && f16i8Features.shaderInt8)
     {
@@ -345,20 +345,20 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       info.int8DotProductSupported = true;
     }
 #endif
-#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
+#if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
     if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME) && bf16Features.shaderBFloat16Type)
     {
       enabledExts.push_back(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME);
       info.bfloat16Supported = true;
     }
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
     if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix && vmmFeatures.vulkanMemoryModel)
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       info.cooperativeMatrixSupported = true;
       // FP16 coopmat inputs also need shaderFloat16.
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP16
+#ifdef VK_HAS_COOPMAT_FP16
       if (f16i8Features.shaderFloat16 && !f16i8ExtEnabled)
       {
         enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
@@ -367,7 +367,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       }
 #endif
       // INT8 coopmat inputs also need shaderInt8 + 8-bit storage.
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+#ifdef VK_HAS_COOPMAT_INT8
       if (f16i8Features.shaderInt8)
       {
         if (!f16i8ExtEnabled)
@@ -381,7 +381,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
 #endif
       // FP8 coopmat inputs additionally need VK_EXT_shader_float8 with
       // shaderFloat8 + shaderFloat8CooperativeMatrix both advertised.
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+#ifdef VK_HAS_ANY_COOPMAT_FP8
       if (hasFP8Ext && fp8Features.shaderFloat8 &&
           fp8Features.shaderFloat8CooperativeMatrix)
       {
@@ -425,14 +425,14 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT) || defined(CLPEAK_VK_HAS_COMPUTE_DP_V1) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
+#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
   // Re-chain the feature structs we actually enabled for vkCreateDevice.
   // The query-phase chain is discarded; these are the features we ask the
   // driver to turn on.
   VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
   enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
   void *enabledChain = nullptr;
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+#ifdef VK_HAS_COMPUTE_DP_V1
   if (info.float64Supported)
     enabledFeatures2.features.shaderFloat64 = VK_TRUE;
 #endif
@@ -441,21 +441,21 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
     f16i8Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &f16i8Features);
   }
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
   if (info.int8DotProductSupported)
   {
     dpFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &dpFeatures);
   }
 #endif
-#if defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_COOPMAT_BF16)
+#if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
   if (info.bfloat16Supported)
   {
     bf16Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &bf16Features);
   }
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
   if (info.cooperativeMatrixSupported)
   {
     coopmatFeatures.pNext = nullptr;
@@ -463,7 +463,7 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
     vmmFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &vmmFeatures);
   }
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT_FP8
+#ifdef VK_HAS_ANY_COOPMAT_FP8
   if (info.fp8Supported)
   {
     fp8Features.pNext = nullptr;
@@ -471,14 +471,14 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
   }
 #endif
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
   if (info.atomicFloat32Supported)
   {
     atomicFloatFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &atomicFloatFeatures);
   }
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   if (info.atomicInt64Supported)
   {
     atomicInt64Features.pNext = nullptr;
@@ -695,7 +695,7 @@ bool vkPeak::initInstance()
   // 1.1 gets us vkGetPhysicalDeviceFeatures2; cooperative matrix brings its
   // own extension + VK_KHR_vulkan_memory_model, so 1.1 is sufficient as the
   // instance version (MoltenVK 1.2 headers reject some older loaders).
-#if defined(CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_MP_V1) || defined(CLPEAK_VK_HAS_COMPUTE_BF16_V1) || defined(CLPEAK_VK_HAS_ANY_COOPMAT)
+#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT)
   appInfo.apiVersion = VK_API_VERSION_1_1;
 #else
   appInfo.apiVersion = VK_API_VERSION_1_0;
@@ -845,7 +845,7 @@ int vkPeak::runAll()
       continue;
     }
 
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
     // Enumerate cooperative-matrix properties to decide which dtype
     // combinations are advertised at the canonical 16x16x16 subgroup-scope
     // tile.  Done here (not in VulkanDevice::init) because the entry point
@@ -924,39 +924,39 @@ int vkPeak::runAll()
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
     if (gating.isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+#ifdef VK_HAS_COMPUTE_HP_V1
     if (gating.isAllowed(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+#ifdef VK_HAS_COMPUTE_DP_V1
     if (gating.isAllowed(Benchmark::ComputeDP))       runComputeDP(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+#ifdef VK_HAS_COMPUTE_MP_V1
     if (gating.isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#ifdef VK_HAS_COMPUTE_BF16_V1
     if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
     if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/false);
 #endif
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
     // Float atomic add is reported in the fp-compute phase (mirrors Metal).
     if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
         runAtomicThroughputFp(dev, cfg);
 #endif
 
     // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+#ifdef VK_HAS_COMPUTE_INT32_V1
     if (gating.isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
     if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
     if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
 #endif
-#ifdef CLPEAK_VK_HAS_ANY_COOPMAT
+#ifdef VK_HAS_ANY_COOPMAT
     if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/true);
 #endif
@@ -1197,10 +1197,10 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V2
+#ifdef VK_HAS_COMPUTE_SP_V2
     { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_SP_V4
+#ifdef VK_HAS_COMPUTE_SP_V4
     { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size },
 #endif
   };
@@ -1218,15 +1218,15 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   return runComputeKernel(dev, cfg, d);
 }
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V1
+#ifdef VK_HAS_COMPUTE_HP_V1
 int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V2
+#ifdef VK_HAS_COMPUTE_HP_V2
     { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_HP_V4
+#ifdef VK_HAS_COMPUTE_HP_V4
     { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size },
 #endif
   };
@@ -1247,15 +1247,15 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V1
+#ifdef VK_HAS_COMPUTE_DP_V1
 int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V2
+#ifdef VK_HAS_COMPUTE_DP_V2
     { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_DP_V4
+#ifdef VK_HAS_COMPUTE_DP_V4
     { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size },
 #endif
   };
@@ -1276,15 +1276,15 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V1
+#ifdef VK_HAS_COMPUTE_INT32_V1
 int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V2
+#ifdef VK_HAS_COMPUTE_INT32_V2
     { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT32_V4
+#ifdef VK_HAS_COMPUTE_INT32_V4
     { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size },
 #endif
   };
@@ -1303,7 +1303,7 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V1
+#ifdef VK_HAS_COMPUTE_MP_V1
 int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   // v1 = scalar fp16 (baseline; no HFMA2 packing).
@@ -1312,10 +1312,10 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   //                exceeds two lanes per slot).
   static const vk_compute_variant_t variants[] = {
     { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V2
+#ifdef VK_HAS_COMPUTE_MP_V2
     { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_MP_V4
+#ifdef VK_HAS_COMPUTE_MP_V4
     { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size },
 #endif
   };
@@ -1336,7 +1336,7 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT4_PACKED_V1
+#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
 int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   int32_t A = 3;
@@ -1357,7 +1357,7 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V1
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1
 int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   // v1 = single dp4a chain (serial through REPACK; dep-stall bound).
@@ -1367,10 +1367,10 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   //       NVIDIA Turing+ / AMD RDNA2+ / Intel Xe+).
   static const vk_compute_variant_t variants[] = {
     { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V2
+#ifdef VK_HAS_COMPUTE_INT8_DP_V2
     { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_INT8_DP_V4
+#ifdef VK_HAS_COMPUTE_INT8_DP_V4
     { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size },
 #endif
   };
@@ -1391,17 +1391,17 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V1
+#ifdef VK_HAS_COMPUTE_BF16_V1
 int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   // v1 / v2 / v4: same packing story as MP.  NVIDIA shader-core BF16
   // peaks at bf16vec2 via BMMA2-style packed multiply.
   static const vk_compute_variant_t variants[] = {
     { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size },
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V2
+#ifdef VK_HAS_COMPUTE_BF16_V2
     { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size },
 #endif
-#ifdef CLPEAK_VK_HAS_COMPUTE_BF16_V4
+#ifdef VK_HAS_COMPUTE_BF16_V4
     { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size },
 #endif
   };
@@ -1442,7 +1442,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
   const uint32_t coopWork    = COOPMAT_WORK_PER_WI;
 
   if (!intPart) {
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP32
+#ifdef VK_HAS_COOPMAT_FP32
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
@@ -1466,7 +1466,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       runComputeKernel(dev, cfg, d);
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP16
+#ifdef VK_HAS_COOPMAT_FP16
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
@@ -1490,7 +1490,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       runComputeKernel(dev, cfg, d);
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_BF16
+#ifdef VK_HAS_COOPMAT_BF16
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
@@ -1514,7 +1514,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       runComputeKernel(dev, cfg, d);
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E4M3
+#ifdef VK_HAS_COOPMAT_FP8_E4M3
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
@@ -1538,7 +1538,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       runComputeKernel(dev, cfg, d);
     }
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_FP8_E5M2
+#ifdef VK_HAS_COOPMAT_FP8_E5M2
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
@@ -1564,7 +1564,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 #endif
   } // !intPart
 
-#if defined(CLPEAK_VK_HAS_COOPMAT_INT8) || defined(CLPEAK_VK_HAS_COOPMAT_INT8_K32)
+#if defined(VK_HAS_COOPMAT_INT8) || defined(VK_HAS_COOPMAT_INT8_K32)
   if (intPart) {
     // Select the shader variant matching whichever INT8 tile the driver
     // advertised.  K=16 is the generic path; NVIDIA tensor cores need K=32.
@@ -1585,16 +1585,16 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (TOPS)";
     const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (TOPS)";
     bool haveShaderK16 = false, haveShaderK32 = false;
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+#ifdef VK_HAS_COOPMAT_INT8
     haveShaderK16 = true;
 #endif
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8_K32
+#ifdef VK_HAS_COOPMAT_INT8_K32
     haveShaderK32 = true;
 #endif
 
     if (dev.info.coopmatINT8K == 16 && haveShaderK16)
     {
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8
+#ifdef VK_HAS_COOPMAT_INT8
       d.title          = titleK16;
       d.spirv          = vk_shaders::coopmat_int8;
       d.spirvSize      = vk_shaders::coopmat_int8_size;
@@ -1603,7 +1603,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     }
     else if (dev.info.coopmatINT8K == 32 && haveShaderK32)
     {
-#ifdef CLPEAK_VK_HAS_COOPMAT_INT8_K32
+#ifdef VK_HAS_COOPMAT_INT8_K32
       d.title          = titleK32;
       d.spirv          = vk_shaders::coopmat_int8_k32;
       d.spirvSize      = vk_shaders::coopmat_int8_k32_size;
@@ -1695,10 +1695,10 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   struct GBVar { const char *label; const uint32_t *spv; size_t sz; uint32_t width; };
   const GBVar variants[] = {
     {"float ",  vk_shaders::global_bandwidth_v1, vk_shaders::global_bandwidth_v1_size, 1},
-#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V2
+#ifdef VK_HAS_GLOBAL_BANDWIDTH_V2
     {"float2",  vk_shaders::global_bandwidth_v2, vk_shaders::global_bandwidth_v2_size, 2},
 #endif
-#ifdef CLPEAK_VK_HAS_GLOBAL_BANDWIDTH_V4
+#ifdef VK_HAS_GLOBAL_BANDWIDTH_V4
     {"float4",  vk_shaders::global_bandwidth_v4, vk_shaders::global_bandwidth_v4_size, 4},
 #endif
   };
@@ -2404,7 +2404,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
     log->recordSkip("int_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
 
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   if (dev.info.atomicInt64Supported)
   {
     log->print(TAB TAB "ulong_global : ");
@@ -2449,7 +2449,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 // on VK_EXT_shader_atomic_float + shaderBufferFloat32AtomicAdd.
 // ---------------------------------------------------------------------------
 
-#ifdef CLPEAK_VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
+#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
 int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);

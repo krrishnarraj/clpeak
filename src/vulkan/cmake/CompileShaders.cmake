@@ -62,7 +62,7 @@ function(compile_shaders)
       continue()
     endif()
     string(TOUPPER "${SHADER_NAME}" SHADER_NAME_UPPER)
-    target_compile_definitions(${CS_TARGET} PRIVATE VK_HAS_${SHADER_NAME_UPPER})
+    target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER})
 
     # Read SPIR-V binary as a hex string (two chars per byte)
     file(READ "${SPV_FILE}" SPV_HEX HEX)
