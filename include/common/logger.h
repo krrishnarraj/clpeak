@@ -1,21 +1,11 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 
-/*
- * ANDROID_LOGGER -- defined only in case of an android ndk build.  On
- * Android there is no file output; the print() and metric-emission paths
- * dispatch directly to Kotlin via JNI callbacks.
- */
-
 #include <iostream>
 #include <string>
 #include <vector>
 #include <common/result_store.h>
 #include "common.h"
-
-#ifdef ANDROID_LOGGER
-#include <jni.h>
-#endif
 
 class logger
 {
@@ -25,48 +15,29 @@ public:
   BaselineMap baseline;
 
   // ---- Accumulated metrics ------------------------------------------------
-  // Single source of truth: all formats serialize from this store at exit.
   ResultStore results;
 
-#ifdef ANDROID_LOGGER
-  JNIEnv  *jEnv;
-  jobject *jObj;
-  jmethodID printCallback;
-  jmethodID recordMetricCallback;
-#endif
-
-  // Construct with optional baseline-compare file path.
-  // File output is centralized in the CLI entry point; per-backend loggers
-  // handle stdout + baseline deltas only.
   explicit logger(std::string compareFileName = "");
-  ~logger();
+  virtual ~logger() = default;
 
-  // ---- stdout / Android UI ------------------------------------------------
-  void print(std::string str);
-  void print(double val);
-  void print(float val);
-  void print(int val);
-  void print(unsigned int val);
+  // ---- Client-specific output — derived classes implement -----------------
+  virtual void print(std::string str) = 0;
+  virtual void print(double val) = 0;
+  virtual void print(float val) = 0;
+  virtual void print(int val) = 0;
+  virtual void print(unsigned int val) = 0;
 
-  // ---- Result-scope recording API ----------------------------------------
-  // Backends use these for the historical nested result shape:
-  //   clpeak -> platform -> device -> test -> metric
-  // The logger translates that shape into ResultEntry rows; result_store then
-  // serializes those rows to every enabled dump format.
+  // ---- Result-scope recording API — common implementation -----------------
   void resultScopeBegin(std::string name);
   void resultScopeAttribute(std::string key, std::string value);
   void resultScopeAttribute(std::string key, unsigned int value);
   void resultSetContent(float value);
   void resultScopeEnd();
   void resultRecord(std::string metric, float value);
-
-  // Record a skipped/unsupported/error metric.
   void recordSkip(const std::string &metric, ResultStatus status,
                   const std::string &reason);
 
   // ---- RAII scope guard --------------------------------------------------
-  // Use resultScope(name) to get a guard that calls resultScopeEnd() on
-  // destruction, eliminating scope leaks on early returns and exceptions.
   class ResultScope {
   public:
     ResultScope(logger *log, std::string name) : log(log) { log->resultScopeBegin(std::move(name)); }
@@ -81,26 +52,18 @@ public:
 
   ResultScope resultScope(std::string name) { return ResultScope(this, std::move(name)); }
 
-private:
-  // Current run / category / test scope.  Updated by both APIs and read by
-  // emit() to qualify each ResultEntry.
+protected:
+  // Override to get notified on every emitted metric (baseline deltas, JNI, etc.).
+  virtual void onMetricEmitted(const ResultEntry &e, float value);
+
+  // Current scope context — populated by resultScope* methods, read by emit().
   std::string curBackend, curPlatform, curDevice, curDriver;
-  Category    curCategory;
+  Category    curCategory = Category::Unknown;
   std::string curTest, curUnit;
+  int  shimDepth    = 0;
+  bool inTestScope  = false;
 
-  // Result-scope cursor: depth in the implicit
-  //   clpeak (1) > platform (2) > device (3) > test (4)
-  // stack as driven by resultScopeBegin / resultScopeEnd.
-  int shimDepth;
-
-  // Tracks whether we are inside a depth-4 (test-group) scope.
-  // resultScopeEnd() becomes a no-op when called before the matching
-  // resultScopeBegin() was reached, preventing shimDepth corruption.
-  bool inTestScope;
-
-  // Build a ResultEntry from the current scope plus the supplied metric
-  // and append to `results`.  Also prints a baseline-delta line to stdout
-  // when compare mode is on and the metric matches a baseline key.
+private:
   void emit(const std::string &metric, ResultStatus status,
             float value, const std::string &reason);
 };

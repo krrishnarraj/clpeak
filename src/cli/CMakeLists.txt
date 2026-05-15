@@ -1,6 +1,6 @@
 add_executable(clpeak
     main.cpp
-    logger.cpp
+    logger_cli.cpp
 )
 target_link_libraries(clpeak PRIVATE peak_common)
 # Place binary at build root (not under src/cli/)

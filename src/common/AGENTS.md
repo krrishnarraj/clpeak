@@ -22,6 +22,7 @@ by every backend. Does NOT contain a logger implementation — each consumer
 | `peak.cpp` | `Peak` base class: constructor, `applyOptions()` common logic |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `Timer`, `populate()`, utilities |
 | `result_store.cpp` | `ResultEntry`/`ResultStore` serialization: JSON, CSV, XML |
+| `logger.cpp` | Base `logger` class: result-scope API, `emit()`, `recordSkip` |
 | `backend_gating.cpp` | `BackendGating::copyFrom()` — copies CLI gating state |
 | `calibrate.cpp` | `pickIters()` — runtime iteration calibration |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |

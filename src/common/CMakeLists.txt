@@ -4,6 +4,7 @@ add_library(peak_common STATIC
     backend_gating.cpp
     calibrate.cpp
     inventory.cpp
+    logger.cpp
     options.cpp
     result_store.cpp
 )

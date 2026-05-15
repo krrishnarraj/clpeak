@@ -2,6 +2,7 @@
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/result_store.h>
+#include <cli/logger_cli.h>
 #include <iostream>
 
 #ifdef ENABLE_OPENCL
@@ -84,6 +85,7 @@ int main(int argc, char **argv)
     if (!opts.skipOpenCL)
     {
         clPeak clObj;
+        clObj.log.reset(new LoggerCli(opts.compareFile));
         clObj.applyOptions(opts);
         clStatus = clObj.runAll();
         mergeResults(combined, clObj.log->results);
@@ -95,6 +97,7 @@ int main(int argc, char **argv)
     if (!opts.skipVulkan)
     {
         vkPeak vkObj;
+        vkObj.log.reset(new LoggerCli(opts.compareFile));
         vkObj.applyOptions(opts);
         vkStatus = vkObj.runAll();
         mergeResults(combined, vkObj.log->results);
@@ -108,6 +111,7 @@ int main(int argc, char **argv)
     if (!opts.skipCuda)
     {
         CudaPeak cuObj;
+        cuObj.log.reset(new LoggerCli(opts.compareFile));
         cuObj.applyOptions(opts);
         cuStatus = cuObj.runAll();
         mergeResults(combined, cuObj.log->results);
@@ -122,6 +126,7 @@ int main(int argc, char **argv)
     if (!opts.skipMetal)
     {
         MetalPeak mtlObj;
+        mtlObj.log.reset(new LoggerCli(opts.compareFile));
         mtlObj.applyOptions(opts);
         mtlStatus = mtlObj.runAll();
         mergeResults(combined, mtlObj.log->results);

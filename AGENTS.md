@@ -21,7 +21,8 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 
 | Path | Purpose |
 |------|---------|
-| `include/common/` | All neutral headers — `peak.h`, `benchmark_enums.h`, `logger.h`, etc. |
+| `include/common/` | All neutral headers — `peak.h`, `benchmark_enums.h`, `logger.h` (base), etc. |
+| `include/cli/` | CLI-specific headers — `logger_cli.h` |
 | `include/opencl/` | OpenCL backend headers — `cl_peak.h`, `cl_common.h` |
 | `include/vulkan/` | Vulkan backend header — `vk_peak.h` |
 | `include/cuda/` | CUDA backend header — `cuda_peak.h` |

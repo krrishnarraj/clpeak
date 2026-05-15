@@ -7,7 +7,7 @@ runs benchmarks, and handles centralized file output.
 
 - CLI argument parsing? → `../common/options.cpp` + `include/common/options.h`
 - How backends are wired? → `main.cpp` — creates backend objects, merges results
-- Logger implementation? → `logger.cpp` — stdout printing, baseline comparison
+- Logger implementation? → `logger_cli.cpp` + `include/cli/logger_cli.h`
 - Device listing? → `main.cpp` — `enumerateAllBackends()` with per-backend printing
 
 ## Key Files
@@ -15,7 +15,7 @@ runs benchmarks, and handles centralized file output.
 | File | Purpose |
 |------|---------|
 | `main.cpp` | `main()` — backend dispatch, `enumerateAllBackends()`, centralized file output |
-| `logger.cpp` | Desktop `logger` implementation — stdout, baseline deltas from `--compare` |
+| `logger_cli.cpp` | `LoggerCli` — stdout printing, baseline comparison (derives from `logger`) |
 
 ## When You Change This Directory
 
