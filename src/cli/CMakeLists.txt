@@ -2,7 +2,7 @@ add_executable(clpeak
     main.cpp
     logger_cli.cpp
 )
-target_link_libraries(clpeak PRIVATE peak_common)
+# peak_common comes transitively through every backend target
 # Place binary at build root (not under src/cli/)
 set_target_properties(clpeak PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 

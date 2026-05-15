@@ -17,6 +17,7 @@ add_library(peak_metal STATIC
     mtl_blas.mm
 )
 target_link_libraries(peak_metal PUBLIC
+    peak_common
     ${METAL_FRAMEWORK}
     ${FOUNDATION_FRAMEWORK}
     ${IOKIT_FRAMEWORK}

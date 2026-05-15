@@ -5,7 +5,7 @@ endif()
 add_library(peak_vulkan STATIC
     vk_peak.cpp
 )
-target_link_libraries(peak_vulkan PUBLIC ${Vulkan_LIBRARIES})
+target_link_libraries(peak_vulkan PUBLIC peak_common ${Vulkan_LIBRARIES})
 target_include_directories(peak_vulkan PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${Vulkan_INCLUDE_DIRS}
