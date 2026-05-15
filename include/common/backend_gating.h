@@ -2,7 +2,7 @@
 #define BACKEND_GATING_H
 
 #include <bitset>
-#include <benchmark_enums.h>  // Benchmark, Category, categoryOf()
+#include <common/benchmark_enums.h>  // Benchmark, Category, categoryOf()
 
 struct CliOptions; // forward decl
 

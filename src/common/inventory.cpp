@@ -1,4 +1,4 @@
-#include <inventory.h>
+#include <common/inventory.h>
 #include <ostream>
 #include <sstream>
 #include <string>

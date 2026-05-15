@@ -7,7 +7,6 @@ add_library(peak_cuda STATIC
     cuda_blas.cpp
 )
 target_link_libraries(peak_cuda PUBLIC
-    peak_common
     CUDA::cuda_driver
     CUDA::nvrtc
     CUDA::cublasLt

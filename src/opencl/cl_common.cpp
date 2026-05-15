@@ -1,6 +1,6 @@
 #include <opencl/cl_common.h>
-#include <common.h>
-#include <benchmark_constants.h>
+#include <common/common.h>
+#include <common/benchmark_constants.h>
 #include <vector>
 #include <cctype>
 

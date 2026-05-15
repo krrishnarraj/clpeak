@@ -1,5 +1,5 @@
-#include <options.h>
-#include <benchmark_enums.h>
+#include <common/options.h>
+#include <common/benchmark_enums.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>

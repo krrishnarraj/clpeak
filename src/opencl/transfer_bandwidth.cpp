@@ -1,5 +1,5 @@
 #include <opencl/cl_peak.h>
-#include <calibrate.h>
+#include <common/calibrate.h>
 #include <cstdlib>
 #include <cstring>
 #include <functional>

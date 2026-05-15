@@ -1,7 +1,7 @@
 #include <opencl/cl_peak.h>
-#include <inventory.h>
-#include <options.h>
-#include <calibrate.h>
+#include <common/inventory.h>
+#include <common/options.h>
+#include <common/calibrate.h>
 #include <cstring>
 
 #define MSTRINGIFY(...) #__VA_ARGS__

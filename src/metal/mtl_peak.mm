@@ -1,9 +1,9 @@
 #ifdef ENABLE_METAL
 
 #include <metal/mtl_peak.h>
-#include <options.h>
-#include <inventory.h>
-#include <calibrate.h>
+#include <common/options.h>
+#include <common/inventory.h>
+#include <common/calibrate.h>
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>

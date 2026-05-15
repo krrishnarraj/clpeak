@@ -1,4 +1,4 @@
-#include <result_store.h>
+#include <common/result_store.h>
 #include <version.h>
 #include <fstream>
 #include <sstream>

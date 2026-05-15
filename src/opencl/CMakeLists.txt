@@ -60,7 +60,7 @@ add_library(peak_opencl STATIC
     transfer_bandwidth.cpp
     kernel_latency.cpp
 )
-target_link_libraries(peak_opencl PUBLIC peak_common ${OpenCL_LIBRARIES})
+target_link_libraries(peak_opencl PUBLIC ${OpenCL_LIBRARIES})
 target_include_directories(peak_opencl PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src/opencl

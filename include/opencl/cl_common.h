@@ -9,7 +9,7 @@
 #include <string>
 #include <cstdint>
 #include <sstream>
-#include <benchmark_enums.h>
+#include <common/benchmark_enums.h>
 
 // Immutable device properties queried from OpenCL.
 struct device_info_t {

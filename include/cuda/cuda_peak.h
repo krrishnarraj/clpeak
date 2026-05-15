@@ -8,13 +8,13 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
-#include <common.h>
-#include <benchmark_constants.h>
-#include <logger.h>
-#include <benchmark_enums.h>
-#include <peak.h>
-#include <inventory.h>
-#include <backend_gating.h>  // centralized benchmark gating
+#include <common/common.h>
+#include <common/benchmark_constants.h>
+#include <common/logger.h>
+#include <common/benchmark_enums.h>
+#include <common/peak.h>
+#include <common/inventory.h>
+#include <common/backend_gating.h>  // centralized benchmark gating
 
 struct CliOptions; // forward decl
 

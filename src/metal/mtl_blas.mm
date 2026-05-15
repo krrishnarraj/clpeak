@@ -23,7 +23,7 @@
 // convolutions, not a general GEMM, so they're outside scope here.
 
 #include <metal/mtl_peak.h>
-#include <calibrate.h>
+#include <common/calibrate.h>
 
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>

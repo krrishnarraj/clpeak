@@ -10,7 +10,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <result_store.h>
+#include <common/result_store.h>
 #include "common.h"
 
 #ifdef ANDROID_LOGGER

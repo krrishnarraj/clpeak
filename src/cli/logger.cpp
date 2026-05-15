@@ -1,7 +1,7 @@
-#include <logger.h>
+#include <common/logger.h>
 #include <iomanip>
 #include <sstream>
-#include <result_store.h>
+#include <common/result_store.h>
 
 // All output formats (JSON, CSV, XML) are produced from the in-memory
 // `results` store at program exit -- this guarantees identical ordering and

@@ -3,6 +3,8 @@ add_executable(clpeak
     logger.cpp
 )
 target_link_libraries(clpeak PRIVATE peak_common)
+# Place binary at build root (not under src/cli/)
+set_target_properties(clpeak PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Link enabled backends (targets exist only if their CMakeLists was processed)
 if(TARGET peak_opencl)

@@ -1,9 +1,9 @@
 #ifdef ENABLE_VULKAN
 
 #include <vulkan/vk_peak.h>
-#include <options.h>
-#include <inventory.h>
-#include <calibrate.h>
+#include <common/options.h>
+#include <common/inventory.h>
+#include <common/calibrate.h>
 #include <cstring>
 #include <sstream>
 #include <chrono>

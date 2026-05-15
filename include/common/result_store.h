@@ -5,7 +5,7 @@
 #include <vector>
 #include <map>
 
-#include <benchmark_enums.h>
+#include <common/benchmark_enums.h>
 
 // Dump-file schema version.  Loaders reject files written by older clpeak
 // versions (v1) with a clear error.  Bumped on any breaking change to the

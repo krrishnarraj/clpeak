@@ -1,6 +1,6 @@
-#include <common.h>
-#include <benchmark_constants.h>
-#include <calibrate.h>
+#include <common/common.h>
+#include <common/benchmark_constants.h>
+#include <common/calibrate.h>
 
 benchmark_config_t benchmark_config_t::forDevice(DeviceType type)
 {

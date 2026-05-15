@@ -1,10 +1,10 @@
 #ifndef CL_PEAK_H
 #define CL_PEAK_H
 
-#include <peak.h>
+#include <common/peak.h>
 #include <opencl/cl_common.h>
-#include <benchmark_constants.h>
-#include <inventory.h>
+#include <common/benchmark_constants.h>
+#include <common/inventory.h>
 #include <string>
 #include <memory>
 

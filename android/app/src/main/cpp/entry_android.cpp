@@ -1,6 +1,6 @@
 #include <opencl/cl_peak.h>
-#include <peak.h>
-#include <options.h>
+#include <common/peak.h>
+#include <common/options.h>
 #include "jni_entry.h"
 
 #ifdef ENABLE_VULKAN

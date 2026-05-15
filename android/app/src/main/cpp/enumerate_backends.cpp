@@ -4,8 +4,8 @@
 
 #include <jni.h>
 
-#include <inventory.h>
-#include <options.h>
+#include <common/inventory.h>
+#include <common/options.h>
 #include <opencl/cl_peak.h>
 #ifdef ENABLE_VULKAN
 #include <vulkan/vk_peak.h>

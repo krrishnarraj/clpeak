@@ -1,4 +1,4 @@
-#include <calibrate.h>
+#include <common/calibrate.h>
 
 unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int forced)
 {

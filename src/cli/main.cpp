@@ -1,7 +1,7 @@
-#include <peak.h>
-#include <options.h>
-#include <inventory.h>
-#include <result_store.h>
+#include <common/peak.h>
+#include <common/options.h>
+#include <common/inventory.h>
+#include <common/result_store.h>
 #include <iostream>
 
 #ifdef ENABLE_OPENCL

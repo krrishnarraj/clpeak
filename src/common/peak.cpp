@@ -1,5 +1,5 @@
-#include <peak.h>
-#include <options.h>
+#include <common/peak.h>
+#include <common/options.h>
 
 Peak::Peak()
     : log(new logger())

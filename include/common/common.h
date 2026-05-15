@@ -10,7 +10,7 @@
 #include <string>
 #include <cstdint>
 #include <algorithm>
-#include <benchmark_enums.h>
+#include <common/benchmark_enums.h>
 
 #define TAB             "  "
 #define NEWLINE         "\n"

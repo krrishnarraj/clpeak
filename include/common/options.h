@@ -3,8 +3,8 @@
 
 #include <bitset>
 #include <string>
-#include <benchmark_enums.h>  // Benchmark, Category
-#include <calibrate.h>
+#include <common/benchmark_enums.h>  // Benchmark, Category
+#include <common/calibrate.h>
 
 // Shared CLI options populated once in entry.cpp and consumed by every
 // backend.  Each backend's applyOptions() copies the relevant fields into
