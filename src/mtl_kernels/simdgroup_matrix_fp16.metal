@@ -4,9 +4,9 @@
 //
 // Four independent accumulator chains (c0..c3) so the matrix engine's
 // multi-cycle pipeline can issue back-to-back instead of stalling on the
-// c -> c dependency every iter (single-chain version on M1 Pro topped out
-// at ~3.9 TFLOPS == 38% of the ~10.4 TFLOPS spec; 4 chains is the
-// canonical ILP fix used in CUDA WMMA / Vulkan coopmat tuning).
+// c -> c dependency every iter (single-chain version on M1 Pro tops out
+// at ~3.9 TFLOPS, well below the ~16 TFLOPS matrix-engine ceiling; 4
+// chains is the canonical ILP fix used in CUDA WMMA / Vulkan coopmat).
 //
 // Per simdgroup ops = 1024 outer * 4 chains * 8*8*8*2 = 4,194,304;
 // per thread = 131,072 (= MTL_SIMDGROUP_WORK_PER_WI in mtl_peak.mm).
