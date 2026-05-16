@@ -49,6 +49,11 @@ elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
 endif()
 endif()  # CLPEAK_OPENCL_PREDEFINED
 
+# Fallback when caller provides OpenCL vars (e.g. Android with stub)
+if(NOT DEFINED CLPEAK_OPENCL_TARGET_VERSION)
+    set(CLPEAK_OPENCL_TARGET_VERSION 300)
+endif()
+
 # ---- peak_opencl static library -----------------------------------------
 add_library(peak_opencl STATIC
     cl_peak.cpp
