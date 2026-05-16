@@ -11,8 +11,8 @@ add_library(peak_common STATIC
 # logger.cpp lives in src/cli/ (desktop) or android/ (Android JNI) —
 # each consumer brings its own output implementation.
 target_include_directories(peak_common PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include/common
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/../../include/common
 )
 target_compile_features(peak_common PUBLIC cxx_std_11)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU|AppleClang")

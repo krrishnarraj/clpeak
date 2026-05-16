@@ -62,8 +62,8 @@ add_library(peak_opencl STATIC
 )
 target_link_libraries(peak_opencl PUBLIC peak_common ${OpenCL_LIBRARIES})
 target_include_directories(peak_opencl PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src/opencl
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}
     ${OpenCL_INCLUDE_DIRS}
 )
 target_compile_definitions(peak_opencl PRIVATE

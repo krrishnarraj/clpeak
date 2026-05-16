@@ -7,7 +7,7 @@ add_library(peak_vulkan STATIC
 )
 target_link_libraries(peak_vulkan PUBLIC peak_common ${Vulkan_LIBRARIES})
 target_include_directories(peak_vulkan PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
     ${Vulkan_INCLUDE_DIRS}
 )
 target_compile_definitions(peak_vulkan PRIVATE ENABLE_VULKAN)

@@ -1,5 +1,6 @@
 #include "logger_android.h"
 #include <sstream>
+#include <iomanip>
 
 // ---- print → JNI ---------------------------------------------------------
 

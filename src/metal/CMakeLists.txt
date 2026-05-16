@@ -25,7 +25,7 @@ target_link_libraries(peak_metal PUBLIC
     ${MPSGRAPH_FRAMEWORK}
 )
 target_include_directories(peak_metal PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
 target_compile_definitions(peak_metal PRIVATE ENABLE_METAL)
 

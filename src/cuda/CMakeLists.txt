@@ -13,7 +13,7 @@ target_link_libraries(peak_cuda PUBLIC
     CUDA::cublasLt
 )
 target_include_directories(peak_cuda PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
