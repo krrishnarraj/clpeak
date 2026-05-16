@@ -28,4 +28,4 @@ by `BenchmarkRepository.kt`.
 - If you add a new JNI entry point → update `jni_entry.h` + the corresponding `.cpp`.
 - If you add a new source file → update `CMakeLists.txt`.
 - If you change the JSON inventory schema → coordinate with `BackendCatalog.kt`.
-- If you change the version setup → see `cmake/version.cmake` (GIT_ROOT parameter).
+- If you change the version setup → see `src/common/cmake/version.cmake` (GIT_ROOT parameter).

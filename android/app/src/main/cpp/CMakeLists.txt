@@ -5,7 +5,7 @@ add_subdirectory(libopencl-stub)
 
 set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 get_filename_component(CLPEAK_GIT_ROOT "${CLPEAK_ROOT}" ABSOLUTE)
-include(${CLPEAK_ROOT}/cmake/version.cmake)
+include(${CLPEAK_ROOT}/src/common/cmake/version.cmake)
 
 # -----------------------------------------------------------------------
 # Shared common library — always built, no logger (Android provides its own)

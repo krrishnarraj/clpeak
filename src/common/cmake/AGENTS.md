@@ -1,7 +1,6 @@
-# cmake — Shared CMake Modules
+# src/common/cmake — Version Handling
 
-Build-system helpers: version derivation from git, and the generated
-`version.h.in` template.
+Git-describe version derivation and the generated `version.h.in` template.
 
 ## Quick Lookups
 

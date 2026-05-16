@@ -25,5 +25,5 @@ if(TARGET peak_metal)
 endif()
 
 target_include_directories(clpeak PRIVATE ${CMAKE_SOURCE_DIR}/include)
-include(${CMAKE_SOURCE_DIR}/cmake/version.cmake)
+include(${CMAKE_SOURCE_DIR}/src/common/cmake/version.cmake)
 clpeak_setup_version(clpeak)

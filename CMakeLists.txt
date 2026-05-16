@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(clpeak)
 
 set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-include(${CLPEAK_ROOT}/cmake/version.cmake)
+include(${CLPEAK_ROOT}/src/common/cmake/version.cmake)
 include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)

@@ -33,8 +33,8 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/cuda/` | CUDA backend: `CudaPeak` class + `.cu` kernels (NVRTC-compiled at runtime) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
 | `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
+| `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `android/` | Android app with JNI native module, its own `logger_android.cpp` |
-| `cmake/` | Shared cmake: version handling (`version.cmake`, `GenVersion.cmake`) |
 
 ## Build
 
