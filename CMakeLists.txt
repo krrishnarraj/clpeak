@@ -9,9 +9,6 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 # Backend options
 option(CLPEAK_ENABLE_OPENCL "Build OpenCL backend" ON)
 option(CLPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)
