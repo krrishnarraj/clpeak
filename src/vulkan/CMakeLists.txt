@@ -11,6 +11,9 @@ target_include_directories(peak_vulkan PUBLIC
     ${Vulkan_INCLUDE_DIRS}
 )
 target_compile_definitions(peak_vulkan PRIVATE ENABLE_VULKAN)
+if(WIN32)
+  target_compile_definitions(peak_vulkan PRIVATE NOMINMAX)
+endif()
 
 # Compile GLSL shaders to SPIR-V and embed as C++ arrays
 set(CLPEAK_VK_SHADERS
