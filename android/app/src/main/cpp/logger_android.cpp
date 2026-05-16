@@ -51,7 +51,7 @@ void LoggerAndroid::print(unsigned int val)
 
 void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value)
 {
-    if (!recordMetricCallback)
+    if (e.status != ResultStatus::Ok || !recordMetricCallback)
         return;
 
     jstring jBackend  = jEnv->NewStringUTF(e.backend.c_str());
