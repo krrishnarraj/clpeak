@@ -29,43 +29,23 @@ static const char *helpStr =
     "\n"
     "\n BACKEND SELECTION (default: run every available backend):"
     "\n  --opencl                    run only the OpenCL backend"
-#ifdef ENABLE_VULKAN
     "\n  --vulkan                    run only the Vulkan backend"
-#endif
-#ifdef ENABLE_CUDA
     "\n  --cuda                      run only the CUDA backend"
-#endif
-#ifdef ENABLE_METAL
     "\n  --metal                     run only the Metal backend"
-#endif
     "\n  (multiple --<backend> flags can be combined: --cuda --vulkan)"
-#if defined(ENABLE_VULKAN) || defined(ENABLE_CUDA) || defined(ENABLE_METAL)
     "\n  --no-opencl                 skip the OpenCL backend"
-#endif
-#ifdef ENABLE_VULKAN
     "\n  --no-vulkan                 skip the Vulkan backend"
-#endif
-#ifdef ENABLE_CUDA
     "\n  --no-cuda                   skip the CUDA backend"
-#endif
-#ifdef ENABLE_METAL
     "\n  --no-metal                  skip the Metal backend"
-#endif
     "\n"
     "\n DEVICE SELECTION:"
     "\n  --cl-platform num           OpenCL platform index (0-based)"
     "\n  --cl-device num             OpenCL device index within the platform"
     "\n  --cl-platform-name str      match OpenCL platform by name"
     "\n  --cl-device-name str        match OpenCL device by name"
-#ifdef ENABLE_VULKAN
     "\n  --vk-device num             Vulkan physical-device index (0-based)"
-#endif
-#ifdef ENABLE_CUDA
     "\n  --cuda-device num           CUDA device ordinal (0-based)"
-#endif
-#ifdef ENABLE_METAL
     "\n  --mtl-device num            Metal device index (0-based)"
-#endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
     "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
@@ -88,18 +68,12 @@ static const char *helpStr =
     "\n  --integer-compute-short           | --no-integer-compute-short     [OpenCL]"
     "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
     "\n  --int4-packed-compute             | --no-int4-packed-compute"
-#ifdef ENABLE_CUDA
     "\n  --wmma                            | --no-wmma                      [CUDA]"
     "\n  --bmma                            | --no-bmma                      [CUDA]"
     "\n  --cublas                          | --no-cublas                    [CUDA]"
-#endif
-#ifdef ENABLE_VULKAN
     "\n  --coopmat                         | --no-coopmat                   [Vulkan]"
-#endif
-#ifdef ENABLE_METAL
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
-#endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
     "\n  --image-memory-bandwidth          | --no-image-memory-bandwidth"
