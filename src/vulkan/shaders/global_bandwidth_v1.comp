@@ -10,7 +10,7 @@ layout(set = 0, binding = 1) writeonly buffer Output {
     float data[];
 } outputBuf;
 
-// Must match FETCH_PER_WI in benchmark_constants.h
+// Must match FETCH_PER_WI in common.h
 #define FETCH_PER_WI 16
 
 void main()

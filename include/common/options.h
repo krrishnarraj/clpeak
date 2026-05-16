@@ -4,7 +4,7 @@
 #include <bitset>
 #include <string>
 #include <common/benchmark_enums.h>  // Benchmark, Category
-#include <common/calibrate.h>
+#include <common/common.h>           // DEFAULT_TARGET_TIME_US
 
 // Shared CLI options populated once in entry.cpp and consumed by every
 // backend.  Each backend's applyOptions() copies the relevant fields into

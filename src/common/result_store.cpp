@@ -1,45 +1,11 @@
 #include <common/result_store.h>
+#include <common/common.h>
 #include <version.h>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <iostream>
 #include <cstring>
-
-// ---- OS name --------------------------------------------------------------
-// Mirrors the OS_NAME macro in common.h.  Duplicated here so result_store.cpp
-// stays free of the OpenCL include chain in common.h.
-
-static const char *osName()
-{
-#if defined(__APPLE__) || defined(__MACOSX)
-    return "Macintosh";
-#elif defined(__ANDROID__)
-    return "Android";
-#elif defined(_WIN32)
-  #if defined(_WIN64)
-    return "Win64";
-  #else
-    return "Win32";
-  #endif
-#elif defined(__linux__)
-  #if defined(__x86_64__)
-    return "Linux x64";
-  #elif defined(__i386__)
-    return "Linux x86";
-  #elif defined(__aarch64__)
-    return "Linux ARM64";
-  #elif defined(__arm__)
-    return "Linux ARM";
-  #else
-    return "Linux unknown";
-  #endif
-#elif defined(__FreeBSD__)
-    return "FreeBSD";
-#else
-    return "Unknown";
-#endif
-}
 
 // ---- Enum <-> string ------------------------------------------------------
 
@@ -178,7 +144,7 @@ void saveJson(const ResultStore &store, const std::string &filename)
     }
     f << "{\"format_version\":" << RESULT_FORMAT_VERSION
       << ",\"clpeak_version\":\"" << jsonEscape(CLPEAK_VERSION_STR) << "\""
-      << ",\"os\":\"" << jsonEscape(osName()) << "\""
+      << ",\"os\":\"" << jsonEscape(OS_NAME) << "\""
       << ",\"entries\":[\n";
     for (size_t i = 0; i < store.size(); i++)
     {
@@ -320,7 +286,7 @@ void saveXml(const ResultStore &store, const std::string &filename)
     f << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
       << "<clpeak format_version=\"" << RESULT_FORMAT_VERSION << "\""
       << " clpeak_version=\""        << xmlEscape(CLPEAK_VERSION_STR) << "\""
-      << " os=\""                    << xmlEscape(osName()) << "\">\n";
+      << " os=\""                    << xmlEscape(OS_NAME) << "\">\n";
 
     XmlPos p;
 

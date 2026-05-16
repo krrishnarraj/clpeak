@@ -3,7 +3,7 @@
 
 #include <common/peak.h>
 #include <opencl/cl_common.h>
-#include <common/benchmark_constants.h>
+#include <opencl/cl_utils.h>
 #include <common/inventory.h>
 #include <string>
 #include <memory>

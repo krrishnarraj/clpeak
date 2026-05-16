@@ -9,12 +9,9 @@
 #include <memory>
 #include <unordered_map>
 #include <common/common.h>
-#include <common/benchmark_constants.h>
 #include <common/logger.h>
-#include <common/benchmark_enums.h>
 #include <common/peak.h>
 #include <common/inventory.h>
-#include <common/backend_gating.h>  // centralized benchmark gating
 
 struct CliOptions; // forward decl
 

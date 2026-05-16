@@ -3,7 +3,7 @@
 #include <cuda/cuda_peak.h>
 #include <common/options.h>
 #include <common/inventory.h>
-#include <common/calibrate.h>
+#include <common/common.h>
 #include <nvrtc.h>
 #include <cstring>
 #include <cstdio>
@@ -383,47 +383,47 @@ int CudaPeak::runAll()
     log->resultScopeAttribute("arch", dev.info.archName);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
-    if (gating.isAllowed(Benchmark::ComputeSP))
+    if (isAllowed(Benchmark::ComputeSP))
       runComputeSP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeHP))
+    if (isAllowed(Benchmark::ComputeHP))
       runComputeHP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeDP))
+    if (isAllowed(Benchmark::ComputeDP))
       runComputeDP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeMP))
+    if (isAllowed(Benchmark::ComputeMP))
       runComputeMP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeBF16))
+    if (isAllowed(Benchmark::ComputeBF16))
       runComputeBF16(dev, cfg);
-    if (gating.isAllowedAs(Benchmark::Wmma, Category::FpCompute))
+    if (isAllowedAs(Benchmark::Wmma, Category::FpCompute))
       runWmma(dev, cfg, Category::FpCompute);
-    if (gating.isAllowedAs(Benchmark::Cublas, Category::FpCompute))
+    if (isAllowedAs(Benchmark::Cublas, Category::FpCompute))
       runCublas(dev, cfg, Category::FpCompute);
 
     // ---- Phase 2: integer compute (GOPS / TOPS) ------------------------
-    if (gating.isAllowed(Benchmark::ComputeInt))
+    if (isAllowed(Benchmark::ComputeInt))
       runComputeInt32(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeInt8DP))
+    if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-    if (gating.isAllowed(Benchmark::ComputeInt4Packed))
+    if (isAllowed(Benchmark::ComputeInt4Packed))
       runComputeInt4Packed(dev, cfg);
-    if (gating.isAllowedAs(Benchmark::Wmma, Category::IntCompute))
+    if (isAllowedAs(Benchmark::Wmma, Category::IntCompute))
       runWmma(dev, cfg, Category::IntCompute);
-    if (gating.isAllowedAs(Benchmark::Cublas, Category::IntCompute))
+    if (isAllowedAs(Benchmark::Cublas, Category::IntCompute))
       runCublas(dev, cfg, Category::IntCompute);
-    if (gating.isAllowed(Benchmark::AtomicThroughput))
+    if (isAllowed(Benchmark::AtomicThroughput))
       runAtomicThroughput(dev, cfg);
 
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
-    if (gating.isAllowed(Benchmark::GlobalBW))
+    if (isAllowed(Benchmark::GlobalBW))
       runGlobalBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::LocalBW))
+    if (isAllowed(Benchmark::LocalBW))
       runLocalBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::ImageBW))
+    if (isAllowed(Benchmark::ImageBW))
       runImageBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::TransferBW))
+    if (isAllowed(Benchmark::TransferBW))
       runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -----------------------------------------
-    if (gating.isAllowed(Benchmark::KernelLatency))
+    if (isAllowed(Benchmark::KernelLatency))
       runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);

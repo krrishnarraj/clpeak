@@ -10,9 +10,11 @@
 #include <cstdint>
 #include <sstream>
 #include <common/benchmark_enums.h>
+#include <common/common.h>
 
 // Immutable device properties queried from OpenCL.
-struct device_info_t {
+struct device_info_t
+{
     std::string deviceName;
     std::string driverVersion;
 
@@ -25,8 +27,8 @@ struct device_info_t {
     bool halfSupported;
     bool doubleSupported;
     bool int8DotProductSupported;
-    cl_device_type  clDeviceType;   // original OpenCL device type
-    DeviceType      deviceType;     // neutral equivalent
+    cl_device_type clDeviceType; // original OpenCL device type
+    DeviceType deviceType;       // neutral equivalent
 
     uint64_t localMemSize;
 

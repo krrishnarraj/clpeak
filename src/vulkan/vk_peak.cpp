@@ -3,7 +3,7 @@
 #include <vulkan/vk_peak.h>
 #include <common/options.h>
 #include <common/inventory.h>
-#include <common/calibrate.h>
+#include <common/common.h>
 #include <cstring>
 #include <sstream>
 #include <chrono>
@@ -923,54 +923,54 @@ int vkPeak::runAll()
     log->resultScopeAttribute("driver_version", dev.info.driverVersion);
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
-    if (gating.isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef VK_HAS_COMPUTE_HP_V1
-    if (gating.isAllowed(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V1
-    if (gating.isAllowed(Benchmark::ComputeDP))       runComputeDP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeDP))       runComputeDP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V1
-    if (gating.isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V1
-    if (gating.isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
+    if (isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
+    if (isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/false);
 #endif
 #ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
     // Float atomic add is reported in the fp-compute phase (mirrors Metal).
-    if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
+    if (isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
         runAtomicThroughputFp(dev, cfg);
 #endif
 
     // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
 #ifdef VK_HAS_COMPUTE_INT32_V1
-    if (gating.isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
-    if (gating.isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
-    if (gating.isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (gating.isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+    if (isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/true);
 #endif
-    if (gating.isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
+    if (isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
         runAtomicThroughput(dev, cfg);
 
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
-    if (gating.isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
-    if (gating.isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -------------------------------------
-    if (gating.isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
+    if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     log->print(NEWLINE);
     // device

@@ -1,7 +1,7 @@
 #include <opencl/cl_peak.h>
 #include <common/inventory.h>
 #include <common/options.h>
-#include <common/calibrate.h>
+#include <common/common.h>
 #include <cstring>
 
 #define MSTRINGIFY(...) #__VA_ARGS__
@@ -262,7 +262,7 @@ int clPeak::runAll()
         // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
           runKernelLatency(queue, prog, devInfo, cfg);
-        else if (gating.isAllowed(Benchmark::KernelLatency))
+        else if (isAllowed(Benchmark::KernelLatency))
         {
           log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
           log->resultScopeBegin("kernel_launch_latency");
@@ -324,12 +324,12 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
       }
       return total;
     }
-    Timer timer;
-    timer.start();
+    auto t1 = std::chrono::high_resolution_clock::now();
     for (unsigned int i = 0; i < n; i++)
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
     queue.finish();
-    return timer.stopAndTime();
+    auto t2 = std::chrono::high_resolution_clock::now();
+    return (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
   };
 
   // Phase 1: untimed warmup (cache + clock ramp). Keep each warmup as its own
@@ -364,7 +364,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            const std::string &unit, unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
-  if (!gating.isAllowed(which))
+  if (!isAllowed(which))
     return 0;
 
   // Vector width suffixes and display labels

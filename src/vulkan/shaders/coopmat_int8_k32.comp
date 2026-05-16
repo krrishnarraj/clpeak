@@ -10,7 +10,7 @@
 // lanes naturally accumulate into one INT32 slot (DP4a-style).
 //
 // Iterations halved vs the K=16 variant so that the work budget per
-// work-item stays at COOPMAT_WORK_PER_WI (see benchmark_constants.h):
+// work-item stays at COOPMAT_WORK_PER_WI (see common.h):
 //   work_per_WG = M * N * K * 2 * ITERS
 //   work_per_WI = work_per_WG / local_size_x
 //   K=16,ITERS=256 -> 16*16*16*2*256 / 32 = 65536 /WI

@@ -1,6 +1,4 @@
 #include <common/common.h>
-#include <common/benchmark_constants.h>
-#include <common/calibrate.h>
 
 benchmark_config_t benchmark_config_t::forDevice(DeviceType type)
 {
@@ -21,45 +19,13 @@ benchmark_config_t benchmark_config_t::forDevice(DeviceType type)
     return cfg;
 }
 
-void Timer::start()
+unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int forced)
 {
-    tick = std::chrono::high_resolution_clock::now();
-}
-
-float Timer::stopAndTime()
-{
-    tock = std::chrono::high_resolution_clock::now();
-    return (float)(std::chrono::duration_cast<std::chrono::microseconds>(tock - tick).count());
-}
-
-void populate(float *ptr, uint64_t N)
-{
-    for (uint64_t i = 0; i < N; i++)
-    {
-        ptr[i] = (float)i;
-    }
-}
-
-void populate(double *ptr, uint64_t N)
-{
-    for (uint64_t i = 0; i < N; i++)
-    {
-        ptr[i] = (double)i;
-    }
-}
-
-uint64_t roundToMultipleOf(uint64_t number, uint64_t base, uint64_t maxValue)
-{
-    uint64_t n = (number > maxValue) ? maxValue : number;
-    return (n / base) * base;
-}
-
-void trimString(std::string &str)
-{
-    size_t pos = str.find('\0');
-
-    if (pos != std::string::npos)
-    {
-        str.erase(pos);
-    }
+  if (forced) return forced;
+  if (target_us == 0) target_us = 5000000; // 5s legacy default
+  if (per_iter_us < 1.0) per_iter_us = 1.0;
+  double want = (double)target_us / per_iter_us;
+  if (want < 1.0)     want = 1.0;
+  if (want > 10000.0) want = 10000.0;
+  return (unsigned int)want;
 }

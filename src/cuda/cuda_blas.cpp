@@ -20,7 +20,7 @@
 
 #include <cuda/cuda_peak.h>
 #include <cublasLt.h>
-#include <common/calibrate.h>
+#include <common/common.h>
 #include <chrono>
 #include <sstream>
 #include <vector>

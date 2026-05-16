@@ -1,8 +1,6 @@
 add_library(peak_common STATIC
     peak.cpp
     common.cpp
-    backend_gating.cpp
-    calibrate.cpp
     inventory.cpp
     logger.cpp
     options.cpp

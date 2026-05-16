@@ -1,5 +1,5 @@
 #include <opencl/cl_peak.h>
-#include <common/calibrate.h>
+#include <opencl/cl_utils.h>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -44,7 +44,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 {
   UNUSED(prog);
 
-  if (!gating.isAllowed(Benchmark::TransferBW))
+  if (!isAllowed(Benchmark::TransferBW))
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -87,12 +87,12 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         }
         return total;
       }
-      Timer timer;
-      timer.start();
+      auto t1 = std::chrono::high_resolution_clock::now();
       for (unsigned int i = 0; i < n; i++)
         op(nullptr);
       queue.finish();
-      return timer.stopAndTime();
+      auto t2 = std::chrono::high_resolution_clock::now();
+      return (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
     };
 
     // Phase 2: timed probe -> per-iter time -> calibrated iters.
@@ -189,9 +189,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     auto calibrateMapIters = [&](std::function<void()> iter) -> unsigned int {
       for (unsigned int w = 0; w < warmupCount; w++) iter();
       unsigned int probe = 1;
-      Timer probeT; probeT.start();
+      auto t1 = std::chrono::high_resolution_clock::now();
       for (unsigned int i = 0; i < probe; i++) iter();
-      float probeUs = probeT.stopAndTime();
+      auto t2 = std::chrono::high_resolution_clock::now();
+      float probeUs = (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
       return pickIters((double)probeUs / (double)probe, cfg.targetTimeUs, forced);
     };
 
@@ -213,11 +214,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float timed = 0;
       for (unsigned int i = 0; i < iters; i++)
       {
-        Timer timer;
-        timer.start();
+        auto t1 = std::chrono::high_resolution_clock::now();
         void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
         queue.finish();
-        timed += timer.stopAndTime();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
         queue.enqueueUnmapMemObject(clBuffer, mapPtr);
         queue.finish();
@@ -247,10 +248,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
         queue.finish();
 
-        Timer timer;
-        timer.start();
+        auto t1 = std::chrono::high_resolution_clock::now();
         memcpy(arr, mapPtr, bytes);
-        timed += timer.stopAndTime();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
         queue.enqueueUnmapMemObject(clBuffer, mapPtr);
         queue.finish();
@@ -281,11 +282,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
         queue.finish();
 
-        Timer timer;
-        timer.start();
+        auto t1 = std::chrono::high_resolution_clock::now();
         queue.enqueueUnmapMemObject(clBuffer, mapPtr);
         queue.finish();
-        timed += timer.stopAndTime();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
       }
       timed /= static_cast<float>(iters);
 
@@ -312,10 +313,10 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
         void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
         queue.finish();
 
-        Timer timer;
-        timer.start();
+        auto t1 = std::chrono::high_resolution_clock::now();
         memcpy(mapPtr, arr, bytes);
-        timed += timer.stopAndTime();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
         queue.enqueueUnmapMemObject(clBuffer, mapPtr);
         queue.finish();

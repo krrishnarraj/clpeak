@@ -5,7 +5,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   float timed, gops;
   cl::NDRange globalSize, localSize;
 
-  if (!gating.isAllowed(Benchmark::AtomicThroughput))
+  if (!isAllowed(Benchmark::AtomicThroughput))
     return 0;
 
   unsigned int forced = forceIters ? specifiedIters : 0;
