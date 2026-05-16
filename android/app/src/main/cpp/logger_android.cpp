@@ -1,57 +1,71 @@
 #include "logger_android.h"
 #include <sstream>
-#include <iomanip>
 
-// ---- print → JNI ---------------------------------------------------------
+// ── note ───────────────────────────────────────────────────────────────────
 
-void LoggerAndroid::print(std::string str)
+void LoggerAndroid::note(const std::string &msg)
 {
-    jstring jstr = jEnv->NewStringUTF(str.c_str());
+    jstring jstr = jEnv->NewStringUTF(msg.c_str());
     jEnv->CallVoidMethod(jObj, printCallback, jstr);
     jEnv->DeleteLocalRef(jstr);
 }
 
-void LoggerAndroid::print(double val)
+// ── onBackendBegin ─────────────────────────────────────────────────────────
+
+void LoggerAndroid::onBackendBegin(const std::string &name)
 {
-    std::stringstream ss;
-    ss << std::setprecision(2) << std::fixed << val;
-    jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-    jEnv->CallVoidMethod(jObj, printCallback, jstr);
-    jEnv->DeleteLocalRef(jstr);
+    if (!firstBackend)
+        note("\n");
+    firstBackend = false;
+
+    note("Backend: " + name + "\n");
 }
 
-void LoggerAndroid::print(float val)
+// ── onDeviceBegin ──────────────────────────────────────────────────────────
+
+void LoggerAndroid::onDeviceBegin(const std::string &name,
+                                  const std::string &platform,
+                                  const std::string &driverVersion,
+                                  const std::vector<Prop> &props,
+                                  bool showPlatformLine)
 {
-    std::stringstream ss;
-    ss << std::setprecision(2) << std::fixed << val;
-    jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-    jEnv->CallVoidMethod(jObj, printCallback, jstr);
-    jEnv->DeleteLocalRef(jstr);
+    int deviceIndent = showPlatformLine ? 2 : 1;
+    propIndent       = deviceIndent + 1;
+    metricIndent     = propIndent + 1;
+
+    if (showPlatformLine)
+        writeNote(1, "Platform: " + platform);
+
+    writeNote(deviceIndent, "Device: " + name);
+
+    if (!driverVersion.empty())
+        writeNote(propIndent, "Driver version  : " + driverVersion);
+
+    for (const auto &prop : props)
+    {
+        std::string line = prop.key;
+        while (line.size() < 17)
+            line += ' ';
+        line += ": " + prop.value;
+        writeNote(propIndent, line);
+    }
 }
 
-void LoggerAndroid::print(int val)
+// ── onTestBegin ────────────────────────────────────────────────────────────
+
+void LoggerAndroid::onTestBegin(const std::string & /*tag*/,
+                                const std::string &display,
+                                const std::string & /*unit*/)
 {
-    std::stringstream ss;
-    ss << val;
-    jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-    jEnv->CallVoidMethod(jObj, printCallback, jstr);
-    jEnv->DeleteLocalRef(jstr);
+    note("\n");
+    writeNote(propIndent, display);
 }
 
-void LoggerAndroid::print(unsigned int val)
-{
-    std::stringstream ss;
-    ss << val;
-    jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-    jEnv->CallVoidMethod(jObj, printCallback, jstr);
-    jEnv->DeleteLocalRef(jstr);
-}
+// ── onMetricEmitted ────────────────────────────────────────────────────────
 
-// ---- onMetricEmitted → JNI -----------------------------------------------
-
-void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value)
+void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*subMetric*/)
 {
-    if (e.status != ResultStatus::Ok || !recordMetricCallback)
+    if (!recordMetricCallback)
         return;
 
     jstring jBackend  = jEnv->NewStringUTF(e.backend.c_str());
@@ -78,4 +92,59 @@ void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value)
     jEnv->DeleteLocalRef(jTest);
     jEnv->DeleteLocalRef(jMetric);
     jEnv->DeleteLocalRef(jUnit);
+}
+
+// ── onMetricSkipped ────────────────────────────────────────────────────────
+
+void LoggerAndroid::onMetricSkipped(const ResultEntry &e)
+{
+    const char *tag = "";
+    switch (e.status)
+    {
+    case ResultStatus::Unsupported: tag = "unsupported"; break;
+    case ResultStatus::Skipped:     tag = "skipped";     break;
+    case ResultStatus::Error:       tag = "error";       break;
+    default: break;
+    }
+
+    std::stringstream ss;
+    ss << indentStr(metricIndent) << e.metric << " : ["
+       << tag << "] " << e.reason << "\n";
+    note(ss.str());
+}
+
+// ── onTestSkippedAll ───────────────────────────────────────────────────────
+
+void LoggerAndroid::onTestSkippedAll(ResultStatus status, const std::string &reason)
+{
+    const char *tag = "";
+    switch (status)
+    {
+    case ResultStatus::Unsupported: tag = "unsupported"; break;
+    case ResultStatus::Skipped:     tag = "skipped";     break;
+    case ResultStatus::Error:       tag = "error";       break;
+    default: break;
+    }
+
+    writeNote(metricIndent, std::string("[") + tag + "] " + reason);
+}
+
+// ── onTestEnd / onDeviceEnd / onBackendEnd ─────────────────────────────────
+
+void LoggerAndroid::onTestEnd()    { /* no-op */ }
+void LoggerAndroid::onDeviceEnd()  { /* no-op */ }
+void LoggerAndroid::onBackendEnd() { /* no-op */ }
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+std::string LoggerAndroid::indentStr(int level) const
+{
+    if (level <= 0)
+        return "";
+    return std::string(static_cast<size_t>(level) * 2, ' ');
+}
+
+void LoggerAndroid::writeNote(int level, const std::string &text)
+{
+    note(indentStr(level) + text + "\n");
 }

@@ -1,7 +1,8 @@
 #include <common/logger.h>
+#include <cassert>
 #include <sstream>
 
-// ---- Constructor ----------------------------------------------------------
+// ── Constructor ────────────────────────────────────────────────────────────
 
 logger::logger(std::string compareFileName)
     : compareEnabled(!compareFileName.empty())
@@ -10,112 +11,218 @@ logger::logger(std::string compareFileName)
         baseline = buildBaselineMap(loadResultFile(compareFileName));
 }
 
-// ---- recordSkip -----------------------------------------------------------
+// ── Top-level entry ────────────────────────────────────────────────────────
 
-void logger::recordSkip(const std::string &metric, ResultStatus status,
-                        const std::string &reason)
+logger::BackendScope logger::beginBackend(const std::string &name)
 {
-    emit(metric, status, 0.0f, reason);
+    return BackendScope(this, name);
 }
 
-// ---- Result-scope recording -----------------------------------------------
+// ── BackendScope ───────────────────────────────────────────────────────────
 
-void logger::resultScopeBegin(std::string name)
+logger::BackendScope::BackendScope(logger *log, const std::string &name)
+    : log(log)
 {
-    shimDepth++;
-    if (shimDepth == 4)
-    {
-        inTestScope = true;
-        curTest = name;
-        curUnit.clear();
-        if (curCategory == Category::Unknown ||
-            curCategory == Category::Latency ||
-            curCategory == Category::Bandwidth ||
-            curCategory == Category::FpCompute ||
-            curCategory == Category::IntCompute)
-        {
-            curCategory = Category::Unknown;
-        }
-    }
+    assert(log->contextDepth == 0);
+    log->curBackend   = name;
+    log->curPlatform.clear();
+    log->curDevice.clear();
+    log->curDriver.clear();
+    log->contextDepth = 1;
+    log->onBackendBegin(name);
 }
 
-void logger::resultScopeAttribute(std::string key, std::string value)
+logger::BackendScope::~BackendScope()
 {
-    switch (shimDepth)
-    {
-    case 2:
-        if      (key == "name")    curPlatform = value;
-        else if (key == "backend") curBackend  = value;
-        break;
-    case 3:
-        if      (key == "name")           curDevice = value;
-        else if (key == "driver_version") curDriver = value;
-        break;
-    case 4:
-        if (key == "unit")
-        {
-            curUnit     = value;
-            curCategory = categoryFromUnit(value);
-        }
-        break;
-    default:
-        break;
-    }
+    if (!closed)
+        end();
 }
 
-void logger::resultScopeAttribute(std::string key, unsigned int value)
+logger::BackendScope::BackendScope(BackendScope &&other) noexcept
+    : log(other.log), closed(other.closed)
 {
-    std::stringstream ss;
-    ss << value;
-    resultScopeAttribute(key, ss.str());
+    other.log    = nullptr;
+    other.closed = true;
 }
 
-void logger::resultSetContent(float value)
+void logger::BackendScope::end()
 {
-    if (shimDepth == 4 && !curTest.empty())
-        emit(curTest, ResultStatus::Ok, value, "");
+    if (closed) return;
+    closed = true;
+    assert(log->contextDepth == 1);
+    log->onBackendEnd();
+    log->curBackend.clear();
+    log->contextDepth = 0;
 }
 
-void logger::resultScopeEnd()
+logger::DeviceScope logger::BackendScope::beginDevice(const DeviceSpec &spec)
 {
-    if (shimDepth == 4)
-    {
-        curTest.clear();
-        curUnit.clear();
-        curCategory = Category::Unknown;
-        inTestScope = false;
-    }
-    if (shimDepth > 0)
-        shimDepth--;
+    assert(!closed);
+    assert(log->contextDepth == 1);
+    return DeviceScope(log, spec);
 }
 
-void logger::resultRecord(std::string metric, float value)
+// ── DeviceScope ────────────────────────────────────────────────────────────
+
+logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
+    : log(log)
 {
-    if (shimDepth == 4)
-        emit(metric, ResultStatus::Ok, value, "");
+    assert(log->contextDepth == 1);
+
+    log->curPlatform = spec.platform.empty() ? log->curBackend : spec.platform;
+    log->curDevice   = spec.name;
+    log->curDriver   = spec.driver_version;
+    log->contextDepth = 2;
+
+    bool showPlatformLine = (log->curPlatform != log->curBackend);
+
+    log->onDeviceBegin(spec.name, log->curPlatform,
+                       spec.driver_version, spec.props,
+                       showPlatformLine);
 }
 
-// ---- emit (common: builds ResultEntry, pushes to results, calls hook) -----
-
-void logger::emit(const std::string &metric, ResultStatus status,
-                  float value, const std::string &reason)
+logger::DeviceScope::~DeviceScope()
 {
+    if (!closed)
+        end();
+}
+
+logger::DeviceScope::DeviceScope(DeviceScope &&other) noexcept
+    : log(other.log), closed(other.closed)
+{
+    other.log    = nullptr;
+    other.closed = true;
+}
+
+void logger::DeviceScope::end()
+{
+    if (closed) return;
+    closed = true;
+    assert(log->contextDepth == 2);
+    log->onDeviceEnd();
+    log->curDevice.clear();
+    log->curDriver.clear();
+    log->curPlatform.clear();
+    log->contextDepth = 1;
+}
+
+logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
+{
+    assert(!closed);
+    assert(log->contextDepth == 2);
+    return TestScope(log, spec);
+}
+
+// ── TestScope ──────────────────────────────────────────────────────────────
+
+logger::TestScope::TestScope(logger *log, const TestSpec &spec)
+    : log(log)
+{
+    assert(log->contextDepth == 2);
+
+    log->curTest     = spec.tag;
+    log->curUnit     = spec.unit;
+    log->curCategory = (spec.category != Category::Unknown)
+                           ? spec.category
+                           : categoryFromUnit(spec.unit);
+    log->contextDepth = 3;
+
+    log->onTestBegin(spec.tag, spec.display, spec.unit);
+}
+
+logger::TestScope::~TestScope()
+{
+    if (!closed)
+        end();
+}
+
+logger::TestScope::TestScope(TestScope &&other) noexcept
+    : log(other.log), closed(other.closed)
+{
+    other.log    = nullptr;
+    other.closed = true;
+}
+
+void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
+{
+    assert(!closed);
+    assert(log->contextDepth == 3);
+
+    // Build ResultEntry and push
     ResultEntry e;
-    e.backend  = curBackend;
-    e.platform = curPlatform;
-    e.device   = curDevice;
-    e.driver   = curDriver;
-    e.category = categoryString(curCategory);
-    e.test     = curTest;
+    e.backend  = log->curBackend;
+    e.platform = log->curPlatform;
+    e.device   = log->curDevice;
+    e.driver   = log->curDriver;
+    e.category = categoryString(log->curCategory);
+    e.test     = log->curTest;
     e.metric   = metric;
-    e.unit     = curUnit;
-    e.status   = status;
-    e.value    = (status == ResultStatus::Ok) ? value : 0.0f;
-    e.reason   = reason;
-    results.push_back(e);
+    e.unit     = log->curUnit;
+    e.status   = ResultStatus::Ok;
+    e.value    = value;
+    log->results.push_back(e);
 
-    onMetricEmitted(e, value);
+    log->onMetricEmitted(e, value, opts.subMetric);
 }
 
-// Default hook: no-op
-void logger::onMetricEmitted(const ResultEntry &, float) {}
+void logger::TestScope::skip(std::string metric, ResultStatus status,
+                             std::string reason)
+{
+    assert(!closed);
+    assert(log->contextDepth == 3);
+
+    // Build ResultEntry and push
+    ResultEntry e;
+    e.backend  = log->curBackend;
+    e.platform = log->curPlatform;
+    e.device   = log->curDevice;
+    e.driver   = log->curDriver;
+    e.category = categoryString(log->curCategory);
+    e.test     = log->curTest;
+    e.metric   = metric;
+    e.unit     = log->curUnit;
+    e.status   = status;
+    e.value    = 0.0f;
+    e.reason   = reason;
+    log->results.push_back(e);
+
+    log->onMetricSkipped(e);
+}
+
+void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,
+                                ResultStatus status, std::string reason)
+{
+    assert(!closed);
+    assert(log->contextDepth == 3);
+
+    log->onTestSkippedAll(status, reason);
+
+    for (const auto &metric : metrics)
+    {
+        ResultEntry e;
+        e.backend  = log->curBackend;
+        e.platform = log->curPlatform;
+        e.device   = log->curDevice;
+        e.driver   = log->curDriver;
+        e.category = categoryString(log->curCategory);
+        e.test     = log->curTest;
+        e.metric   = metric;
+        e.unit     = log->curUnit;
+        e.status   = status;
+        e.value    = 0.0f;
+        e.reason   = reason;
+        log->results.push_back(e);
+    }
+}
+
+void logger::TestScope::end()
+{
+    if (closed) return;
+    closed = true;
+    assert(log->contextDepth == 3);
+    log->onTestEnd();
+    log->curTest.clear();
+    log->curUnit.clear();
+    log->curCategory = Category::Unknown;
+    log->contextDepth = 2;
+}

@@ -12,12 +12,11 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
+  auto test = currentDeviceScope->beginTest(
+    {"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
+
   try
   {
-    log->print(NEWLINE TAB TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    auto scope = log->resultScope("local_memory_bandwidth");
-    log->resultScopeAttribute("unit", "gbps");
-
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));
 
@@ -27,7 +26,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     const int widths[] = {1, 2, 4, 8};
     const char *knames[] = {"local_bandwidth_v1", "local_bandwidth_v2", "local_bandwidth_v4", "local_bandwidth_v8"};
     const char *labels[] = {"float", "float2", "float4", "float8"};
-    const char *display[] = {"float   ", "float2  ", "float4  ", "float8  "};
 
     cl::Kernel kernels[4];
     for (int w = 0; w < 4; w++)
@@ -43,29 +41,21 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
         continue;
 
-      log->print(TAB TAB TAB + std::string(display[w]) + ": ");
-
       timed = run_kernel(queue, kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
 
       // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * globalWIs;
       gbps = (float)bytesPerCall / timed / 1e3f;
 
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->resultRecord(labels[w], gbps);
+      test.emit(labels[w], gbps);
     }
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     const char *labels[] = {"float", "float2", "float4", "float8"};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 4; w++)
-      log->recordSkip(labels[w], ResultStatus::Error, reason);
+      test.skip(labels[w], ResultStatus::Error, reason);
     return -1;
   }
 

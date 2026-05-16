@@ -25,12 +25,11 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   cl::NDRange localSize  = devInfo.maxWGSize;
   unsigned int iters = forceIters ? specifiedIters : cfg.kernelLatencyIters;
 
+  auto test = currentDeviceScope->beginTest(
+    {"kernel_launch_latency", "Kernel launch latency (us)", "us"});
+
   try
   {
-    log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
-    auto scope = log->resultScope("kernel_launch_latency");
-    log->resultScopeAttribute("unit", "us");
-
     cl::Buffer inputBuf  = cl::Buffer(ctx, CL_MEM_READ_ONLY,  (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
 
@@ -62,23 +61,14 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     float dispatchUs  = (float)(totalDispatchUs  / iters);
     float roundtripUs = (float)(totalRoundtripUs / iters);
 
-    log->print(TAB TAB TAB "dispatch  : ");
-    log->print(dispatchUs);
-    log->print(NEWLINE TAB TAB TAB "roundtrip : ");
-    log->print(roundtripUs);
-    log->print(NEWLINE);
-    log->resultRecord("dispatch",  dispatchUs);
-    log->resultRecord("roundtrip", roundtripUs);
+    test.emit("dispatch",  dispatchUs);
+    test.emit("roundtrip", roundtripUs);
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    log->recordSkip("dispatch", ResultStatus::Error, reason);
-    log->recordSkip("roundtrip", ResultStatus::Error, reason);
+    test.skip("dispatch", ResultStatus::Error, reason);
+    test.skip("roundtrip", ResultStatus::Error, reason);
     return -1;
   }
 

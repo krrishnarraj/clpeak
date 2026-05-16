@@ -130,32 +130,18 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
 
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    log->print(NEWLINE TAB "MPS GEMM peak (TFLOPS)" NEWLINE);
-    log->resultScopeBegin("mps-gemm-fp");
-    log->resultScopeAttribute("unit", "tflops");
+    auto test = currentDeviceScope->beginTest({"mps-gemm-fp", "MPS GEMM peak", "tflops"});
 
     if (!dev.info.isAppleSilicon)
     {
-        log->print(TAB TAB "MPS GEMM requires Apple silicon! Skipped" NEWLINE);
-        log->recordSkip("fp32", ResultStatus::Unsupported,
-                         "MPS GEMM requires Apple silicon");
-        log->recordSkip("fp16", ResultStatus::Unsupported,
-                         "MPS GEMM requires Apple silicon");
-        log->recordSkip("bf16", ResultStatus::Unsupported,
-                         "MPS GEMM requires Apple silicon");
-        log->resultScopeEnd();
+        test.skipAll({"fp32", "fp16", "bf16"}, ResultStatus::Unsupported,
+                      "MPS GEMM requires Apple silicon");
         return 0;
     }
 
     const uint32_t D = pickGemmDim(dev.info);
     const uint32_t M = D, N = D, K = D;
     const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
-
-    {
-        std::stringstream ss; ss << M << "x" << N << "x" << K;
-        log->resultScopeAttribute("dim", ss.str());
-    }
-    log->resultScopeAttribute("layout", "row-major");
 
     id<MTLDevice>       mtlDev = dev.impl->device;
     id<MTLCommandQueue> queue  = dev.impl->queue;
@@ -167,8 +153,9 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     id<MTLBuffer> bufB = makePrivateBuffer(mtlDev, (uint64_t)K * N * 4);
     if (!bufA || !bufB)
     {
-        log->print(TAB TAB "Failed to allocate input buffers" NEWLINE);
-        log->resultScopeEnd();
+        test.skip("fp32", ResultStatus::Error, "Failed to allocate input buffers");
+        test.skip("fp16", ResultStatus::Error, "Failed to allocate input buffers");
+        test.skip("bf16", ResultStatus::Error, "Failed to allocate input buffers");
         return -1;
     }
     {
@@ -183,16 +170,12 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
     auto runMatMul = [&](const char *label, MPSDataType dt, uint32_t elemSize)
     {
-        log->print(TAB TAB);
-        log->print(label);
-        log->print(" : ");
         @autoreleasepool {
             const uint64_t outBytes = (uint64_t)M * N * elemSize;
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufC)
             {
-                log->print("output alloc failed" NEWLINE);
-                log->resultRecord(label, 0.0f);
+                test.skip(label, ResultStatus::Error, "output alloc failed");
                 return;
             }
 
@@ -227,8 +210,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double per_iter_us = timeMPSMatMul(queue, mm, matA, matB, matC, warmup);
             if (per_iter_us <= 0.0)
             {
-                log->print("timing probe failed" NEWLINE);
-                log->resultRecord(label, 0.0f);
+                test.skip(label, ResultStatus::Error, "timing probe failed");
                 return;
             }
 
@@ -236,24 +218,18 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double mean_us = timeMPSMatMul(queue, mm, matA, matB, matC, iters);
             double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
 
-            log->print((float)tops);
-            log->print(NEWLINE);
-            log->resultRecord(label, (float)tops);
+            test.emit(label, (float)tops);
         }
     };
 
     auto runGraphMatMul = [&](const char *label, MPSDataType dt, uint32_t elemSize)
     {
-        log->print(TAB TAB);
-        log->print(label);
-        log->print(" : ");
         @autoreleasepool {
             const uint64_t outBytes = (uint64_t)M * N * elemSize;
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufC)
             {
-                log->print("output alloc failed" NEWLINE);
-                log->resultRecord(label, 0.0f);
+                test.skip(label, ResultStatus::Error, "output alloc failed");
                 return;
             }
 
@@ -280,8 +256,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double per_iter_us = timeMPSGraph(queue, g, feeds, results, warmup);
             if (per_iter_us <= 0.0)
             {
-                log->print("timing probe failed" NEWLINE);
-                log->resultRecord(label, 0.0f);
+                test.skip(label, ResultStatus::Error, "timing probe failed");
                 return;
             }
 
@@ -289,20 +264,13 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
             double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
 
-            log->print((float)tops);
-            log->print(NEWLINE);
-            log->resultRecord(label, (float)tops);
+            test.emit(label, (float)tops);
         }
     };
 
     auto reportUnsupported = [&](const char *label, const char *msg)
     {
-        log->print(TAB TAB);
-        log->print(label);
-        log->print(" : ");
-        log->print(msg);
-        log->print(NEWLINE);
-        log->resultRecord(label, 0.0f);
+        test.skip(label, ResultStatus::Unsupported, msg);
     };
 
     // ---- Run the dtype matrix --------------------------------------------
@@ -324,7 +292,6 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
         reportUnsupported("bf16", "bf16 requires macOS 14 -- unsupported on this device");
     }
 
-    log->resultScopeEnd(); // mps-gemm
     return 0;
 }
 
@@ -332,16 +299,12 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    log->print(NEWLINE TAB "MPS GEMM peak (TOPS)" NEWLINE);
-    log->resultScopeBegin("mps-gemm-int");
-    log->resultScopeAttribute("unit", "tops");
+    auto test = currentDeviceScope->beginTest({"mps-gemm-int", "MPS GEMM peak", "tops"});
 
     if (!dev.info.isAppleSilicon)
     {
-        log->print(TAB TAB "MPS GEMM requires Apple silicon! Skipped" NEWLINE);
-        log->recordSkip("int8", ResultStatus::Unsupported,
-                         "MPS GEMM requires Apple silicon");
-        log->resultScopeEnd();
+        test.skip("int8", ResultStatus::Unsupported,
+                   "MPS GEMM requires Apple silicon");
         return 0;
     }
 
@@ -349,21 +312,14 @@ int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t M = D, N = D, K = D;
     const double  ops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
-    {
-        std::stringstream ss; ss << M << "x" << N << "x" << K;
-        log->resultScopeAttribute("dim", ss.str());
-    }
-    log->resultScopeAttribute("layout", "row-major");
-
     id<MTLDevice>       mtlDev = dev.impl->device;
     id<MTLCommandQueue> queue  = dev.impl->queue;
 
     // ---- int8 via MPSGraph (cast to int32 for the matmul) -----------------
-    log->print(TAB TAB "int8 : ");
     if (!dev.info.simdgroupMatrixInt8Supported)
     {
-        log->print("requires Apple9 (M3) or newer -- unsupported on this device" NEWLINE);
-        log->resultRecord("int8", 0.0f);
+        test.skip("int8", ResultStatus::Unsupported,
+                   "requires Apple9 (M3) or newer -- unsupported on this device");
     }
     else
     {
@@ -376,8 +332,7 @@ int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufA || !bufB || !bufC)
             {
-                log->print("buffer alloc failed" NEWLINE);
-                log->resultRecord("int8", 0.0f);
+                test.skip("int8", ResultStatus::Error, "buffer alloc failed");
             }
             else
             {
@@ -421,23 +376,19 @@ int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
                 double per_iter_us = timeMPSGraph(queue, g, feeds, results, warmup);
                 if (per_iter_us <= 0.0)
                 {
-                    log->print("timing probe failed" NEWLINE);
-                    log->resultRecord("int8", 0.0f);
+                    test.skip("int8", ResultStatus::Error, "timing probe failed");
                 }
                 else
                 {
                     unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
                     double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
                     double tops = ops_per_iter * 1.0e6 / mean_us / 1.0e12;
-                    log->print((float)tops);
-                    log->print(NEWLINE);
-                    log->resultRecord("int8", (float)tops);
+                    test.emit("int8", (float)tops);
                 }
             }
         }
     }
 
-    log->resultScopeEnd(); // mps-gemm-int
     return 0;
 }
 

@@ -165,9 +165,6 @@ struct vk_compute_desc_t
   bool skip;
   const char *skipMsg;
 
-  // Optional extra result attribute (e.g. emulated="true" for packed INT4).
-  const char *extraAttribKey;
-  const char *extraAttribVal;
 };
 
 // Top-level Vulkan benchmark runner
@@ -243,6 +240,10 @@ private:
   // a clean skip) and -1 if buffer allocation itself failed.
   int runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                        const vk_compute_desc_t &d);
+
+  // Points to the current device scope during runAll().  Individual
+  // benchmark methods use it to open TestScopes.
+  logger::DeviceScope *currentDeviceScope = nullptr;
 };
 
 // Embedded SPIR-V shader data (generated at build time)

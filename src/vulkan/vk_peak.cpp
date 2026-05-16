@@ -818,20 +818,12 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
 
 int vkPeak::runAll()
 {
-  log->print(NEWLINE "=== Vulkan backend ===" NEWLINE);
+  auto backendScope = log->beginBackend("Vulkan");
   if (!initInstance())
   {
-    log->print("Vulkan: failed to create instance or no devices found" NEWLINE);
+    log->note("Vulkan: failed to create instance or no devices found\n");
     return -1;
   }
-
-  // Mirror the OpenCL context stack so logger_android recordMetric() can
-  // reach contextStack depth 4 (clpeak > platform > device > test_group).
-  auto clpeakScope = log->resultScope("clpeak");
-  log->resultScopeAttribute("os", OS_NAME);
-  auto platformScope = log->resultScope("platform");
-  log->resultScopeAttribute("name", "Vulkan");
-  log->resultScopeAttribute("backend", "Vulkan");
 
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
@@ -841,7 +833,7 @@ int vkPeak::runAll()
     VulkanDevice dev;
     if (!dev.init(instance, physicalDevices[d]))
     {
-      log->print(NEWLINE "Vulkan: failed to init device " + std::to_string(d) + NEWLINE);
+      log->note("Vulkan: failed to init device " + std::to_string(d) + "\n");
       continue;
     }
 
@@ -904,23 +896,19 @@ int vkPeak::runAll()
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
 
-    log->print(NEWLINE "Vulkan Device: " + dev.info.deviceName + NEWLINE);
-    log->print(TAB "API version   : " + dev.info.apiVersion + NEWLINE);
-    log->print(TAB "Driver version: " + dev.info.driverVersion + NEWLINE);
-    log->print(TAB "VRAM          : ");
-    log->print((unsigned int)(dev.info.heapSize / (1024 * 1024)));
-    log->print(" MB" NEWLINE);
+    std::vector<logger::Prop> deviceProps;
+    deviceProps.push_back({"API version", dev.info.apiVersion});
+    deviceProps.push_back({"VRAM", std::to_string(dev.info.heapSize / (1024*1024)) + " MB"});
     if (dev.info.numCUs > 0)
-    {
-      log->print(TAB "Compute units : ");
-      log->print(dev.info.numCUs);
-      log->print(NEWLINE);
-    }
+      deviceProps.push_back({"Compute units", std::to_string(dev.info.numCUs)});
 
-    auto deviceScope = log->resultScope("device");
-    log->resultScopeAttribute("name", dev.info.deviceName);
-    log->resultScopeAttribute("api", "vulkan");
-    log->resultScopeAttribute("driver_version", dev.info.driverVersion);
+    auto deviceScope = backendScope.beginDevice({
+      dev.info.deviceName,
+      "",   // platform defaults to "Vulkan"
+      dev.info.driverVersion,
+      deviceProps
+    });
+    currentDeviceScope = &deviceScope;
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
     if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
@@ -972,12 +960,11 @@ int vkPeak::runAll()
     // ---- Phase 4: latency (us) -------------------------------------
     if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
-    log->print(NEWLINE);
-    // device
+    currentDeviceScope = nullptr;
+    // deviceScope auto-closes here
   }
 
-  // platform
-  // clpeak
+  // backendScope auto-closes here
   return 0;
 }
 
@@ -997,33 +984,24 @@ int vkPeak::runAll()
 int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                              const vk_compute_desc_t &d)
 {
-  log->print(NEWLINE TAB);
-  log->print(d.title);
-  log->print(NEWLINE);
-  auto scope = log->resultScope(d.resultTag);
-  log->resultScopeAttribute("unit", d.unit);
-  if (d.extraAttribKey && d.extraAttribVal)
-    log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
+  logger::TestSpec testSpec;
+  testSpec.tag = d.resultTag;
+  testSpec.display = d.title;
+  testSpec.unit = d.unit;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   if (d.skip)
   {
-    log->print(TAB TAB);
-    log->print(d.skipMsg ? d.skipMsg : "Skipped");
-    log->print(NEWLINE);
-    struct SkipVariant { const char *label; };
-    std::vector<SkipVariant> skipVariants;
+    const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
     if (d.variants && d.numVariants > 0)
     {
       for (uint32_t i = 0; i < d.numVariants; i++)
-        skipVariants.push_back({d.variants[i].label});
+        test.skip(d.variants[i].label, ResultStatus::Unsupported, msg);
     }
     else
     {
-      skipVariants.push_back({d.metricLabel});
+      test.skip(d.metricLabel, ResultStatus::Unsupported, msg);
     }
-    for (const auto &sv : skipVariants)
-      log->recordSkip(sv.label, ResultStatus::Unsupported,
-                       d.skipMsg ? d.skipMsg : "Skipped");
     return 0;
   }
 
@@ -1067,7 +1045,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->note("Failed to allocate buffer\n");
     return -1;
   }
 
@@ -1141,20 +1119,14 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
 
   // Build + dispatch each variant's pipeline.  Variants failing pipeline
-  // creation are printed as skipped but don't abort the group -- some
-  // drivers accept the v1 shader but choke on a wider packed variant.
+  // creation are skipped but don't abort the group -- some drivers accept
+  // the v1 shader but choke on a wider packed variant.
   for (const auto &v : variants)
   {
-    log->print(TAB TAB);
-    log->print(v.label);
-    log->print(" : ");
-
     VkPipeline pipeline;
     if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline))
     {
-      log->print("pipeline creation failed (driver may not honor extension)" NEWLINE);
-      log->recordSkip(v.label, ResultStatus::Error,
-                       "Pipeline creation failed");
+      test.skip(v.label, ResultStatus::Error, "Pipeline creation failed");
       continue;
     }
 
@@ -1163,18 +1135,14 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                             d.pushData, d.pushSize);
     if (timed <= 0.0f)
     {
-      log->print("submit failed (driver lost the device or rejected the dispatch)" NEWLINE);
-      log->recordSkip(v.label, ResultStatus::Error,
-                       "vkQueueSubmit/WaitIdle failed");
+      test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
       vkDestroyPipeline(dev.device, pipeline, nullptr);
       continue;
     }
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
 
-    log->print(value);
-    log->print(NEWLINE);
-    log->resultRecord(v.label, value);
+    test.emit(v.label, value);
 
     vkDestroyPipeline(dev.device, pipeline, nullptr);
   }
@@ -1351,8 +1319,6 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
   d.elemSize        = sizeof(int32_t);
   d.pushData        = &A;
   d.pushSize        = sizeof(A);
-  d.extraAttribKey  = "emulated";
-  d.extraAttribVal  = "true";
   return runComputeKernel(dev, cfg, d);
 }
 #endif
@@ -1461,8 +1427,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.pushSize       = sizeof(A);
       d.skip           = !dev.info.coopmatFP32Supported;
       d.skipMsg        = "No 16x16x16 fp32xfp32+fp32 coopmat property! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       runComputeKernel(dev, cfg, d);
     }
 #endif
@@ -1485,8 +1449,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.pushSize       = sizeof(A);
       d.skip           = !dev.info.coopmatFP16Supported;
       d.skipMsg        = "No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       runComputeKernel(dev, cfg, d);
     }
 #endif
@@ -1509,8 +1471,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.pushSize       = sizeof(A);
       d.skip           = !dev.info.coopmatBF16Supported;
       d.skipMsg        = "No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       runComputeKernel(dev, cfg, d);
     }
 #endif
@@ -1533,8 +1493,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.pushSize       = sizeof(A);
       d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E4M3Supported);
       d.skipMsg        = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       runComputeKernel(dev, cfg, d);
     }
 #endif
@@ -1557,8 +1515,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.pushSize       = sizeof(A);
       d.skip           = !(dev.info.fp8Supported && dev.info.coopmatFP8E5M2Supported);
       d.skipMsg        = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       runComputeKernel(dev, cfg, d);
     }
 #endif
@@ -1580,7 +1536,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     d.outElemsPerWG  = coopOutElems;
     d.pushData       = &A;
     d.pushSize       = sizeof(A);
-    d.extraAttribKey = "tile";
 
     const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (TOPS)";
     const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (TOPS)";
@@ -1598,7 +1553,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.title          = titleK16;
       d.spirv          = vk_shaders::coopmat_int8;
       d.spirvSize      = vk_shaders::coopmat_int8_size;
-      d.extraAttribVal = "16x16x16";
 #endif
     }
     else if (dev.info.coopmatINT8K == 32 && haveShaderK32)
@@ -1607,7 +1561,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.title          = titleK32;
       d.spirv          = vk_shaders::coopmat_int8_k32;
       d.spirvSize      = vk_shaders::coopmat_int8_k32_size;
-      d.extraAttribVal = "16x16x32";
 #endif
     }
     else
@@ -1618,7 +1571,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.title          = titleK16;
       d.skip           = true;
       d.skipMsg        = "No 16x16x{16,32} int8xint8+int32 coopmat property! Skipped";
-      d.extraAttribVal = "16x16x16";
       d.spirv          = nullptr;
       d.spirvSize      = 0;
     }
@@ -1644,9 +1596,11 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   uint32_t numGroups = (uint32_t)(numItems / FETCH_PER_WI / wgSize);
   if (numGroups == 0) numGroups = 1;
 
-  log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  auto scope_1 = log->resultScope("global_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  logger::TestSpec testSpec;
+  testSpec.tag = "global_memory_bandwidth";
+  testSpec.display = "Global memory bandwidth";
+  testSpec.unit = "gbps";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;
@@ -1661,7 +1615,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
+    log->note("Failed to allocate buffers\n");
     return -1;
   }
 
@@ -1750,13 +1704,12 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   // (i.e. the loaded shader) changes per row.
   for (const auto &v : variants)
   {
-    log->print(TAB TAB);
-    log->print(v.label);
-    log->print("  : ");
     VkPipeline pipe;
     if (!dev.createComputePipeline(v.spv, v.sz, dsLayout, pipeLayout, pipe))
     {
-      log->print("pipeline creation failed" NEWLINE);
+      std::string key(v.label);
+      while (!key.empty() && key.back() == ' ') key.pop_back();
+      test.skip(key, ResultStatus::Error, "Pipeline creation failed");
       continue;
     }
     // Match OpenCL: reduce work-group count by vector width so total bytes
@@ -1769,15 +1722,12 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ') key.pop_back();
     if (timed <= 0.0f)
     {
-      log->print("submit failed" NEWLINE);
-      log->recordSkip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
     float gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord(key, gbps);
+    test.emit(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -1790,7 +1740,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyBuffer(dev.device, outputBuf, nullptr);
   vkFreeMemory(dev.device, outputMem, nullptr);
 
-  // global_memory_bandwidth
   return 0;
 }
 
@@ -1822,11 +1771,11 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   unsigned int forced = forceIters ? specifiedIters : 0;
 
-  log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
-  auto scope_2 = log->resultScope("transfer_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
-  log->resultScopeAttribute("memory", "host_visible_staging");
-  log->resultScopeAttribute("timer", canUseTimestamps ? "gpu_timestamp" : "host_wall");
+  logger::TestSpec testSpec;
+  testSpec.tag = "transfer_bandwidth";
+  testSpec.display = "Transfer bandwidth";
+  testSpec.unit = "gbps";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   VkBuffer hostBuf = VK_NULL_HANDLE;
   VkBuffer devBuf = VK_NULL_HANDLE;
@@ -1842,7 +1791,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         devBuf, devMem))
   {
-    log->print(TAB TAB "Failed to allocate transfer buffers" NEWLINE);
+    log->note("Failed to allocate transfer buffers\n");
     if (hostBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, hostBuf, nullptr);
     if (hostMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, hostMem, nullptr);
     if (devBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, devBuf, nullptr);
@@ -1959,25 +1908,20 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     return totalUs / static_cast<float>(iters);
   };
 
-  auto reportCopy = [&](const char *label, const char *metric, float us)
+  auto reportCopy = [&](const char *metric, float us)
   {
-    log->print(TAB TAB);
-    log->print(label);
     if (us <= 0.0f)
     {
-      log->print("submit failed (timer/device unreliable)" NEWLINE);
-      log->recordSkip(metric, ResultStatus::Error,
-                       "vkQueueSubmit/WaitIdle failed or timer returned zero");
+      test.skip(metric, ResultStatus::Error,
+                 "vkQueueSubmit/WaitIdle failed or timer returned zero");
       return;
     }
     float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord(metric, gbps);
+    test.emit(metric, gbps);
   };
 
-  reportCopy("Host->Dev : ", "h2d", runCopy(hostBuf, devBuf));
-  reportCopy("Dev->Host : ", "d2h", runCopy(devBuf, hostBuf));
+  reportCopy("h2d", runCopy(hostBuf, devBuf));
+  reportCopy("d2h", runCopy(devBuf, hostBuf));
 
   if (queryPool != VK_NULL_HANDLE)
     vkDestroyQueryPool(dev.device, queryPool, nullptr);
@@ -1987,7 +1931,6 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkDestroyBuffer(dev.device, devBuf, nullptr);
   vkFreeMemory(dev.device, devMem, nullptr);
 
-  // transfer_bandwidth
   return 0;
 }
 
@@ -2000,9 +1943,11 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  auto scope_3 = log->resultScope("local_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  logger::TestSpec testSpec;
+  testSpec.tag = "local_memory_bandwidth";
+  testSpec.display = "Local memory bandwidth";
+  testSpec.unit = "gbps";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
@@ -2014,7 +1959,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.createBuffer(bufferBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->note("Failed to allocate buffer\n");
     return -1;
   }
 
@@ -2065,13 +2010,12 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   for (const auto &v : variants)
   {
-    log->print(TAB TAB);
-    log->print(v.label);
-    log->print(": ");
     VkPipeline pipe;
     if (!dev.createComputePipeline(v.spv, v.sz, dsLayout, pipeLayout, pipe))
     {
-      log->print("pipeline failed" NEWLINE);
+      std::string key(v.label);
+      while (!key.empty() && key.back() == ' ') key.pop_back();
+      test.skip(key, ResultStatus::Error, "Pipeline creation failed");
       continue;
     }
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
@@ -2081,17 +2025,14 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ') key.pop_back();
     if (us <= 0.0f)
     {
-      log->print("submit failed" NEWLINE);
-      log->recordSkip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
     float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord(key, gbps);
+    test.emit(key, gbps);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
@@ -2112,9 +2053,11 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  auto scope_4 = log->resultScope("image_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  logger::TestSpec testSpec;
+  testSpec.tag = "image_memory_bandwidth";
+  testSpec.display = "Image memory bandwidth";
+  testSpec.unit = "gbps";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
@@ -2138,7 +2081,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   VkImage img;
   if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
   {
-    log->print(TAB TAB "Image create failed" NEWLINE);
+    log->note("Image create failed\n");
     return -1;
   }
 
@@ -2213,7 +2156,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.createBuffer(outBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
-    log->print(TAB TAB "Output buffer alloc failed" NEWLINE);
+    log->note("Output buffer alloc failed\n");
     vkDestroySampler(dev.device, sampler, nullptr);
     vkDestroyImageView(dev.device, imgView, nullptr);
     vkDestroyImage(dev.device, img, nullptr);
@@ -2272,10 +2215,9 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   VkPipeline pipe;
   bool ok = dev.createComputePipeline(vk_shaders::image_bandwidth_v1,
       vk_shaders::image_bandwidth_v1_size, dsLayout, pipeLayout, pipe);
-  log->print(TAB TAB "float4 : ");
   if (!ok)
   {
-    log->print("pipeline failed" NEWLINE);
+    test.skip("float4", ResultStatus::Error, "Pipeline creation failed");
   }
   else
   {
@@ -2283,16 +2225,13 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
-      log->print("submit failed" NEWLINE);
-      log->recordSkip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
     }
     else
     {
       uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
       float gbps = (float)bytes / us / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->resultRecord("float4", gbps);
+      test.emit("float4", gbps);
     }
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
@@ -2315,9 +2254,11 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
 int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  auto scope_5 = log->resultScope("atomic_throughput");
-  log->resultScopeAttribute("unit", "gops");
+  logger::TestSpec testSpec;
+  testSpec.tag = "atomic_throughput";
+  testSpec.display = "Atomic throughput";
+  testSpec.unit = "gops";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t wgSize = 256;
   uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
@@ -2368,7 +2309,6 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
     VkPipeline pipe;
     if (!dev.createComputePipeline(spv, spvSize, dsl, pl, pipe))
     {
-      log->print("pipeline failed" NEWLINE);
       vkDestroyDescriptorPool(dev.device, dp, nullptr);
       vkDestroyPipelineLayout(dev.device, pl, nullptr);
       vkDestroyDescriptorSetLayout(dev.device, dsl, nullptr);
@@ -2389,55 +2329,46 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
   };
 
   // Global atomics: one int counter per WI -> 128 MB output.
-  log->print(TAB TAB "int_global   : ");
   float us_g = runOne("int_global", vk_shaders::atomic_throughput_global,
       vk_shaders::atomic_throughput_global_size, globalWIs * sizeof(int32_t));
   if (us_g > 0)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_g / 1e3f;
-    log->print(gops); log->print(NEWLINE);
-    log->resultRecord("int_global", gops);
+    test.emit("int_global", gops);
   }
   else
   {
-    log->print("submit failed" NEWLINE);
-    log->recordSkip("int_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    test.skip("int_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
 
 #ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
   if (dev.info.atomicInt64Supported)
   {
-    log->print(TAB TAB "ulong_global : ");
     float us = runOne("ulong_global", vk_shaders::atomic_throughput_global_uint64,
         vk_shaders::atomic_throughput_global_uint64_size, globalWIs * sizeof(uint64_t));
     if (us > 0)
     {
       float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
-      log->print(gops); log->print(NEWLINE);
-      log->resultRecord("ulong_global", gops);
+      test.emit("ulong_global", gops);
     }
     else
     {
-      log->print("submit failed" NEWLINE);
-      log->recordSkip("ulong_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip("ulong_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
     }
   }
 #endif
 
   // Local atomics: one int counter per workgroup.
-  log->print(TAB TAB "int_local    : ");
   float us_l = runOne("int_local", vk_shaders::atomic_throughput_local,
       vk_shaders::atomic_throughput_local_size, (uint64_t)numGroups * sizeof(int32_t));
   if (us_l > 0)
   {
     float gops = ((float)globalWIs * (float)ATOMIC_REPS) / us_l / 1e3f;
-    log->print(gops); log->print(NEWLINE);
-    log->resultRecord("int_local", gops);
+    test.emit("int_local", gops);
   }
   else
   {
-    log->print("submit failed" NEWLINE);
-    log->recordSkip("int_local", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    test.skip("int_local", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
 
   return 0;
@@ -2452,15 +2383,16 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
 int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
-  auto scope = log->resultScope("atomic_throughput");
-  log->resultScopeAttribute("unit", "gflops");
+  logger::TestSpec testSpec;
+  testSpec.tag = "atomic_throughput";
+  testSpec.display = "Atomic throughput";
+  testSpec.unit = "gflops";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   if (!dev.info.atomicFloat32Supported)
   {
-    log->print(TAB TAB "VK_EXT_shader_atomic_float / shaderBufferFloat32AtomicAdd not supported! Skipped" NEWLINE);
-    log->recordSkip("float_global", ResultStatus::Unsupported,
-                    "VK_EXT_shader_atomic_float not supported");
+    test.skip("float_global", ResultStatus::Unsupported,
+              "VK_EXT_shader_atomic_float not supported");
     return 0;
   }
 
@@ -2474,12 +2406,12 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buf, mem))
   {
-    log->print(TAB TAB "Failed to allocate buffer" NEWLINE);
+    log->note("Failed to allocate buffer\n");
     return -1;
   }
   if (!dev.zeroBuffer(buf))
   {
-    log->print(TAB TAB "Failed to zero buffer" NEWLINE);
+    log->note("Failed to zero buffer\n");
     vkDestroyBuffer(dev.device, buf, nullptr);
     vkFreeMemory(dev.device, mem, nullptr);
     return -1;
@@ -2511,13 +2443,12 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
   w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.pBufferInfo = &bi;
   vkUpdateDescriptorSets(dev.device, 1, &w, 0, nullptr);
 
-  log->print(TAB TAB "float_global : ");
   VkPipeline pipe;
   if (!dev.createComputePipeline(vk_shaders::atomic_throughput_global_float,
                                   vk_shaders::atomic_throughput_global_float_size,
                                   dsl, pl, pipe))
   {
-    log->print("pipeline failed" NEWLINE);
+    test.skip("float_global", ResultStatus::Error, "Pipeline creation failed");
   }
   else
   {
@@ -2525,14 +2456,12 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
-      log->print("submit failed" NEWLINE);
-      log->recordSkip("float_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip("float_global", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
     }
     else
     {
       float gflops = ((float)globalWIs * (float)ATOMIC_REPS) / us / 1e3f;
-      log->print(gflops); log->print(NEWLINE);
-      log->resultRecord("float_global", gflops);
+      test.emit("float_global", gflops);
     }
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
@@ -2563,9 +2492,11 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = forceIters ? specifiedIters
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
-  log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-  auto scope_6 = log->resultScope("kernel_launch_latency");
-  log->resultScopeAttribute("unit", "us");
+  logger::TestSpec testSpec;
+  testSpec.tag = "kernel_launch_latency";
+  testSpec.display = "Kernel launch latency";
+  testSpec.unit = "us";
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};
@@ -2573,7 +2504,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
   if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
   {
-    log->print(TAB TAB "pipeline layout creation failed" NEWLINE);
+    log->note("pipeline layout creation failed\n");
     return -1;
   }
 
@@ -2586,7 +2517,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreateShaderModule(dev.device, &smCI, nullptr, &shaderModule) != VK_SUCCESS)
   {
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    log->print(TAB TAB "shader module creation failed" NEWLINE);
+    log->note("shader module creation failed\n");
     return -1;
   }
 
@@ -2602,7 +2533,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     vkDestroyShaderModule(dev.device, shaderModule, nullptr);
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    log->print(TAB TAB "compute pipeline creation failed" NEWLINE);
+    log->note("compute pipeline creation failed\n");
     return -1;
   }
 
@@ -2788,37 +2719,28 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     }
   }
 
-  log->print(TAB TAB "dispatch  : ");
   if (submitFailed)
   {
-    log->print("submit failed" NEWLINE);
-    log->recordSkip("dispatch", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    test.skip("dispatch", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
   else if (dispatchSamples > 0)
   {
     float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
-    log->print(dispatchUs);
-    log->print(NEWLINE);
-    log->resultRecord("dispatch", dispatchUs);
+    test.emit("dispatch", dispatchUs);
   }
   else
   {
-    log->print("skipped (needs VK_EXT_calibrated_timestamps)" NEWLINE);
-    log->recordSkip("dispatch", ResultStatus::Unsupported,
-                     "Needs VK_EXT_calibrated_timestamps");
+    test.skip("dispatch", ResultStatus::Unsupported,
+               "Needs VK_EXT_calibrated_timestamps");
   }
-  log->print(TAB TAB "roundtrip : ");
   if (submitFailed)
   {
-    log->print("submit failed" NEWLINE);
-    log->recordSkip("roundtrip", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    test.skip("roundtrip", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
   }
   else
   {
     double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
-    log->print((float)avgRoundtripUs);
-    log->print(NEWLINE);
-    log->resultRecord("roundtrip", (float)avgRoundtripUs);
+    test.emit("roundtrip", (float)avgRoundtripUs);
   }
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);

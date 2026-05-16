@@ -13,12 +13,11 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
   uint64_t numWGs    = globalWIs / devInfo.maxWGSize;
 
+  auto test = currentDeviceScope->beginTest(
+    {"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
+
   try
   {
-    log->print(NEWLINE TAB TAB "Atomic throughput (GOPS)" NEWLINE);
-    auto scope = log->resultScope("atomic_throughput");
-    log->resultScopeAttribute("unit", "gops");
-
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
     globalSize = globalWIs;
@@ -27,8 +26,6 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
     ///////////////////////////////////////////////////////////////////////////
     // Global atomics -- independent per-WI counters (no cross-WI contention)
     {
-      log->print(TAB TAB TAB "int_global : ");
-
       cl::Buffer globalBuf = cl::Buffer(ctx, CL_MEM_READ_WRITE, globalWIs * sizeof(cl_int));
       cl_int zero = 0;
       queue.enqueueFillBuffer(globalBuf, zero, 0, globalWIs * sizeof(cl_int));
@@ -40,16 +37,12 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       timed = run_kernel(queue, kernel_global, globalSize, localSize, cfg.targetTimeUs, forced);
 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
-      log->print(gops);
-      log->print(NEWLINE);
-      log->resultRecord("int_global", gops);
+      test.emit("int_global", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
 
     // Local atomics -- all WIs in a WG contend on one shared counter
     {
-      log->print(TAB TAB TAB "int_local  : ");
-
       cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, numWGs * sizeof(cl_int));
 
       cl::Kernel kernel_local(prog, "atomic_throughput_local");
@@ -59,21 +52,15 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
       timed = run_kernel(queue, kernel_local, globalSize, localSize, cfg.targetTimeUs, forced);
 
       gops = (static_cast<float>(globalWIs) * static_cast<float>(ATOMIC_REPS)) / timed / 1e3f;
-      log->print(gops);
-      log->print(NEWLINE);
-      log->resultRecord("int_local", gops);
+      test.emit("int_local", gops);
     }
     ///////////////////////////////////////////////////////////////////////////
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    log->recordSkip("int_global", ResultStatus::Error, reason);
-    log->recordSkip("int_local", ResultStatus::Error, reason);
+    test.skip("int_global", ResultStatus::Error, reason);
+    test.skip("int_local", ResultStatus::Error, reason);
     return -1;
   }
 

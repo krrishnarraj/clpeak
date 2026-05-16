@@ -280,8 +280,6 @@ static float runDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
 
 int MetalPeak::runAll()
 {
-    log->print(NEWLINE "=== Metal backend ===" NEWLINE);
-
     impl = new MetalPeakImpl();
     impl->allDevices = MTLCopyAllDevices();
     if (impl->allDevices.count == 0)
@@ -291,15 +289,11 @@ int MetalPeak::runAll()
     }
     if (impl->allDevices.count == 0)
     {
-        log->print("Metal: no devices found" NEWLINE);
+        log->note("Metal: no devices found");
         return -1;
     }
 
-    auto clpeakScope = log->resultScope("clpeak");
-    log->resultScopeAttribute("os", OS_NAME);
-    auto platformScope = log->resultScope("platform");
-    log->resultScopeAttribute("name", "Metal");
-    log->resultScopeAttribute("backend", "Metal");
+    auto backendScope = log->beginBackend("Metal");
 
     for (NSUInteger d = 0; d < impl->allDevices.count; d++)
     {
@@ -309,13 +303,13 @@ int MetalPeak::runAll()
         MetalDevice dev;
         if (!dev.init((int)d))
         {
-            log->print(NEWLINE "Metal: failed to init device " + std::to_string(d) + NEWLINE);
+            log->note("Metal: failed to init device " + std::to_string(d));
             continue;
         }
         if (!dev.info.isAppleSilicon)
         {
-            log->print(NEWLINE "Metal: skipping " + dev.info.deviceName +
-                       " -- requires Apple silicon (M1 or newer)" NEWLINE);
+            log->note("Metal: skipping " + dev.info.deviceName +
+                      " -- requires Apple silicon (M1 or newer)");
             continue;
         }
 
@@ -324,28 +318,18 @@ int MetalPeak::runAll()
         if (forceIters)
             cfg.kernelLatencyIters = specifiedIters;
 
-        log->print(NEWLINE "Metal Device: " + dev.info.deviceName + NEWLINE);
-        log->print(TAB "OS            : " + dev.info.osVersion + NEWLINE);
-        log->print(TAB "Apple family  : ");
-        log->print((unsigned int)dev.info.appleFamily);
-        log->print(NEWLINE);
-        log->print(TAB "Working set   : ");
-        log->print((unsigned int)(dev.info.recommendedMaxWorkingSetSize / (1024 * 1024)));
-        log->print(" MB" NEWLINE);
-        if (dev.info.gpuCoreCount)
-        {
-            log->print(TAB "GPU cores     : ");
-            log->print((unsigned int)dev.info.gpuCoreCount);
-            log->print(NEWLINE);
-        }
+        std::stringstream familySS;
+        familySS << "Apple" << dev.info.appleFamily;
 
-        auto deviceScope = log->resultScope("device");
-        log->resultScopeAttribute("name", dev.info.deviceName);
-        log->resultScopeAttribute("api", "metal");
-        {
-            std::stringstream ss; ss << "Apple" << dev.info.appleFamily;
-            log->resultScopeAttribute("family", ss.str());
-        }
+        auto deviceScope = backendScope.beginDevice({
+            dev.info.deviceName,
+            "",
+            dev.info.osVersion,
+            {{"Apple family", familySS.str()},
+             {"Working set", std::to_string(dev.info.recommendedMaxWorkingSetSize / (1024*1024)) + " MB"},
+             {"GPU cores", std::to_string(dev.info.gpuCoreCount)}}
+        });
+        currentDeviceScope = &deviceScope;
 
         // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -----------
         if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
@@ -376,12 +360,9 @@ int MetalPeak::runAll()
         // ---- Phase 4: latency (us) ---------------------------------------
         if (isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
-        log->print(NEWLINE);
-        // device
+        currentDeviceScope = nullptr;
     }
 
-    // platform
-    // clpeak
     return 0;
 }
 
@@ -393,33 +374,28 @@ int MetalPeak::runAll()
 int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                                 const mtl_compute_desc_t &d)
 {
-    log->print(NEWLINE TAB);
-    log->print(d.title);
-    log->print(NEWLINE);
-    auto scope = log->resultScope(d.resultTag);
-    log->resultScopeAttribute("unit", d.unit);
-    if (d.extraAttribKey && d.extraAttribVal)
-        log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
+    auto test = currentDeviceScope->beginTest({d.resultTag, d.title, d.unit});
 
     if (d.skip)
     {
-        log->print(TAB TAB);
-        log->print(d.skipMsg ? d.skipMsg : "Skipped");
-        log->print(NEWLINE);
-        struct SkipVariant { const char *label; };
-        std::vector<SkipVariant> skipVariants;
+        std::vector<std::string> skipLabels;
         if (d.variants && d.numVariants > 0)
         {
             for (uint32_t i = 0; i < d.numVariants; i++)
-                skipVariants.push_back({d.variants[i].label});
+            {
+                std::string label(d.variants[i].label);
+                while (!label.empty() && label.back() == ' ')
+                    label.pop_back();
+                skipLabels.push_back(label);
+            }
         }
         else
         {
-            skipVariants.push_back({d.metricLabel});
+            skipLabels.push_back(d.metricLabel);
         }
-        for (const auto &sv : skipVariants)
-            log->recordSkip(sv.label, ResultStatus::Unsupported,
-                             d.skipMsg ? d.skipMsg : "Skipped");
+        for (const auto &label : skipLabels)
+            test.skip(label, ResultStatus::Unsupported,
+                       d.skipMsg ? d.skipMsg : "Skipped");
         return 0;
     }
 
@@ -445,20 +421,23 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                                                          options:MTLResourceStorageModeShared];
     if (!outBuf)
     {
-        log->print(TAB TAB "Failed to allocate output buffer" NEWLINE);
-        struct SkipVariant { const char *label; };
-        std::vector<SkipVariant> skipVariants;
+        std::vector<std::string> skipLabels;
         if (d.variants && d.numVariants > 0)
         {
             for (uint32_t i = 0; i < d.numVariants; i++)
-                skipVariants.push_back({d.variants[i].label});
+            {
+                std::string label(d.variants[i].label);
+                while (!label.empty() && label.back() == ' ')
+                    label.pop_back();
+                skipLabels.push_back(label);
+            }
         }
         else
         {
-            skipVariants.push_back({d.metricLabel});
+            skipLabels.push_back(d.metricLabel);
         }
-        for (const auto &sv : skipVariants)
-            log->recordSkip(sv.label, ResultStatus::Error, "Failed to allocate output buffer");
+        for (const auto &label : skipLabels)
+            test.skip(label, ResultStatus::Error, "Failed to allocate output buffer");
         return -1;
     }
 
@@ -467,18 +446,13 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 
     for (const auto &v : variants)
     {
-        log->print(TAB TAB);
-        log->print(v.label);
-        log->print(" : ");
-
         id<MTLComputePipelineState> pso = getPipeline(dev, v.src, v.srcName, v.kernelName);
         if (!pso)
         {
-            log->print("compile/load failed" NEWLINE);
             std::string metricTag(v.label);
             while (!metricTag.empty() && metricTag.back() == ' ')
                 metricTag.pop_back();
-            log->recordSkip(metricTag, ResultStatus::Error, "Kernel compile failed");
+            test.skip(metricTag, ResultStatus::Error, "Kernel compile failed");
             continue;
         }
 
@@ -489,16 +463,13 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
         float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
 
-        log->print(value);
-        log->print(NEWLINE);
-
         // Strip the right-padding used for stdout column alignment so the
         // metric tag stored in the dump (and shown in the Android UI) is
         // a clean canonical label.
         std::string metricTag(v.label);
         while (!metricTag.empty() && metricTag.back() == ' ')
             metricTag.pop_back();
-        log->resultRecord(metricTag, value);
+        test.emit(metricTag, value);
     }
 
     return 0;
@@ -591,8 +562,6 @@ int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
     d.elemSize       = sizeof(int);
     d.scalarArg      = &A;
     d.scalarSize     = sizeof(A);
-    d.extraAttribKey = "emulated";
-    d.extraAttribVal = "true";
     return runComputeKernel(dev, cfg, d);
 }
 
@@ -614,8 +583,6 @@ int MetalPeak::runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg)
     d.elemSize       = sizeof(int);
     d.scalarArg      = &A;
     d.scalarSize     = sizeof(A);
-    d.extraAttribKey = "emulated";
-    d.extraAttribVal = "true";
     return runComputeKernel(dev, cfg, d);
 }
 
@@ -639,8 +606,6 @@ int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
     d.scalarSize       = sizeof(A);
     d.skip             = !dev.info.simdgroupMatrixInt8Supported;
     d.skipMsg          = "int8 simdgroup_matrix requires Apple9 (M3) or newer! Skipped";
-    d.extraAttribKey   = "tile";
-    d.extraAttribVal   = "8x8x8";
     return runComputeKernel(dev, cfg, d);
 }
 
@@ -665,8 +630,6 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.scalarSize       = sizeof(A);
         d.skip             = !dev.info.simdgroupMatrixFP16Supported;
         d.skipMsg          = "simdgroup_matrix requires Apple7 (M1) or newer! Skipped";
-        d.extraAttribKey   = "tile";
-        d.extraAttribVal   = "8x8x8";
         runComputeKernel(dev, cfg, d);
     }
     {
@@ -688,8 +651,6 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.scalarSize       = sizeof(A);
         d.skip             = !dev.info.simdgroupMatrixFP16Supported || !dev.info.simdgroupMatrixBF16Supported;
         d.skipMsg          = "bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped";
-        d.extraAttribKey   = "tile";
-        d.extraAttribVal   = "8x8x8";
         runComputeKernel(dev, cfg, d);
     }
     return 0;
@@ -703,9 +664,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     const uint32_t tgSize = 256;
 
-    log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    auto scope_1 = log->resultScope("global_memory_bandwidth");
-    log->resultScopeAttribute("unit", "gbps");
+    auto test = currentDeviceScope->beginTest({"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).
@@ -722,10 +681,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                                          options:MTLResourceStorageModeShared];
     if (!inBuf || !outBuf)
     {
-        log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
-        const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
-        for (int i = 0; i < 5; i++)
-            log->recordSkip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
+        test.skipAll({"float", "float2", "float4", "float8", "float16"},
+                      ResultStatus::Error, "Failed to allocate buffers");
         return -1;
     }
     // Touch the input so we don't measure zero-page reads on copy-on-write.
@@ -733,10 +690,10 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
     struct V { const char *label; const char *kname; uint32_t width; };
     const V vs[] = {
-        { "float  ", "global_bandwidth",     1  },
-        { "float2 ", "global_bandwidth_v2",  2  },
-        { "float4 ", "global_bandwidth_v4",  4  },
-        { "float8 ", "global_bandwidth_v8",  8  },
+        { "float",   "global_bandwidth",     1  },
+        { "float2",  "global_bandwidth_v2",  2  },
+        { "float4",  "global_bandwidth_v4",  4  },
+        { "float8",  "global_bandwidth_v8",  8  },
         { "float16", "global_bandwidth_v16", 16 },
     };
 
@@ -744,19 +701,12 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
     for (const auto &v : vs)
     {
-        log->print(TAB TAB);
-        log->print(v.label);
-        log->print(": ");
-
         id<MTLComputePipelineState> pso = getPipeline(dev,
             mtl_kernels::global_bandwidth_src,
             mtl_kernels::global_bandwidth_name,
             v.kname);
         if (!pso) {
-            log->print("compile/load failed" NEWLINE);
-            std::string key(v.label);
-            while (!key.empty() && key.back() == ' ') key.pop_back();
-            log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
             continue;
         }
 
@@ -772,11 +722,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
         float gbps = (float)bytesRead / us / 1e3f;
-        log->print(gbps);
-        log->print(NEWLINE);
-        std::string key(v.label);
-        while (!key.empty() && key.back() == ' ') key.pop_back();
-        log->resultRecord(key, gbps);
+        test.emit(v.label, gbps);
     }
 
     return 0;
@@ -791,9 +737,7 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     unsigned int iters = forceIters ? specifiedIters
                                     : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
-    log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-    auto scope_2 = log->resultScope("kernel_launch_latency");
-    log->resultScopeAttribute("unit", "us");
+    auto test = currentDeviceScope->beginTest({"kernel_launch_latency", "Kernel launch latency", "us"});
 
     id<MTLComputePipelineState> pso = getPipeline(dev,
         mtl_kernels::kernel_latency_src,
@@ -801,9 +745,8 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         "kernel_latency_noop");
     if (!pso)
     {
-        log->print(TAB TAB "Pipeline create failed" NEWLINE);
-        log->recordSkip("dispatch", ResultStatus::Error, "Pipeline create failed");
-        log->recordSkip("roundtrip", ResultStatus::Error, "Pipeline create failed");
+        test.skip("dispatch", ResultStatus::Error, "Pipeline create failed");
+        test.skip("roundtrip", ResultStatus::Error, "Pipeline create failed");
         return -1;
     }
 
@@ -855,31 +798,17 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
             totalRoundtripSec += (doneTime - commitTime);
         }
     }
-    log->print(TAB TAB TAB "dispatch  : ");
     if (submitFailed)
     {
-        log->print("submit failed" NEWLINE);
-        log->recordSkip("dispatch",  ResultStatus::Error, "MTLCommandBuffer execution failed");
+        test.skip("dispatch",  ResultStatus::Error, "MTLCommandBuffer execution failed");
+        test.skip("roundtrip", ResultStatus::Error, "MTLCommandBuffer execution failed");
     }
     else
     {
         float dispatchUs = (float)(totalDispatchSec * 1e6 / iters);
-        log->print(dispatchUs);
-        log->print(NEWLINE);
-        log->resultRecord("dispatch", dispatchUs);
-    }
-    log->print(TAB TAB TAB "roundtrip : ");
-    if (submitFailed)
-    {
-        log->print("submit failed" NEWLINE);
-        log->recordSkip("roundtrip", ResultStatus::Error, "MTLCommandBuffer execution failed");
-    }
-    else
-    {
+        test.emit("dispatch", dispatchUs);
         float roundtripUs = (float)(totalRoundtripSec * 1e6 / iters);
-        log->print(roundtripUs);
-        log->print(NEWLINE);
-        log->resultRecord("roundtrip", roundtripUs);
+        test.emit("roundtrip", roundtripUs);
     }
 
     return 0;
@@ -891,9 +820,7 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-    auto scope_3 = log->resultScope("local_memory_bandwidth");
-    log->resultScopeAttribute("unit", "gbps");
+    auto test = currentDeviceScope->beginTest({"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
@@ -903,36 +830,27 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                                          options:MTLResourceStorageModeShared];
     if (!outBuf)
     {
-        log->print(TAB TAB "Buffer alloc failed" NEWLINE);
-        log->recordSkip("float", ResultStatus::Error, "Buffer alloc failed");
-        log->recordSkip("float2", ResultStatus::Error, "Buffer alloc failed");
-        log->recordSkip("float4", ResultStatus::Error, "Buffer alloc failed");
-        log->recordSkip("float8", ResultStatus::Error, "Buffer alloc failed");
+        test.skipAll({"float", "float2", "float4", "float8"},
+                      ResultStatus::Error, "Buffer alloc failed");
         return -1;
     }
 
     struct V { const char *label; const char *kname; uint32_t width; };
     const V vs[] = {
-        {"float  ", "local_bandwidth_v1", 1},
-        {"float2 ", "local_bandwidth_v2", 2},
-        {"float4 ", "local_bandwidth_v4", 4},
-        {"float8 ", "local_bandwidth_v8", 8},
+        {"float",  "local_bandwidth_v1", 1},
+        {"float2", "local_bandwidth_v2", 2},
+        {"float4", "local_bandwidth_v4", 4},
+        {"float8", "local_bandwidth_v8", 8},
     };
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
     for (const auto &v : vs)
     {
-        log->print(TAB TAB);
-        log->print(v.label);
-        log->print(": ");
         id<MTLComputePipelineState> pso = getPipeline(dev,
             mtl_kernels::local_bandwidth_src,
             mtl_kernels::local_bandwidth_name, v.kname);
         if (!pso) {
-            log->print("compile/load failed" NEWLINE);
-            std::string key(v.label);
-            while (!key.empty() && key.back() == ' ') key.pop_back();
-            log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
             continue;
         }
         float us = runDispatches(dev, pso, outBuf, nullptr, 0, nil,
@@ -940,10 +858,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
         float gbps = (float)bytes / us / 1e3f;
-        log->print(gbps); log->print(NEWLINE);
-        std::string key(v.label);
-        while (!key.empty() && key.back() == ' ') key.pop_back();
-        log->resultRecord(key, gbps);
+        test.emit(v.label, gbps);
     }
 
     return 0;
@@ -955,9 +870,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-    auto scope_4 = log->resultScope("image_memory_bandwidth");
-    log->resultScopeAttribute("unit", "gbps");
+    auto test = currentDeviceScope->beginTest({"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
@@ -968,11 +881,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                                          options:MTLResourceStorageModeShared];
     if (!outBuf)
     {
-        log->print(TAB TAB "Output buffer alloc failed" NEWLINE);
-        log->recordSkip("rgba32f", ResultStatus::Error, "Output buffer alloc failed");
-        log->recordSkip("rgba16f", ResultStatus::Error, "Output buffer alloc failed");
-        log->recordSkip("rgba8", ResultStatus::Error, "Output buffer alloc failed");
-        log->recordSkip("r32f", ResultStatus::Error, "Output buffer alloc failed");
+        test.skipAll({"rgba32f", "rgba16f", "rgba8", "r32f"},
+                      ResultStatus::Error, "Output buffer alloc failed");
         return -1;
     }
 
@@ -988,16 +898,12 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     const V vs[] = {
         { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16 },
         { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8  },
-        { "rgba8  ", "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4  },
-        { "r32f   ", "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4  },
+        { "rgba8",   "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4  },
+        { "r32f",    "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4  },
     };
 
     for (const auto &v : vs)
     {
-        log->print(TAB TAB);
-        log->print(v.label);
-        log->print(": ");
-
         MTLTextureDescriptor *td = [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:v.fmt
                                          width:imgW height:imgH mipmapped:NO];
@@ -1006,10 +912,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
         if (!tex)
         {
-            log->print("texture alloc failed" NEWLINE);
-            std::string key(v.label);
-            while (!key.empty() && key.back() == ' ') key.pop_back();
-            log->recordSkip(key, ResultStatus::Error, "Texture alloc failed");
+            test.skip(v.label, ResultStatus::Error, "Texture alloc failed");
             continue;
         }
 
@@ -1017,10 +920,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::image_bandwidth_src,
             mtl_kernels::image_bandwidth_name, v.kname);
         if (!pso) {
-            log->print("compile/load failed" NEWLINE);
-            std::string key(v.label);
-            while (!key.empty() && key.back() == ' ') key.pop_back();
-            log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
             continue;
         }
 
@@ -1055,10 +955,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         float us = (float)((t.GPUEndTime - t.GPUStartTime) * 1e6 / iters);
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
         float gbps = (float)bytes / us / 1e3f;
-        log->print(gbps); log->print(NEWLINE);
-        std::string key(v.label);
-        while (!key.empty() && key.back() == ' ') key.pop_back();
-        log->resultRecord(key, gbps);
+        test.emit(v.label, gbps);
     }
 
     return 0;
@@ -1070,9 +967,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-    auto scope_5 = log->resultScope("atomic_throughput");
-    log->resultScopeAttribute("unit", "gops");
+    auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput", "gops"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
@@ -1095,28 +990,25 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
         return us;
     };
 
-    auto reportOne = [&](const char *resultKey, const char *src, const char *srcName,
+    auto reportOne = [&](const std::string &resultKey, const char *src, const char *srcName,
                          const char *fnName, NSUInteger bufBytes,
                          bool skip, const char *skipMsg)
     {
         if (skip)
         {
-            log->print(skipMsg); log->print(NEWLINE);
-            log->recordSkip(resultKey, ResultStatus::Unsupported,
-                             skipMsg ? skipMsg : "Skipped");
+            test.skip(resultKey, ResultStatus::Unsupported,
+                       skipMsg ? skipMsg : "Skipped");
             return;
         }
         float us = runOne(src, srcName, fnName, bufBytes);
         if (us > 0)
         {
             float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-            log->print(gops); log->print(NEWLINE);
-            log->resultRecord(resultKey, gops);
+            test.emit(resultKey, gops);
         }
         else
         {
-            log->print("compile/load failed" NEWLINE);
-            log->recordSkip(resultKey, ResultStatus::Error, "Kernel compile failed");
+            test.skip(resultKey, ResultStatus::Error, "Kernel compile failed");
         }
     };
 
@@ -1124,25 +1016,20 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
                       const char *gFn, const char *lFn, uint32_t elemSize,
                       bool skip, const char *skipMsg)
     {
-        // Trim trailing/internal padding so the persisted metric key is valid.
-        std::string trimmed(label);
-        while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
-        log->print(TAB TAB); log->print(trimmed.c_str()); log->print("_global : ");
-        reportOne((trimmed + "_global").c_str(),
+        reportOne(std::string(label) + "_global",
                   src, srcName, gFn, globalThreads * elemSize, skip, skipMsg);
         if (lFn)
         {
-            log->print(TAB TAB); log->print(trimmed.c_str()); log->print("_local  : ");
-            reportOne((trimmed + "_local").c_str(),
+            reportOne(std::string(label) + "_local",
                       src, srcName, lFn, numGroups * elemSize, skip, skipMsg);
         }
     };
 
-    report("int  ",  mtl_kernels::atomic_throughput_src,
+    report("int",  mtl_kernels::atomic_throughput_src,
            mtl_kernels::atomic_throughput_name,
            "atomic_throughput_global",      "atomic_throughput_local",
            sizeof(int), false, nullptr);
-    report("uint ",  mtl_kernels::atomic_throughput_src,
+    report("uint",  mtl_kernels::atomic_throughput_src,
            mtl_kernels::atomic_throughput_name,
            "atomic_throughput_global_uint", "atomic_throughput_local_uint",
            sizeof(uint32_t), false, nullptr);
@@ -1161,9 +1048,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    log->print(NEWLINE TAB "Atomic throughput (GFLOPS)" NEWLINE);
-    auto scope_6 = log->resultScope("atomic_throughput");
-    log->resultScopeAttribute("unit", "gflops");
+    auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput", "gflops"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
@@ -1184,21 +1069,18 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
                              cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     };
 
-    auto reportOne = [&](const char *resultKey, const char *src, const char *srcName,
+    auto reportOne = [&](const std::string &resultKey, const char *src, const char *srcName,
                          const char *fnName, NSUInteger bufBytes)
     {
-        log->print(TAB TAB); log->print(resultKey); log->print(" : ");
         float us = runOne(src, srcName, fnName, bufBytes);
         if (us > 0)
         {
             float gflops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-            log->print(gflops); log->print(NEWLINE);
-            log->resultRecord(resultKey, gflops);
+            test.emit(resultKey, gflops);
         }
         else
         {
-            log->print("compile/load failed" NEWLINE);
-            log->recordSkip(resultKey, ResultStatus::Error, "Kernel compile failed");
+            test.skip(resultKey, ResultStatus::Error, "Kernel compile failed");
         }
     };
 

@@ -128,8 +128,6 @@ struct cuda_compute_desc_t
   // Optional gates / attributes
   bool        skip;
   const char *skipMsg;
-  const char *extraAttribKey;
-  const char *extraAttribVal;
 
   // Optional NVRTC compile flags shared by all variants (e.g. wmma needs
   // --gpu-architecture matching the device, but per-test extras like
@@ -173,6 +171,7 @@ public:
 private:
   bool initialised;
   std::vector<int> devIndices;
+  logger::DeviceScope *currentDeviceScope = nullptr;  // set during runAll
 
   bool initDriver();
 

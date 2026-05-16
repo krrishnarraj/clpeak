@@ -92,8 +92,6 @@ struct mtl_compute_desc_t
 
   bool        skip;
   const char *skipMsg;
-  const char *extraAttribKey;
-  const char *extraAttribVal;
 };
 
 class MetalPeak : public Peak
@@ -128,6 +126,8 @@ public:
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
   MetalPeakImpl *impl;
+
+  logger::DeviceScope *currentDeviceScope = nullptr;
 
 private:
   int runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,

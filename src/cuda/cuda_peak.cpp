@@ -329,24 +329,18 @@ float CudaPeak::runKernel(CudaDevice &dev, CUfunction fn,
 
 int CudaPeak::runAll()
 {
-  log->print(NEWLINE "=== CUDA backend ===" NEWLINE);
   if (!initDriver())
   {
-    log->print("CUDA: driver init failed" NEWLINE);
+    log->note("CUDA: driver init failed\n");
     return -1;
   }
   if (devIndices.empty())
   {
-    log->print("CUDA: no devices found" NEWLINE);
+    log->note("CUDA: no devices found\n");
     return -1;
   }
 
-  // Mirror the OpenCL/Vulkan logger context stack (clpeak > platform > device).
-  auto clpeakScope = log->resultScope("clpeak");
-  log->resultScopeAttribute("os", OS_NAME);
-  auto platformScope = log->resultScope("platform");
-  log->resultScopeAttribute("name", "CUDA");
-  log->resultScopeAttribute("backend", "CUDA");
+  auto backendScope = log->beginBackend("CUDA");
 
   for (int idx : devIndices)
   {
@@ -356,7 +350,7 @@ int CudaPeak::runAll()
     CudaDevice dev;
     if (!dev.init(idx))
     {
-      log->print(NEWLINE "CUDA: failed to init device " + std::to_string(idx) + NEWLINE);
+      log->note("CUDA: failed to init device " + std::to_string(idx) + "\n");
       continue;
     }
 
@@ -365,22 +359,18 @@ int CudaPeak::runAll()
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
 
-    log->print(NEWLINE "CUDA Device: " + dev.info.deviceName + NEWLINE);
-    log->print(TAB "Arch          : " + dev.info.archName + NEWLINE);
-    log->print(TAB "Driver        : " + dev.info.driverVersion + NEWLINE);
-    log->print(TAB "NVRTC         : " + dev.info.runtimeVersion + NEWLINE);
-    log->print(TAB "SMs           : ");
-    log->print((unsigned int)dev.info.numSMs);
-    log->print(NEWLINE);
-    log->print(TAB "VRAM          : ");
-    log->print((unsigned int)(dev.info.totalGlobalMem / (1024 * 1024)));
-    log->print(" MB" NEWLINE);
-
-    auto deviceScope = log->resultScope("device");
-    log->resultScopeAttribute("name", dev.info.deviceName);
-    log->resultScopeAttribute("api", "cuda");
-    log->resultScopeAttribute("driver_version", dev.info.driverVersion);
-    log->resultScopeAttribute("arch", dev.info.archName);
+    auto deviceScope = backendScope.beginDevice({
+      dev.info.deviceName,
+      "",   // platform defaults to "CUDA"
+      dev.info.driverVersion,
+      {
+        {"Arch",  dev.info.archName},
+        {"NVRTC", dev.info.runtimeVersion},
+        {"SMs",   std::to_string(dev.info.numSMs)},
+        {"VRAM",  std::to_string(dev.info.totalGlobalMem / (1024 * 1024)) + " MB"},
+      }
+    });
+    currentDeviceScope = &deviceScope;
 
     // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
     if (isAllowed(Benchmark::ComputeSP))
@@ -426,7 +416,7 @@ int CudaPeak::runAll()
     if (isAllowed(Benchmark::KernelLatency))
       runKernelLatency(dev, cfg);
 
-    log->print(NEWLINE);
+    currentDeviceScope = nullptr;
   }
 
   return 0;
@@ -441,36 +431,21 @@ int CudaPeak::runAll()
 int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
                                const cuda_compute_desc_t &d)
 {
-  log->print(NEWLINE TAB);
-  log->print(d.title);
-  log->print(NEWLINE);
-  auto scope = log->resultScope(d.resultTag);
-  log->resultScopeAttribute("unit", d.unit);
-  if (d.extraAttribKey && d.extraAttribVal)
-    log->resultScopeAttribute(d.extraAttribKey, d.extraAttribVal);
+  auto test = currentDeviceScope->beginTest({d.resultTag, d.title, d.unit});
 
   if (d.skip)
   {
-    log->print(TAB TAB);
-    log->print(d.skipMsg ? d.skipMsg : "Skipped");
-    log->print(NEWLINE);
-    struct SkipVariant
-    {
-      const char *label;
-    };
-    std::vector<SkipVariant> skipVariants;
     if (d.variants && d.numVariants > 0)
     {
       for (uint32_t i = 0; i < d.numVariants; i++)
-        skipVariants.push_back({d.variants[i].label});
+        test.skip(d.variants[i].label, ResultStatus::Unsupported,
+                  d.skipMsg ? d.skipMsg : "Skipped");
     }
     else
     {
-      skipVariants.push_back({d.metricLabel});
+      test.skip(d.metricLabel, ResultStatus::Unsupported,
+                d.skipMsg ? d.skipMsg : "Skipped");
     }
-    for (const auto &sv : skipVariants)
-      log->recordSkip(sv.label, ResultStatus::Unsupported,
-                      d.skipMsg ? d.skipMsg : "Skipped");
     return 0;
   }
 
@@ -504,7 +479,8 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   CUdeviceptr outputBuf = 0;
   if (cuMemAlloc(&outputBuf, bufferBytes) != CUDA_SUCCESS)
   {
-    log->print(TAB TAB "Failed to allocate output buffer" NEWLINE);
+    for (const auto &v : variants)
+      test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer");
     return -1;
   }
 
@@ -514,20 +490,13 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
 
   for (const auto &v : variants)
   {
-    log->print(TAB TAB);
-    log->print(v.label);
-    log->print(" : ");
-
     CUfunction fn;
     if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, nvrtcOpts))
     {
-      log->print("compile/load failed" NEWLINE);
+      test.skip(v.label, ResultStatus::Error, "compile/load failed");
       continue;
     }
 
-    // Two args: output pointer + scalar A.  cuLaunchKernel takes an array
-    // of pointers to argument values; we always pass both slots since every
-    // compute kernel here is declared as (T* out, scalar A).
     void *args[2];
     args[0] = &outputBuf;
     args[1] = const_cast<void *>(d.scalarArg);
@@ -538,9 +507,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
 
-    log->print(value);
-    log->print(NEWLINE);
-    log->resultRecord(v.label, value);
+    test.emit(v.label, value);
   }
 
   cuMemFree(outputBuf);
@@ -715,8 +682,6 @@ int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
   d.elemSize = sizeof(int);
   d.scalarArg = &A;
   d.scalarSize = sizeof(A);
-  d.extraAttribKey = "emulated";
-  d.extraAttribVal = "true";
   return runComputeKernel(dev, cfg, d);
 }
 
@@ -756,8 +721,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.outElemsPerBlock = outElems;
       d.scalarArg = &A;
       d.scalarSize = sizeof(A);
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       d.skip = !dev.info.wmmaSupported;
       d.skipMsg = "WMMA requires sm_70 or newer (Volta+)! Skipped";
       runComputeKernel(dev, cfg, d);
@@ -782,8 +745,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.bf16Supported;
       d.skipMsg = "bf16 WMMA requires sm_80 or newer (Ampere+)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x16";
       runComputeKernel(dev, cfg, d);
     }
     // TF32 WMMA m16n16k8 -- Ampere+
@@ -806,8 +767,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.tf32GemmSupported;
       d.skipMsg = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "16x16x8";
       runComputeKernel(dev, cfg, d);
     }
     // FP64 WMMA m8n8k4 -- Ampere+ DP tensor cores
@@ -830,8 +789,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.dpTensorSupported;
       d.skipMsg = "FP64 WMMA requires sm_80 or newer (Ampere+)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "8x8x4";
       runComputeKernel(dev, cfg, d);
     }
     // FP8 mma.sync E4M3 (PTX) - sm_89+
@@ -854,8 +811,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSupported;
       d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "m16n8k32";
       runComputeKernel(dev, cfg, d);
     }
     // FP8 mma.sync E5M2 (PTX) - sm_89+
@@ -878,8 +833,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSupported;
       d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "m16n8k32";
       runComputeKernel(dev, cfg, d);
     }
     // FP4 mma.sync E2M1 (PTX) - Blackwell sm_120a+
@@ -906,8 +859,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
       d.skipMsg = "FP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "m16n8k32";
       d.extraNvrtcOpts = fp4Opts;
       d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
@@ -936,8 +887,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
       d.skipMsg = "MXFP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
-      d.extraAttribKey = "tile";
-      d.extraAttribVal = "m16n8k64";
       d.extraNvrtcOpts = fp4Opts;
       d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
@@ -974,8 +923,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.wmmaInt8Supported;
     d.skipMsg = "INT8 WMMA requires sm_72 or newer (Turing+)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "16x16x16";
     runComputeKernel(dev, cfg, d);
   }
   // INT8 mma.sync K=32 (NVIDIA-native tile via inline PTX)
@@ -998,8 +945,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.wmmaInt8Supported;
     d.skipMsg = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
   }
   // INT8 mma.sp 2:4 structured sparsity m16n8k32 -- sm_80+
@@ -1022,8 +967,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.int8MmaSparseSupported;
     d.skipMsg = "INT8 mma.sp 2:4 sparsity requires sm_80 or newer (Ampere+)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "m16n8k32";
     runComputeKernel(dev, cfg, d);
   }
   // INT4 mma.sync m8n8k32 -- sm_75..sm_89
@@ -1046,8 +989,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.int4MmaSupported;
     d.skipMsg = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "m8n8k32";
     runComputeKernel(dev, cfg, d);
   }
   // BMMA b1 mma.sync m8n8k128 (XOR-popc) -- sm_75+
@@ -1070,8 +1011,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.bmmaSupported;
     d.skipMsg = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
-    d.extraAttribKey = "tile";
-    d.extraAttribVal = "m8n8k128";
     runComputeKernel(dev, cfg, d);
   }
 
@@ -1095,18 +1034,16 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (numBlocks == 0)
     numBlocks = 1;
 
-  log->print(NEWLINE TAB "Global memory bandwidth (GBPS)" NEWLINE);
-  auto scope = log->resultScope("global_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  auto test = currentDeviceScope->beginTest(
+    {"global_memory_bandwidth", "Global memory bandwidth (GBPS)", "gbps"});
 
   CUdeviceptr inBuf = 0, outBuf = 0;
   if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||
       cuMemAlloc(&outBuf, numItems * sizeof(float)) != CUDA_SUCCESS)
   {
-    log->print(TAB TAB "Failed to allocate buffers" NEWLINE);
     const char *labels[] = {"float", "float2", "float4"};
     for (int i = 0; i < 3; i++)
-      log->recordSkip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
+      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
     if (inBuf)
       cuMemFree(inBuf);
     return -1;
@@ -1136,31 +1073,21 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                        cuda_kernels::global_bandwidth_name,
                        v.kernelName, fn))
     {
-      log->print(TAB TAB);
-      log->print(v.label);
-      log->print(": compile failed" NEWLINE);
-      log->recordSkip(v.label, ResultStatus::Error, "Kernel compile failed");
+      test.skip(v.kernelName, ResultStatus::Error, "Kernel compile failed");
       continue;
     }
 
-    // Threads cover numItems/V elements: numBlocks = numItems / FETCH_PER_WI / V / blockSize.
     uint64_t blocks = numItems / FETCH_PER_WI / v.width / blockSize;
     if (blocks == 0)
       blocks = 1;
     uint32_t blocksU = (uint32_t)blocks;
 
     void *args[2] = {&inBuf, &outBuf};
-    log->print(TAB TAB);
-    log->print(v.label);
-    log->print(": ");
     float us = runKernel(dev, fn, blocksU, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-    // Bytes touched = numBlocks * blockSize * FETCH_PER_WI * V * sizeof(float)
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float gbps = (float)(bytes / us / 1e3);
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord(v.kernelName, gbps);
+    test.emit(v.kernelName, gbps);
   }
 
   cuMemFree(inBuf);
@@ -1177,28 +1104,22 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   const uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
   unsigned int forced = forceIters ? specifiedIters : 0;
 
-  log->print(NEWLINE TAB "Transfer bandwidth (GBPS)" NEWLINE);
-  auto scope = log->resultScope("transfer_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  auto test = currentDeviceScope->beginTest(
+    {"transfer_bandwidth", "Transfer bandwidth (GBPS)", "gbps"});
 
   CUdeviceptr dBuf = 0;
   if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)
   {
-    log->print(TAB TAB "Failed to allocate device buffer" NEWLINE);
-    log->recordSkip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer");
-    log->recordSkip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer");
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer");
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer");
     return -1;
   }
-  // Pinned host buffer -- the transfer-BW number we want is the pinned
-  // path; pageable host allocations cap well below PCIe peak.
   void *hPinned = nullptr;
   if (cuMemAllocHost(&hPinned, bytes) != CUDA_SUCCESS)
   {
     cuMemFree(dBuf);
-    log->print(TAB TAB "Failed to allocate pinned host buffer" NEWLINE);
-    log->recordSkip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
-    log->recordSkip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
-    log->resultScopeEnd();
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
     return -1;
   }
 
@@ -1250,17 +1171,11 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   float usH2D = timeXfer(true);
   float gbpsH2D = (float)bytes / usH2D / 1e3f;
-  log->print(TAB TAB "Host->Dev (pinned) : ");
-  log->print(gbpsH2D);
-  log->print(NEWLINE);
-  log->resultRecord("h2d_pinned", gbpsH2D);
+  test.emit("h2d_pinned", gbpsH2D);
 
   float usD2H = timeXfer(false);
   float gbpsD2H = (float)bytes / usD2H / 1e3f;
-  log->print(TAB TAB "Dev->Host (pinned) : ");
-  log->print(gbpsD2H);
-  log->print(NEWLINE);
-  log->resultRecord("d2h_pinned", gbpsD2H);
+  test.emit("d2h_pinned", gbpsD2H);
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);
@@ -1276,18 +1191,16 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int iters = forceIters ? specifiedIters
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
-  log->print(NEWLINE TAB "Kernel launch latency (us)" NEWLINE);
-  auto scope = log->resultScope("kernel_launch_latency");
-  log->resultScopeAttribute("unit", "us");
+  auto test = currentDeviceScope->beginTest(
+    {"kernel_launch_latency", "Kernel launch latency (us)", "us"});
 
   CUfunction fn;
   if (!dev.getKernel(cuda_kernels::kernel_latency_src,
                      cuda_kernels::kernel_latency_name,
                      "kernel_latency_noop", fn))
   {
-    log->print(TAB TAB "Compile failed" NEWLINE);
-    log->recordSkip("dispatch", ResultStatus::Error, "Kernel compile failed");
-    log->recordSkip("roundtrip", ResultStatus::Error, "Kernel compile failed");
+    test.skip("dispatch", ResultStatus::Error, "Kernel compile failed");
+    test.skip("roundtrip", ResultStatus::Error, "Kernel compile failed");
     return -1;
   }
 
@@ -1323,21 +1236,17 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
     }
   }
 
-  log->print(TAB TAB "dispatch  : not measurable via CUDA driver API" NEWLINE);
-  log->recordSkip("dispatch", ResultStatus::Unsupported,
-                  "Not measurable via CUDA driver API");
-  log->print(TAB TAB "roundtrip : ");
+  test.skip("dispatch", ResultStatus::Unsupported,
+            "Not measurable via CUDA driver API");
   if (submitFailed)
   {
-    log->print("submit failed" NEWLINE);
-    log->recordSkip("roundtrip", ResultStatus::Error, "cuLaunchKernel/cuStreamSynchronize failed");
+    test.skip("roundtrip", ResultStatus::Error,
+              "cuLaunchKernel/cuStreamSynchronize failed");
   }
   else
   {
     float roundtripUs = (float)(totalRoundtripUs / iters);
-    log->print(roundtripUs);
-    log->print(NEWLINE);
-    log->resultRecord("roundtrip", roundtripUs);
+    test.emit("roundtrip", roundtripUs);
   }
 
   return 0;
@@ -1349,9 +1258,8 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Local memory bandwidth (GBPS)" NEWLINE);
-  auto scope = log->resultScope("local_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  auto test = currentDeviceScope->beginTest(
+    {"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
@@ -1360,10 +1268,9 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUdeviceptr outBuf = 0;
   if (cuMemAlloc(&outBuf, globalThreads * sizeof(float)) != CUDA_SUCCESS)
   {
-    log->print(TAB TAB "Buffer alloc failed" NEWLINE);
-    log->recordSkip("float", ResultStatus::Error, "Buffer alloc failed");
-    log->recordSkip("float2", ResultStatus::Error, "Buffer alloc failed");
-    log->recordSkip("float4", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed");
     return -1;
   }
 
@@ -1380,18 +1287,14 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   };
   for (const auto &v : vs)
   {
-    log->print(TAB TAB);
-    log->print(v.label);
-    log->print(": ");
     CUfunction fn;
     if (!dev.getKernel(cuda_kernels::local_bandwidth_src,
                        cuda_kernels::local_bandwidth_name, v.kname, fn))
     {
-      log->print("compile/load failed" NEWLINE);
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ')
         key.pop_back();
-      log->recordSkip(key, ResultStatus::Error, "Kernel compile failed");
+      test.skip(key, ResultStatus::Error, "Kernel compile failed");
       continue;
     }
     void *args[1] = {&outBuf};
@@ -1399,12 +1302,10 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
     float gbps = (float)bytes / us / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
-    log->resultRecord(key, gbps);
+    test.emit(key, gbps);
   }
 
   cuMemFree(outBuf);
@@ -1417,9 +1318,8 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  auto scope = log->resultScope("image_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  auto test = currentDeviceScope->beginTest(
+    {"image_memory_bandwidth", "Image memory bandwidth (GBPS)", "gbps"});
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
@@ -1435,8 +1335,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUarray arr;
   if (cuArrayCreate(&arr, &adesc) != CUDA_SUCCESS)
   {
-    log->print(TAB TAB "Image array create failed" NEWLINE);
-    log->recordSkip("float4", ResultStatus::Error, "Image array create failed");
+    test.skip("float4", ResultStatus::Error, "Image array create failed");
     return -1;
   }
   // Contents undefined is fine for a bandwidth measurement -- the cache
@@ -1453,8 +1352,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUtexObject tex = 0;
   if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
   {
-    log->print(TAB TAB "Texture object create failed" NEWLINE);
     cuArrayDestroy(arr);
+    test.skip("float4", ResultStatus::Error, "Texture object create failed");
     return -1;
   }
 
@@ -1476,14 +1375,11 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   int w = imgW, h = imgH;
   void *args[4] = {&tex, &outBuf, &w, &h};
-  log->print(TAB TAB "float4 : ");
   float us = runKernel(dev, fn, numBlocks, blockSize, args,
                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
   float gbps = (float)bytes / us / 1e3f;
-  log->print(gbps);
-  log->print(NEWLINE);
-  log->resultRecord("float4", gbps);
+  test.emit("float4", gbps);
 
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);
@@ -1497,9 +1393,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  log->print(NEWLINE TAB "Atomic throughput (GOPS)" NEWLINE);
-  auto scope = log->resultScope("atomic_throughput");
-  log->resultScopeAttribute("unit", "gops");
+  auto test = currentDeviceScope->beginTest(
+    {"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
@@ -1512,7 +1407,6 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
     {
       cuMemsetD32(buf, 0, globalThreads);
       CUfunction fn;
-      log->print(TAB TAB "int_global : ");
       if (dev.getKernel(cuda_kernels::atomic_throughput_src,
                         cuda_kernels::atomic_throughput_name,
                         "atomic_throughput_global", fn))
@@ -1521,20 +1415,17 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
         float us = runKernel(dev, fn, numBlocks, blockSize, args,
                              cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-        log->print(gops);
-        log->print(NEWLINE);
-        log->resultRecord("int_global", gops);
+        test.emit("int_global", gops);
       }
       else
       {
-        log->print("compile failed" NEWLINE);
-        log->recordSkip("int_global", ResultStatus::Error, "Kernel compile failed");
+        test.skip("int_global", ResultStatus::Error, "Kernel compile failed");
       }
       cuMemFree(buf);
     }
     else
     {
-      log->recordSkip("int_global", ResultStatus::Error, "Buffer alloc failed");
+      test.skip("int_global", ResultStatus::Error, "Buffer alloc failed");
     }
   }
 
@@ -1544,7 +1435,6 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
     if (cuMemAlloc(&buf, (uint64_t)numBlocks * sizeof(int)) == CUDA_SUCCESS)
     {
       CUfunction fn;
-      log->print(TAB TAB "int_local  : ");
       if (dev.getKernel(cuda_kernels::atomic_throughput_src,
                         cuda_kernels::atomic_throughput_name,
                         "atomic_throughput_local", fn))
@@ -1553,20 +1443,17 @@ int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
         float us = runKernel(dev, fn, numBlocks, blockSize, args,
                              cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
-        log->print(gops);
-        log->print(NEWLINE);
-        log->resultRecord("int_local", gops);
+        test.emit("int_local", gops);
       }
       else
       {
-        log->print("compile failed" NEWLINE);
-        log->recordSkip("int_local", ResultStatus::Error, "Kernel compile failed");
+        test.skip("int_local", ResultStatus::Error, "Kernel compile failed");
       }
       cuMemFree(buf);
     }
     else
     {
-      log->recordSkip("int_local", ResultStatus::Error, "Buffer alloc failed");
+      test.skip("int_local", ResultStatus::Error, "Buffer alloc failed");
     }
   }
 

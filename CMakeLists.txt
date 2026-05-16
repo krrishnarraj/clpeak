@@ -6,7 +6,6 @@ include(${CLPEAK_ROOT}/src/common/cmake/version.cmake)
 include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)
-    message(STATUS "Setting build type to Release")
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 

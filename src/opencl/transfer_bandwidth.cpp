@@ -62,11 +62,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   // Helper: run a timed transfer test with warmup + calibration, return
   // measured gbps.  Calibrates iters from a one-iteration timed probe so the
   // measurement window lands at ~cfg.targetTimeUs regardless of bus speed.
-  auto runTransfer = [&](const std::string &label, const std::string &resultName,
-                         std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
+  auto runTransfer = [&](std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
   {
-    log->print(label);
-
     // Phase 1: untimed warmup
     for (unsigned int w = 0; w < warmupCount; w++)
     {
@@ -105,9 +102,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     float timed = runBatch(iters) / static_cast<float>(iters);
 
     float gbps = (float)bytes / timed / 1e3f;
-    log->print(gbps);
-    log->print(NEWLINE);
-    log->resultRecord(resultName, gbps);
     return gbps;
   };
 
@@ -119,21 +113,17 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     return gbps > ZERO_COPY_ABSOLUTE_GBPS;
   };
 
+  auto test = currentDeviceScope->beginTest(
+    {"transfer_bandwidth", "Transfer bandwidth (GBPS)", "gbps"});
+
   // Helper: report a map/unmap result, detecting zero-copy
-  auto reportMapUnmap = [&](float gbps, const std::string &resultName)
+  auto reportMapUnmap = [&](float gbps, const std::string &resultName,
+                            logger::EmitOptions opts = {})
   {
     if (isZeroCopy(gbps))
-    {
-      log->print("inf (zero-copy)");
-      log->print(NEWLINE);
-      log->resultRecord(resultName, (float)0);
-    }
+      test.emit(resultName, 0.0f, opts);
     else
-    {
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->resultRecord(resultName, gbps);
-    }
+      test.emit(resultName, gbps, opts);
   };
 
   try
@@ -141,45 +131,42 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     arr = allocAligned(bytes);
     if (!arr)
     {
-      log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
-      auto scope = log->resultScope("transfer_bandwidth");
-      log->resultScopeAttribute("unit", "gbps");
-      log->recordSkip("enqueuewritebuffer", ResultStatus::Error, "Out of memory");
-      log->recordSkip("enqueuereadbuffer", ResultStatus::Error, "Out of memory");
-      log->recordSkip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory");
-      log->recordSkip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory");
-      log->recordSkip("enqueuemapbuffer", ResultStatus::Error, "Out of memory");
-      log->recordSkip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory");
-      log->recordSkip("enqueueunmap", ResultStatus::Error, "Out of memory");
-      log->recordSkip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory");
+      test.skip("enqueuewritebuffer", ResultStatus::Error, "Out of memory");
+      test.skip("enqueuereadbuffer", ResultStatus::Error, "Out of memory");
+      test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory");
+      test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory");
+      test.skip("enqueuemapbuffer", ResultStatus::Error, "Out of memory");
+      test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory");
+      test.skip("enqueueunmap", ResultStatus::Error, "Out of memory");
+      test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory");
       return -1;
     }
     memset(arr, 0, bytes);
     cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), bytes);
 
-    log->print(NEWLINE TAB TAB "Transfer bandwidth (GBPS)" NEWLINE);
-    auto scope = log->resultScope("transfer_bandwidth");
-    log->resultScopeAttribute("unit", "gbps");
-
     // enqueueWriteBuffer (blocking)
     float bw;
-    bw = runTransfer(TAB TAB TAB "enqueueWriteBuffer              : ", "enqueuewritebuffer",
+    bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
+    test.emit("enqueuewritebuffer", bw);
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueReadBuffer (blocking)
-    bw = runTransfer(TAB TAB TAB "enqueueReadBuffer               : ", "enqueuereadbuffer",
+    bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
+    test.emit("enqueuereadbuffer", bw);
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueWriteBuffer non-blocking
-    bw = runTransfer(TAB TAB TAB "enqueueWriteBuffer non-blocking : ", "enqueuewritebuffer_nonblocking",
+    bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
+    test.emit("enqueuewritebuffer_nonblocking", bw);
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueReadBuffer non-blocking
-    bw = runTransfer(TAB TAB TAB "enqueueReadBuffer non-blocking  : ", "enqueuereadbuffer_nonblocking",
+    bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
+    test.emit("enqueuereadbuffer_nonblocking", bw);
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // Helper: calibrate iter count for the open-coded map/unmap loops below.
@@ -201,7 +188,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     // processing time, which is zero on unified-memory platforms (Apple Silicon),
     // causing division-by-zero / inf with --use-event-timer.
     {
-      log->print(TAB TAB TAB "enqueueMapBuffer(for read)      : ");
       queue.finish();
 
       unsigned int iters = calibrateMapIters([&]() {
@@ -231,7 +217,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     // memcpy from mapped ptr
     {
-      log->print(TAB TAB TAB TAB "memcpy from mapped ptr        : ");
       queue.finish();
 
       unsigned int iters = calibrateMapIters([&]() {
@@ -259,14 +244,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->resultRecord("memcpy_from_mapped_ptr", gbps);
+      test.emit("memcpy_from_mapped_ptr", gbps, {true});
     }
 
     // enqueueUnmap(after write)
     {
-      log->print(TAB TAB TAB "enqueueUnmap(after write)       : ");
       queue.finish();
 
       unsigned int iters = calibrateMapIters([&]() {
@@ -296,7 +278,6 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
     // memcpy to mapped ptr
     {
-      log->print(TAB TAB TAB TAB "memcpy to mapped ptr          : ");
       queue.finish();
 
       unsigned int iters = calibrateMapIters([&]() {
@@ -324,28 +305,22 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      log->print(gbps);
-      log->print(NEWLINE);
-       log->resultRecord("memcpy_to_mapped_ptr", gbps);
+      test.emit("memcpy_to_mapped_ptr", gbps, {true});
     }
 
     freeAligned(arr);
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    log->recordSkip("enqueuewritebuffer", ResultStatus::Error, reason);
-    log->recordSkip("enqueuereadbuffer", ResultStatus::Error, reason);
-    log->recordSkip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason);
-    log->recordSkip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason);
-    log->recordSkip("enqueuemapbuffer", ResultStatus::Error, reason);
-    log->recordSkip("memcpy_from_mapped_ptr", ResultStatus::Error, reason);
-    log->recordSkip("enqueueunmap", ResultStatus::Error, reason);
-    log->recordSkip("memcpy_to_mapped_ptr", ResultStatus::Error, reason);
+    test.skip("enqueuewritebuffer", ResultStatus::Error, reason);
+    test.skip("enqueuereadbuffer", ResultStatus::Error, reason);
+    test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason);
+    test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason);
+    test.skip("enqueuemapbuffer", ResultStatus::Error, reason);
+    test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, reason);
+    test.skip("enqueueunmap", ResultStatus::Error, reason);
+    test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, reason);
 
     freeAligned(arr);
     return -1;

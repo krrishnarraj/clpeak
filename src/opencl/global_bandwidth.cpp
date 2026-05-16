@@ -15,14 +15,13 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
   uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize);
 
+  auto test = currentDeviceScope->beginTest(
+    {"global_memory_bandwidth", "Global memory bandwidth (GBPS)", "gbps"});
+
   try
   {
     arr = new float[numItems];
     populate(arr, numItems);
-
-    log->print(NEWLINE TAB TAB "Global memory bandwidth (GBPS)" NEWLINE);
-    auto scope = log->resultScope("global_memory_bandwidth");
-    log->resultScopeAttribute("unit", "gbps");
 
     cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
@@ -62,14 +61,11 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     cl::Kernel *go_kernels[] = {&kernel_v1_go, &kernel_v2_go, &kernel_v4_go, &kernel_v8_go, &kernel_v16_go};
     const int widths[] = {1, 2, 4, 8, 16};
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
-    const char *display[] = {"float   ", "float2  ", "float4  ", "float8  ", "float16 "};
 
     localSize = devInfo.maxWGSize;
 
     for (int w = 0; w < 5; w++)
     {
-      log->print(TAB TAB TAB + std::string(display[w]) + ": ");
-
       globalSize = numItems / widths[w] / FETCH_PER_WI;
 
       timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
@@ -78,33 +74,26 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
 
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->resultRecord(labels[w], gbps);
+      test.emit(labels[w], gbps);
      }
 
     delete[] arr;
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Error, reason);
+      test.skip(labels[w], ResultStatus::Error, reason);
 
     delete[] arr;
     return -1;
   }
   catch (std::bad_alloc &)
   {
-    log->print(TAB TAB TAB "Out of memory, tests skipped" NEWLINE);
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
     for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Error, "Out of memory");
+      test.skip(labels[w], ResultStatus::Error, "Out of memory");
     delete[] arr;
     return -1;
   }

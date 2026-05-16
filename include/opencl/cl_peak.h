@@ -24,6 +24,10 @@ public:
     clPeak();
     ~clPeak() override = default;
 
+    // Set by runAll() before each device's benchmarks, read by runComputeTest()
+    // and the per-benchmark methods.
+    logger::DeviceScope *currentDeviceScope = nullptr;
+
     void applyOptions(const CliOptions &opts) override;
     int runAll() override;
 

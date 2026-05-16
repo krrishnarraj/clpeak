@@ -9,15 +9,13 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   if (!isAllowed(Benchmark::ImageBW))
     return 0;
 
-  log->print(NEWLINE TAB TAB "Image memory bandwidth (GBPS)" NEWLINE);
-  auto scope = log->resultScope("image_memory_bandwidth");
-  log->resultScopeAttribute("unit", "gbps");
+  auto test = currentDeviceScope->beginTest(
+    {"image_memory_bandwidth", "Image memory bandwidth (GBPS)", "gbps"});
 
-    if (!devInfo.imageSupported)
+  if (!devInfo.imageSupported)
   {
-    log->print(TAB TAB TAB "Skipped (device has no image support)" NEWLINE);
-    log->recordSkip("float4", ResultStatus::Unsupported,
-                     "Device has no image support");
+    test.skip("float4", ResultStatus::Unsupported,
+               "Device has no image support");
     return 0;
   }
 
@@ -52,8 +50,6 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     ///////////////////////////////////////////////////////////////////////////
     // float4 -- read_imagef always returns float4 (RGBA)
     {
-      log->print(TAB TAB TAB "float4  : ");
-
       cl::Kernel kernel_v1(prog, "image_bandwidth_v1");
       kernel_v1.setArg(0, img);
       kernel_v1.setArg(1, outputBuf);
@@ -64,20 +60,14 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * globalWIs;
       gbps = (float)bytesPerCall / timed / 1e3f;
 
-      log->print(gbps);
-      log->print(NEWLINE);
-      log->resultRecord("float4", gbps);
+      test.emit("float4", gbps);
     }
     ///////////////////////////////////////////////////////////////////////////
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    log->recordSkip("float4", ResultStatus::Error, reason);
+    test.skip("float4", ResultStatus::Error, reason);
     return -1;
   }
 

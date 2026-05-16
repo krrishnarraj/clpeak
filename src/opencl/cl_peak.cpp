@@ -74,9 +74,7 @@ int clPeak::runAll()
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
 
-    log->print(NEWLINE "=== OpenCL backend ===" NEWLINE);
-    log->resultScopeBegin("clpeak");
-    log->resultScopeAttribute("os", OS_NAME);
+    auto backendScope = log->beginBackend("OpenCL");
     for (size_t p = 0; p < platforms.size(); p++)
     {
       if (forcePlatform && (p != specifiedPlatform))
@@ -87,11 +85,6 @@ int clPeak::runAll()
 
       if (forcePlatformName && specifiedPlatformName != platformName)
         continue;
-
-      log->print(NEWLINE "Platform: " + platformName + NEWLINE);
-      log->resultScopeBegin("platform");
-      log->resultScopeAttribute("name", platformName);
-      log->resultScopeAttribute("backend", "OpenCL");
 
       cl_context_properties cps[3] = {
           CL_CONTEXT_PLATFORM,
@@ -115,24 +108,19 @@ int clPeak::runAll()
         if (forceDeviceName && specifiedDeviceName != devInfo.deviceName)
           continue;
 
-        log->print(TAB "Device: " + devInfo.deviceName + NEWLINE);
-        log->print(TAB TAB "Driver version  : ");
-        log->print(devInfo.driverVersion);
-        log->print(" (" OS_NAME ")" NEWLINE);
-        log->print(TAB TAB "Compute units   : ");
-        log->print(devInfo.numCUs);
-        log->print(NEWLINE);
-        log->print(TAB TAB "Clock frequency : ");
-        log->print(devInfo.maxClockFreq);
-        log->print(" MHz" NEWLINE);
         if (useEventTimer)
-          log->print(TAB TAB "Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation" NEWLINE);
-        log->resultScopeBegin("device");
-        log->resultScopeAttribute("name", devInfo.deviceName);
-        log->resultScopeAttribute("driver_version", devInfo.driverVersion);
-        log->resultScopeAttribute("compute_units", devInfo.numCUs);
-        log->resultScopeAttribute("clock_frequency", devInfo.maxClockFreq);
-        log->resultScopeAttribute("clock_frequency_unit", "MHz");
+          log->note("  Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation\n");
+
+        auto deviceScope = backendScope.beginDevice({
+          devInfo.deviceName,
+          platformName,
+          devInfo.driverVersion,
+          {
+            {"Compute units", std::to_string(devInfo.numCUs)},
+            {"Clock frequency", std::to_string(devInfo.maxClockFreq) + " MHz"},
+          }
+        });
+        currentDeviceScope = &deviceScope;
 
         cl::Program::Sources source(1, stringifiedKernels);
         cl::Program prog = cl::Program(ctx, source);
@@ -144,7 +132,8 @@ int clPeak::runAll()
         catch (cl::Error &error)
         {
           UNUSED(error);
-          log->print(TAB TAB "Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]) + NEWLINE NEWLINE);
+          log->note("  Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]) + "\n\n");
+          currentDeviceScope = nullptr;
           continue;
         }
 
@@ -161,7 +150,7 @@ int clPeak::runAll()
           }
           catch (cl::Error &)
           {
-            log->print(TAB TAB + label + " kernel build failed, test skipped" NEWLINE);
+            log->note("  " + label + " kernel build failed, test skipped\n");
             p = cl::Program(); // return empty/invalid program
           }
           return p;
@@ -194,7 +183,7 @@ int clPeak::runAll()
         {
           if (useEventTimer)
           {
-            log->print(TAB TAB "NOTE: Device does not support profiling queue, --use-event-timer disabled" NEWLINE);
+            log->note("  NOTE: Device does not support profiling queue, --use-event-timer disabled\n");
           }
           useEventTimer = false;
         }
@@ -264,36 +253,28 @@ int clPeak::runAll()
           runKernelLatency(queue, prog, devInfo, cfg);
         else if (isAllowed(Benchmark::KernelLatency))
         {
-          log->print(NEWLINE TAB TAB "Kernel launch latency (us)" NEWLINE);
-          log->resultScopeBegin("kernel_launch_latency");
-          log->resultScopeAttribute("unit", "us");
-          log->recordSkip("dispatch", ResultStatus::Unsupported,
-                           "No profiling queue support");
-          log->recordSkip("roundtrip", ResultStatus::Unsupported,
-                           "No profiling queue support");
-          log->resultScopeEnd();
+          auto test = deviceScope.beginTest({"kernel_launch_latency",
+                                             "Kernel launch latency", "us"});
+          test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
+                       "No profiling queue support");
         }
 
         useEventTimer = savedUseEventTimer;
 
-        log->print(NEWLINE);
-        log->resultScopeEnd(); // device
+        currentDeviceScope = nullptr;
       }
-      log->resultScopeEnd(); // platform
     }
-    log->resultScopeEnd(); // clpeak
   }
   catch (cl::Error &error)
   {
     std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE;
-
-    log->print(ss.str());
+    ss << error.what() << " (" << error.err() << ")";
+    log->note(ss.str() + "\n");
 
     // skip error for no platform
     if (error.err() == CL_INVALID_VALUE || error.err() == CL_PLATFORM_NOT_FOUND_KHR)
     {
-      log->print("no platforms found" NEWLINE);
+      log->note("no platforms found\n");
     }
     else
     {
@@ -380,60 +361,37 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       labels[w] += std::to_string(widths[w]);
   }
 
+  auto test = currentDeviceScope->beginTest({resultTag, displayName, unit});
+
   // Feature gates
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
   {
-    log->print(NEWLINE TAB TAB "No half precision support! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
-    log->resultScopeAttribute("unit", unit);
-    for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Unsupported,
-                       "No half precision support");
-    log->resultScopeEnd();
+    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
+                 ResultStatus::Unsupported, "No half precision support");
     return 0;
   }
   if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
   {
-    log->print(NEWLINE TAB TAB "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)" NEWLINE);
-    log->print(TAB TAB TAB "No half precision support! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
-    log->resultScopeAttribute("unit", unit);
-    for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Unsupported,
-                       "No half precision support");
-    log->resultScopeEnd();
+    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
+                 ResultStatus::Unsupported, "No half precision support");
     return 0;
   }
   if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
   {
-    log->print(NEWLINE TAB TAB "No double precision support! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
-    log->resultScopeAttribute("unit", unit);
-    for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Unsupported,
-                       "No double precision support");
-    log->resultScopeEnd();
+    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
+                 ResultStatus::Unsupported, "No double precision support");
     return 0;
   }
   if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
   {
-    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->print(TAB TAB TAB "cl_khr_integer_dot_product not supported! Skipped" NEWLINE);
-    log->resultScopeBegin(resultTag);
-    log->resultScopeAttribute("unit", unit);
-    for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Unsupported,
-                       "cl_khr_integer_dot_product not supported");
-    log->resultScopeEnd();
+    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
+                 ResultStatus::Unsupported,
+                 "cl_khr_integer_dot_product not supported");
     return 0;
   }
 
   try
   {
-    log->print(NEWLINE TAB TAB + displayName + NEWLINE);
-    log->resultScopeBegin(resultTag);
-    log->resultScopeAttribute("unit", unit);
-
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
     uint64_t globalWIs = (uint64_t)devInfo.numCUs * wgsPerCU * devInfo.maxWGSize;
@@ -482,47 +440,27 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     }
 
-  // Run each vector width
-  for (int w = 0; w < 5; w++)
-  {
-    // Padding for aligned output
-      std::string padded = labels[w];
-      while (padded.size() < 8)
-        padded += ' ';
-      log->print(TAB TAB TAB + padded + ": ");
-
+    // Run each vector width
+    for (int w = 0; w < 5; w++)
+    {
       float timed = run_kernel(queue, kernels[w], globalSize, localSize,
                                cfg.targetTimeUs, forceIters ? specifiedIters : 0);
       float throughput = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-      log->print(throughput);
-      log->print(NEWLINE);
-      log->resultRecord(labels[w], throughput);
+      test.emit(labels[w], throughput);
     }
-
-    log->resultScopeEnd();
   }
   catch (cl::Error &error)
   {
-    std::stringstream ss;
-    ss << error.what() << " (" << error.err() << ")" NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Error, reason);
-    log->resultScopeEnd();
+      test.skip(labels[w], ResultStatus::Error, reason);
     return -1;
   }
   catch (std::exception &e)
   {
-    std::stringstream ss;
-    ss << "Exception: " << e.what() << NEWLINE
-       << TAB TAB TAB "Tests skipped" NEWLINE;
-    log->print(ss.str());
     for (int w = 0; w < 5; w++)
-      log->recordSkip(labels[w], ResultStatus::Error, e.what());
-    log->resultScopeEnd();
+      test.skip(labels[w], ResultStatus::Error, e.what());
     return -1;
   }
 
