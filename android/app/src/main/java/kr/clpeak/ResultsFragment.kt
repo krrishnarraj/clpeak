@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -99,20 +100,35 @@ class ResultsFragment : Fragment() {
     private fun refreshCurrentTab() {
         val backend = selectedBackend
         val cats = viewModel.categoriesByBackend.value?.get(backend) ?: emptyList()
-        adapter.submitList(cats.toList())
+        // Don't show fully-skipped tests as cards
+        adapter.submitList(cats.filter { !it.allSkipped }.toList())
 
         val info = viewModel.deviceInfoByBackend.value?.get(backend)
         if (info != null) {
             binding.cardDeviceInfo.visibility = View.VISIBLE
             binding.tvPlatform.text = info.platformName
             binding.tvDevice.text   = info.deviceName
-            val extra = info.props().joinToString("  │  ") { "${it.first}: ${it.second}" }
-            binding.tvDriver.text   = if (extra.isNotEmpty())
-                info.driverVersion + "  │  " + extra
-            else
-                info.driverVersion
+            binding.tvDriver.text   = info.driverVersion
+            rebuildProps(info)
         } else {
             binding.cardDeviceInfo.visibility = View.GONE
+        }
+    }
+
+    private fun rebuildProps(info: DeviceInfo) {
+        val container = binding.layoutProps
+        // Remove previously added dynamic prop rows (keep the 3 static label rows)
+        while (container.childCount > 3) {
+            container.removeViewAt(container.childCount - 1)
+        }
+        for ((key, value) in info.props()) {
+            val row = LayoutInflater.from(requireContext())
+                .inflate(R.layout.item_device_prop, container, false)
+            val label = row.findViewById<TextView>(R.id.tv_prop_label)
+            val valueView = row.findViewById<TextView>(R.id.tv_prop_value)
+            label.text = key
+            valueView.text = value
+            container.addView(row)
         }
     }
 
