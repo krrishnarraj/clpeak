@@ -20,7 +20,6 @@ void LoggerCli::note(const std::string &msg)
 
 void LoggerCli::onBackendBegin(const std::string &name)
 {
-    std::cout << "\n";
     indentLevel = 0;
     std::cout << "Backend: " << name << "\n";
     std::cout.flush();
@@ -130,6 +129,7 @@ void LoggerCli::onDeviceEnd()
     if (!metricLines.empty())
         flushMetrics();
 
+    std::cout << "\n";
     indentLevel = 0;
     std::cout.flush();
 }

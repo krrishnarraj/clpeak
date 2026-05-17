@@ -1068,12 +1068,16 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   for (const auto &v : variants)
   {
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ')
+      key.pop_back();
+
     CUfunction fn;
     if (!dev.getKernel(cuda_kernels::global_bandwidth_src,
                        cuda_kernels::global_bandwidth_name,
                        v.kernelName, fn))
     {
-      test.skip(v.kernelName, ResultStatus::Error, "Kernel compile failed");
+      test.skip(key, ResultStatus::Error, "Kernel compile failed");
       continue;
     }
 
@@ -1087,7 +1091,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float gbps = (float)(bytes / us / 1e3);
-    test.emit(v.kernelName, gbps);
+    test.emit(key, gbps);
   }
 
   cuMemFree(inBuf);
