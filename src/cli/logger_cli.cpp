@@ -161,10 +161,13 @@ void LoggerCli::flushMetrics()
     for (const auto &ml : metricLines)
     {
         int lineIndent = ml.subMetric ? metricIndent + 1 : metricIndent;
+        int padTarget  = ml.subMetric ? maxWidth - 2 : maxWidth;
+        if (padTarget < MIN_METRIC_PAD)
+            padTarget = MIN_METRIC_PAD;
 
         // Build padded metric name
         std::string padded = ml.metric;
-        while (static_cast<int>(padded.size()) < maxWidth)
+        while (static_cast<int>(padded.size()) < padTarget)
             padded += ' ';
 
         if (ml.kind == MetricLine::Ok)
