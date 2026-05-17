@@ -106,7 +106,11 @@ class ResultsFragment : Fragment() {
             binding.cardDeviceInfo.visibility = View.VISIBLE
             binding.tvPlatform.text = info.platformName
             binding.tvDevice.text   = info.deviceName
-            binding.tvDriver.text   = info.driverVersion
+            val extra = info.props().joinToString("  │  ") { "${it.first}: ${it.second}" }
+            binding.tvDriver.text   = if (extra.isNotEmpty())
+                info.driverVersion + "  │  " + extra
+            else
+                info.driverVersion
         } else {
             binding.cardDeviceInfo.visibility = View.GONE
         }

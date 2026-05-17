@@ -1,8 +1,6 @@
 package kr.clpeak
 
 // Visual category used for tonal coloring + section grouping in the UI.
-// Maps 1:1 with the C++ `Category` enum (fp_compute, int_compute,
-// bandwidth, latency) plus an UNKNOWN fallback for unrecognised values.
 enum class TestType { FP_COMPUTE, INT_COMPUTE, BANDWIDTH, LATENCY, UNKNOWN }
 
 fun testTypeFromCategory(category: String): TestType = when (category) {
@@ -14,6 +12,7 @@ fun testTypeFromCategory(category: String): TestType = when (category) {
 }
 
 data class BenchmarkCategory(
+    val backend: String,
     val testName: String,
     val displayName: String,
     val category: String,           // canonical category string from C++
@@ -22,6 +21,8 @@ data class BenchmarkCategory(
     val metrics: List<ResultEntry>,
     val isExpanded: Boolean = false
 ) {
-    val peakValue: Float get() = metrics.maxOfOrNull { it.value } ?: 0f
-    val backend: String get() = metrics.firstOrNull()?.backend ?: ""
+    val peakValue: Float get() = metrics.filter { it.status == "ok" }.maxOfOrNull { it.value } ?: 0f
+    val allSkipped: Boolean get() = metrics.all { it.status != "ok" }
+    val skipReason: String get() = metrics.firstOrNull { it.reason.isNotEmpty() }?.reason ?: ""
+    val skipStatus: String get() = metrics.firstOrNull { it.status != "ok" }?.status ?: ""
 }

@@ -8,19 +8,22 @@
 #include <vulkan/vk_peak.h>
 #endif
 
-#define PRINT_CALLBACK         "print_callback_from_c"
 #define RECORD_METRIC_CALLBACK "record_metric_callback_from_c"
+#define DEVICE_INFO_CALLBACK   "device_info_callback_from_c"
 
 static void wireLoggerToJni(LoggerAndroid *lg, JNIEnv *jniEnv, jobject jObj, jclass cls)
 {
     lg->jEnv = jniEnv;
     lg->jObj = jObj;
-    lg->printCallback = jniEnv->GetMethodID(cls,
-        PRINT_CALLBACK, "(Ljava/lang/String;)V");
     lg->recordMetricCallback = jniEnv->GetMethodID(cls,
         RECORD_METRIC_CALLBACK,
         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F)V");
+        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F"
+        "Ljava/lang/String;Ljava/lang/String;)V");
+    lg->deviceInfoCallback = jniEnv->GetMethodID(cls,
+        DEVICE_INFO_CALLBACK,
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
 }
 
 jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
