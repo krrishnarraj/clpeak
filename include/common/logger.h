@@ -90,7 +90,9 @@ protected:
                              const std::string &platform,
                              const std::string &driverVersion,
                              const std::vector<Prop> &props,
-                             bool showPlatformLine) = 0;
+                             bool showPlatformLine,
+                             int platformIndex,
+                             int deviceIndex) = 0;
   virtual void onTestBegin(const std::string &tag,
                            const std::string &display,
                            const std::string &unit) = 0;

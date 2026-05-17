@@ -30,7 +30,9 @@ protected:
                        const std::string &platform,
                        const std::string &driverVersion,
                        const std::vector<Prop> &props,
-                       bool showPlatformLine) override;
+                       bool showPlatformLine,
+                       int platformIndex,
+                       int deviceIndex) override;
     void onTestBegin(const std::string &tag,
                      const std::string &display,
                      const std::string &unit) override;

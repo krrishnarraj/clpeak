@@ -27,16 +27,26 @@ void LoggerAndroid::onDeviceBegin(const std::string &name,
                                   const std::string &platform,
                                   const std::string &driverVersion,
                                   const std::vector<Prop> &props,
-                                  bool showPlatformLine)
+                                  bool showPlatformLine,
+                                  int platformIndex,
+                                  int deviceIndex)
 {
     int deviceIndent = showPlatformLine ? 2 : 1;
     propIndent       = deviceIndent + 1;
     metricIndent     = propIndent + 1;
 
     if (showPlatformLine)
-        writeNote(1, "Platform: " + platform);
+    {
+        std::string pline = platformIndex >= 0
+            ? "Platform " + std::to_string(platformIndex) + ": " + platform
+            : "Platform: " + platform;
+        writeNote(1, pline);
+    }
 
-    writeNote(deviceIndent, "Device: " + name);
+    std::string dline = deviceIndex >= 0
+        ? "Device " + std::to_string(deviceIndex) + ": " + name
+        : "Device: " + name;
+    writeNote(deviceIndent, dline);
 
     if (!driverVersion.empty())
     {

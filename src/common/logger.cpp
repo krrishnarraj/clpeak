@@ -76,17 +76,10 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
 
     bool showPlatformLine = (log->curPlatform != log->curBackend);
 
-    std::string displayPlatform = log->curPlatform;
-    if (spec.platform_index >= 0 && showPlatformLine)
-        displayPlatform = std::to_string(spec.platform_index) + ": " + displayPlatform;
-
-    std::string displayDevice = spec.name;
-    if (spec.device_index >= 0)
-        displayDevice = std::to_string(spec.device_index) + ": " + displayDevice;
-
-    log->onDeviceBegin(displayDevice, displayPlatform,
+    log->onDeviceBegin(spec.name, log->curPlatform,
                        spec.driver_version, spec.props,
-                       showPlatformLine);
+                       showPlatformLine,
+                       spec.platform_index, spec.device_index);
 }
 
 logger::DeviceScope::~DeviceScope()

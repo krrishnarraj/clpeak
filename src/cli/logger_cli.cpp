@@ -31,7 +31,9 @@ void LoggerCli::onDeviceBegin(const std::string &name,
                               const std::string &platform,
                               const std::string &driverVersion,
                               const std::vector<Prop> &props,
-                              bool _showPlatformLine)
+                              bool _showPlatformLine,
+                              int platformIndex,
+                              int deviceIndex)
 {
     showPlatformLine = _showPlatformLine;
 
@@ -42,10 +44,16 @@ void LoggerCli::onDeviceBegin(const std::string &name,
 
     if (showPlatformLine)
     {
-        writeLine(1, "Platform: " + platform);
+        std::string pline = platformIndex >= 0
+            ? "Platform " + std::to_string(platformIndex) + ": " + platform
+            : "Platform: " + platform;
+        writeLine(1, pline);
     }
 
-    writeLine(deviceIndent, "Device: " + name);
+    std::string dline = deviceIndex >= 0
+        ? "Device " + std::to_string(deviceIndex) + ": " + name
+        : "Device: " + name;
+    writeLine(deviceIndent, dline);
 
     // Properties
     if (!driverVersion.empty())
