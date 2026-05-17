@@ -28,6 +28,7 @@ target_include_directories(peak_metal PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
 target_compile_definitions(peak_metal PRIVATE ENABLE_METAL)
+target_compile_definitions(peak_common PRIVATE ENABLE_METAL)
 
 # Compile .mm files with ObjC ARC -- saves us from sprinkling release
 # calls on autoreleased Metal objects.

@@ -28,24 +28,48 @@ static const char *helpStr =
     "\n  --compare file              compare results against a baseline (JSON / CSV / XML)"
     "\n"
     "\n BACKEND SELECTION (default: run every available backend):"
+#ifdef ENABLE_OPENCL
     "\n  --opencl                    run only the OpenCL backend"
+#endif
+#ifdef ENABLE_VULKAN
     "\n  --vulkan                    run only the Vulkan backend"
+#endif
+#ifdef ENABLE_CUDA
     "\n  --cuda                      run only the CUDA backend"
+#endif
+#ifdef ENABLE_METAL
     "\n  --metal                     run only the Metal backend"
-    "\n  (multiple --<backend> flags can be combined: --cuda --vulkan)"
+#endif
+    "\n  (multiple --<backend> flags can be combined)"
+#ifdef ENABLE_OPENCL
     "\n  --no-opencl                 skip the OpenCL backend"
+#endif
+#ifdef ENABLE_VULKAN
     "\n  --no-vulkan                 skip the Vulkan backend"
+#endif
+#ifdef ENABLE_CUDA
     "\n  --no-cuda                   skip the CUDA backend"
+#endif
+#ifdef ENABLE_METAL
     "\n  --no-metal                  skip the Metal backend"
+#endif
     "\n"
     "\n DEVICE SELECTION:"
+#ifdef ENABLE_OPENCL
     "\n  --cl-platform num           OpenCL platform index (0-based)"
     "\n  --cl-device num             OpenCL device index within the platform"
     "\n  --cl-platform-name str      match OpenCL platform by name"
     "\n  --cl-device-name str        match OpenCL device by name"
+#endif
+#ifdef ENABLE_VULKAN
     "\n  --vk-device num             Vulkan physical-device index (0-based)"
+#endif
+#ifdef ENABLE_CUDA
     "\n  --cuda-device num           CUDA device ordinal (0-based)"
+#endif
+#ifdef ENABLE_METAL
     "\n  --mtl-device num            Metal device index (0-based)"
+#endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
     "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
@@ -63,17 +87,25 @@ static const char *helpStr =
     "\n  --mixed-precision-compute         | --no-mixed-precision-compute"
     "\n  --bfloat16-compute                | --no-bfloat16-compute"
     "\n  --integer-compute                 | --no-integer-compute"
+#ifdef ENABLE_OPENCL
     "\n  --integer-compute-fast            | --no-integer-compute-fast      [OpenCL]"
     "\n  --integer-compute-char            | --no-integer-compute-char      [OpenCL]"
     "\n  --integer-compute-short           | --no-integer-compute-short     [OpenCL]"
+#endif
     "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
     "\n  --int4-packed-compute             | --no-int4-packed-compute"
+#ifdef ENABLE_CUDA
     "\n  --wmma                            | --no-wmma                      [CUDA]"
     "\n  --bmma                            | --no-bmma                      [CUDA]"
     "\n  --cublas                          | --no-cublas                    [CUDA]"
+#endif
+#ifdef ENABLE_VULKAN
     "\n  --coopmat                         | --no-coopmat                   [Vulkan]"
+#endif
+#ifdef ENABLE_METAL
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
+#endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
     "\n  --image-memory-bandwidth          | --no-image-memory-bandwidth"
@@ -81,9 +113,12 @@ static const char *helpStr =
     "\n  --atomic-throughput               | --no-atomic-throughput"
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
     "\n"
+#ifdef ENABLE_OPENCL
     "\n OPENCL-SPECIFIC:"
     "\n  --use-event-timer           time using cl events instead of std chrono"
-    "\n";
+    "\n"
+#endif
+;
 
 // ---- Flag tables ----------------------------------------------------------
 
@@ -99,17 +134,29 @@ static const TestFlag testFlags[] = {
   {"mixed-precision-compute",   Benchmark::ComputeMP},
   {"bfloat16-compute",          Benchmark::ComputeBF16},
   {"integer-compute",           Benchmark::ComputeInt},
+#ifdef ENABLE_OPENCL
   {"integer-compute-fast",      Benchmark::ComputeIntFast},
   {"integer-compute-char",      Benchmark::ComputeChar},
   {"integer-compute-short",     Benchmark::ComputeShort},
+#endif
   {"int8-dot-product-compute",  Benchmark::ComputeInt8DP},
   {"int4-packed-compute",       Benchmark::ComputeInt4Packed},
+#ifdef ENABLE_CUDA
   {"wmma",                      Benchmark::Wmma},
   {"bmma",                      Benchmark::Bmma},
+#endif
+#ifdef ENABLE_VULKAN
   {"coopmat",                   Benchmark::CoopMatrix},
+#endif
+#ifdef ENABLE_METAL
   {"simdgroup-matrix",          Benchmark::SimdgroupMatrix},
+#endif
+#ifdef ENABLE_CUDA
   {"cublas",                    Benchmark::Cublas},
+#endif
+#ifdef ENABLE_METAL
   {"mps-gemm",                  Benchmark::MpsGemm},
+#endif
   {"global-memory-bandwidth",   Benchmark::GlobalBW},
   {"local-memory-bandwidth",    Benchmark::LocalBW},
   {"image-memory-bandwidth",    Benchmark::ImageBW},
@@ -252,14 +299,22 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       std::exit(0);
     }
     // ---- backend selection ----------------------------------------------
+#ifdef ENABLE_OPENCL
     else if (!strcmp(a, "--no-opencl")) out.skipOpenCL = true;
-    else if (!strcmp(a, "--no-vulkan")) out.skipVulkan = true;
-    else if (!strcmp(a, "--no-cuda"))   out.skipCuda   = true;
-    else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
     else if (!strcmp(a, "--opencl"))    { incOpenCL = true; includeAny = true; }
+#endif
+#ifdef ENABLE_VULKAN
+    else if (!strcmp(a, "--no-vulkan")) out.skipVulkan = true;
     else if (!strcmp(a, "--vulkan"))    { incVulkan = true; includeAny = true; }
+#endif
+#ifdef ENABLE_CUDA
+    else if (!strcmp(a, "--no-cuda"))   out.skipCuda   = true;
     else if (!strcmp(a, "--cuda"))      { incCuda   = true; includeAny = true; }
+#endif
+#ifdef ENABLE_METAL
+    else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
     else if (!strcmp(a, "--metal"))     { incMetal  = true; includeAny = true; }
+#endif
 
     // ---- iters / warmup -------------------------------------------------
     else if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
@@ -298,6 +353,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     }
 
     // ---- OpenCL device selection ----------------------------------------
+#ifdef ENABLE_OPENCL
     else if (!strcmp(a, "--cl-platform"))
     {
       const char *v = requireArg(argc, argv, i, a);
@@ -328,8 +384,10 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       out.deviceName = requireArg(argc, argv, i, a);
       out.forceDeviceName = true;
     }
+#endif
 
     // ---- Per-backend device selection -----------------------------------
+#ifdef ENABLE_VULKAN
     else if (!strcmp(a, "--vk-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
@@ -339,6 +397,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
         printHelpAndExit(-1);
       }
     }
+#endif
+#ifdef ENABLE_CUDA
     else if (!strcmp(a, "--cuda-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
@@ -348,6 +408,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
         printHelpAndExit(-1);
       }
     }
+#endif
+#ifdef ENABLE_METAL
     else if (!strcmp(a, "--mtl-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
@@ -357,12 +419,15 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
         printHelpAndExit(-1);
       }
     }
+#endif
 
     // ---- OpenCL-specific timer ------------------------------------------
+#ifdef ENABLE_OPENCL
     else if (!strcmp(a, "--use-event-timer"))
     {
       out.useEventTimer = true;
     }
+#endif
 
     // ---- Modes ----------------------------------------------------------
     else if (!strcmp(a, "--list-devices"))

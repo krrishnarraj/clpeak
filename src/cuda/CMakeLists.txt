@@ -25,6 +25,7 @@ target_compile_definitions(peak_cuda PRIVATE
     ENABLE_CUDA
     CLPEAK_CUDA_INCLUDE_DIR="${_clpeak_cuda_inc}"
 )
+target_compile_definitions(peak_common PRIVATE ENABLE_CUDA)
 
 # Embed .cu kernel sources as C++ raw-string literals
 set(CLPEAK_CUDA_KERNELS

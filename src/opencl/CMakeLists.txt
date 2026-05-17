@@ -75,3 +75,4 @@ target_include_directories(peak_opencl PUBLIC
 target_compile_definitions(peak_opencl PRIVATE
     CL_TARGET_OPENCL_VERSION=${CLPEAK_OPENCL_TARGET_VERSION}
 )
+target_compile_definitions(peak_common PRIVATE ENABLE_OPENCL)
