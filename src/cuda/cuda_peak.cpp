@@ -1365,8 +1365,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                      cuda_kernels::image_bandwidth_name,
                      "image_bandwidth", fn))
   {
-    log->print(TAB TAB "Compile failed" NEWLINE);
-    log->recordSkip("float4", ResultStatus::Error, "Kernel compile failed");
+    test.skip("float4", ResultStatus::Error, "Kernel compile failed");
     cuTexObjectDestroy(tex);
     cuArrayDestroy(arr);
     cuMemFree(outBuf);
