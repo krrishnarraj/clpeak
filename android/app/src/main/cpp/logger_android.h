@@ -36,7 +36,10 @@ protected:
                        int deviceIndex) override;
     void onTestBegin(const std::string &tag,
                      const std::string &display,
-                     const std::string &unit) override              { (void)tag; (void)display; (void)unit; }
+                     const std::string &unit) override {
+        (void)tag; (void)unit;
+        curDisplay = display;
+    }
     void onMetricEmitted(const ResultEntry &e,
                          float value,
                          bool subMetric) override;
@@ -46,6 +49,9 @@ protected:
     void onTestEnd() override                                       {}
     void onDeviceEnd() override                                     {}
     void onBackendEnd() override                                    {}
+
+private:
+    std::string curDisplay;
 };
 
 #endif // LOGGER_ANDROID_HPP

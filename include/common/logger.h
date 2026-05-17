@@ -113,7 +113,6 @@ protected:
   std::string curDevice;
   std::string curDriver;
   std::string curTest;
-  std::string curDisplay;
   std::string curUnit;
   Category    curCategory = Category::Unknown;
   int         contextDepth = 0;   // 0=none, 1=backend, 2=device, 3=test
