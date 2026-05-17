@@ -159,7 +159,6 @@ class BenchmarkViewModel : ViewModel() {
                 BenchmarkCategory(
                     backend     = backend,
                     testName    = test,
-                    displayName = displayNameOf(test),
                     category    = category,
                     unit        = entries.firstOrNull()?.unit ?: "",
                     testType    = testTypeFromCategory(category),
@@ -172,56 +171,5 @@ class BenchmarkViewModel : ViewModel() {
 
         _backends.value = backendOrder.toList()
         _categoriesByBackend.value = result
-    }
-
-    companion object {
-        private val DISPLAY_NAMES = mapOf(
-            "global_memory_bandwidth"     to "Global Memory Bandwidth",
-            "local_memory_bandwidth"      to "Local Memory Bandwidth",
-            "image_memory_bandwidth"      to "Image Memory Bandwidth",
-            "transfer_bandwidth"          to "Transfer Bandwidth",
-            "single_precision_compute"    to "Single-Precision Compute",
-            "double_precision_compute"    to "Double-Precision Compute",
-            "half_precision_compute"      to "Half-Precision Compute",
-            "mixed_precision_compute"     to "Mixed-Precision Compute",
-            "bfloat16_compute"            to "BF16 Compute",
-            "integer_compute"             to "Integer Compute",
-            "integer_compute_fast"        to "Integer Compute (Fast 24-bit)",
-            "integer_compute_char"        to "Char (8-bit) Integer Compute",
-            "integer_compute_short"       to "Short (16-bit) Integer Compute",
-            "integer_compute_int8_dp"     to "INT8 Dot-Product Compute",
-            "int4_packed_compute"         to "Packed INT4 Compute",
-            "wmma"                        to "WMMA",
-            "bmma"                        to "BMMA",
-            "coopmat"                     to "Cooperative Matrix",
-            "simdgroup_matrix"            to "Simdgroup Matrix",
-            "cublas"                      to "cuBLASLt GEMM",
-            "mps_gemm"                    to "MPS GEMM",
-            "atomic_throughput"           to "Atomic Throughput",
-            "kernel_launch_latency"       to "Kernel Launch Latency",
-            "wmma_fp16"                   to "WMMA fp16×fp16+fp32",
-            "wmma_bf16"                   to "WMMA bf16×bf16+fp32",
-            "wmma_tf32"                   to "WMMA tf32×tf32+fp32",
-            "wmma_fp64"                   to "WMMA fp64×fp64+fp64",
-            "wmma_fp8_e4m3"              to "FP8(E4M3) mma.sync",
-            "wmma_fp8_e5m2"              to "FP8(E5M2) mma.sync",
-            "wmma_fp4_e2m1"              to "FP4(E2M1) mma.sync",
-            "wmma_mxf4_e2m1"             to "MXFP4(E2M1) mma.sync",
-            "wmma_int8"                   to "WMMA int8×int8+int32",
-            "wmma_int8_k32"              to "INT8 mma.sync K=32",
-            "wmma_int8_sparse"           to "INT8 mma.sp 2:4",
-            "wmma_int4"                   to "INT4 mma.sync",
-            "wmma_bmma_b1"               to "BMMA b1 xor.popc",
-            "cublas-fp"                   to "cuBLASLt GEMM",
-            "cublas-int"                  to "cuBLASLt GEMM",
-            "mps-gemm-fp"                 to "MPS GEMM",
-            "mps-gemm-int"                to "MPS GEMM"
-        )
-
-        private fun displayNameOf(test: String): String =
-            DISPLAY_NAMES[test] ?: test
-                .replace('_', ' ')
-                .split(' ')
-                .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
     }
 }

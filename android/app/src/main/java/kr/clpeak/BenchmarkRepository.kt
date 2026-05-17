@@ -31,6 +31,7 @@ class BenchmarkRepository {
         driver: String,
         category: String,
         test: String,
+        display: String,
         metric: String,
         unit: String,
         value: Float,
@@ -39,7 +40,7 @@ class BenchmarkRepository {
     ) {
         _metricChannel.trySend(
             ResultEntry(backend, platform, device, driver, category,
-                        test, metric, unit, value, status, reason)
+                        test, display, metric, unit, value, status, reason)
         )
     }
 

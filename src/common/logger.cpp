@@ -122,6 +122,7 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
     assert(log->contextDepth == 2);
 
     log->curTest     = spec.tag;
+    log->curDisplay  = spec.display;
     log->curUnit     = spec.unit;
     log->curCategory = (spec.category != Category::Unknown)
                            ? spec.category
@@ -223,6 +224,7 @@ void logger::TestScope::end()
     assert(log->contextDepth == 3);
     log->onTestEnd();
     log->curTest.clear();
+    log->curDisplay.clear();
     log->curUnit.clear();
     log->curCategory = Category::Unknown;
     log->contextDepth = 2;

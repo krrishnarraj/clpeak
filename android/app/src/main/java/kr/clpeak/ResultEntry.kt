@@ -9,6 +9,7 @@ data class ResultEntry(
     val driver: String,
     val category: String,
     val test: String,
+    val display: String,
     val metric: String,
     val unit: String,
     val value: Float,

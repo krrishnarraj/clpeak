@@ -14,13 +14,13 @@ fun testTypeFromCategory(category: String): TestType = when (category) {
 data class BenchmarkCategory(
     val backend: String,
     val testName: String,
-    val displayName: String,
-    val category: String,           // canonical category string from C++
+    val category: String,
     val unit: String,
     val testType: TestType,
     val metrics: List<ResultEntry>,
     val isExpanded: Boolean = false
 ) {
+    val displayName: String get() = metrics.firstOrNull()?.display ?: testName
     val peakValue: Float get() = metrics.filter { it.status == "ok" }.maxOfOrNull { it.value } ?: 0f
     val allSkipped: Boolean get() = metrics.all { it.status != "ok" }
     val skipReason: String get() = metrics.firstOrNull { it.reason.isNotEmpty() }?.reason ?: ""

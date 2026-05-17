@@ -65,6 +65,7 @@ void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*su
     jstring jDriver   = jEnv->NewStringUTF(e.driver.c_str());
     jstring jCategory = jEnv->NewStringUTF(e.category.c_str());
     jstring jTest     = jEnv->NewStringUTF(e.test.c_str());
+    jstring jDisplay  = jEnv->NewStringUTF(curDisplay.c_str());
     jstring jMetric   = jEnv->NewStringUTF(e.metric.c_str());
     jstring jUnit     = jEnv->NewStringUTF(e.unit.c_str());
     jstring jStatus   = jEnv->NewStringUTF("ok");
@@ -72,7 +73,7 @@ void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*su
 
     jEnv->CallVoidMethod(jObj, recordMetricCallback,
                          jBackend, jPlatform, jDevice, jDriver,
-                         jCategory, jTest, jMetric, jUnit,
+                         jCategory, jTest, jDisplay, jMetric, jUnit,
                          static_cast<jfloat>(value),
                          jStatus, jReason);
 
@@ -82,6 +83,7 @@ void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*su
     jEnv->DeleteLocalRef(jDriver);
     jEnv->DeleteLocalRef(jCategory);
     jEnv->DeleteLocalRef(jTest);
+    jEnv->DeleteLocalRef(jDisplay);
     jEnv->DeleteLocalRef(jMetric);
     jEnv->DeleteLocalRef(jUnit);
     jEnv->DeleteLocalRef(jStatus);
@@ -110,6 +112,7 @@ void LoggerAndroid::onMetricSkipped(const ResultEntry &e)
     jstring jDriver   = jEnv->NewStringUTF(e.driver.c_str());
     jstring jCategory = jEnv->NewStringUTF(e.category.c_str());
     jstring jTest     = jEnv->NewStringUTF(e.test.c_str());
+    jstring jDisplay  = jEnv->NewStringUTF(curDisplay.c_str());
     jstring jMetric   = jEnv->NewStringUTF(e.metric.c_str());
     jstring jUnit     = jEnv->NewStringUTF(e.unit.c_str());
     jstring jStatus   = jEnv->NewStringUTF(statusStr);
@@ -117,7 +120,7 @@ void LoggerAndroid::onMetricSkipped(const ResultEntry &e)
 
     jEnv->CallVoidMethod(jObj, recordMetricCallback,
                          jBackend, jPlatform, jDevice, jDriver,
-                         jCategory, jTest, jMetric, jUnit,
+                         jCategory, jTest, jDisplay, jMetric, jUnit,
                          0.0f,
                          jStatus, jReason);
 
@@ -127,6 +130,7 @@ void LoggerAndroid::onMetricSkipped(const ResultEntry &e)
     jEnv->DeleteLocalRef(jDriver);
     jEnv->DeleteLocalRef(jCategory);
     jEnv->DeleteLocalRef(jTest);
+    jEnv->DeleteLocalRef(jDisplay);
     jEnv->DeleteLocalRef(jMetric);
     jEnv->DeleteLocalRef(jUnit);
     jEnv->DeleteLocalRef(jStatus);

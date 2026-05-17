@@ -18,7 +18,7 @@ static void wireLoggerToJni(LoggerAndroid *lg, JNIEnv *jniEnv, jobject jObj, jcl
     lg->recordMetricCallback = jniEnv->GetMethodID(cls,
         RECORD_METRIC_CALLBACK,
         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F"
+        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F"
         "Ljava/lang/String;Ljava/lang/String;)V");
     lg->deviceInfoCallback = jniEnv->GetMethodID(cls,
         DEVICE_INFO_CALLBACK,
