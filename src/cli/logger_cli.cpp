@@ -45,7 +45,10 @@ void LoggerCli::onDeviceBegin(const std::string &name,
         writeLine(1, "Platform: " + platform);
     }
 
-    writeLine(deviceIndent, "Device: " + name);
+    std::string deviceLabel = "Device";
+    while (deviceLabel.size() < 17)
+        deviceLabel += ' ';
+    writeLine(deviceIndent, deviceLabel + ": " + name);
 
     // Properties
     if (!driverVersion.empty())
