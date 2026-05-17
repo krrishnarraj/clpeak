@@ -13,7 +13,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize);
+  uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize / sizeof(float));
 
   auto test = currentDeviceScope->beginTest(
     {"global_memory_bandwidth", "Global memory bandwidth (GBPS)", "gbps"});
