@@ -906,7 +906,9 @@ int vkPeak::runAll()
       dev.info.deviceName,
       "",   // platform defaults to "Vulkan"
       dev.info.driverVersion,
-      deviceProps
+      deviceProps,
+      -1,
+      static_cast<int>(d)
     });
     currentDeviceScope = &deviceScope;
 

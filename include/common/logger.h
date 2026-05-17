@@ -41,6 +41,8 @@ public:
     std::string platform;         // empty → auto-set to backend name
     std::string driver_version;
     std::vector<Prop> props;      // free-form properties (compute units, VRAM, …)
+    int platform_index = -1;      // if >= 0, printed as "Platform N: ..."
+    int device_index   = -1;      // if >= 0, printed as "Device N: ..."
   };
 
   struct TestSpec {

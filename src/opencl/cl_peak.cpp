@@ -118,7 +118,9 @@ int clPeak::runAll()
           {
             {"Compute units", std::to_string(devInfo.numCUs)},
             {"Clock frequency", std::to_string(devInfo.maxClockFreq) + " MHz"},
-          }
+          },
+          static_cast<int>(p),
+          static_cast<int>(d)
         });
         currentDeviceScope = &deviceScope;
 

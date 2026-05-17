@@ -368,7 +368,9 @@ int CudaPeak::runAll()
         {"NVRTC", dev.info.runtimeVersion},
         {"SMs",   std::to_string(dev.info.numSMs)},
         {"VRAM",  std::to_string(dev.info.totalGlobalMem / (1024 * 1024)) + " MB"},
-      }
+      },
+      -1,
+      idx
     });
     currentDeviceScope = &deviceScope;
 

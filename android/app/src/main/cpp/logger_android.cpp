@@ -36,13 +36,15 @@ void LoggerAndroid::onDeviceBegin(const std::string &name,
     if (showPlatformLine)
         writeNote(1, "Platform: " + platform);
 
-    std::string deviceLabel = "Device";
-    while (deviceLabel.size() < 17)
-        deviceLabel += ' ';
-    writeNote(deviceIndent, deviceLabel + ": " + name);
+    writeNote(deviceIndent, "Device: " + name);
 
     if (!driverVersion.empty())
-        writeNote(propIndent, "Driver version  : " + driverVersion);
+    {
+        std::string dvLabel = "Driver version";
+        while (dvLabel.size() < 17)
+            dvLabel += ' ';
+        writeNote(propIndent, dvLabel + ": " + driverVersion);
+    }
 
     for (const auto &prop : props)
     {
