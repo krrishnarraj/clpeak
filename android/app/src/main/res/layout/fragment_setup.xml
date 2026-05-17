@@ -19,15 +19,6 @@
             android:paddingBottom="128dp">
 
             <TextView
-                android:id="@+id/setup_subtitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/idle_subtitle"
-                android:textAppearance="?attr/textAppearanceBodyMedium"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/setup_backends_title"

@@ -1,8 +1,7 @@
 package kr.clpeak
 
-// Mirrors the C++ ResultEntry produced by logger_android.cpp::emit().
-// `category` is the canonical lower-snake string ("fp_compute", "int_compute",
-// "bandwidth", "latency"); empty string for unknown / shim-derived rows.
+// Mirrors the C++ ResultEntry produced by logger_android.cpp.
+// status is "ok" | "unsupported" | "skipped" | "error".
 data class ResultEntry(
     val backend: String,
     val platform: String,
@@ -10,7 +9,10 @@ data class ResultEntry(
     val driver: String,
     val category: String,
     val test: String,
+    val display: String,
     val metric: String,
     val unit: String,
-    val value: Float
+    val value: Float,
+    val status: String = "ok",
+    val reason: String = ""
 )

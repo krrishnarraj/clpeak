@@ -1,0 +1,1526 @@
+#ifdef ENABLE_CUDA
+
+#include <cuda/cuda_peak.h>
+#include <common/options.h>
+#include <common/inventory.h>
+#include <common/common.h>
+#include <nvrtc.h>
+#include <cstring>
+#include <cstdio>
+#include <sstream>
+#include <vector>
+#include <string>
+
+#ifndef CLPEAK_CUDA_INCLUDE_DIR
+#define CLPEAK_CUDA_INCLUDE_DIR "/usr/local/cuda/include"
+#endif
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+static const char *cuErrStr(CUresult r)
+{
+  const char *s = nullptr;
+  cuGetErrorString(r, &s);
+  return s ? s : "unknown CUDA error";
+}
+
+#define CU_CHECK(call)                                                                \
+  do                                                                                  \
+  {                                                                                   \
+    CUresult _r = (call);                                                             \
+    if (_r != CUDA_SUCCESS)                                                           \
+    {                                                                                 \
+      fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r)); \
+      return false;                                                                   \
+    }                                                                                 \
+  } while (0)
+
+// ---------------------------------------------------------------------------
+// CudaDevice
+// ---------------------------------------------------------------------------
+
+CudaDevice::CudaDevice() : device(0), context(nullptr), stream(nullptr) {}
+
+CudaDevice::~CudaDevice() { cleanup(); }
+
+bool CudaDevice::init(int devIndex)
+{
+  CU_CHECK(cuDeviceGet(&device, devIndex));
+
+  char nameBuf[256] = {0};
+  CU_CHECK(cuDeviceGetName(nameBuf, sizeof(nameBuf), device));
+  info.deviceName = nameBuf;
+
+  CU_CHECK(cuDeviceGetAttribute(&info.major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
+  CU_CHECK(cuDeviceGetAttribute(&info.minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
+  CU_CHECK(cuDeviceGetAttribute(&info.numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device));
+  CU_CHECK(cuDeviceGetAttribute(&info.maxThreadsPerBlock, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, device));
+  CU_CHECK(cuDeviceGetAttribute(&info.clockRateKHz, CU_DEVICE_ATTRIBUTE_CLOCK_RATE, device));
+
+  size_t mem = 0;
+  CU_CHECK(cuDeviceTotalMem(&mem, device));
+  info.totalGlobalMem = mem;
+
+  int driverVer = 0;
+  cuDriverGetVersion(&driverVer);
+  {
+    std::stringstream ss;
+    ss << (driverVer / 1000) << "." << (driverVer % 100) / 10;
+    info.driverVersion = ss.str();
+  }
+  {
+    int major = 0, minor = 0;
+    nvrtcVersion(&major, &minor);
+    std::stringstream ss;
+    ss << major << "." << minor;
+    info.runtimeVersion = ss.str();
+  }
+  {
+    std::stringstream ss;
+    ss << "sm_" << info.major << info.minor;
+    info.archName = ss.str();
+  }
+
+  // Capability bits.  Compute-capability cutoffs follow CUDA's documented
+  // first-architecture-supporting-X numbers.
+  info.fp16Supported = (info.major > 5) || (info.major == 5 && info.minor >= 3);
+  info.bf16Supported = (info.major >= 8);
+  info.dp4aSupported = (info.major > 6) || (info.major == 6 && info.minor >= 1);
+  info.wmmaSupported = (info.major >= 7);
+  info.wmmaInt8Supported = (info.major > 7) || (info.major == 7 && info.minor >= 2);
+  info.fp8MmaSupported = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
+  info.fp4MmaSupported = (info.major >= 12);
+  info.tf32GemmSupported = (info.major >= 8);
+  info.int8GemmSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
+  info.int4GemmSupported = (info.major >= 9);
+  info.dpTensorSupported = (info.major >= 8);
+  // s4 mma.sync was added on Turing (sm_75), kept on Ampere/Ada, removed on
+  // Hopper+ (sm_90+).  Allow 7.5..8.9 inclusive.
+  {
+    int cc = info.major * 10 + info.minor;
+    info.int4MmaSupported = (cc >= 75) && (cc <= 89);
+  }
+  info.bmmaSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
+  info.int8MmaSparseSupported = (info.major >= 8);
+
+  info.deviceType = DeviceType::Gpu;   // CUDA devices are always GPUs
+
+  // CUDA 13 promoted cuCtxCreate to a 4-arg signature taking a
+  // CUctxCreateParams*; CUDA 12 and earlier expose only the 3-arg form.
+  // Branch on CUDA_VERSION so the same source builds against both toolkits.
+#if CUDA_VERSION >= 13000
+  CU_CHECK(cuCtxCreate(&context, nullptr, 0, device));
+#else
+  CU_CHECK(cuCtxCreate(&context, 0, device));
+#endif
+  CU_CHECK(cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING));
+
+  return true;
+}
+
+void CudaDevice::cleanup()
+{
+  for (auto &kv : moduleCache)
+    cuModuleUnload(kv.second);
+  moduleCache.clear();
+
+  if (stream)
+  {
+    cuStreamDestroy(stream);
+    stream = nullptr;
+  }
+  if (context)
+  {
+    cuCtxDestroy(context);
+    context = nullptr;
+  }
+}
+
+bool CudaDevice::getKernel(const char *src, const char *srcName,
+                           const char *kernelName, CUfunction &fn,
+                           const std::vector<const char *> &extraOpts)
+{
+  // Cache by source-pointer identity: every embedded .cu blob is a distinct
+  // extern in cuda_kernels_generated.cpp, so pointer equality is sufficient.
+  auto it = moduleCache.find(src);
+  CUmodule mod = nullptr;
+  if (it != moduleCache.end())
+  {
+    mod = it->second;
+  }
+  else
+  {
+    nvrtcProgram prog;
+    nvrtcResult nr = nvrtcCreateProgram(&prog, src, srcName, 0, nullptr, nullptr);
+    if (nr != NVRTC_SUCCESS)
+    {
+      fprintf(stderr, "nvrtcCreateProgram failed: %s\n", nvrtcGetErrorString(nr));
+      return false;
+    }
+
+    // Build the option list.  --gpu-architecture=sm_<cc> targets cubin
+    // directly; the driver still JITs from PTX if needed but we get the
+    // straightest path on the matching arch.  -I<CUDA_INCLUDE_DIR> resolves
+    // <mma.h>, <cuda_fp16.h>, <cuda_bf16.h>, <cuda_fp8.h> at runtime.
+    std::stringstream archOpt;
+    archOpt << "--gpu-architecture=sm_" << info.major << info.minor;
+    std::string archStr = archOpt.str();
+
+    std::string incOpt = std::string("-I") + CLPEAK_CUDA_INCLUDE_DIR;
+
+    std::vector<const char *> opts;
+    bool hasArchOverride = false;
+    for (auto *e : extraOpts)
+    {
+      if (e && (std::strncmp(e, "--gpu-architecture=", 19) == 0 ||
+                std::strncmp(e, "-arch=", 6) == 0))
+      {
+        hasArchOverride = true;
+        break;
+      }
+    }
+    if (!hasArchOverride)
+      opts.push_back(archStr.c_str());
+    opts.push_back(incOpt.c_str());
+    for (auto *e : extraOpts)
+      opts.push_back(e);
+
+    nr = nvrtcCompileProgram(prog, (int)opts.size(), opts.data());
+    if (nr != NVRTC_SUCCESS)
+    {
+      size_t logSize = 0;
+      nvrtcGetProgramLogSize(prog, &logSize);
+      std::string log(logSize, '\0');
+      if (logSize > 1)
+        nvrtcGetProgramLog(prog, &log[0]);
+      fprintf(stderr, "NVRTC compile of %s failed:\n%s\n", srcName, log.c_str());
+      nvrtcDestroyProgram(&prog);
+      return false;
+    }
+
+    // Prefer cubin for the matching architecture; fall back to PTX if
+    // cubin retrieval is unsupported in this NVRTC build.
+    size_t cubinSize = 0;
+    nr = nvrtcGetCUBINSize(prog, &cubinSize);
+    if (nr == NVRTC_SUCCESS && cubinSize > 0)
+    {
+      std::vector<char> cubin(cubinSize);
+      nvrtcGetCUBIN(prog, cubin.data());
+      CUresult lr = cuModuleLoadData(&mod, cubin.data());
+      if (lr != CUDA_SUCCESS)
+      {
+        fprintf(stderr, "cuModuleLoadData(cubin %s) failed: %s\n", srcName, cuErrStr(lr));
+        nvrtcDestroyProgram(&prog);
+        return false;
+      }
+    }
+    else
+    {
+      size_t ptxSize = 0;
+      nvrtcGetPTXSize(prog, &ptxSize);
+      std::vector<char> ptx(ptxSize);
+      nvrtcGetPTX(prog, ptx.data());
+      CUresult lr = cuModuleLoadData(&mod, ptx.data());
+      if (lr != CUDA_SUCCESS)
+      {
+        fprintf(stderr, "cuModuleLoadData(ptx %s) failed: %s\n", srcName, cuErrStr(lr));
+        nvrtcDestroyProgram(&prog);
+        return false;
+      }
+    }
+    nvrtcDestroyProgram(&prog);
+    moduleCache[src] = mod;
+  }
+
+  CUresult r = cuModuleGetFunction(&fn, mod, kernelName);
+  if (r != CUDA_SUCCESS)
+  {
+    fprintf(stderr, "cuModuleGetFunction(%s in %s) failed: %s\n",
+            kernelName, srcName, cuErrStr(r));
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// CudaPeak
+// ---------------------------------------------------------------------------
+
+CudaPeak::CudaPeak()
+    : deviceIndex(-1),
+      initialised(false)
+{
+}
+
+CudaPeak::~CudaPeak() {}
+
+void CudaPeak::applyOptions(const CliOptions &opts)
+{
+    Peak::applyOptions(opts);
+    deviceIndex = opts.cudaDeviceIndex;
+}
+
+bool CudaPeak::initDriver()
+{
+  if (initialised)
+    return true;
+  CUresult r = cuInit(0);
+  if (r != CUDA_SUCCESS)
+  {
+    fprintf(stderr, "cuInit failed: %s\n", cuErrStr(r));
+    return false;
+  }
+  int n = 0;
+  r = cuDeviceGetCount(&n);
+  if (r != CUDA_SUCCESS)
+    return false;
+  for (int i = 0; i < n; i++)
+    devIndices.push_back(i);
+  initialised = true;
+  return true;
+}
+
+float CudaPeak::runKernel(CudaDevice &dev, CUfunction fn,
+                          uint32_t gridX, uint32_t blockX,
+                          void **args,
+                          unsigned int targetTimeUsLocal, unsigned int forcedIters)
+{
+  CUevent start, stop;
+  cuEventCreate(&start, CU_EVENT_DEFAULT);
+  cuEventCreate(&stop, CU_EVENT_DEFAULT);
+
+  // Time `n` launches batched as one stream submit; returns total us.
+  auto runBatch = [&](unsigned int n) -> float {
+    cuEventRecord(start, dev.stream);
+    for (unsigned int i = 0; i < n; i++)
+      cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1, 0, dev.stream, args, nullptr);
+    cuEventRecord(stop, dev.stream);
+    cuEventSynchronize(stop);
+    float ms = 0;
+    cuEventElapsedTime(&ms, start, stop);
+    return ms * 1000.0f;
+  };
+
+  // Phase 1: untimed warmup. Keep each warmup as its own completed launch so
+  // slow kernels do not get batched before calibration.
+  for (unsigned int w = 0; w < warmupCount; w++)
+  {
+    cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1, 0, dev.stream, args, nullptr);
+    cuStreamSynchronize(dev.stream);
+  }
+
+  // Phase 2: timed calibration probe. Keep this to one launch so warmupCount
+  // does not force a multi-launch batch on slow kernels.
+  unsigned int probeIters = 1;
+  float probeUs = runBatch(probeIters);
+  double per_iter_us = (double)probeUs / (double)probeIters;
+
+  // Phase 3: real timed run with calibrated iter count.
+  unsigned int iters = pickIters(per_iter_us, targetTimeUsLocal, forcedIters);
+  float totalUs = runBatch(iters);
+
+  cuEventDestroy(start);
+  cuEventDestroy(stop);
+
+  return totalUs / static_cast<float>(iters); // microseconds / iter
+}
+
+int CudaPeak::runAll()
+{
+  if (!initDriver())
+  {
+    log->note("CUDA: driver init failed\n");
+    return -1;
+  }
+  if (devIndices.empty())
+  {
+    log->note("CUDA: no devices found\n");
+    return -1;
+  }
+
+  auto backendScope = log->beginBackend("CUDA");
+
+  for (int idx : devIndices)
+  {
+    if (deviceIndex >= 0 && idx != deviceIndex)
+      continue;
+
+    CudaDevice dev;
+    if (!dev.init(idx))
+    {
+      log->note("CUDA: failed to init device " + std::to_string(idx) + "\n");
+      continue;
+    }
+
+    benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu);
+    cfg.targetTimeUs = targetTimeUs;
+    if (forceIters)
+      cfg.kernelLatencyIters = specifiedIters;
+
+    auto deviceScope = backendScope.beginDevice({
+      dev.info.deviceName,
+      "",   // platform defaults to "CUDA"
+      dev.info.driverVersion,
+      {
+        {"Arch",  dev.info.archName},
+        {"NVRTC", dev.info.runtimeVersion},
+        {"SMs",   std::to_string(dev.info.numSMs)},
+        {"VRAM",  std::to_string(dev.info.totalGlobalMem / (1024 * 1024)) + " MB"},
+      },
+      -1,
+      idx
+    });
+    currentDeviceScope = &deviceScope;
+
+    // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
+    if (isAllowed(Benchmark::ComputeSP))
+      runComputeSP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeHP))
+      runComputeHP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeDP))
+      runComputeDP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeMP))
+      runComputeMP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeBF16))
+      runComputeBF16(dev, cfg);
+    if (isAllowedAs(Benchmark::Wmma, Category::FpCompute))
+      runWmma(dev, cfg, Category::FpCompute);
+    if (isAllowedAs(Benchmark::Cublas, Category::FpCompute))
+      runCublas(dev, cfg, Category::FpCompute);
+
+    // ---- Phase 2: integer compute (GOPS / TOPS) ------------------------
+    if (isAllowed(Benchmark::ComputeInt))
+      runComputeInt32(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt8DP))
+      runComputeInt8DP(dev, cfg);
+    if (isAllowed(Benchmark::ComputeInt4Packed))
+      runComputeInt4Packed(dev, cfg);
+    if (isAllowedAs(Benchmark::Wmma, Category::IntCompute))
+      runWmma(dev, cfg, Category::IntCompute);
+    if (isAllowedAs(Benchmark::Cublas, Category::IntCompute))
+      runCublas(dev, cfg, Category::IntCompute);
+    if (isAllowed(Benchmark::AtomicThroughput))
+      runAtomicThroughput(dev, cfg);
+
+    // ---- Phase 3: bandwidth (GBPS) -------------------------------------
+    if (isAllowed(Benchmark::GlobalBW))
+      runGlobalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::LocalBW))
+      runLocalBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::ImageBW))
+      runImageBandwidth(dev, cfg);
+    if (isAllowed(Benchmark::TransferBW))
+      runTransferBandwidth(dev, cfg);
+
+    // ---- Phase 4: latency (us) -----------------------------------------
+    if (isAllowed(Benchmark::KernelLatency))
+      runKernelLatency(dev, cfg);
+
+    currentDeviceScope = nullptr;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Shared compute-peak driver.  Mirrors vkPeak::runComputeKernel in spirit:
+// allocate a single device-local output buffer, dispatch each variant of
+// the same kernel against it with NVRTC-compiled kernels.
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
+                               const cuda_compute_desc_t &d)
+{
+  auto test = currentDeviceScope->beginTest({d.resultTag, d.title, d.unit});
+
+  if (d.skip)
+  {
+    if (d.variants && d.numVariants > 0)
+    {
+      for (uint32_t i = 0; i < d.numVariants; i++)
+        test.skip(d.variants[i].label, ResultStatus::Unsupported,
+                  d.skipMsg ? d.skipMsg : "Skipped");
+    }
+    else
+    {
+      test.skip(d.metricLabel, ResultStatus::Unsupported,
+                d.skipMsg ? d.skipMsg : "Skipped");
+    }
+    return 0;
+  }
+
+  struct Variant
+  {
+    const char *label;
+    const char *kernelName;
+    const char *src;
+    const char *srcName;
+  };
+  std::vector<Variant> variants;
+  if (d.variants && d.numVariants > 0)
+    for (uint32_t i = 0; i < d.numVariants; i++)
+      variants.push_back({d.variants[i].label, d.variants[i].kernelName,
+                          d.variants[i].src, d.variants[i].srcName});
+  else
+    variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName});
+
+  // Scale to numSMs so high-SM parts (H100, B200, …) don't get under-saturated;
+  // floor at 32M preserves behavior on small dev cards.  Clamp by VRAM below.
+  const uint32_t blockSize = d.blockSize ? d.blockSize : 256;
+  const uint32_t outPerBlock = d.outElemsPerBlock ? d.outElemsPerBlock : blockSize;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
+  uint64_t bytesPerBlock = (uint64_t)outPerBlock * d.elemSize;
+  uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock; // cap at 1/4 VRAM
+  uint64_t wantBlocks = globalThreads / blockSize;
+  uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
+  uint32_t numBlocks = (uint32_t)pickBlocks;
+  uint64_t bufferBytes = (uint64_t)numBlocks * bytesPerBlock;
+
+  CUdeviceptr outputBuf = 0;
+  if (cuMemAlloc(&outputBuf, bufferBytes) != CUDA_SUCCESS)
+  {
+    for (const auto &v : variants)
+      test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer");
+    return -1;
+  }
+
+  std::vector<const char *> nvrtcOpts;
+  for (uint32_t i = 0; i < d.numExtraNvrtcOpts; i++)
+    nvrtcOpts.push_back(d.extraNvrtcOpts[i]);
+
+  for (const auto &v : variants)
+  {
+    CUfunction fn;
+    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, nvrtcOpts))
+    {
+      test.skip(v.label, ResultStatus::Error, "compile/load failed");
+      continue;
+    }
+
+    void *args[2];
+    args[0] = &outputBuf;
+    args[1] = const_cast<void *>(d.scalarArg);
+
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
+    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
+    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+
+    test.emit(v.label, value);
+  }
+
+  cuMemFree(outputBuf);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Concrete compute benchmarks.
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  float A = 1.3f;
+  cuda_compute_desc_t d = {};
+  d.title = "Single-precision compute (GFLOPS)";
+  d.resultTag = "single_precision_compute";
+  d.unit = "gflops";
+  d.metricLabel = "float";
+  d.kernelName = "compute_sp";
+  d.src = cuda_kernels::compute_sp_src;
+  d.srcName = cuda_kernels::compute_sp_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  static const cuda_compute_variant_t variants[] = {
+      {"half", "compute_hp", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
+      {"half2", "compute_hp2", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
+  };
+  float A = 1.3f;
+  cuda_compute_desc_t d = {};
+  d.title = "Half-precision compute (GFLOPS)";
+  d.resultTag = "half_precision_compute";
+  d.unit = "gflops";
+  d.variants = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float); // 32-bit slot per thread; we store the reduced fp32 result
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.fp16Supported;
+  d.skipMsg = "fp16 not supported on this compute capability! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  double A = 1.3;
+  cuda_compute_desc_t d = {};
+  d.title = "Double-precision compute (GFLOPS)";
+  d.resultTag = "double_precision_compute";
+  d.unit = "gflops";
+  d.metricLabel = "double";
+  d.kernelName = "compute_dp";
+  d.src = cuda_kernels::compute_dp_src;
+  d.srcName = cuda_kernels::compute_dp_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(double);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  // Single variant: NVIDIA shader-core fp16xfp16+fp32 issues at FP32 rate.
+  // The packed (HFMA2) path is fp16xfp16+fp16 -- that's compute_hp2, not MP.
+  float A = 1.3f;
+  cuda_compute_desc_t d = {};
+  d.title = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
+  d.resultTag = "mixed_precision_compute";
+  d.unit = "gflops";
+  d.metricLabel = "mp";
+  d.kernelName = "compute_mp";
+  d.src = cuda_kernels::compute_mp_src;
+  d.srcName = cuda_kernels::compute_mp_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.fp16Supported;
+  d.skipMsg = "fp16 not supported on this compute capability! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  // Single variant: shader-core bf16xbf16+fp32 issues at FP32 rate on
+  // Ampere+.  Packed BF16 is reachable through tensor cores (wmma), not
+  // an SFU-style packed shader instruction, so a bf16_2 variant wouldn't
+  // be a different code path.
+  float A = 1.3f;
+  cuda_compute_desc_t d = {};
+  d.title = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
+  d.resultTag = "bfloat16_compute";
+  d.unit = "gflops";
+  d.metricLabel = "bf16";
+  d.kernelName = "compute_bf16";
+  d.src = cuda_kernels::compute_bf16_src;
+  d.srcName = cuda_kernels::compute_bf16_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI;
+  d.elemSize = sizeof(float);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.bf16Supported;
+  d.skipMsg = "bf16 requires sm_80 or newer (Ampere+)! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  // Scalar 32-bit integer IMAD chain throughput.  Distinct shader-core
+  // path from __dp4a (compute_int8_dp) and the int4 emulation; reported
+  // in GOPS.
+  int A = 3;
+  cuda_compute_desc_t d = {};
+  d.title = "Integer compute (32-bit IMAD) (GOPS)";
+  d.resultTag = "integer_compute";
+  d.unit = "gops";
+  d.metricLabel = "int";
+  d.kernelName = "compute_int32";
+  d.src = cuda_kernels::compute_int32_src;
+  d.srcName = cuda_kernels::compute_int32_name;
+  d.workPerWI = COMPUTE_FP_WORK_PER_WI; // 4096 ops/thread (same scaling)
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  static const cuda_compute_variant_t variants[] = {
+      {"int8_dp", "compute_int8_dp", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp2", "compute_int8_dp2", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp4", "compute_int8_dp4", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp8", "compute_int8_dp8", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+  };
+  int A = 4;
+  cuda_compute_desc_t d = {};
+  d.title = "INT8 dot-product compute (__dp4a) (GOPS)";
+  d.resultTag = "integer_compute_int8_dp";
+  d.unit = "gops";
+  d.variants = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.workPerWI = COMPUTE_INT8_DP_WORK_PER_WI;
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  d.skip = !dev.info.dp4aSupported;
+  d.skipMsg = "__dp4a requires sm_61 or newer (Pascal+)! Skipped";
+  return runComputeKernel(dev, cfg, d);
+}
+
+int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  int A = 3;
+  cuda_compute_desc_t d = {};
+  d.title = "Packed INT4 compute (emulated) (GOPS)";
+  d.resultTag = "int4_packed_compute";
+  d.unit = "gops";
+  d.metricLabel = "int4_packed";
+  d.kernelName = "compute_int4_packed";
+  d.src = cuda_kernels::compute_int4_packed_src;
+  d.srcName = cuda_kernels::compute_int4_packed_name;
+  d.workPerWI = COMPUTE_INT4_PACKED_WORK_PER_WI;
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
+}
+
+// ---------------------------------------------------------------------------
+// WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category)
+{
+  // Shared geometry: one warp (32 threads) per block, m16n16k16 tile per
+  // wmma fragment, 256 outer iters → COOPMAT_WORK_PER_WI per thread.
+  const uint32_t warp = 32;
+  const uint32_t outElems = 16 * 16; // M*N
+
+  // ---------------------------------------------------------------------
+  // FP cluster -- each variant opens its own <wmma_*> group with the
+  // proper unit attribute via runComputeKernel; no umbrella tag here
+  // (depth-5 nesting under one would break the v2 logger shim).
+  // ---------------------------------------------------------------------
+  if (category == Category::FpCompute)
+  {
+    // FP16 WMMA
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)";
+      d.resultTag = "wmma_fp16";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "wmma_fp16";
+      d.kernelName = "wmma_fp16";
+      d.src = cuda_kernels::wmma_fp16_src;
+      d.srcName = cuda_kernels::wmma_fp16_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = outElems;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported;
+      d.skipMsg = "WMMA requires sm_70 or newer (Volta+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // BF16 WMMA
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "WMMA bf16xbf16+fp32 16x16x16 (TFLOPS)";
+      d.resultTag = "wmma_bf16";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "wmma_bf16";
+      d.kernelName = "wmma_bf16";
+      d.src = cuda_kernels::wmma_bf16_src;
+      d.srcName = cuda_kernels::wmma_bf16_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = outElems;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.bf16Supported;
+      d.skipMsg = "bf16 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // TF32 WMMA m16n16k8 -- Ampere+
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "WMMA tf32xtf32+fp32 16x16x8 (TFLOPS)";
+      d.resultTag = "wmma_tf32";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "wmma_tf32";
+      d.kernelName = "wmma_tf32";
+      d.src = cuda_kernels::wmma_tf32_src;
+      d.srcName = cuda_kernels::wmma_tf32_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = outElems;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.tf32GemmSupported;
+      d.skipMsg = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // FP64 WMMA m8n8k4 -- Ampere+ DP tensor cores
+    {
+      double A = 1.3;
+      cuda_compute_desc_t d = {};
+      d.title = "WMMA fp64xfp64+fp64 8x8x4 (TFLOPS)";
+      d.resultTag = "wmma_fp64";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "wmma_fp64";
+      d.kernelName = "wmma_fp64";
+      d.src = cuda_kernels::wmma_fp64_src;
+      d.srcName = cuda_kernels::wmma_fp64_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
+      d.elemSize = sizeof(double);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 8 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.dpTensorSupported;
+      d.skipMsg = "FP64 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // FP8 mma.sync E4M3 (PTX) - sm_89+
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.resultTag = "wmma_fp8_e4m3";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp8_e4m3";
+      d.kernelName = "wmma_fp8_e4m3";
+      d.src = cuda_kernels::wmma_fp8_e4m3_src;
+      d.srcName = cuda_kernels::wmma_fp8_e4m3_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSupported;
+      d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // FP8 mma.sync E5M2 (PTX) - sm_89+
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.resultTag = "wmma_fp8_e5m2";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp8_e5m2";
+      d.kernelName = "wmma_fp8_e5m2";
+      d.src = cuda_kernels::wmma_fp8_e5m2_src;
+      d.srcName = cuda_kernels::wmma_fp8_e5m2_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSupported;
+      d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // FP4 mma.sync E2M1 (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "FP4(E2M1) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.resultTag = "wmma_fp4_e2m1";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp4_e2m1";
+      d.kernelName = "wmma_fp4_e2m1";
+      d.src = cuda_kernels::wmma_fp4_e2m1_src;
+      d.srcName = cuda_kernels::wmma_fp4_e2m1_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
+      d.skipMsg = "FP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
+    // MXFP4 mma.sync E2M1 + UE8M0 block scale (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)";
+      d.resultTag = "wmma_mxf4_e2m1";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "mxf4_e2m1";
+      d.kernelName = "wmma_mxf4_e2m1";
+      d.src = cuda_kernels::wmma_mxf4_e2m1_src;
+      d.srcName = cuda_kernels::wmma_mxf4_e2m1_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 16;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
+      d.skipMsg = "MXFP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Integer / binary cluster -- each variant opens its own <wmma_*> group
+  // with the proper unit attribute via runComputeKernel; no umbrella tag.
+  // The fp/int split is preserved by the per-variant unit -> category
+  // derivation in the dump pipeline.
+  // ---------------------------------------------------------------------
+
+  if (category != Category::IntCompute)
+    return 0;
+
+  // INT8 WMMA
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "WMMA int8xint8+int32 16x16x16 (TOPS)";
+    d.resultTag = "wmma_int8";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "wmma_int8";
+    d.kernelName = "wmma_int8";
+    d.src = cuda_kernels::wmma_int8_src;
+    d.srcName = cuda_kernels::wmma_int8_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = outElems;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.wmmaInt8Supported;
+    d.skipMsg = "INT8 WMMA requires sm_72 or newer (Turing+)! Skipped";
+    runComputeKernel(dev, cfg, d);
+  }
+  // INT8 mma.sync K=32 (NVIDIA-native tile via inline PTX)
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "INT8 mma.sync m16n8k32+int32 (TOPS)";
+    d.resultTag = "wmma_int8_k32";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int8_k32";
+    d.kernelName = "wmma_int8_k32";
+    d.src = cuda_kernels::wmma_int8_k32_src;
+    d.srcName = cuda_kernels::wmma_int8_k32_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = 16 * 8;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.wmmaInt8Supported;
+    d.skipMsg = "INT8 mma.sync K=32 requires sm_72 or newer (Turing+)! Skipped";
+    runComputeKernel(dev, cfg, d);
+  }
+  // INT8 mma.sp 2:4 structured sparsity m16n8k32 -- sm_80+
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "INT8 mma.sp 2:4 sparsity m16n8k32+int32 (TOPS)";
+    d.resultTag = "wmma_int8_sparse";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int8_sparse";
+    d.kernelName = "wmma_int8_sparse";
+    d.src = cuda_kernels::wmma_int8_sparse_src;
+    d.srcName = cuda_kernels::wmma_int8_sparse_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = 16 * 8;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.int8MmaSparseSupported;
+    d.skipMsg = "INT8 mma.sp 2:4 sparsity requires sm_80 or newer (Ampere+)! Skipped";
+    runComputeKernel(dev, cfg, d);
+  }
+  // INT4 mma.sync m8n8k32 -- sm_75..sm_89
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "INT4 mma.sync m8n8k32+int32 (TOPS)";
+    d.resultTag = "wmma_int4";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "int4";
+    d.kernelName = "wmma_int4";
+    d.src = cuda_kernels::wmma_int4_src;
+    d.srcName = cuda_kernels::wmma_int4_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 256 outer * 4 chains * 8*8*32*2 / 32
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = 8 * 8;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.int4MmaSupported;
+    d.skipMsg = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
+    runComputeKernel(dev, cfg, d);
+  }
+  // BMMA b1 mma.sync m8n8k128 (XOR-popc) -- sm_75+
+  {
+    int A = 3;
+    cuda_compute_desc_t d = {};
+    d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc (TOPS)";
+    d.resultTag = "wmma_bmma_b1";
+    d.unit = "tops";
+    d.unitDivider = 1e12;
+    d.metricLabel = "bmma_b1";
+    d.kernelName = "wmma_bmma_b1";
+    d.src = cuda_kernels::wmma_bmma_b1_src;
+    d.srcName = cuda_kernels::wmma_bmma_b1_name;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 256 outer * 4 chains * 8*8*128*2 / 32
+    d.elemSize = sizeof(int);
+    d.blockSize = warp;
+    d.outElemsPerBlock = 8 * 8;
+    d.scalarArg = &A;
+    d.scalarSize = sizeof(A);
+    d.skip = !dev.info.wmmaSupported || !dev.info.bmmaSupported;
+    d.skipMsg = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
+    runComputeKernel(dev, cfg, d);
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Global bandwidth (CUDA)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  const uint32_t blockSize = 256;
+
+  uint64_t maxItems = dev.info.totalGlobalMem / sizeof(float) / 4; // input+output, plus margin
+  uint64_t numItems = (maxItems / (blockSize * FETCH_PER_WI)) * (blockSize * FETCH_PER_WI);
+  if (numItems > cfg.globalBWMaxSize / sizeof(float))
+    numItems = (cfg.globalBWMaxSize / sizeof(float) / (blockSize * FETCH_PER_WI)) * (blockSize * FETCH_PER_WI);
+
+  uint32_t numBlocks = (uint32_t)(numItems / FETCH_PER_WI / blockSize);
+  if (numBlocks == 0)
+    numBlocks = 1;
+
+  auto test = currentDeviceScope->beginTest(
+    {"global_memory_bandwidth", "Global memory bandwidth (GBPS)", "gbps"});
+
+  CUdeviceptr inBuf = 0, outBuf = 0;
+  if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||
+      cuMemAlloc(&outBuf, numItems * sizeof(float)) != CUDA_SUCCESS)
+  {
+    const char *labels[] = {"float", "float2", "float4"};
+    for (int i = 0; i < 3; i++)
+      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
+    if (inBuf)
+      cuMemFree(inBuf);
+    return -1;
+  }
+  // Touch input so we measure DRAM not zero-page.
+  cuMemsetD32(inBuf, 0x3f800000u, numItems);
+
+  // Each variant takes input typed as floatN* so element index strides by
+  // V floats per iteration -- matching the OpenCL backend.  numBlocks
+  // shrinks accordingly so the total bytes touched remain the same.
+  struct Variant
+  {
+    const char *label;
+    const char *kernelName;
+    uint32_t width;
+  };
+  static const Variant variants[] = {
+      {"float   ", "global_bandwidth_v1", 1},
+      {"float2  ", "global_bandwidth_v2", 2},
+      {"float4  ", "global_bandwidth_v4", 4},
+  };
+
+  for (const auto &v : variants)
+  {
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ')
+      key.pop_back();
+
+    CUfunction fn;
+    if (!dev.getKernel(cuda_kernels::global_bandwidth_src,
+                       cuda_kernels::global_bandwidth_name,
+                       v.kernelName, fn))
+    {
+      test.skip(key, ResultStatus::Error, "Kernel compile failed");
+      continue;
+    }
+
+    uint64_t blocks = numItems / FETCH_PER_WI / v.width / blockSize;
+    if (blocks == 0)
+      blocks = 1;
+    uint32_t blocksU = (uint32_t)blocks;
+
+    void *args[2] = {&inBuf, &outBuf};
+    float us = runKernel(dev, fn, blocksU, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
+    float gbps = (float)(bytes / us / 1e3);
+    test.emit(key, gbps);
+  }
+
+  cuMemFree(inBuf);
+  cuMemFree(outBuf);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Host<->device transfer bandwidth (CUDA)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  const uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
+  unsigned int forced = forceIters ? specifiedIters : 0;
+
+  auto test = currentDeviceScope->beginTest(
+    {"transfer_bandwidth", "Transfer bandwidth (GBPS)", "gbps"});
+
+  CUdeviceptr dBuf = 0;
+  if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)
+  {
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer");
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer");
+    return -1;
+  }
+  void *hPinned = nullptr;
+  if (cuMemAllocHost(&hPinned, bytes) != CUDA_SUCCESS)
+  {
+    cuMemFree(dBuf);
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
+    return -1;
+  }
+
+  auto timeXfer = [&](bool h2d) -> float
+  {
+    CUevent s, e;
+    cuEventCreate(&s, CU_EVENT_DEFAULT);
+    cuEventCreate(&e, CU_EVENT_DEFAULT);
+
+    auto runBatch = [&](unsigned int n) -> float {
+      cuEventRecord(s, dev.stream);
+      for (unsigned i = 0; i < n; i++)
+      {
+        if (h2d)
+          cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
+        else
+          cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      }
+      cuEventRecord(e, dev.stream);
+      cuEventSynchronize(e);
+      float ms = 0;
+      cuEventElapsedTime(&ms, s, e);
+      return ms * 1000.0f; // total us
+    };
+
+    // Phase 1: untimed warmup.
+    for (unsigned w = 0; w < warmupCount; w++)
+    {
+      if (h2d)
+        cuMemcpyHtoDAsync(dBuf, hPinned, bytes, dev.stream);
+      else
+        cuMemcpyDtoHAsync(hPinned, dBuf, bytes, dev.stream);
+      cuStreamSynchronize(dev.stream);
+    }
+
+    // Phase 2: timed probe -> per-iter time -> calibrated iters.
+    unsigned int probeIters = 1;
+    float probeUs = runBatch(probeIters);
+    double per_iter_us = (double)probeUs / (double)probeIters;
+    unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);
+
+    // Phase 3: real timed run.
+    float totalUs = runBatch(iters);
+
+    cuEventDestroy(s);
+    cuEventDestroy(e);
+    return totalUs / iters; // microseconds per transfer
+  };
+
+  float usH2D = timeXfer(true);
+  float gbpsH2D = (float)bytes / usH2D / 1e3f;
+  test.emit("h2d_pinned", gbpsH2D);
+
+  float usD2H = timeXfer(false);
+  float gbpsD2H = (float)bytes / usD2H / 1e3f;
+  test.emit("d2h_pinned", gbpsD2H);
+
+  cuMemFreeHost(hPinned);
+  cuMemFree(dBuf);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Kernel launch latency (CUDA)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  unsigned int iters = forceIters ? specifiedIters
+                                  : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
+
+  auto test = currentDeviceScope->beginTest(
+    {"kernel_launch_latency", "Kernel launch latency (us)", "us"});
+
+  CUfunction fn;
+  if (!dev.getKernel(cuda_kernels::kernel_latency_src,
+                     cuda_kernels::kernel_latency_name,
+                     "kernel_latency_noop", fn))
+  {
+    test.skip("dispatch", ResultStatus::Error, "Kernel compile failed");
+    test.skip("roundtrip", ResultStatus::Error, "Kernel compile failed");
+    return -1;
+  }
+
+  void *args[1] = {nullptr};
+
+  // CUDA's driver API has no primitive equivalent to OpenCL's QUEUED -> START
+  // profiling info or VK_EXT_calibrated_timestamps -- cuEventRecord captures
+  // GPU stream-time, with no portable way to project a host timestamp into
+  // the same domain.  So we report only the round-trip metric here, leaving
+  // dispatch latency as "not measurable" rather than a misleading estimate.
+
+  bool submitFailed = false;
+
+  // Warmup
+  for (unsigned int w = 0; w < warmupCount; w++)
+  {
+    CUresult lr = cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
+    CUresult sr = cuStreamSynchronize(dev.stream);
+    if (lr != CUDA_SUCCESS || sr != CUDA_SUCCESS) { submitFailed = true; break; }
+  }
+
+  double totalRoundtripUs = 0;
+  if (!submitFailed)
+  {
+    for (unsigned int i = 0; i < iters; i++)
+    {
+      auto t0 = std::chrono::high_resolution_clock::now();
+      CUresult lr = cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, dev.stream, args, nullptr);
+      CUresult sr = cuStreamSynchronize(dev.stream);
+      auto t1 = std::chrono::high_resolution_clock::now();
+      if (lr != CUDA_SUCCESS || sr != CUDA_SUCCESS) { submitFailed = true; break; }
+      totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
+    }
+  }
+
+  test.skip("dispatch", ResultStatus::Unsupported,
+            "Not measurable via CUDA driver API");
+  if (submitFailed)
+  {
+    test.skip("roundtrip", ResultStatus::Error,
+              "cuLaunchKernel/cuStreamSynchronize failed");
+  }
+  else
+  {
+    float roundtripUs = (float)(totalRoundtripUs / iters);
+    test.emit("roundtrip", roundtripUs);
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Local memory bandwidth (CUDA -- __shared__ memory)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  auto test = currentDeviceScope->beginTest(
+    {"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
+
+  const uint32_t blockSize = 256;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
+  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+
+  CUdeviceptr outBuf = 0;
+  if (cuMemAlloc(&outBuf, globalThreads * sizeof(float)) != CUDA_SUCCESS)
+  {
+    test.skip("float", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed");
+    return -1;
+  }
+
+  struct V
+  {
+    const char *label;
+    const char *kname;
+    uint32_t width;
+  };
+  const V vs[] = {
+      {"float  ", "local_bandwidth_v1", 1},
+      {"float2 ", "local_bandwidth_v2", 2},
+      {"float4 ", "local_bandwidth_v4", 4},
+  };
+  for (const auto &v : vs)
+  {
+    CUfunction fn;
+    if (!dev.getKernel(cuda_kernels::local_bandwidth_src,
+                       cuda_kernels::local_bandwidth_name, v.kname, fn))
+    {
+      std::string key(v.label);
+      while (!key.empty() && key.back() == ' ')
+        key.pop_back();
+      test.skip(key, ResultStatus::Error, "Kernel compile failed");
+      continue;
+    }
+    void *args[1] = {&outBuf};
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
+    float gbps = (float)bytes / us / 1e3f;
+    std::string key(v.label);
+    while (!key.empty() && key.back() == ' ')
+      key.pop_back();
+    test.emit(key, gbps);
+  }
+
+  cuMemFree(outBuf);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Image (texture) bandwidth (CUDA -- cudaTextureObject_t via driver API)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  auto test = currentDeviceScope->beginTest(
+    {"image_memory_bandwidth", "Image memory bandwidth (GBPS)", "gbps"});
+
+  const int imgW = 4096, imgH = 4096;
+  const uint32_t blockSize = 256;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
+  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+
+  // Create CUarray (RGBA float).
+  CUDA_ARRAY_DESCRIPTOR adesc = {};
+  adesc.Width = imgW;
+  adesc.Height = imgH;
+  adesc.Format = CU_AD_FORMAT_FLOAT;
+  adesc.NumChannels = 4;
+  CUarray arr;
+  if (cuArrayCreate(&arr, &adesc) != CUDA_SUCCESS)
+  {
+    test.skip("float4", ResultStatus::Error, "Image array create failed");
+    return -1;
+  }
+  // Contents undefined is fine for a bandwidth measurement -- the cache
+  // lines still get fetched.
+
+  CUDA_RESOURCE_DESC rd = {};
+  rd.resType = CU_RESOURCE_TYPE_ARRAY;
+  rd.res.array.hArray = arr;
+  CUDA_TEXTURE_DESC td = {};
+  td.addressMode[0] = CU_TR_ADDRESS_MODE_CLAMP;
+  td.addressMode[1] = CU_TR_ADDRESS_MODE_CLAMP;
+  td.filterMode = CU_TR_FILTER_MODE_POINT;
+  td.flags = CU_TRSF_READ_AS_INTEGER; // we want raw float bits, no normalization
+  CUtexObject tex = 0;
+  if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
+  {
+    cuArrayDestroy(arr);
+    test.skip("float4", ResultStatus::Error, "Texture object create failed");
+    return -1;
+  }
+
+  CUdeviceptr outBuf = 0;
+  cuMemAlloc(&outBuf, globalThreads * sizeof(float));
+
+  CUfunction fn;
+  if (!dev.getKernel(cuda_kernels::image_bandwidth_src,
+                     cuda_kernels::image_bandwidth_name,
+                     "image_bandwidth", fn))
+  {
+    test.skip("float4", ResultStatus::Error, "Kernel compile failed");
+    cuTexObjectDestroy(tex);
+    cuArrayDestroy(arr);
+    cuMemFree(outBuf);
+    return -1;
+  }
+
+  int w = imgW, h = imgH;
+  void *args[4] = {&tex, &outBuf, &w, &h};
+  float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                       cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+  uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
+  float gbps = (float)bytes / us / 1e3f;
+  test.emit("float4", gbps);
+
+  cuTexObjectDestroy(tex);
+  cuArrayDestroy(arr);
+  cuMemFree(outBuf);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Atomic throughput (CUDA -- global + local atomics)
+// ---------------------------------------------------------------------------
+
+int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
+{
+  auto test = currentDeviceScope->beginTest(
+    {"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
+
+  const uint32_t blockSize = 256;
+  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
+  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+
+  // Global: per-thread counter (128 MB).
+  {
+    CUdeviceptr buf = 0;
+    if (cuMemAlloc(&buf, globalThreads * sizeof(int)) == CUDA_SUCCESS)
+    {
+      cuMemsetD32(buf, 0, globalThreads);
+      CUfunction fn;
+      if (dev.getKernel(cuda_kernels::atomic_throughput_src,
+                        cuda_kernels::atomic_throughput_name,
+                        "atomic_throughput_global", fn))
+      {
+        void *args[1] = {&buf};
+        float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                             cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+        test.emit("int_global", gops);
+      }
+      else
+      {
+        test.skip("int_global", ResultStatus::Error, "Kernel compile failed");
+      }
+      cuMemFree(buf);
+    }
+    else
+    {
+      test.skip("int_global", ResultStatus::Error, "Buffer alloc failed");
+    }
+  }
+
+  // Local: one counter per block.
+  {
+    CUdeviceptr buf = 0;
+    if (cuMemAlloc(&buf, (uint64_t)numBlocks * sizeof(int)) == CUDA_SUCCESS)
+    {
+      CUfunction fn;
+      if (dev.getKernel(cuda_kernels::atomic_throughput_src,
+                        cuda_kernels::atomic_throughput_name,
+                        "atomic_throughput_local", fn))
+      {
+        void *args[1] = {&buf};
+        float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                             cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+        float gops = ((float)globalThreads * (float)ATOMIC_REPS) / us / 1e3f;
+        test.emit("int_local", gops);
+      }
+      else
+      {
+        test.skip("int_local", ResultStatus::Error, "Kernel compile failed");
+      }
+      cuMemFree(buf);
+    }
+    else
+    {
+      test.skip("int_local", ResultStatus::Error, "Buffer alloc failed");
+    }
+  }
+
+  return 0;
+}
+
+// Free-function enumeration used by --list-devices and the Android JNI surface.
+// Uses the static driver API directly — no CudaPeak instance required.
+BackendInventory CudaPeak::enumerate()
+{
+  BackendInventory inv;
+  inv.backend = "CUDA";
+
+  if (cuInit(0) != CUDA_SUCCESS)
+    return inv;
+  int n = 0;
+  if (cuDeviceGetCount(&n) != CUDA_SUCCESS || n == 0)
+    return inv;
+  inv.available = true;
+
+  InventoryPlatform plat;
+  plat.index = 0;
+  plat.name = "CUDA";
+
+  for (int i = 0; i < n; i++)
+  {
+    CUdevice d;
+    if (cuDeviceGet(&d, i) != CUDA_SUCCESS)
+      continue;
+    char name[256] = {0};
+    cuDeviceGetName(name, sizeof(name), d);
+    int maj = 0, min = 0;
+    cuDeviceGetAttribute(&maj, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, d);
+    cuDeviceGetAttribute(&min, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, d);
+
+    InventoryDevice dev;
+    dev.index = i;
+    dev.name = name;
+    dev.typeStr = "sm_" + std::to_string(maj) + std::to_string(min);
+    plat.devices.push_back(std::move(dev));
+  }
+
+  inv.platforms.push_back(std::move(plat));
+  return inv;
+}
+
+void CudaPeak::printInventory(const BackendInventory &b, std::ostream &os)
+{
+    os << "\n=== CUDA backend ===\n";
+    if (!b.available)
+    {
+        os << "CUDA: driver init failed or no devices found\n";
+        return;
+    }
+    for (const auto &plat : b.platforms)
+        for (const auto &d : plat.devices)
+        {
+            os << "  CUDA Device " << d.index << ": " << d.name;
+            if (!d.typeStr.empty())
+                os << " [" << d.typeStr << "]";
+            os << "\n";
+        }
+}
+
+#endif // ENABLE_CUDA

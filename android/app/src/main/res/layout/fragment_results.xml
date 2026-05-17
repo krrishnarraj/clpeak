@@ -46,6 +46,7 @@
                 app:cardBackgroundColor="?attr/colorSurfaceVariant">
 
                 <LinearLayout
+                    android:id="@+id/layout_props"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"

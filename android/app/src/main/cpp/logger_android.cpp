@@ -1,266 +1,138 @@
-#include <logger.h>
-#include <iomanip>
+#include "logger_android.h"
 #include <sstream>
 
-// Android logger: print() routes to the Kotlin UI via JNI; metric emission
-// fires record_metric_callback_from_c() on every Ok measurement.  File
-// outputs (XML / JSON / CSV) are unused on Android, but the result store
-// is still populated for parity with the desktop build.
-//
-// Stage 1 of the v2 schema refactor keeps the JNI callback signature as it
-// was (backend, platform, device, driver, test, metric, unit, value).
-// Stage 4 extends it with category / status / reason and updates Kotlin to
-// match.
+// ── note (no-op: text channel removed) ─────────────────────────────────────
 
-logger::logger(bool, std::string,
-               bool, std::string,
-               bool, std::string,
-               std::string)
-  : enableXml(false),
-    enableJson(false),
-    enableCsv(false),
-    compareEnabled(false),
-    curCategory(Category::Unknown),
-    shimDepth(0),
-    inTestScope(false)
+void LoggerAndroid::note(const std::string & /*msg*/)
 {
+    // Text channel is dead — Android UI consumes structured data only.
 }
 
-logger::~logger()
+// ── onDeviceBegin → device_info_callback_from_c ────────────────────────────
+
+void LoggerAndroid::onDeviceBegin(const std::string &name,
+                                  const std::string &platform,
+                                  const std::string &driverVersion,
+                                  const std::vector<Prop> &props,
+                                  bool /*showPlatformLine*/,
+                                  int platformIndex,
+                                  int deviceIndex)
 {
-}
+    if (!deviceInfoCallback)
+        return;
 
-// ---- print -> JNI ---------------------------------------------------------
-
-void logger::print(std::string str)
-{
-  jstring jstr = jEnv->NewStringUTF(str.c_str());
-  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
-  jEnv->DeleteLocalRef(jstr);
-}
-
-void logger::print(double val)
-{
-  std::stringstream ss;
-  ss << std::setprecision(2) << std::fixed << val;
-  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
-  jEnv->DeleteLocalRef(jstr);
-}
-
-void logger::print(float val)
-{
-  std::stringstream ss;
-  ss << std::setprecision(2) << std::fixed << val;
-  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
-  jEnv->DeleteLocalRef(jstr);
-}
-
-void logger::print(int val)
-{
-  std::stringstream ss;
-  ss << val;
-  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
-  jEnv->DeleteLocalRef(jstr);
-}
-
-void logger::print(unsigned int val)
-{
-  std::stringstream ss;
-  ss << val;
-  jstring jstr = jEnv->NewStringUTF(ss.str().c_str());
-  jEnv->CallVoidMethod((*jObj), printCallback, jstr);
-  jEnv->DeleteLocalRef(jstr);
-}
-
-// ---- High-level recording API --------------------------------------------
-
-void logger::deviceBegin(const std::string &backend,
-                         const std::string &platform,
-                         const std::string &device,
-                         const std::string &driver)
-{
-  curBackend  = backend;
-  curPlatform = platform;
-  curDevice   = device;
-  curDriver   = driver;
-}
-
-void logger::deviceEnd()
-{
-  curBackend.clear();
-  curPlatform.clear();
-  curDevice.clear();
-  curDriver.clear();
-  curCategory = Category::Unknown;
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::categoryBegin(Category c)
-{
-  curCategory = c;
-}
-
-void logger::categoryEnd()
-{
-  curCategory = Category::Unknown;
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::testBegin(const std::string &test, const std::string &unit)
-{
-  curTest = test;
-  curUnit = unit;
-  if (curCategory == Category::Unknown)
-    curCategory = categoryFromUnit(unit);
-}
-
-void logger::testEnd()
-{
-  curTest.clear();
-  curUnit.clear();
-}
-
-void logger::record(const std::string &metric, float value)
-{
-  emit(metric, ResultStatus::Ok, value, "");
-}
-
-void logger::recordSkip(const std::string &metric, ResultStatus status,
-                        const std::string &reason)
-{
-  emit(metric, status, 0.0f, reason);
-}
-
-// ---- Result-scope recording ----------------------------------------------
-
-void logger::resultScopeBegin(std::string name)
-{
-  shimDepth++;
-  if (shimDepth == 4)
-  {
-    inTestScope = true;
-    curTest = name;
-    curUnit.clear();
-    curCategory = Category::Unknown;
-  }
-}
-
-void logger::resultScopeAttribute(std::string key, std::string value)
-{
-  switch (shimDepth)
-  {
-  case 2:
-    if      (key == "name")    curPlatform = value;
-    else if (key == "backend") curBackend  = value;
-    break;
-  case 3:
-    if      (key == "name")           curDevice = value;
-    else if (key == "driver_version") curDriver = value;
-    break;
-  case 4:
-    if (key == "unit")
+    // Build a compact JSON array of props: [{"k":"Compute units","v":"16"},...]
+    std::stringstream json;
+    json << "[";
+    for (size_t i = 0; i < props.size(); i++)
     {
-      curUnit     = value;
-      curCategory = categoryFromUnit(value);
+        if (i > 0) json << ",";
+        json << "{\"k\":\"" << props[i].key << "\",\"v\":\"" << props[i].value << "\"}";
     }
-    break;
-  default:
-    break;
-  }
+    json << "]";
+
+    jstring jBackend       = jEnv->NewStringUTF(curBackend.c_str());
+    jstring jPlatform      = jEnv->NewStringUTF(platform.c_str());
+    jstring jDevice        = jEnv->NewStringUTF(name.c_str());
+    jstring jDriver        = jEnv->NewStringUTF(driverVersion.c_str());
+    jstring jProps         = jEnv->NewStringUTF(json.str().c_str());
+    jstring jPlatformIndex = jEnv->NewStringUTF(std::to_string(platformIndex).c_str());
+    jstring jDeviceIndex   = jEnv->NewStringUTF(std::to_string(deviceIndex).c_str());
+
+    jEnv->CallVoidMethod(jObj, deviceInfoCallback,
+                         jBackend, jPlatform, jDevice, jDriver,
+                         jProps, jPlatformIndex, jDeviceIndex);
+
+    jEnv->DeleteLocalRef(jBackend);
+    jEnv->DeleteLocalRef(jPlatform);
+    jEnv->DeleteLocalRef(jDevice);
+    jEnv->DeleteLocalRef(jDriver);
+    jEnv->DeleteLocalRef(jProps);
+    jEnv->DeleteLocalRef(jPlatformIndex);
+    jEnv->DeleteLocalRef(jDeviceIndex);
 }
 
-void logger::resultScopeAttribute(std::string key, unsigned int value)
+// ── onMetricEmitted → record_metric_callback_from_c ────────────────────────
+
+void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*subMetric*/)
 {
-  std::stringstream ss;
-  ss << value;
-  resultScopeAttribute(key, ss.str());
+    if (!recordMetricCallback)
+        return;
+
+    jstring jBackend  = jEnv->NewStringUTF(e.backend.c_str());
+    jstring jPlatform = jEnv->NewStringUTF(e.platform.c_str());
+    jstring jDevice   = jEnv->NewStringUTF(e.device.c_str());
+    jstring jDriver   = jEnv->NewStringUTF(e.driver.c_str());
+    jstring jCategory = jEnv->NewStringUTF(e.category.c_str());
+    jstring jTest     = jEnv->NewStringUTF(e.test.c_str());
+    jstring jDisplay  = jEnv->NewStringUTF(curDisplay.c_str());
+    jstring jMetric   = jEnv->NewStringUTF(e.metric.c_str());
+    jstring jUnit     = jEnv->NewStringUTF(e.unit.c_str());
+    jstring jStatus   = jEnv->NewStringUTF("ok");
+    jstring jReason   = jEnv->NewStringUTF("");
+
+    jEnv->CallVoidMethod(jObj, recordMetricCallback,
+                         jBackend, jPlatform, jDevice, jDriver,
+                         jCategory, jTest, jDisplay, jMetric, jUnit,
+                         static_cast<jfloat>(value),
+                         jStatus, jReason);
+
+    jEnv->DeleteLocalRef(jBackend);
+    jEnv->DeleteLocalRef(jPlatform);
+    jEnv->DeleteLocalRef(jDevice);
+    jEnv->DeleteLocalRef(jDriver);
+    jEnv->DeleteLocalRef(jCategory);
+    jEnv->DeleteLocalRef(jTest);
+    jEnv->DeleteLocalRef(jDisplay);
+    jEnv->DeleteLocalRef(jMetric);
+    jEnv->DeleteLocalRef(jUnit);
+    jEnv->DeleteLocalRef(jStatus);
+    jEnv->DeleteLocalRef(jReason);
 }
 
-void logger::resultSetContent(float value)
+// ── onMetricSkipped → record_metric_callback_from_c ────────────────────────
+
+void LoggerAndroid::onMetricSkipped(const ResultEntry &e)
 {
-  if (shimDepth == 4 && !curTest.empty())
-    emit(curTest, ResultStatus::Ok, value, "");
-}
+    if (!recordMetricCallback)
+        return;
 
-void logger::resultScopeEnd()
-{
-  if (shimDepth == 4)
-  {
-    curTest.clear();
-    curUnit.clear();
-    curCategory = Category::Unknown;
-    inTestScope = false;
-  }
-  if (inTestScope || shimDepth > 3)
-    shimDepth--;
-}
+    const char *statusStr = "";
+    switch (e.status)
+    {
+    case ResultStatus::Unsupported: statusStr = "unsupported"; break;
+    case ResultStatus::Skipped:     statusStr = "skipped";     break;
+    case ResultStatus::Error:       statusStr = "error";       break;
+    default: break;
+    }
 
-void logger::resultRecord(std::string metric, float value)
-{
-  if (shimDepth == 4)
-    emit(metric, ResultStatus::Ok, value, "");
-}
+    jstring jBackend  = jEnv->NewStringUTF(e.backend.c_str());
+    jstring jPlatform = jEnv->NewStringUTF(e.platform.c_str());
+    jstring jDevice   = jEnv->NewStringUTF(e.device.c_str());
+    jstring jDriver   = jEnv->NewStringUTF(e.driver.c_str());
+    jstring jCategory = jEnv->NewStringUTF(e.category.c_str());
+    jstring jTest     = jEnv->NewStringUTF(e.test.c_str());
+    jstring jDisplay  = jEnv->NewStringUTF(curDisplay.c_str());
+    jstring jMetric   = jEnv->NewStringUTF(e.metric.c_str());
+    jstring jUnit     = jEnv->NewStringUTF(e.unit.c_str());
+    jstring jStatus   = jEnv->NewStringUTF(statusStr);
+    jstring jReason   = jEnv->NewStringUTF(e.reason.c_str());
 
-// ---- emit -> JNI ----------------------------------------------------------
+    jEnv->CallVoidMethod(jObj, recordMetricCallback,
+                         jBackend, jPlatform, jDevice, jDriver,
+                         jCategory, jTest, jDisplay, jMetric, jUnit,
+                         0.0f,
+                         jStatus, jReason);
 
-void logger::emit(const std::string &metric, ResultStatus status,
-                  float value, const std::string &reason)
-{
-  ResultEntry e;
-  e.backend  = curBackend;
-  e.platform = curPlatform;
-  e.device   = curDevice;
-  e.driver   = curDriver;
-  e.category = categoryString(curCategory);
-  e.test     = curTest;
-  e.metric   = metric;
-  e.unit     = curUnit;
-  e.status   = status;
-  e.value    = (status == ResultStatus::Ok) ? value : 0.0f;
-  e.reason   = reason;
-  results.push_back(e);
-
-  // v2 JNI signature carries `category` after `backend`.  Skip /
-  // unsupported / error rows are still recorded in `results` but don't
-  // fire the callback (Kotlin renders only Ok values).  A follow-up
-  // change can extend the signature to include status+reason and
-  // surface skipped rows in the UI.
-  if (status != ResultStatus::Ok || !recordMetricCallback)
-    return;
-
-  jstring jBackend  = jEnv->NewStringUTF(e.backend.c_str());
-  jstring jPlatform = jEnv->NewStringUTF(e.platform.c_str());
-  jstring jDevice   = jEnv->NewStringUTF(e.device.c_str());
-  jstring jDriver   = jEnv->NewStringUTF(e.driver.c_str());
-  jstring jCategory = jEnv->NewStringUTF(e.category.c_str());
-  jstring jTest     = jEnv->NewStringUTF(e.test.c_str());
-  jstring jMetric   = jEnv->NewStringUTF(e.metric.c_str());
-  jstring jUnit     = jEnv->NewStringUTF(e.unit.c_str());
-
-  jEnv->CallVoidMethod(
-      (*jObj),
-      recordMetricCallback,
-      jBackend,
-      jPlatform,
-      jDevice,
-      jDriver,
-      jCategory,
-      jTest,
-      jMetric,
-      jUnit,
-      static_cast<jfloat>(value));
-
-  jEnv->DeleteLocalRef(jBackend);
-  jEnv->DeleteLocalRef(jPlatform);
-  jEnv->DeleteLocalRef(jDevice);
-  jEnv->DeleteLocalRef(jDriver);
-  jEnv->DeleteLocalRef(jCategory);
-  jEnv->DeleteLocalRef(jTest);
-  jEnv->DeleteLocalRef(jMetric);
-  jEnv->DeleteLocalRef(jUnit);
+    jEnv->DeleteLocalRef(jBackend);
+    jEnv->DeleteLocalRef(jPlatform);
+    jEnv->DeleteLocalRef(jDevice);
+    jEnv->DeleteLocalRef(jDriver);
+    jEnv->DeleteLocalRef(jCategory);
+    jEnv->DeleteLocalRef(jTest);
+    jEnv->DeleteLocalRef(jDisplay);
+    jEnv->DeleteLocalRef(jMetric);
+    jEnv->DeleteLocalRef(jUnit);
+    jEnv->DeleteLocalRef(jStatus);
+    jEnv->DeleteLocalRef(jReason);
 }

@@ -9,13 +9,11 @@ import kotlinx.coroutines.channels.ReceiveChannel
  */
 class BenchmarkRepository {
 
-    // Unlimited capacity so trySend never drops items regardless of how fast
-    // the native thread produces metrics relative to the collector coroutine.
-    private val _logChannel    = Channel<String>(Channel.UNLIMITED)
-    private val _metricChannel = Channel<ResultEntry>(Channel.UNLIMITED)
+    private val _metricChannel     = Channel<ResultEntry>(Channel.UNLIMITED)
+    private val _deviceInfoChannel = Channel<DeviceInfo>(Channel.UNLIMITED)
 
-    val logChannel:    ReceiveChannel<String>      get() = _logChannel
-    val metricChannel: ReceiveChannel<ResultEntry> get() = _metricChannel
+    val metricChannel:     ReceiveChannel<ResultEntry> get() = _metricChannel
+    val deviceInfoChannel: ReceiveChannel<DeviceInfo>   get() = _deviceInfoChannel
 
     // ---- JNI declarations --------------------------------------------------
 
@@ -24,16 +22,7 @@ class BenchmarkRepository {
     /** Non-destructive enumeration. Safe to call from any thread. */
     external fun nativeEnumerateBackends(): String
 
-    // Called from C++ logger_android.cpp::print() on the benchmark thread.
-    @Suppress("unused")
-    fun print_callback_from_c(str: String) {
-        _logChannel.trySend(str)
-    }
-
-    // Called from C++ logger_android.cpp::emit() on the benchmark thread.
-    // Signature mirrors the v2 ResultEntry layout (backend, platform, device,
-    // driver, category, test, metric, unit, value) -- category is new in v2
-    // and replaces the static CATEGORY_META lookup the ViewModel used to do.
+    // Called from C++ logger_android.cpp on every metric (Ok or skipped).
     @Suppress("unused")
     fun record_metric_callback_from_c(
         backend: String,
@@ -42,12 +31,34 @@ class BenchmarkRepository {
         driver: String,
         category: String,
         test: String,
+        display: String,
         metric: String,
         unit: String,
-        value: Float
+        value: Float,
+        status: String,
+        reason: String
     ) {
         _metricChannel.trySend(
-            ResultEntry(backend, platform, device, driver, category, test, metric, unit, value)
+            ResultEntry(backend, platform, device, driver, category,
+                        test, display, metric, unit, value, status, reason)
+        )
+    }
+
+    // Called from C++ once per device before its metrics arrive.
+    @Suppress("unused")
+    fun device_info_callback_from_c(
+        backend: String,
+        platform: String,
+        device: String,
+        driver: String,
+        propsJson: String,
+        platformIndex: String,
+        deviceIndex: String
+    ) {
+        _deviceInfoChannel.trySend(
+            DeviceInfo(backend, platform, device, driver, propsJson,
+                       platformIndex.toIntOrNull() ?: -1,
+                       deviceIndex.toIntOrNull() ?: -1)
         )
     }
 
@@ -62,8 +73,8 @@ class BenchmarkRepository {
         return try {
             launchClpeak(argv.size, argv)
         } finally {
-            _logChannel.close()
             _metricChannel.close()
+            _deviceInfoChannel.close()
         }
     }
 

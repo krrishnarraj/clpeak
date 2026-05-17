@@ -1,0 +1,248 @@
+#ifndef CUDA_PEAK_H
+#define CUDA_PEAK_H
+
+#ifdef ENABLE_CUDA
+
+#include <cuda.h>
+#include <string>
+#include <vector>
+#include <memory>
+#include <unordered_map>
+#include <common/common.h>
+#include <common/logger.h>
+#include <common/peak.h>
+#include <common/inventory.h>
+
+struct CliOptions; // forward decl
+
+// CUDA device info (mirrors vk_device_info_t for display + per-test gating).
+struct cuda_device_info_t {
+  std::string deviceName;
+  std::string driverVersion;     // e.g. "12.6"
+  std::string runtimeVersion;    // NVRTC version
+  std::string archName;          // "sm_120" etc.
+
+  DeviceType deviceType = DeviceType::Unknown;
+
+  int major;                     // compute-capability major
+  int minor;                     // compute-capability minor
+  int numSMs;
+  int maxThreadsPerBlock;
+  uint64_t totalGlobalMem;
+  int clockRateKHz;
+
+  // Per-test capability flags
+  bool fp16Supported;            // cc >= 5.3
+  bool bf16Supported;            // cc >= 8.0 (Ampere)
+  bool dp4aSupported;            // cc >= 6.1 (Pascal)
+  bool wmmaSupported;            // cc >= 7.0 (Volta) -- fp16 wmma
+  bool wmmaInt8Supported;        // cc >= 7.2 (Turing) -- int8 wmma fragments
+  bool fp8MmaSupported;          // cc >= 8.9 (Ada) -- inline mma.sync.e4m3/e5m2
+  bool fp4MmaSupported;          // cc >= 12.0 (Blackwell) -- sm_120a mma FP4/MXFP4
+  bool tf32GemmSupported;        // cc >= 8.0 (Ampere) -- TF32 tensor cores
+  bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
+  bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
+  bool dpTensorSupported;        // cc >= 8.0 (Ampere) -- fp64 wmma m8n8k4
+  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
+                                 // dropped on sm_90+ (Hopper) where the s4 imma
+                                 // path was removed.
+  bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
+  bool bmmaSupported;            // cc >= 7.5 (Turing) -- b1 XOR-popc bmma
+};
+
+// One CUDA device + the bookkeeping needed to launch kernels through the
+// driver API.  Modules are loaded lazily and cached per-source-text.
+class CudaDevice
+{
+public:
+  CUdevice  device;
+  CUcontext context;
+  CUstream  stream;
+  cuda_device_info_t info;
+
+  CudaDevice();
+  ~CudaDevice();
+
+  bool init(int devIndex);
+  void cleanup();
+
+  // NVRTC-compile a .cu source string and load the resulting PTX into a
+  // module, then resolve named kernels.  Caches by source pointer; the same
+  // source compiled for two device archs lives in two cache entries.
+  // Returns true on success; on compile failure logs the NVRTC log to stderr
+  // and returns false.
+  bool getKernel(const char *src, const char *srcName,
+                 const char *kernelName, CUfunction &fn,
+                 const std::vector<const char *> &extraOpts = {});
+
+private:
+  // moduleCache key = source pointer (string identity is the simplest
+  // viable cache key because every .cu blob is a unique extern in the
+  // generated cpp).  Value = loaded module handle.
+  std::unordered_map<const char *, CUmodule> moduleCache;
+};
+
+// Variant of a single compute-peak kernel.  All variants of one benchmark
+// share the same output buffer + dispatch geometry; only the kernel symbol
+// (and possibly source file) differs.
+struct cuda_compute_variant_t
+{
+  const char *label;             // column / result metric, e.g. "mp", "mp2"
+  const char *kernelName;        // CUDA kernel symbol (extern "C")
+  const char *src;               // .cu source text (may be shared by sibling
+                                 // variants emitting from one file)
+  const char *srcName;           // file stem for NVRTC diagnostics
+};
+
+struct cuda_compute_desc_t
+{
+  const char *title;             // header line
+  const char *resultTag;            // persisted test name
+  const char *unit;              // "gflops" / "gops" / "tflops" / "tops"
+  double      unitDivider;       // 1e9 = G* (default when 0), 1e12 = T*
+
+  // Single-variant fallback (used when variants==nullptr).
+  const char *metricLabel;
+  const char *kernelName;
+  const char *src;
+  const char *srcName;
+
+  // Multi-variant (preferred when set).
+  const cuda_compute_variant_t *variants;
+  uint32_t numVariants;
+
+  // Scaling.
+  uint32_t workPerWI;            // matches the kernel's per-thread op budget
+  uint32_t elemSize;             // output element size
+  uint32_t blockSize;            // threads per block; 0 => default 256.
+                                 // WMMA kernels use 32 (one warp) per block.
+  uint32_t outElemsPerBlock;     // output elements written per block;
+                                 // 0 => defaults to blockSize.
+
+  // Scalar A passed as the second kernel argument (after the output buffer).
+  // Stored by the caller; pointer kept here so cuLaunchKernel can index it.
+  // Using a 4-byte slot is enough for float / int32 / etc.
+  const void *scalarArg;
+  uint32_t    scalarSize;        // 0 => no scalar arg
+
+  // Optional gates / attributes
+  bool        skip;
+  const char *skipMsg;
+
+  // Optional NVRTC compile flags shared by all variants (e.g. wmma needs
+  // --gpu-architecture matching the device, but per-test extras like
+  // -default-device or -DSOMETHING go here).
+  const char *const *extraNvrtcOpts;
+  uint32_t           numExtraNvrtcOpts;
+};
+
+class CudaPeak : public Peak
+{
+public:
+  int  deviceIndex;  // -1 = run all
+
+  CudaPeak();
+  ~CudaPeak();
+
+  void applyOptions(const CliOptions &opts) override;
+  int runAll() override;
+
+  // Inventory.
+  static BackendInventory enumerate();
+  static void printInventory(const BackendInventory &inv, std::ostream &os);
+
+  int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeHP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeDP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeMP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg);
+  int runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg);
+  int runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
+  int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
+  int runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg);
+  int runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category);
+  int runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category);
+  int runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
+  int runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
+  int runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg);
+
+private:
+  bool initialised;
+  std::vector<int> devIndices;
+  logger::DeviceScope *currentDeviceScope = nullptr;  // set during runAll
+
+  bool initDriver();
+
+  // Time a kernel batched as `iters` dispatches, where `iters` is calibrated
+  // from a one-shot warmup so the timed phase lands at ~targetTimeUs.  Returns
+  // mean per-launch time in microseconds.  forcedIters != 0 short-circuits
+  // calibration (matches --iters).
+  float runKernel(CudaDevice &dev, CUfunction fn,
+                  uint32_t gridX, uint32_t blockX,
+                  void **args,
+                  unsigned int targetTimeUs, unsigned int forcedIters);
+
+  int runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
+                       const cuda_compute_desc_t &d);
+};
+
+// Embedded CUDA kernel source text (generated at build time).
+namespace cuda_kernels {
+  extern const char *compute_sp_src;
+  extern const char *compute_sp_name;
+  extern const char *compute_hp_src;
+  extern const char *compute_hp_name;
+  extern const char *compute_dp_src;
+  extern const char *compute_dp_name;
+  extern const char *compute_mp_src;
+  extern const char *compute_mp_name;
+  extern const char *compute_bf16_src;
+  extern const char *compute_bf16_name;
+  extern const char *compute_int8_dp_src;
+  extern const char *compute_int8_dp_name;
+  extern const char *compute_int4_packed_src;
+  extern const char *compute_int4_packed_name;
+  extern const char *compute_int32_src;
+  extern const char *compute_int32_name;
+  extern const char *global_bandwidth_src;
+  extern const char *global_bandwidth_name;
+  extern const char *kernel_latency_src;
+  extern const char *kernel_latency_name;
+  extern const char *wmma_fp16_src;
+  extern const char *wmma_fp16_name;
+  extern const char *wmma_bf16_src;
+  extern const char *wmma_bf16_name;
+  extern const char *wmma_int8_src;
+  extern const char *wmma_int8_name;
+  extern const char *wmma_int8_k32_src;
+  extern const char *wmma_int8_k32_name;
+  extern const char *wmma_int8_sparse_src;
+  extern const char *wmma_int8_sparse_name;
+  extern const char *wmma_fp8_e4m3_src;
+  extern const char *wmma_fp8_e4m3_name;
+  extern const char *wmma_fp8_e5m2_src;
+  extern const char *wmma_fp8_e5m2_name;
+  extern const char *wmma_fp4_e2m1_src;
+  extern const char *wmma_fp4_e2m1_name;
+  extern const char *wmma_mxf4_e2m1_src;
+  extern const char *wmma_mxf4_e2m1_name;
+  extern const char *wmma_tf32_src;
+  extern const char *wmma_tf32_name;
+  extern const char *wmma_fp64_src;
+  extern const char *wmma_fp64_name;
+  extern const char *wmma_int4_src;
+  extern const char *wmma_int4_name;
+  extern const char *wmma_bmma_b1_src;
+  extern const char *wmma_bmma_b1_name;
+  extern const char *local_bandwidth_src;
+  extern const char *local_bandwidth_name;
+  extern const char *image_bandwidth_src;
+  extern const char *image_bandwidth_name;
+  extern const char *atomic_throughput_src;
+  extern const char *atomic_throughput_name;
+}
+
+#endif // ENABLE_CUDA
+#endif // CUDA_PEAK_H

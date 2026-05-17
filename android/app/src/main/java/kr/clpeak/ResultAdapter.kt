@@ -37,8 +37,16 @@ class ResultAdapter(
             val ctx = binding.root.context
 
             binding.tvCategoryName.text = category.displayName
-            binding.tvPeakValue.text    = "%.2f".format(category.peakValue)
-            binding.tvUnit.text         = category.unit.uppercase()
+
+            if (category.allSkipped) {
+                binding.tvPeakValue.text = category.skipStatus.replaceFirstChar { it.uppercase() }
+                binding.tvUnit.text = category.skipReason
+                binding.tvUnit.setSingleLine(false)
+            } else {
+                binding.tvPeakValue.text = "%.2f".format(category.peakValue)
+                binding.tvUnit.text = category.unit.uppercase()
+                binding.tvUnit.setSingleLine(true)
+            }
 
             // Tonal card background based on test type.  UNKNOWN reuses the
             // fp_compute palette (a soft warm orange) as a generic fallback.
