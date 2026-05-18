@@ -91,8 +91,18 @@ int clPeak::runAll()
           (cl_context_properties)(platforms[p])(),
           0};
 
-      cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
-      std::vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+      cl::Context ctx;
+      std::vector<cl::Device> devices;
+      try
+      {
+        ctx = cl::Context(CL_DEVICE_TYPE_ALL, cps);
+        devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+      }
+      catch (cl::Error &error)
+      {
+        log->note("  Platform \"" + platformName + "\": " + error.what() + " (" + std::to_string(error.err()) + ") — no devices, skipping\n");
+        continue;
+      }
 
       for (size_t d = 0; d < devices.size(); d++)
       {
