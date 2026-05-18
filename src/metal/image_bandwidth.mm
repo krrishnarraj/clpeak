@@ -81,15 +81,29 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         }
         // Phase 2: timed calibration probe.
         unsigned int probeIters = 1;
+        double probeT0 = [NSProcessInfo processInfo].systemUptime;
         id<MTLCommandBuffer> p = enqueue(probeIters);
         [p waitUntilCompleted];
-        double per_iter_us = (p.GPUEndTime - p.GPUStartTime) * 1e6 / (double)probeIters;
+        double probeT1 = [NSProcessInfo processInfo].systemUptime;
+        CFTimeInterval gpuProbeSec = p.GPUEndTime - p.GPUStartTime;
+        CFTimeInterval wallProbeSec = probeT1 - probeT0;
+        double gpuProbeUs = gpuProbeSec * 1e6;
+        if (gpuProbeSec <= 0.0 || gpuProbeSec < wallProbeSec * 0.01)
+            gpuProbeUs = wallProbeSec * 1e6;
+        double per_iter_us = gpuProbeUs / (double)probeIters;
         unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs,
                                        forceIters ? specifiedIters : 0);
         // Phase 3: real timed run.
+        double t0 = [NSProcessInfo processInfo].systemUptime;
         id<MTLCommandBuffer> t = enqueue(iters);
         [t waitUntilCompleted];
-        float us = (float)((t.GPUEndTime - t.GPUStartTime) * 1e6 / iters);
+        double t1 = [NSProcessInfo processInfo].systemUptime;
+        CFTimeInterval gpuTimedSec = t.GPUEndTime - t.GPUStartTime;
+        CFTimeInterval wallTimedSec = t1 - t0;
+        double gpuTimedUs = gpuTimedSec * 1e6;
+        if (gpuTimedSec <= 0.0 || gpuTimedSec < wallTimedSec * 0.01)
+            gpuTimedUs = wallTimedSec * 1e6;
+        float us = (float)(gpuTimedUs / iters);
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
         float gbps = (float)bytes / us / 1e3f;
         test.emit(v.label, gbps);

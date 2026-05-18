@@ -235,19 +235,24 @@ final class BenchmarkViewModel: ObservableObject {
     private func rebuild() {
         var order: [String] = []
         var grouped: [String: [String: [ResultEntry]]] = [:]
+        var keyOrder: [String: [String]] = [:] // per-backend insertion order of keys
 
         for entry in accumulated {
             if !order.contains(entry.backend) {
                 order.append(entry.backend)
             }
             let key = "\(entry.category)|\(entry.test)"
+            if grouped[entry.backend]?[key] == nil {
+                keyOrder[entry.backend, default: []].append(key)
+            }
             grouped[entry.backend, default: [:]][key, default: []].append(entry)
         }
 
         var rebuilt: [String: [BenchmarkCategory]] = [:]
         for backend in order {
             let cards = grouped[backend] ?? [:]
-            rebuilt[backend] = cards.keys.sorted().compactMap { key in
+            let keys = keyOrder[backend] ?? []
+            rebuilt[backend] = keys.compactMap { key in
                 guard let entries = cards[key], let first = entries.first else { return nil }
                 if entries.allSatisfy({ $0.status != "ok" }) { return nil }
                 return BenchmarkCategory(

@@ -24,7 +24,7 @@ struct ClpeakApp: App {
                         }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        AboutButton()
+                        AboutButton(viewModel: viewModel)
                     }
                 }
             }
@@ -33,6 +33,7 @@ struct ClpeakApp: App {
 }
 
 private struct AboutButton: View {
+    let viewModel: BenchmarkViewModel
     @State private var showingAbout = false
 
     var body: some View {
@@ -43,6 +44,7 @@ private struct AboutButton: View {
         }
         .sheet(isPresented: $showingAbout) {
             AboutView()
+                .environmentObject(viewModel)
         }
     }
 }

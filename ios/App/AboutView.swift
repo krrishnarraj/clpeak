@@ -13,7 +13,7 @@ struct AboutView: View {
                 }
 
                 Section {
-                    Text("Cross-API GPU benchmark for compute, bandwidth, and latency tests.")
+                    Text("A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops to expose what the hardware is capable of in isolation, not real-world workload performance.")
                         .font(.body)
                 }
             }

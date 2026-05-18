@@ -250,10 +250,21 @@ float mtlRunDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
     };
 
     auto runBatch = [&](unsigned int n) -> float {
+        NSProcessInfo *pi = [NSProcessInfo processInfo];
+        double t0 = pi.systemUptime;
         id<MTLCommandBuffer> b = enqueue(n);
         [b waitUntilCompleted];
+        double t1 = pi.systemUptime;
         CFTimeInterval gpuTime = b.GPUEndTime - b.GPUStartTime;
-        return (float)(gpuTime * 1e6); // total us
+        CFTimeInterval wallTime = t1 - t0;
+        // On the iOS simulator (or any configuration where the Metal driver
+        // does not implement GPU profiling timestamps), GPUStartTime /
+        // GPUEndTime may be zero or a tiny fraction of wall time.  Fall
+        // back to host wall-clock time when the GPU time looks implausible
+        // (< 1% of wall time, or zero).
+        if (gpuTime > 0.0 && gpuTime >= wallTime * 0.01)
+            return (float)(gpuTime * 1e6);
+        return (float)(wallTime * 1e6);
     };
 
     // Phase 1: untimed warmup. Keep each warmup as its own completed command
