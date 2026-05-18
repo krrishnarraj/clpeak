@@ -130,7 +130,7 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
 
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"mps-gemm-fp", "MPS GEMM peak", "tflops"});
+    auto test = currentDeviceScope->beginTest({"mps-gemm-fp", "MPS GEMM peak (TFLOPS)", "tflops"});
 
     if (!dev.info.isAppleSilicon)
     {
@@ -299,7 +299,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"mps-gemm-int", "MPS GEMM peak", "tops"});
+    auto test = currentDeviceScope->beginTest({"mps-gemm-int", "MPS GEMM peak (TOPS)", "tops"});
 
     if (!dev.info.isAppleSilicon)
     {

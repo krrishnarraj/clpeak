@@ -15,6 +15,14 @@ endif()
 add_library(peak_metal STATIC
     mtl_peak.mm
     mtl_blas.mm
+    compute_float.mm
+    compute_int.mm
+    simdgroup.mm
+    global_bandwidth.mm
+    local_bandwidth.mm
+    image_bandwidth.mm
+    kernel_latency.mm
+    atomic_throughput.mm
 )
 target_link_libraries(peak_metal PUBLIC
     peak_common
@@ -32,7 +40,7 @@ target_compile_definitions(peak_common PRIVATE ENABLE_METAL)
 
 # Compile .mm files with ObjC ARC -- saves us from sprinkling release
 # calls on autoreleased Metal objects.
-set_source_files_properties(mtl_peak.mm mtl_blas.mm
+set_source_files_properties(mtl_peak.mm mtl_blas.mm compute_float.mm compute_int.mm simdgroup.mm global_bandwidth.mm local_bandwidth.mm image_bandwidth.mm kernel_latency.mm atomic_throughput.mm
     PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
 # Embed .metal kernel sources as C++ raw-string literals

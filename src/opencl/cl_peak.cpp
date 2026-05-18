@@ -266,7 +266,7 @@ int clPeak::runAll()
         else if (isAllowed(Benchmark::KernelLatency))
         {
           auto test = deviceScope.beginTest({"kernel_launch_latency",
-                                             "Kernel launch latency", "us"});
+                                             "Kernel launch latency (us)", "us"});
           test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
                        "No profiling queue support");
         }
