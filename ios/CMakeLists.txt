@@ -51,6 +51,8 @@ set(CLPEAK_IOS_SWIFT_SOURCES
   App/AboutView.swift
 )
 
+set(CLPEAK_IOS_ASSET_CATALOG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Assets.xcassets")
+
 add_executable(clpeak_ios MACOSX_BUNDLE
   ${CLPEAK_IOS_SWIFT_SOURCES}
   Native/entry_ios.mm
@@ -58,6 +60,7 @@ add_executable(clpeak_ios MACOSX_BUNDLE
   Native/clpeak_ios_bridge.h
   Native/logger_ios.h
   ${CLPEAK_VULKAN_RESOURCE_DIR}
+  ${CLPEAK_IOS_ASSET_CATALOG}
 )
 
 target_link_libraries(clpeak_ios PRIVATE
@@ -78,6 +81,11 @@ target_compile_options(clpeak_ios PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-a
 clpeak_setup_version(clpeak_ios GIT_ROOT ${CLPEAK_GIT_ROOT})
 
 set_source_files_properties(${CLPEAK_VULKAN_RESOURCE_DIR}
+  PROPERTIES
+  MACOSX_PACKAGE_LOCATION Resources
+)
+
+set_source_files_properties(${CLPEAK_IOS_ASSET_CATALOG}
   PROPERTIES
   MACOSX_PACKAGE_LOCATION Resources
 )
@@ -106,6 +114,7 @@ set_target_properties(clpeak_ios PROPERTIES
   XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
   XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
   XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos"
+  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
   XCODE_GENERATE_SCHEME TRUE
 )
 
@@ -118,6 +127,7 @@ add_executable(clpeak_ios_simulator MACOSX_BUNDLE
   Native/logger_ios.mm
   Native/clpeak_ios_bridge.h
   Native/logger_ios.h
+  ${CLPEAK_IOS_ASSET_CATALOG}
 )
 
 target_link_libraries(clpeak_ios_simulator PRIVATE
@@ -149,6 +159,7 @@ set_target_properties(clpeak_ios_simulator PROPERTIES
   XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
   XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
   XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphonesimulator"
+  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
   "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"
   XCODE_GENERATE_SCHEME TRUE
 )
