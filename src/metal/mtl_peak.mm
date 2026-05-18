@@ -2,6 +2,27 @@
 
 #include "mtl_internal.h"
 
+namespace
+{
+NSArray<id<MTLDevice>> *copyClpeakMetalDevices()
+{
+#if TARGET_OS_IPHONE
+    id<MTLDevice> def = MTLCreateSystemDefaultDevice();
+    return def ? @[def] : @[];
+#else
+    NSArray<id<MTLDevice>> *devs = MTLCopyAllDevices();
+    if (devs.count == 0)
+    {
+        // On macOS the default-device call is the most reliable way to grab
+        // the integrated Apple-silicon GPU.
+        id<MTLDevice> def = MTLCreateSystemDefaultDevice();
+        if (def) devs = @[def];
+    }
+    return devs;
+#endif
+}
+}
+
 // ---------------------------------------------------------------------------
 // MetalDevice
 // ---------------------------------------------------------------------------
@@ -11,15 +32,7 @@ MetalDevice::~MetalDevice() { cleanup(); }
 
 bool MetalDevice::init(int devIndex)
 {
-    NSArray<id<MTLDevice>> *devs = MTLCopyAllDevices();
-    if (devs.count == 0)
-    {
-        // On macOS the default-device call is the most reliable way to grab
-        // the integrated Apple-silicon GPU.
-        id<MTLDevice> def = MTLCreateSystemDefaultDevice();
-        if (!def) return false;
-        devs = @[def];
-    }
+    NSArray<id<MTLDevice>> *devs = copyClpeakMetalDevices();
     if ((NSUInteger)devIndex >= devs.count) return false;
 
     impl = new MetalDeviceImpl();
@@ -36,22 +49,29 @@ bool MetalDevice::init(int devIndex)
     NSOperatingSystemVersion v = [[NSProcessInfo processInfo] operatingSystemVersion];
     {
         std::stringstream ss;
+#if TARGET_OS_IPHONE
+        ss << "iOS " << v.majorVersion << "." << v.minorVersion << "." << v.patchVersion;
+#else
         ss << "macOS " << v.majorVersion << "." << v.minorVersion << "." << v.patchVersion;
+#endif
         info.osVersion = ss.str();
     }
 
-    // Probe Apple silicon family.  Apple7 = M1 baseline; Apple9 = M3
-    // (bf16 simdgroup_matrix lights up here); Apple10 = M4.
+    // Probe Apple GPU family.  Apple7 = M1/A15 baseline for simdgroup_matrix;
+    // Apple9 = M3/A17 generation where bf16/int8 paths light up.
     info.appleFamily = 0;
     info.isAppleSilicon = false;
-    for (int f = 7; f <= 10; f++)
+    for (int f = 1; f <= 10; f++)
     {
         if ([impl->device supportsFamily:(MTLGPUFamily)(MTLGPUFamilyApple1 + f - 1)])
         {
             info.appleFamily = (uint32_t)f;
-            info.isAppleSilicon = true;
         }
     }
+    info.isAppleSilicon = info.appleFamily >= 7;
+#if TARGET_OS_IPHONE
+    info.isAppleSilicon = info.appleFamily > 0;
+#endif
 
     // Capability bits.  Apple silicon always has fp16; fp16 simdgroup_matrix
     // is M1+; bf16 simdgroup_matrix is M3+ (Apple9).
@@ -68,14 +88,19 @@ bool MetalDevice::init(int devIndex)
     // MPSGraph bf16 dtype was added in macOS 14 (Sonoma) and only lights up
     // on Apple9+ (M3); below that it falls back to a slow software path.
     info.mpsGraphBF16Supported = false;
+#if TARGET_OS_IPHONE
+    if (@available(iOS 17.0, *))
+        info.mpsGraphBF16Supported = info.appleFamily >= 9;
+#else
     if (@available(macOS 14.0, *))
         info.mpsGraphBF16Supported = info.appleFamily >= 9;
+#endif
 
     // Best-effort GPU core count via IORegistry (Apple silicon exposes
     // "gpu-core-count" on the AGXAccelerator service).  Used to scale the
     // GEMM dim so similar-class GPUs land in similar wall-clock windows.
     info.gpuCoreCount = 0;
-#if __has_include(<IOKit/IOKitLib.h>)
+#if __has_include(<IOKit/IOKitLib.h>) && !TARGET_OS_IPHONE
     {
         io_iterator_t it = 0;
         if (IOServiceGetMatchingServices(kIOMainPortDefault,
@@ -129,12 +154,17 @@ id<MTLLibrary> mtlGetLibrary(MetalDevice &dev, const char *src, const char *srcN
     NSError *err = nil;
     NSString *srcStr = [NSString stringWithUTF8String:src];
     MTLCompileOptions *opts = [MTLCompileOptions new];
-    // languageVersion is a property on MTLCompileOptions; pin to 3.0
-    // (macOS 13+) so simdgroup_matrix compiles even when the SDK default
-    // is older.  bf16 needs 3.1, set conditionally below.
+    // languageVersion is a property on MTLCompileOptions; pin to 3.0 so
+    // simdgroup_matrix compiles even when the SDK default is older. bf16
+    // needs 3.1, set conditionally below.
     opts.languageVersion = MTLLanguageVersion3_0;
+#if TARGET_OS_IPHONE
+    if (@available(iOS 17.0, *))
+        opts.languageVersion = MTLLanguageVersion3_1;
+#else
     if (@available(macOS 14.0, *))
         opts.languageVersion = MTLLanguageVersion3_1;
+#endif
 
     lib = [dev.impl->device newLibraryWithSource:srcStr options:opts error:&err];
     if (!lib)
@@ -249,12 +279,7 @@ float mtlRunDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
 int MetalPeak::runAll()
 {
     impl = new MetalPeakImpl();
-    impl->allDevices = MTLCopyAllDevices();
-    if (impl->allDevices.count == 0)
-    {
-        id<MTLDevice> def = MTLCreateSystemDefaultDevice();
-        if (def) impl->allDevices = @[def];
-    }
+    impl->allDevices = copyClpeakMetalDevices();
     if (impl->allDevices.count == 0)
     {
         log->note("Metal: no devices found");
@@ -274,12 +299,14 @@ int MetalPeak::runAll()
             log->note("Metal: failed to init device " + std::to_string(d));
             continue;
         }
+#if !TARGET_OS_IPHONE
         if (!dev.info.isAppleSilicon)
         {
             log->note("Metal: skipping " + dev.info.deviceName +
                       " -- requires Apple silicon (M1 or newer)");
             continue;
         }
+#endif
 
         benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu);
         cfg.targetTimeUs = targetTimeUs;
@@ -380,7 +407,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 
     const uint32_t tgSize = d.threadsPerGroup ? d.threadsPerGroup : 256;
     const uint32_t outPerGroup = d.outElemsPerGroup ? d.outElemsPerGroup : tgSize;
-    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
+    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
     uint64_t bytesPerGroup = (uint64_t)outPerGroup * d.elemSize;
     uint64_t maxGroups  = dev.info.maxBufferLength / bytesPerGroup;
     uint64_t wantGroups = globalThreads / tgSize;
@@ -461,12 +488,7 @@ BackendInventory MetalPeak::enumerate()
     BackendInventory inv;
     inv.backend = "Metal";
 
-    NSArray<id<MTLDevice>> *devs = MTLCopyAllDevices();
-    if (devs.count == 0)
-    {
-        id<MTLDevice> def = MTLCreateSystemDefaultDevice();
-        if (def) devs = @[def];
-    }
+    NSArray<id<MTLDevice>> *devs = copyClpeakMetalDevices();
     if (devs.count == 0) return inv;
 
     inv.available = true;

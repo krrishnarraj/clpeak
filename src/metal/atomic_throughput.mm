@@ -10,7 +10,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
 
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
+    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
@@ -91,7 +91,7 @@ int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput (GFLOPS)", "gflops"});
 
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
+    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);

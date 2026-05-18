@@ -690,11 +690,30 @@ bool vkPeak::initInstance()
   instCI.pApplicationInfo = &appInfo;
 
 #if defined(__APPLE__) || defined(__MACOSX)
-  // MoltenVK portability
-  instCI.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-  const char *extensions[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
-  instCI.enabledExtensionCount = 1;
-  instCI.ppEnabledExtensionNames = extensions;
+  // MoltenVK portability.  Newer Apple SDK loaders require applications to
+  // opt in before non-conformant portability drivers are enumerated.
+  std::vector<const char *> extensions;
+  auto hasInstanceExt = [](const char *name) {
+    uint32_t extCount = 0;
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr) != VK_SUCCESS)
+      return false;
+    std::vector<VkExtensionProperties> props(extCount);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, props.data()) != VK_SUCCESS)
+      return false;
+    for (const auto &prop : props)
+      if (strcmp(prop.extensionName, name) == 0)
+        return true;
+    return false;
+  };
+  if (hasInstanceExt(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME))
+  {
+    instCI.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  }
+  if (hasInstanceExt(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+    extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+  instCI.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+  instCI.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
 #endif
 
   if (vkCreateInstance(&instCI, nullptr, &instance) != VK_SUCCESS)

@@ -4,11 +4,16 @@ endif()
 
 find_library(METAL_FRAMEWORK Metal)
 find_library(FOUNDATION_FRAMEWORK Foundation)
-find_library(IOKIT_FRAMEWORK IOKit)
 find_library(MPS_FRAMEWORK MetalPerformanceShaders)
 find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    find_library(IOKIT_FRAMEWORK IOKit)
+endif()
 
 if(NOT METAL_FRAMEWORK OR NOT FOUNDATION_FRAMEWORK OR NOT MPS_FRAMEWORK OR NOT MPSGRAPH_FRAMEWORK)
+    return()
+endif()
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT IOKIT_FRAMEWORK)
     return()
 endif()
 
@@ -28,10 +33,12 @@ target_link_libraries(peak_metal PUBLIC
     peak_common
     ${METAL_FRAMEWORK}
     ${FOUNDATION_FRAMEWORK}
-    ${IOKIT_FRAMEWORK}
     ${MPS_FRAMEWORK}
     ${MPSGRAPH_FRAMEWORK}
 )
+if(IOKIT_FRAMEWORK)
+    target_link_libraries(peak_metal PUBLIC ${IOKIT_FRAMEWORK})
+endif()
 target_include_directories(peak_metal PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
 )

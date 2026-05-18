@@ -10,7 +10,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest({"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
 
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
+    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
 
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)

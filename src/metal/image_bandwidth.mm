@@ -11,7 +11,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = targetGlobalThreads(dev.info.gpuCoreCount);
+    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
     uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
 
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)

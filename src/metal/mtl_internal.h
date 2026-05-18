@@ -15,7 +15,10 @@
 
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
+#import <TargetConditionals.h>
+#if __has_include(<IOKit/IOKitLib.h>) && !TARGET_OS_IPHONE
 #import <IOKit/IOKitLib.h>
+#endif
 
 #include <common/common.h>
 #include <common/options.h>
@@ -64,6 +67,15 @@ float mtlRunDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
                        MTLSize gridSize, MTLSize tgSize,
                        unsigned int warmup,
                        unsigned int targetTimeUs, unsigned int forcedIters);
+
+static inline uint64_t mtlTargetGlobalThreads(const mtl_device_info_t &info)
+{
+#if TARGET_OS_IPHONE
+    if (info.gpuCoreCount == 0)
+        return 2ULL << 20;
+#endif
+    return targetGlobalThreads(info.gpuCoreCount);
+}
 
 #endif // ENABLE_METAL
 #endif // MTL_INTERNAL_H
