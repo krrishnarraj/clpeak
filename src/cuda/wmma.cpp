@@ -3,6 +3,7 @@
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
 #include <cstdio>
+#include <sstream>
 
 // ---------------------------------------------------------------------------
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
