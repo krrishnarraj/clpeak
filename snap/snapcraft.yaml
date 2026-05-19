@@ -15,8 +15,7 @@ description: |
 
   Output formats: plain text, XML, JSON, CSV
 
-build-base: devel
-grade: devel
+grade: stable
 confinement: classic
 
 apps:
@@ -38,9 +37,9 @@ parts:
       - spirv-tools
       - glslc
     override-pull: |
-      snapcraftctl pull
+      craftctl default
       version=$(git describe --tags --abbrev=0)
-      snapcraftctl set-version "$version"
+      craftctl set version="$version"
     stage-packages:
       - ocl-icd-libopencl1
       - libvulkan1
