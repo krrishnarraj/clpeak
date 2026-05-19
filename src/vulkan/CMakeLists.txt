@@ -4,6 +4,17 @@ endif()
 
 add_library(peak_vulkan STATIC
     vk_peak.cpp
+    vulkan_device.cpp
+    compute_kernel.cpp
+    compute_float.cpp
+    compute_int.cpp
+    coopmat.cpp
+    global_bandwidth.cpp
+    local_bandwidth.cpp
+    image_bandwidth.cpp
+    transfer_bandwidth.cpp
+    atomic_throughput.cpp
+    kernel_latency.cpp
 )
 target_link_libraries(peak_vulkan PUBLIC peak_common ${Vulkan_LIBRARIES})
 target_include_directories(peak_vulkan PUBLIC

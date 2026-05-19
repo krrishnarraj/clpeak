@@ -4,28 +4,22 @@ plugins {
 
 android {
     namespace = "kr.clpeak"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "kr.clpeak"
         minSdk = 33
-        targetSdk = 36
-        versionCode = 23
-        versionName = "2.0.7"
+        targetSdk = 37
+        versionCode = 24
+        versionName = "2.0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        externalNativeBuild {
-            cmake {
-                cppFlags += "-std=c++17"
-                arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
-            }
-        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

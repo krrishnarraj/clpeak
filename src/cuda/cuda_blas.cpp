@@ -335,7 +335,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         // Floating-point variants -- reported in TFLOPS.
         // -----------------------------------------------------------------------
         auto testFp = currentDeviceScope->beginTest(
-            {"cublas-fp", "cuBLASLt GEMM peak (TFLOPS)", "tflops"});
+            {"cublas-fp", "cuBLASLt GEMM peak", "tflops"});
         blasTest = &testFp;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
@@ -406,7 +406,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     // Integer variants -- reported in TOPS
     // -----------------------------------------------------------------------
     auto testInt = currentDeviceScope->beginTest(
-        {"cublas-int", "cuBLASLt GEMM peak (TOPS)", "tops"});
+        {"cublas-int", "cuBLASLt GEMM peak", "tops"});
     blasTest = &testInt;
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute

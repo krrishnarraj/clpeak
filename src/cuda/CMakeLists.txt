@@ -4,7 +4,18 @@ endif()
 
 add_library(peak_cuda STATIC
     cuda_peak.cpp
+    cuda_device.cpp
+    compute_kernel.cpp
     cuda_blas.cpp
+    compute_float.cpp
+    compute_int.cpp
+    wmma.cpp
+    global_bandwidth.cpp
+    local_bandwidth.cpp
+    image_bandwidth.cpp
+    transfer_bandwidth.cpp
+    kernel_latency.cpp
+    atomic_throughput.cpp
 )
 target_link_libraries(peak_cuda PUBLIC
     peak_common

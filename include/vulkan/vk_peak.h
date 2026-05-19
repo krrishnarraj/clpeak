@@ -72,6 +72,24 @@ struct vk_device_info_t {
   uint32_t coopmatINT8K;
 };
 
+// Dispatch-sizing helper used by runComputeKernel and several benchmark
+// files (local_bandwidth, image_bandwidth, atomic_throughput, etc.).
+static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
+{
+  if (info.numCUs > 0)
+    return targetGlobalThreads(info.numCUs);
+
+  // Mobile/integrated Vulkan drivers often do not expose a vendor CU-count
+  // property.  The desktop 32M fallback can make the calibration probe itself
+  // a multi-second dispatch on those GPUs, so start smaller and let timed
+  // calibration batch more dispatches when the kernel is fast enough.
+  if (info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+      info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+    return 2ULL << 20;
+
+  return targetGlobalThreads(0);
+}
+
 // Manages a single Vulkan device for benchmarking
 class VulkanDevice
 {

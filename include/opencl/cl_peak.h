@@ -12,6 +12,13 @@ struct CliOptions;
 
 #define BUILD_OPTIONS " -cl-mad-enable "
 
+// Kernel string accessors (defined in cl_kernels.cpp)
+const std::string& clGetMainKernels();
+const std::string& clGetLocalKernels();
+const std::string& clGetAtomicKernels();
+const std::string& clGetImageKernels();
+const std::string& clGetInt8DpKernels();
+
 class clPeak : public Peak
 {
 public:

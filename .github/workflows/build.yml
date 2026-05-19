@@ -60,7 +60,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for git-describe versioning
+          fetch-depth: 0 # full history for git-describe versioning
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -149,6 +149,31 @@ jobs:
         with:
           name: clpeak-android-release
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+  # ---------------------------------------------------------------------------
+  # iOS app
+  # ---------------------------------------------------------------------------
+  build-ios:
+    name: iOS App
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure CMake (iOS)
+        run: cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS
+
+      - name: Build (iOS device)
+        run: cmake --build ios/build --config Debug --target clpeak_ios -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clpeak-ios-app
+          path: ios/build/Debug-iphoneos/clpeak_ios.app
 
   # ---------------------------------------------------------------------------
   # GitHub Release — attach binaries on tag push

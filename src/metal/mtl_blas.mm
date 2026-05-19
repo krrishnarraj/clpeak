@@ -13,7 +13,7 @@
 //     onward and reaches near-peak.  MPSGraph's matmul on Apple7 falls back
 //     to a non-tile fp16 kernel that's ~10x slower, so it's the wrong tool
 //     for that dtype on that hardware.
-//   * MPSGraph for bf16 (gated to Apple9+ / macOS 14+).  MPSMatrix doesn't
+//   * MPSGraph for bf16 (gated to Apple9+ / OS support).  MPSMatrix doesn't
 //     support bf16; MPSGraph does, and on Apple9+ it lowers to bf16
 //     simdgroup_matrix.
 //
@@ -27,6 +27,7 @@
 
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
+#import <TargetConditionals.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
@@ -99,7 +100,7 @@ double timeMPSMatMul(id<MTLCommandQueue> queue,
     }
 }
 
-// ---- MPSGraph path (bf16; Apple9+ / macOS 14+) ----------------------------
+// ---- MPSGraph path (bf16; Apple9+ / OS support) ---------------------------
 
 double timeMPSGraph(id<MTLCommandQueue> queue,
                     MPSGraph *graph,
@@ -278,9 +279,13 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     runMatMul("fp32", MPSDataTypeFloat32, 4);
     runMatMul("fp16", MPSDataTypeFloat16, 2);
 
-    // bf16: only via MPSGraph, and only on Apple9+ / macOS 14+ where the
+    // bf16: only via MPSGraph, and only on Apple9+ / OS support where the
     // path actually lowers to bf16 simdgroup_matrix.
+#if TARGET_OS_IPHONE
+    if (@available(iOS 17.0, *))
+#else
     if (@available(macOS 14.0, *))
+#endif
     {
         if (dev.info.mpsGraphBF16Supported)
             runGraphMatMul("bf16", MPSDataTypeBFloat16, 2);
@@ -289,7 +294,11 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     }
     else
     {
+#if TARGET_OS_IPHONE
+        reportUnsupported("bf16", "bf16 requires iOS 17 -- unsupported on this device");
+#else
         reportUnsupported("bf16", "bf16 requires macOS 14 -- unsupported on this device");
+#endif
     }
 
     return 0;

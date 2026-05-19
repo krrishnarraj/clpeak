@@ -23,18 +23,18 @@ struct MetalPeakImpl;
 struct mtl_device_info_t {
   DeviceType deviceType = DeviceType::Unknown;
   std::string deviceName;
-  std::string osVersion;          // "macOS 26.4.1"
+  std::string osVersion;          // "macOS 26.4.1" / "iOS 18.1"
 
   uint64_t recommendedMaxWorkingSetSize;  // ~ usable VRAM-equivalent
   uint64_t maxBufferLength;
   uint32_t maxThreadsPerThreadgroup;
 
-  bool isAppleSilicon;            // gate: refuse non-Apple7+ devices
+  bool isAppleSilicon;            // macOS gate; iOS devices are Apple GPUs
   bool fp16Supported;             // always true on Apple silicon
   bool simdgroupMatrixFP16Supported; // M1+ (Apple7)
   bool simdgroupMatrixBF16Supported; // M3+ (Apple9)
   bool simdgroupMatrixInt8Supported; // M3+ (Apple9) -- int8 simdgroup_matrix
-  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: macOS 14 + Apple9 (M3)
+  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: OS support + Apple9
   bool atomic64Supported;         // 64-bit int atomics: Apple8+ (M2)
   uint32_t appleFamily;           // largest MTLGPUFamilyApple<N> the device supports
   uint32_t gpuCoreCount;          // GPU core count (e.g. 8 on M1 base, 32 on M1 Max). 0 = unknown.

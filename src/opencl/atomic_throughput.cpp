@@ -14,7 +14,7 @@ int clPeak::runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog, 
   uint64_t numWGs    = globalWIs / devInfo.maxWGSize;
 
   auto test = currentDeviceScope->beginTest(
-    {"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
+    {"atomic_throughput", "Atomic throughput", "gops"});
 
   try
   {
