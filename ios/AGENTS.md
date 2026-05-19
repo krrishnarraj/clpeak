@@ -15,6 +15,9 @@ open `ios/build` in xcode
 or build in cmdline
 `cmake --build ios/build --config Debug --target clpeak_ios -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO`
 
+To build without the Vulkan (MoltenVK) backend:
+`cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCLPEAK_IOS_ENABLE_VULKAN=OFF`
+
 ### iOS Simulator
 cmake step: `cmake -S ios -B ios/build-sim -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator`
 open `ios/build-sim` in xcode

@@ -14,33 +14,50 @@ include(${CLPEAK_ROOT}/src/common/cmake/version.cmake)
 
 set(CLPEAK_ENABLE_OPENCL OFF CACHE BOOL "" FORCE)
 set(CLPEAK_ENABLE_CUDA OFF CACHE BOOL "" FORCE)
-set(CLPEAK_ENABLE_VULKAN ON CACHE BOOL "" FORCE)
 set(CLPEAK_ENABLE_METAL ON CACHE BOOL "" FORCE)
 
-if(NOT DEFINED CLPEAK_IOS_VULKAN_SDK)
-  if(DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/lib/vulkan.framework")
-    set(CLPEAK_IOS_VULKAN_SDK "$ENV{VULKAN_SDK}" CACHE PATH "iOS Vulkan SDK root")
-  elseif(EXISTS "$ENV{HOME}/VulkanSDK/1.4.350.0/iOS/lib/vulkan.framework")
-    set(CLPEAK_IOS_VULKAN_SDK "$ENV{HOME}/VulkanSDK/1.4.350.0/iOS" CACHE PATH "iOS Vulkan SDK root")
-  else()
-    set(CLPEAK_IOS_VULKAN_SDK "" CACHE PATH "iOS Vulkan SDK root")
+# ---- Vulkan backend (optional, ON by default) -------------------------------
+option(CLPEAK_IOS_ENABLE_VULKAN "Enable Vulkan (MoltenVK) backend on iOS" ON)
+
+set(CLPEAK_ENABLE_VULKAN OFF CACHE BOOL "" FORCE)
+set(CLPEAK_IOS_VULKAN_AVAILABLE OFF)
+
+if(CLPEAK_IOS_ENABLE_VULKAN)
+  if(NOT DEFINED CLPEAK_IOS_VULKAN_SDK)
+    if(DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/lib/vulkan.framework")
+      set(CLPEAK_IOS_VULKAN_SDK "$ENV{VULKAN_SDK}" CACHE PATH "iOS Vulkan SDK root")
+    elseif(EXISTS "$ENV{HOME}/VulkanSDK/1.4.350.0/iOS/lib/vulkan.framework")
+      set(CLPEAK_IOS_VULKAN_SDK "$ENV{HOME}/VulkanSDK/1.4.350.0/iOS" CACHE PATH "iOS Vulkan SDK root")
+    else()
+      set(CLPEAK_IOS_VULKAN_SDK "" CACHE PATH "iOS Vulkan SDK root")
+    endif()
   endif()
-endif()
 
-if(NOT CLPEAK_IOS_VULKAN_SDK OR NOT EXISTS "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
-  message(FATAL_ERROR "Set CLPEAK_IOS_VULKAN_SDK to the SDK iOS root, e.g. /Users/kr/VulkanSDK/1.4.350.0/iOS")
-endif()
+  if(CLPEAK_IOS_VULKAN_SDK AND EXISTS "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
+    set(CLPEAK_IOS_VULKAN_AVAILABLE ON)
+    set(CLPEAK_ENABLE_VULKAN ON CACHE BOOL "" FORCE)
 
-set(Vulkan_FOUND TRUE)
-set(Vulkan_VERSION "1.4.350")
-set(Vulkan_INCLUDE_DIRS "${CLPEAK_IOS_VULKAN_SDK}/include")
-set(Vulkan_LIBRARIES "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
-set(CLPEAK_MOLTENVK_XCFRAMEWORK "${CLPEAK_IOS_VULKAN_SDK}/lib/MoltenVK.xcframework")
-set(CLPEAK_VALIDATION_FRAMEWORK "${CLPEAK_IOS_VULKAN_SDK}/lib/VkLayer_khronos_validation.framework")
-set(CLPEAK_VULKAN_RESOURCE_DIR "${CLPEAK_IOS_VULKAN_SDK}/share/vulkan")
+    set(Vulkan_FOUND TRUE)
+    set(Vulkan_VERSION "1.4.350")
+    set(Vulkan_INCLUDE_DIRS "${CLPEAK_IOS_VULKAN_SDK}/include")
+    set(Vulkan_LIBRARIES "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
+    set(CLPEAK_MOLTENVK_XCFRAMEWORK "${CLPEAK_IOS_VULKAN_SDK}/lib/MoltenVK.xcframework")
+    set(CLPEAK_VALIDATION_FRAMEWORK "${CLPEAK_IOS_VULKAN_SDK}/lib/VkLayer_khronos_validation.framework")
+    set(CLPEAK_VULKAN_RESOURCE_DIR "${CLPEAK_IOS_VULKAN_SDK}/share/vulkan")
+  else()
+    message(WARNING "Vulkan SDK for iOS not found — Vulkan backend disabled. "
+                    "Set CLPEAK_IOS_VULKAN_SDK to the SDK iOS root "
+                    "(e.g. \$HOME/VulkanSDK/1.4.350.0/iOS) or pass "
+                    "-DCLPEAK_IOS_ENABLE_VULKAN=OFF to silence this warning.")
+  endif()
+else()
+  message(STATUS "Vulkan backend disabled (CLPEAK_IOS_ENABLE_VULKAN=OFF)")
+endif()
 
 add_subdirectory(${CLPEAK_ROOT}/src/common ${CMAKE_BINARY_DIR}/common)
-add_subdirectory(${CLPEAK_ROOT}/src/vulkan ${CMAKE_BINARY_DIR}/vulkan)
+if(CLPEAK_IOS_VULKAN_AVAILABLE)
+  add_subdirectory(${CLPEAK_ROOT}/src/vulkan ${CMAKE_BINARY_DIR}/vulkan)
+endif()
 add_subdirectory(${CLPEAK_ROOT}/src/metal ${CMAKE_BINARY_DIR}/metal)
 
 set(CLPEAK_IOS_SWIFT_SOURCES
@@ -54,22 +71,26 @@ set(CLPEAK_IOS_SWIFT_SOURCES
 
 set(CLPEAK_IOS_ASSET_CATALOG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Assets.xcassets")
 
-add_executable(clpeak_ios MACOSX_BUNDLE
+# Device target sources — Vulkan resource dir is conditional
+set(_clpeak_ios_device_sources
   ${CLPEAK_IOS_SWIFT_SOURCES}
   Native/entry_ios.mm
   Native/logger_ios.mm
   Native/clpeak_ios_bridge.h
   Native/logger_ios.h
-  ${CLPEAK_VULKAN_RESOURCE_DIR}
   ${CLPEAK_IOS_ASSET_CATALOG}
 )
+if(CLPEAK_IOS_VULKAN_AVAILABLE)
+  list(APPEND _clpeak_ios_device_sources ${CLPEAK_VULKAN_RESOURCE_DIR})
+endif()
 
-target_link_libraries(clpeak_ios PRIVATE
-  peak_common
-  peak_vulkan
-  peak_metal
-  "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework"
-)
+add_executable(clpeak_ios MACOSX_BUNDLE ${_clpeak_ios_device_sources})
+
+set(_clpeak_ios_link_libs peak_common peak_metal)
+if(CLPEAK_IOS_VULKAN_AVAILABLE)
+  list(APPEND _clpeak_ios_link_libs peak_vulkan "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
+endif()
+target_link_libraries(clpeak_ios PRIVATE ${_clpeak_ios_link_libs})
 
 target_include_directories(clpeak_ios PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/Native
@@ -77,26 +98,35 @@ target_include_directories(clpeak_ios PRIVATE
   ${CLPEAK_ROOT}/include/common
 )
 
-target_compile_definitions(clpeak_ios PRIVATE ENABLE_VULKAN ENABLE_METAL)
+set(_clpeak_ios_defines ENABLE_METAL)
+if(CLPEAK_IOS_VULKAN_AVAILABLE)
+  list(APPEND _clpeak_ios_defines ENABLE_VULKAN)
+endif()
+target_compile_definitions(clpeak_ios PRIVATE ${_clpeak_ios_defines})
 target_compile_options(clpeak_ios PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
 clpeak_setup_version(clpeak_ios GIT_ROOT ${CLPEAK_GIT_ROOT})
 
-set_source_files_properties(${CLPEAK_VULKAN_RESOURCE_DIR}
-  PROPERTIES
-  MACOSX_PACKAGE_LOCATION Resources
-)
+if(CLPEAK_IOS_VULKAN_AVAILABLE)
+  set_source_files_properties(${CLPEAK_VULKAN_RESOURCE_DIR}
+    PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources
+  )
+endif()
 
 set_source_files_properties(${CLPEAK_IOS_ASSET_CATALOG}
   PROPERTIES
   MACOSX_PACKAGE_LOCATION Resources
 )
 
-set(_clpeak_embed_frameworks
-  "${CLPEAK_MOLTENVK_XCFRAMEWORK}"
-  "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework"
-)
-if(EXISTS "${CLPEAK_VALIDATION_FRAMEWORK}")
-  list(APPEND _clpeak_embed_frameworks "${CLPEAK_VALIDATION_FRAMEWORK}")
+set(_clpeak_embed_frameworks "")
+if(CLPEAK_IOS_VULKAN_AVAILABLE)
+  list(APPEND _clpeak_embed_frameworks
+    "${CLPEAK_MOLTENVK_XCFRAMEWORK}"
+    "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework"
+  )
+  if(EXISTS "${CLPEAK_VALIDATION_FRAMEWORK}")
+    list(APPEND _clpeak_embed_frameworks "${CLPEAK_VALIDATION_FRAMEWORK}")
+  endif()
 endif()
 
 set_target_properties(clpeak_ios PROPERTIES
