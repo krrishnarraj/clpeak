@@ -114,7 +114,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   };
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth (GBPS)", "gbps"});
+    {"transfer_bandwidth", "Transfer bandwidth", "gbps"});
 
   // Helper: report a map/unmap result, detecting zero-copy
   auto reportMapUnmap = [&](float gbps, const std::string &resultName,

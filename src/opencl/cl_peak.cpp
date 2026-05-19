@@ -4,45 +4,12 @@
 #include <common/common.h>
 #include <cstring>
 
-#define MSTRINGIFY(...) #__VA_ARGS__
-
-// Main program: only kernels without __local pointer arguments.
-// Keeping this set identical to what shipped in master ensures that
-// NVIDIA CUDA-OpenCL's module compiler does not reserve dynamic shared-memory
-// resources, which would shrink the register budget and break the v16 kernels
-// (global_bandwidth_v16 / compute_dp_v16) with CL_OUT_OF_RESOURCES.
-static const std::string stringifiedKernels =
-#include "kernels/global_bandwidth_kernels.cl"
-#include "kernels/compute_sp_kernels.cl"
-#include "kernels/compute_hp_kernels.cl"
-#include "kernels/compute_mp_kernels.cl"
-#include "kernels/compute_dp_kernels.cl"
-#include "kernels/compute_int24_kernels.cl"
-#include "kernels/compute_integer_kernels.cl"
-#include "kernels/compute_char_kernels.cl"
-#include "kernels/compute_short_kernels.cl"
-#include "kernels/compute_int4_packed_kernels.cl"
-    ;
-
-// Separate programs for kernels that use __local pointer arguments or
-// image/sampler types.  On NVIDIA CUDA-OpenCL these force module-level
-// resource reservations that spill into every other kernel in the same
-// program, so they must be isolated from the main benchmark kernels.
-static const std::string stringifiedLocalKernels =
-#include "kernels/local_bandwidth_kernels.cl"
-    ;
-
-static const std::string stringifiedAtomicKernels =
-#include "kernels/atomic_throughput_kernels.cl"
-    ;
-
-static const std::string stringifiedImageKernels =
-#include "kernels/image_bandwidth_kernels.cl"
-    ;
-
-static const std::string stringifiedInt8DpKernels =
-#include "kernels/compute_int8_dp_kernels.cl"
-    ;
+// Kernel strings live in cl_kernels.cpp — see clGetMainKernels(), etc.
+// Benchmark methods live in separate files:
+//   cl_kernels.cpp        compute_test.cpp
+//   global_bandwidth.cpp  local_bandwidth.cpp  image_bandwidth.cpp
+//   transfer_bandwidth.cpp atomic_throughput.cpp kernel_latency.cpp
+//   cl_common.cpp         cl_utils.cpp
 
 clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
                    forceDeviceName(false), useEventTimer(false),
@@ -91,8 +58,18 @@ int clPeak::runAll()
           (cl_context_properties)(platforms[p])(),
           0};
 
-      cl::Context ctx(CL_DEVICE_TYPE_ALL, cps);
-      std::vector<cl::Device> devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+      cl::Context ctx;
+      std::vector<cl::Device> devices;
+      try
+      {
+        ctx = cl::Context(CL_DEVICE_TYPE_ALL, cps);
+        devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+      }
+      catch (cl::Error &error)
+      {
+        log->note("  Platform \"" + platformName + "\": " + error.what() + " (" + std::to_string(error.err()) + ") — no devices, skipping\n");
+        continue;
+      }
 
       for (size_t d = 0; d < devices.size(); d++)
       {
@@ -124,7 +101,7 @@ int clPeak::runAll()
         });
         currentDeviceScope = &deviceScope;
 
-        cl::Program::Sources source(1, stringifiedKernels);
+        cl::Program::Sources source(1, clGetMainKernels());
         cl::Program prog = cl::Program(ctx, source);
         try
         {
@@ -164,15 +141,15 @@ int clPeak::runAll()
         // that compress the register budget for every other kernel in the same
         // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
         // Each gets its own isolated program object.
-        cl::Program localProg = buildAuxProg(stringifiedLocalKernels, "Local bandwidth");
-        cl::Program atomicProg = buildAuxProg(stringifiedAtomicKernels, "Atomic throughput");
+        cl::Program localProg = buildAuxProg(clGetLocalKernels(), "Local bandwidth");
+        cl::Program atomicProg = buildAuxProg(clGetAtomicKernels(), "Atomic throughput");
         cl::Program imgProg;
         if (devInfo.imageSupported)
-          imgProg = buildAuxProg(stringifiedImageKernels, "Image bandwidth");
+          imgProg = buildAuxProg(clGetImageKernels(), "Image bandwidth");
 
         cl::Program int8DpProg;
         if (devInfo.int8DotProductSupported)
-          int8DpProg = buildAuxProg(stringifiedInt8DpKernels, "INT8 dot-product compute");
+          int8DpProg = buildAuxProg(clGetInt8DpKernels(), "INT8 dot-product compute");
 
         cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
         bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
@@ -192,53 +169,53 @@ int clPeak::runAll()
 
         // ---- Phase 1: floating-point compute ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
-                       "Single-precision compute (GFLOPS)", "single_precision_compute",
+                       "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
-                       "Half-precision compute (GFLOPS)", "half_precision_compute",
+                       "Half-precision compute", "half_precision_compute",
                        "compute_hp", "half", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
-                       "Double-precision compute (GFLOPS)", "double_precision_compute",
+                       "Double-precision compute", "double_precision_compute",
                        "compute_dp", "double", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
-                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
+                       "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
                        "compute_mp", "mp", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
-                       "Integer compute (GOPS)", "integer_compute",
+                       "Integer compute", "integer_compute",
                        "compute_integer", "int", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
-                       "Integer compute Fast 24bit (GOPS)", "integer_compute_fast",
+                       "Integer compute Fast 24bit", "integer_compute_fast",
                        "compute_intfast", "int", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
-                       "Integer char (8bit) compute (GOPS)", "integer_compute_char",
+                       "Integer char (8bit) compute", "integer_compute_char",
                        "compute_char", "char", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
-                       "Integer short (16bit) compute (GOPS)", "integer_compute_short",
+                       "Integer short (16bit) compute", "integer_compute_short",
                        "compute_short", "short", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
         runComputeTest(queue, int8DpProg, devInfo, cfg, Benchmark::ComputeInt8DP,
-                       "INT8 dot-product compute (GOPS)", "integer_compute_int8_dp",
+                       "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
+                       "Packed INT4 compute (emulated)", "int4_packed_compute",
                        "compute_int4_packed", "int4_packed", "gops",
                        COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
@@ -333,140 +310,6 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
   unsigned int iters = pickIters(per_iter_us, targetTimeUsLocal, forcedIters);
   float timed = runBatch(iters);
   return (timed / static_cast<float>(iters));
-}
-
-// ---------------------------------------------------------------------------
-// Unified compute benchmark -- replaces compute_sp/hp/dp/integer/intfast/char/short
-// ---------------------------------------------------------------------------
-
-int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
-                           device_info_t &devInfo, benchmark_config_t &cfg,
-                           Benchmark which,
-                           const std::string &displayName, const std::string &resultTag,
-                           const std::string &kernelPrefix, const std::string &typeName,
-                           const std::string &unit, unsigned int workPerWI,
-                           unsigned int wgsPerCU, size_t elemSize)
-{
-  if (!isAllowed(which))
-    return 0;
-
-  // Vector width suffixes and display labels
-  const int widths[] = {1, 2, 4, 8, 16};
-  const char *suffixes[] = {"_v1", "_v2", "_v4", "_v8", "_v16"};
-
-  // Build display names: "float", "float2", ... or "int", "int2", ...
-  std::string labels[5];
-  for (int w = 0; w < 5; w++)
-  {
-    labels[w] = typeName;
-    if (widths[w] > 1)
-      labels[w] += std::to_string(widths[w]);
-  }
-
-  auto test = currentDeviceScope->beginTest({resultTag, displayName, unit});
-
-  // Feature gates
-  if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
-  {
-    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
-                 ResultStatus::Unsupported, "No half precision support");
-    return 0;
-  }
-  if (which == Benchmark::ComputeMP && !devInfo.halfSupported)
-  {
-    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
-                 ResultStatus::Unsupported, "No half precision support");
-    return 0;
-  }
-  if (which == Benchmark::ComputeDP && !devInfo.doubleSupported)
-  {
-    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
-                 ResultStatus::Unsupported, "No double precision support");
-    return 0;
-  }
-  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
-  {
-    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
-                 ResultStatus::Unsupported,
-                 "cl_khr_integer_dot_product not supported");
-    return 0;
-  }
-
-  try
-  {
-    cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-
-    uint64_t globalWIs = (uint64_t)devInfo.numCUs * wgsPerCU * devInfo.maxWGSize;
-    uint64_t t = std::min(globalWIs * elemSize, devInfo.maxAllocSize) / elemSize;
-    globalWIs = roundToMultipleOf(t, devInfo.maxWGSize);
-
-    cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, globalWIs * elemSize);
-
-    cl::NDRange globalSize = globalWIs;
-    cl::NDRange localSize = devInfo.maxWGSize;
-
-    // Create kernels and set arguments
-    cl::Kernel kernels[5];
-    for (int w = 0; w < 5; w++)
-    {
-      std::string kname = kernelPrefix + suffixes[w];
-      kernels[w] = cl::Kernel(prog, kname.c_str());
-      kernels[w].setArg(0, outputBuf);
-      // Arg 1: scalar constant -- type depends on the test
-      if (which == Benchmark::ComputeDP)
-      {
-        cl_double A = 1.3;
-        kernels[w].setArg(1, A);
-      }
-      else if (which == Benchmark::ComputeChar || which == Benchmark::ComputeInt8DP ||
-               which == Benchmark::ComputeInt4Packed)
-      {
-        cl_char A = 4;
-        kernels[w].setArg(1, A);
-      }
-      else if (which == Benchmark::ComputeShort)
-      {
-        cl_short A = 4;
-        kernels[w].setArg(1, A);
-      }
-      else if (which == Benchmark::ComputeInt || which == Benchmark::ComputeIntFast)
-      {
-        cl_int A = 4;
-        kernels[w].setArg(1, A);
-      }
-      else
-      {
-        // SP and HP both take cl_float
-        cl_float A = 1.3f;
-        kernels[w].setArg(1, A);
-      }
-    }
-
-    // Run each vector width
-    for (int w = 0; w < 5; w++)
-    {
-      float timed = run_kernel(queue, kernels[w], globalSize, localSize,
-                               cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-      float throughput = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
-
-      test.emit(labels[w], throughput);
-    }
-  }
-  catch (cl::Error &error)
-  {
-    std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason);
-    return -1;
-  }
-  catch (std::exception &e)
-  {
-    for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, e.what());
-    return -1;
-  }
-
-  return 0;
 }
 
 BackendInventory clPeak::enumerate()

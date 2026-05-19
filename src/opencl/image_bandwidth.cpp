@@ -10,7 +10,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth (GBPS)", "gbps"});
+    {"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
 
   if (!devInfo.imageSupported)
   {

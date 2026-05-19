@@ -81,14 +81,24 @@ void LoggerCli::onDeviceBegin(const std::string &name,
 
 void LoggerCli::onTestBegin(const std::string & /*tag*/,
                             const std::string &display,
-                            const std::string & /*unit*/)
+                            const std::string &unit)
 {
     std::cout << "\n";
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
-    writeLine(display);
+    // Build header: display name + unit in caps, e.g. "Global memory bandwidth (GBPS)"
+    std::string header = display;
+    if (!unit.empty())
+    {
+        std::string u = unit;
+        for (auto &c : u)
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        header += " (" + u + ")";
+    }
+
+    writeLine(header);
     metricLines.clear();
     std::cout.flush();
 }

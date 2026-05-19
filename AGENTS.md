@@ -35,12 +35,12 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `android/` | Android app with JNI native module, its own `logger_android.cpp` |
+| `ios/` | iOS SwiftUI app with Vulkan-over-MoltenVK and Metal backends |
 
 ## Build
 
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
-- Android: open `android/` in Android Studio (reuses `src/common/`, `src/opencl/`, `src/vulkan/` CMakeLists.txt via `add_subdirectory`)
 
 ## Quick Lookups
 

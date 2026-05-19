@@ -57,6 +57,8 @@ endif()
 # ---- peak_opencl static library -----------------------------------------
 add_library(peak_opencl STATIC
     cl_peak.cpp
+    cl_kernels.cpp
+    compute_test.cpp
     cl_common.cpp
     cl_utils.cpp
     global_bandwidth.cpp

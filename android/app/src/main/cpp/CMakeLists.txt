@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Support 16 KB page sizes on Android 15+
+set(ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES ON CACHE BOOL "" FORCE)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Build OpenCL stub (provides headers + dlopen-based libOpenCL)
 add_subdirectory(libopencl-stub)
 
@@ -68,7 +73,6 @@ target_include_directories(clpeak PRIVATE
 
 target_compile_definitions(clpeak PRIVATE ANDROID_LOGGER CL_TARGET_OPENCL_VERSION=300)
 target_compile_options(clpeak PRIVATE -fPIC -O2 -fexceptions)
-set_target_properties(clpeak PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
 # Version
 clpeak_setup_version(clpeak GIT_ROOT ${CLPEAK_GIT_ROOT})

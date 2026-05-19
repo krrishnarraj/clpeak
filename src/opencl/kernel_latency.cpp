@@ -26,7 +26,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   unsigned int iters = forceIters ? specifiedIters : cfg.kernelLatencyIters;
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency (us)", "us"});
+    {"kernel_launch_latency", "Kernel launch latency", "us"});
 
   try
   {
