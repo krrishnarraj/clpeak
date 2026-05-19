@@ -331,9 +331,13 @@ int MetalPeak::runAll()
             dev.info.deviceName,
             "",
             dev.info.osVersion,
-            {{"Apple family", familySS.str()},
-             {"Working set", std::to_string(dev.info.recommendedMaxWorkingSetSize / (1024*1024)) + " MB"},
-             {"GPU cores", std::to_string(dev.info.gpuCoreCount)}},
+            {
+#if !TARGET_OS_IPHONE
+                {"Apple family", familySS.str()},
+                {"Working set", std::to_string(dev.info.recommendedMaxWorkingSetSize / (1024*1024)) + " MB"},
+                {"GPU cores", std::to_string(dev.info.gpuCoreCount)}
+#endif
+             },
             -1,
             static_cast<int>(d)
         });

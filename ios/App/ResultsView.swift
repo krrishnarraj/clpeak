@@ -80,7 +80,6 @@ private struct DeviceInfoPanel: View {
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
 
-            InfoRow(label: "Platform", value: info.platformName)
             InfoRow(label: "Device", value: info.deviceName)
             InfoRow(label: "Driver", value: info.driverVersion)
 
