@@ -41,8 +41,6 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
-- Android: open `android/` in Android Studio (reuses `src/common/`, `src/opencl/`, `src/vulkan/` CMakeLists.txt via `add_subdirectory`)
-- iOS: `source ~/VulkanSDK/1.4.350.0/iOS/setup-env.sh && cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0`
 
 ## Quick Lookups
 

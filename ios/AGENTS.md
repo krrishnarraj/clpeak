@@ -1,6 +1,26 @@
 # iOS
 iOS app bundle for running clpeak with Vulkan-over-MoltenVK and Metal.
 
+## Dependencies
+Install [vulkan sdk](https://vulkan.lunarg.com/sdk/home) for mac os.
+While installing, in the 'Select Components' windows, choose these items:
+ - KosmicKrisp (Vulkan on Metal)
+ - System Global Installation
+ - Development libraries for iOS
+
+## Build
+### iOS
+cmake step: `cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS`
+open `ios/build` in xcode
+or build in cmdline
+`cmake --build ios/build --config Debug --target clpeak_ios -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO`
+
+### iOS Simulator
+cmake step: `cmake -S ios -B ios/build-sim -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator`
+open `ios/build-sim` in xcode
+or build in cmdline
+`cmake --build ios/build-sim --config Debug --target clpeak_ios_simulator -- -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO`
+
 ## Quick Lookups
 - Looking for the native Swift bridge? → see `Native/clpeak_ios_bridge.h`
 - Looking for benchmark dispatch? → see `Native/entry_ios.mm`
