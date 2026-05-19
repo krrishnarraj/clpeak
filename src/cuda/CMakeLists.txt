@@ -4,6 +4,8 @@ endif()
 
 add_library(peak_cuda STATIC
     cuda_peak.cpp
+    cuda_device.cpp
+    compute_kernel.cpp
     cuda_blas.cpp
     compute_float.cpp
     compute_int.cpp

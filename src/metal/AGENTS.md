@@ -6,7 +6,10 @@ static library.  Source files are Objective-C++ (`.mm`).
 
 ## Quick Lookups
 
-- Looking for the main class / device init? → `mtl_peak.mm` (`MetalDevice`, `MetalPeak`, `runAll`, `runComputeKernel`)
+- Looking for the main class (`MetalPeak` ctor, `runAll`, inventory)? → `mtl_peak.mm`
+- Looking for device init (`MetalDevice` + device enumeration)? → `mtl_device.mm`
+- Looking for shared compute-peak driver (`runComputeKernel` + `mtlRunDispatches`)? → `compute_kernel.mm`
+- Looking for Metal library/pipeline caching (`mtlGetLibrary`, `mtlGetPipeline`)? → `mtl_utils.mm`
 - Looking for the internal header (ObjC types + pimpls + helpers)? → `mtl_internal.h`
 - Looking for FP compute benchmarks? → `compute_float.mm`
 - Looking for int compute benchmarks? → `compute_int.mm`
@@ -22,7 +25,10 @@ static library.  Source files are Objective-C++ (`.mm`).
 
 | File | Purpose |
 |------|---------|
-| `mtl_peak.mm` | `MetalDevice` + `MetalPeak` classes: ctor, `applyOptions()`, `runAll()`, `runComputeKernel()`, helpers (`mtlGetLibrary`, `mtlGetPipeline`, `mtlRunDispatches`), inventory |
+| `mtl_peak.mm` | `MetalPeak` class: ctor, `applyOptions()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyClpeakMetalDevices()` helper |
+| `mtl_utils.mm` | `mtlGetLibrary()`, `mtlGetPipeline()` — Metal library/pipeline caching |
+| `compute_kernel.mm` | `MetalPeak::runComputeKernel()` + `mtlRunDispatches()` — shared compute-peak driver and GPU timing |
 | `mtl_internal.h` | Internal header: ObjC imports, pimpl definitions, helper declarations — included by all `.mm` files |
 | `compute_float.mm` | `runComputeSP`, `runComputeHP`, `runComputeMP` |
 | `compute_int.mm` | `runComputeInt8DP`, `runComputeInt4Packed` |
@@ -47,5 +53,5 @@ with only forward declarations — it can be included from non-ObjC TUs.
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
 - If you add a new `.metal` kernel → add to `CLPEAK_MTL_KERNELS` in `CMakeLists.txt`.
 - If you change `MetalPeak` interface → update `include/metal/mtl_peak.h`.
-- If you add a new helper → declare in `mtl_internal.h`, define in `mtl_peak.mm`.
+- If you add a new helper → declare in `mtl_internal.h`, define in the appropriate `.mm` file (`mtl_device.mm`, `mtl_utils.mm`, `compute_kernel.mm`, or a new file).
 - If you add Objective-C code → remember ARC is enabled (`-fobjc-arc`).

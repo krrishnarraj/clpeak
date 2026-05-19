@@ -6,9 +6,11 @@ CUDA kernels (in `cuda_kernels/`) compiled via NVRTC at runtime.  Built as
 
 ## Quick Lookups
 
-- Looking for the main class? → `cuda_peak.cpp`
+- Looking for the main class / orchestrator? → `cuda_peak.cpp`
+- Looking for CudaDevice class (device init, NVRTC compilation, caching)? → `cuda_device.cpp`
 - Looking for driver init / device enumeration? → `cuda_peak.cpp` (`initDriver`)
-- Looking for the unified compute kernel runner? → `cuda_peak.cpp` (`runComputeKernel`)
+- Looking for the unified compute kernel runner? → `compute_kernel.cpp` (`runComputeKernel`)
+- Looking for kernel timing/calibration? → `cuda_peak.cpp` (`runKernel`)
 - Looking for FP compute benchmarks? → `compute_float.cpp`
 - Looking for int compute benchmarks? → `compute_int.cpp`
 - Looking for WMMA/MMA benchmarks? → `wmma.cpp`
@@ -23,7 +25,9 @@ CUDA kernels (in `cuda_kernels/`) compiled via NVRTC at runtime.  Built as
 
 | File | Purpose |
 |------|---------|
-| `cuda_peak.cpp` | `CudaPeak` + `CudaDevice` classes: ctor, `applyOptions()`, `runAll()`, `runComputeKernel()`, `run_kernel()`, inventory |
+| `cuda_peak.cpp` | `CudaPeak` class: ctor, `applyOptions()`, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `cuda_device.cpp` | `CudaDevice` class: `init()`, `cleanup()`, `getKernel()` (NVRTC compilation + module caching) |
+| `compute_kernel.cpp` | `CudaPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
 | `wmma.cpp` | `runWmma` — WMMA/MMA tensor-core umbrella |

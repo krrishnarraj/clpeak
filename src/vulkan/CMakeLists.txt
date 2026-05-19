@@ -4,6 +4,8 @@ endif()
 
 add_library(peak_vulkan STATIC
     vk_peak.cpp
+    vulkan_device.cpp
+    compute_kernel.cpp
     compute_float.cpp
     compute_int.cpp
     coopmat.cpp
