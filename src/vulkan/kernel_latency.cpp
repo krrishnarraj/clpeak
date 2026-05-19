@@ -31,7 +31,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
 
   logger::TestSpec testSpec;
   testSpec.tag = "kernel_launch_latency";
-  testSpec.display = "Kernel launch latency (us)";
+  testSpec.display = "Kernel launch latency";
   testSpec.unit = "us";
   auto test = currentDeviceScope->beginTest(testSpec);
 

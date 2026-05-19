@@ -17,7 +17,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     numBlocks = 1;
 
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth (GBPS)", "gbps"});
+    {"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
 
   CUdeviceptr inBuf = 0, outBuf = 0;
   if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||

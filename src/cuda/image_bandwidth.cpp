@@ -6,7 +6,7 @@
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth (GBPS)", "gbps"});
+    {"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;

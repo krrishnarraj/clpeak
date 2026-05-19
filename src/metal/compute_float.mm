@@ -17,7 +17,7 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
     };
     float A = 1.3f;
     mtl_compute_desc_t d = {};
-    d.title       = "Single-precision compute (GFLOPS)";
+    d.title       = "Single-precision compute";
     d.resultTag      = "single_precision_compute";
     d.unit        = "gflops";
     d.variants    = variants;
@@ -39,7 +39,7 @@ int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
     };
     float A = 1.3f;
     mtl_compute_desc_t d = {};
-    d.title       = "Half-precision compute (GFLOPS)";
+    d.title       = "Half-precision compute";
     d.resultTag      = "half_precision_compute";
     d.unit        = "gflops";
     d.variants    = variants;
@@ -60,7 +60,7 @@ int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
     };
     float A = 1.3f;
     mtl_compute_desc_t d = {};
-    d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
+    d.title       = "Mixed-precision compute fp16xfp16+fp32";
     d.resultTag      = "mixed_precision_compute";
     d.unit        = "gflops";
     d.variants    = variants;

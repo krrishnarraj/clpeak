@@ -27,7 +27,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)";
+      d.title = "WMMA fp16xfp16+fp32 16x16x16";
       d.resultTag = "wmma_fp16";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -49,7 +49,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA bf16xbf16+fp32 16x16x16 (TFLOPS)";
+      d.title = "WMMA bf16xbf16+fp32 16x16x16";
       d.resultTag = "wmma_bf16";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -71,7 +71,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA tf32xtf32+fp32 16x16x8 (TFLOPS)";
+      d.title = "WMMA tf32xtf32+fp32 16x16x8";
       d.resultTag = "wmma_tf32";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -93,7 +93,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       double A = 1.3;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA fp64xfp64+fp64 8x8x4 (TFLOPS)";
+      d.title = "WMMA fp64xfp64+fp64 8x8x4";
       d.resultTag = "wmma_fp64";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -115,7 +115,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.title = "FP8(E4M3) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp8_e4m3";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -137,7 +137,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E5M2) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.title = "FP8(E5M2) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp8_e5m2";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -163,7 +163,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       std::string archOptStr = archOpt.str();
       const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
-      d.title = "FP4(E2M1) mma.sync m16n8k32+fp32 (TFLOPS)";
+      d.title = "FP4(E2M1) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp4_e2m1";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -191,7 +191,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       std::string archOptStr = archOpt.str();
       const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
-      d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)";
+      d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32";
       d.resultTag = "wmma_mxf4_e2m1";
       d.unit = "tflops";
       d.unitDivider = 1e12;
@@ -227,7 +227,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "WMMA int8xint8+int32 16x16x16 (TOPS)";
+    d.title = "WMMA int8xint8+int32 16x16x16";
     d.resultTag = "wmma_int8";
     d.unit = "tops";
     d.unitDivider = 1e12;
@@ -249,7 +249,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "INT8 mma.sync m16n8k32+int32 (TOPS)";
+    d.title = "INT8 mma.sync m16n8k32+int32";
     d.resultTag = "wmma_int8_k32";
     d.unit = "tops";
     d.unitDivider = 1e12;
@@ -271,7 +271,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "INT8 mma.sp 2:4 sparsity m16n8k32+int32 (TOPS)";
+    d.title = "INT8 mma.sp 2:4 sparsity m16n8k32+int32";
     d.resultTag = "wmma_int8_sparse";
     d.unit = "tops";
     d.unitDivider = 1e12;
@@ -293,7 +293,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "INT4 mma.sync m8n8k32+int32 (TOPS)";
+    d.title = "INT4 mma.sync m8n8k32+int32";
     d.resultTag = "wmma_int4";
     d.unit = "tops";
     d.unitDivider = 1e12;
@@ -315,7 +315,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc (TOPS)";
+    d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc";
     d.resultTag = "wmma_bmma_b1";
     d.unit = "tops";
     d.unitDivider = 1e12;

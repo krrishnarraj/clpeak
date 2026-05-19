@@ -14,7 +14,7 @@ int MetalPeak::runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg)
     };
     int A = 4;
     mtl_compute_desc_t d = {};
-    d.title          = "INT8 dot-product compute (emulated) (GOPS)";
+    d.title          = "INT8 dot-product compute (emulated)";
     d.resultTag         = "integer_compute_int8_dp";
     d.unit           = "gops";
     d.variants       = variants;
@@ -35,7 +35,7 @@ int MetalPeak::runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg)
     };
     int A = 3;
     mtl_compute_desc_t d = {};
-    d.title          = "Packed INT4 compute (emulated) (GOPS)";
+    d.title          = "Packed INT4 compute (emulated)";
     d.resultTag         = "int4_packed_compute";
     d.unit           = "gops";
     d.variants       = variants;

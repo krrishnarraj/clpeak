@@ -7,7 +7,7 @@
 
 int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
+    auto test = currentDeviceScope->beginTest({"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);

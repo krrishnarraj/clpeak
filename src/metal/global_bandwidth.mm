@@ -9,7 +9,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     const uint32_t tgSize = 256;
 
-    auto test = currentDeviceScope->beginTest({"global_memory_bandwidth", "Global memory bandwidth (GBPS)", "gbps"});
+    auto test = currentDeviceScope->beginTest({"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).

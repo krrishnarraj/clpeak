@@ -27,7 +27,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
-      d.title          = "Cooperative-matrix fp32xfp32+fp32 16x16x16 (TFLOPS)";
+      d.title          = "Cooperative-matrix fp32xfp32+fp32 16x16x16";
       d.resultTag      = "coopmat_fp32";
       d.metricLabel    = "coopmat_fp32";
       d.unit           = "tflops";
@@ -49,7 +49,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
-      d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16 (TFLOPS)";
+      d.title          = "Cooperative-matrix fp16xfp16+fp32 16x16x16";
       d.resultTag      = "coopmat_fp16";
       d.metricLabel    = "coopmat_fp16";
       d.unit           = "tflops";
@@ -71,7 +71,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
-      d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16 (TFLOPS)";
+      d.title          = "Cooperative-matrix bf16xbf16+fp32 16x16x16";
       d.resultTag      = "coopmat_bf16";
       d.metricLabel    = "coopmat_bf16";
       d.unit           = "tflops";
@@ -93,7 +93,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
-      d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16 (TFLOPS)";
+      d.title          = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32 16x16x16";
       d.resultTag      = "coopmat_fp8_e4m3";
       d.metricLabel    = "coopmat_fp8_e4m3";
       d.unit           = "tflops";
@@ -115,7 +115,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     {
       float A = 1.3f;
       vk_compute_desc_t d = {};
-      d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16 (TFLOPS)";
+      d.title          = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32 16x16x16";
       d.resultTag      = "coopmat_fp8_e5m2";
       d.metricLabel    = "coopmat_fp8_e5m2";
       d.unit           = "tflops";
@@ -152,8 +152,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     d.pushData       = &A;
     d.pushSize       = sizeof(A);
 
-    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16 (TOPS)";
-    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32 (TOPS)";
+    const char *titleK16 = "Cooperative-matrix int8xint8+int32 16x16x16";
+    const char *titleK32 = "Cooperative-matrix int8xint8+int32 16x16x32";
     bool haveShaderK16 = false, haveShaderK32 = false;
 #ifdef VK_HAS_COOPMAT_INT8
     haveShaderK16 = true;

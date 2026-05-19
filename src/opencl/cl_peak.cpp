@@ -169,53 +169,53 @@ int clPeak::runAll()
 
         // ---- Phase 1: floating-point compute ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
-                       "Single-precision compute (GFLOPS)", "single_precision_compute",
+                       "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
-                       "Half-precision compute (GFLOPS)", "half_precision_compute",
+                       "Half-precision compute", "half_precision_compute",
                        "compute_hp", "half", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
-                       "Double-precision compute (GFLOPS)", "double_precision_compute",
+                       "Double-precision compute", "double_precision_compute",
                        "compute_dp", "double", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
-                       "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)", "mixed_precision_compute",
+                       "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
                        "compute_mp", "mp", "gflops",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
-                       "Integer compute (GOPS)", "integer_compute",
+                       "Integer compute", "integer_compute",
                        "compute_integer", "int", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
-                       "Integer compute Fast 24bit (GOPS)", "integer_compute_fast",
+                       "Integer compute Fast 24bit", "integer_compute_fast",
                        "compute_intfast", "int", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
-                       "Integer char (8bit) compute (GOPS)", "integer_compute_char",
+                       "Integer char (8bit) compute", "integer_compute_char",
                        "compute_char", "char", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
-                       "Integer short (16bit) compute (GOPS)", "integer_compute_short",
+                       "Integer short (16bit) compute", "integer_compute_short",
                        "compute_short", "short", "gops",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
         runComputeTest(queue, int8DpProg, devInfo, cfg, Benchmark::ComputeInt8DP,
-                       "INT8 dot-product compute (GOPS)", "integer_compute_int8_dp",
+                       "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated) (GOPS)", "int4_packed_compute",
+                       "Packed INT4 compute (emulated)", "int4_packed_compute",
                        "compute_int4_packed", "int4_packed", "gops",
                        COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
@@ -233,7 +233,7 @@ int clPeak::runAll()
         else if (isAllowed(Benchmark::KernelLatency))
         {
           auto test = deviceScope.beginTest({"kernel_launch_latency",
-                                             "Kernel launch latency (us)", "us"});
+                                             "Kernel launch latency", "us"});
           test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
                        "No profiling queue support");
         }

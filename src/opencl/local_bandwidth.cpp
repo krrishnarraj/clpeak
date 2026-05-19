@@ -13,7 +13,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
+    {"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
 
   try
   {

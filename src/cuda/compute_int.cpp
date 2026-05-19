@@ -14,7 +14,7 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
   // in GOPS.
   int A = 3;
   cuda_compute_desc_t d = {};
-  d.title = "Integer compute (32-bit IMAD) (GOPS)";
+  d.title = "Integer compute (32-bit IMAD)";
   d.resultTag = "integer_compute";
   d.unit = "gops";
   d.metricLabel = "int";
@@ -38,7 +38,7 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
   };
   int A = 4;
   cuda_compute_desc_t d = {};
-  d.title = "INT8 dot-product compute (__dp4a) (GOPS)";
+  d.title = "INT8 dot-product compute (__dp4a)";
   d.resultTag = "integer_compute_int8_dp";
   d.unit = "gops";
   d.variants = variants;
@@ -56,7 +56,7 @@ int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
 {
   int A = 3;
   cuda_compute_desc_t d = {};
-  d.title = "Packed INT4 compute (emulated) (GOPS)";
+  d.title = "Packed INT4 compute (emulated)";
   d.resultTag = "int4_packed_compute";
   d.unit = "gops";
   d.metricLabel = "int4_packed";

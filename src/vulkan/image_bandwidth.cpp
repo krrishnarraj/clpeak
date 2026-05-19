@@ -14,7 +14,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   logger::TestSpec testSpec;
   testSpec.tag = "image_memory_bandwidth";
-  testSpec.display = "Image memory bandwidth (GBPS)";
+  testSpec.display = "Image memory bandwidth";
   testSpec.unit = "gbps";
   auto test = currentDeviceScope->beginTest(testSpec);
 

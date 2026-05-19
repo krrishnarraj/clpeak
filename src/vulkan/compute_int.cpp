@@ -23,7 +23,7 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   int32_t A = 4;
   vk_compute_desc_t d = {};
-  d.title       = "Integer compute int32 (GOPS)";
+  d.title       = "Integer compute int32";
   d.resultTag   = "integer_compute";
   d.unit        = "gops";
   d.variants    = variants;
@@ -41,7 +41,7 @@ int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   int32_t A = 3;
   vk_compute_desc_t d = {};
-  d.title        = "Packed INT4 compute (emulated) (GOPS)";
+  d.title        = "Packed INT4 compute (emulated)";
   d.resultTag    = "int4_packed_compute";
   d.metricLabel  = "int4_packed";
   d.unit         = "gops";
@@ -74,7 +74,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   int32_t A = 4;
   vk_compute_desc_t d = {};
-  d.title       = "INT8 dot-product compute (GOPS)";
+  d.title       = "INT8 dot-product compute";
   d.resultTag   = "integer_compute_int8_dp";
   d.unit        = "gops";
   d.variants    = variants;

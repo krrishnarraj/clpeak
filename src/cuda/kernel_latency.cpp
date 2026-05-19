@@ -9,7 +9,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency (us)", "us"});
+    {"kernel_launch_latency", "Kernel launch latency", "us"});
 
   CUfunction fn;
   if (!dev.getKernel(cuda_kernels::kernel_latency_src,

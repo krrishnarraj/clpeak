@@ -11,7 +11,7 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title = "Single-precision compute (GFLOPS)";
+  d.title = "Single-precision compute";
   d.resultTag = "single_precision_compute";
   d.unit = "gflops";
   d.metricLabel = "float";
@@ -33,7 +33,7 @@ int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
   };
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title = "Half-precision compute (GFLOPS)";
+  d.title = "Half-precision compute";
   d.resultTag = "half_precision_compute";
   d.unit = "gflops";
   d.variants = variants;
@@ -51,7 +51,7 @@ int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   double A = 1.3;
   cuda_compute_desc_t d = {};
-  d.title = "Double-precision compute (GFLOPS)";
+  d.title = "Double-precision compute";
   d.resultTag = "double_precision_compute";
   d.unit = "gflops";
   d.metricLabel = "double";
@@ -71,7 +71,7 @@ int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
   // The packed (HFMA2) path is fp16xfp16+fp16 -- that's compute_hp2, not MP.
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
+  d.title = "Mixed-precision compute fp16xfp16+fp32";
   d.resultTag = "mixed_precision_compute";
   d.unit = "gflops";
   d.metricLabel = "mp";
@@ -95,7 +95,7 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   // be a different code path.
   float A = 1.3f;
   cuda_compute_desc_t d = {};
-  d.title = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
+  d.title = "BF16 compute bf16xbf16+fp32";
   d.resultTag = "bfloat16_compute";
   d.unit = "gflops";
   d.metricLabel = "bf16";

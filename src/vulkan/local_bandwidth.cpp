@@ -15,7 +15,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   logger::TestSpec testSpec;
   testSpec.tag = "local_memory_bandwidth";
-  testSpec.display = "Local memory bandwidth (GBPS)";
+  testSpec.display = "Local memory bandwidth";
   testSpec.unit = "gbps";
   auto test = currentDeviceScope->beginTest(testSpec);
 

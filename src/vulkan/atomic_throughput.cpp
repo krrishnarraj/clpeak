@@ -11,7 +11,7 @@ int vkPeak::runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   logger::TestSpec testSpec;
   testSpec.tag = "atomic_throughput";
-  testSpec.display = "Atomic throughput (GOPS)";
+  testSpec.display = "Atomic throughput";
   testSpec.unit = "gops";
   auto test = currentDeviceScope->beginTest(testSpec);
 
@@ -140,7 +140,7 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   logger::TestSpec testSpec;
   testSpec.tag = "atomic_throughput";
-  testSpec.display = "Atomic throughput (GFLOPS)";
+  testSpec.display = "Atomic throughput";
   testSpec.unit = "gflops";
   auto test = currentDeviceScope->beginTest(testSpec);
 

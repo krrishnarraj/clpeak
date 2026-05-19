@@ -9,7 +9,7 @@ int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
 {
     int A = 1;
     mtl_compute_desc_t d = {};
-    d.title            = "simdgroup_matrix int8xint8+int32 8x8x8 (TOPS)";
+    d.title            = "simdgroup_matrix int8xint8+int32 8x8x8";
     d.resultTag           = "simdgroup_matrix_int8";
     d.unit             = "tops";
     d.unitDivider      = 1e12;
@@ -33,7 +33,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     {
         float A = 1.3f;
         mtl_compute_desc_t d = {};
-        d.title            = "simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)";
+        d.title            = "simdgroup_matrix fp16xfp16+fp32 8x8x8";
         d.resultTag           = "simdgroup_matrix_fp16";
         d.unit             = "tflops";
         d.unitDivider      = 1e12;
@@ -54,7 +54,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     {
         float A = 1.3f;
         mtl_compute_desc_t d = {};
-        d.title            = "simdgroup_matrix bf16xbf16+fp32 8x8x8 (TFLOPS)";
+        d.title            = "simdgroup_matrix bf16xbf16+fp32 8x8x8";
         d.resultTag           = "simdgroup_matrix_bf16";
         d.unit             = "tflops";
         d.unitDivider      = 1e12;

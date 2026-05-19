@@ -10,7 +10,7 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth (GBPS)", "gbps"});
+    {"transfer_bandwidth", "Transfer bandwidth", "gbps"});
 
   CUdeviceptr dBuf = 0;
   if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)

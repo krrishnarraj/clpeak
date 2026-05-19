@@ -6,7 +6,7 @@
 int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth (GBPS)", "gbps"});
+    {"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);

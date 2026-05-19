@@ -7,7 +7,7 @@
 
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"image_memory_bandwidth", "Image memory bandwidth (GBPS)", "gbps"});
+    auto test = currentDeviceScope->beginTest({"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;

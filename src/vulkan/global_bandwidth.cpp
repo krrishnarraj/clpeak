@@ -23,7 +23,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   logger::TestSpec testSpec;
   testSpec.tag = "global_memory_bandwidth";
-  testSpec.display = "Global memory bandwidth (GBPS)";
+  testSpec.display = "Global memory bandwidth";
   testSpec.unit = "gbps";
   auto test = currentDeviceScope->beginTest(testSpec);
 

@@ -6,7 +6,7 @@
 int CudaPeak::runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
+    {"atomic_throughput", "Atomic throughput", "gops"});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);

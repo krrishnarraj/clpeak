@@ -7,7 +7,7 @@
 
 int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput (GOPS)", "gops"});
+    auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput", "gops"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
@@ -88,7 +88,7 @@ int MetalPeak::runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg)
 
 int MetalPeak::runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput (GFLOPS)", "gflops"});
+    auto test = currentDeviceScope->beginTest({"atomic_throughput", "Atomic throughput", "gflops"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);

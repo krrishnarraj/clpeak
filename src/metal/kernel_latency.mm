@@ -10,7 +10,7 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     unsigned int iters = forceIters ? specifiedIters
                                     : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
-    auto test = currentDeviceScope->beginTest({"kernel_launch_latency", "Kernel launch latency (us)", "us"});
+    auto test = currentDeviceScope->beginTest({"kernel_launch_latency", "Kernel launch latency", "us"});
 
     id<MTLComputePipelineState> pso = mtlGetPipeline(dev,
         mtl_kernels::kernel_latency_src,

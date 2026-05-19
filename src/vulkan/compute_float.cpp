@@ -22,7 +22,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   float A = 1.3f;
   vk_compute_desc_t d = {};
-  d.title       = "Single-precision compute (GFLOPS)";
+  d.title       = "Single-precision compute";
   d.resultTag   = "single_precision_compute";
   d.unit        = "gflops";
   d.variants    = variants;
@@ -48,7 +48,7 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   float A = 1.3f;
   vk_compute_desc_t d = {};
-  d.title       = "Half-precision compute fp16xfp16+fp16 (GFLOPS)";
+  d.title       = "Half-precision compute fp16xfp16+fp16";
   d.resultTag   = "half_precision_compute";
   d.unit        = "gflops";
   d.variants    = variants;
@@ -77,7 +77,7 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   double A = 1.3;
   vk_compute_desc_t d = {};
-  d.title       = "Double-precision compute (GFLOPS)";
+  d.title       = "Double-precision compute";
   d.resultTag   = "double_precision_compute";
   d.unit        = "gflops";
   d.variants    = variants;
@@ -110,7 +110,7 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   float A = 1.3f;
   vk_compute_desc_t d = {};
-  d.title       = "Mixed-precision compute fp16xfp16+fp32 (GFLOPS)";
+  d.title       = "Mixed-precision compute fp16xfp16+fp32";
   d.resultTag   = "mixed_precision_compute";
   d.unit        = "gflops";
   d.variants    = variants;
@@ -141,7 +141,7 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   };
   float A = 1.3f;
   vk_compute_desc_t d = {};
-  d.title       = "BF16 compute bf16xbf16+fp32 (GFLOPS)";
+  d.title       = "BF16 compute bf16xbf16+fp32";
   d.resultTag   = "bfloat16_compute";
   d.unit        = "gflops";
   d.variants    = variants;

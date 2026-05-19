@@ -36,7 +36,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   logger::TestSpec testSpec;
   testSpec.tag = "transfer_bandwidth";
-  testSpec.display = "Transfer bandwidth (GBPS)";
+  testSpec.display = "Transfer bandwidth";
   testSpec.unit = "gbps";
   auto test = currentDeviceScope->beginTest(testSpec);
 
