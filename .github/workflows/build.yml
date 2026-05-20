@@ -163,6 +163,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+
       - name: Configure CMake (iOS)
         run: cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS
 
