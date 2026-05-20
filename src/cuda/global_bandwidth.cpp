@@ -30,8 +30,11 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
       cuMemFree(inBuf);
     return -1;
   }
-  // Touch input so we measure DRAM not zero-page.
-  cuMemsetD32(inBuf, 0x3f800000u, numItems);
+  // Fill input with pseudo-random data to defeat hardware memory compression.
+  float *hInput = new float[numItems];
+  populate(hInput, numItems);
+  cuMemcpyHtoD(inBuf, hInput, numItems * sizeof(float));
+  delete[] hInput;
 
   // Each variant takes input typed as floatN* so element index strides by
   // V floats per iteration -- matching the OpenCL backend.  numBlocks

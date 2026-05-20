@@ -62,6 +62,15 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
+  // Fill the host-visible buffer with pseudo-random data to defeat hardware
+  // memory compression on both H2D and D2H paths.
+  {
+    void *hostMap = nullptr;
+    vkMapMemory(dev.device, hostMem, 0, bytes, 0, &hostMap);
+    populate((float *)hostMap, bytes / sizeof(float));
+    vkUnmapMemory(dev.device, hostMem);
+  }
+
   VkCommandBufferAllocateInfo allocInfo = {};
   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   allocInfo.commandPool = dev.commandPool;

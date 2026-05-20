@@ -1,4 +1,5 @@
 #include <common/common.h>
+#include <cstring>
 
 benchmark_config_t benchmark_config_t::forDevice(DeviceType type)
 {
@@ -28,4 +29,25 @@ unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int 
   if (want < 1.0)     want = 1.0;
   if (want > 10000.0) want = 10000.0;
   return (unsigned int)want;
+}
+
+void populate(float *ptr, uint64_t N)
+{
+    // Use pseudo-random data to defeat hardware memory compression (some GPUs
+    // transparently compress buffers, inflating apparent bandwidth when the
+    // content is predictable/compressible).
+    uint32_t state = 0xDEADBEEF;
+    for (uint64_t i = 0; i < N; i++)
+    {
+        // xorshift32
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        // Reinterpret bits as float; mask off sign+exponent high bit to avoid
+        // NaN/Inf (keep exponent in [1,127] range so values are finite).
+        uint32_t bits = (state & 0x7F7FFFFF) | 0x00800000;
+        float val;
+        memcpy(&val, &bits, sizeof(val));
+        ptr[i] = val;
+    }
 }
