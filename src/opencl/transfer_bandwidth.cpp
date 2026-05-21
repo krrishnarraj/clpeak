@@ -141,7 +141,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory");
       return -1;
     }
-    memset(arr, 0, bytes);
+    populate(arr, bytes / sizeof(float));
     cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), bytes);
 
     // enqueueWriteBuffer (blocking)

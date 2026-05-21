@@ -30,8 +30,9 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                       ResultStatus::Error, "Failed to allocate buffers");
         return -1;
     }
-    // Touch the input so we don't measure zero-page reads on copy-on-write.
-    memset(inBuf.contents, 0x3f, numItems * sizeof(float));
+    // Touch the input with pseudo-random data so we don't measure
+    // zero-page reads on copy-on-write or defeat hardware compression.
+    populate((float *)inBuf.contents, numItems);
 
     struct V { const char *label; const char *kname; uint32_t width; };
     const V vs[] = {

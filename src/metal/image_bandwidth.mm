@@ -11,8 +11,11 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
-    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
-    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+    // Size the dispatch so each pixel is read exactly once per launch,
+    // eliminating cache reuse that inflates apparent bandwidth.
+    uint32_t numGroups = ((uint32_t)imgW * (uint32_t)imgH) / IMAGE_FETCH_PER_WI / tgSize;
+    if (numGroups == 0) numGroups = 1;
+    uint64_t globalThreads = (uint64_t)numGroups * tgSize;
 
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
@@ -51,6 +54,20 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         {
             test.skip(v.label, ResultStatus::Error, "Texture alloc failed");
             continue;
+        }
+
+        // Fill texture with pseudo-random data to defeat hardware compression.
+        {
+            NSUInteger numPixels = imgW * imgH;
+            NSUInteger numFloats = numPixels * v.bytesPerPixel / sizeof(float);
+            float *staging = new float[numFloats];
+            populate(staging, numFloats);
+            MTLRegion region = MTLRegionMake2D(0, 0, imgW, imgH);
+            [tex replaceRegion:region
+                  mipmapLevel:0
+                    withBytes:staging
+                  bytesPerRow:imgW * v.bytesPerPixel];
+            delete[] staging;
         }
 
         id<MTLComputePipelineState> pso = mtlGetPipeline(dev,

@@ -44,6 +44,57 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
+  // Fill the input buffer with pseudo-random data to defeat hardware memory
+  // compression.  Upload via a host-visible staging buffer then copy to the
+  // device-local input buffer.
+  {
+    VkBuffer stagingBuf;
+    VkDeviceMemory stagingMem;
+    if (!dev.createBuffer(numItems * sizeof(float),
+                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          stagingBuf, stagingMem))
+    {
+      log->note("Failed to allocate staging buffer\n");
+      vkDestroyBuffer(dev.device, inputBuf, nullptr);
+      vkFreeMemory(dev.device, inputMem, nullptr);
+      vkDestroyBuffer(dev.device, outputBuf, nullptr);
+      vkFreeMemory(dev.device, outputMem, nullptr);
+      return -1;
+    }
+
+    void *stagingMap = nullptr;
+    vkMapMemory(dev.device, stagingMem, 0, numItems * sizeof(float), 0, &stagingMap);
+    populate((float *)stagingMap, numItems);
+    vkUnmapMemory(dev.device, stagingMem);
+
+    VkCommandBufferAllocateInfo cmdAI = {};
+    cmdAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAI.commandPool = dev.commandPool;
+    cmdAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAI.commandBufferCount = 1;
+
+    VkCommandBuffer cmdBuf;
+    vkAllocateCommandBuffers(dev.device, &cmdAI, &cmdBuf);
+
+    VkCommandBufferBeginInfo cmdBI = {};
+    cmdBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmdBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuf, &cmdBI);
+
+    VkBufferCopy copyRegion = {};
+    copyRegion.size = numItems * sizeof(float);
+    vkCmdCopyBuffer(cmdBuf, stagingBuf, inputBuf, 1, &copyRegion);
+
+    vkEndCommandBuffer(cmdBuf);
+    dev.submitAndWait(cmdBuf);
+    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+
+    vkDestroyBuffer(dev.device, stagingBuf, nullptr);
+    vkFreeMemory(dev.device, stagingMem, nullptr);
+  }
+
   // Descriptor set layout (2 bindings: input + output)
   VkDescriptorSetLayoutBinding bindings[2] = {};
   bindings[0].binding = 0;

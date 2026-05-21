@@ -154,6 +154,15 @@ static const unsigned int DEFAULT_TARGET_TIME_US = 500000;
 unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int forced);
 
 // ---------------------------------------------------------------------------
+// Benchmark data initialisation
+// ---------------------------------------------------------------------------
+
+// Fill an array with xorshift32 pseudo-random bit patterns.  Used to defeat
+// transparent hardware memory compression that inflates apparent bandwidth
+// when buffer content is predictable (sequential, zero-filled, or constant).
+void populate(float *ptr, uint64_t N);
+
+// ---------------------------------------------------------------------------
 // Per-device benchmark tuning knobs
 // ---------------------------------------------------------------------------
 

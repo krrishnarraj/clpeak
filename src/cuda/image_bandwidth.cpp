@@ -10,8 +10,12 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
-  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);
-  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+  // Size the dispatch so each pixel is read exactly once per launch,
+  // eliminating cache reuse that inflates apparent bandwidth.
+  uint64_t groups = ((uint64_t)imgW * (uint64_t)imgH) / IMAGE_FETCH_PER_WI / blockSize;
+  if (groups == 0) groups = 1;
+  uint64_t globalThreads = groups * blockSize;
+  uint32_t numBlocks = (uint32_t)groups;
 
   // Create CUarray (RGBA float).
   CUDA_ARRAY_DESCRIPTOR adesc = {};
@@ -25,8 +29,23 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     test.skip("float4", ResultStatus::Error, "Image array create failed");
     return -1;
   }
-  // Contents undefined is fine for a bandwidth measurement -- the cache
-  // lines still get fetched.
+
+  // Fill image with pseudo-random data to defeat hardware memory compression.
+  {
+    size_t numFloats = (size_t)imgW * (size_t)imgH * 4;
+    float *staging = new float[numFloats];
+    populate(staging, numFloats);
+    CUDA_MEMCPY2D copy = {};
+    copy.srcMemoryType = CU_MEMORYTYPE_HOST;
+    copy.srcHost       = staging;
+    copy.srcPitch      = (size_t)imgW * 4 * sizeof(float);
+    copy.dstMemoryType = CU_MEMORYTYPE_ARRAY;
+    copy.dstArray      = arr;
+    copy.WidthInBytes  = (size_t)imgW * 4 * sizeof(float);
+    copy.Height        = (size_t)imgH;
+    cuMemcpy2D(&copy);
+    delete[] staging;
+  }
 
   CUDA_RESOURCE_DESC rd = {};
   rd.resType = CU_RESOURCE_TYPE_ARRAY;
@@ -35,7 +54,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   td.addressMode[0] = CU_TR_ADDRESS_MODE_CLAMP;
   td.addressMode[1] = CU_TR_ADDRESS_MODE_CLAMP;
   td.filterMode = CU_TR_FILTER_MODE_POINT;
-  td.flags = CU_TRSF_READ_AS_INTEGER; // we want raw float bits, no normalization
+  td.flags = 0; // no normalization needed for float textures
   CUtexObject tex = 0;
   if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
   {

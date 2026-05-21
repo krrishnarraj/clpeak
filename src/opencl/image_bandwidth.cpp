@@ -33,7 +33,11 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       imgH = 1;
   }
 
-  uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
+  // Size the dispatch so each pixel is read exactly once per launch,
+  // eliminating cache reuse that inflates apparent bandwidth.
+  uint64_t groups = ((uint64_t)imgW * (uint64_t)imgH) / IMAGE_FETCH_PER_WI / devInfo.maxWGSize;
+  if (groups == 0) groups = 1;
+  uint64_t globalWIs = groups * devInfo.maxWGSize;
 
   try
   {
@@ -41,6 +45,17 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
     cl::ImageFormat imgFmt(CL_RGBA, CL_FLOAT);
     cl::Image2D img(ctx, CL_MEM_READ_ONLY, imgFmt, (size_t)imgW, (size_t)imgH);
+
+    // Fill image with pseudo-random data to defeat hardware memory compression.
+    {
+      size_t numFloats = (size_t)imgW * (size_t)imgH * 4;
+      float *staging = new float[numFloats];
+      populate(staging, numFloats);
+      cl::array<cl::size_type, 3> origin = {0, 0, 0};
+      cl::array<cl::size_type, 3> region = {(size_t)imgW, (size_t)imgH, 1};
+      queue.enqueueWriteImage(img, CL_TRUE, origin, region, 0, 0, staging);
+      delete[] staging;
+    }
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, globalWIs * sizeof(cl_float));
 

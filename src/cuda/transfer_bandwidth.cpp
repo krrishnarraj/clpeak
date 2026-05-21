@@ -28,6 +28,10 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
+  // Fill host buffer with pseudo-random data to defeat hardware memory
+  // compression on both H2D and D2H paths.
+  populate((float *)hPinned, bytes / sizeof(float));
+
   auto timeXfer = [&](bool h2d) -> float
   {
     CUevent s, e;
