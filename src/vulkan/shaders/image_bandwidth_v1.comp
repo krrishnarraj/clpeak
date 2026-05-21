@@ -26,8 +26,9 @@ void main()
     for (int i = 0; i < 16; i++)
     {
         int pixel = (gid + i * gsize) % total;
-        ivec2 coord = ivec2(pixel % width, pixel / width);
-        sum += texelFetch(img, coord, 0);
+        vec2 coord = vec2(float(pixel % width),
+                          float(pixel / width));
+        sum += texture(img, coord);
     }
     outputBuf.data[gid] = sum.x + sum.y + sum.z + sum.w;
 }

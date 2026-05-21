@@ -163,7 +163,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   smCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
   smCI.addressModeU = smCI.addressModeV = smCI.addressModeW =
       VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-  smCI.unnormalizedCoordinates = VK_FALSE;
+  smCI.unnormalizedCoordinates = VK_TRUE;
   VkSampler sampler;
   vkCreateSampler(dev.device, &smCI, nullptr, &sampler);
 
