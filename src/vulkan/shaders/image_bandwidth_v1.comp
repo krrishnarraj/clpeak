@@ -1,8 +1,8 @@
 #version 450
 
 // Image (texture) bandwidth.  Each WI reads 16 RGBA-float pixels using
-// integer coords + nearest sampler (combined image-sampler in Vulkan).
-// Mirrors image_bandwidth_kernels.cl::v1.
+// the combined image-sampler with nearest + unnormalized coordinates,
+// measuring the full Vulkan texture pipeline (sampler → cache → data).
 //
 // Bytes = IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs.
 
