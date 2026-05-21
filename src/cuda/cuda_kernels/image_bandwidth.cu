@@ -21,10 +21,10 @@ extern "C" __global__ void image_bandwidth(cudaTextureObject_t tex, float *out, 
         int y = pixel / width;
         float4 v = tex2D<float4>(tex, x, y);
         switch (i & 3) {
-        case 0: sum0 += v; break;
-        case 1: sum1 += v; break;
-        case 2: sum2 += v; break;
-        case 3: sum3 += v; break;
+        case 0: sum0.x += v.x; sum0.y += v.y; sum0.z += v.z; sum0.w += v.w; break;
+        case 1: sum1.x += v.x; sum1.y += v.y; sum1.z += v.z; sum1.w += v.w; break;
+        case 2: sum2.x += v.x; sum2.y += v.y; sum2.z += v.z; sum2.w += v.w; break;
+        case 3: sum3.x += v.x; sum3.y += v.y; sum3.z += v.z; sum3.w += v.w; break;
         }
     }
     float4 sum = make_float4(
