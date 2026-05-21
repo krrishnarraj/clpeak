@@ -10,10 +10,12 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
-  // Match OpenCL: scale to CU count without a floor so we don't
-  // oversubscribe a fixed-size image and inflate cache reuse.
-  uint64_t globalThreads = (uint64_t)dev.info.numSMs * cfg.computeWgsPerCU * blockSize;
-  uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);
+  // Size the dispatch so each pixel is read exactly once per launch,
+  // eliminating cache reuse that inflates apparent bandwidth.
+  uint64_t groups = ((uint64_t)imgW * (uint64_t)imgH) / IMAGE_FETCH_PER_WI / blockSize;
+  if (groups == 0) groups = 1;
+  uint64_t globalThreads = groups * blockSize;
+  uint32_t numBlocks = (uint32_t)groups;
 
   // Create CUarray (RGBA float).
   CUDA_ARRAY_DESCRIPTOR adesc = {};

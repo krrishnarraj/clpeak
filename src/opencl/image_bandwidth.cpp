@@ -33,7 +33,11 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       imgH = 1;
   }
 
-  uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
+  // Size the dispatch so each pixel is read exactly once per launch,
+  // eliminating cache reuse that inflates apparent bandwidth.
+  uint64_t groups = ((uint64_t)imgW * (uint64_t)imgH) / IMAGE_FETCH_PER_WI / devInfo.maxWGSize;
+  if (groups == 0) groups = 1;
+  uint64_t globalWIs = groups * devInfo.maxWGSize;
 
   try
   {

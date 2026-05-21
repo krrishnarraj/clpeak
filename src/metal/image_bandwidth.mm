@@ -11,10 +11,11 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
-    // Match OpenCL: scale to CU count without a floor so we don't
-    // oversubscribe a fixed-size image and inflate cache reuse.
-    uint64_t globalThreads = (uint64_t)dev.info.gpuCoreCount * cfg.computeWgsPerCU * tgSize;
-    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+    // Size the dispatch so each pixel is read exactly once per launch,
+    // eliminating cache reuse that inflates apparent bandwidth.
+    uint32_t numGroups = ((uint32_t)imgW * (uint32_t)imgH) / IMAGE_FETCH_PER_WI / tgSize;
+    if (numGroups == 0) numGroups = 1;
+    uint64_t globalThreads = (uint64_t)numGroups * tgSize;
 
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
