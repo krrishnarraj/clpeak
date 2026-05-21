@@ -53,6 +53,20 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             continue;
         }
 
+        // Fill texture with pseudo-random data to defeat hardware compression.
+        {
+            NSUInteger numPixels = imgW * imgH;
+            NSUInteger numFloats = numPixels * v.bytesPerPixel / sizeof(float);
+            float *staging = new float[numFloats];
+            populate(staging, numFloats);
+            MTLRegion region = MTLRegionMake2D(0, 0, imgW, imgH);
+            [tex replaceRegion:region
+                  mipmapLevel:0
+                    withBytes:staging
+                  bytesPerRow:imgW * v.bytesPerPixel];
+            delete[] staging;
+        }
+
         id<MTLComputePipelineState> pso = mtlGetPipeline(dev,
             mtl_kernels::image_bandwidth_src,
             mtl_kernels::image_bandwidth_name, v.kname);

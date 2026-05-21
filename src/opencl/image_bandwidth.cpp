@@ -42,6 +42,19 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     cl::ImageFormat imgFmt(CL_RGBA, CL_FLOAT);
     cl::Image2D img(ctx, CL_MEM_READ_ONLY, imgFmt, (size_t)imgW, (size_t)imgH);
 
+    // Fill image with pseudo-random data to defeat hardware memory compression.
+    {
+      size_t numFloats = (size_t)imgW * (size_t)imgH * 4;
+      float *staging = new float[numFloats];
+      populate(staging, numFloats);
+      cl::size_t<3> origin;
+      origin[0] = 0; origin[1] = 0; origin[2] = 0;
+      cl::size_t<3> region;
+      region[0] = (size_t)imgW; region[1] = (size_t)imgH; region[2] = 1;
+      queue.enqueueWriteImage(img, CL_TRUE, origin, region, 0, 0, staging);
+      delete[] staging;
+    }
+
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, globalWIs * sizeof(cl_float));
 
     globalSize = globalWIs;

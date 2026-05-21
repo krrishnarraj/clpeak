@@ -25,8 +25,23 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     test.skip("float4", ResultStatus::Error, "Image array create failed");
     return -1;
   }
-  // Contents undefined is fine for a bandwidth measurement -- the cache
-  // lines still get fetched.
+
+  // Fill image with pseudo-random data to defeat hardware memory compression.
+  {
+    size_t numFloats = (size_t)imgW * (size_t)imgH * 4;
+    float *staging = new float[numFloats];
+    populate(staging, numFloats);
+    CUDA_MEMCPY2D copy = {};
+    copy.srcMemoryType = CU_MEMORYTYPE_HOST;
+    copy.srcHost       = staging;
+    copy.srcPitch      = (size_t)imgW * 4 * sizeof(float);
+    copy.dstMemoryType = CU_MEMORYTYPE_ARRAY;
+    copy.dstArray      = arr;
+    copy.WidthInBytes  = (size_t)imgW * 4 * sizeof(float);
+    copy.Height        = (size_t)imgH;
+    cuMemcpy2D(&copy);
+    delete[] staging;
+  }
 
   CUDA_RESOURCE_DESC rd = {};
   rd.resType = CU_RESOURCE_TYPE_ARRAY;

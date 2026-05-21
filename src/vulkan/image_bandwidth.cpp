@@ -63,34 +63,87 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkAllocateMemory(dev.device, &aI, nullptr, &imgMem);
   vkBindImageMemory(dev.device, img, imgMem, 0);
 
-  // Transition UNDEFINED -> SHADER_READ_ONLY_OPTIMAL.  We don't need to
-  // upload any data; the image contents being unspecified is fine for a
-  // bandwidth measurement (the cache lines still get fetched).
-  VkCommandBufferAllocateInfo cbAI = {};
-  cbAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  cbAI.commandPool = dev.commandPool;
-  cbAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cbAI.commandBufferCount = 1;
-  VkCommandBuffer transCmd;
-  vkAllocateCommandBuffers(dev.device, &cbAI, &transCmd);
-  VkCommandBufferBeginInfo cbBI = {};
-  cbBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  cbBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(transCmd, &cbBI);
-  VkImageMemoryBarrier b = {};
-  b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  b.image = img;
-  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  b.srcAccessMask = 0;
-  b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  vkCmdPipelineBarrier(transCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
-                       0, nullptr, 0, nullptr, 1, &b);
-  vkEndCommandBuffer(transCmd);
-  dev.submitAndWait(transCmd);
-  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &transCmd);
+  // Upload pseudo-random data to defeat hardware memory compression.
+  {
+    VkDeviceSize stagingBytes = (VkDeviceSize)imgW * (VkDeviceSize)imgH * 16;
+    VkBuffer stagingBuf;
+    VkDeviceMemory stagingMem;
+    if (!dev.createBuffer(stagingBytes,
+                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          stagingBuf, stagingMem))
+    {
+      log->note("Staging buffer alloc failed\n");
+      vkDestroyImage(dev.device, img, nullptr);
+      vkFreeMemory(dev.device, imgMem, nullptr);
+      return -1;
+    }
+    void *stagingMap = nullptr;
+    vkMapMemory(dev.device, stagingMem, 0, stagingBytes, 0, &stagingMap);
+    populate((float *)stagingMap, (size_t)imgW * (size_t)imgH * 4);
+    vkUnmapMemory(dev.device, stagingMem);
+
+    VkCommandBufferAllocateInfo cbAI = {};
+    cbAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cbAI.commandPool = dev.commandPool;
+    cbAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cbAI.commandBufferCount = 1;
+    VkCommandBuffer transCmd;
+    vkAllocateCommandBuffers(dev.device, &cbAI, &transCmd);
+    VkCommandBufferBeginInfo cbBI = {};
+    cbBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cbBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(transCmd, &cbBI);
+
+    // UNDEFINED -> TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier b0 = {};
+    b0.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b0.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    b0.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b0.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b0.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b0.image = img;
+    b0.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    b0.srcAccessMask = 0;
+    b0.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(transCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                         0, nullptr, 0, nullptr, 1, &b0);
+
+    // Copy staging buffer to image
+    VkBufferImageCopy copyRegion = {};
+    copyRegion.bufferOffset      = 0;
+    copyRegion.bufferRowLength   = 0; // tightly packed
+    copyRegion.bufferImageHeight = 0;
+    copyRegion.imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copyRegion.imageOffset       = {0, 0, 0};
+    copyRegion.imageExtent       = {imgW, imgH, 1};
+    vkCmdCopyBufferToImage(transCmd, stagingBuf, img,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+    // TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+    VkImageMemoryBarrier b1 = {};
+    b1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b1.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b1.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    b1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b1.image = img;
+    b1.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    b1.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    b1.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(transCmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                         0, nullptr, 0, nullptr, 1, &b1);
+
+    vkEndCommandBuffer(transCmd);
+    dev.submitAndWait(transCmd);
+    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &transCmd);
+
+    vkDestroyBuffer(dev.device, stagingBuf, nullptr);
+    vkFreeMemory(dev.device, stagingMem, nullptr);
+  }
 
   VkImageViewCreateInfo ivCI = {};
   ivCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
