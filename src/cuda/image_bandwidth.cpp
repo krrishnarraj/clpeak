@@ -54,7 +54,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   td.addressMode[0] = CU_TR_ADDRESS_MODE_CLAMP;
   td.addressMode[1] = CU_TR_ADDRESS_MODE_CLAMP;
   td.filterMode = CU_TR_FILTER_MODE_POINT;
-  td.flags = CU_TRSF_READ_AS_INTEGER; // we want raw float bits, no normalization
+  td.flags = 0; // no normalization needed for float textures
   CUtexObject tex = 0;
   if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
   {
