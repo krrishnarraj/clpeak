@@ -20,7 +20,9 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
-  uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
+  // Match OpenCL: scale to CU count without a floor so we don't
+  // oversubscribe a fixed-size image and inflate cache reuse.
+  uint64_t globalWIs = (uint64_t)dev.info.numCUs * cfg.computeWgsPerCU * wgSize;
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t outBytes  = globalWIs * sizeof(float);
 
