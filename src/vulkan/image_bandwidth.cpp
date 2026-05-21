@@ -20,9 +20,22 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
-  // Match OpenCL: scale to CU count without a floor so we don't
-  // oversubscribe a fixed-size image and inflate cache reuse.
-  uint64_t globalWIs = (uint64_t)dev.info.numCUs * cfg.computeWgsPerCU * wgSize;
+  // Scale thread count to GPU compute-unit count, matching the OpenCL
+  // formula without a floor, so we don't oversubscribe a fixed-size image
+  // and inflate apparent bandwidth through cache reuse.
+  uint32_t cuCount = dev.info.numCUs;
+  if (cuCount == 0 || cuCount > 256)
+  {
+    // No vendor CU-count property, or an unreasonably large proxy value
+    // (some drivers expose maxComputeWorkGroupCount here).  Use a
+    // conservative default so we don't oversubscribe the image.
+    if (dev.info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+        dev.info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+      cuCount = 8;
+    else
+      cuCount = 32;
+  }
+  uint64_t globalWIs = (uint64_t)cuCount * cfg.computeWgsPerCU * wgSize;
   uint32_t numGroups = (uint32_t)(globalWIs / wgSize);
   uint64_t outBytes  = globalWIs * sizeof(float);
 
