@@ -5,7 +5,7 @@
 
 A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops and vendor-SDK GEMM libraries (cuBLASLt on NVIDIA, MPS on Apple) to expose what the hardware is capable of &mdash; from raw ALU peaks to near-vendor-advertised matrix throughput.
 
-clpeak began as an OpenCL-only tool. It now ships four interchangeable backends &mdash; OpenCL, Vulkan, CUDA, and Metal &mdash; running back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) become visible alongside the raw peak numbers.
+clpeak began as an OpenCL-only tool. It now ships five interchangeable backends &mdash; OpenCL, Vulkan, CUDA, ROCm/HIP, and Metal &mdash; running back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) become visible alongside the raw peak numbers.
 
 ## Sample output
 
@@ -109,6 +109,7 @@ cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
 | `CLPEAK_ENABLE_OPENCL` | `ON` | Skip OpenCL backend |
 | `CLPEAK_ENABLE_VULKAN` | `ON` | Skip Vulkan even if Vulkan SDK is present |
 | `CLPEAK_ENABLE_CUDA` | `ON` | Skip CUDA even if CUDA Toolkit is present |
+| `CLPEAK_ENABLE_ROCM` | `ON` | Skip ROCm/HIP even if ROCm SDK is present |
 | `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
 
 ## Backends
@@ -118,29 +119,30 @@ cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
 | **OpenCL** | on (optional) | C++ host + .cl strings | OpenCL 1.2 baseline; 3.0 features when headers expose them |
 | **Vulkan** | on, if Vulkan SDK present | GLSL .comp &rarr; SPIR-V at configure time | Vulkan 1.1+ |
 | **CUDA** | on, if CUDA Toolkit present | .cu source embedded as raw strings, NVRTC at runtime; cuBLASLt for GEMM peak | CUDA driver API + NVRTC + cuBLASLt (all part of CUDA Toolkit) |
+| **ROCm/HIP** | on, if ROCm/HIP + HIPRTC are present | .hip source embedded as raw strings, HIPRTC at runtime; rocBLAS for GEMM peak | AMD ROCm HIP runtime + HIPRTC; optional rocWMMA / rocBLAS |
 | **Metal** | on, on Apple silicon | .metal source embedded as raw strings, runtime compile; MPS / MPSGraph for GEMM peak | Apple7 (M1) and newer (MPSGraph bf16 requires Apple9 / M3+) |
 
-A backend is silently skipped at runtime if its loader / driver / device is missing, so a single binary stays portable across boxes. Force-disable at runtime with `--no-opencl`, `--no-vulkan`, `--no-cuda`, `--no-metal`.
+A backend is silently skipped at runtime if its loader / driver / device is missing, so a single binary stays portable across boxes. Force-disable at runtime with `--no-opencl`, `--no-vulkan`, `--no-cuda`, `--no-rocm`, `--no-metal`.
 
 ## What it measures
 
-| Test | Unit | OpenCL | Vulkan | CUDA | Metal |
-|---|---|:---:|:---:|:---:|:---:|
-| Global memory bandwidth | GB/s | &check; | &check; | &check; | &check; |
-| Local / shared memory bandwidth | GB/s | &check; | &check; | &check; | &check; |
-| Image / texture bandwidth | GB/s | &check; | &check; | &check; | &check; |
-| Transfer bandwidth (host&harr;device) | GB/s | &check; | &check; | &check; | &mdash; |
-| Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; |
-| Compute INT (int32) | GOPS | &check; | &check; | &check; | &mdash; |
-| Compute INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; |
-| INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &check; (emul) |
-| Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | simdgroup_matrix fp16/bf16 |
-| Vendor-SDK GEMM peak (`--cublas`, `--mps-gemm`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | MPS: fp32/fp16/bf16 |
-| Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; |
-| Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; |
+| Test | Unit | OpenCL | Vulkan | CUDA | ROCm/HIP | Metal |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| Global memory bandwidth | GB/s | &check; | &check; | &check; | &check; | &check; |
+| Local / shared memory bandwidth | GB/s | &check; | &check; | &check; | &check; | &check; |
+| Image / texture bandwidth | GB/s | &check; | &check; | &check; | &check; | &check; |
+| Transfer bandwidth (host&harr;device) | GB/s | &check; | &check; | &check; | &check; | &mdash; |
+| Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; | &check; |
+| Compute INT (int32) | GOPS | &check; | &check; | &check; | &check; | &mdash; |
+| Compute INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; | &mdash; |
+| INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &mdash; | &check; (emul) |
+| Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; | &check; |
+| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | rocWMMA fp16/int8 | simdgroup_matrix fp16/bf16 |
+| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 | MPS: fp32/fp16/bf16 |
+| Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; | &check; |
+| Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; | &check; |
 
-The vendor-SDK GEMM tests (`--cublas`, `--mps-gemm`) measure a different point than the hand-rolled MMA kernels above: they use cuBLASLt / MPS internally, which contain the same hand-tuned tiling and swizzling that NVIDIA / Apple use to publish their own peak numbers. The hand-rolled WMMA / simdgroup_matrix tests benchmark the raw instruction throughput; the vendor-SDK tests benchmark the achievable system GEMM peak including occupancy, memory staging, and algorithm selection.
+The vendor-SDK GEMM tests (`--cublas`, `--rocblas`, `--mps-gemm`) measure a different point than the hand-rolled MMA kernels above: they use cuBLASLt / rocBLAS / MPS internally, which contain the same hand-tuned tiling and swizzling that NVIDIA / AMD / Apple use to publish their own peak numbers. The hand-rolled WMMA / rocWMMA / simdgroup_matrix tests benchmark the raw instruction throughput; the vendor-SDK tests benchmark the achievable system GEMM peak including occupancy, memory staging, and algorithm selection.
 
 ## Cross-backend comparison
 
@@ -156,16 +158,19 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 
 ## CLI
 
-`./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, or Metal is doing the work.
+`./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, ROCm/HIP, or Metal is doing the work.
 
 ```console
 ./clpeak                              # run every test on every available backend
 ./clpeak --single-precision-compute   # run only single-precision compute, on every backend
 ./clpeak --metal                      # run only one backend
 ./clpeak --cuda --vulkan              # combine multiple --<backend> flags
+./clpeak --rocm                       # run only the ROCm/HIP backend
 ./clpeak --no-opencl --no-cuda        # or skip the ones you don't want
 ./clpeak --wmma                       # CUDA tensor-core tests (hand-rolled WMMA)
 ./clpeak --cublas                     # CUDA vendor-SDK GEMM peak (cuBLASLt, all dtypes)
+./clpeak --rocwmma                    # AMD matrix-engine tests (hand-rolled rocWMMA)
+./clpeak --rocblas                    # AMD vendor-SDK GEMM peak (rocBLAS)
 ./clpeak --simdgroup-matrix           # Apple matrix-engine tests (hand-rolled simdgroup_matrix)
 ./clpeak --mps-gemm                   # Apple vendor-SDK GEMM peak (MPS / MPSGraph)
 ./clpeak --coopmat                    # Vulkan tensor-core tests
@@ -182,6 +187,7 @@ Multi-GPU machines pick devices per-backend:
 ./clpeak --cl-platform 0 --cl-device 1   # OpenCL platform/device pair
 ./clpeak --vk-device 1                   # Vulkan physical-device index
 ./clpeak --cuda-device 0                 # CUDA device ordinal
+./clpeak --rocm-device 0                 # ROCm/HIP device ordinal
 ./clpeak --mtl-device 0                  # Metal device index
 ```
 

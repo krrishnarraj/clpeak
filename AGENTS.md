@@ -1,7 +1,7 @@
 # clpeak — "compute latency peak"
 
 Cross-API GPU benchmark tool. Measures compute, bandwidth, and latency
-across OpenCL, Vulkan, CUDA, and Metal backends from a single binary.
+across OpenCL, Vulkan, CUDA, ROCm/HIP, and Metal backends from a single binary.
 
 ## Architecture
 
@@ -10,6 +10,7 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 ├── clPeak    → src/opencl/                         ← OpenCL backend
 ├── vkPeak    → src/vulkan/                         ← Vulkan backend
 ├── CudaPeak  → src/cuda/                           ← CUDA backend
+├── RocmPeak  → src/rocm/                           ← ROCm/HIP backend
 └── MetalPeak → src/metal/                          ← Metal backend
 ```
 
@@ -26,11 +27,13 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `include/opencl/` | OpenCL backend headers — `cl_peak.h`, `cl_common.h` |
 | `include/vulkan/` | Vulkan backend header — `vk_peak.h` |
 | `include/cuda/` | CUDA backend header — `cuda_peak.h` |
+| `include/rocm/` | ROCm/HIP backend header — `rocm_peak.h` |
 | `include/metal/` | Metal backend header — `mtl_peak.h` |
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
 | `src/cuda/` | CUDA backend: `CudaPeak` class + `.cu` kernels (NVRTC-compiled at runtime) |
+| `src/rocm/` | ROCm/HIP backend: `RocmPeak` class + `.hip` kernels (HIPRTC-compiled at runtime) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
 | `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |

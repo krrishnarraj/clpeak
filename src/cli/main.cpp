@@ -14,6 +14,9 @@
 #ifdef ENABLE_CUDA
 #include <cuda/cuda_peak.h>
 #endif
+#ifdef ENABLE_ROCM
+#include <rocm/rocm_peak.h>
+#endif
 #ifdef ENABLE_METAL
 #include <metal/mtl_peak.h>
 #endif
@@ -39,6 +42,10 @@ static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts
 #ifdef ENABLE_CUDA
     if (!opts.skipCuda)
         out.push_back(CudaPeak::enumerate());
+#endif
+#ifdef ENABLE_ROCM
+    if (!opts.skipRocm)
+        out.push_back(RocmPeak::enumerate());
 #endif
 #ifdef ENABLE_METAL
     if (!opts.skipMetal)
@@ -69,6 +76,10 @@ int main(int argc, char **argv)
 #ifdef ENABLE_CUDA
             if (inv.backend == "CUDA")
                 CudaPeak::printInventory(inv, std::cout);
+#endif
+#ifdef ENABLE_ROCM
+            if (inv.backend == "ROCm")
+                RocmPeak::printInventory(inv, std::cout);
 #endif
 #ifdef ENABLE_METAL
             if (inv.backend == "Metal")
@@ -121,6 +132,22 @@ int main(int argc, char **argv)
     }
 #endif
 
+    int rocmStatus = 0;
+#ifdef ENABLE_ROCM
+    if (!opts.skipRocm)
+    {
+        RocmPeak rocmObj;
+        rocmObj.log.reset(new LoggerCli(opts.compareFile));
+        rocmObj.applyOptions(opts);
+        rocmStatus = rocmObj.runAll();
+        mergeResults(combined, rocmObj.log->results);
+        if (rocmStatus != 0 && ((!opts.skipOpenCL && clStatus == 0) ||
+                                (!opts.skipVulkan && vkStatus == 0) ||
+                                (!opts.skipCuda   && cuStatus == 0)))
+            rocmStatus = 0;
+    }
+#endif
+
     int mtlStatus = 0;
 #ifdef ENABLE_METAL
     if (!opts.skipMetal)
@@ -133,7 +160,8 @@ int main(int argc, char **argv)
         if (mtlStatus != 0 &&
             ((!opts.skipOpenCL && clStatus  == 0) ||
              (!opts.skipVulkan && vkStatus  == 0) ||
-             (!opts.skipCuda   && cuStatus  == 0)))
+             (!opts.skipCuda   && cuStatus  == 0) ||
+             (!opts.skipRocm   && rocmStatus == 0)))
             mtlStatus = 0;
     }
 #endif
@@ -146,5 +174,6 @@ int main(int argc, char **argv)
     if (clStatus  != 0) return clStatus;
     if (vkStatus  != 0) return vkStatus;
     if (cuStatus  != 0) return cuStatus;
+    if (rocmStatus != 0) return rocmStatus;
     return mtlStatus;
 }

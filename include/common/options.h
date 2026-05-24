@@ -14,6 +14,7 @@ struct CliOptions {
   bool skipOpenCL = false;
   bool skipVulkan = false;
   bool skipCuda   = false;
+  bool skipRocm   = false;
   bool skipMetal  = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
@@ -30,6 +31,7 @@ struct CliOptions {
   // Per-backend device selectors (-1 = run all enumerated devices).
   int vkDeviceIndex   = -1;
   int cudaDeviceIndex = -1;
+  int rocmDeviceIndex = -1;
   int mtlDeviceIndex  = -1;
 
   // Iters / warmup.  When forceIters is false, each backend's runKernel

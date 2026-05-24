@@ -1,0 +1,49 @@
+# src/rocm — ROCm Backend Implementation
+
+`RocmPeak` class implementation: HIP runtime init, per-benchmark runners, and
+HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
+`peak_rocm` static library.
+
+## Quick Lookups
+
+- Looking for the main class / orchestrator? → `rocm_peak.cpp`
+- Looking for RocmDevice class (device init, HIPRTC compilation, caching)? → `rocm_device.cpp`
+- Looking for HIP runtime init / device enumeration? → `rocm_peak.cpp` (`initRuntime`)
+- Looking for the unified compute kernel runner? → `compute_kernel.cpp` (`runComputeKernel`)
+- Looking for kernel timing/calibration? → `rocm_peak.cpp` (`runKernel`)
+- Looking for FP compute benchmarks? → `compute_float.cpp`
+- Looking for int compute benchmarks? → `compute_int.cpp`
+- Looking for rocWMMA matrix benchmarks? → `rocwmma.cpp`
+- Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
+- Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
+- Looking for atomic benchmarks? → `atomic_throughput.cpp`
+- Looking for kernel latency? → `kernel_latency.cpp`
+- Looking for .hip kernel sources? → `rocm_kernels/*.hip`
+- Looking for kernel embedding logic? → `cmake/EmbedRocmKernels.cmake`
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `rocm_peak.cpp` | `RocmPeak` class: ctor, `applyOptions()`, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (HIPRTC compilation + module caching) |
+| `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
+| `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
+| `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
+| `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark |
+| `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak benchmark |
+| `global_bandwidth.cpp` | `runGlobalBandwidth` |
+| `local_bandwidth.cpp` | `runLocalBandwidth` |
+| `image_bandwidth.cpp` | `runImageBandwidth` via HIP texture object |
+| `transfer_bandwidth.cpp` | `runTransferBandwidth` |
+| `atomic_throughput.cpp` | `runAtomicThroughput` |
+| `kernel_latency.cpp` | `runKernelLatency` |
+| `rocm_kernels/` | HIP kernel sources (`.hip`) embedded as C++ string literals |
+| `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — .hip → C++ raw-string arrays |
+
+## When You Change This Directory
+
+- If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
+- If you add a new `.hip` kernel → add to `CLPEAK_ROCM_KERNELS` in `CMakeLists.txt`.
+- If you change `RocmPeak` interface → update `include/rocm/rocm_peak.h`.
+- If you change the HIPRTC include path → check `CLPEAK_ROCM_INCLUDE_DIR` compile definition.

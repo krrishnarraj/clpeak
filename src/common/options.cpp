@@ -37,6 +37,9 @@ static const char *helpStr =
 #ifdef ENABLE_CUDA
     "\n  --cuda                      run only the CUDA backend"
 #endif
+#ifdef ENABLE_ROCM
+    "\n  --rocm                      run only the ROCm/HIP backend"
+#endif
 #ifdef ENABLE_METAL
     "\n  --metal                     run only the Metal backend"
 #endif
@@ -49,6 +52,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CUDA
     "\n  --no-cuda                   skip the CUDA backend"
+#endif
+#ifdef ENABLE_ROCM
+    "\n  --no-rocm                   skip the ROCm/HIP backend"
 #endif
 #ifdef ENABLE_METAL
     "\n  --no-metal                  skip the Metal backend"
@@ -66,6 +72,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CUDA
     "\n  --cuda-device num           CUDA device ordinal (0-based)"
+#endif
+#ifdef ENABLE_ROCM
+    "\n  --rocm-device num           ROCm/HIP device ordinal (0-based)"
 #endif
 #ifdef ENABLE_METAL
     "\n  --mtl-device num            Metal device index (0-based)"
@@ -98,6 +107,10 @@ static const char *helpStr =
     "\n  --wmma                            | --no-wmma                      [CUDA]"
     "\n  --bmma                            | --no-bmma                      [CUDA]"
     "\n  --cublas                          | --no-cublas                    [CUDA]"
+#endif
+#ifdef ENABLE_ROCM
+    "\n  --rocwmma                         | --no-rocwmma                   [ROCm]"
+    "\n  --rocblas                         | --no-rocblas                   [ROCm]"
 #endif
 #ifdef ENABLE_VULKAN
     "\n  --coopmat                         | --no-coopmat                   [Vulkan]"
@@ -153,6 +166,10 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_CUDA
   {"cublas",                    Benchmark::Cublas},
+#endif
+#ifdef ENABLE_ROCM
+  {"rocwmma",                   Benchmark::Rocwmma},
+  {"rocblas",                   Benchmark::Rocblas},
 #endif
 #ifdef ENABLE_METAL
   {"mps-gemm",                  Benchmark::MpsGemm},
@@ -279,7 +296,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incMetal = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
@@ -310,6 +327,10 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
 #ifdef ENABLE_CUDA
     else if (!strcmp(a, "--no-cuda"))   out.skipCuda   = true;
     else if (!strcmp(a, "--cuda"))      { incCuda   = true; includeAny = true; }
+#endif
+#ifdef ENABLE_ROCM
+    else if (!strcmp(a, "--no-rocm")) out.skipRocm = true;
+    else if (!strcmp(a, "--rocm"))    { incRocm = true; includeAny = true; }
 #endif
 #ifdef ENABLE_METAL
     else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
@@ -409,6 +430,17 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       }
     }
 #endif
+#ifdef ENABLE_ROCM
+    else if (!strcmp(a, "--rocm-device"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseIntArg(v, out.rocmDeviceIndex))
+      {
+        std::cerr << "clpeak: invalid ROCm device index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+    }
+#endif
 #ifdef ENABLE_METAL
     else if (!strcmp(a, "--mtl-device"))
     {
@@ -493,6 +525,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     if (!incOpenCL) out.skipOpenCL = true;
     if (!incVulkan) out.skipVulkan = true;
     if (!incCuda)   out.skipCuda   = true;
+    if (!incRocm)   out.skipRocm   = true;
     if (!incMetal)  out.skipMetal  = true;
   }
 
