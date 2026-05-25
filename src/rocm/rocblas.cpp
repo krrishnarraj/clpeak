@@ -4,7 +4,8 @@
 #include <common/common.h>
 
 #ifdef CLPEAK_ROCM_HAS_ROCBLAS
-#include "rocblas.h"
+#include <rocblas/rocblas.h>
+#include <hip/hip_fp16.h>
 #endif
 
 namespace {
@@ -28,32 +29,32 @@ template <typename Fn>
 double timeRocblas(hipStream_t stream, Fn fn, unsigned int n)
 {
   hipEvent_t start = nullptr, stop = nullptr;
-  hipEventCreate(&start);
-  hipEventCreate(&stop);
+  (void)hipEventCreate(&start);
+  (void)hipEventCreate(&stop);
 
-  hipStreamSynchronize(stream);
-  hipEventRecord(start, stream);
+  (void)hipStreamSynchronize(stream);
+  (void)hipEventRecord(start, stream);
   for (unsigned int i = 0; i < n; i++)
   {
     if (fn() != rocblas_status_success)
     {
-      hipEventDestroy(start);
-      hipEventDestroy(stop);
+      (void)hipEventDestroy(start);
+      (void)hipEventDestroy(stop);
       return -1.0;
     }
   }
-  hipEventRecord(stop, stream);
+  (void)hipEventRecord(stop, stream);
   if (hipEventSynchronize(stop) != hipSuccess)
   {
-    hipEventDestroy(start);
-    hipEventDestroy(stop);
+    (void)hipEventDestroy(start);
+    (void)hipEventDestroy(stop);
     return -1.0;
   }
 
   float ms = 0.0f;
-  hipEventElapsedTime(&ms, start, stop);
-  hipEventDestroy(start);
-  hipEventDestroy(stop);
+  (void)hipEventElapsedTime(&ms, start, stop);
+  (void)hipEventDestroy(start);
+  (void)hipEventDestroy(stop);
   return (double)ms * 1000.0 / (double)n;
 }
 #endif
@@ -89,15 +90,15 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     test.skip("fp32", ResultStatus::Error, "Failed to allocate GEMM buffers");
     test.skip("fp64", ResultStatus::Error, "Failed to allocate GEMM buffers");
     test.skip("fp16", ResultStatus::Error, "Failed to allocate GEMM buffers");
-    if (dA) hipFree(dA);
-    if (dB) hipFree(dB);
-    if (dC) hipFree(dC);
+    if (dA) (void)hipFree(dA);
+    if (dB) (void)hipFree(dB);
+    if (dC) (void)hipFree(dC);
     return -1;
   }
 
-  hipMemset(dA, 0x3f, aBytes);
-  hipMemset(dB, 0x3f, bBytes);
-  hipMemset(dC, 0, cBytes);
+  (void)hipMemset(dA, 0x3f, aBytes);
+  (void)hipMemset(dB, 0x3f, bBytes);
+  (void)hipMemset(dC, 0, cBytes);
 
   rocblas_handle handle = nullptr;
   if (rocblas_create_handle(&handle) != rocblas_status_success)
@@ -105,7 +106,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     test.skip("fp32", ResultStatus::Error, "rocblas_create_handle failed");
     test.skip("fp64", ResultStatus::Error, "rocblas_create_handle failed");
     test.skip("fp16", ResultStatus::Error, "rocblas_create_handle failed");
-    hipFree(dA); hipFree(dB); hipFree(dC);
+    (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC);
     return -1;
   }
   rocblas_set_stream(handle, dev.stream);
@@ -151,8 +152,10 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
 
   if (dev.info.fp16Supported)
   {
-    const rocblas_half alpha16 = rocblas_half(1.0f);
-    const rocblas_half beta16 = rocblas_half(0.0f);
+    __half hAlpha = __float2half(1.0f);
+    __half hBeta  = __float2half(0.0f);
+    const rocblas_half alpha16 = {hAlpha.data};
+    const rocblas_half beta16  = {hBeta.data};
     runTimed("fp16", [&]() {
       return rocblas_hgemm(handle, rocblas_operation_none, rocblas_operation_none,
                            M, N, K, &alpha16,
@@ -168,9 +171,9 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   }
 
   rocblas_destroy_handle(handle);
-  hipFree(dA);
-  hipFree(dB);
-  hipFree(dC);
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
   return 0;
 #endif
 }
