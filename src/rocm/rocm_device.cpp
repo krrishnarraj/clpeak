@@ -88,12 +88,12 @@ bool RocmDevice::init(int devIndex)
 void RocmDevice::cleanup()
 {
   for (auto &kv : moduleCache)
-    hipModuleUnload(kv.second);
+    (void)hipModuleUnload(kv.second);
   moduleCache.clear();
 
   if (stream)
   {
-    hipStreamDestroy(stream);
+    (void)hipStreamDestroy(stream);
     stream = nullptr;
   }
 }

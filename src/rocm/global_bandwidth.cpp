@@ -28,16 +28,26 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     for (int i = 0; i < 3; i++)
       test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
     if (inBuf)
-      hipFree(inBuf);
+      (void)hipFree(inBuf);
     if (outBuf)
-      hipFree(outBuf);
+      (void)hipFree(outBuf);
     return -1;
   }
 
   float *hInput = new float[numItems];
   populate(hInput, numItems);
-  hipMemcpy(inBuf, hInput, numItems * sizeof(float), hipMemcpyHostToDevice);
+  hipError_t copyStatus = hipMemcpy(inBuf, hInput, numItems * sizeof(float),
+                                    hipMemcpyHostToDevice);
   delete[] hInput;
+  if (copyStatus != hipSuccess)
+  {
+    const char *labels[] = {"float", "float2", "float4"};
+    for (int i = 0; i < 3; i++)
+      test.skip(labels[i], ResultStatus::Error, "Failed to upload input buffer");
+    (void)hipFree(inBuf);
+    (void)hipFree(outBuf);
+    return -1;
+  }
 
   struct Variant
   {
@@ -84,8 +94,8 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     test.emit(key, gbps);
   }
 
-  hipFree(inBuf);
-  hipFree(outBuf);
+  (void)hipFree(inBuf);
+  (void)hipFree(outBuf);
   return 0;
 }
 

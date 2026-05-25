@@ -56,7 +56,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
                      isInt ? "rocwmma_int8" : "rocwmma_fp16", fn,
                      std::vector<const char *>(opts, opts + 1)))
   {
-    hipFree(outBuf);
+    (void)hipFree(outBuf);
     test.skip(metric, ResultStatus::Error, "Kernel compile failed");
     return 0;
   }
@@ -66,7 +66,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (us <= 0.0f)
   {
-    hipFree(outBuf);
+    (void)hipFree(outBuf);
     test.skip(metric, ResultStatus::Error, "kernel launch failed");
     return 0;
   }
@@ -76,7 +76,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   float value = (float)(ops * 1.0e6 / us / 1.0e12);
   test.emit(metric, value);
 
-  hipFree(outBuf);
+  (void)hipFree(outBuf);
   return 0;
 #endif
 }

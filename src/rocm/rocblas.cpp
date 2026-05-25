@@ -110,7 +110,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC);
     return -1;
   }
-  rocblas_set_stream(handle, dev.stream);
+  (void)rocblas_set_stream(handle, dev.stream);
 
   auto runTimed = [&](const char *label, auto gemmFn) {
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
@@ -172,7 +172,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device");
   }
 
-  rocblas_destroy_handle(handle);
+  (void)rocblas_destroy_handle(handle);
   (void)hipFree(dA);
   (void)hipFree(dB);
   (void)hipFree(dC);
