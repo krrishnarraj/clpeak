@@ -16,7 +16,7 @@ int RocmPeak::runAtomicThroughput(RocmDevice &dev, benchmark_config_t &cfg)
     void *buf = nullptr;
     if (hipMalloc(&buf, globalThreads * sizeof(int)) == hipSuccess)
     {
-      hipMemset(buf, 0, globalThreads * sizeof(int));
+      (void)hipMemset(buf, 0, globalThreads * sizeof(int));
       hipFunction_t fn;
       if (dev.getKernel(rocm_kernels::atomic_throughput_src,
                         rocm_kernels::atomic_throughput_name,
@@ -39,7 +39,7 @@ int RocmPeak::runAtomicThroughput(RocmDevice &dev, benchmark_config_t &cfg)
       {
         test.skip("int_global", ResultStatus::Error, "Kernel compile failed");
       }
-      hipFree(buf);
+      (void)hipFree(buf);
     }
     else
     {
@@ -73,7 +73,7 @@ int RocmPeak::runAtomicThroughput(RocmDevice &dev, benchmark_config_t &cfg)
       {
         test.skip("int_local", ResultStatus::Error, "Kernel compile failed");
       }
-      hipFree(buf);
+      (void)hipFree(buf);
     }
     else
     {

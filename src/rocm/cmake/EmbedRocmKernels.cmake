@@ -20,7 +20,7 @@ function(embed_rocm_kernels)
       APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${KERNEL}")
 
     file(READ "${KERNEL}" KSRC)
-    set(DELIM "CLPEAK_ROCM_KDELIM")
+    set(DELIM "K")
     string(APPEND CPP_CONTENT "// from ${KERNEL_NAME}.hip\n")
     string(APPEND CPP_CONTENT "const char *${KERNEL_NAME}_name = \"${KERNEL_NAME}.hip\";\n")
     string(APPEND CPP_CONTENT "const char *${KERNEL_NAME}_src = R\"${DELIM}(\n")

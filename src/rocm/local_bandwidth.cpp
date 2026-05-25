@@ -58,7 +58,7 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     test.emit(key, gbps);
   }
 
-  hipFree(outBuf);
+  (void)hipFree(outBuf);
   return 0;
 }
 

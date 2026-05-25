@@ -34,7 +34,7 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     delete[] staging;
     if (copyStatus != hipSuccess)
     {
-      hipFreeArray(arr);
+      (void)hipFreeArray(arr);
       test.skip("float4", ResultStatus::Error, "Image upload failed");
       return -1;
     }
@@ -54,7 +54,7 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   hipTextureObject_t tex = 0;
   if (hipCreateTextureObject(&tex, &rd, &td, nullptr) != hipSuccess)
   {
-    hipFreeArray(arr);
+    (void)hipFreeArray(arr);
     test.skip("float4", ResultStatus::Error, "Texture object create failed");
     return -1;
   }
@@ -62,8 +62,8 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   void *outBuf = nullptr;
   if (hipMalloc(&outBuf, globalThreads * sizeof(float)) != hipSuccess)
   {
-    hipDestroyTextureObject(tex);
-    hipFreeArray(arr);
+    (void)hipDestroyTextureObject(tex);
+    (void)hipFreeArray(arr);
     test.skip("float4", ResultStatus::Error, "Output buffer alloc failed");
     return -1;
   }
@@ -73,9 +73,9 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
                      rocm_kernels::image_bandwidth_name,
                      "image_bandwidth", fn))
   {
-    hipFree(outBuf);
-    hipDestroyTextureObject(tex);
-    hipFreeArray(arr);
+    (void)hipFree(outBuf);
+    (void)hipDestroyTextureObject(tex);
+    (void)hipFreeArray(arr);
     test.skip("float4", ResultStatus::Error, "Kernel compile failed");
     return -1;
   }
@@ -94,9 +94,9 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     test.emit("float4", (float)bytes / us / 1e3f);
   }
 
-  hipFree(outBuf);
-  hipDestroyTextureObject(tex);
-  hipFreeArray(arr);
+  (void)hipFree(outBuf);
+  (void)hipDestroyTextureObject(tex);
+  (void)hipFreeArray(arr);
   return 0;
 }
 

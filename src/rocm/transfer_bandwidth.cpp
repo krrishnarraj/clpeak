@@ -21,7 +21,7 @@ int RocmPeak::runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   void *hPinned = nullptr;
   if (hipHostMalloc(&hPinned, bytes) != hipSuccess)
   {
-    hipFree(dBuf);
+    (void)hipFree(dBuf);
     test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
     test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
     return -1;
@@ -32,11 +32,11 @@ int RocmPeak::runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   auto timeXfer = [&](bool h2d) -> float
   {
     hipEvent_t s = nullptr, e = nullptr;
-    hipEventCreate(&s);
-    hipEventCreate(&e);
+    (void)hipEventCreate(&s);
+    (void)hipEventCreate(&e);
 
     auto runBatch = [&](unsigned int n) -> float {
-      hipEventRecord(s, dev.stream);
+      (void)hipEventRecord(s, dev.stream);
       hipError_t status = hipSuccess;
       for (unsigned i = 0; i < n; i++)
       {
@@ -50,36 +50,36 @@ int RocmPeak::runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       }
       if (status != hipSuccess)
         return -1.0f;
-      hipEventRecord(e, dev.stream);
+      (void)hipEventRecord(e, dev.stream);
       if (hipEventSynchronize(e) != hipSuccess)
         return -1.0f;
       float ms = 0.0f;
-      hipEventElapsedTime(&ms, s, e);
+      (void)hipEventElapsedTime(&ms, s, e);
       return ms * 1000.0f;
     };
 
     for (unsigned w = 0; w < warmupCount; w++)
     {
-      hipMemcpyAsync(h2d ? dBuf : hPinned,
-                     h2d ? hPinned : dBuf,
-                     bytes,
-                     h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
-                     dev.stream);
-      hipStreamSynchronize(dev.stream);
+      (void)hipMemcpyAsync(h2d ? dBuf : hPinned,
+                           h2d ? hPinned : dBuf,
+                           bytes,
+                           h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
+                           dev.stream);
+      (void)hipStreamSynchronize(dev.stream);
     }
 
     float probeUs = runBatch(1);
     if (probeUs <= 0.0f)
     {
-      hipEventDestroy(s);
-      hipEventDestroy(e);
+      (void)hipEventDestroy(s);
+      (void)hipEventDestroy(e);
       return -1.0f;
     }
     unsigned int iters = pickIters((double)probeUs, cfg.targetTimeUs, forced);
     float totalUs = runBatch(iters);
 
-    hipEventDestroy(s);
-    hipEventDestroy(e);
+    (void)hipEventDestroy(s);
+    (void)hipEventDestroy(e);
     return totalUs > 0.0f ? totalUs / iters : -1.0f;
   };
 
@@ -95,8 +95,8 @@ int RocmPeak::runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   else
     test.skip("d2h_pinned", ResultStatus::Error, "transfer failed");
 
-  hipHostFree(hPinned);
-  hipFree(dBuf);
+  (void)hipHostFree(hPinned);
+  (void)hipFree(dBuf);
   return 0;
 }
 
