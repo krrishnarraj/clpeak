@@ -6,6 +6,7 @@
 #include <common/options.h>
 #include <chrono>
 #include <cstdio>
+#include <ostream>
 #include <utility>
 
 static const char *hipErrStr(hipError_t r)
@@ -57,7 +58,7 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
 
   auto runBatch = [&](unsigned int n) -> float {
     hipError_t status = hipSuccess;
-    hipEventRecord(start, dev.stream);
+    (void)hipEventRecord(start, dev.stream);
     for (unsigned int i = 0; i < n; i++)
     {
       status = hipModuleLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1,
@@ -70,7 +71,7 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
       fprintf(stderr, "hipModuleLaunchKernel failed: %s\n", hipErrStr(status));
       return -1.0f;
     }
-    hipEventRecord(stop, dev.stream);
+    (void)hipEventRecord(stop, dev.stream);
     status = hipEventSynchronize(stop);
     if (status != hipSuccess)
     {
@@ -78,7 +79,7 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
       return -1.0f;
     }
     float ms = 0.0f;
-    hipEventElapsedTime(&ms, start, stop);
+    (void)hipEventElapsedTime(&ms, start, stop);
     return ms * 1000.0f;
   };
 
@@ -89,8 +90,8 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
     hipError_t sr = hipStreamSynchronize(dev.stream);
     if (lr != hipSuccess || sr != hipSuccess)
     {
-      hipEventDestroy(start);
-      hipEventDestroy(stop);
+      (void)hipEventDestroy(start);
+      (void)hipEventDestroy(stop);
       return -1.0f;
     }
   }
@@ -98,16 +99,16 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
   float probeUs = runBatch(1);
   if (probeUs <= 0.0f)
   {
-    hipEventDestroy(start);
-    hipEventDestroy(stop);
+    (void)hipEventDestroy(start);
+    (void)hipEventDestroy(stop);
     return -1.0f;
   }
 
   unsigned int iters = pickIters((double)probeUs, targetTimeUsLocal, forcedIters);
   float totalUs = runBatch(iters);
 
-  hipEventDestroy(start);
-  hipEventDestroy(stop);
+  (void)hipEventDestroy(start);
+  (void)hipEventDestroy(stop);
 
   return totalUs > 0.0f ? totalUs / static_cast<float>(iters) : -1.0f;
 }
@@ -227,8 +228,7 @@ BackendInventory RocmPeak::enumerate()
     InventoryDevice dev;
     dev.index = i;
     dev.name = props.name;
-    dev.type = DeviceType::Gpu;
-    dev.typeStr = props.gcnArchName[0] ? props.gcnArchName : "gfx";
+    dev.typeStr = "GPU";
     plat.devices.push_back(std::move(dev));
   }
 
