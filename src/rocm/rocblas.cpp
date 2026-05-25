@@ -2,6 +2,7 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+#include <cstring>
 
 #ifdef CLPEAK_ROCM_HAS_ROCBLAS
 #include <rocblas/rocblas.h>
@@ -154,8 +155,9 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   {
     __half hAlpha = __float2half(1.0f);
     __half hBeta  = __float2half(0.0f);
-    const rocblas_half alpha16 = {hAlpha.data};
-    const rocblas_half beta16  = {hBeta.data};
+    rocblas_half alpha16, beta16;
+    std::memcpy(&alpha16, &hAlpha, sizeof(rocblas_half));
+    std::memcpy(&beta16, &hBeta,  sizeof(rocblas_half));
     runTimed("fp16", [&]() {
       return rocblas_hgemm(handle, rocblas_operation_none, rocblas_operation_none,
                            M, N, K, &alpha16,
