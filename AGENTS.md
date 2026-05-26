@@ -1,17 +1,19 @@
 # clpeak — "compute latency peak"
 
 Cross-API GPU benchmark tool. Measures compute, bandwidth, and latency
-across OpenCL, Vulkan, CUDA, ROCm/HIP, and Metal backends from a single binary.
+across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL backends from
+a single binary.
 
 ## Architecture
 
 ```
 Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
-├── clPeak    → src/opencl/                         ← OpenCL backend
-├── vkPeak    → src/vulkan/                         ← Vulkan backend
-├── CudaPeak  → src/cuda/                           ← CUDA backend
-├── RocmPeak  → src/rocm/                           ← ROCm/HIP backend
-└── MetalPeak → src/metal/                          ← Metal backend
+├── clPeak     → src/opencl/                         ← OpenCL backend
+├── vkPeak     → src/vulkan/                         ← Vulkan backend
+├── CudaPeak   → src/cuda/                           ← CUDA backend
+├── RocmPeak   → src/rocm/                           ← ROCm/HIP backend
+├── MetalPeak  → src/metal/                          ← Metal backend
+└── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
 ```
 
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
@@ -29,12 +31,14 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `include/cuda/` | CUDA backend header — `cuda_peak.h` |
 | `include/rocm/` | ROCm/HIP backend header — `rocm_peak.h` |
 | `include/metal/` | Metal backend header — `mtl_peak.h` |
+| `include/oneapi/` | oneAPI/SYCL backend header — `oneapi_peak.h` |
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
 | `src/cuda/` | CUDA backend: `CudaPeak` class + `.cu` kernels (NVRTC-compiled at runtime) |
 | `src/rocm/` | ROCm/HIP backend: `RocmPeak` class + `.hip` kernels (HIPRTC-compiled at runtime) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
+| `src/oneapi/` | oneAPI/SYCL backend: `OneapiPeak` class + SYCL kernels (inline lambdas, AOT/JIT via DPC++) |
 | `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `android/` | Android app with JNI native module, its own `logger_android.cpp` |
@@ -44,6 +48,8 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
+- oneAPI requires `-DCMAKE_CXX_COMPILER=icpx` (or `clang++ -fsycl`) and the
+  Intel oneAPI Base Toolkit (sources `setvars.sh` before invoking cmake).
 
 ## Quick Lookups
 

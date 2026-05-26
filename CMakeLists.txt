@@ -15,6 +15,7 @@ option(CLPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)
 option(CLPEAK_ENABLE_CUDA   "Build CUDA backend"   ON)
 option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
 option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
+option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx or clang++ -fsycl)" ON)
 
 # Find Vulkan (needed by src/vulkan/CMakeLists.txt)
 if(CLPEAK_ENABLE_VULKAN)
@@ -69,6 +70,16 @@ if(APPLE AND CLPEAK_ENABLE_METAL)
     find_library(MPS_FRAMEWORK MetalPerformanceShaders)
     find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
 endif()
+# Find Intel oneAPI / SYCL (needed by src/oneapi/CMakeLists.txt)
+if(CLPEAK_ENABLE_ONEAPI)
+    # IntelSYCL ships with the Intel oneAPI Base Toolkit.  When compiling with
+    # icpx (or clang++ -fsycl), it exposes add_sycl_to_target() and the
+    # IntelSYCL::SYCL_CXX imported target.
+    find_package(IntelSYCL CONFIG QUIET)
+    # Optional vendor libraries.  MKL_SYCL is the SYCL-enabled BLAS subset of
+    # oneMKL; only present when the user installed the MKL component.
+    find_package(MKL CONFIG QUIET)
+endif()
 
 # Always build common
 add_subdirectory(src/common)
@@ -79,6 +90,7 @@ add_subdirectory(src/vulkan)
 add_subdirectory(src/cuda)
 add_subdirectory(src/rocm)
 add_subdirectory(src/metal)
+add_subdirectory(src/oneapi)
 
 # CLI executable
 add_subdirectory(src/cli)
@@ -130,6 +142,20 @@ elseif(CLPEAK_ENABLE_METAL)
     string(APPEND _clpeak_summary "  Metal  : disabled (non-Apple host)\n")
 else()
     string(APPEND _clpeak_summary "  Metal  : disabled (CLPEAK_ENABLE_METAL=OFF)\n")
+endif()
+if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND)
+    set(_clpeak_oneapi_features "SYCL")
+    if(MKL_FOUND)
+        string(APPEND _clpeak_oneapi_features ", oneMKL")
+    endif()
+    if(CLPEAK_ONEAPI_HAS_JOINT_MATRIX)
+        string(APPEND _clpeak_oneapi_features ", joint_matrix")
+    endif()
+    string(APPEND _clpeak_summary "  oneAPI : ENABLED  (${_clpeak_oneapi_features})\n")
+elseif(CLPEAK_ENABLE_ONEAPI)
+    string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - use icpx / clang++ -fsycl)\n")
+else()
+    string(APPEND _clpeak_summary "  oneAPI : disabled (CLPEAK_ENABLE_ONEAPI=OFF)\n")
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")

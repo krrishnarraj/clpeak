@@ -43,6 +43,9 @@ static const char *helpStr =
 #ifdef ENABLE_METAL
     "\n  --metal                     run only the Metal backend"
 #endif
+#ifdef ENABLE_ONEAPI
+    "\n  --oneapi                    run only the oneAPI/SYCL backend"
+#endif
     "\n  (multiple --<backend> flags can be combined)"
 #ifdef ENABLE_OPENCL
     "\n  --no-opencl                 skip the OpenCL backend"
@@ -58,6 +61,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_METAL
     "\n  --no-metal                  skip the Metal backend"
+#endif
+#ifdef ENABLE_ONEAPI
+    "\n  --no-oneapi                 skip the oneAPI/SYCL backend"
 #endif
     "\n"
     "\n DEVICE SELECTION:"
@@ -78,6 +84,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_METAL
     "\n  --mtl-device num            Metal device index (0-based)"
+#endif
+#ifdef ENABLE_ONEAPI
+    "\n  --oneapi-device num         oneAPI/SYCL device index (0-based)"
 #endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
@@ -118,6 +127,10 @@ static const char *helpStr =
 #ifdef ENABLE_METAL
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
+#endif
+#ifdef ENABLE_ONEAPI
+    "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"
+    "\n  --onemkl                          | --no-onemkl                    [oneAPI]"
 #endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
@@ -173,6 +186,10 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_METAL
   {"mps-gemm",                  Benchmark::MpsGemm},
+#endif
+#ifdef ENABLE_ONEAPI
+  {"joint-matrix",              Benchmark::JointMatrix},
+  {"onemkl",                    Benchmark::Onemkl},
 #endif
   {"global-memory-bandwidth",   Benchmark::GlobalBW},
   {"local-memory-bandwidth",    Benchmark::LocalBW},
@@ -296,7 +313,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
@@ -335,6 +352,10 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
 #ifdef ENABLE_METAL
     else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
     else if (!strcmp(a, "--metal"))     { incMetal  = true; includeAny = true; }
+#endif
+#ifdef ENABLE_ONEAPI
+    else if (!strcmp(a, "--no-oneapi")) out.skipOneapi = true;
+    else if (!strcmp(a, "--oneapi"))    { incOneapi = true; includeAny = true; }
 #endif
 
     // ---- iters / warmup -------------------------------------------------
@@ -452,6 +473,17 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       }
     }
 #endif
+#ifdef ENABLE_ONEAPI
+    else if (!strcmp(a, "--oneapi-device"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      if (!parseIntArg(v, out.oneapiDeviceIndex))
+      {
+        std::cerr << "clpeak: invalid oneAPI device index: " << v << "\n";
+        printHelpAndExit(-1);
+      }
+    }
+#endif
 
     // ---- OpenCL-specific timer ------------------------------------------
 #ifdef ENABLE_OPENCL
@@ -527,6 +559,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     if (!incCuda)   out.skipCuda   = true;
     if (!incRocm)   out.skipRocm   = true;
     if (!incMetal)  out.skipMetal  = true;
+    if (!incOneapi) out.skipOneapi = true;
   }
 
   return 0;

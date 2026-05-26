@@ -20,6 +20,9 @@
 #ifdef ENABLE_METAL
 #include <metal/mtl_peak.h>
 #endif
+#ifdef ENABLE_ONEAPI
+#include <oneapi/oneapi_peak.h>
+#endif
 
 static void mergeResults(ResultStore &dst, const ResultStore &src)
 {
@@ -50,6 +53,10 @@ static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts
 #ifdef ENABLE_METAL
     if (!opts.skipMetal)
         out.push_back(MetalPeak::enumerate());
+#endif
+#ifdef ENABLE_ONEAPI
+    if (!opts.skipOneapi)
+        out.push_back(OneapiPeak::enumerate());
 #endif
     return out;
 }
@@ -84,6 +91,10 @@ int main(int argc, char **argv)
 #ifdef ENABLE_METAL
             if (inv.backend == "Metal")
                 MetalPeak::printInventory(inv, std::cout);
+#endif
+#ifdef ENABLE_ONEAPI
+            if (inv.backend == "oneAPI")
+                OneapiPeak::printInventory(inv, std::cout);
 #endif
         }
         return 0;
@@ -166,14 +177,34 @@ int main(int argc, char **argv)
     }
 #endif
 
+    int oneapiStatus = 0;
+#ifdef ENABLE_ONEAPI
+    if (!opts.skipOneapi)
+    {
+        OneapiPeak oneObj;
+        oneObj.log.reset(new LoggerCli(opts.compareFile));
+        oneObj.applyOptions(opts);
+        oneapiStatus = oneObj.runAll();
+        mergeResults(combined, oneObj.log->results);
+        if (oneapiStatus != 0 &&
+            ((!opts.skipOpenCL && clStatus   == 0) ||
+             (!opts.skipVulkan && vkStatus   == 0) ||
+             (!opts.skipCuda   && cuStatus   == 0) ||
+             (!opts.skipRocm   && rocmStatus == 0) ||
+             (!opts.skipMetal  && mtlStatus  == 0)))
+            oneapiStatus = 0;
+    }
+#endif
+
     // Centralized file dump: one file per enabled format.
     if (opts.enableJson) saveJson(combined, opts.jsonFile);
     if (opts.enableCsv)  saveCsv (combined, opts.csvFile);
     if (opts.enableXml)  saveXml (combined, opts.xmlFile);
 
-    if (clStatus  != 0) return clStatus;
-    if (vkStatus  != 0) return vkStatus;
-    if (cuStatus  != 0) return cuStatus;
-    if (rocmStatus != 0) return rocmStatus;
-    return mtlStatus;
+    if (clStatus     != 0) return clStatus;
+    if (vkStatus     != 0) return vkStatus;
+    if (cuStatus     != 0) return cuStatus;
+    if (rocmStatus   != 0) return rocmStatus;
+    if (mtlStatus    != 0) return mtlStatus;
+    return oneapiStatus;
 }

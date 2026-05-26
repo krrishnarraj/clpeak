@@ -16,6 +16,7 @@ struct CliOptions {
   bool skipCuda   = false;
   bool skipRocm   = false;
   bool skipMetal  = false;
+  bool skipOneapi = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
   // applyOptions can copy it).
@@ -29,10 +30,11 @@ struct CliOptions {
   std::string   deviceName;
 
   // Per-backend device selectors (-1 = run all enumerated devices).
-  int vkDeviceIndex   = -1;
-  int cudaDeviceIndex = -1;
-  int rocmDeviceIndex = -1;
-  int mtlDeviceIndex  = -1;
+  int vkDeviceIndex     = -1;
+  int cudaDeviceIndex   = -1;
+  int rocmDeviceIndex   = -1;
+  int mtlDeviceIndex    = -1;
+  int oneapiDeviceIndex = -1;
 
   // Iters / warmup.  When forceIters is false, each backend's runKernel
   // calibrates iters from a one-shot timed warmup so the timed phase lands

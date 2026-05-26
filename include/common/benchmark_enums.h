@@ -37,6 +37,8 @@ enum class Benchmark : unsigned int {
     Cublas,
     Rocwmma,
     Rocblas,
+    JointMatrix,
+    Onemkl,
     AtomicThroughput,
     TransferBW,
     KernelLatency,
@@ -79,6 +81,8 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::MpsGemm:
     case Benchmark::Rocwmma:
     case Benchmark::Rocblas:
+    case Benchmark::JointMatrix:
+    case Benchmark::Onemkl:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:
