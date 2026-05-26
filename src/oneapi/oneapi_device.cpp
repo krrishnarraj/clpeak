@@ -63,9 +63,8 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
   info.fp16Supported = dev.has(sycl::aspect::fp16);
   info.fp64Supported = dev.has(sycl::aspect::fp64);
 
-  // bf16: aspect was promoted from ext_oneapi_bfloat16_math_functions on
-  // newer SYCL releases.  Probe both, ignore unknown-aspect throws.
-  try { info.bf16Supported = dev.has(sycl::aspect::ext_oneapi_bfloat16_math_functions); }
+  // bf16: aspect was promoted to sycl::aspect::bf16 in newer SYCL releases
+  try { info.bf16Supported = dev.has(sycl::aspect::bf16); }
   catch (...) { info.bf16Supported = false; }
 
   try

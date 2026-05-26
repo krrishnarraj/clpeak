@@ -31,7 +31,7 @@ struct oneapi_device_info_t {
 
   bool fp16Supported = false;
   bool fp64Supported = false;
-  bool bf16Supported = false;     // queried via sycl::aspect::ext_oneapi_bfloat16
+  bool bf16Supported = false;     // queried via sycl::aspect::bf16
   bool xmxSupported = false;      // Xe-cores Matrix eXtensions (Arc / PVC / Battlemage)
 };
 
