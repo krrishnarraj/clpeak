@@ -11,9 +11,9 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(
     {"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
 
-  if (!dev.dev.has(sycl::aspect::image))
+  if (!dev.dev.has(sycl::aspect::ext_intel_legacy_image))
   {
-    test.skip("float4", ResultStatus::Unsupported, "device does not advertise sycl::aspect::image");
+    test.skip("float4", ResultStatus::Unsupported, "device does not advertise ext_intel_legacy_image");
     return 0;
   }
 
