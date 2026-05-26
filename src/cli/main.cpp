@@ -3,6 +3,7 @@
 #include <common/inventory.h>
 #include <common/result_store.h>
 #include <cli/logger_cli.h>
+#include <functional>
 #include <iostream>
 
 #ifdef ENABLE_OPENCL
@@ -29,35 +30,87 @@ static void mergeResults(ResultStore &dst, const ResultStore &src)
     dst.insert(dst.end(), src.begin(), src.end());
 }
 
-// Aggregate every backend not skipped in opts.  Lives here (not in common)
-// because it needs every backend header.
-static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
+// A thin wrapper that captures everything we need per backend so the rest of
+// main() can iterate instead of repeating #ifdef-guarded blocks.
+struct BackendEntry
 {
-    std::vector<BackendInventory> out;
+    const char *name;
+    std::function<BackendInventory()> enumerate;
+    std::function<void(const BackendInventory &, std::ostream &)> printInv;
+    std::function<std::unique_ptr<Peak>()> create;
+    bool CliOptions::*skip;
+};
+
+// Build the backend list once.  Each enabled backend registers its static
+// enumerate / printInventory / factory lambdas here so that main() only
+// has simple loops.
+static std::vector<BackendEntry> buildBackends()
+{
+    std::vector<BackendEntry> out;
 #ifdef ENABLE_OPENCL
-    if (!opts.skipOpenCL)
-        out.push_back(clPeak::enumerate());
+    out.push_back({
+        "OpenCL",
+        []{ return clPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ clPeak::printInventory(inv, os); },
+        []{ return std::make_unique<clPeak>(); },
+        &CliOptions::skipOpenCL,
+    });
 #endif
 #ifdef ENABLE_VULKAN
-    if (!opts.skipVulkan)
-        out.push_back(vkPeak::enumerate());
+    out.push_back({
+        "Vulkan",
+        []{ return vkPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ vkPeak::printInventory(inv, os); },
+        []{ return std::make_unique<vkPeak>(); },
+        &CliOptions::skipVulkan,
+    });
 #endif
 #ifdef ENABLE_CUDA
-    if (!opts.skipCuda)
-        out.push_back(CudaPeak::enumerate());
+    out.push_back({
+        "CUDA",
+        []{ return CudaPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ CudaPeak::printInventory(inv, os); },
+        []{ return std::make_unique<CudaPeak>(); },
+        &CliOptions::skipCuda,
+    });
 #endif
 #ifdef ENABLE_ROCM
-    if (!opts.skipRocm)
-        out.push_back(RocmPeak::enumerate());
+    out.push_back({
+        "ROCm",
+        []{ return RocmPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ RocmPeak::printInventory(inv, os); },
+        []{ return std::make_unique<RocmPeak>(); },
+        &CliOptions::skipRocm,
+    });
 #endif
 #ifdef ENABLE_METAL
-    if (!opts.skipMetal)
-        out.push_back(MetalPeak::enumerate());
+    out.push_back({
+        "Metal",
+        []{ return MetalPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ MetalPeak::printInventory(inv, os); },
+        []{ return std::make_unique<MetalPeak>(); },
+        &CliOptions::skipMetal,
+    });
 #endif
 #ifdef ENABLE_ONEAPI
-    if (!opts.skipOneapi)
-        out.push_back(OneapiPeak::enumerate());
+    out.push_back({
+        "oneAPI",
+        []{ return OneapiPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ OneapiPeak::printInventory(inv, os); },
+        []{ return std::make_unique<OneapiPeak>(); },
+        &CliOptions::skipOneapi,
+    });
 #endif
+    return out;
+}
+
+static std::vector<BackendInventory> enumerateAllBackends(
+    const CliOptions &opts, const std::vector<BackendEntry> &backends)
+{
+    std::vector<BackendInventory> out;
+    for (const auto &be : backends)
+        if (!(opts.*(be.skip)))
+            out.push_back(be.enumerate());
     return out;
 }
 
@@ -66,145 +119,52 @@ int main(int argc, char **argv)
     CliOptions opts;
     parseCliOptions(argc, argv, opts);
 
+    auto backends = buildBackends();
+
     // --list-devices: print every backend's inventory.
     if (opts.listDevices)
     {
-        auto invs = enumerateAllBackends(opts);
+        auto invs = enumerateAllBackends(opts, backends);
         for (const auto &inv : invs)
-        {
-#ifdef ENABLE_OPENCL
-            if (inv.backend == "OpenCL")
-                clPeak::printInventory(inv, std::cout);
-#endif
-#ifdef ENABLE_VULKAN
-            if (inv.backend == "Vulkan")
-                vkPeak::printInventory(inv, std::cout);
-#endif
-#ifdef ENABLE_CUDA
-            if (inv.backend == "CUDA")
-                CudaPeak::printInventory(inv, std::cout);
-#endif
-#ifdef ENABLE_ROCM
-            if (inv.backend == "ROCm")
-                RocmPeak::printInventory(inv, std::cout);
-#endif
-#ifdef ENABLE_METAL
-            if (inv.backend == "Metal")
-                MetalPeak::printInventory(inv, std::cout);
-#endif
-#ifdef ENABLE_ONEAPI
-            if (inv.backend == "oneAPI")
-                OneapiPeak::printInventory(inv, std::cout);
-#endif
-        }
+            for (const auto &be : backends)
+                if (inv.backend == be.name)
+                {
+                    be.printInv(inv, std::cout);
+                    break;
+                }
         return 0;
     }
 
     ResultStore combined;
 
-    int clStatus = 0;
-#ifdef ENABLE_OPENCL
-    if (!opts.skipOpenCL)
-    {
-        clPeak clObj;
-        clObj.log.reset(new LoggerCli(opts.compareFile));
-        clObj.applyOptions(opts);
-        clStatus = clObj.runAll();
-        mergeResults(combined, clObj.log->results);
-    }
-#endif
+    // Run every enabled backend in order.  If a backend fails but at least
+    // one preceding backend succeeded, we suppress the error so that a
+    // single broken device doesn't mask results from healthy ones.
+    bool anyPrecedingSucceeded = false;
+    int  lastError = 0;
 
-    int vkStatus = 0;
-#ifdef ENABLE_VULKAN
-    if (!opts.skipVulkan)
+    for (const auto &be : backends)
     {
-        vkPeak vkObj;
-        vkObj.log.reset(new LoggerCli(opts.compareFile));
-        vkObj.applyOptions(opts);
-        vkStatus = vkObj.runAll();
-        mergeResults(combined, vkObj.log->results);
-        if (vkStatus != 0 && !opts.skipOpenCL && clStatus == 0)
-            vkStatus = 0;
-    }
-#endif
+        if (opts.*(be.skip)) continue;
 
-    int cuStatus = 0;
-#ifdef ENABLE_CUDA
-    if (!opts.skipCuda)
-    {
-        CudaPeak cuObj;
-        cuObj.log.reset(new LoggerCli(opts.compareFile));
-        cuObj.applyOptions(opts);
-        cuStatus = cuObj.runAll();
-        mergeResults(combined, cuObj.log->results);
-        if (cuStatus != 0 && ((!opts.skipOpenCL && clStatus == 0) ||
-                              (!opts.skipVulkan && vkStatus == 0)))
-            cuStatus = 0;
-    }
-#endif
+        auto peak = be.create();
+        peak->log.reset(new LoggerCli(opts.compareFile));
+        peak->applyOptions(opts);
+        int status = peak->runAll();
+        mergeResults(combined, peak->log->results);
 
-    int rocmStatus = 0;
-#ifdef ENABLE_ROCM
-    if (!opts.skipRocm)
-    {
-        RocmPeak rocmObj;
-        rocmObj.log.reset(new LoggerCli(opts.compareFile));
-        rocmObj.applyOptions(opts);
-        rocmStatus = rocmObj.runAll();
-        mergeResults(combined, rocmObj.log->results);
-        if (rocmStatus != 0 && ((!opts.skipOpenCL && clStatus == 0) ||
-                                (!opts.skipVulkan && vkStatus == 0) ||
-                                (!opts.skipCuda   && cuStatus == 0)))
-            rocmStatus = 0;
+        if (status != 0 && anyPrecedingSucceeded)
+            status = 0;
+        if (status == 0)
+            anyPrecedingSucceeded = true;
+        if (status != 0)
+            lastError = status;
     }
-#endif
-
-    int mtlStatus = 0;
-#ifdef ENABLE_METAL
-    if (!opts.skipMetal)
-    {
-        MetalPeak mtlObj;
-        mtlObj.log.reset(new LoggerCli(opts.compareFile));
-        mtlObj.applyOptions(opts);
-        mtlStatus = mtlObj.runAll();
-        mergeResults(combined, mtlObj.log->results);
-        if (mtlStatus != 0 &&
-            ((!opts.skipOpenCL && clStatus  == 0) ||
-             (!opts.skipVulkan && vkStatus  == 0) ||
-             (!opts.skipCuda   && cuStatus  == 0) ||
-             (!opts.skipRocm   && rocmStatus == 0)))
-            mtlStatus = 0;
-    }
-#endif
-
-    int oneapiStatus = 0;
-#ifdef ENABLE_ONEAPI
-    if (!opts.skipOneapi)
-    {
-        OneapiPeak oneObj;
-        oneObj.log.reset(new LoggerCli(opts.compareFile));
-        oneObj.applyOptions(opts);
-        oneapiStatus = oneObj.runAll();
-        mergeResults(combined, oneObj.log->results);
-        if (oneapiStatus != 0 &&
-            ((!opts.skipOpenCL && clStatus   == 0) ||
-             (!opts.skipVulkan && vkStatus   == 0) ||
-             (!opts.skipCuda   && cuStatus   == 0) ||
-             (!opts.skipRocm   && rocmStatus == 0) ||
-             (!opts.skipMetal  && mtlStatus  == 0)))
-            oneapiStatus = 0;
-    }
-#endif
 
     // Centralized file dump: one file per enabled format.
     if (opts.enableJson) saveJson(combined, opts.jsonFile);
     if (opts.enableCsv)  saveCsv (combined, opts.csvFile);
     if (opts.enableXml)  saveXml (combined, opts.xmlFile);
 
-    if (clStatus     != 0) return clStatus;
-    if (vkStatus     != 0) return vkStatus;
-    if (cuStatus     != 0) return cuStatus;
-    if (rocmStatus   != 0) return rocmStatus;
-    if (mtlStatus    != 0) return mtlStatus;
-    return oneapiStatus;
+    return lastError;
 }
