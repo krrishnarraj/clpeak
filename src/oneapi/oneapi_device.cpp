@@ -63,9 +63,10 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
   info.fp16Supported = dev.has(sycl::aspect::fp16);
   info.fp64Supported = dev.has(sycl::aspect::fp64);
 
-  // bf16: aspect was promoted to sycl::aspect::bf16 in newer SYCL releases
-  try { info.bf16Supported = dev.has(sycl::aspect::bf16); }
-  catch (...) { info.bf16Supported = false; }
+  // bf16: no SYCL aspect exists in oneAPI 2026.0+ — Intel removed it
+  // because all SYCL-capable Intel GPUs (Xe-LP / DG2 / Arc / PVC) have
+  // native bf16 hardware.
+  info.bf16Supported = true;
 
   try
   {
