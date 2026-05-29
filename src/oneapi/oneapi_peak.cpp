@@ -23,32 +23,53 @@ void OneapiPeak::applyOptions(const CliOptions &opts)
   deviceIndex = opts.oneapiDeviceIndex;
 }
 
-// Pull every SYCL-visible GPU device.  Filter CPU/accelerator out — clpeak
-// is a GPU benchmark tool, and on a typical install the SYCL CPU device
-// would otherwise show up alongside the iGPU and confuse the matrix.
-static std::vector<sycl::device> enumerateGpus()
+// Collect every SYCL device of a given type across all platforms.
+static void collectDevices(sycl::info::device_type type,
+                           std::vector<sycl::device> &out)
 {
-  std::vector<sycl::device> out;
   try
   {
     for (const auto &p : sycl::platform::get_platforms())
-    {
-      for (const auto &d : p.get_devices(sycl::info::device_type::gpu))
+      for (const auto &d : p.get_devices(type))
         out.push_back(d);
-    }
   }
   catch (const sycl::exception &e)
   {
     fprintf(stderr, "sycl::platform::get_platforms failed: %s\n", e.what());
   }
+}
+
+// Pick the SYCL devices to benchmark.  clpeak is primarily a GPU tool, so we
+// prefer GPUs and (on a typical machine) leave the SYCL CPU device out so it
+// doesn't clutter the matrix alongside the iGPU.  But SYCL kernels also run
+// fine on the CPU/accelerator runtime, so if there is NO GPU visible (e.g.
+// the Level Zero / Intel compute runtime isn't installed) we fall back to
+// the CPU and any accelerator rather than reporting nothing.
+static std::vector<sycl::device> enumerateDevices()
+{
+  std::vector<sycl::device> out;
+  collectDevices(sycl::info::device_type::gpu, out);
+  if (out.empty())
+  {
+    collectDevices(sycl::info::device_type::cpu, out);
+    collectDevices(sycl::info::device_type::accelerator, out);
+  }
   return out;
+}
+
+static const char *deviceTypeStr(const sycl::device &d)
+{
+  if (d.is_gpu())         return "GPU";
+  if (d.is_cpu())         return "CPU";
+  if (d.is_accelerator()) return "Accelerator";
+  return "Other";
 }
 
 bool OneapiPeak::initRuntime()
 {
   if (initialised)
     return true;
-  devices = enumerateGpus();
+  devices = enumerateDevices();
   initialised = true;
   return true;
 }
@@ -109,7 +130,8 @@ int OneapiPeak::runAll()
   }
   if (devices.empty())
   {
-    log->note("oneAPI: no SYCL GPU devices found\n");
+    log->note("oneAPI: no SYCL devices found (no GPU, CPU, or accelerator "
+              "visible to the SYCL runtime)\n");
     return -1;
   }
 
@@ -138,6 +160,7 @@ int OneapiPeak::runAll()
       dev.info.driverVersion,
       {
         {"Vendor",  dev.info.vendor},
+        {"Type",    deviceTypeStr(devices[idx])},
         {"Backend", dev.info.backendName},
         {"CUs",     std::to_string(dev.info.numCUs)},
         {"SG",      std::to_string(dev.info.preferredSubGroupSize)},
@@ -183,7 +206,7 @@ BackendInventory OneapiPeak::enumerate()
   BackendInventory inv;
   inv.backend = "oneAPI";
 
-  auto devs = enumerateGpus();
+  auto devs = enumerateDevices();
   if (devs.empty())
     return inv;
   inv.available = true;
@@ -198,7 +221,7 @@ BackendInventory OneapiPeak::enumerate()
     d.index = i;
     try { d.name = devs[i].get_info<sycl::info::device::name>(); }
     catch (...) { d.name = "<unknown>"; }
-    d.typeStr = "GPU";
+    d.typeStr = deviceTypeStr(devs[i]);
     plat.devices.push_back(std::move(d));
   }
 
@@ -211,7 +234,7 @@ void OneapiPeak::printInventory(const BackendInventory &b, std::ostream &os)
   os << "\n=== oneAPI backend ===\n";
   if (!b.available)
   {
-    os << "oneAPI: no SYCL GPU devices found\n";
+    os << "oneAPI: no SYCL devices found\n";
     return;
   }
   for (const auto &plat : b.platforms)

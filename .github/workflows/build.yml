@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           source /opt/intel/oneapi/setvars.sh
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx
           cmake --build build --config Release -j4
 
       - name: Print version
