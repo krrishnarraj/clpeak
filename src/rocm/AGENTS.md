@@ -14,6 +14,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 - Looking for FP compute benchmarks? → `compute_float.cpp`
 - Looking for int compute benchmarks? → `compute_int.cpp`
 - Looking for rocWMMA matrix benchmarks? → `rocwmma.cpp`
+- Looking for raw MFMA matrix-core peak benchmarks? → `mfma.cpp` + `rocm_kernels/mfma_*.hip`
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
 - Looking for atomic benchmarks? → `atomic_throughput.cpp`
@@ -31,6 +32,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
 | `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark |
+| `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_mfma_*` |
 | `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak benchmark |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` |
 | `local_bandwidth.cpp` | `runLocalBandwidth` |

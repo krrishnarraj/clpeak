@@ -173,6 +173,8 @@ int RocmPeak::runAll()
       runComputeBF16(dev, cfg);
     if (isAllowedAs(Benchmark::Rocwmma, Category::FpCompute))
       runRocwmma(dev, cfg, Category::FpCompute);
+    if (isAllowedAs(Benchmark::Rocwmma, Category::FpCompute))
+      runMfma(dev, cfg, Category::FpCompute);
     if (isAllowedAs(Benchmark::Rocblas, Category::FpCompute))
       runRocblas(dev, cfg);
 
@@ -184,6 +186,8 @@ int RocmPeak::runAll()
       runComputeInt4Packed(dev, cfg);
     if (isAllowedAs(Benchmark::Rocwmma, Category::IntCompute))
       runRocwmma(dev, cfg, Category::IntCompute);
+    if (isAllowedAs(Benchmark::Rocwmma, Category::IntCompute))
+      runMfma(dev, cfg, Category::IntCompute);
     if (isAllowed(Benchmark::AtomicThroughput))
       runAtomicThroughput(dev, cfg);
 

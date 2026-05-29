@@ -73,13 +73,17 @@ bool RocmDevice::init(int devIndex)
   // reports the effective HIP-native rate.
   info.fp16Supported = true;
   info.bf16Supported = true;
+  // gcnArchName carries feature flags (e.g. "gfx942:sramecc+:xnack-").
+  // Match against the base ISA only, otherwise the suffix makes every
+  // exact comparison miss and rocWMMA looks "unsupported" on supported GPUs.
+  const std::string archBase = info.archName.substr(0, info.archName.find(':'));
   info.rocwmmaSupported =
-      info.archName == "gfx908" || info.archName == "gfx90a" ||
-      info.archName == "gfx940" || info.archName == "gfx941" ||
-      info.archName == "gfx942" || info.archName == "gfx950" ||
-      info.archName == "gfx1100" || info.archName == "gfx1101" ||
-      info.archName == "gfx1102" || info.archName == "gfx1200" ||
-      info.archName == "gfx1201";
+      archBase == "gfx908" || archBase == "gfx90a" ||
+      archBase == "gfx940" || archBase == "gfx941" ||
+      archBase == "gfx942" || archBase == "gfx950" ||
+      archBase == "gfx1100" || archBase == "gfx1101" ||
+      archBase == "gfx1102" || archBase == "gfx1200" ||
+      archBase == "gfx1201";
 
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
   return true;
