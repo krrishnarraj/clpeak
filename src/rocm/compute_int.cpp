@@ -21,19 +21,29 @@ int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
   return runComputeKernel(dev, cfg, d);
 }
 
-int RocmPeak::runComputeInt8DP(RocmDevice &, benchmark_config_t &)
+int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"integer_compute_int8_dp", "INT8 dot-product compute", "gops"});
-  test.skip("int8_dp", ResultStatus::Unsupported,
-            "native AMD DP4a/MFMA dot-product path not implemented in ROCm backend yet");
-  test.skip("int8_dp2", ResultStatus::Unsupported,
-            "native AMD DP4a/MFMA dot-product path not implemented in ROCm backend yet");
-  test.skip("int8_dp4", ResultStatus::Unsupported,
-            "native AMD DP4a/MFMA dot-product path not implemented in ROCm backend yet");
-  test.skip("int8_dp8", ResultStatus::Unsupported,
-            "native AMD DP4a/MFMA dot-product path not implemented in ROCm backend yet");
-  return 0;
+  // INT8 DP4a (v_dot4_i32_i8) vector-shader path -- distinct from the matrix
+  // INT8 MFMA peak (runMfma). All four variants do 8192 ops/thread, so the
+  // numbers are directly comparable; they differ only in ILP (chain count).
+  static const rocm_compute_variant_t variants[] = {
+      {"int8_dp", "compute_int8_dp", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
+      {"int8_dp2", "compute_int8_dp2", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
+      {"int8_dp4", "compute_int8_dp4", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
+      {"int8_dp8", "compute_int8_dp8", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
+  };
+  int A = 4;
+  rocm_compute_desc_t d = {};
+  d.title = "INT8 dot-product compute (DP4a)";
+  d.resultTag = "integer_compute_int8_dp";
+  d.unit = "gops";
+  d.variants = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
+  d.workPerWI = COMPUTE_INT8_DP_WORK_PER_WI;
+  d.elemSize = sizeof(int);
+  d.scalarArg = &A;
+  d.scalarSize = sizeof(A);
+  return runComputeKernel(dev, cfg, d);
 }
 
 int RocmPeak::runComputeInt4Packed(RocmDevice &dev, benchmark_config_t &cfg)

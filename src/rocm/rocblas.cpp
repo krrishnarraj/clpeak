@@ -153,18 +153,20 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
 
   if (dev.info.fp16Supported)
   {
-    __half hAlpha = __float2half(1.0f);
-    __half hBeta  = __float2half(0.0f);
-    rocblas_half alpha16, beta16;
-    std::memcpy(&alpha16, &hAlpha, sizeof(rocblas_half));
-    std::memcpy(&beta16, &hBeta,  sizeof(rocblas_half));
+    // Use gemm_ex with f16 in/out and f32 *accumulate* (HPA). rocblas_hgemm
+    // accumulates in fp16, which does not map to the fast fp16xfp16->fp32 MFMA
+    // path and tops out far below peak; the f32-compute path reaches it.
+    const float alphaf = 1.0f, betaf = 0.0f;
     runTimed("fp16", [&]() {
-      return rocblas_hgemm(handle, rocblas_operation_none, rocblas_operation_none,
-                           M, N, K, &alpha16,
-                           (const rocblas_half *)dA, M,
-                           (const rocblas_half *)dB, K,
-                           &beta16,
-                           (rocblas_half *)dC, M);
+      return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
+                             M, N, K, &alphaf,
+                             dA, rocblas_datatype_f16_r, M,
+                             dB, rocblas_datatype_f16_r, K,
+                             &betaf,
+                             dC, rocblas_datatype_f16_r, M,
+                             dC, rocblas_datatype_f16_r, M,
+                             rocblas_datatype_f32_r,
+                             rocblas_gemm_algo_standard, 0, 0);
     });
   }
   else

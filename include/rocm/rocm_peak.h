@@ -157,6 +157,8 @@ namespace rocm_kernels {
   extern const char *compute_int32_name;
   extern const char *compute_int4_packed_src;
   extern const char *compute_int4_packed_name;
+  extern const char *compute_int8_dp_src;
+  extern const char *compute_int8_dp_name;
   extern const char *rocwmma_fp16_src;
   extern const char *rocwmma_fp16_name;
   extern const char *rocwmma_int8_src;
