@@ -80,6 +80,18 @@ if(CLPEAK_ENABLE_ONEAPI)
     # Optional vendor libraries.  MKL_SYCL is the SYCL-enabled BLAS subset of
     # oneMKL; only present when the user installed the MKL component.
     find_package(MKL CONFIG QUIET)
+
+    # SYCL device code must be compiled AND linked by a SYCL-aware compiler
+    # (icpx / IntelLLVM).  Because the kernels live in a static lib that is
+    # link-resolved into the clpeak executable, the *whole* binary has to be
+    # built with icpx -- a GCC link step can't embed the device images.
+    # So we only build the oneAPI backend when the project compiler is icpx;
+    # otherwise we auto-disable it (other backends are unaffected).
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+        set(CLPEAK_ONEAPI_COMPILER_OK TRUE)
+    else()
+        set(CLPEAK_ONEAPI_COMPILER_OK FALSE)
+    endif()
 endif()
 
 # Always build common
@@ -147,7 +159,7 @@ elseif(CLPEAK_ENABLE_METAL)
 else()
     string(APPEND _clpeak_summary "  Metal  : disabled (CLPEAK_ENABLE_METAL=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND)
+if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND CLPEAK_ONEAPI_COMPILER_OK)
     set(_clpeak_oneapi_features "SYCL")
     if(MKL_FOUND)
         string(APPEND _clpeak_oneapi_features ", oneMKL")
@@ -156,8 +168,10 @@ if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND)
         string(APPEND _clpeak_oneapi_features ", joint_matrix")
     endif()
     string(APPEND _clpeak_summary "  oneAPI : ENABLED  (${_clpeak_oneapi_features})\n")
+elseif(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND NOT CLPEAK_ONEAPI_COMPILER_OK)
+    string(APPEND _clpeak_summary "  oneAPI : disabled (needs icpx - reconfigure with -DCMAKE_CXX_COMPILER=icpx, current is ${CMAKE_CXX_COMPILER_ID})\n")
 elseif(CLPEAK_ENABLE_ONEAPI)
-    string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - use icpx / clang++ -fsycl)\n")
+    string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - source setvars.sh + use icpx)\n")
 else()
     string(APPEND _clpeak_summary "  oneAPI : disabled (CLPEAK_ENABLE_ONEAPI=OFF)\n")
 endif()
