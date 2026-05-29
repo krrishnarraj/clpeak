@@ -10,6 +10,7 @@ add_library(peak_rocm STATIC
     compute_int.cpp
     rocwmma.cpp
     mfma.cpp
+    sparse_mfma.cpp
     rocblas.cpp
     hipblaslt_gemm.cpp
     global_bandwidth.cpp
@@ -78,6 +79,10 @@ set(CLPEAK_ROCM_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_bf16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_int8.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_fp8.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_fp16.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_bf16.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_int8.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_fp8.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/global_bandwidth.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/local_bandwidth.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/image_bandwidth.hip

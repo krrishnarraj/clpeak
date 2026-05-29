@@ -118,6 +118,7 @@ public:
   int runComputeInt4Packed(RocmDevice &dev, benchmark_config_t &cfg);
   int runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
+  int runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runRocblas(RocmDevice &dev, benchmark_config_t &cfg);
   int runHipblasLt(RocmDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
@@ -172,6 +173,14 @@ namespace rocm_kernels {
   extern const char *mfma_int8_name;
   extern const char *mfma_fp8_src;
   extern const char *mfma_fp8_name;
+  extern const char *smfmac_fp16_src;
+  extern const char *smfmac_fp16_name;
+  extern const char *smfmac_bf16_src;
+  extern const char *smfmac_bf16_name;
+  extern const char *smfmac_int8_src;
+  extern const char *smfmac_int8_name;
+  extern const char *smfmac_fp8_src;
+  extern const char *smfmac_fp8_name;
   extern const char *global_bandwidth_src;
   extern const char *global_bandwidth_name;
   extern const char *local_bandwidth_src;
