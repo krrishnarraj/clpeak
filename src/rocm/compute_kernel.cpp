@@ -91,7 +91,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     test.emit(v.label, value);
   }
 
-  hipFree(outputBuf);
+  (void)hipFree(outputBuf);
   return 0;
 }
 
