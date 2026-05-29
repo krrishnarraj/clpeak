@@ -11,6 +11,7 @@ add_library(peak_rocm STATIC
     rocwmma.cpp
     mfma.cpp
     rocblas.cpp
+    hipblaslt_gemm.cpp
     global_bandwidth.cpp
     local_bandwidth.cpp
     image_bandwidth.cpp
@@ -27,6 +28,10 @@ target_link_libraries(peak_rocm PUBLIC
 if(rocblas_FOUND AND TARGET roc::rocblas)
     target_link_libraries(peak_rocm PUBLIC roc::rocblas)
     target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_ROCBLAS)
+endif()
+if(hipblaslt_FOUND AND TARGET roc::hipblaslt)
+    target_link_libraries(peak_rocm PUBLIC roc::hipblaslt)
+    target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_HIPBLASLT)
 endif()
 target_include_directories(peak_rocm PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include

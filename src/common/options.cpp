@@ -119,6 +119,7 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_ROCM
     "\n  --rocwmma                         | --no-rocwmma                   [ROCm]"
+    "\n  --mfma                            | --no-mfma                      [ROCm]"
     "\n  --rocblas                         | --no-rocblas                   [ROCm]"
 #endif
 #ifdef ENABLE_VULKAN
@@ -182,6 +183,7 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_ROCM
   {"rocwmma",                   Benchmark::Rocwmma},
+  {"mfma",                      Benchmark::Mfma},
   {"rocblas",                   Benchmark::Rocblas},
 #endif
 #ifdef ENABLE_METAL

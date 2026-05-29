@@ -16,6 +16,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 - Looking for rocWMMA matrix benchmarks? → `rocwmma.cpp`
 - Looking for raw MFMA matrix-core peak benchmarks? → `mfma.cpp` + `rocm_kernels/mfma_*.hip`
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
+- Looking for hipBLASLt FP8 GEMM benchmarks? → `hipblaslt_gemm.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
 - Looking for atomic benchmarks? → `atomic_throughput.cpp`
 - Looking for kernel latency? → `kernel_latency.cpp`
@@ -33,7 +34,8 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
 | `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark |
 | `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_mfma_*` |
-| `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak benchmark |
+| `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak (fp32/fp64/fp16) |
+| `hipblaslt_gemm.cpp` | `runHipblasLt` — hipBLASLt FP8 GEMM peak (e4m3/e5m2 fnuz) |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` |
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` via HIP texture object |

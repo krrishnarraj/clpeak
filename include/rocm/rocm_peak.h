@@ -119,6 +119,7 @@ public:
   int runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runRocblas(RocmDevice &dev, benchmark_config_t &cfg);
+  int runHipblasLt(RocmDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg);

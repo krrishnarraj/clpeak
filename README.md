@@ -139,12 +139,12 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Compute INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
 | INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &mdash; | &check; (emul) | &check; (emul) |
 | Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; | &check; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--joint-matrix`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | rocWMMA fp16/int8 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) |
-| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 |
+| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) |
+| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 |
 | Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; | &check; | &check; |
 | Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; | &check; | &check; |
 
-The vendor-SDK GEMM tests (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) measure a different point than the hand-rolled MMA kernels above: they use cuBLASLt / rocBLAS / MPS / oneMKL internally, which contain the same hand-tuned tiling and swizzling that NVIDIA / AMD / Apple / Intel use to publish their own peak numbers. The hand-rolled WMMA / rocWMMA / simdgroup_matrix / joint_matrix tests benchmark the raw instruction throughput; the vendor-SDK tests benchmark the achievable system GEMM peak including occupancy, memory staging, and algorithm selection.
+The vendor-SDK GEMM tests (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) measure a different point than the hand-rolled MMA kernels above: they use cuBLASLt / rocBLAS / MPS / oneMKL internally, which contain the same hand-tuned tiling and swizzling that NVIDIA / AMD / Apple / Intel use to publish their own peak numbers. The hand-rolled WMMA / rocWMMA / MFMA / simdgroup_matrix / joint_matrix tests benchmark the raw instruction throughput; the vendor-SDK tests benchmark the achievable system GEMM peak including occupancy, memory staging, and algorithm selection. On AMD CDNA, `--mfma` drives the matrix cores directly via `__builtin_amdgcn_mfma_*` intrinsics (fp16/bf16/int8/fp8) and is the closest to the datasheet PFLOPS/POPS peaks; `--rocwmma` exercises the same cores through the rocWMMA header library.
 
 ## Cross-backend comparison
 
@@ -173,7 +173,8 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 ./clpeak --wmma                       # CUDA tensor-core tests (hand-rolled WMMA)
 ./clpeak --cublas                     # CUDA vendor-SDK GEMM peak (cuBLASLt, all dtypes)
 ./clpeak --rocwmma                    # AMD matrix-engine tests (hand-rolled rocWMMA)
-./clpeak --rocblas                    # AMD vendor-SDK GEMM peak (rocBLAS)
+./clpeak --mfma                       # AMD raw MFMA matrix-core peak (fp16/bf16/int8/fp8)
+./clpeak --rocblas                    # AMD vendor-SDK GEMM peak (rocBLAS fp32/fp64/fp16 + hipBLASLt fp8)
 ./clpeak --simdgroup-matrix           # Apple matrix-engine tests (hand-rolled simdgroup_matrix)
 ./clpeak --mps-gemm                   # Apple vendor-SDK GEMM peak (MPS / MPSGraph)
 ./clpeak --joint-matrix               # Intel XMX matrix-engine tests (hand-rolled joint_matrix)

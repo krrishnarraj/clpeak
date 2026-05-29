@@ -19,8 +19,13 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   hipArray_t arr = nullptr;
   if (hipMallocArray(&arr, &desc, imgW, imgH) != hipSuccess)
   {
-    test.skip("float4", ResultStatus::Error, "Image array create failed");
-    return -1;
+    // CDNA data-center GPUs (gfx9xx / MI-series) have no texture/image
+    // hardware, so the array allocation legitimately fails -- this is a
+    // device capability gap, not a benchmark error. (The OpenCL backend
+    // reports the same device as "Device has no image support".)
+    test.skip("float4", ResultStatus::Unsupported,
+              "Device has no image/texture support");
+    return 0;
   }
 
   {
