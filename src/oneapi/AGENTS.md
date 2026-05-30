@@ -42,6 +42,13 @@ build time and the SYCL runtime JITs it on first launch.
 | `atomic_throughput.cpp` | `runAtomicThroughput` (global + SLM via `sycl::atomic_ref`) |
 | `kernel_latency.cpp` | `runKernelLatency` (empty kernel submit + `queue.wait_and_throw()`) |
 
+
+## Build
+
+- oneAPI requires the Intel oneAPI Base Toolkit (sources `setvars.sh` before invoking cmake).
+- oneAPI requires -DCMAKE_CXX_COMPILER=icpx to be set in cmake step
+- Cmake step: `cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx`
+
 ## Build Gates
 
 - `CLPEAK_ENABLE_ONEAPI` — top-level CMake option (default ON). Backend silently no-ops if `IntelSYCL` package is not found.

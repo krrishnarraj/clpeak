@@ -102,6 +102,7 @@ Optional backends are auto-detected and enabled when their SDK is found. To opt 
 ```console
 cmake -S . -B build -DCLPEAK_ENABLE_CUDA=OFF
 cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
+cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ```
 
 | CMake option | Default | Effect when `OFF` |

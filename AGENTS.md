@@ -48,7 +48,6 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
-- oneAPI requires the Intel oneAPI Base Toolkit (sources `setvars.sh` before invoking cmake).
 
 ## Quick Lookups
 
