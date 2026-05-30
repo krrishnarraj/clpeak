@@ -69,6 +69,9 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     {"mfma_fp8", "MFMA fp8xfp8+fp32 16x16x32", "tflops",
      rocm_kernels::mfma_fp8_src, rocm_kernels::mfma_fp8_name, "mfma_fp8",
      16, 16, 32, false},
+    {"mfma_mxfp4", "MFMA mxfp4(e2m1)+fp32 16x16x128", "tflops",
+     rocm_kernels::mfma_mxfp4_src, rocm_kernels::mfma_mxfp4_name, "mfma_mxfp4",
+     16, 16, 128, false},
   };
   static const MfmaEntry intEntries[] = {
     {"mfma_int8", "MFMA int8xint8+int32 16x16x32", "tops",

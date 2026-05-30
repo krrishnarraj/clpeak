@@ -14,7 +14,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 - Looking for FP compute benchmarks? → `compute_float.cpp`
 - Looking for int compute benchmarks? → `compute_int.cpp`
 - Looking for rocWMMA matrix benchmarks? → `rocwmma.cpp`
-- Looking for raw MFMA matrix-core peak benchmarks? → `mfma.cpp` + `rocm_kernels/mfma_*.hip`
+- Looking for raw MFMA matrix-core peak benchmarks (incl. scaled-MFMA mxfp4)? → `mfma.cpp` + `rocm_kernels/mfma_*.hip`
 - Looking for 2:4 structured-sparse MFMA peak benchmarks? → `sparse_mfma.cpp` + `rocm_kernels/smfmac_*.hip`
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
 - Looking for hipBLASLt FP8 GEMM benchmarks? → `hipblaslt_gemm.cpp`
@@ -34,7 +34,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
 | `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark |
-| `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_mfma_*` |
+| `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
 | `sparse_mfma.cpp` | `runSparseMfma` — 2:4 structured-sparse MFMA peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_smfmac_*` |
 | `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak (fp32/fp64/fp16) |
 | `hipblaslt_gemm.cpp` | `runHipblasLt` — hipBLASLt FP8 GEMM peak (e4m3/e5m2 fnuz) |

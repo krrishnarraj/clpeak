@@ -211,6 +211,34 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
+    // NVFP4 mma.sync E2M1 + UE4M3 block scale (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "NVFP4(E2M1) mma.sync m16n8k64+fp32";
+      d.resultTag = "wmma_nvf4_e2m1";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "nvf4_e2m1";
+      d.kernelName = "wmma_nvf4_e2m1";
+      d.src = cuda_kernels::wmma_nvf4_e2m1_src;
+      d.srcName = cuda_kernels::wmma_nvf4_e2m1_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 16;
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
+      d.skipMsg = "NVFP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
   }
 
   // ---------------------------------------------------------------------

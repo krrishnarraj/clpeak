@@ -173,6 +173,8 @@ namespace rocm_kernels {
   extern const char *mfma_int8_name;
   extern const char *mfma_fp8_src;
   extern const char *mfma_fp8_name;
+  extern const char *mfma_mxfp4_src;
+  extern const char *mfma_mxfp4_name;
   extern const char *smfmac_fp16_src;
   extern const char *smfmac_fp16_name;
   extern const char *smfmac_bf16_src;

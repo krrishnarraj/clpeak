@@ -79,6 +79,7 @@ set(CLPEAK_ROCM_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_bf16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_int8.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_fp8.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_mxfp4.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_fp16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_bf16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_int8.hip

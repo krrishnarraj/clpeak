@@ -228,6 +228,8 @@ namespace cuda_kernels {
   extern const char *wmma_fp4_e2m1_name;
   extern const char *wmma_mxf4_e2m1_src;
   extern const char *wmma_mxf4_e2m1_name;
+  extern const char *wmma_nvf4_e2m1_src;
+  extern const char *wmma_nvf4_e2m1_name;
   extern const char *wmma_tf32_src;
   extern const char *wmma_tf32_name;
   extern const char *wmma_fp64_src;
