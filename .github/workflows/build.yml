@@ -47,12 +47,6 @@ jobs:
             binary: build/clpeak
             cuda: true
 
-          - name: Windows x64 CUDA
-            runner: windows-latest
-            artifact: clpeak-windows-x86_64-cuda
-            binary: build/Release/clpeak.exe
-            cuda: true
-
           - name: Linux x64 ROCm
             runner: ubuntu-22.04
             artifact: clpeak-linux-x86_64-rocm
@@ -81,12 +75,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake git ca-certificates \
-            ocl-icd-opencl-dev opencl-headers
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
+            build-essential ca-certificates ocl-icd-opencl-dev opencl-headers
 
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -98,9 +87,6 @@ jobs:
       - name: Install CUDA Toolkit
         if: matrix.cuda
         uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: "13.2.0"
-          method: network
 
       # ROCm SDK (HIP runtime + HIPRTC + rocBLAS + rocWMMA): install only for
       # ROCm-enabled matrix entries.  Ubuntu 22.04 (jammy) is the
@@ -267,7 +253,7 @@ jobs:
             chmod +x "$dir"/* 2>/dev/null || true
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
-          for dir in artifacts/clpeak-windows-x86_64 artifacts/clpeak-windows-x86_64-cuda; do
+          for dir in artifacts/clpeak-windows-x86_64; do
             name=$(basename "$dir")
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
