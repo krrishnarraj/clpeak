@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<clpeak format_version="2" clpeak_version="2.0.9-27-g063804c" os="Linux x64">
+  <run backend="OpenCL" platform="Intel(R) OpenCL" device="INTEL(R) XEON(R) PLATINUM 8568Y+" driver="2026.21.3.0.31_160000">
+    <category name="fp_compute">
+      <test name="single_precision_compute" unit="gflops">
+        <metric name="float">589.0295</metric>
+        <metric name="float2">78.4041</metric>
+        <metric name="float4">171.2858</metric>
+        <metric name="float8">410.1721</metric>
+        <metric name="float16">1003.6582</metric>
+      </test>
+      <test name="half_precision_compute" unit="gflops">
+        <metric name="half">567.1952</metric>
+        <metric name="half2">78.1714</metric>
+        <metric name="half4">173.6962</metric>
+        <metric name="half8">420.7843</metric>
+        <metric name="half16">1113.7111</metric>
+      </test>
+      <test name="double_precision_compute" unit="gflops">
+        <metric name="double">574.6052</metric>
+        <metric name="double2">78.4949</metric>
+        <metric name="double4">163.3493</metric>
+        <metric name="double8">412.6260</metric>
+        <metric name="double16">768.3611</metric>
+      </test>
+      <test name="mixed_precision_compute" unit="gflops">
+        <metric name="mp">108.5033</metric>
+        <metric name="mp2">16.9894</metric>
+        <metric name="mp4">34.4546</metric>
+        <metric name="mp8">57.5441</metric>
+        <metric name="mp16">124.2173</metric>
+      </test>
+    </category>
+    <category name="int_compute">
+      <test name="integer_compute" unit="gops">
+        <metric name="int">192.3844</metric>
+        <metric name="int2">373.8533</metric>
+        <metric name="int4">733.2815</metric>
+        <metric name="int8">1188.8312</metric>
+        <metric name="int16">1242.5729</metric>
+      </test>
+      <test name="integer_compute_fast" unit="gops">
+        <metric name="int">154.2951</metric>
+        <metric name="int2">22.5166</metric>
+        <metric name="int4">47.3034</metric>
+        <metric name="int8">99.0060</metric>
+        <metric name="int16">199.4725</metric>
+      </test>
+      <test name="integer_compute_char" unit="gops">
+        <metric name="char">244.3781</metric>
+        <metric name="char2">430.7719</metric>
+        <metric name="char4">829.1194</metric>
+        <metric name="char8">1460.5665</metric>
+        <metric name="char16">2183.4866</metric>
+      </test>
+      <test name="integer_compute_short" unit="gops">
+        <metric name="short">412.1567</metric>
+        <metric name="short2">688.4671</metric>
+        <metric name="short4">1262.2122</metric>
+        <metric name="short8">2317.3535</metric>
+        <metric name="short16">3501.3770</metric>
+      </test>
+      <test name="integer_compute_int8_dp" unit="gops">
+        <metric name="int8_dp" status="error" reason="clCreateKernel (-46)"/>
+        <metric name="int8_dp2" status="error" reason="clCreateKernel (-46)"/>
+        <metric name="int8_dp4" status="error" reason="clCreateKernel (-46)"/>
+        <metric name="int8_dp8" status="error" reason="clCreateKernel (-46)"/>
+        <metric name="int8_dp16" status="error" reason="clCreateKernel (-46)"/>
+      </test>
+      <test name="atomic_throughput" unit="gops">
+        <metric name="int_global">3.6306</metric>
+        <metric name="int_local">244.7035</metric>
+      </test>
+    </category>
+    <category name="bandwidth">
+      <test name="global_memory_bandwidth" unit="gbps">
+        <metric name="float">318.4034</metric>
+        <metric name="float2">530.8472</metric>
+        <metric name="float4">277.1071</metric>
+        <metric name="float8">322.7744</metric>
+        <metric name="float16">662.0756</metric>
+      </test>
+      <test name="local_memory_bandwidth" unit="gbps">
+        <metric name="float">238.1660</metric>
+        <metric name="float2">403.3607</metric>
+        <metric name="float4">265.1226</metric>
+        <metric name="float8">280.0141</metric>
+      </test>
+      <test name="image_memory_bandwidth" unit="gbps">
+        <metric name="float4">67.0374</metric>
+      </test>
+      <test name="transfer_bandwidth" unit="gbps">
+        <metric name="enqueuewritebuffer">207.5113</metric>
+        <metric name="enqueuereadbuffer">205.4099</metric>
+        <metric name="enqueuewritebuffer_nonblocking">219.7471</metric>
+        <metric name="enqueuereadbuffer_nonblocking">206.5337</metric>
+        <metric name="enqueuemapbuffer">0.0000</metric>
+        <metric name="memcpy_from_mapped_ptr">19.2147</metric>
+        <metric name="enqueueunmap">0.0000</metric>
+        <metric name="memcpy_to_mapped_ptr">19.5071</metric>
+      </test>
+    </category>
+    <category name="latency">
+      <test name="kernel_launch_latency" unit="us">
+        <metric name="dispatch">2.8155</metric>
+        <metric name="roundtrip">16.7275</metric>
+      </test>
+    </category>
+  </run>
+  <run backend="oneAPI" platform="oneAPI" device="INTEL(R) XEON(R) PLATINUM 8568Y+" driver="2026.21.3.0.31_160000">
+    <category name="fp_compute">
+      <test name="single_precision_compute" unit="gflops">
+        <metric name="float">591.0391</metric>
+        <metric name="float2">953.2977</metric>
+        <metric name="float4">2225.3638</metric>
+        <metric name="float8">3252.1526</metric>
+        <metric name="float16">3119.7524</metric>
+      </test>
+      <test name="half_precision_compute" unit="gflops">
+        <metric name="half">104.4940</metric>
+        <metric name="half2">80.3630</metric>
+        <metric name="half4">163.4250</metric>
+        <metric name="half8">324.6705</metric>
+        <metric name="half16">487.6082</metric>
+      </test>
+      <test name="double_precision_compute" unit="gflops">
+        <metric name="double">670.6545</metric>
+        <metric name="double2">1188.0273</metric>
+        <metric name="double4">1470.4843</metric>
+        <metric name="double8">1330.6204</metric>
+        <metric name="double16">489.5194</metric>
+      </test>
+      <test name="mixed_precision_compute" unit="gflops">
+        <metric name="mp">453.3618</metric>
+      </test>
+      <test name="bfloat16_compute" unit="gflops">
+        <metric name="bf16">571.4263</metric>
+      </test>
+      <test name="joint-matrix-fp" unit="tflops">
+        <metric name="joint_matrix_bf16" status="unsupported" reason="XMX matrix engine not available on this device"/>
+        <metric name="joint_matrix_fp16" status="unsupported" reason="XMX matrix engine not available on this device"/>
+        <metric name="joint_matrix_tf32" status="unsupported" reason="XMX matrix engine not available on this device"/>
+      </test>
+      <test name="onemkl-fp" unit="tflops">
+        <metric name="fp32">4.0685</metric>
+        <metric name="fp64">1.9918</metric>
+        <metric name="fp16">5.8424</metric>
+      </test>
+    </category>
+    <category name="int_compute">
+      <test name="integer_compute" unit="gops">
+        <metric name="int">189.2172</metric>
+        <metric name="int2">367.5539</metric>
+        <metric name="int4">712.3427</metric>
+        <metric name="int8">1215.4457</metric>
+        <metric name="int16">1319.1868</metric>
+      </test>
+      <test name="integer_compute_int8_dp" unit="gops">
+        <metric name="int8_dp">353.6600</metric>
+        <metric name="int8_dp2">518.1999</metric>
+        <metric name="int8_dp4">537.1232</metric>
+        <metric name="int8_dp8">530.9886</metric>
+      </test>
+      <test name="joint-matrix-int" unit="tops">
+        <metric name="joint_matrix_int8" status="unsupported" reason="XMX matrix engine not available on this device"/>
+      </test>
+      <test name="atomic_throughput" unit="gops">
+        <metric name="int_global">3.9446</metric>
+        <metric name="int_local">9.5427</metric>
+      </test>
+    </category>
+    <category name="bandwidth">
+      <test name="global_memory_bandwidth" unit="gbps">
+        <metric name="float">350.5384</metric>
+        <metric name="float2">494.8505</metric>
+        <metric name="float4">240.7359</metric>
+      </test>
+      <test name="local_memory_bandwidth" unit="gbps">
+        <metric name="float">345.7780</metric>
+        <metric name="float2">593.4435</metric>
+        <metric name="float4">290.3605</metric>
+      </test>
+      <test name="image_memory_bandwidth" unit="gbps">
+        <metric name="float4">130.1143</metric>
+      </test>
+      <test name="transfer_bandwidth" unit="gbps">
+        <metric name="h2d_pinned">205.0993</metric>
+        <metric name="d2h_pinned">204.7277</metric>
+      </test>
+    </category>
+    <category name="latency">
+      <test name="kernel_launch_latency" unit="us">
+        <metric name="dispatch" status="unsupported" reason="Not measurable via SYCL runtime"/>
+        <metric name="roundtrip">10.0065</metric>
+      </test>
+    </category>
+  </run>
+</clpeak>
