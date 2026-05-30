@@ -104,7 +104,8 @@ void RocmDevice::cleanup()
 
 bool RocmDevice::getKernel(const char *src, const char *srcName,
                            const char *kernelName, hipFunction_t &fn,
-                           const std::vector<const char *> &extraOpts)
+                           const std::vector<const char *> &extraOpts,
+                           bool quiet)
 {
   auto it = moduleCache.find(src);
   hipModule_t mod = nullptr;
@@ -141,12 +142,15 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
     rr = hiprtcCompileProgram(prog, (int)opts.size(), opts.data());
     if (rr != HIPRTC_SUCCESS)
     {
-      size_t logSize = 0;
-      hiprtcGetProgramLogSize(prog, &logSize);
-      std::string log(logSize, '\0');
-      if (logSize > 1)
-        hiprtcGetProgramLog(prog, &log[0]);
-      fprintf(stderr, "HIPRTC compile of %s failed:\n%s\n", srcName, log.c_str());
+      if (!quiet)
+      {
+        size_t logSize = 0;
+        hiprtcGetProgramLogSize(prog, &logSize);
+        std::string log(logSize, '\0');
+        if (logSize > 1)
+          hiprtcGetProgramLog(prog, &log[0]);
+        fprintf(stderr, "HIPRTC compile of %s failed:\n%s\n", srcName, log.c_str());
+      }
       hiprtcDestroyProgram(&prog);
       return false;
     }

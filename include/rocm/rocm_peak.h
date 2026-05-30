@@ -48,9 +48,14 @@ public:
   bool init(int devIndex);
   void cleanup();
 
+  // When `quiet` is set, a compile failure is treated as an expected
+  // capability probe and the verbose HIPRTC log is suppressed (callers that
+  // gate on the compile result, e.g. MFMA datatype detection, use this to
+  // avoid breaking the result output formatting).
   bool getKernel(const char *src, const char *srcName,
                  const char *kernelName, hipFunction_t &fn,
-                 const std::vector<const char *> &extraOpts = {});
+                 const std::vector<const char *> &extraOpts = {},
+                 bool quiet = false);
 
 private:
   std::unordered_map<const char *, hipModule_t> moduleCache;
