@@ -96,8 +96,7 @@ int MetalPeak::runAll()
             runAtomicThroughputFp(dev, cfg);
 
         // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
-        if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
-        if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
+
         if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::IntCompute))
             runSimdgroupMatrixInt(dev, cfg);
         if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))

@@ -157,7 +157,6 @@ public:
   int runComputeMP(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg);
-  int runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
@@ -202,8 +201,6 @@ namespace cuda_kernels {
   extern const char *compute_bf16_name;
   extern const char *compute_int8_dp_src;
   extern const char *compute_int8_dp_name;
-  extern const char *compute_int4_packed_src;
-  extern const char *compute_int4_packed_name;
   extern const char *compute_int32_src;
   extern const char *compute_int32_name;
   extern const char *global_bandwidth_src;

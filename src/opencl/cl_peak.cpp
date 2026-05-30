@@ -214,11 +214,6 @@ int clPeak::runAll()
                        "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated)", "int4_packed_compute",
-                       "compute_int4_packed", "int4_packed", "gops",
-                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
-
         runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
 
         // ---- Phase 3: bandwidth ----------------------------------------

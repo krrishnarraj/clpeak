@@ -71,7 +71,6 @@ public:
   int runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg);
   int runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg);
-  int runComputeInt4Packed(OneapiDevice &dev, benchmark_config_t &cfg);
   int runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category);
   int runOnemkl(OneapiDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);

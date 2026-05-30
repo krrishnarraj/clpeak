@@ -183,7 +183,7 @@ int OneapiPeak::runAll()
 
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))      runComputeInt8DP(dev, cfg);
-    if (isAllowed(Benchmark::ComputeInt4Packed))  runComputeInt4Packed(dev, cfg);
+
     if (isAllowedAs(Benchmark::JointMatrix, Category::IntCompute))
       runJointMatrix(dev, cfg, Category::IntCompute);
     if (isAllowed(Benchmark::AtomicThroughput))   runAtomicThroughput(dev, cfg);

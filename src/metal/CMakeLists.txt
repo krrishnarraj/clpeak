@@ -24,7 +24,6 @@ add_library(peak_metal STATIC
     compute_kernel.mm
     mtl_blas.mm
     compute_float.mm
-    compute_int.mm
     simdgroup.mm
     global_bandwidth.mm
     local_bandwidth.mm
@@ -50,7 +49,7 @@ target_compile_definitions(peak_common PRIVATE ENABLE_METAL)
 
 # Compile .mm files with ObjC ARC -- saves us from sprinkling release
 # calls on autoreleased Metal objects.
-set_source_files_properties(mtl_peak.mm mtl_device.mm mtl_utils.mm compute_kernel.mm mtl_blas.mm compute_float.mm compute_int.mm simdgroup.mm global_bandwidth.mm local_bandwidth.mm image_bandwidth.mm kernel_latency.mm atomic_throughput.mm
+set_source_files_properties(mtl_peak.mm mtl_device.mm mtl_utils.mm compute_kernel.mm mtl_blas.mm compute_float.mm simdgroup.mm global_bandwidth.mm local_bandwidth.mm image_bandwidth.mm kernel_latency.mm atomic_throughput.mm
     PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
 # Embed .metal kernel sources as C++ raw-string literals
@@ -58,8 +57,6 @@ set(CLPEAK_MTL_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_sp.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_hp.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_mp.metal
-    ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_int8_dp.metal
-    ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_int4_packed.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/global_bandwidth.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/kernel_latency.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/simdgroup_matrix_fp16.metal

@@ -197,67 +197,6 @@ int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
   return 0;
 }
 
-// --------------------------------------------------------------------------
-// Packed INT4 compute (emulated — same shape as compute_int4_packed.hip).
-// Real x<->y dependency chain already; single metric (matches ROCm).
-// 64 outer iters * MAD_16 = 1024 MACs; reported as 4096 ops/WI.
-// --------------------------------------------------------------------------
-class compute_int4_packed_kernel;
 
-int OneapiPeak::runComputeInt4Packed(OneapiDevice &dev, benchmark_config_t &cfg)
-{
-  auto test = currentDeviceScope->beginTest(
-    {"int4_packed_compute", "Packed INT4 compute (emulated)", "gops"});
-
-  const uint32_t blockSize = 256;
-  uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));
-  uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
-
-  int *out = sycl::malloc_device<int>(totalThreads, dev.stream);
-  if (!out)
-  {
-    test.skip("int4_packed", ResultStatus::Error, "Failed to allocate output buffer");
-    return -1;
-  }
-  const int A = 3;
-
-  auto submit = [&](sycl::queue &q) -> sycl::event {
-    return q.submit([&](sycl::handler &h) {
-      h.parallel_for<compute_int4_packed_kernel>(
-        sycl::nd_range<1>(totalThreads, blockSize),
-        [=](sycl::nd_item<1> it) {
-          int x = A;
-          int y = (int)it.get_local_id(0);
-          auto MAC = [](int &dst, int src) {
-            int _d = dst, _s = src;
-            int _dl = (_d << 28) >> 28;
-            int _dh = _d >> 4;
-            int _sl = (_s << 28) >> 28;
-            int _sh = _s >> 4;
-            _dl = _sl * _dl + _sl;
-            _dh = _sh * _dh + _sh;
-            dst = ((_dl & 0x0F) | ((_dh & 0x0F) << 4));
-          };
-          #pragma unroll 1
-          for (int i = 0; i < 64; i++) {
-            #pragma unroll
-            for (int j = 0; j < 4; j++) {
-              MAC(x, y); MAC(y, x); MAC(x, y); MAC(y, x);
-            }
-          }
-          out[it.get_global_id(0)] = x + y;
-        });
-    });
-  };
-
-  float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (us <= 0.0f)
-    test.skip("int4_packed", ResultStatus::Error, "kernel launch failed");
-  else
-    test.emit("int4_packed", clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT4_PACKED_WORK_PER_WI, us, 1e9));
-
-  sycl::free(out, dev.stream);
-  return 0;
-}
 
 #endif // ENABLE_ONEAPI

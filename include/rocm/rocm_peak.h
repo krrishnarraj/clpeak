@@ -120,7 +120,7 @@ public:
   int runComputeBF16(RocmDevice &dev, benchmark_config_t &cfg);
   int runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg);
-  int runComputeInt4Packed(RocmDevice &dev, benchmark_config_t &cfg);
+
   int runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
@@ -162,8 +162,7 @@ namespace rocm_kernels {
   extern const char *compute_bf16_name;
   extern const char *compute_int32_src;
   extern const char *compute_int32_name;
-  extern const char *compute_int4_packed_src;
-  extern const char *compute_int4_packed_name;
+
   extern const char *compute_int8_dp_src;
   extern const char *compute_int8_dp_name;
   extern const char *rocwmma_fp16_src;

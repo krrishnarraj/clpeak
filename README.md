@@ -137,8 +137,7 @@ A backend is silently skipped at runtime if its loader / driver / device is miss
 | Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; | &check; | &check; |
 | Compute INT (int32) | GOPS | &check; | &check; | &check; | &check; | &mdash; | &check; |
 | Compute INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
-| INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &mdash; | &check; (emul) | &check; (emul) |
-| Packed INT4 (emulated) | GOPS | &check; | &check; | &check; | &check; | &check; | &check; |
+| INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &check; | &mdash; | &check; |
 | Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync + FP4/MXFP4/NVFP4 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8/mxfp4 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) |
 | Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 |
 | Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; | &check; | &check; |

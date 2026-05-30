@@ -132,7 +132,7 @@ private:
 };
 
 // Describes a single compute-peak benchmark: just the bits that differ
-// between runComputeSP / MP / INT8-DP / INT4-packed / etc.  The Vulkan
+// between runComputeSP / MP / INT8-DP / etc.  The Vulkan
 // scaffolding (buffer, descriptors, pipeline, dispatch loop, cleanup) is
 // identical across all of them and lives in vkPeak::runComputeKernel.
 //
@@ -213,9 +213,6 @@ public:
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
   int runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg);
-#endif
-#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
-  int runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V1
   int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
@@ -367,10 +364,6 @@ namespace vk_shaders {
 #ifdef VK_HAS_COMPUTE_MP_V4
   extern const uint32_t compute_mp_v4[];
   extern const size_t   compute_mp_v4_size;
-#endif
-#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
-  extern const uint32_t compute_int4_packed_v1[];
-  extern const size_t   compute_int4_packed_v1_size;
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V1
   extern const uint32_t compute_bf16_v1[];

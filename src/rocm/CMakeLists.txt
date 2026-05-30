@@ -71,7 +71,7 @@ set(CLPEAK_ROCM_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_mp.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_bf16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_int32.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_int4_packed.hip
+
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_int8_dp.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/rocwmma_fp16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/rocwmma_int8.hip

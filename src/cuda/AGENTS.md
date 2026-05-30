@@ -29,7 +29,7 @@ CUDA kernels (in `cuda_kernels/`) compiled via NVRTC at runtime.  Built as
 | `cuda_device.cpp` | `CudaDevice` class: `init()`, `cleanup()`, `getKernel()` (NVRTC compilation + module caching) |
 | `compute_kernel.cpp` | `CudaPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
-| `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
+| `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP` |
 | `wmma.cpp` | `runWmma` — WMMA/MMA tensor-core umbrella |
 | `cuda_blas.cpp` | `runCublas` — cuBLASLt tensor-core GEMM benchmarks |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` |

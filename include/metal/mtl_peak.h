@@ -110,8 +110,7 @@ public:
   int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(MetalDevice &dev, benchmark_config_t &cfg);
   int runComputeMP(MetalDevice &dev, benchmark_config_t &cfg);
-  int runComputeInt8DP(MetalDevice &dev, benchmark_config_t &cfg);
-  int runComputeInt4Packed(MetalDevice &dev, benchmark_config_t &cfg);
+
   int runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
   int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
@@ -143,10 +142,7 @@ namespace mtl_kernels {
   extern const char *compute_hp_name;
   extern const char *compute_mp_src;
   extern const char *compute_mp_name;
-  extern const char *compute_int8_dp_src;
-  extern const char *compute_int8_dp_name;
-  extern const char *compute_int4_packed_src;
-  extern const char *compute_int4_packed_name;
+
   extern const char *global_bandwidth_src;
   extern const char *global_bandwidth_name;
   extern const char *kernel_latency_src;

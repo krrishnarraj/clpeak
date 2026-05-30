@@ -111,7 +111,6 @@ static const char *helpStr =
     "\n  --integer-compute-short           | --no-integer-compute-short     [OpenCL]"
 #endif
     "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
-    "\n  --int4-packed-compute             | --no-int4-packed-compute"
 #ifdef ENABLE_CUDA
     "\n  --wmma                            | --no-wmma                      [CUDA]"
     "\n  --bmma                            | --no-bmma                      [CUDA]"
@@ -167,7 +166,6 @@ static const TestFlag testFlags[] = {
   {"integer-compute-short",     Benchmark::ComputeShort},
 #endif
   {"int8-dot-product-compute",  Benchmark::ComputeInt8DP},
-  {"int4-packed-compute",       Benchmark::ComputeInt4Packed},
 #ifdef ENABLE_CUDA
   {"wmma",                      Benchmark::Wmma},
   {"bmma",                      Benchmark::Bmma},

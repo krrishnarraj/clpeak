@@ -12,7 +12,7 @@ static library.  Source files are Objective-C++ (`.mm`).
 - Looking for Metal library/pipeline caching (`mtlGetLibrary`, `mtlGetPipeline`)? → `mtl_utils.mm`
 - Looking for the internal header (ObjC types + pimpls + helpers)? → `mtl_internal.h`
 - Looking for FP compute benchmarks? → `compute_float.mm`
-- Looking for int compute benchmarks? → `compute_int.mm`
+- Looking for int compute benchmarks? → `simdgroup.mm`, `mtl_blas.mm`, `atomic_throughput.mm`
 - Looking for simdgroup matrix benchmarks? → `simdgroup.mm`
 - Looking for MPSGraph GEMM benchmarks? → `mtl_blas.mm`
 - Looking for bandwidth benchmarks? → `global_bandwidth.mm`, `local_bandwidth.mm`, `image_bandwidth.mm`
@@ -31,7 +31,6 @@ static library.  Source files are Objective-C++ (`.mm`).
 | `compute_kernel.mm` | `MetalPeak::runComputeKernel()` + `mtlRunDispatches()` — shared compute-peak driver and GPU timing |
 | `mtl_internal.h` | Internal header: ObjC imports, pimpl definitions, helper declarations — included by all `.mm` files |
 | `compute_float.mm` | `runComputeSP`, `runComputeHP`, `runComputeMP` |
-| `compute_int.mm` | `runComputeInt8DP`, `runComputeInt4Packed` |
 | `simdgroup.mm` | `runSimdgroupMatrix` + `runSimdgroupMatrixInt` |
 | `mtl_blas.mm` | `runMpsGemm` + `runMpsGemmInt` — MPSGraph matrix multiply |
 | `global_bandwidth.mm` | `runGlobalBandwidth` |

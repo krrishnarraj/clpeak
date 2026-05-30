@@ -316,9 +316,6 @@ int vkPeak::runAll()
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
     if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
-#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
-    if (isAllowed(Benchmark::ComputeInt4Packed)) runComputeInt4Packed(dev, cfg);
-#endif
 #ifdef VK_HAS_ANY_COOPMAT
     if (isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/true);

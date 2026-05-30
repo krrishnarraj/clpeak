@@ -46,7 +46,6 @@ set(CLPEAK_CUDA_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/compute_mp.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/compute_bf16.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/compute_int8_dp.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/compute_int4_packed.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/compute_int32.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/global_bandwidth.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/kernel_latency.cu

@@ -32,7 +32,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (HIPRTC compilation + module caching) |
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
-| `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
+| `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP` |
 | `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark |
 | `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
 | `sparse_mfma.cpp` | `runSparseMfma` — 2:4 structured-sparse MFMA peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_smfmac_*` |

@@ -13,7 +13,6 @@ static const std::string stringifiedKernels =
 #include "kernels/compute_integer_kernels.cl"
 #include "kernels/compute_char_kernels.cl"
 #include "kernels/compute_short_kernels.cl"
-#include "kernels/compute_int4_packed_kernels.cl"
     ;
 
 static const std::string stringifiedLocalKernels =

@@ -186,8 +186,7 @@ int RocmPeak::runAll()
       runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-    if (isAllowed(Benchmark::ComputeInt4Packed))
-      runComputeInt4Packed(dev, cfg);
+
     if (isAllowedAs(Benchmark::Rocwmma, Category::IntCompute))
       runRocwmma(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Mfma, Category::IntCompute))

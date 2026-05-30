@@ -27,7 +27,6 @@ enum class Benchmark : unsigned int {
     ComputeChar,
     ComputeShort,
     ComputeInt8DP,
-    ComputeInt4Packed,
     ComputeBF16,
     CoopMatrix,
     Wmma,
@@ -92,7 +91,6 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
-    case Benchmark::ComputeInt4Packed:
     case Benchmark::AtomicThroughput:
     case Benchmark::Bmma:
         return Category::IntCompute;

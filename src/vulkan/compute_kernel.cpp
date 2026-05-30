@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 // Shared compute-peak driver.
 //
-// Every compute-peak benchmark (runComputeSP / MP / INT8-DP / INT4-packed /
+// Every compute-peak benchmark (runComputeSP / MP / INT8-DP /
 // coop-matrix / ...) shares the same Vulkan scaffolding: allocate a single
 // device-local output buffer, build a one-binding descriptor set, create a
 // pipeline from the shader's SPIR-V, dispatch repeatedly with a push
