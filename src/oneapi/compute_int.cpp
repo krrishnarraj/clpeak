@@ -3,6 +3,7 @@
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
 #include <sycl/sycl.hpp>
+#include <string>
 
 namespace clpeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
@@ -12,17 +13,59 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
                        double unitDivider);
 }
 
-// Integer MAD macros: shape mirrors compute_int32.hip exactly so the work-per-WI
-// constant (COMPUTE_FP_WORK_PER_WI = 4096) matches what the kernel actually does.
+// Integer MAD macros: shape mirrors compute_int32.hip exactly.  The alternating
+// read/write builds a dependency chain so the loop can't be hoisted.
+// One IMAD_16 = 16 mul-adds = 32 int ops per lane.  Width-invariant total:
+// width W runs baseIters/W iters * 32*W ops = baseIters*32 ops/WI.
+// baseIters=128 -> 4096 (COMPUTE_FP_WORK_PER_WI, matches ROCm int32).
 #define IMAD_4(x, y)  x = y * x + y; y = x * y + x; x = y * x + y; y = x * y + x;
 #define IMAD_16(x, y) IMAD_4(x, y) IMAD_4(x, y) IMAD_4(x, y) IMAD_4(x, y)
 
-// --------------------------------------------------------------------------
-// Integer compute (32-bit IMAD)
-// 128 outer iters * IMAD_16 (32 ops) = 4096 ops/WI.
-// --------------------------------------------------------------------------
-class compute_int32_kernel;
+namespace { struct IntTag; }
+template <typename Tag, int W> class compute_int_vec_kernel;
 
+template <typename Tag, int W>
+static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
+                        logger::TestScope &test, const char *label,
+                        int *out, uint64_t totalThreads, uint32_t blockSize,
+                        int baseIters, int scalarA, uint32_t workPerWI,
+                        unsigned int targetTimeUs, unsigned int forced)
+{
+  using VecT = sycl::vec<int, W>;
+  int iters = baseIters / W;
+  if (iters < 1) iters = 1;
+  const int A = scalarA;
+
+  auto submit = [=](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_int_vec_kernel<Tag, W>>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) {
+          VecT x, y;
+          #pragma unroll
+          for (int k = 0; k < W; k++)
+          {
+            x[k] = A + k;
+            y[k] = (int)it.get_local_id(0) + k;
+          }
+          #pragma unroll 1
+          for (int i = 0; i < iters; i++) { IMAD_16(x, y) }
+          int acc = 0;
+          #pragma unroll
+          for (int k = 0; k < W; k++) acc += y[k];
+          out[it.get_global_id(0)] = acc;
+        });
+    });
+  };
+
+  float us = peak.runKernel(dev, submit, targetTimeUs, forced);
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9));
+}
+
+// --------------------------------------------------------------------------
+// Integer compute (32-bit IMAD) — int / int2 / int4 / int8 / int16
+// --------------------------------------------------------------------------
 int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
@@ -35,49 +78,100 @@ int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
   int *out = sycl::malloc_device<int>(totalThreads, dev.stream);
   if (!out)
   {
-    test.skip("int", ResultStatus::Error, "Failed to allocate output buffer");
+    test.skipAll({"int", "int2", "int4", "int8", "int16"},
+                 ResultStatus::Error, "Failed to allocate output buffer");
     return -1;
   }
+
   const int A = 3;
-
-  auto submit = [&](sycl::queue &q) -> sycl::event {
-    return q.submit([&](sycl::handler &h) {
-      h.parallel_for<compute_int32_kernel>(
-        sycl::nd_range<1>(totalThreads, blockSize),
-        [=](sycl::nd_item<1> it) {
-          int x = A;
-          int y = (int)it.get_local_id(0);
-          #pragma unroll 1
-          for (int i = 0; i < 128; i++) { IMAD_16(x, y) }
-          out[it.get_global_id(0)] = y;
-        });
-    });
-  };
-
-  float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (us <= 0.0f)
-    test.skip("int", ResultStatus::Error, "kernel launch failed");
-  else
-    test.emit("int", clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9));
+  const unsigned int forced = forceIters ? specifiedIters : 0;
+  runIntWidth<IntTag, 1 >(*this, dev, test, "int",   out, totalThreads, blockSize, 128, A, COMPUTE_FP_WORK_PER_WI, cfg.targetTimeUs, forced);
+  runIntWidth<IntTag, 2 >(*this, dev, test, "int2",  out, totalThreads, blockSize, 128, A, COMPUTE_FP_WORK_PER_WI, cfg.targetTimeUs, forced);
+  runIntWidth<IntTag, 4 >(*this, dev, test, "int4",  out, totalThreads, blockSize, 128, A, COMPUTE_FP_WORK_PER_WI, cfg.targetTimeUs, forced);
+  runIntWidth<IntTag, 8 >(*this, dev, test, "int8",  out, totalThreads, blockSize, 128, A, COMPUTE_FP_WORK_PER_WI, cfg.targetTimeUs, forced);
+  runIntWidth<IntTag, 16>(*this, dev, test, "int16", out, totalThreads, blockSize, 128, A, COMPUTE_FP_WORK_PER_WI, cfg.targetTimeUs, forced);
 
   sycl::free(out, dev.stream);
   return 0;
 }
 
 // --------------------------------------------------------------------------
-// INT8 dot-product compute via sycl::dot_acc when available.
-// Intel iGPUs/Arc expose this via SYCL ext_intel_dot_acc / ext_oneapi_dot_acc.
-// We try a generic emulation (manual int8 mul + add) — the SYCL compiler
-// will lower it to native dp4a on hardware that supports it.
-// COMPUTE_INT8_DP_WORK_PER_WI = 8192.  Each "dot" = 4 INT8 muladds = 8 ops.
-// 64 outer iters * 16 dots = 1024 dots = 8192 ops/WI.
+// INT8 dot-product compute (DP4a-style).  Mirrors compute_int8_dp.hip:
+// each STEP does a 4-lane int8 dot-accumulate into an int32, then feeds the
+// accumulator back into an operand (y ^= a) so the chain CANNOT be hoisted
+// (this is the fix for the bogus loop-invariant version).
+//
+// dp4(xp, yp, a): unpack 4 signed int8 lanes from packed ints xp, yp and
+//   accumulate sum(xi*yi) into a.  4 muls + 4 adds = 8 ops.
+// STEP_16 = 16 dp4 = 128 ops.  All variants total 8192 ops/WI
+// (COMPUTE_INT8_DP_WORK_PER_WI); they differ only in ILP (chain count):
+//   dp:  64 iters * 1 chain, dp2: 32 * 2, dp4: 16 * 4, dp8: 8 * 8.
+// On Intel HW the compiler may fuse to dp4a; on CPU it is honest int MACs.
 // --------------------------------------------------------------------------
-class compute_int8_dp_kernel;
+template <int NCH> class compute_int8_dp_kernel;
+
+template <int NCH>
+static void runInt8DpVariant(OneapiPeak &peak, OneapiDevice &dev,
+                             logger::TestScope &test, const char *label,
+                             int *out, uint64_t totalThreads, uint32_t blockSize,
+                             int outerIters, int scalarA,
+                             unsigned int targetTimeUs, unsigned int forced)
+{
+  const int A = scalarA;
+  auto submit = [=](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_int8_dp_kernel<NCH>>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) {
+          auto dp4 = [](int xp, int yp, int a) {
+            // sign-extend each 8-bit lane via arithmetic shift, multiply-add.
+            a += ((xp << 24) >> 24) * ((yp << 24) >> 24);
+            a += ((xp << 16) >> 24) * ((yp << 16) >> 24);
+            a += ((xp <<  8) >> 24) * ((yp <<  8) >> 24);
+            a += ( xp        >> 24) * ( yp        >> 24);
+            return a;
+          };
+
+          int lid = (int)it.get_local_id(0);
+          int x = (A & 0xff) | (((A + 1) & 0xff) << 8)
+                | (((A + 2) & 0xff) << 16) | (((A + 3) & 0xff) << 24);
+
+          int y[NCH], a[NCH];
+          #pragma unroll
+          for (int c = 0; c < NCH; c++) { y[c] = lid + c; a[c] = lid + 7 * c; }
+
+          #pragma unroll 1
+          for (int i = 0; i < outerIters; i++)
+          {
+            #pragma unroll
+            for (int c = 0; c < NCH; c++)
+            {
+              // STEP_16: 16 dot-accumulates with feedback per chain
+              #pragma unroll
+              for (int s = 0; s < 16; s++)
+              {
+                a[c] = dp4(x, y[c], a[c]);
+                y[c] ^= a[c];
+              }
+            }
+          }
+          int acc = 0;
+          #pragma unroll
+          for (int c = 0; c < NCH; c++) acc += a[c];
+          out[it.get_global_id(0)] = acc;
+        });
+    });
+  };
+
+  float us = peak.runKernel(dev, submit, targetTimeUs, forced);
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT8_DP_WORK_PER_WI, us, 1e9));
+}
 
 int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"integer_compute_int8_dp", "INT8 dot-product compute", "gops"});
+    {"integer_compute_int8_dp", "INT8 dot-product compute (DP4a)", "gops"});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));
@@ -86,42 +180,18 @@ int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
   int *out = sycl::malloc_device<int>(totalThreads, dev.stream);
   if (!out)
   {
-    test.skip("int8_dp", ResultStatus::Error, "Failed to allocate output buffer");
+    test.skipAll({"int8_dp", "int8_dp2", "int8_dp4", "int8_dp8"},
+                 ResultStatus::Error, "Failed to allocate output buffer");
     return -1;
   }
 
-  auto submit = [&](sycl::queue &q) -> sycl::event {
-    return q.submit([&](sycl::handler &h) {
-      h.parallel_for<compute_int8_dp_kernel>(
-        sycl::nd_range<1>(totalThreads, blockSize),
-        [=](sycl::nd_item<1> it) {
-          // 4 INT8 lanes packed into an int.  Use builtin types so the
-          // compiler can vectorize.  Init values chosen to avoid sign-extension
-          // saturating to zero on the first iteration.
-          sycl::vec<int8_t, 4> a{1, 2, 3, 4};
-          sycl::vec<int8_t, 4> b{(int8_t)(it.get_local_id(0) & 0x7F),
-                                 (int8_t)((it.get_local_id(0) + 1) & 0x7F),
-                                 (int8_t)((it.get_local_id(0) + 2) & 0x7F),
-                                 (int8_t)((it.get_local_id(0) + 3) & 0x7F)};
-          int acc = 0;
-          #pragma unroll 1
-          for (int i = 0; i < 64; i++) {
-            #pragma unroll
-            for (int j = 0; j < 16; j++) {
-              acc += (int)a[0] * (int)b[0] + (int)a[1] * (int)b[1]
-                   + (int)a[2] * (int)b[2] + (int)a[3] * (int)b[3];
-            }
-          }
-          out[it.get_global_id(0)] = acc;
-        });
-    });
-  };
-
-  float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (us <= 0.0f)
-    test.skip("int8_dp", ResultStatus::Error, "kernel launch failed");
-  else
-    test.emit("int8_dp", clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT8_DP_WORK_PER_WI, us, 1e9));
+  const int A = 4;
+  const unsigned int forced = forceIters ? specifiedIters : 0;
+  // outerIters scaled by chain count so every variant totals 8192 ops/WI.
+  runInt8DpVariant<1>(*this, dev, test, "int8_dp",  out, totalThreads, blockSize, 64, A, cfg.targetTimeUs, forced);
+  runInt8DpVariant<2>(*this, dev, test, "int8_dp2", out, totalThreads, blockSize, 32, A, cfg.targetTimeUs, forced);
+  runInt8DpVariant<4>(*this, dev, test, "int8_dp4", out, totalThreads, blockSize, 16, A, cfg.targetTimeUs, forced);
+  runInt8DpVariant<8>(*this, dev, test, "int8_dp8", out, totalThreads, blockSize,  8, A, cfg.targetTimeUs, forced);
 
   sycl::free(out, dev.stream);
   return 0;
@@ -129,9 +199,8 @@ int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
 
 // --------------------------------------------------------------------------
 // Packed INT4 compute (emulated — same shape as compute_int4_packed.hip).
-// 64 outer iters * MAD_16 = 1024 MAC ops per WI; reported as 4096 ops/WI to
-// match the cross-backend constant (each int packs 2 int4 lanes, each MAC
-// counts as 2 ops since we operate on both nibbles).
+// Real x<->y dependency chain already; single metric (matches ROCm).
+// 64 outer iters * MAD_16 = 1024 MACs; reported as 4096 ops/WI.
 // --------------------------------------------------------------------------
 class compute_int4_packed_kernel;
 
@@ -152,9 +221,6 @@ int OneapiPeak::runComputeInt4Packed(OneapiDevice &dev, benchmark_config_t &cfg)
   }
   const int A = 3;
 
-  // INT4 macro: unpack two nibbles, MAC each lane, repack.  Matches the
-  // ROCm/CUDA kernel byte-for-byte so reported gops are comparable across
-  // backends.
   auto submit = [&](sycl::queue &q) -> sycl::event {
     return q.submit([&](sycl::handler &h) {
       h.parallel_for<compute_int4_packed_kernel>(

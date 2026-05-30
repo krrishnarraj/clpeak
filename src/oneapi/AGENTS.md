@@ -28,12 +28,12 @@ build time and the SYCL runtime JITs it on first launch.
 
 | File | Purpose |
 |------|---------|
-| `oneapi_peak.cpp` | `OneapiPeak`: ctor, `applyOptions()`, `runAll()`, `runKernel()`, `enumerate()`, `printInventory()`, `enumerateGpus()` |
+| `oneapi_peak.cpp` | `OneapiPeak`: ctor, `applyOptions()`, `runAll()`, `runKernel()`, `enumerate()`, `printInventory()`, `enumerateDevices()` |
 | `oneapi_device.cpp` | `OneapiDevice::init()` — sets up `sycl::queue`, populates `oneapi_device_info_t` (vendor, CUs, sub-group sizes, fp16/fp64/bf16/XMX flags) |
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeGflops`) reused by `compute_float.cpp` / `compute_int.cpp` |
-| `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
-| `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP`, `runComputeInt4Packed` |
-| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`) |
+| `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
+| `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`), `runComputeInt8DP` (DP4a-style `int8_dp/dp2/dp4/dp8` ILP-chain variants with accumulator feedback — see note), `runComputeInt4Packed` (scalar) |
+| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). FP category emits `joint_matrix_bf16`/`_fp16` (8x16x16) + `_tf32` (8x16x8); int category emits `joint_matrix_int8` (8x16x32) |
 | `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak fp32/fp64/fp16 (gated by `CLPEAK_ONEAPI_HAS_ONEMKL`) |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
@@ -47,6 +47,18 @@ build time and the SYCL runtime JITs it on first launch.
 - `CLPEAK_ENABLE_ONEAPI` — top-level CMake option (default ON). Backend silently no-ops if `IntelSYCL` package is not found.
 - `CLPEAK_ONEAPI_HAS_ONEMKL` — defined when `MKL::MKL_SYCL` target was found. `onemkl.cpp` records skip rows otherwise.
 - `CLPEAK_ONEAPI_HAS_JOINT_MATRIX` — defined when `<sycl/ext/oneapi/matrix/matrix.hpp>` is available. `joint_matrix.cpp` records skip rows otherwise. The benchmark additionally skips at runtime on devices without XMX (detected via vendor/name heuristic in `oneapi_device.cpp`).
+
+## Gotchas
+
+- **Compute kernels must carry a real data-dependency chain** or the SYCL
+  compiler hoists loop-invariant work out and reports a fabricated peak. The
+  FP/INT MAD kernels alternate `x = fma(y,x,y); y = fma(x,y,x);` and the INT8
+  DP kernel feeds the accumulator back via `y ^= a`. A symptom of getting this
+  wrong was the INT8 test reporting ~768 TOPS on a Xeon CPU (physically
+  impossible). Keep every new compute kernel's output dependent on the loop.
+- **Vector-width sweeps keep ops/WI constant** by running `baseIters/W` outer
+  iterations for width `W`, so the same work-constant (`COMPUTE_FP_WORK_PER_WI`
+  etc.) is reported for every width and the numbers stay comparable.
 
 ## When You Change This Directory
 
