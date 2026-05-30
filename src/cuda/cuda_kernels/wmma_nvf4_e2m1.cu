@@ -7,9 +7,12 @@
 //   * block size is 16 elements (vs 32 for MXFP4), so over K=64 there are
 //     four scale values per row -> `.scale_vec::4X` (MXFP4 uses ::2X)
 // The E2M1 data path itself is identical: true 4-bit packed elements.  The
-// scale selectors / arithmetic values are arbitrary for a throughput probe
-// because all inputs are synthetic constants; only instruction issue rate
-// matters.
+// scale arithmetic values are arbitrary for a throughput probe because all
+// inputs are synthetic constants; only instruction issue rate matters.
+//
+// NOTE: with `.scale_vec::4X` the scale-selector pairs {byte-id, thread-id}
+// MUST both be {0, 0} -- ptxas rejects the non-zero byte-id selectors that
+// the `.scale_vec::2X` MXFP4 path accepts (e.g. {2,1}/{2,3}).
 //
 // Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major):
 //   A: m16 x k64 packed FP4 = 512 bytes / 32 threads = 16 bytes/thread = 4 x .b32
@@ -43,21 +46,21 @@ extern "C" __global__ void wmma_nvf4_e2m1(float *out, float A)
     {
         asm(
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%0,%1,%2,%3}, {%32,%33,%34,%35}, {%36,%37}, {%0,%1,%2,%3}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%0,%1,%2,%3}, {%32,%33,%34,%35}, {%36,%37}, {%0,%1,%2,%3}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%4,%5,%6,%7}, {%32,%33,%34,%35}, {%36,%37}, {%4,%5,%6,%7}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%4,%5,%6,%7}, {%32,%33,%34,%35}, {%36,%37}, {%4,%5,%6,%7}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%8,%9,%10,%11}, {%32,%33,%34,%35}, {%36,%37}, {%8,%9,%10,%11}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%8,%9,%10,%11}, {%32,%33,%34,%35}, {%36,%37}, {%8,%9,%10,%11}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%12,%13,%14,%15}, {%32,%33,%34,%35}, {%36,%37}, {%12,%13,%14,%15}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%12,%13,%14,%15}, {%32,%33,%34,%35}, {%36,%37}, {%12,%13,%14,%15}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%16,%17,%18,%19}, {%32,%33,%34,%35}, {%36,%37}, {%16,%17,%18,%19}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%16,%17,%18,%19}, {%32,%33,%34,%35}, {%36,%37}, {%16,%17,%18,%19}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%20,%21,%22,%23}, {%32,%33,%34,%35}, {%36,%37}, {%20,%21,%22,%23}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%20,%21,%22,%23}, {%32,%33,%34,%35}, {%36,%37}, {%20,%21,%22,%23}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%24,%25,%26,%27}, {%32,%33,%34,%35}, {%36,%37}, {%24,%25,%26,%27}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%24,%25,%26,%27}, {%32,%33,%34,%35}, {%36,%37}, {%24,%25,%26,%27}, %38, {0, 0}, %39, {0, 0};\n"
           "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
-              "{%28,%29,%30,%31}, {%32,%33,%34,%35}, {%36,%37}, {%28,%29,%30,%31}, %38, {2, 1}, %39, {2, 3};\n"
+              "{%28,%29,%30,%31}, {%32,%33,%34,%35}, {%36,%37}, {%28,%29,%30,%31}, %38, {0, 0}, %39, {0, 0};\n"
           : "+f"(c00),"+f"(c01),"+f"(c02),"+f"(c03),
             "+f"(c10),"+f"(c11),"+f"(c12),"+f"(c13),
             "+f"(c20),"+f"(c21),"+f"(c22),"+f"(c23),
