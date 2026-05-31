@@ -5,15 +5,20 @@
 
 int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
 {
+  // Native HIP SDK vector widths: int, int2, int4. Each variant does the same
+  // 4096 ops/thread (loop count divided by the vector width).
+  static const rocm_compute_variant_t variants[] = {
+      {"int", "compute_int32", rocm_kernels::compute_int32_src, rocm_kernels::compute_int32_name},
+      {"int2", "compute_int32_v2", rocm_kernels::compute_int32_src, rocm_kernels::compute_int32_name},
+      {"int4", "compute_int32_v4", rocm_kernels::compute_int32_src, rocm_kernels::compute_int32_name},
+  };
   int A = 3;
   rocm_compute_desc_t d = {};
   d.title = "Integer compute (32-bit IMAD)";
   d.resultTag = "integer_compute";
   d.unit = "gops";
-  d.metricLabel = "int";
-  d.kernelName = "compute_int32";
-  d.src = rocm_kernels::compute_int32_src;
-  d.srcName = rocm_kernels::compute_int32_name;
+  d.variants = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(int);
   d.scalarArg = &A;

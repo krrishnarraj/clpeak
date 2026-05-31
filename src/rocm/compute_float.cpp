@@ -5,15 +5,20 @@
 
 int RocmPeak::runComputeSP(RocmDevice &dev, benchmark_config_t &cfg)
 {
+  // Native HIP SDK vector widths: float, float2, float4 (hip_vector_types.h
+  // has no float8/float16). Each variant does the same 4096 flops/thread.
+  static const rocm_compute_variant_t variants[] = {
+      {"float", "compute_sp", rocm_kernels::compute_sp_src, rocm_kernels::compute_sp_name},
+      {"float2", "compute_sp_v2", rocm_kernels::compute_sp_src, rocm_kernels::compute_sp_name},
+      {"float4", "compute_sp_v4", rocm_kernels::compute_sp_src, rocm_kernels::compute_sp_name},
+  };
   float A = 1.3f;
   rocm_compute_desc_t d = {};
   d.title = "Single-precision compute";
   d.resultTag = "single_precision_compute";
   d.unit = "gflops";
-  d.metricLabel = "float";
-  d.kernelName = "compute_sp";
-  d.src = rocm_kernels::compute_sp_src;
-  d.srcName = rocm_kernels::compute_sp_name;
+  d.variants = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(float);
   d.scalarArg = &A;
@@ -45,15 +50,20 @@ int RocmPeak::runComputeHP(RocmDevice &dev, benchmark_config_t &cfg)
 
 int RocmPeak::runComputeDP(RocmDevice &dev, benchmark_config_t &cfg)
 {
+  // Native HIP SDK vector widths: double, double2, double4. Each variant does
+  // the same 512 flops/thread (loop count divided by the vector width).
+  static const rocm_compute_variant_t variants[] = {
+      {"double", "compute_dp", rocm_kernels::compute_dp_src, rocm_kernels::compute_dp_name},
+      {"double2", "compute_dp_v2", rocm_kernels::compute_dp_src, rocm_kernels::compute_dp_name},
+      {"double4", "compute_dp_v4", rocm_kernels::compute_dp_src, rocm_kernels::compute_dp_name},
+  };
   double A = 1.3;
   rocm_compute_desc_t d = {};
   d.title = "Double-precision compute";
   d.resultTag = "double_precision_compute";
   d.unit = "gflops";
-  d.metricLabel = "double";
-  d.kernelName = "compute_dp";
-  d.src = rocm_kernels::compute_dp_src;
-  d.srcName = rocm_kernels::compute_dp_name;
+  d.variants = variants;
+  d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_DP_WORK_PER_WI;
   d.elemSize = sizeof(double);
   d.scalarArg = &A;
