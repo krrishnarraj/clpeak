@@ -75,7 +75,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates ocl-icd-opencl-dev opencl-headers
+            build-essential ca-certificates ocl-icd-opencl-dev
 
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@v1
