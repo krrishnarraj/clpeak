@@ -239,6 +239,62 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
+    // MXFP4 mma.sp 2:4 sparsity E2M1 + UE8M0 block scale (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
+      d.resultTag = "wmma_mxf4_sparse";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "mxf4_sparse";
+      d.kernelName = "wmma_mxf4_sparse";
+      d.src = cuda_kernels::wmma_mxf4_sparse_src;
+      d.srcName = cuda_kernels::wmma_mxf4_sparse_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSparseSupported;
+      d.skipMsg = "MXFP4 mma.sp 2:4 sparsity requires Blackwell sm_120a or newer! Skipped";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
+    // NVFP4 mma.sp 2:4 sparsity E2M1 + UE4M3 block scale (PTX) - Blackwell sm_120a+
+    {
+      float A = 1.3f;
+      std::stringstream archOpt;
+      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
+      std::string archOptStr = archOpt.str();
+      const char *fp4Opts[] = {archOptStr.c_str()};
+      cuda_compute_desc_t d = {};
+      d.title = "NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
+      d.resultTag = "wmma_nvf4_sparse";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "nvf4_sparse";
+      d.kernelName = "wmma_nvf4_sparse";
+      d.src = cuda_kernels::wmma_nvf4_sparse_src;
+      d.srcName = cuda_kernels::wmma_nvf4_sparse_name;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSparseSupported;
+      d.skipMsg = "NVFP4 mma.sp 2:4 sparsity requires Blackwell sm_120a or newer! Skipped";
+      d.extraNvrtcOpts = fp4Opts;
+      d.numExtraNvrtcOpts = 1;
+      runComputeKernel(dev, cfg, d);
+    }
   }
 
   // ---------------------------------------------------------------------

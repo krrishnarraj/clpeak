@@ -39,6 +39,7 @@ struct cuda_device_info_t {
   bool wmmaInt8Supported;        // cc >= 7.2 (Turing) -- int8 wmma fragments
   bool fp8MmaSupported;          // cc >= 8.9 (Ada) -- inline mma.sync.e4m3/e5m2
   bool fp4MmaSupported;          // cc >= 12.0 (Blackwell) -- sm_120a mma FP4/MXFP4
+  bool fp4MmaSparseSupported;    // cc >= 12.0 (Blackwell) -- sm_120a mma.sp FP4 2:4
   bool tf32GemmSupported;        // cc >= 8.0 (Ampere) -- TF32 tensor cores
   bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
   bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
@@ -227,6 +228,10 @@ namespace cuda_kernels {
   extern const char *wmma_mxf4_e2m1_name;
   extern const char *wmma_nvf4_e2m1_src;
   extern const char *wmma_nvf4_e2m1_name;
+  extern const char *wmma_mxf4_sparse_src;
+  extern const char *wmma_mxf4_sparse_name;
+  extern const char *wmma_nvf4_sparse_src;
+  extern const char *wmma_nvf4_sparse_name;
   extern const char *wmma_tf32_src;
   extern const char *wmma_tf32_name;
   extern const char *wmma_fp64_src;

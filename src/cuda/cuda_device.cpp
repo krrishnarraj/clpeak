@@ -89,6 +89,7 @@ bool CudaDevice::init(int devIndex)
   info.wmmaInt8Supported = (info.major > 7) || (info.major == 7 && info.minor >= 2);
   info.fp8MmaSupported = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
   info.fp4MmaSupported = (info.major >= 12);
+  info.fp4MmaSparseSupported = (info.major >= 12);
   info.tf32GemmSupported = (info.major >= 8);
   info.int8GemmSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int4GemmSupported = (info.major >= 9);

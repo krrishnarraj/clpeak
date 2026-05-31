@@ -59,6 +59,8 @@ set(CLPEAK_CUDA_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_fp4_e2m1.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_mxf4_e2m1.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_nvf4_e2m1.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_mxf4_sparse.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_nvf4_sparse.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_tf32.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_fp64.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_int4.cu
