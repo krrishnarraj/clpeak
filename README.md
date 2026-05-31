@@ -3,89 +3,138 @@
 [![Google Play](https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg)](https://play.google.com/store/apps/details?id=kr.clpeak)
 [![Build](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml)
 
-A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops and vendor-SDK GEMM libraries (cuBLASLt on NVIDIA, MPS on Apple) to expose what the hardware is capable of &mdash; from raw ALU peaks to near-vendor-advertised matrix throughput.
+**clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops and vendor-SDK GEMM libraries (cuBLASLt on NVIDIA, MPS on Apple) to expose what the hardware is capable of &mdash; from raw ALU peaks to near-vendor-advertised matrix throughput.
 
-clpeak began as an OpenCL-only tool. It now ships six interchangeable backends &mdash; OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL &mdash; running back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) become visible alongside the raw peak numbers.
+clpeak began as an OpenCL-only tool. It has since been repurposed into a multi-backend benchmark, shipping multiple interchangeable backends &mdash; OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL &mdash; running back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) become visible alongside the raw peak numbers.
 
 ## Sample output
 
-NVIDIA RTX 5060, condensed:
+Condensed, peak-revealing lines straight from the tool. Numbers below are real runs.
+
+Apple M1 Pro, Metal backend:
 
 ```text
-=== CUDA backend ===
+Backend: Metal
+  Device 0: Apple M1 Pro
 
-  Single-precision compute (GFLOPS)
-    float : 17830.03
+    Single-precision compute (GFLOPS)
+      float    : 4487.56
+      half     : 4989.62
 
-  BF16 compute bf16xbf16+fp32 (GFLOPS)
-    bf16 : 19653.56
+    simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)
+      simdgroup_fp16 : 15.84
 
-  INT8 dot-product compute (__dp4a) (GOPS)
-    int8_dp4 : 33758.77
+    MPS GEMM peak (TFLOPS)
+      fp32     : 4.09
+      fp16     : 3.97
 
-  WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)
-    wmma_fp16 : 165.93
+    Global memory bandwidth (GBPS)
+      float    : 184.49
 
-  WMMA int8xint8+int32 16x16x16 (TOPS)
-    wmma_int8 : 327.36
+    Local memory bandwidth (GBPS)
+      float    : 2938.50
 
-  FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)
-    fp8_e4m3 : 85.10
+    Image memory bandwidth (GBPS)
+      rgba32f  : 162.67
 
-  cuBLASLt GEMM peak (TFLOPS)
-    fp32     : 15.35
-    tf32     : 20.94
-    fp16     : 79.94
-    bf16     : 42.20
-    fp8_e4m3 : 161.61
-    fp8_e5m2 : 161.60
-
-  cuBLASLt GEMM peak (TOPS)
-    int8     : 161.33
-    int4     : unsupported on sm_120
-
-  Global memory bandwidth (GBPS)
-    float   : 390.90
-
-  Local memory bandwidth (GBPS)
-    float4 : 9139.50
-
-  Atomic throughput (GOPS)
-    global : 170.90
-    local  : 1322.27
-
-  Kernel launch latency (us)
-    noop : 2.35
+    Atomic throughput (GOPS)
+      int_global : 24.78
+      int_local  : 255.52
 ```
 
-Apple M1 Pro, condensed:
+NVIDIA RTX 5060, CUDA backend:
 
 ```text
-=== Metal backend ===
+Backend: CUDA
+  Device 0: NVIDIA GeForce RTX 5060
 
-  Single-precision compute (GFLOPS)
-    float : 4487.11
+    Single-precision compute (GFLOPS)
+      float    : 17779.23
+      half     : 21067.54
+      bf16     : 19637.48
 
-  simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)
-    simdgroup_fp16 : 15.84
+    WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)
+      wmma_fp16 : 165.90
 
-  MPS GEMM peak (TFLOPS)
-    fp32 : 4.31
-    fp16 : 3.97
-    bf16 : unsupported on this device
+    WMMA int8xint8+int32 16x16x16 (TOPS)
+      wmma_int8 : 325.18
 
-  Global memory bandwidth (GBPS)
-    float   : 180.87
+    FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)
+      fp8_e4m3 : 85.08
 
-  Local memory bandwidth (GBPS)
-    float4 : 2705.21
+    MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
+      mxf4_e2m1 : 324.54
+    NVFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
+      nvf4_e2m1 : 327.00
 
-  Image memory bandwidth (GBPS)
-    float4 : 499.71
+    MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32 (TFLOPS)
+      mxf4_sparse : 630.37
+    NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32 (TFLOPS)
+      nvf4_sparse : 630.45
 
-  Atomic throughput (GOPS)
-    global : 24.64
-    local  : 256.45
+    INT8 dot-product compute (__dp4a) (GOPS)
+      int8_dp8 : 33587.22
+
+    cuBLASLt GEMM peak (TFLOPS)
+      fp16     : 77.54
+      bf16     : 41.14
+      fp8_e4m3 : 143.89
+    cuBLASLt GEMM peak (TOPS)
+      int8     : 149.18
+
+    Global memory bandwidth (GBPS)
+      float4   : 418.82
+
+    Local memory bandwidth (GBPS)
+      float4   : 9118.74
+
+    Kernel launch latency (US)
+      roundtrip : 6.24
+```
+
+AMD Instinct MI300X, ROCm backend:
+
+```text
+Backend: ROCm
+  Device 0: AMD Instinct MI300X
+
+    Single-precision compute (GFLOPS)
+      float    : 134624.47
+      half     : 151388.55
+      double   : 62886.77
+      bf16     : 117266.34
+
+    MFMA fp16xfp16+fp32 16x16x16 (TFLOPS)
+      mfma_fp16 : 1128.18
+    MFMA bf16xbf16+fp32 16x16x16 (TFLOPS)
+      mfma_bf16 : 1124.29
+    MFMA fp8xfp8+fp32 16x16x32 (TFLOPS)
+      mfma_fp8 : 2166.78
+    MFMA int8xint8+int32 16x16x32 (TOPS)
+      mfma_int8 : 2339.26
+
+    Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)
+      smfmac_fp16 : 2154.45
+    Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)
+      smfmac_fp8 : 4138.86
+    Sparse MFMA int8 2:4 16x16x64 (TOPS)
+      smfmac_int8 : 4499.68
+
+    rocBLAS GEMM peak (TFLOPS)
+      fp32     : 129.70
+      fp64     : 100.48
+      fp16     : 840.05
+    hipBLASLt FP8 GEMM peak (TFLOPS)
+      fp8_e4m3 : 1588.02
+
+    Global memory bandwidth (GBPS)
+      float4   : 3577.33
+
+    Local memory bandwidth (GBPS)
+      float4   : 65024.37
+
+    Kernel launch latency (US)
+      roundtrip : 8.66
 ```
 
 ## Building
@@ -105,6 +154,8 @@ cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
 cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ```
 
+> **oneAPI/SYCL note:** the oneAPI backend must be configured with `-DCMAKE_CXX_COMPILER=icpx` (the DPC++ compiler). SYCL kernels are compiled inline by the host compiler, so configuring with a non-`icpx` compiler silently skips the backend.
+
 | CMake option | Default | Effect when `OFF` |
 |---|---|---|
 | `CLPEAK_ENABLE_OPENCL` | `ON` | Skip OpenCL backend |
@@ -114,49 +165,22 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 
-## Backends
-
-| Backend | Default | Compile path | Targets |
-|---|---|---|---|
-| **OpenCL** | on (optional) | C++ host + .cl strings | OpenCL 1.2 baseline; 3.0 features when headers expose them |
-| **Vulkan** | on, if Vulkan SDK present | GLSL .comp &rarr; SPIR-V at configure time | Vulkan 1.1+ |
-| **CUDA** | on, if CUDA Toolkit present | .cu source embedded as raw strings, NVRTC at runtime; cuBLASLt for GEMM peak | CUDA driver API + NVRTC + cuBLASLt (all part of CUDA Toolkit) |
-| **ROCm/HIP** | on, if ROCm/HIP + HIPRTC are present | .hip source embedded as raw strings, HIPRTC at runtime; rocBLAS for GEMM peak | AMD ROCm HIP runtime + HIPRTC; optional rocWMMA / rocBLAS |
-| **Metal** | on, on Apple silicon | .metal source embedded as raw strings, runtime compile; MPS / MPSGraph for GEMM peak | Apple7 (M1) and newer (MPSGraph bf16 requires Apple9 / M3+) |
-| **oneAPI/SYCL** | on, if compiling with `icpx` / `clang++ -fsycl` | SYCL kernels compiled inline by the host compiler (DPC++/AOT or JIT); oneMKL for GEMM peak | Intel oneAPI Base Toolkit; optional oneMKL (`MKL::MKL_SYCL`) and joint_matrix header for XMX |
-
-A backend is silently skipped at runtime if its loader / driver / device is missing, so a single binary stays portable across boxes. Force-disable at runtime with `--no-opencl`, `--no-vulkan`, `--no-cuda`, `--no-rocm`, `--no-metal`, `--no-oneapi`.
-
 ## What it measures
 
-| Test | Unit | OpenCL | Vulkan | CUDA | ROCm/HIP | Metal | oneAPI/SYCL |
-|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Global memory bandwidth | GB/s | &check; | &check; | &check; | &check; | &check; | &check; |
-| Local / shared memory bandwidth | GB/s | &check; | &check; | &check; | &check; | &check; | &check; |
-| Image / texture bandwidth | GB/s | &check; | &check; | &check; | &check; | &check; | &check; |
-| Transfer bandwidth (host&harr;device) | GB/s | &check; | &check; | &check; | &check; | &mdash; | &check; |
-| Compute SP / HP / DP / MP / BF16 | GFLOPS | &check; | &check; | &check; | &check; | &check; | &check; |
-| Compute INT (int32) | GOPS | &check; | &check; | &check; | &check; | &mdash; | &check; |
-| Compute INT24 / INT8 / INT16 | GOPS | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
-| INT8 dot-product (DP4a) | GOPS | &check; | &check; | &check; | &check; | &mdash; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`) | TFLOPS / TOPS | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync + FP4/MXFP4/NVFP4 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8/mxfp4 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) |
-| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | TFLOPS / TOPS | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 |
-| Atomic throughput (global + local) | GOPS | &check; | &check; | &check; | &check; | &check; | &check; |
-| Kernel launch latency | &mu;s | &check; | &check; | &check; | &check; | &check; | &check; |
-
-The vendor-SDK GEMM tests (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) measure a different point than the hand-rolled MMA kernels above: they use cuBLASLt / rocBLAS / MPS / oneMKL internally, which contain the same hand-tuned tiling and swizzling that NVIDIA / AMD / Apple / Intel use to publish their own peak numbers. The hand-rolled WMMA / rocWMMA / MFMA / simdgroup_matrix / joint_matrix tests benchmark the raw instruction throughput; the vendor-SDK tests benchmark the achievable system GEMM peak including occupancy, memory staging, and algorithm selection. On AMD CDNA, `--mfma` drives the matrix cores directly via `__builtin_amdgcn_mfma_*` intrinsics (fp16/bf16/int8/fp8, plus block-scaled mxfp4 on CDNA4 / gfx950) and is the closest to the datasheet PFLOPS/POPS peaks; `--rocwmma` exercises the same cores through the rocWMMA header library. `--mfma` also reports 2:4 **structured-sparse** matrix-core peaks (`smfmac_*`, via `__builtin_amdgcn_smfmac_*`), which target the datasheet's "with Structured Sparsity" columns (~2x the dense rate).
-
-## Cross-backend comparison
-
-Running multiple backends on the same device exposes driver- and lowering-quality deltas that a single-stack benchmark cannot:
-
-- NVIDIA RTX 5060: OpenCL image bandwidth comes in at ~1/10 the Vulkan or CUDA equivalent &mdash; driver-side image-fetch lowering issue, not a hardware limit.
-- NVIDIA RTX 5060: Vulkan local-atomic throughput is ~1/2 the OpenCL or CUDA rate &mdash; NVIDIA's Vulkan SPIR-V atomic lowering takes a heavier-ordering path.
-- NVIDIA RTX 5060: CUDA WMMA INT8 (327 TOPS) is almost exactly 2&times; the Vulkan coopmat INT8 (166 TOPS), reflecting the K=16 vs K=32 tile difference and ptxas's cross-chain ILP.
-- NVIDIA RTX 5060: cuBLASLt fp16 (80 TFLOPS) is roughly half of WMMA fp16 (166 TFLOPS) &mdash; WMMA exercises raw instruction throughput; cuBLASLt is bounded by memory traffic and occupancy at realistic GEMM sizes. The cuBLASLt number is the practical achievable peak.
-- NVIDIA RTX 5060: cuBLASLt fp8 (161 TFLOPS) more than doubles cuBLASLt fp16 (80 TFLOPS), consistent with the 2&times; arithmetic density and efficient memory reuse at the same matrix dimension.
-- Apple M1 Pro: simdgroup_matrix fp16 (~16 TFLOPS) is ~4&times; the MPS GEMM fp16 (~4 TFLOPS) &mdash; the hand-rolled kernel saturates the matrix-engine in a register-resident loop; MPS GEMM is memory-bound at M1 VRAM bandwidth.
-- Apple M1 Pro: all three backends agree on atomic throughput &mdash; MoltenVK and native Metal both reach the hardware path.
+| Test | OpenCL | Vulkan | CUDA | ROCm/HIP | Metal | oneAPI/SYCL |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Global memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; |
+| Local / shared memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; |
+| Image / texture bandwidth | &check; | &check; | &check; | &check; | &check; | &check; |
+| Transfer bandwidth (host&harr;device) | &check; | &check; | &check; | &check; | &mdash; | &check; |
+| Compute SP / HP / DP / MP / BF16 | &check; | &check; | &check; | &check; | &check; | &check; |
+| Compute INT (int32) | &check; | &check; | &check; | &check; | &mdash; | &check; |
+| Compute INT24 / INT8 / INT16 | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
+| INT8 dot-product (DP4a) | &check; | &check; | &check; | &check; | &mdash; | &check; |
+| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`) | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync + FP4/MXFP4/NVFP4 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8/mxfp4 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) |
+| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 |
+| Atomic throughput (global + local) | &check; | &check; | &check; | &check; | &check; | &check; |
+| Kernel launch latency | &check; | &check; | &check; | &check; | &check; | &check; |
 
 ## CLI
 
@@ -181,9 +205,11 @@ Running multiple backends on the same device exposes driver- and lowering-qualit
 ./clpeak --onemkl                     # Intel vendor-SDK GEMM peak (oneMKL)
 ./clpeak --coopmat                    # Vulkan tensor-core tests
 ./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
-./clpeak --compare baseline.json      # diff against a previous run
+./clpeak --compare baseline.json      # diff this run against a saved baseline JSON
 ./clpeak --list-devices               # enumerate devices for every backend, no benchmarks
 ```
+
+`--compare baseline.json` re-runs the selected tests and prints each result next to the value recorded in `baseline.json` (saved earlier with `--json-file`), so regressions or driver/SDK upgrades show up as a per-test delta instead of two outputs you have to eyeball side by side.
 
 ### Selecting a specific device
 
@@ -197,10 +223,6 @@ Multi-GPU machines pick devices per-backend:
 ./clpeak --mtl-device 0                  # Metal device index
 ./clpeak --oneapi-device 0               # oneAPI/SYCL device index
 ```
-
-## License
-
-See [LICENSE](LICENSE).
 
 ## For AI agents
 
