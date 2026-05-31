@@ -11,12 +11,16 @@
 //
 // === Ops accounting ===
 // Count the nominal instruction shape M*N*K*2 = 16*8*128*2 = 32768 ops per
-// mma.sp.  No sparsity multiplier on top.  On hardware that accelerates 2:4
-// (datacenter Blackwell) the m16n8k128 sparse mma issues at the dense m16n8k64
-// rate -> reports ~2x the dense MXFP4 TOPS (near the vendor "with sparsity"
-// peak).  On GeForce sm_120 (RTX 50-series) sparsity is NOT accelerated, so it
-// reports the SAME ~327 TOPS as dense -- see `wmma_int8_sparse.cu` for the same
-// null result measured on RTX 5060 (int8_sparse == int8_k32, 0% gain).
+// mma.sp.  The doubled K (k128 vs the dense k64) already encodes the 2x; one
+// m16n8k128 sparse mma issues at the dense m16n8k64 rate on hardware that
+// accelerates 2:4 -> reports ~2x the dense MXFP4 TOPS, matching NVIDIA's "with
+// sparsity" AI-TOPS definition.
+//
+// Consumer Blackwell (RTX 5060, sm_120) DOES accelerate FP4 2:4 sparsity -- the
+// sibling NVFP4 sparse kernel measures ~632 TFLOPS (~1.93x dense, above the
+// advertised 615).  This is unlike INT8, where `wmma_int8_sparse.cu` measures
+// int8_sparse == int8_k32 (0% gain) on the same GPU: NVIDIA gates the INT sparse
+// path on GeForce but not the FP4 one.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k128 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32
@@ -27,13 +31,10 @@
 // 8 independent accumulator chains in one asm block (same ILP pattern as the
 // dense MXFP4 kernel and wmma_int8_sparse.cu).
 //
-// NOTE (to confirm on first NVRTC build): the exact operand order for
-// sparse + block_scale combined, the scale_vec size for the doubled K, and the
-// scale-selector pairs are best-effort here -- the dense MXFP4 kernel used an
-// implicit scale_vec (2X) with {2,1}/{2,3} selectors, but the doubled sparse K
-// likely needs scale_vec::4X with {0,0} selectors (as the NVFP4 4X path
-// requires).  ptxas on the sm_120a box is the source of truth -- adjust the asm
-// template against its diagnostics if it rejects this form.
+// scale_vec::2X tracks the COMPRESSED K=64 (mxf4 block32 -> 64/32 = 2), not the
+// logical k128.  ptxas rejects `.scale_vec::4X` with `.kind::mxf4` (4X is the
+// NVFP4/block16 size); 2X is the mxf4/block32 size.  Operand order matches the
+// NVFP4 sparse kernel: D, A{4}, B{4}, C, meta, 0x0, scaleA, {0,0}, scaleB, {0,0}.
 
 extern "C" __global__ void wmma_mxf4_sparse(float *out, float A)
 {
@@ -59,21 +60,21 @@ extern "C" __global__ void wmma_mxf4_sparse(float *out, float A)
     for (int i = 0; i < 256; i++)
     {
         asm(
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%0,%1,%2,%3}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%0,%1,%2,%3}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%4,%5,%6,%7}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%4,%5,%6,%7}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%8,%9,%10,%11}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%8,%9,%10,%11}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%12,%13,%14,%15}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%12,%13,%14,%15}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%16,%17,%18,%19}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%16,%17,%18,%19}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%20,%21,%22,%23}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%20,%21,%22,%23}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%24,%25,%26,%27}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%24,%25,%26,%27}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
-          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 "
+          "mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 "
               "{%28,%29,%30,%31}, {%32,%33,%34,%35}, {%36,%37,%38,%39}, {%28,%29,%30,%31}, %40, 0x0, %41, {0, 0}, %42, {0, 0};\n"
           : "+f"(c00),"+f"(c01),"+f"(c02),"+f"(c03),
             "+f"(c10),"+f"(c11),"+f"(c12),"+f"(c13),

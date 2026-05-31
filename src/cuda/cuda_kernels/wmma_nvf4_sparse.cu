@@ -11,16 +11,19 @@
 //
 // === Ops accounting ===
 // Count the nominal instruction shape M*N*K*2 = 16*8*128*2 = 32768 ops per
-// mma.sp.  No sparsity multiplier on top.  On hardware that actually accelerates
-// 2:4 (datacenter Blackwell), one m16n8k128 sparse mma issues at the same rate
-// as a dense m16n8k64 mma, so this reports ~2x the dense NVFP4 TOPS and lands
-// near the vendor "with sparsity" AI-TOPS peak.  On hardware that does NOT
-// accelerate sparsity (GeForce sm_120 / RTX 50-series), the sparse instruction
-// processes the full k128 at half the issue rate, so it reports the SAME ~327
-// TOPS as dense -- see `wmma_int8_sparse.cu` for the same null result measured
-// on RTX 5060 (int8_sparse == int8_k32, 0% gain).  That GeForce gating is the
-// documented reason the advertised 615 "AI TOPS" is unreachable on consumer
-// parts; this kernel makes the gating directly measurable.
+// mma.sp.  No extra sparsity multiplier on top -- the doubled K (k128 vs the
+// dense k64) already encodes the 2x.  One m16n8k128 sparse mma issues at the
+// same rate as a dense m16n8k64 mma on hardware that accelerates 2:4, so this
+// reports ~2x the dense NVFP4 TOPS, matching NVIDIA's "with sparsity" AI-TOPS
+// definition.
+//
+// MEASURED, RTX 5060 (sm_120, GeForce/consumer Blackwell): 632.7 TFLOPS, i.e.
+// ~1.93x the dense NVFP4 (328) and ABOVE the advertised 615 "AI TOPS".  So
+// consumer Blackwell DOES accelerate FP4 2:4 sparsity at full rate.  This is the
+// opposite of INT8: `wmma_int8_sparse.cu` measures int8_sparse == int8_k32 (0%
+// gain) on the very same GPU -- NVIDIA gates the INT sparse data-path on GeForce
+// but NOT the FP4 one.  The advertised FP4 AI-TOPS figure is therefore the
+// sparse number and IS reachable on consumer parts via this instruction.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k128 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32
@@ -31,11 +34,11 @@
 // 8 independent accumulator chains in one asm block (same ILP pattern as the
 // dense NVFP4 kernel and wmma_int8_sparse.cu).
 //
-// NOTE (to confirm on first NVRTC build): the exact operand order for
-// sparse + block_scale combined, the scale_vec size for the doubled K, and the
-// metadata/sparsity-selector placement are best-effort here.  ptxas on the
-// sm_120a box is the source of truth -- adjust the asm template against its
-// diagnostics if it rejects this form.
+// Operand order (confirmed compiling + running on sm_120a, NVRTC 13.2):
+//   D, A{4}, B{4}, C, metadata, sparsity-selector(0x0),
+//   scaleA-reg, {byte,thread}, scaleB-reg, {byte,thread}.
+// scale_vec::4X tracks the COMPRESSED K=64 (nvf4 block16 -> 64/16 = 4), not the
+// logical k128; with 4X the scale selectors must both be {0,0}.
 
 extern "C" __global__ void wmma_nvf4_sparse(float *out, float A)
 {
