@@ -2,3 +2,6 @@
 	path = android/app/src/main/cpp/libopencl-stub
 	url = https://github.com/krrishnarraj/libopencl-stub
 	branch = master
+[submodule "android/app/src/main/cpp/Vulkan-Headers"]
+	path = android/app/src/main/cpp/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
