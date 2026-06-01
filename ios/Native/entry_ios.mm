@@ -24,13 +24,13 @@ namespace
 std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
 {
   std::vector<BackendInventory> out;
-#ifdef ENABLE_VULKAN
-  if (!opts.skipVulkan)
-    out.push_back(vkPeak::enumerate());
-#endif
 #ifdef ENABLE_METAL
   if (!opts.skipMetal)
     out.push_back(MetalPeak::enumerate());
+#endif
+#ifdef ENABLE_VULKAN
+  if (!opts.skipVulkan)
+    out.push_back(vkPeak::enumerate());
 #endif
   return out;
 }
@@ -75,23 +75,24 @@ int clpeak_ios_launch(int argc,
 
   int status = 0;
 
-#ifdef ENABLE_VULKAN
-  if (!opts.skipVulkan)
-  {
-    vkPeak vkObj;
-    vkObj.log.reset(new LoggerIOS(callbacks, context));
-    vkObj.applyOptions(opts);
-    status |= vkObj.runAll();
-  }
-#endif
-
 #ifdef ENABLE_METAL
   if (!opts.skipMetal)
   {
     MetalPeak mtlObj;
     mtlObj.log.reset(new LoggerIOS(callbacks, context));
     mtlObj.applyOptions(opts);
-    status |= mtlObj.runAll();
+    status = mtlObj.runAll();
+  }
+#endif
+
+#ifdef ENABLE_VULKAN
+  if (!opts.skipVulkan)
+  {
+    vkPeak vkObj;
+    vkObj.log.reset(new LoggerIOS(callbacks, context));
+    vkObj.applyOptions(opts);
+    int vkStatus = vkObj.runAll();
+    status |= vkStatus;
   }
 #endif
 

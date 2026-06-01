@@ -47,24 +47,6 @@ struct BackendEntry
 static std::vector<BackendEntry> buildBackends()
 {
     std::vector<BackendEntry> out;
-#ifdef ENABLE_OPENCL
-    out.push_back({
-        "OpenCL",
-        []{ return clPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os){ clPeak::printInventory(inv, os); },
-        []{ return std::make_unique<clPeak>(); },
-        &CliOptions::skipOpenCL,
-    });
-#endif
-#ifdef ENABLE_VULKAN
-    out.push_back({
-        "Vulkan",
-        []{ return vkPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os){ vkPeak::printInventory(inv, os); },
-        []{ return std::make_unique<vkPeak>(); },
-        &CliOptions::skipVulkan,
-    });
-#endif
 #ifdef ENABLE_CUDA
     out.push_back({
         "CUDA",
@@ -99,6 +81,24 @@ static std::vector<BackendEntry> buildBackends()
         [](const BackendInventory &inv, std::ostream &os){ OneapiPeak::printInventory(inv, os); },
         []{ return std::make_unique<OneapiPeak>(); },
         &CliOptions::skipOneapi,
+    });
+#endif
+#ifdef ENABLE_VULKAN
+    out.push_back({
+        "Vulkan",
+        []{ return vkPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ vkPeak::printInventory(inv, os); },
+        []{ return std::make_unique<vkPeak>(); },
+        &CliOptions::skipVulkan,
+    });
+#endif
+#ifdef ENABLE_OPENCL
+    out.push_back({
+        "OpenCL",
+        []{ return clPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ clPeak::printInventory(inv, os); },
+        []{ return std::make_unique<clPeak>(); },
+        &CliOptions::skipOpenCL,
     });
 #endif
     return out;

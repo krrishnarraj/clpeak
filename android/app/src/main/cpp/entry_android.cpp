@@ -42,15 +42,6 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
     jclass cls = _jniEnv->GetObjectClass(_jObject);
 
     int clStatus = 0;
-    if (!opts.skipOpenCL)
-    {
-        clPeak clObj;
-        clObj.log.reset(new LoggerAndroid());
-        clObj.applyOptions(opts);
-        wireLoggerToJni(static_cast<LoggerAndroid *>(clObj.log.get()), _jniEnv, _jObject, cls);
-        clStatus = clObj.runAll();
-    }
-
 #ifdef ENABLE_VULKAN
     if (!opts.skipVulkan)
     {
@@ -58,10 +49,19 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
         vkObj.log.reset(new LoggerAndroid());
         vkObj.applyOptions(opts);
         wireLoggerToJni(static_cast<LoggerAndroid *>(vkObj.log.get()), _jniEnv, _jObject, cls);
-        int vkStatus = vkObj.runAll();
-        clStatus |= vkStatus;
+        clStatus = vkObj.runAll();
     }
 #endif
+
+    if (!opts.skipOpenCL)
+    {
+        clPeak clObj;
+        clObj.log.reset(new LoggerAndroid());
+        clObj.applyOptions(opts);
+        wireLoggerToJni(static_cast<LoggerAndroid *>(clObj.log.get()), _jniEnv, _jObject, cls);
+        int ocStatus = clObj.runAll();
+        clStatus |= ocStatus;
+    }
 
     if (argv)
         free(argv);
