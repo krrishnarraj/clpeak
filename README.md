@@ -213,12 +213,13 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 
 ### Selecting a specific device
 
-Multi-GPU machines pick devices per-backend:
+Multi-GPU machines pick devices per-backend. Each index flag takes one index or
+a comma-separated list; omitting it runs every device in that backend:
 
 ```console
 ./clpeak --cl-platform 0 --cl-device 1   # OpenCL platform/device pair
-./clpeak --vk-device 1                   # Vulkan physical-device index
-./clpeak --cuda-device 0                 # CUDA device ordinal
+./clpeak --vk-device 0,1                 # Vulkan physical-device indices (subset)
+./clpeak --cuda-device 0,2               # CUDA device ordinals
 ./clpeak --rocm-device 0                 # ROCm/HIP device ordinal
 ./clpeak --mtl-device 0                  # Metal device index
 ./clpeak --oneapi-device 0               # oneAPI/SYCL device index

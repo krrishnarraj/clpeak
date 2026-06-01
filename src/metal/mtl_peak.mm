@@ -7,8 +7,7 @@
 // ---------------------------------------------------------------------------
 
 MetalPeak::MetalPeak()
-  : deviceIndex(-1),
-    impl(nullptr)
+  : impl(nullptr)
 {
 }
 
@@ -17,7 +16,7 @@ MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
 void MetalPeak::applyOptions(const CliOptions &opts)
 {
     Peak::applyOptions(opts);
-    deviceIndex = opts.mtlDeviceIndex;
+    deviceIndices = opts.mtlDeviceIndices;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +41,8 @@ int MetalPeak::runAll()
 
     for (NSUInteger d = 0; d < impl->allDevices.count; d++)
     {
-        if (deviceIndex >= 0 && static_cast<NSUInteger>(deviceIndex) != d)
+        if (!deviceIndices.empty() &&
+            std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
             continue;
 
         MetalDevice dev;

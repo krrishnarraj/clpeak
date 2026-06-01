@@ -7,6 +7,7 @@
 #include <common/inventory.h>
 #include <string>
 #include <memory>
+#include <vector>
 
 struct CliOptions;
 
@@ -22,11 +23,9 @@ const std::string& clGetInt8DpKernels();
 class clPeak : public Peak
 {
 public:
-    // OpenCL-specific device selection.
-    bool forcePlatform, forcePlatformName, forceDevice, forceDeviceName, useEventTimer;
-    unsigned long specifiedPlatform, specifiedDevice;
-    std::string specifiedPlatformName;
-    std::string specifiedDeviceName;
+    // OpenCL-specific device selection.  Empty index list = run all.
+    bool useEventTimer;
+    std::vector<unsigned long> platformIndices, deviceIndices;
 
     clPeak();
     ~clPeak() override = default;

@@ -97,7 +97,7 @@ struct mtl_compute_desc_t
 class MetalPeak : public Peak
 {
 public:
-  int  deviceIndex; // -1 = run all
+  std::vector<int> deviceIndices; // empty = run all
 
   MetalPeak();
   ~MetalPeak();

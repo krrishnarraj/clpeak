@@ -102,7 +102,7 @@ struct rocm_compute_desc_t
 class RocmPeak : public Peak
 {
 public:
-  int deviceIndex;
+  std::vector<int> deviceIndices;  // empty = run all
 
   RocmPeak();
   ~RocmPeak();

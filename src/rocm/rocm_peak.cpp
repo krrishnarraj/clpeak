@@ -4,6 +4,7 @@
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/options.h>
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <ostream>
@@ -16,8 +17,7 @@ static const char *hipErrStr(hipError_t r)
 }
 
 RocmPeak::RocmPeak()
-    : deviceIndex(-1),
-      initialised(false)
+    : initialised(false)
 {
 }
 
@@ -26,7 +26,7 @@ RocmPeak::~RocmPeak() {}
 void RocmPeak::applyOptions(const CliOptions &opts)
 {
   Peak::applyOptions(opts);
-  deviceIndex = opts.rocmDeviceIndex;
+  deviceIndices = opts.rocmDeviceIndices;
 }
 
 bool RocmPeak::initRuntime()
@@ -130,7 +130,8 @@ int RocmPeak::runAll()
 
   for (int idx : devIndices)
   {
-    if (deviceIndex >= 0 && idx != deviceIndex)
+    if (!deviceIndices.empty() &&
+        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
       continue;
 
     RocmDevice dev;

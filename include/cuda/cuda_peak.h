@@ -140,7 +140,7 @@ struct cuda_compute_desc_t
 class CudaPeak : public Peak
 {
 public:
-  int  deviceIndex;  // -1 = run all
+  std::vector<int> deviceIndices;  // empty = run all
 
   CudaPeak();
   ~CudaPeak();

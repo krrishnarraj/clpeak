@@ -189,7 +189,7 @@ struct vk_compute_desc_t
 class vkPeak : public Peak
 {
 public:
-  int  deviceIndex; // -1 = run all
+  std::vector<int> deviceIndices; // empty = run all
 
   vkPeak();
   ~vkPeak();

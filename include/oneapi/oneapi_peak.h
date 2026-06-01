@@ -53,7 +53,7 @@ public:
 class OneapiPeak : public Peak
 {
 public:
-  int deviceIndex;
+  std::vector<int> deviceIndices;  // empty = run all
 
   OneapiPeak();
   ~OneapiPeak();

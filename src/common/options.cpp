@@ -66,27 +66,26 @@ static const char *helpStr =
     "\n  --no-oneapi                 skip the oneAPI/SYCL backend"
 #endif
     "\n"
-    "\n DEVICE SELECTION:"
+    "\n DEVICE SELECTION (indices are 0-based; comma-separated for multiple,"
+    "\n default: run every device):"
 #ifdef ENABLE_OPENCL
-    "\n  --cl-platform num           OpenCL platform index (0-based)"
-    "\n  --cl-device num             OpenCL device index within the platform"
-    "\n  --cl-platform-name str      match OpenCL platform by name"
-    "\n  --cl-device-name str        match OpenCL device by name"
+    "\n  --cl-platform list          OpenCL platform index/indices (e.g. 0 or 0,1)"
+    "\n  --cl-device list            OpenCL device index/indices within the platform"
 #endif
 #ifdef ENABLE_VULKAN
-    "\n  --vk-device num             Vulkan physical-device index (0-based)"
+    "\n  --vk-device list            Vulkan physical-device index/indices"
 #endif
 #ifdef ENABLE_CUDA
-    "\n  --cuda-device num           CUDA device ordinal (0-based)"
+    "\n  --cuda-device list          CUDA device ordinal(s) (e.g. 0 or 0,2)"
 #endif
 #ifdef ENABLE_ROCM
-    "\n  --rocm-device num           ROCm/HIP device ordinal (0-based)"
+    "\n  --rocm-device list          ROCm/HIP device ordinal(s)"
 #endif
 #ifdef ENABLE_METAL
-    "\n  --mtl-device num            Metal device index (0-based)"
+    "\n  --mtl-device list           Metal device index/indices"
 #endif
 #ifdef ENABLE_ONEAPI
-    "\n  --oneapi-device num         oneAPI/SYCL device index (0-based)"
+    "\n  --oneapi-device list        oneAPI/SYCL device index/indices"
 #endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
@@ -251,6 +250,44 @@ static bool parseIntArg(const char *arg, int &value)
   return true;
 }
 
+// Parse a comma-separated list of indices (single value = list of one).  Each
+// token must be a valid non-negative index; empty tokens (e.g. "0,,2") fail.
+static bool parseIndexList(const char *arg, std::vector<unsigned long> &out)
+{
+  std::vector<unsigned long> parsed;
+  std::stringstream ss(arg);
+  std::string tok;
+  while (std::getline(ss, tok, ','))
+  {
+    unsigned long v;
+    if (tok.empty() || !parseUnsignedLongArg(tok.c_str(), v))
+      return false;
+    parsed.push_back(v);
+  }
+  if (parsed.empty())  // arg was empty string
+    return false;
+  out = std::move(parsed);
+  return true;
+}
+
+static bool parseIndexList(const char *arg, std::vector<int> &out)
+{
+  std::vector<int> parsed;
+  std::stringstream ss(arg);
+  std::string tok;
+  while (std::getline(ss, tok, ','))
+  {
+    int v;
+    if (tok.empty() || !parseIntArg(tok.c_str(), v))
+      return false;
+    parsed.push_back(v);
+  }
+  if (parsed.empty())
+    return false;
+  out = std::move(parsed);
+  return true;
+}
+
 static const char *requireArg(int argc, char **argv, int &i, const char *flag)
 {
   if (i + 1 >= argc)
@@ -399,32 +436,20 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--cl-platform"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseUnsignedLongArg(v, out.platformIndex))
+      if (!parseIndexList(v, out.platformIndices))
       {
-        std::cerr << "clpeak: invalid platform index: " << v << "\n";
+        std::cerr << "clpeak: invalid platform index list: " << v << "\n";
         printHelpAndExit(-1);
       }
-      out.forcePlatform = true;
     }
     else if (!strcmp(a, "--cl-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseUnsignedLongArg(v, out.deviceIndex))
+      if (!parseIndexList(v, out.deviceIndices))
       {
-        std::cerr << "clpeak: invalid device index: " << v << "\n";
+        std::cerr << "clpeak: invalid device index list: " << v << "\n";
         printHelpAndExit(-1);
       }
-      out.forceDevice = true;
-    }
-    else if (!strcmp(a, "--cl-platform-name"))
-    {
-      out.platformName = requireArg(argc, argv, i, a);
-      out.forcePlatformName = true;
-    }
-    else if (!strcmp(a, "--cl-device-name"))
-    {
-      out.deviceName = requireArg(argc, argv, i, a);
-      out.forceDeviceName = true;
     }
 #endif
 
@@ -433,9 +458,9 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--vk-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseIntArg(v, out.vkDeviceIndex))
+      if (!parseIndexList(v, out.vkDeviceIndices))
       {
-        std::cerr << "clpeak: invalid Vulkan device index: " << v << "\n";
+        std::cerr << "clpeak: invalid Vulkan device index list: " << v << "\n";
         printHelpAndExit(-1);
       }
     }
@@ -444,9 +469,9 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--cuda-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseIntArg(v, out.cudaDeviceIndex))
+      if (!parseIndexList(v, out.cudaDeviceIndices))
       {
-        std::cerr << "clpeak: invalid CUDA device index: " << v << "\n";
+        std::cerr << "clpeak: invalid CUDA device index list: " << v << "\n";
         printHelpAndExit(-1);
       }
     }
@@ -455,9 +480,9 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--rocm-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseIntArg(v, out.rocmDeviceIndex))
+      if (!parseIndexList(v, out.rocmDeviceIndices))
       {
-        std::cerr << "clpeak: invalid ROCm device index: " << v << "\n";
+        std::cerr << "clpeak: invalid ROCm device index list: " << v << "\n";
         printHelpAndExit(-1);
       }
     }
@@ -466,9 +491,9 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--mtl-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseIntArg(v, out.mtlDeviceIndex))
+      if (!parseIndexList(v, out.mtlDeviceIndices))
       {
-        std::cerr << "clpeak: invalid Metal device index: " << v << "\n";
+        std::cerr << "clpeak: invalid Metal device index list: " << v << "\n";
         printHelpAndExit(-1);
       }
     }
@@ -477,9 +502,9 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--oneapi-device"))
     {
       const char *v = requireArg(argc, argv, i, a);
-      if (!parseIntArg(v, out.oneapiDeviceIndex))
+      if (!parseIndexList(v, out.oneapiDeviceIndices))
       {
-        std::cerr << "clpeak: invalid oneAPI device index: " << v << "\n";
+        std::cerr << "clpeak: invalid oneAPI device index list: " << v << "\n";
         printHelpAndExit(-1);
       }
     }

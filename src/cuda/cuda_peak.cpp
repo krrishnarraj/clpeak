@@ -4,6 +4,7 @@
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/common.h>
+#include <algorithm>
 #include <cstdio>
 #include <sstream>
 #include <string>
@@ -24,8 +25,7 @@ static const char *cuErrStr(CUresult r)
 // ---------------------------------------------------------------------------
 
 CudaPeak::CudaPeak()
-    : deviceIndex(-1),
-      initialised(false)
+    : initialised(false)
 {
 }
 
@@ -34,7 +34,7 @@ CudaPeak::~CudaPeak() {}
 void CudaPeak::applyOptions(const CliOptions &opts)
 {
     Peak::applyOptions(opts);
-    deviceIndex = opts.cudaDeviceIndex;
+    deviceIndices = opts.cudaDeviceIndices;
 }
 
 bool CudaPeak::initDriver()
@@ -119,7 +119,8 @@ int CudaPeak::runAll()
 
   for (int idx : devIndices)
   {
-    if (deviceIndex >= 0 && idx != deviceIndex)
+    if (!deviceIndices.empty() &&
+        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
       continue;
 
     CudaDevice dev;

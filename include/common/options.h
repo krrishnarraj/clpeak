@@ -3,6 +3,7 @@
 
 #include <bitset>
 #include <string>
+#include <vector>
 #include <common/benchmark_enums.h>  // Benchmark, Category
 #include <common/common.h>           // DEFAULT_TARGET_TIME_US
 
@@ -19,22 +20,16 @@ struct CliOptions {
   bool skipOneapi = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
-  // applyOptions can copy it).
-  bool          forcePlatform     = false;
-  unsigned long platformIndex     = 0;
-  bool          forcePlatformName = false;
-  std::string   platformName;
-  bool          forceDevice       = false;
-  unsigned long deviceIndex       = 0;
-  bool          forceDeviceName   = false;
-  std::string   deviceName;
+  // applyOptions can copy it).  Empty = run all enumerated platforms/devices.
+  std::vector<unsigned long> platformIndices;
+  std::vector<unsigned long> deviceIndices;
 
-  // Per-backend device selectors (-1 = run all enumerated devices).
-  int vkDeviceIndex     = -1;
-  int cudaDeviceIndex   = -1;
-  int rocmDeviceIndex   = -1;
-  int mtlDeviceIndex    = -1;
-  int oneapiDeviceIndex = -1;
+  // Per-backend device selectors.  Empty = run all enumerated devices.
+  std::vector<int> vkDeviceIndices;
+  std::vector<int> cudaDeviceIndices;
+  std::vector<int> rocmDeviceIndices;
+  std::vector<int> mtlDeviceIndices;
+  std::vector<int> oneapiDeviceIndices;
 
   // Iters / warmup.  When forceIters is false, each backend's runKernel
   // calibrates iters from a one-shot timed warmup so the timed phase lands
