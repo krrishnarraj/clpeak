@@ -1,14 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+>
 
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:clipToPadding="false">
+        android:clipToPadding="false"
+    >
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -16,7 +18,8 @@
             android:orientation="vertical"
             android:paddingHorizontal="16dp"
             android:paddingTop="16dp"
-            android:paddingBottom="128dp">
+            android:paddingBottom="128dp"
+        >
 
             <TextView
                 android:layout_width="wrap_content"
@@ -25,73 +28,32 @@
                 android:textAppearance="?attr/textAppearanceLabelLarge"
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:letterSpacing="0.05"
-                android:paddingBottom="8dp" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_opencl"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardElevation="0dp"
-                app:cardCornerRadius="20dp"
-                app:cardBackgroundColor="?attr/colorSurfaceVariant">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:id="@+id/opencl_title"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/backend_opencl"
-                            android:textAppearance="?attr/textAppearanceTitleMedium"
-                            android:textColor="?attr/colorOnSurface" />
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switch_opencl"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:id="@+id/opencl_platforms"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:paddingTop="8dp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+                android:paddingBottom="8dp"
+            />
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/card_vulkan"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"
+                android:layout_marginBottom="12dp"
                 app:cardElevation="0dp"
                 app:cardCornerRadius="20dp"
-                app:cardBackgroundColor="?attr/colorSurfaceVariant">
+                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+            >
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp">
+                    android:padding="16dp"
+                >
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                        android:gravity="center_vertical"
+                    >
 
                         <TextView
                             android:id="@+id/vulkan_title"
@@ -100,12 +62,14 @@
                             android:layout_weight="1"
                             android:text="@string/backend_vulkan"
                             android:textAppearance="?attr/textAppearanceTitleMedium"
-                            android:textColor="?attr/colorOnSurface" />
+                            android:textColor="?attr/colorOnSurface"
+                        />
 
                         <com.google.android.material.materialswitch.MaterialSwitch
                             android:id="@+id/switch_vulkan"
                             android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
+                            android:layout_height="wrap_content"
+                        />
                     </LinearLayout>
 
                     <LinearLayout
@@ -113,7 +77,59 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:paddingTop="8dp" />
+                        android:paddingTop="8dp"
+                    />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_opencl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="0dp"
+                app:cardCornerRadius="20dp"
+                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+            >
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                >
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                    >
+
+                        <TextView
+                            android:id="@+id/opencl_title"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/backend_opencl"
+                            android:textAppearance="?attr/textAppearanceTitleMedium"
+                            android:textColor="?attr/colorOnSurface"
+                        />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_opencl"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                        />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/opencl_platforms"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:paddingTop="8dp"
+                    />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -126,14 +142,16 @@
                 android:textColor="?attr/colorError"
                 android:visibility="gone"
                 android:paddingVertical="16dp"
-                android:gravity="center" />
+                android:gravity="center"
+            />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="end"
-                android:layout_marginTop="4dp">
+                android:layout_marginTop="4dp"
+            >
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_clear"
@@ -141,14 +159,16 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="8dp"
-                    android:text="@string/setup_clear" />
+                    android:text="@string/setup_clear"
+                />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_select_all"
                     style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/setup_select_all" />
+                    android:text="@string/setup_select_all"
+                />
             </LinearLayout>
 
         </LinearLayout>
@@ -161,6 +181,7 @@
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginBottom="32dp"
         android:text="@string/run_button_text"
-        app:icon="@drawable/ic_play_arrow" />
+        app:icon="@drawable/ic_play_arrow"
+    />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
