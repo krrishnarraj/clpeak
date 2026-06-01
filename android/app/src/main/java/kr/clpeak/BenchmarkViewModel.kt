@@ -18,7 +18,7 @@ class BenchmarkViewModel : ViewModel() {
     private val _categoriesByBackend = MutableLiveData<Map<String, List<BenchmarkCategory>>>(emptyMap())
     private val _errorMsg            = MutableLiveData<String?>(null)
     private val _catalog             = MutableLiveData(BackendCatalog.EMPTY)
-    private val _selection           = MutableLiveData(BenchmarkSelection(emptySet(), emptySet()))
+    private val _selection           = MutableLiveData(BenchmarkSelection())
     private val _screen              = MutableLiveData(Screen.SETUP)
 
     val isRunning:  LiveData<Boolean>                          = _isRunning
@@ -48,26 +48,15 @@ class BenchmarkViewModel : ViewModel() {
         }
     }
 
-    fun toggleOpenClDevice(platform: Int, device: Int) {
-        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
-            .toggleOpenCl(platform, device)
+    fun toggleDevice(backend: String, deviceKey: String) {
+        _selection.value = (_selection.value ?: BenchmarkSelection()).toggleDevice(backend, deviceKey)
     }
 
-    fun toggleVulkanDevice(device: Int) {
-        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
-            .toggleVulkan(device)
-    }
-
-    fun setOpenClBackendEnabled(on: Boolean) {
+    fun setBackendEnabled(backend: String, enabled: Boolean) {
         val cat = _catalog.value ?: return
-        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
-            .setOpenClBackend(cat.opencl, on)
-    }
-
-    fun setVulkanBackendEnabled(on: Boolean) {
-        val cat = _catalog.value ?: return
-        _selection.value = (_selection.value ?: BenchmarkSelection(emptySet(), emptySet()))
-            .setVulkanBackend(cat.vulkan, on)
+        val info = cat.backend(backend) ?: return
+        _selection.value = (_selection.value ?: BenchmarkSelection())
+            .setBackend(backend, enabled, info.devices.map { it.key })
     }
 
     fun selectAll() {
@@ -75,7 +64,7 @@ class BenchmarkViewModel : ViewModel() {
     }
 
     fun resetSelection() {
-        _selection.value = BenchmarkSelection(emptySet(), emptySet())
+        _selection.value = BenchmarkSelection()
     }
 
     fun returnToSetup() {
@@ -128,7 +117,7 @@ class BenchmarkViewModel : ViewModel() {
 
             if (result != 0) {
                 _errorMsg.value = "Benchmark exited with error ($result). " +
-                    "Check that an OpenCL library is available."
+                    "Check that an OpenCL or Vulkan library is available."
             }
             _isRunning.value = false
             rebuild()
