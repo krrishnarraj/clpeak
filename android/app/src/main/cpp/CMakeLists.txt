@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
+project(clpeak_android)
 
 # Support 16 KB page sizes on Android 15+
 set(ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES ON CACHE BOOL "" FORCE)
