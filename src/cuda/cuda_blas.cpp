@@ -329,6 +329,135 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     const uint16_t alpha16   = 0x3c00, beta16  = 0x0000;
     const int32_t  alpha32i  = 1,     beta32i  = 0;
 
+#if defined(CLPEAK_CUBLASLT_HAS_FP4)
+    // Block-scaled FP4 GEMM (Blackwell, CUDA 12.8+).  Both operands are
+    // CUDA_R_4F_E2M1 (4-bit e2m1) and carry a companion per-block scale tensor:
+    //   * mxfp4 -> 1 UE8M0 scale per 32 elements (OCP MX)
+    //   * nvfp4 -> 1 UE4M3 scale per 16 elements (NVIDIA NVFP4)
+    // Output is bf16, compute + scale are fp32.  We bind neutral (==1.0) scale
+    // tensors filled once -- their values affect numerics, not throughput.  The
+    // scale buffers are over-allocated to the operand element count (always >=
+    // the padded scale-tensor size cuBLASLt expects) to stay safe regardless of
+    // the exact block-scale layout.  TN layout, like the fp8 path.
+    auto runVariantFp4 = [&](const char *label,
+                             cublasLtMatmulMatrixScale_t scaleMode,
+                             uint8_t neutralScaleByte) -> int
+    {
+        const size_t scaleABytes = (size_t)M * K; // upper bound, 1 byte/scale
+        const size_t scaleBBytes = (size_t)K * N;
+        CUdeviceptr dSA = 0, dSB = 0;
+        if (cuMemAlloc(&dSA, scaleABytes) != CUDA_SUCCESS ||
+            cuMemAlloc(&dSB, scaleBBytes) != CUDA_SUCCESS)
+        {
+            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed");
+            if (dSA) cuMemFree(dSA);
+            if (dSB) cuMemFree(dSB);
+            return -1;
+        }
+        cuMemsetD8(dSA, neutralScaleByte, scaleABytes);
+        cuMemsetD8(dSB, neutralScaleByte, scaleBBytes);
+
+        cublasLtMatmulDesc_t opDesc = nullptr;
+        cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
+        // TN: stored A is K x M col-major, B is K x N col-major, C/D are M x N.
+        if (cublasLtMatmulDescCreate(&opDesc, CUBLAS_COMPUTE_32F, CUDA_R_32F) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_4F_E2M1, K, M, K) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_4F_E2M1, K, N, K) != CUBLAS_STATUS_SUCCESS ||
+            cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_16BF, M, N, M) != CUBLAS_STATUS_SUCCESS)
+        {
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed");
+            if (opDesc) cublasLtMatmulDescDestroy(opDesc);
+            if (Adesc)  cublasLtMatrixLayoutDestroy(Adesc);
+            if (Bdesc)  cublasLtMatrixLayoutDestroy(Bdesc);
+            if (Cdesc)  cublasLtMatrixLayoutDestroy(Cdesc);
+            cuMemFree(dSA); cuMemFree(dSB);
+            return -1;
+        }
+
+        cublasOperation_t opA = CUBLAS_OP_T, opN = CUBLAS_OP_N;
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
+
+        // Bind the per-block scale tensors + their mode for A and B.
+        CUdeviceptr saPtr = dSA, sbPtr = dSB;
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, &saPtr, sizeof(saPtr));
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, &sbPtr, sizeof(sbPtr));
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleMode, sizeof(scaleMode));
+        cublasLtMatmulDescSetAttribute(opDesc, CUBLASLT_MATMUL_DESC_B_SCALE_MODE, &scaleMode, sizeof(scaleMode));
+
+        cublasLtMatmulPreference_t pref = nullptr;
+        cublasLtMatmulPreferenceCreate(&pref);
+        cublasLtMatmulPreferenceSetAttribute(pref,
+            CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
+
+        const int kCandidates = 8;
+        cublasLtMatmulHeuristicResult_t heurs[kCandidates] = {};
+        int returnedResults = 0;
+        cublasStatus_t hs = cublasLtMatmulAlgoGetHeuristic(
+            lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
+            pref, kCandidates, heurs, &returnedResults);
+        cublasLtMatmulPreferenceDestroy(pref);
+
+        auto cleanup = [&]() {
+            cublasLtMatmulDescDestroy(opDesc);
+            cublasLtMatrixLayoutDestroy(Adesc);
+            cublasLtMatrixLayoutDestroy(Bdesc);
+            cublasLtMatrixLayoutDestroy(Cdesc);
+            cuMemFree(dSA); cuMemFree(dSB);
+        };
+
+        if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
+        {
+            blasTest->skip(label, ResultStatus::Unsupported,
+                          std::string("unsupported on ") + dev.info.archName);
+            cleanup();
+            return 0;
+        }
+
+        const unsigned int probeIters = 4;
+        int bestIdx = -1;
+        double bestProbeUs = 1e30;
+        for (int i = 0; i < returnedResults; i++)
+        {
+            double t = timeCublasLt(lt, dev.stream, opDesc,
+                &alpha32, (void*)dA, Adesc, (void*)dB, Bdesc,
+                &beta32,  (void*)dC, Cdesc, (void*)dC, Cdesc,
+                &heurs[i].algo, (void*)dWS, wsBytes, probeIters);
+            if (t > 0.0 && t < bestProbeUs) { bestProbeUs = t; bestIdx = i; }
+        }
+        if (bestIdx < 0)
+        {
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed");
+            cleanup();
+            return -1;
+        }
+
+        unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
+        double per_iter_us = timeCublasLt(lt, dev.stream, opDesc,
+            &alpha32, (void*)dA, Adesc, (void*)dB, Bdesc,
+            &beta32,  (void*)dC, Cdesc, (void*)dC, Cdesc,
+            &heurs[bestIdx].algo, (void*)dWS, wsBytes, warmup);
+        if (per_iter_us <= 0.0)
+        {
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed");
+            cleanup();
+            return -1;
+        }
+
+        unsigned int iters = pickIters(per_iter_us, 5000000u,
+                                       forceIters ? specifiedIters : 0);
+        double mean_us = timeCublasLt(lt, dev.stream, opDesc,
+            &alpha32, (void*)dA, Adesc, (void*)dB, Bdesc,
+            &beta32,  (void*)dC, Cdesc, (void*)dC, Cdesc,
+            &heurs[bestIdx].algo, (void*)dWS, wsBytes, iters);
+
+        double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
+        blasTest->emit(label, (float)tops);
+        cleanup();
+        return 0;
+    };
+#endif // CLPEAK_CUBLASLT_HAS_FP4
+
     if (category == Category::FpCompute)
     {
         // -----------------------------------------------------------------------
@@ -393,6 +522,31 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
                          CUBLAS_COMPUTE_32F, CUDA_R_32F,
                          &alpha32, &beta32, /*useTN=*/true);
         }
+
+        // mxfp4 / nvfp4: block-scaled 4-bit GEMM on Blackwell tensor cores.
+        // Same dtypes the wmma microbench measures (mxf4_e2m1 / nvf4_e2m1), so
+        // the cublas-fp rows line up against the wmma rows.
+#if defined(CLPEAK_CUBLASLT_HAS_FP4)
+        if (dev.info.fp4MmaSupported)
+        {
+            // 0x7F = 1.0 in UE8M0 (exponent-only, bias 127);
+            // 0x38 = 1.0 in UE4M3 (e4m3, bias 7).
+            runVariantFp4("mxf4_e2m1", CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0, 0x7F);
+            runVariantFp4("nvf4_e2m1", CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3, 0x38);
+        }
+        else
+        {
+            blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName);
+            blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName);
+        }
+#else
+        blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)");
+        blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)");
+#endif
     }
 
     if (category != Category::IntCompute)

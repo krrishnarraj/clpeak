@@ -178,7 +178,7 @@ int RocmPeak::runAll()
     if (isAllowedAs(Benchmark::Mfma, Category::FpCompute))
       runSparseMfma(dev, cfg, Category::FpCompute);
     if (isAllowedAs(Benchmark::Rocblas, Category::FpCompute))
-      runRocblas(dev, cfg);
+      runRocblas(dev, cfg, Category::FpCompute);
     if (isAllowedAs(Benchmark::Rocblas, Category::FpCompute))
       runHipblasLt(dev, cfg);
 
@@ -193,6 +193,8 @@ int RocmPeak::runAll()
       runMfma(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Mfma, Category::IntCompute))
       runSparseMfma(dev, cfg, Category::IntCompute);
+    if (isAllowedAs(Benchmark::Rocblas, Category::IntCompute))
+      runRocblas(dev, cfg, Category::IntCompute);
     if (isAllowed(Benchmark::AtomicThroughput))
       runAtomicThroughput(dev, cfg);
 

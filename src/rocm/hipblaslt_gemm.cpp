@@ -96,6 +96,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 #ifndef CLPEAK_ROCM_HAS_HIPBLASLT
   test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt not found at configure time");
   test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt not found at configure time");
+  test.skip("mxf4_e2m1", ResultStatus::Unsupported, "hipBLASLt not found at configure time");
   return 0;
 #else
   const uint32_t D = pickGemmDim(dev.info);
@@ -242,6 +243,120 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   // rate -- any asymmetry is library algo coverage, mirroring cuda_blas.cpp).
   runVariant("fp8_e4m3", HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3_FNUZ);
   runVariant("fp8_e5m2", HIP_R_8F_E5M2_FNUZ, HIP_R_8F_E4M3_FNUZ);
+
+#if defined(CLPEAK_HIPBLASLT_HAS_FP4)
+  // mxfp4: block-scaled 4-bit GEMM (OCP MX, 32-element UE8M0 scales) on gfx950 /
+  // MI350 -- the same dtype the mfma_mxfp4 microbench measures. Both operands are
+  // HIP_R_4F_E2M1 (4 bits/elem, so they fit the fp8-sized dA/dB), output is bf16,
+  // compute + scale are fp32. Neutral (==1.0) per-block scale tensors are bound;
+  // their values affect numerics, not throughput.
+  {
+    const size_t scaleABytes = (size_t)M * K; // upper bound, 1 byte/scale
+    const size_t scaleBBytes = (size_t)K * N;
+    void *dSA = nullptr, *dSB = nullptr;
+    if (hipMalloc(&dSA, scaleABytes) != hipSuccess ||
+        hipMalloc(&dSB, scaleBBytes) != hipSuccess)
+    {
+      test.skip("mxf4_e2m1", ResultStatus::Error, "scale buffer alloc failed");
+      if (dSA) (void)hipFree(dSA);
+      if (dSB) (void)hipFree(dSB);
+    }
+    else
+    {
+      (void)hipMemset(dSA, 0x7F, scaleABytes); // 0x7F = 1.0 in UE8M0
+      (void)hipMemset(dSB, 0x7F, scaleBBytes);
+
+      hipblasLtMatmulDesc_t opDesc = nullptr;
+      hipblasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
+      bool ok = (hipblasLtMatmulDescCreate(&opDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F) == HIPBLAS_STATUS_SUCCESS &&
+                 hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_4F_E2M1, K, M, K) == HIPBLAS_STATUS_SUCCESS &&
+                 hipblasLtMatrixLayoutCreate(&Bdesc, HIP_R_4F_E2M1, K, N, K) == HIPBLAS_STATUS_SUCCESS &&
+                 hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_16BF, M, N, M) == HIPBLAS_STATUS_SUCCESS);
+      if (!ok)
+      {
+        test.skip("mxf4_e2m1", ResultStatus::Error, "descriptor create failed");
+      }
+      else
+      {
+        const hipblasOperation_t opA = HIPBLAS_OP_T, opB = HIPBLAS_OP_N;
+        (void)hipblasLtMatmulDescSetAttribute(opDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
+        (void)hipblasLtMatmulDescSetAttribute(opDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB));
+
+        const hipblasLtMatmulMatrixScale_t scaleMode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        (void)hipblasLtMatmulDescSetAttribute(opDesc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &dSA, sizeof(dSA));
+        (void)hipblasLtMatmulDescSetAttribute(opDesc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &dSB, sizeof(dSB));
+        (void)hipblasLtMatmulDescSetAttribute(opDesc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleMode, sizeof(scaleMode));
+        (void)hipblasLtMatmulDescSetAttribute(opDesc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scaleMode, sizeof(scaleMode));
+
+        const int kCandidates = 8;
+        hipblasLtMatmulPreference_t pref = nullptr;
+        (void)hipblasLtMatmulPreferenceCreate(&pref);
+        (void)hipblasLtMatmulPreferenceSetAttribute(
+            pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
+        std::vector<hipblasLtMatmulHeuristicResult_t> heurs(kCandidates);
+        int returnedResults = 0;
+        hipblasStatus_t hs = hipblasLtMatmulAlgoGetHeuristic(
+            lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
+            pref, kCandidates, heurs.data(), &returnedResults);
+        (void)hipblasLtMatmulPreferenceDestroy(pref);
+
+        if (hs != HIPBLAS_STATUS_SUCCESS || returnedResults == 0)
+        {
+          test.skip("mxf4_e2m1", ResultStatus::Unsupported,
+                    std::string("no mxfp4 GEMM algorithm for this device (") + dev.info.archName + ")");
+        }
+        else
+        {
+          const unsigned int probeIters = 4;
+          int bestIdx = -1;
+          double bestProbeUs = 1e30;
+          for (int i = 0; i < returnedResults; i++)
+          {
+            double t = timeHipblasLt(dev.stream, lt, opDesc,
+                &alpha, dA, Adesc, dB, Bdesc, &beta, dC, Cdesc, dC, Cdesc,
+                &heurs[i].algo, dWS, wsBytes, probeIters);
+            if (t > 0.0 && t < bestProbeUs) { bestProbeUs = t; bestIdx = i; }
+          }
+          if (bestIdx < 0)
+          {
+            test.skip("mxf4_e2m1", ResultStatus::Error, "all candidate algos failed");
+          }
+          else
+          {
+            const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
+            double probeUs = timeHipblasLt(dev.stream, lt, opDesc,
+                &alpha, dA, Adesc, dB, Bdesc, &beta, dC, Cdesc, dC, Cdesc,
+                &heurs[bestIdx].algo, dWS, wsBytes, warm);
+            if (probeUs <= 0.0)
+            {
+              test.skip("mxf4_e2m1", ResultStatus::Error, "timing probe failed");
+            }
+            else
+            {
+              unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
+              double meanUs = timeHipblasLt(dev.stream, lt, opDesc,
+                  &alpha, dA, Adesc, dB, Bdesc, &beta, dC, Cdesc, dC, Cdesc,
+                  &heurs[bestIdx].algo, dWS, wsBytes, iters);
+              if (meanUs <= 0.0)
+                test.skip("mxf4_e2m1", ResultStatus::Error, "hipBLASLt GEMM failed");
+              else
+                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs / 1.0e12));
+            }
+          }
+        }
+      }
+      if (opDesc) (void)hipblasLtMatmulDescDestroy(opDesc);
+      if (Adesc)  (void)hipblasLtMatrixLayoutDestroy(Adesc);
+      if (Bdesc)  (void)hipblasLtMatrixLayoutDestroy(Bdesc);
+      if (Cdesc)  (void)hipblasLtMatrixLayoutDestroy(Cdesc);
+      (void)hipFree(dSA);
+      (void)hipFree(dSB);
+    }
+  }
+#else
+  test.skip("mxf4_e2m1", ResultStatus::Unsupported,
+            "block-scaled FP4 GEMM API not in this hipBLASLt (needs gfx950 / recent ROCm)");
+#endif // CLPEAK_HIPBLASLT_HAS_FP4
 
   (void)hipblasLtDestroy(lt);
   (void)hipFree(dA);

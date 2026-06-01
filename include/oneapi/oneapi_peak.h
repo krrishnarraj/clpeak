@@ -72,7 +72,7 @@ public:
   int runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg);
   int runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category);
-  int runOnemkl(OneapiDevice &dev, benchmark_config_t &cfg);
+  int runOnemkl(OneapiDevice &dev, benchmark_config_t &cfg, Category category);
   int runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);

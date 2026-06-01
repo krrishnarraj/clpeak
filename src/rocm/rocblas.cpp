@@ -3,6 +3,7 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 #include <cstring>
+#include <string>
 
 #ifdef CLPEAK_ROCM_HAS_ROCBLAS
 #include <rocblas/rocblas.h>
@@ -62,15 +63,26 @@ double timeRocblas(hipStream_t stream, Fn fn, unsigned int n)
 
 } // namespace
 
-int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
+int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category category)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"rocblas-fp", "rocBLAS GEMM peak", "tflops"});
+  const bool fpPhase = (category != Category::IntCompute);
+
+  auto test = fpPhase
+    ? currentDeviceScope->beginTest({"rocblas-fp", "rocBLAS GEMM peak", "tflops"})
+    : currentDeviceScope->beginTest({"rocblas-int", "rocBLAS GEMM peak", "tops"});
 
 #ifndef CLPEAK_ROCM_HAS_ROCBLAS
-  test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time");
-  test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time");
-  test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+  if (fpPhase)
+  {
+    test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+    test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+    test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+    test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+  }
+  else
+  {
+    test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+  }
   return 0;
 #else
   const uint32_t D = pickRocblasGemmDim(dev.info);
@@ -83,14 +95,28 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   const size_t bBytes = (size_t)K * N * sizeof(double);
   const size_t cBytes = (size_t)M * N * sizeof(double);
 
+  // Skip every label for the active phase with one error message -- keeps the
+  // fp/int label lists in one place so alloc/handle failures report cleanly.
+  auto skipPhase = [&](ResultStatus status, const char *msg) {
+    if (fpPhase)
+    {
+      test.skip("fp32", status, msg);
+      test.skip("fp64", status, msg);
+      test.skip("fp16", status, msg);
+      test.skip("bf16", status, msg);
+    }
+    else
+    {
+      test.skip("int8", status, msg);
+    }
+  };
+
   void *dA = nullptr, *dB = nullptr, *dC = nullptr;
   if (hipMalloc(&dA, aBytes) != hipSuccess ||
       hipMalloc(&dB, bBytes) != hipSuccess ||
       hipMalloc(&dC, cBytes) != hipSuccess)
   {
-    test.skip("fp32", ResultStatus::Error, "Failed to allocate GEMM buffers");
-    test.skip("fp64", ResultStatus::Error, "Failed to allocate GEMM buffers");
-    test.skip("fp16", ResultStatus::Error, "Failed to allocate GEMM buffers");
+    skipPhase(ResultStatus::Error, "Failed to allocate GEMM buffers");
     if (dA) (void)hipFree(dA);
     if (dB) (void)hipFree(dB);
     if (dC) (void)hipFree(dC);
@@ -104,9 +130,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   rocblas_handle handle = nullptr;
   if (rocblas_create_handle(&handle) != rocblas_status_success)
   {
-    test.skip("fp32", ResultStatus::Error, "rocblas_create_handle failed");
-    test.skip("fp64", ResultStatus::Error, "rocblas_create_handle failed");
-    test.skip("fp16", ResultStatus::Error, "rocblas_create_handle failed");
+    skipPhase(ResultStatus::Error, "rocblas_create_handle failed");
     (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC);
     return -1;
   }
@@ -131,47 +155,96 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12));
   };
 
-  const float alpha32 = 1.0f, beta32 = 0.0f;
-  runTimed("fp32", [&]() {
-    return rocblas_sgemm(handle, rocblas_operation_none, rocblas_operation_none,
-                         M, N, K, &alpha32,
-                         (const float *)dA, M,
-                         (const float *)dB, K,
-                         &beta32,
-                         (float *)dC, M);
-  });
-
-  const double alpha64 = 1.0, beta64 = 0.0;
-  runTimed("fp64", [&]() {
-    return rocblas_dgemm(handle, rocblas_operation_none, rocblas_operation_none,
-                         M, N, K, &alpha64,
-                         (const double *)dA, M,
-                         (const double *)dB, K,
-                         &beta64,
-                         (double *)dC, M);
-  });
-
-  if (dev.info.fp16Supported)
+  if (fpPhase)
   {
-    // Use gemm_ex with f16 in/out and f32 *accumulate* (HPA). rocblas_hgemm
-    // accumulates in fp16, which does not map to the fast fp16xfp16->fp32 MFMA
-    // path and tops out far below peak; the f32-compute path reaches it.
-    const float alphaf = 1.0f, betaf = 0.0f;
-    runTimed("fp16", [&]() {
-      return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
-                             M, N, K, &alphaf,
-                             dA, rocblas_datatype_f16_r, M,
-                             dB, rocblas_datatype_f16_r, K,
-                             &betaf,
-                             dC, rocblas_datatype_f16_r, M,
-                             dC, rocblas_datatype_f16_r, M,
-                             rocblas_datatype_f32_r,
-                             rocblas_gemm_algo_standard, 0, 0);
+    const float alpha32 = 1.0f, beta32 = 0.0f;
+    runTimed("fp32", [&]() {
+      return rocblas_sgemm(handle, rocblas_operation_none, rocblas_operation_none,
+                           M, N, K, &alpha32,
+                           (const float *)dA, M,
+                           (const float *)dB, K,
+                           &beta32,
+                           (float *)dC, M);
     });
+
+    const double alpha64 = 1.0, beta64 = 0.0;
+    runTimed("fp64", [&]() {
+      return rocblas_dgemm(handle, rocblas_operation_none, rocblas_operation_none,
+                           M, N, K, &alpha64,
+                           (const double *)dA, M,
+                           (const double *)dB, K,
+                           &beta64,
+                           (double *)dC, M);
+    });
+
+    // fp16/bf16 both use gemm_ex with f32 *accumulate* (HPA). The native-format
+    // accumulate (rocblas_hgemm etc.) does not map to the fast 16-bit x 16-bit
+    // -> fp32 MFMA path and tops out far below peak; f32-compute reaches it.
+    const float alphaf = 1.0f, betaf = 0.0f;
+    if (dev.info.fp16Supported)
+    {
+      runTimed("fp16", [&]() {
+        return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
+                               M, N, K, &alphaf,
+                               dA, rocblas_datatype_f16_r, M,
+                               dB, rocblas_datatype_f16_r, K,
+                               &betaf,
+                               dC, rocblas_datatype_f16_r, M,
+                               dC, rocblas_datatype_f16_r, M,
+                               rocblas_datatype_f32_r,
+                               rocblas_gemm_algo_standard, 0, 0);
+      });
+    }
+    else
+    {
+      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device");
+    }
+
+    if (dev.info.bf16Supported)
+    {
+      runTimed("bf16", [&]() {
+        return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
+                               M, N, K, &alphaf,
+                               dA, rocblas_datatype_bf16_r, M,
+                               dB, rocblas_datatype_bf16_r, K,
+                               &betaf,
+                               dC, rocblas_datatype_bf16_r, M,
+                               dC, rocblas_datatype_bf16_r, M,
+                               rocblas_datatype_f32_r,
+                               rocblas_gemm_algo_standard, 0, 0);
+      });
+    }
+    else
+    {
+      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device");
+    }
   }
   else
   {
-    test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device");
+    // int8 x int8 -> int32 via gemm_ex (i8 in, i32 out + compute). No device-info
+    // flag tracks int8 GEMM support, so we attempt it and let rocBLAS decide.
+    // i8 GEMM wants K a multiple of 4; the 256-aligned dim from
+    // pickRocblasGemmDim satisfies it.
+    const int32_t alphaI = 1, betaI = 0;
+    auto int8Gemm = [&]() {
+      return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
+                             M, N, K, &alphaI,
+                             dA, rocblas_datatype_i8_r, M,
+                             dB, rocblas_datatype_i8_r, K,
+                             &betaI,
+                             dC, rocblas_datatype_i32_r, M,
+                             dC, rocblas_datatype_i32_r, M,
+                             rocblas_datatype_i32_r,
+                             rocblas_gemm_algo_standard, 0, 0);
+    };
+    // The launch status is returned synchronously, so an unsupported type combo
+    // (rocblas_status_not_implemented) is distinguishable from a runtime error
+    // here -- report it as Unsupported rather than Error.
+    if (int8Gemm() != rocblas_status_success)
+      test.skip("int8", ResultStatus::Unsupported,
+                std::string("int8 GEMM not supported on ") + dev.info.archName);
+    else
+      runTimed("int8", int8Gemm);
   }
 
   (void)rocblas_destroy_handle(handle);

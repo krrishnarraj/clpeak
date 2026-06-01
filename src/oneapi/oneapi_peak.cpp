@@ -179,13 +179,15 @@ int OneapiPeak::runAll()
     if (isAllowedAs(Benchmark::JointMatrix, Category::FpCompute))
       runJointMatrix(dev, cfg, Category::FpCompute);
     if (isAllowedAs(Benchmark::Onemkl, Category::FpCompute))
-      runOnemkl(dev, cfg);
+      runOnemkl(dev, cfg, Category::FpCompute);
 
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))      runComputeInt8DP(dev, cfg);
 
     if (isAllowedAs(Benchmark::JointMatrix, Category::IntCompute))
       runJointMatrix(dev, cfg, Category::IntCompute);
+    if (isAllowedAs(Benchmark::Onemkl, Category::IntCompute))
+      runOnemkl(dev, cfg, Category::IntCompute);
     if (isAllowed(Benchmark::AtomicThroughput))   runAtomicThroughput(dev, cfg);
 
     if (isAllowed(Benchmark::GlobalBW))     runGlobalBandwidth(dev, cfg);

@@ -56,6 +56,29 @@ target_compile_definitions(peak_rocm PRIVATE
     ENABLE_ROCM
     CLPEAK_ROCM_INCLUDE_DIR="${_clpeak_rocm_inc}"
 )
+
+# Probe whether the installed hipBLASLt exposes the block-scaled FP4 GEMM API
+# (gfx950 / MI350, recent ROCm).  Feature-test by compilation so the build stays
+# green on ROCm versions without it and auto-enables the mxfp4 path where present.
+if(hipblaslt_FOUND AND TARGET roc::hipblaslt)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES "${_clpeak_rocm_inc}")
+    set(CMAKE_REQUIRED_DEFINITIONS "-D__HIP_PLATFORM_AMD__")
+    check_cxx_source_compiles("
+#include <hipblaslt/hipblaslt.h>
+int main() {
+  hipblasLtMatmulMatrixScale_t s = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+  hipblasLtMatmulDescAttributes_t a = HIPBLASLT_MATMUL_DESC_A_SCALE_MODE;
+  hipDataType t = HIP_R_4F_E2M1;
+  (void)s; (void)a; (void)t;
+  return 0;
+}" CLPEAK_HIPBLASLT_HAS_FP4)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    unset(CMAKE_REQUIRED_DEFINITIONS)
+    if(CLPEAK_HIPBLASLT_HAS_FP4)
+        target_compile_definitions(peak_rocm PRIVATE CLPEAK_HIPBLASLT_HAS_FP4)
+    endif()
+endif()
 if(CLPEAK_ROCWMMA_FOUND)
     target_compile_definitions(peak_rocm PRIVATE
         CLPEAK_ROCM_HAS_ROCWMMA
