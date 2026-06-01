@@ -30,17 +30,17 @@
     <color name="md_theme_inverse_surface">#2F3036</color>
     <color name="md_theme_inverse_on_surface">#F1F0F4</color>
 
-    <!-- Semantic colors for benchmark test types -->
-    <color name="test_bandwidth">#0061A6</color>
-    <color name="test_fp_compute">#9C4400</color>
-    <color name="test_int_compute">#7A4FB0</color>
-    <color name="test_latency">#3A6A00</color>
-    <color name="test_bandwidth_container">#D2E4FF</color>
-    <color name="test_fp_compute_container">#FFDCC8</color>
-    <color name="test_int_compute_container">#E8DDFF</color>
-    <color name="test_latency_container">#C2F18D</color>
-    <color name="test_bandwidth_on_container">#001C38</color>
-    <color name="test_fp_compute_on_container">#331200</color>
-    <color name="test_int_compute_on_container">#240D52</color>
-    <color name="test_latency_on_container">#0F2000</color>
+    <!-- Semantic colors for benchmark test types (subdued tonal) -->
+    <color name="test_bandwidth">#3B6DB5</color>
+    <color name="test_fp_compute">#B06E3E</color>
+    <color name="test_int_compute">#7D5BAA</color>
+    <color name="test_latency">#5C8A35</color>
+    <color name="test_bandwidth_container">#E0E8F5</color>
+    <color name="test_fp_compute_container">#F5E8DD</color>
+    <color name="test_int_compute_container">#EEE7F5</color>
+    <color name="test_latency_container">#DFECC8</color>
+    <color name="test_bandwidth_on_container">#0A1E35</color>
+    <color name="test_fp_compute_on_container">#351A08</color>
+    <color name="test_int_compute_on_container">#250C4A</color>
+    <color name="test_latency_on_container">#112205</color>
 </resources>
