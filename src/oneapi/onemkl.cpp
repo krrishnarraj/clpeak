@@ -221,7 +221,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     }
     else
     {
-      // gemm_bias with offset::fixed reads a single int32 bias from `co`.
+      // gemm_bias with offset::fix reads a single int32 bias from `co`.
       void *dCo = sycl::malloc_device(sizeof(std::int32_t), dev.stream);
       if (!dCo)
       {
@@ -233,7 +233,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
         timeBatch("int8", [&]() {
           mkl::blas::row_major::gemm_bias(
             dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
-            mkl::offset::fixed,
+            mkl::offset::fix,
             M, N, K, 1.0f,
             (const std::int8_t *)dA, K, (std::int8_t)0,
             (const std::uint8_t *)dB, N, (std::uint8_t)0,
