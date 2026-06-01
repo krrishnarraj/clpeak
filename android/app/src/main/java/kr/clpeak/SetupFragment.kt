@@ -7,11 +7,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.materialswitch.MaterialSwitch
 import kr.clpeak.databinding.FragmentSetupBinding
 
@@ -71,6 +71,9 @@ class SetupFragment : Fragment() {
             }
             radius = (20 * density)
             cardElevation = 0f
+            setCardBackgroundColor(
+                MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurfaceVariant)
+            )
         }
 
         val cardInner = LinearLayout(ctx).apply {
