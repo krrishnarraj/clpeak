@@ -147,10 +147,10 @@ private struct ResultCategoryCard: View {
 
     private var tint: Color {
         switch category.testType {
-        case .bandwidth: return .teal
-        case .fpCompute: return .orange
-        case .intCompute: return .indigo
-        case .latency: return .pink
+        case .bandwidth: return Color(red: 0.23, green: 0.43, blue: 0.71) // #3B6DB5
+        case .fpCompute: return Color(red: 0.69, green: 0.43, blue: 0.24) // #B06E3E
+        case .intCompute: return Color(red: 0.49, green: 0.36, blue: 0.67) // #7D5BAA
+        case .latency: return Color(red: 0.36, green: 0.54, blue: 0.21) // #5C8A35
         case .unknown: return .gray
         }
     }
