@@ -21,7 +21,7 @@ struct ResultsView: View {
             }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     if let backend = viewModel.selectedBackend,
                        let info = viewModel.deviceInfoByBackend[backend] {
                         DeviceInfoPanel(info: info)
@@ -122,16 +122,17 @@ private struct ResultCategoryCard: View {
                     MetricRow(entry: entry, maxValue: maxValue, tint: tint)
                 }
             }
-            .padding(.top, 10)
+            .padding(.top, 8)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Circle()
                     .fill(tint)
-                    .frame(width: 10, height: 10)
+                    .frame(width: 8, height: 8)
                 Text(category.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                Spacer()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(String(format: "%.2f", category.peakValue))
                         .font(.headline.monospacedDigit())
@@ -141,7 +142,8 @@ private struct ResultCategoryCard: View {
                 }
             }
         }
-        .padding(14)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(containerTint, in: RoundedRectangle(cornerRadius: 12))
     }
 
@@ -166,7 +168,7 @@ private struct MetricRow: View {
     let tint: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(entry.metric)
                     .font(.caption)
