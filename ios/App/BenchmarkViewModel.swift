@@ -213,19 +213,22 @@ final class BenchmarkViewModel: ObservableObject {
         var args = ["clpeak", "--max-time", "150"]
 
         for backend in catalog.backends {
-            let selected = selection.devicesByBackend[backend.name] ?? []
-            if selected.isEmpty {
-                if backend.name == "Vulkan" { args.append("--no-vulkan") }
-                if backend.name == "Metal" { args.append("--no-metal") }
-                continue
+            let flag: String
+            let noFlag: String
+            switch backend.name {
+            case "Vulkan": flag = "--vk-device"; noFlag = "--no-vulkan"
+            case "Metal":  flag = "--mtl-device"; noFlag = "--no-metal"
+            default:       continue
             }
 
-            if selected.count == 1, let only = selected.first {
-                if backend.name == "Vulkan" {
-                    args += ["--vk-device", String(only)]
-                } else if backend.name == "Metal" {
-                    args += ["--mtl-device", String(only)]
-                }
+            let selected = selection.devicesByBackend[backend.name] ?? []
+            if selected.isEmpty {
+                args.append(noFlag)
+            } else if selected.count < backend.devices.count {
+                // Partial pick → list exactly the chosen device indices.
+                // A full selection is left implicit (native runs every device).
+                let list = selected.sorted().map(String.init).joined(separator: ",")
+                args += [flag, list]
             }
         }
 

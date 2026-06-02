@@ -6,9 +6,9 @@ package kr.clpeak
  * enable picked" for tests on the first test flag, so we never emit per-test
  * flags here — all tests always run.
  *
- * Limitation: the native CLI's device flags select exactly one device.  If the
- * user selects multiple devices for a backend we omit those flags and let native
- * iterate every enumerated device.
+ * Device flags accept a comma-separated index list, so any subset of a backend's
+ * devices can be expressed.  We emit a list only for a *partial* selection; a
+ * fully-selected backend is left implicit (native runs every device).
  */
 object ArgvBuilder {
 
@@ -17,6 +17,7 @@ object ArgvBuilder {
 
         for (backend in catalog.backends) {
             val selectedKeys = sel.devicesByBackend[backend.name] ?: continue
+
             if (selectedKeys.isEmpty()) {
                 when (backend.name) {
                     "OpenCL"  -> args += "--no-opencl"
@@ -26,25 +27,39 @@ object ArgvBuilder {
                     "Metal"   -> args += "--no-metal"
                     "oneAPI"  -> args += "--no-oneapi"
                 }
-            } else if (selectedKeys.size == 1) {
-                val key = selectedKeys.single()
-                val dash = key.indexOf(':')
-                if (dash < 0) continue
-                val platformIdx = key.substring(0, dash).toIntOrNull() ?: continue
-                val deviceIdx   = key.substring(dash + 1).toIntOrNull() ?: continue
-
-                when (backend.name) {
-                    "OpenCL" -> {
-                        args += "--cl-platform"; args += platformIdx.toString()
-                        args += "--cl-device";   args += deviceIdx.toString()
-                    }
-                    "Vulkan" -> {
-                        args += "--vk-device";   args += deviceIdx.toString()
-                    }
-                    // Future backends (CUDA, Metal, etc.) can add their flags here.
-                }
+                continue
             }
-            // else: multiple devices selected → omit flags, native iterates all
+
+            // Full selection → no device flags; native iterates every device.
+            if (selectedKeys == backend.devices.map { it.key }.toSet()) continue
+
+            // Partial selection → list the chosen "platformIndex:deviceIndex" pairs.
+            val pairs = selectedKeys.mapNotNull { key ->
+                val dash = key.indexOf(':')
+                if (dash < 0) return@mapNotNull null
+                val p = key.substring(0, dash).toIntOrNull() ?: return@mapNotNull null
+                val d = key.substring(dash + 1).toIntOrNull() ?: return@mapNotNull null
+                p to d
+            }
+            if (pairs.isEmpty()) continue
+
+            when (backend.name) {
+                "OpenCL" -> {
+                    // OpenCL filters platform and device independently, so a pick
+                    // spanning platforms is the cross-product of the platform and
+                    // device index lists (exact for the common single-platform case).
+                    val platforms = pairs.map { it.first }.distinct().sorted()
+                    val devices   = pairs.map { it.second }.distinct().sorted()
+                    args += "--cl-platform"; args += platforms.joinToString(",")
+                    args += "--cl-device";   args += devices.joinToString(",")
+                }
+                "Vulkan" -> {
+                    val devices = pairs.map { it.second }.distinct().sorted()
+                    args += "--vk-device"; args += devices.joinToString(",")
+                }
+                // Other backends aren't compiled into the Android binary
+                // (see entry_android.cpp), so they need no device flags here.
+            }
         }
 
         return args.toTypedArray()
