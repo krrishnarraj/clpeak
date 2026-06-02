@@ -15,7 +15,7 @@ option(CLPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)
 option(CLPEAK_ENABLE_CUDA   "Build CUDA backend"   ON)
 option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
 option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
-option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx or clang++ -fsycl)" ON)
+option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
 
 # Find Vulkan (needed by src/vulkan/CMakeLists.txt)
 if(CLPEAK_ENABLE_VULKAN)
@@ -82,11 +82,12 @@ if(CLPEAK_ENABLE_ONEAPI)
     find_package(MKL CONFIG QUIET)
 
     # SYCL device code must be compiled AND linked by a SYCL-aware compiler
-    # (icpx / IntelLLVM).  Because the kernels live in a static lib that is
-    # link-resolved into the clpeak executable, the *whole* binary has to be
-    # built with icpx -- a GCC link step can't embed the device images.
-    # So we only build the oneAPI backend when the project compiler is icpx;
-    # otherwise we auto-disable it (other backends are unaffected).
+    # (CMAKE_CXX_COMPILER_ID == "IntelLLVM").  The kernels live in a static
+    # lib that is link-resolved into the clpeak executable, so the *whole*
+    # binary must be built with icpx/icx -- MSVC and GCC cannot embed device
+    # images.
+    #   Linux:   cmake -B build -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx
+    #   Windows: cmake -G Ninja -B build -DCMAKE_CXX_COMPILER=icx -DCMAKE_C_COMPILER=icx
     if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
         set(CLPEAK_ONEAPI_COMPILER_OK TRUE)
     else()
@@ -169,9 +170,17 @@ if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND CLPEAK_ONEAPI_COMPILER_OK)
     endif()
     string(APPEND _clpeak_summary "  oneAPI : ENABLED  (${_clpeak_oneapi_features})\n")
 elseif(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND NOT CLPEAK_ONEAPI_COMPILER_OK)
-    string(APPEND _clpeak_summary "  oneAPI : disabled (needs icpx - reconfigure with -DCMAKE_CXX_COMPILER=icpx, current is ${CMAKE_CXX_COMPILER_ID})\n")
+    if(WIN32)
+        string(APPEND _clpeak_summary "  oneAPI : disabled (needs icx - reconfigure with -G Ninja -DCMAKE_CXX_COMPILER=icx, current is ${CMAKE_CXX_COMPILER_ID})\n")
+    else()
+        string(APPEND _clpeak_summary "  oneAPI : disabled (needs icpx - reconfigure with -DCMAKE_CXX_COMPILER=icpx, current is ${CMAKE_CXX_COMPILER_ID})\n")
+    endif()
 elseif(CLPEAK_ENABLE_ONEAPI)
-    string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - source setvars.sh + use icpx)\n")
+    if(WIN32)
+        string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - run setvars.bat then reconfigure with -G Ninja -DCMAKE_CXX_COMPILER=icx)\n")
+    else()
+        string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - source setvars.sh then reconfigure with -DCMAKE_CXX_COMPILER=icpx)\n")
+    endif()
 else()
     string(APPEND _clpeak_summary "  oneAPI : disabled (CLPEAK_ENABLE_ONEAPI=OFF)\n")
 endif()
