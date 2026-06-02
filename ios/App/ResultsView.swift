@@ -130,8 +130,8 @@ private struct ResultCategoryCard: View {
                     .frame(width: 8, height: 8)
                 Text(category.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(String(format: "%.2f", category.peakValue))
