@@ -98,6 +98,8 @@ set(CLPEAK_ROCM_KERNELS
 
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_int8_dp.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_fp16.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_bf16.hip
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_fp8.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_int8.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/rocwmma_fp16.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/rocwmma_int8.hip

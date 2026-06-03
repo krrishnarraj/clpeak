@@ -34,7 +34,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP` |
-| `wmma.cpp` | `runWmma` — native RDNA3/4 (gfx11/gfx12) WMMA matrix-core peak (fp16/int8) via `__builtin_amdgcn_wmma_*`; wave32, arch-gated, degrades to Unsupported on missing builtin |
+| `wmma.cpp` | `runWmma` — native RDNA3/4 (gfx11/gfx12) WMMA matrix-core peak (fp16/bf16/fp8 e4m3+e5m2/int8) via `__builtin_amdgcn_wmma_*`; wave32, arch-gated, degrades to Unsupported on missing builtin (fp8 is gfx12-only) |
 | `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark (library path) |
 | `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (CDNA, fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
 | `sparse_mfma.cpp` | `runSparseMfma` — 2:4 structured-sparse MFMA peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_smfmac_*` |

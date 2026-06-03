@@ -56,6 +56,15 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     {"wmma_fp16", "WMMA fp16xfp16+fp32 16x16x16", "tflops",
      rocm_kernels::wmma_fp16_src, rocm_kernels::wmma_fp16_name, "wmma_fp16",
      16, 16, 16, false},
+    {"wmma_bf16", "WMMA bf16xbf16+fp32 16x16x16", "tflops",
+     rocm_kernels::wmma_bf16_src, rocm_kernels::wmma_bf16_name, "wmma_bf16",
+     16, 16, 16, false},
+    {"wmma_fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "tflops",
+     rocm_kernels::wmma_fp8_src, rocm_kernels::wmma_fp8_name, "wmma_fp8_e4m3",
+     16, 16, 16, false},
+    {"wmma_fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "tflops",
+     rocm_kernels::wmma_fp8_src, rocm_kernels::wmma_fp8_name, "wmma_fp8_e5m2",
+     16, 16, 16, false},
   };
   static const WmmaEntry intEntries[] = {
     {"wmma_int8", "WMMA int8xint8+int32 16x16x16", "tops",
