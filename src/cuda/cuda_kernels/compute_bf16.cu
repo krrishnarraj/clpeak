@@ -17,7 +17,7 @@ extern "C" __global__ void compute_bf16(float *out, float A)
     float x = __bfloat162float(__float2bfloat16(A));
     float y = __bfloat162float(__float2bfloat16((float)threadIdx.x));
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 16; i++)
     {
         MAD_128(x, y)

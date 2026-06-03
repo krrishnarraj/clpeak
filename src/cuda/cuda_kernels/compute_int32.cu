@@ -15,7 +15,7 @@ extern "C" __global__ void compute_int32(int *out, int A)
     int x = A;
     int y = (int)threadIdx.x;
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 128; i++)
     {
         MAD_16(x, y)
