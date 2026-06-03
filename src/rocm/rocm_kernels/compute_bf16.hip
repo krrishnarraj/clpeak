@@ -12,21 +12,16 @@
 
 extern "C" __global__ void compute_bf16(float *out, float A)
 {
-    float x0 = (float)hip_bfloat16(A);
-    float y0 = (float)hip_bfloat16((float)threadIdx.x);
-    float x1 = (float)hip_bfloat16(A + 1.0f);
-    float y1 = (float)hip_bfloat16((float)threadIdx.x + 7.0f);
+    float x = (float)hip_bfloat16(A);
+    float y = (float)hip_bfloat16((float)threadIdx.x);
 
     #pragma unroll 1
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 16; i++)
     {
-        MAD_128(x0, y0)
-        MAD_128(x1, y1)
-        x0 = (float)hip_bfloat16(x0);
-        y0 = (float)hip_bfloat16(y0);
-        x1 = (float)hip_bfloat16(x1);
-        y1 = (float)hip_bfloat16(y1);
+        MAD_128(x, y)
+        x = (float)hip_bfloat16(x);
+        y = (float)hip_bfloat16(y);
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = (x0 + y0) + (x1 + y1);
+    out[blockIdx.x * blockDim.x + threadIdx.x] = x + y;
 }
