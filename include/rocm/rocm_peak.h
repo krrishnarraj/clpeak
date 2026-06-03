@@ -95,6 +95,13 @@ struct rocm_compute_desc_t
   bool        skip;
   const char *skipMsg;
 
+  // When set, a HIPRTC compile failure for this test is treated as an expected
+  // capability probe: the verbose compiler log is suppressed and only the
+  // "[error] compile/load failed" status is emitted. Used by tests whose
+  // builtin may be absent on a given arch (e.g. int8 DP4a), mirroring how
+  // mfma.cpp passes quiet=true to getKernel().
+  bool        quietCompile;
+
   const char *const *extraHiprtcOpts;
   uint32_t           numExtraHiprtcOpts;
 };

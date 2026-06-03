@@ -48,6 +48,10 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   d.elemSize = sizeof(int);
   d.scalarArg = &A;
   d.scalarSize = sizeof(A);
+  // The DP4a builtin is absent on some archs (e.g. gfx12 lacks dot1-insts when
+  // built against the legacy sdot4 path); suppress the multi-page HIPRTC log so
+  // a failure shows just "[error] compile/load failed".
+  d.quietCompile = true;
   return runComputeKernel(dev, cfg, d);
 }
 
