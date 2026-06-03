@@ -1,13 +1,29 @@
 #include <hip/hip_runtime.h>
 
-// INT8 dot-product throughput via the AMD DP4a instruction (v_dot4_i32_i8),
-// exposed as __builtin_amdgcn_sdot4. Each call computes dot(char4, char4) into
-// an int32 accumulator: 4 INT8 multiply-adds = 8 INT8 ops. This is the vector
-// shader-core INT8 path, distinct from the matrix-core MFMA int8 (mfma_int8).
+// INT8 dot-product throughput via the AMD DP4a instruction. Each call computes
+// dot(char4, char4) into an int32 accumulator: 4 INT8 multiply-adds = 8 INT8
+// ops. This is the vector shader-core INT8 path, distinct from the matrix-core
+// MFMA int8 (mfma_int8).
 //
-// No arch #ifdef: HIPRTC compiles for the real device and clang gates the
-// builtin per sub-target, so an unsupported GPU fails to compile and the test
-// is reported skipped rather than emitting a fabricated number.
+// The builtin differs by arch: older GCN/CDNA1-2 and RDNA1-2 expose the
+// signed v_dot4_i32_i8 (__builtin_amdgcn_sdot4, gated by the dot1-insts
+// feature); CDNA3 (gfx94x/gfx950) and RDNA3/4 (gfx11xx/gfx12xx) replaced it
+// with the mixed-sign v_dot4_i32_iu8 (__builtin_amdgcn_sudot4) and no longer
+// carry dot1-insts -- so sdot4 fails to compile there (the gfx12 "needs target
+// feature dot1-insts" error). Select per-arch via clang's predefined
+// __gfxNNNN__ processor macros; signed*signed maps to sudot4 with both sign
+// flags set. Arches not listed fall back to sdot4 (unchanged behavior); if a
+// part has neither, the compile fails and the test reports compile/load failed.
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) ||       \
+    defined(__gfx950__) ||                                                     \
+    defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||    \
+    defined(__gfx1103__) ||                                                    \
+    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) ||    \
+    defined(__gfx1200__) || defined(__gfx1201__)
+#define DOT4_I8(x, y, a) __builtin_amdgcn_sudot4(true, (x), true, (y), (a), false)
+#else
+#define DOT4_I8(x, y, a) __builtin_amdgcn_sdot4((x), (y), (a), false)
+#endif
 //
 // Four variants scale instruction-level parallelism (independent accumulator
 // chains). Op accounting is 8192 ops/thread for every variant so the numbers
@@ -15,7 +31,7 @@
 //   dp  = 64 * 16 dots * 8 ops, dp2 = 32 * (2*16) * 8, dp4 = 16 * (4*16) * 8,
 //   dp8 = 8 * (8*16) * 8 -- all 8192.
 
-#define STEP(x, y, a)    a = __builtin_amdgcn_sdot4(x, y, a, false); y ^= a;
+#define STEP(x, y, a)    a = DOT4_I8(x, y, a); y ^= a;
 #define STEP_4(x, y, a)  STEP(x, y, a) STEP(x, y, a) STEP(x, y, a) STEP(x, y, a)
 #define STEP_16(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a)
 
