@@ -172,6 +172,8 @@ int RocmPeak::runAll()
       runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))
       runComputeBF16(dev, cfg);
+    if (isAllowedAs(Benchmark::Wmma, Category::FpCompute))
+      runWmma(dev, cfg, Category::FpCompute);
     if (isAllowedAs(Benchmark::Rocwmma, Category::FpCompute))
       runRocwmma(dev, cfg, Category::FpCompute);
     if (isAllowedAs(Benchmark::Mfma, Category::FpCompute))
@@ -188,6 +190,8 @@ int RocmPeak::runAll()
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
 
+    if (isAllowedAs(Benchmark::Wmma, Category::IntCompute))
+      runWmma(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Rocwmma, Category::IntCompute))
       runRocwmma(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Mfma, Category::IntCompute))

@@ -13,8 +13,9 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 - Looking for kernel timing/calibration? → `rocm_peak.cpp` (`runKernel`)
 - Looking for FP compute benchmarks? → `compute_float.cpp`
 - Looking for int compute benchmarks? → `compute_int.cpp`
-- Looking for rocWMMA matrix benchmarks? → `rocwmma.cpp`
-- Looking for raw MFMA matrix-core peak benchmarks (incl. scaled-MFMA mxfp4)? → `mfma.cpp` + `rocm_kernels/mfma_*.hip`
+- Looking for raw WMMA matrix-core peak benchmarks (RDNA3/4, native `__builtin_amdgcn_wmma_*`)? → `wmma.cpp` + `rocm_kernels/wmma_*.hip`
+- Looking for rocWMMA matrix benchmarks (library path)? → `rocwmma.cpp`
+- Looking for raw MFMA matrix-core peak benchmarks (CDNA, incl. scaled-MFMA mxfp4)? → `mfma.cpp` + `rocm_kernels/mfma_*.hip`
 - Looking for 2:4 structured-sparse MFMA peak benchmarks? → `sparse_mfma.cpp` + `rocm_kernels/smfmac_*.hip`
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
 - Looking for hipBLASLt FP8 GEMM benchmarks? → `hipblaslt_gemm.cpp`
@@ -33,8 +34,9 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP` |
-| `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark |
-| `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
+| `wmma.cpp` | `runWmma` — native RDNA3/4 (gfx11/gfx12) WMMA matrix-core peak (fp16/int8) via `__builtin_amdgcn_wmma_*`; wave32, arch-gated, degrades to Unsupported on missing builtin |
+| `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark (library path) |
+| `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (CDNA, fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
 | `sparse_mfma.cpp` | `runSparseMfma` — 2:4 structured-sparse MFMA peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_smfmac_*` |
 | `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 (tops) |
 | `hipblaslt_gemm.cpp` | `runHipblasLt` — hipBLASLt GEMM peak: fp8 e4m3/e5m2 fnuz + mxfp4 (block-scaled, gated by `CLPEAK_HIPBLASLT_HAS_FP4`) |

@@ -128,6 +128,7 @@ public:
   int runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg);
 
+  int runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
   int runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
@@ -172,6 +173,10 @@ namespace rocm_kernels {
 
   extern const char *compute_int8_dp_src;
   extern const char *compute_int8_dp_name;
+  extern const char *wmma_fp16_src;
+  extern const char *wmma_fp16_name;
+  extern const char *wmma_int8_src;
+  extern const char *wmma_int8_name;
   extern const char *rocwmma_fp16_src;
   extern const char *rocwmma_fp16_name;
   extern const char *rocwmma_int8_src;
