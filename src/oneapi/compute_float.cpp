@@ -57,11 +57,15 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
           VecT x, y;
+          // Seeds in T arithmetic only: a double here would pull in the fp64
+          // aspect and make the kernel fail to launch on devices without fp64
+          // (e.g. Intel Arc). That only bit the vector widths, because the
+          // scalar W=1 case constant-folds the k==0 double term away.
           #pragma unroll
           for (int k = 0; k < W; k++)
           {
-            x[k] = (T)((double)A + (double)k);
-            y[k] = (T)((double)it.get_local_id(0) + (double)k);
+            x[k] = A + (T)k;
+            y[k] = (T)it.get_local_id(0) + (T)k;
           }
           #pragma unroll 1
           for (int i = 0; i < iters; i++) { MAD_16(x, y) }
