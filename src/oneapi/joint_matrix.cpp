@@ -36,24 +36,72 @@ constexpr int      JM_SG = 16;   // XMX sub-group (lane) width on Intel Xe
 // Per-variant kernel-name tags (SYCL needs a unique type per parallel_for).
 struct JmBf16Tag; struct JmFp16Tag; struct JmTf32Tag; struct JmInt8Tag;
 
-// Ask the device's joint_matrix combination table whether (atype,btype,ctype)
-// at shape MxNxK is accepted.  Intel/Xe rejects unsupported shapes (and tf32 on
-// non-PVC parts) at *launch*, which otherwise surfaces as a scary
-// "kernel launch failed".  Probing first lets us record a clean Unsupported row.
-// Returns 1 supported, 0 unsupported, -1 when the query itself is unavailable
-// (caller should then just attempt the launch and let runKernel report).
+static const char *mtName(syclex::matrix_type t)
+{
+  using mt = syclex::matrix_type;
+  switch (t)
+  {
+    case mt::bf16:   return "bf16";
+    case mt::fp16:   return "fp16";
+    case mt::tf32:   return "tf32";
+    case mt::fp32:   return "fp32";
+    case mt::fp64:   return "fp64";
+    case mt::sint8:  return "sint8";
+    case mt::sint16: return "sint16";
+    case mt::sint32: return "sint32";
+    case mt::sint64: return "sint64";
+    case mt::uint8:  return "uint8";
+    case mt::uint16: return "uint16";
+    case mt::uint32: return "uint32";
+    case mt::uint64: return "uint64";
+    default:         return "?";
+  }
+}
+
+// Pull the device's joint_matrix combination table.  Sets `threw` so callers
+// can distinguish "queried OK, none" from "couldn't query at all".
+static std::vector<syclex::combination> queryCombos(const sycl::device &d, bool &threw)
+{
+  threw = false;
+  try {
+    return d.get_info<
+      sycl::ext::oneapi::experimental::info::device::matrix_combinations>();
+  } catch (const std::exception &e) {
+    CLPEAK_VLOG("joint_matrix: matrix_combinations query threw: %s\n", e.what());
+    threw = true;
+    return {};
+  }
+}
+
+// Verbose-only: print every (a/b/c/d type, M/N/K, max M/N/K) the device accepts.
+// This is the ground truth for picking tile shapes on a new device.
+static void dumpMatrixCombinations(const sycl::device &d)
+{
+  if (!::clpeak::verboseEnabled()) return;
+  bool threw = false;
+  auto combos = queryCombos(d, threw);
+  if (threw) return;
+  CLPEAK_VLOG("joint_matrix: device reports %zu matrix combination(s):\n",
+              combos.size());
+  for (const auto &c : combos)
+    CLPEAK_VLOG("  a=%-5s b=%-5s c=%-5s d=%-5s  M=%zu N=%zu K=%zu  "
+                "(max M=%zu N=%zu K=%zu)\n",
+                mtName(c.atype), mtName(c.btype), mtName(c.ctype), mtName(c.dtype),
+                c.msize, c.nsize, c.ksize,
+                c.max_msize, c.max_nsize, c.max_ksize);
+}
+
+// Ask whether (atype,btype,ctype) at shape MxNxK is in the device table.
+// Returns 1 supported, 0 unsupported (queried OK but absent, incl. empty table),
+// -1 when the query itself threw (caller should attempt and let runKernel report).
 static int jmComboSupport(const sycl::device &d,
                           syclex::matrix_type at, syclex::matrix_type bt,
                           syclex::matrix_type ct,
                           size_t M, size_t N, size_t K)
 {
-#if defined(SYCL_EXT_ONEAPI_MATRIX_VERSION)
-  std::vector<syclex::combination> combos;
-  try {
-    combos = d.get_info<
-      sycl::ext::oneapi::experimental::info::device::matrix_combinations>();
-  } catch (...) { return -1; }
-  if (combos.empty()) return -1;
+  bool threw = false;
+  auto combos = queryCombos(d, threw);
+  if (threw) return -1;
   for (const auto &c : combos) {
     if (c.atype != at || c.btype != bt || c.ctype != ct) continue;
     // Xe reports a flexible dim as 0 with a max_* bound; AMX-style backends
@@ -63,11 +111,7 @@ static int jmComboSupport(const sycl::device &d,
     const bool kok = (c.ksize == 0) ? (K <= c.max_ksize) : (K == c.ksize);
     if (mok && nok && kok) return 1;
   }
-  return 0;
-#else
-  (void)d; (void)at; (void)bt; (void)ct; (void)M; (void)N; (void)K;
-  return -1;
-#endif
+  return 0;  // queried fine; shape/type absent (empty table => nothing supported)
 }
 
 // Run one matrix-engine variant.  ABt is the joint_matrix element type
@@ -160,6 +204,11 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
                    "XMX matrix engine not available on this device");
     return 0;
   }
+
+  // Ground-truth diagnostic (verbose only): what shapes/types does this device
+  // actually accept?  Dump once (FP pass) so we can pick tile shapes per device.
+  if (!isInt)
+    dumpMatrixCombinations(dev.dev);
 
   // One sub-group per work-group: joint_matrix executes per sub-group and the
   // ops accounting below counts one matrix chain per block, so the work-group
