@@ -49,9 +49,9 @@ Backend: CUDA
   Device 0: NVIDIA GeForce RTX 5060
 
     Single-precision compute (GFLOPS)
-      float    : 17779.23
-      half     : 21067.54
-      bf16     : 19637.48
+      float    : 21100.20
+      half     : 21077.21
+      bf16     : 20042.78
 
     WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)
       wmma_fp16 : 165.90
@@ -79,6 +79,7 @@ Backend: CUDA
       fp16     : 77.54
       bf16     : 41.14
       fp8_e4m3 : 143.89
+      nvf4_e2m1 : 298.99
     cuBLASLt GEMM peak (TOPS)
       int8     : 149.18
 
