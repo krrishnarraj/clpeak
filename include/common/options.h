@@ -62,6 +62,10 @@ struct CliOptions {
   // Listing mode (no benchmarks run; just print devices).
   bool listDevices = false;
 
+  // Verbose diagnostics: print backend debug logs (kernel build logs, API /
+  // launch errors, library exceptions) that are suppressed by default.
+  bool verbose = false;
+
   CliOptions()
   {
     enabledTests.set();

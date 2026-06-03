@@ -35,7 +35,7 @@ static std::string formatHipVersionLocal(int v)
     hipError_t _r = (call);                                                           \
     if (_r != hipSuccess)                                                             \
     {                                                                                 \
-      fprintf(stderr, "HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(_r)); \
+      CLPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(_r));      \
       return false;                                                                   \
     }                                                                                 \
   } while (0)
@@ -104,8 +104,7 @@ void RocmDevice::cleanup()
 
 bool RocmDevice::getKernel(const char *src, const char *srcName,
                            const char *kernelName, hipFunction_t &fn,
-                           const std::vector<const char *> &extraOpts,
-                           bool quiet)
+                           const std::vector<const char *> &extraOpts)
 {
   auto it = moduleCache.find(src);
   hipModule_t mod = nullptr;
@@ -119,7 +118,7 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
     hiprtcResult rr = hiprtcCreateProgram(&prog, src, srcName, 0, nullptr, nullptr);
     if (rr != HIPRTC_SUCCESS)
     {
-      fprintf(stderr, "hiprtcCreateProgram failed: %s\n", hiprtcGetErrorString(rr));
+      CLPEAK_VLOG("hiprtcCreateProgram failed: %s\n", hiprtcGetErrorString(rr));
       return false;
     }
 
@@ -142,15 +141,12 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
     rr = hiprtcCompileProgram(prog, (int)opts.size(), opts.data());
     if (rr != HIPRTC_SUCCESS)
     {
-      if (!quiet)
-      {
-        size_t logSize = 0;
-        hiprtcGetProgramLogSize(prog, &logSize);
-        std::string log(logSize, '\0');
-        if (logSize > 1)
-          hiprtcGetProgramLog(prog, &log[0]);
-        fprintf(stderr, "HIPRTC compile of %s failed:\n%s\n", srcName, log.c_str());
-      }
+      size_t logSize = 0;
+      hiprtcGetProgramLogSize(prog, &logSize);
+      std::string log(logSize, '\0');
+      if (logSize > 1)
+        hiprtcGetProgramLog(prog, &log[0]);
+      CLPEAK_VLOG("HIPRTC compile of %s failed:\n%s\n", srcName, log.c_str());
       hiprtcDestroyProgram(&prog);
       return false;
     }
@@ -159,8 +155,8 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
     rr = hiprtcGetCodeSize(prog, &codeSize);
     if (rr != HIPRTC_SUCCESS || codeSize == 0)
     {
-      fprintf(stderr, "hiprtcGetCodeSize(%s) failed: %s\n",
-              srcName, hiprtcGetErrorString(rr));
+      CLPEAK_VLOG("hiprtcGetCodeSize(%s) failed: %s\n",
+                  srcName, hiprtcGetErrorString(rr));
       hiprtcDestroyProgram(&prog);
       return false;
     }
@@ -170,14 +166,14 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
     hiprtcDestroyProgram(&prog);
     if (rr != HIPRTC_SUCCESS)
     {
-      fprintf(stderr, "hiprtcGetCode(%s) failed: %s\n", srcName, hiprtcGetErrorString(rr));
+      CLPEAK_VLOG("hiprtcGetCode(%s) failed: %s\n", srcName, hiprtcGetErrorString(rr));
       return false;
     }
 
     hipError_t hr = hipModuleLoadData(&mod, code.data());
     if (hr != hipSuccess)
     {
-      fprintf(stderr, "hipModuleLoadData(%s) failed: %s\n", srcName, hipErrStr(hr));
+      CLPEAK_VLOG("hipModuleLoadData(%s) failed: %s\n", srcName, hipErrStr(hr));
       return false;
     }
     moduleCache[src] = mod;
@@ -186,8 +182,8 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
   hipError_t r = hipModuleGetFunction(&fn, mod, kernelName);
   if (r != hipSuccess)
   {
-    fprintf(stderr, "hipModuleGetFunction(%s in %s) failed: %s\n",
-            kernelName, srcName, hipErrStr(r));
+    CLPEAK_VLOG("hipModuleGetFunction(%s in %s) failed: %s\n",
+                kernelName, srcName, hipErrStr(r));
     return false;
   }
   return true;

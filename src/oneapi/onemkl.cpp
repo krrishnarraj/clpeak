@@ -110,12 +110,12 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
       }
       catch (const sycl::exception &e)
       {
-        fprintf(stderr, "oneMKL %s failed: %s\n", label, e.what());
+        CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
         return -1.0;
       }
       catch (const std::exception &e)
       {
-        fprintf(stderr, "oneMKL %s failed: %s\n", label, e.what());
+        CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
         return -1.0;
       }
     };

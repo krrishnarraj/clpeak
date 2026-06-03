@@ -21,6 +21,7 @@ static const char *helpStr =
     "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
     "\n  --max-time ms               per-test time budget for the timed phase (default: 500 ms)"
     "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
+    "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
     "\n  --list-devices              list available devices for every backend and exit"
     "\n  --xml-file file             save results to an XML file"
     "\n  --json-file file            save results to a JSON file"
@@ -368,6 +369,10 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     {
       std::cout << "clpeak version: " << CLPEAK_VERSION_STR << "\n";
       std::exit(0);
+    }
+    else if (!strcmp(a, "--verbose"))
+    {
+      out.verbose = true;
     }
     // ---- backend selection ----------------------------------------------
 #ifdef ENABLE_OPENCL

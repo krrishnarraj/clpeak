@@ -29,7 +29,7 @@ static const char *cuErrStr(CUresult r)
     CUresult _r = (call);                                                             \
     if (_r != CUDA_SUCCESS)                                                           \
     {                                                                                 \
-      fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r)); \
+      CLPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r));      \
       return false;                                                                   \
     }                                                                                 \
   } while (0)
@@ -154,7 +154,7 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
     nvrtcResult nr = nvrtcCreateProgram(&prog, src, srcName, 0, nullptr, nullptr);
     if (nr != NVRTC_SUCCESS)
     {
-      fprintf(stderr, "nvrtcCreateProgram failed: %s\n", nvrtcGetErrorString(nr));
+      CLPEAK_VLOG("nvrtcCreateProgram failed: %s\n", nvrtcGetErrorString(nr));
       return false;
     }
 
@@ -193,7 +193,7 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
       std::string log(logSize, '\0');
       if (logSize > 1)
         nvrtcGetProgramLog(prog, &log[0]);
-      fprintf(stderr, "NVRTC compile of %s failed:\n%s\n", srcName, log.c_str());
+      CLPEAK_VLOG("NVRTC compile of %s failed:\n%s\n", srcName, log.c_str());
       nvrtcDestroyProgram(&prog);
       return false;
     }
@@ -209,7 +209,7 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
       CUresult lr = cuModuleLoadData(&mod, cubin.data());
       if (lr != CUDA_SUCCESS)
       {
-        fprintf(stderr, "cuModuleLoadData(cubin %s) failed: %s\n", srcName, cuErrStr(lr));
+        CLPEAK_VLOG("cuModuleLoadData(cubin %s) failed: %s\n", srcName, cuErrStr(lr));
         nvrtcDestroyProgram(&prog);
         return false;
       }
@@ -223,7 +223,7 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
       CUresult lr = cuModuleLoadData(&mod, ptx.data());
       if (lr != CUDA_SUCCESS)
       {
-        fprintf(stderr, "cuModuleLoadData(ptx %s) failed: %s\n", srcName, cuErrStr(lr));
+        CLPEAK_VLOG("cuModuleLoadData(ptx %s) failed: %s\n", srcName, cuErrStr(lr));
         nvrtcDestroyProgram(&prog);
         return false;
       }
@@ -235,8 +235,8 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
   CUresult r = cuModuleGetFunction(&fn, mod, kernelName);
   if (r != CUDA_SUCCESS)
   {
-    fprintf(stderr, "cuModuleGetFunction(%s in %s) failed: %s\n",
-            kernelName, srcName, cuErrStr(r));
+    CLPEAK_VLOG("cuModuleGetFunction(%s in %s) failed: %s\n",
+                kernelName, srcName, cuErrStr(r));
     return false;
   }
   return true;

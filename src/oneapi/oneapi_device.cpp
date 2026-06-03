@@ -19,7 +19,7 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
   }
   catch (const sycl::exception &e)
   {
-    fprintf(stderr, "SYCL queue create failed: %s\n", e.what());
+    CLPEAK_VLOG("SYCL queue create failed: %s\n", e.what());
     return false;
   }
 

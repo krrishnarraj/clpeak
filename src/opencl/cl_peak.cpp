@@ -102,7 +102,8 @@ int clPeak::runAll()
         catch (cl::Error &error)
         {
           UNUSED(error);
-          log->note("  Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]) + "\n\n");
+          CLPEAK_VLOG("  Build Log: %s\n\n",
+                      prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
           currentDeviceScope = nullptr;
           continue;
         }
@@ -120,7 +121,7 @@ int clPeak::runAll()
           }
           catch (cl::Error &)
           {
-            log->note("  " + label + " kernel build failed, test skipped\n");
+            CLPEAK_VLOG("  %s kernel build failed, test skipped\n", label.c_str());
             p = cl::Program(); // return empty/invalid program
           }
           return p;

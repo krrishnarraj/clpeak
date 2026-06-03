@@ -1,6 +1,12 @@
 #include <common/common.h>
 #include <cstring>
 
+namespace clpeak {
+static bool g_verbose = false;
+bool verboseEnabled()   { return g_verbose; }
+void setVerbose(bool on) { g_verbose = on; }
+}
+
 benchmark_config_t benchmark_config_t::forDevice(DeviceType type)
 {
     benchmark_config_t cfg;

@@ -68,14 +68,14 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
     }
     if (status != hipSuccess)
     {
-      fprintf(stderr, "hipModuleLaunchKernel failed: %s\n", hipErrStr(status));
+      CLPEAK_VLOG("hipModuleLaunchKernel failed: %s\n", hipErrStr(status));
       return -1.0f;
     }
     (void)hipEventRecord(stop, dev.stream);
     status = hipEventSynchronize(stop);
     if (status != hipSuccess)
     {
-      fprintf(stderr, "hipEventSynchronize failed: %s\n", hipErrStr(status));
+      CLPEAK_VLOG("hipEventSynchronize failed: %s\n", hipErrStr(status));
       return -1.0f;
     }
     float ms = 0.0f;

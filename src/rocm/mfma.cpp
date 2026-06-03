@@ -106,9 +106,9 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     // HIPRTC compile of the builtin fails. Report that as Unsupported rather
     // than a hard error, since for MFMA it means the datatype isn't available.
     hipFunction_t fn;
-    // quiet: a compile failure here just means the datatype isn't supported on
-    // this arch; suppress the HIPRTC log so it doesn't break result formatting.
-    if (!dev.getKernel(me.src, me.srcName, me.kernelName, fn, {}, /*quiet=*/true))
+    // A compile failure here just means the datatype isn't supported on this
+    // arch; the HIPRTC log is --verbose-only so it never breaks result output.
+    if (!dev.getKernel(me.src, me.srcName, me.kernelName, fn))
     {
       test.skip(me.metric, ResultStatus::Unsupported,
                 "MFMA instruction for this datatype not available on this GPU");

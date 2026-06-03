@@ -48,14 +48,12 @@ public:
   bool init(int devIndex);
   void cleanup();
 
-  // When `quiet` is set, a compile failure is treated as an expected
-  // capability probe and the verbose HIPRTC log is suppressed (callers that
-  // gate on the compile result, e.g. MFMA datatype detection, use this to
-  // avoid breaking the result output formatting).
+  // A HIPRTC compile failure (e.g. an MFMA datatype unsupported on this arch)
+  // returns false; the compiler log is emitted via CLPEAK_VLOG, so it only
+  // appears under --verbose and never disturbs the default result output.
   bool getKernel(const char *src, const char *srcName,
                  const char *kernelName, hipFunction_t &fn,
-                 const std::vector<const char *> &extraOpts = {},
-                 bool quiet = false);
+                 const std::vector<const char *> &extraOpts = {});
 
 private:
   std::unordered_map<const char *, hipModule_t> moduleCache;
@@ -94,13 +92,6 @@ struct rocm_compute_desc_t
 
   bool        skip;
   const char *skipMsg;
-
-  // When set, a HIPRTC compile failure for this test is treated as an expected
-  // capability probe: the verbose compiler log is suppressed and only the
-  // "[error] compile/load failed" status is emitted. Used by tests whose
-  // builtin may be absent on a given arch (e.g. int8 DP4a), mirroring how
-  // mfma.cpp passes quiet=true to getKernel().
-  bool        quietCompile;
 
   const char *const *extraHiprtcOpts;
   uint32_t           numExtraHiprtcOpts;

@@ -40,12 +40,12 @@ const char *cuErrStrLocal(CUresult r)
 
 #define CU_TRY(call) do { CUresult _r = (call); \
     if (_r != CUDA_SUCCESS) { \
-        fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStrLocal(_r)); \
+        CLPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStrLocal(_r)); \
         return -1; } } while (0)
 
 #define LT_TRY(call) do { cublasStatus_t _s = (call); \
     if (_s != CUBLAS_STATUS_SUCCESS) { \
-        fprintf(stderr, "cuBLASLt error at %s:%d: status=%d\n", __FILE__, __LINE__, (int)_s); \
+        CLPEAK_VLOG("cuBLASLt error at %s:%d: status=%d\n", __FILE__, __LINE__, (int)_s); \
         return -1; } } while (0)
 
 // Pick a square GEMM dim that scales with the device's compute budget so
@@ -95,7 +95,7 @@ double timeCublasLt(cublasLtHandle_t lt, CUstream stream,
         if (s != CUBLAS_STATUS_SUCCESS)
         {
             cuEventDestroy(start); cuEventDestroy(stop);
-            fprintf(stderr, "cublasLtMatmul failed: status=%d\n", (int)s);
+            CLPEAK_VLOG("cublasLtMatmul failed: status=%d\n", (int)s);
             return -1.0;
         }
     }

@@ -41,7 +41,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
   if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
   {
-    log->note("pipeline layout creation failed\n");
+    CLPEAK_VLOG("pipeline layout creation failed\n");
     return -1;
   }
 
@@ -54,7 +54,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreateShaderModule(dev.device, &smCI, nullptr, &shaderModule) != VK_SUCCESS)
   {
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    log->note("shader module creation failed\n");
+    CLPEAK_VLOG("shader module creation failed\n");
     return -1;
   }
 
@@ -70,7 +70,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     vkDestroyShaderModule(dev.device, shaderModule, nullptr);
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    log->note("compute pipeline creation failed\n");
+    CLPEAK_VLOG("compute pipeline creation failed\n");
     return -1;
   }
 

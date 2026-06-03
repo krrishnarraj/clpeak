@@ -1,4 +1,5 @@
 #include <common/peak.h>
+#include <common/common.h>
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/result_store.h>
@@ -118,6 +119,7 @@ int main(int argc, char **argv)
 {
     CliOptions opts;
     parseCliOptions(argc, argv, opts);
+    clpeak::setVerbose(opts.verbose);
 
     auto backends = buildBackends();
 

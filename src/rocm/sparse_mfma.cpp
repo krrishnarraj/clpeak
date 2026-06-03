@@ -94,9 +94,9 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     }
 
     hipFunction_t fn;
-    // quiet: a compile failure here just means the datatype isn't supported on
-    // this arch; suppress the HIPRTC log so it doesn't break result formatting.
-    if (!dev.getKernel(se.src, se.srcName, se.kernelName, fn, {}, /*quiet=*/true))
+    // A compile failure here just means the datatype isn't supported on this
+    // arch; the HIPRTC log is --verbose-only so it never breaks result output.
+    if (!dev.getKernel(se.src, se.srcName, se.kernelName, fn))
     {
       test.skip(se.metric, ResultStatus::Unsupported,
                 "Sparse MFMA instruction for this datatype not available on this GPU");

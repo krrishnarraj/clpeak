@@ -107,9 +107,9 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     }
 
     // Compiler-driven capability check: a missing builtin for this datatype
-    // fails the HIPRTC compile. Suppress the log (quiet) and report Unsupported.
+    // fails the HIPRTC compile (log is --verbose-only); report Unsupported.
     hipFunction_t fn;
-    if (!dev.getKernel(me.src, me.srcName, me.kernelName, fn, {}, /*quiet=*/true))
+    if (!dev.getKernel(me.src, me.srcName, me.kernelName, fn))
     {
       test.skip(me.metric, ResultStatus::Unsupported,
                 "WMMA instruction for this datatype not available on this GPU");

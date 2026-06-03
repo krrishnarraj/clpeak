@@ -66,7 +66,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
   for (const auto &v : variants)
   {
     hipFunction_t fn;
-    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, hiprtcOpts, d.quietCompile))
+    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, hiprtcOpts))
     {
       test.skip(v.label, ResultStatus::Error, "compile/load failed");
       continue;

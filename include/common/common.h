@@ -6,6 +6,7 @@
 #endif
 
 #include <stdlib.h>
+#include <cstdio>
 #include <chrono>
 #include <string>
 #include <cstdint>
@@ -171,5 +172,21 @@ struct benchmark_config_t {
 
   static benchmark_config_t forDevice(DeviceType type);
 };
+
+// ---------------------------------------------------------------------------
+// Verbose diagnostics gate (--verbose).  Backend build logs, kernel launch /
+// API errors and similar debug spam are suppressed by default and only
+// emitted when verbose is enabled.  A process-global flag is used because the
+// gated sites include free functions and error macros in the *_device.cpp
+// files that have no access to the Peak object or the logger.
+// ---------------------------------------------------------------------------
+namespace clpeak {
+bool verboseEnabled();
+void setVerbose(bool on);
+}
+
+// Gated stderr diagnostic — no-op unless --verbose was passed.
+#define CLPEAK_VLOG(...) \
+    do { if (::clpeak::verboseEnabled()) fprintf(stderr, __VA_ARGS__); } while (0)
 
 #endif  // COMMON_H

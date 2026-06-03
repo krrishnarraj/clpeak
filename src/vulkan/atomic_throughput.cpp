@@ -161,12 +161,12 @@ int vkPeak::runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buf, mem))
   {
-    log->note("Failed to allocate buffer\n");
+    CLPEAK_VLOG("Failed to allocate buffer\n");
     return -1;
   }
   if (!dev.zeroBuffer(buf))
   {
-    log->note("Failed to zero buffer\n");
+    CLPEAK_VLOG("Failed to zero buffer\n");
     vkDestroyBuffer(dev.device, buf, nullptr);
     vkFreeMemory(dev.device, mem, nullptr);
     return -1;

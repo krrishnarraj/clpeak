@@ -40,7 +40,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    log->note("Failed to allocate buffers\n");
+    CLPEAK_VLOG("Failed to allocate buffers\n");
     return -1;
   }
 
@@ -56,7 +56,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           stagingBuf, stagingMem))
     {
-      log->note("Failed to allocate staging buffer\n");
+      CLPEAK_VLOG("Failed to allocate staging buffer\n");
       vkDestroyBuffer(dev.device, inputBuf, nullptr);
       vkFreeMemory(dev.device, inputMem, nullptr);
       vkDestroyBuffer(dev.device, outputBuf, nullptr);
