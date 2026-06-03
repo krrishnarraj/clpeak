@@ -33,7 +33,11 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
       launchNoop();
     dev.stream.wait_and_throw();
   }
-  catch (const sycl::exception &) { submitFailed = true; }
+  catch (const sycl::exception &e)
+  {
+    CLPEAK_VLOG("SYCL kernel-latency warmup failed: %s\n", e.what());
+    submitFailed = true;
+  }
 
   double totalRoundtripUs = 0.0;
   if (!submitFailed)
@@ -42,7 +46,12 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
     {
       auto t0 = std::chrono::high_resolution_clock::now();
       try { launchNoop(); dev.stream.wait_and_throw(); }
-      catch (const sycl::exception &) { submitFailed = true; break; }
+      catch (const sycl::exception &e)
+      {
+        CLPEAK_VLOG("SYCL kernel-latency submit failed: %s\n", e.what());
+        submitFailed = true;
+        break;
+      }
       auto t1 = std::chrono::high_resolution_clock::now();
       totalRoundtripUs += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0;
     }

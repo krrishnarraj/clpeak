@@ -47,8 +47,9 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         return (float)((double)ns / 1000.0);
       }
-      catch (const sycl::exception &)
+      catch (const sycl::exception &e)
       {
+        CLPEAK_VLOG("SYCL transfer batch failed: %s\n", e.what());
         return -1.0f;
       }
     };
@@ -59,7 +60,11 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
         dev.stream.memcpy(h2d ? dBuf : hPinned, h2d ? hPinned : dBuf, bytes);
       dev.stream.wait_and_throw();
     }
-    catch (const sycl::exception &) { return -1.0f; }
+    catch (const sycl::exception &e)
+    {
+      CLPEAK_VLOG("SYCL transfer warmup failed: %s\n", e.what());
+      return -1.0f;
+    }
 
     float probeUs = runBatch(1);
     if (probeUs <= 0.0f) return -1.0f;
