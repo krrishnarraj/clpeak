@@ -33,7 +33,7 @@ build time and the SYCL runtime JITs it on first launch.
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeGflops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
 | `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`), `runComputeInt8DP` (DP4a-style `int8_dp/dp2/dp4/dp8` ILP-chain variants with accumulator feedback — see note) |
-| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). FP category emits `joint_matrix_bf16`/`_fp16` (8x16x16) + `_tf32` (8x16x8); int category emits `joint_matrix_int8` (8x16x32) |
+| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). FP category emits `joint_matrix_bf16`/`_fp16` (8x16x16) + `_tf32` (8x16x8); int category emits `joint_matrix_int8` (8x16x32). B operand uses `layout::ext_intel_packed` (VNNI — row_major B is rejected at launch on Xe-HPG). Each variant is gated at runtime by `jmComboSupport()` which queries the device's `matrix_combinations` table, so unsupported shapes/types (e.g. tf32 on non-PVC) record a clean `Unsupported` row instead of a launch error. Work-group = one sub-group (`JM_SG`=16) so the ops accounting (one matrix chain per block) stays correct. |
 | `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 via `gemm_bias` (tops). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL` |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
@@ -66,6 +66,15 @@ build time and the SYCL runtime JITs it on first launch.
 - **Vector-width sweeps keep ops/WI constant** by running `baseIters/W` outer
   iterations for width `W`, so the same work-constant (`COMPUTE_FP_WORK_PER_WI`
   etc.) is reported for every width and the numbers stay comparable.
+- **No `double` inside fp32/fp16 kernels.** A stray `double` (even just for
+  computing per-lane seeds) pulls in the `fp64` aspect, so the kernel fails to
+  *launch* on devices without fp64 (Intel Arc) with "Required aspect fp64 is not
+  supported". The scalar W=1 case constant-folds the double away and survives,
+  so the symptom is "scalar works, every vector width fails" — compute seeds in
+  the kernel's own element type.
+- **Intel XMX needs the `joint_matrix` B operand in `layout::ext_intel_packed`**
+  (VNNI). A `row_major` B is rejected at launch on Xe-HPG (Arc/DG2) as an
+  unsupported combination. Prefer probing `jmComboSupport()` before launching.
 
 ## When You Change This Directory
 
