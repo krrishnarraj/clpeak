@@ -15,16 +15,19 @@
 
 extern "C" __global__ void compute_sp(float *out, float A)
 {
-    float x = A;
-    float y = (float)threadIdx.x;
+    float x0 = A;
+    float y0 = (float)threadIdx.x;
+    float x1 = A + 1.0f;
+    float y1 = (float)threadIdx.x + 7.0f;
 
     #pragma unroll 1
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 64; i++)
     {
-        MAD_16(x, y)
+        MAD_16(x0, y0)
+        MAD_16(x1, y1)
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = y;
+    out[blockIdx.x * blockDim.x + threadIdx.x] = y0 + y1;
 }
 
 // ---- float2 --------------------------------------------------------------
@@ -34,16 +37,19 @@ extern "C" __global__ void compute_sp(float *out, float A)
 
 extern "C" __global__ void compute_sp_v2(float *out, float A)
 {
-    float2 x = make_float2(A, A + 1.0f);
-    float2 y = make_float2((float)threadIdx.x, (float)threadIdx.x);
+    float2 x0 = make_float2(A, A + 1.0f);
+    float2 y0 = make_float2((float)threadIdx.x, (float)threadIdx.x);
+    float2 x1 = make_float2(A + 2.0f, A + 3.0f);
+    float2 y1 = make_float2((float)threadIdx.x + 7.0f, (float)threadIdx.x + 7.0f);
 
     #pragma unroll 1
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < 32; i++)
     {
-        MAD2_16(x, y)
+        MAD2_16(x0, y0)
+        MAD2_16(x1, y1)
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = y.x + y.y;
+    out[blockIdx.x * blockDim.x + threadIdx.x] = (y0.x + y0.y) + (y1.x + y1.y);
 }
 
 // ---- float4 --------------------------------------------------------------
@@ -54,15 +60,20 @@ extern "C" __global__ void compute_sp_v2(float *out, float A)
 
 extern "C" __global__ void compute_sp_v4(float *out, float A)
 {
-    float4 x = make_float4(A, A + 1.0f, A + 2.0f, A + 3.0f);
-    float4 y = make_float4((float)threadIdx.x, (float)threadIdx.x,
-                           (float)threadIdx.x, (float)threadIdx.x);
+    float4 x0 = make_float4(A, A + 1.0f, A + 2.0f, A + 3.0f);
+    float4 y0 = make_float4((float)threadIdx.x, (float)threadIdx.x,
+                            (float)threadIdx.x, (float)threadIdx.x);
+    float4 x1 = make_float4(A + 4.0f, A + 5.0f, A + 6.0f, A + 7.0f);
+    float4 y1 = make_float4((float)threadIdx.x + 7.0f, (float)threadIdx.x + 7.0f,
+                            (float)threadIdx.x + 7.0f, (float)threadIdx.x + 7.0f);
 
     #pragma unroll 1
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < 16; i++)
     {
-        MAD4_16(x, y)
+        MAD4_16(x0, y0)
+        MAD4_16(x1, y1)
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = y.x + y.y + y.z + y.w;
+    out[blockIdx.x * blockDim.x + threadIdx.x] =
+        (y0.x + y0.y + y0.z + y0.w) + (y1.x + y1.y + y1.z + y1.w);
 }
