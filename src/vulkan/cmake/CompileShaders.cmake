@@ -12,11 +12,32 @@
 function(compile_shaders)
   cmake_parse_arguments(CS "" "TARGET" "SHADERS" ${ARGN})
 
-  # Search Vulkan SDK first, then the NDK's bundled shader-tools when building
-  # for Android (Gradle passes ANDROID_NDK to CMake; ANDROID_HOST_TAG is set by
-  # android.toolchain.cmake, e.g. "darwin-x86_64" / "linux-x86_64").
-  set(_shader_tool_hints "$ENV{VULKAN_SDK}/bin")
-  if(DEFINED ANDROID_NDK)
+  # Always prefer the host Vulkan SDK's glslc, including for Android builds.
+  # glslc runs at configure time and emits portable, architecture-neutral
+  # SPIR-V that is embedded as C++ arrays and reused unchanged across every
+  # ABI, so it is decoupled from the NDK cross-compilation toolchain. The host
+  # SDK ships a modern glslang that supports the newer GLSL extensions some
+  # shaders here depend on (integer dot product, bfloat16, cooperative matrix,
+  # fp8); the glslc bundled with the NDK is frozen at an old shaderc/glslang
+  # (v2022.x as of NDK r30) that rejects them.
+  #
+  # An explicit -DCLPEAK_GLSLC=/path/to/glslc override wins over everything.
+  set(_shader_tool_hints "$ENV{VULKAN_SDK}/bin" /usr/local/bin /opt/homebrew/bin)
+  if(DEFINED CLPEAK_GLSLC)
+    set(GLSLC "${CLPEAK_GLSLC}")
+  else()
+    find_program(GLSLC glslc HINTS ${_shader_tool_hints})
+  endif()
+
+  # Last-resort fallback: the glslc bundled with the Android NDK
+  # (shader-tools/). It is older than the host SDK and will skip shaders that
+  # need newer GLSL extensions (those benchmarks are then excluded). We only
+  # use it when no host glslc is available.
+  #
+  # TODO: revisit and drop this fallback once the NDK ships a glslc new enough
+  # to compile every shader in src/vulkan/shaders/.
+  if(NOT GLSLC AND DEFINED ANDROID_NDK)
+    # ANDROID_HOST_TAG is set by android.toolchain.cmake (e.g. "darwin-x86_64").
     if(NOT ANDROID_HOST_TAG)
       if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         set(ANDROID_HOST_TAG "darwin-x86_64")
@@ -26,9 +47,15 @@ function(compile_shaders)
         set(ANDROID_HOST_TAG "windows-x86_64")
       endif()
     endif()
-    list(APPEND _shader_tool_hints "${ANDROID_NDK}/shader-tools/${ANDROID_HOST_TAG}")
+    find_program(GLSLC glslc HINTS "${ANDROID_NDK}/shader-tools/${ANDROID_HOST_TAG}")
+    if(GLSLC)
+      message(WARNING "Using the NDK's bundled glslc (${GLSLC}); it is older "
+                      "than the host Vulkan SDK and will skip shaders that need "
+                      "newer GLSL extensions. Install the Vulkan SDK / set "
+                      "VULKAN_SDK to build all shaders.")
+    endif()
   endif()
-  find_program(GLSLC glslc HINTS ${_shader_tool_hints})
+
   if(NOT GLSLC)
     message(FATAL_ERROR "glslc not found. Install the Vulkan SDK or set VULKAN_SDK env var.")
   endif()

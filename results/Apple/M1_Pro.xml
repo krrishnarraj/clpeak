@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="utf-8"?>
+<clpeak format_version="2" clpeak_version="2.0.9-56-g108fa5a" os="Macintosh">
+  <run backend="Metal" platform="Metal" device="Apple M1 Pro" driver="macOS 26.5.0">
+    <category name="fp_compute">
+      <test name="single_precision_compute" unit="gflops">
+        <metric name="float">4487.2407</metric>
+        <metric name="float2">4788.3052</metric>
+        <metric name="float4">4740.6592</metric>
+        <metric name="float8">2403.2148</metric>
+      </test>
+      <test name="half_precision_compute" unit="gflops">
+        <metric name="half">4475.1909</metric>
+        <metric name="half2">4846.6235</metric>
+        <metric name="half4">4989.5649</metric>
+        <metric name="half8">4769.0176</metric>
+      </test>
+      <test name="mixed_precision_compute" unit="gflops">
+        <metric name="mp">4398.2642</metric>
+        <metric name="mp2">4674.2368</metric>
+        <metric name="mp4">4778.2339</metric>
+      </test>
+      <test name="simdgroup_matrix_fp16" unit="tflops">
+        <metric name="simdgroup_fp16">15.8395</metric>
+      </test>
+      <test name="simdgroup_matrix_bf16" unit="tflops">
+        <metric name="simdgroup_bf16" status="unsupported" reason="bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped"/>
+      </test>
+      <test name="mps-gemm-fp" unit="tflops">
+        <metric name="fp32">4.1042</metric>
+        <metric name="fp16">3.9737</metric>
+        <metric name="bf16" status="unsupported" reason="bf16 requires Apple9 (M3) -- unsupported on this device"/>
+      </test>
+      <test name="atomic_throughput" unit="gflops">
+        <metric name="float_global">22.8699</metric>
+      </test>
+    </category>
+    <category name="int_compute">
+      <test name="simdgroup_matrix_int8" unit="tops">
+        <metric name="simdgroup_int8" status="unsupported" reason="int8 simdgroup_matrix requires Apple9 (M3) or newer! Skipped"/>
+      </test>
+      <test name="mps-gemm-int" unit="tops">
+        <metric name="int8" status="unsupported" reason="requires Apple9 (M3) or newer -- unsupported on this device"/>
+      </test>
+      <test name="atomic_throughput" unit="gops">
+        <metric name="int_global">24.6002</metric>
+        <metric name="int_local">255.6435</metric>
+        <metric name="uint_global">24.7686</metric>
+        <metric name="uint_local">255.5286</metric>
+        <metric name="ulong_global" status="unsupported" reason="skipped (requires Apple8 / M2 or newer)"/>
+        <metric name="ulong_local" status="unsupported" reason="skipped (requires Apple8 / M2 or newer)"/>
+      </test>
+    </category>
+    <category name="bandwidth">
+      <test name="global_memory_bandwidth" unit="gbps">
+        <metric name="float">180.8641</metric>
+        <metric name="float2">184.4185</metric>
+        <metric name="float4">182.9058</metric>
+        <metric name="float8">183.1822</metric>
+        <metric name="float16">182.7784</metric>
+      </test>
+      <test name="local_memory_bandwidth" unit="gbps">
+        <metric name="float">2938.3257</metric>
+        <metric name="float2">2767.2185</metric>
+        <metric name="float4">2704.2573</metric>
+        <metric name="float8">2580.7258</metric>
+      </test>
+      <test name="image_memory_bandwidth" unit="gbps">
+        <metric name="rgba32f">163.0686</metric>
+        <metric name="rgba16f">151.7800</metric>
+        <metric name="rgba8">96.7002</metric>
+        <metric name="r32f">97.6718</metric>
+      </test>
+    </category>
+    <category name="latency">
+      <test name="kernel_launch_latency" unit="us">
+        <metric name="dispatch">5.5621</metric>
+        <metric name="roundtrip">183.0647</metric>
+      </test>
+    </category>
+  </run>
+  <run backend="Vulkan" platform="Vulkan" device="Apple M1 Pro" driver="0.2.2209">
+    <category name="fp_compute">
+      <test name="single_precision_compute" unit="gflops">
+        <metric name="float">4457.7227</metric>
+        <metric name="float2">4755.0859</metric>
+        <metric name="float4">4562.2056</metric>
+      </test>
+      <test name="half_precision_compute" unit="gflops">
+        <metric name="half">4443.1167</metric>
+        <metric name="half2">4820.0586</metric>
+        <metric name="half4">4949.2183</metric>
+      </test>
+      <test name="double_precision_compute" unit="gflops">
+        <metric name="double" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
+        <metric name="double2" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
+        <metric name="double4" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
+      </test>
+      <test name="mixed_precision_compute" unit="gflops">
+        <metric name="mp">4370.1372</metric>
+        <metric name="mp2">4645.1802</metric>
+        <metric name="mp4">4709.4590</metric>
+      </test>
+      <test name="bfloat16_compute" unit="gflops">
+        <metric name="bf16" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
+        <metric name="bf16_2" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
+        <metric name="bf16_4" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
+      </test>
+      <test name="coopmat_fp32" unit="tflops">
+        <metric name="coopmat_fp32" status="unsupported" reason="No 16x16x16 fp32xfp32+fp32 coopmat property! Skipped"/>
+      </test>
+      <test name="coopmat_fp16" unit="tflops">
+        <metric name="coopmat_fp16" status="unsupported" reason="No 16x16x16 fp16xfp16+fp32 coopmat property! Skipped"/>
+      </test>
+      <test name="coopmat_bf16" unit="tflops">
+        <metric name="coopmat_bf16" status="unsupported" reason="No 16x16x16 bf16xbf16+fp32 coopmat property! Skipped"/>
+      </test>
+      <test name="coopmat_fp8_e4m3" unit="tflops">
+        <metric name="coopmat_fp8_e4m3" status="unsupported" reason="No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped"/>
+      </test>
+      <test name="coopmat_fp8_e5m2" unit="tflops">
+        <metric name="coopmat_fp8_e5m2" status="unsupported" reason="No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped"/>
+      </test>
+      <test name="atomic_throughput" unit="gflops">
+        <metric name="float_global">22.8201</metric>
+      </test>
+    </category>
+    <category name="int_compute">
+      <test name="integer_compute" unit="gops">
+        <metric name="int">1322.0211</metric>
+        <metric name="int2">1321.0562</metric>
+        <metric name="int4">1320.4269</metric>
+      </test>
+      <test name="integer_compute_int8_dp" unit="gops">
+        <metric name="int8_dp">378.4437</metric>
+        <metric name="int8_dp2">378.7324</metric>
+        <metric name="int8_dp4">377.3946</metric>
+      </test>
+      <test name="coopmat_int8" unit="tops">
+        <metric name="coopmat_int8" status="unsupported" reason="No 16x16x{16,32} int8xint8+int32 coopmat property! Skipped"/>
+      </test>
+      <test name="atomic_throughput" unit="gops">
+        <metric name="int_global">25.1814</metric>
+        <metric name="int_local">254.5939</metric>
+      </test>
+    </category>
+    <category name="bandwidth">
+      <test name="global_memory_bandwidth" unit="gbps">
+        <metric name="float">181.6211</metric>
+        <metric name="float2">180.7941</metric>
+        <metric name="float4">180.4124</metric>
+      </test>
+      <test name="local_memory_bandwidth" unit="gbps">
+        <metric name="float">2852.4395</metric>
+        <metric name="float2">2724.2131</metric>
+        <metric name="float4">2673.5212</metric>
+      </test>
+      <test name="image_memory_bandwidth" unit="gbps">
+        <metric name="float4">156.8511</metric>
+      </test>
+      <test name="transfer_bandwidth" unit="gbps">
+        <metric name="h2d">92.6881</metric>
+        <metric name="d2h">92.7333</metric>
+      </test>
+    </category>
+    <category name="latency">
+      <test name="kernel_launch_latency" unit="us">
+        <metric name="dispatch">149.7139</metric>
+        <metric name="roundtrip">324.3095</metric>
+      </test>
+    </category>
+  </run>
+  <run backend="OpenCL" platform="Apple" device="Apple M1 Pro" driver="1.2 1.0">
+    <category name="fp_compute">
+      <test name="single_precision_compute" unit="gflops">
+        <metric name="float">2409.3450</metric>
+        <metric name="float2">2455.2678</metric>
+        <metric name="float4">2467.1313</metric>
+        <metric name="float8">2056.7559</metric>
+        <metric name="float16">2586.6428</metric>
+      </test>
+      <test name="half_precision_compute" unit="gflops">
+        <metric name="half" status="unsupported" reason="No half precision support"/>
+        <metric name="half2" status="unsupported" reason="No half precision support"/>
+        <metric name="half4" status="unsupported" reason="No half precision support"/>
+        <metric name="half8" status="unsupported" reason="No half precision support"/>
+        <metric name="half16" status="unsupported" reason="No half precision support"/>
+      </test>
+      <test name="double_precision_compute" unit="gflops">
+        <metric name="double" status="unsupported" reason="No double precision support"/>
+        <metric name="double2" status="unsupported" reason="No double precision support"/>
+        <metric name="double4" status="unsupported" reason="No double precision support"/>
+        <metric name="double8" status="unsupported" reason="No double precision support"/>
+        <metric name="double16" status="unsupported" reason="No double precision support"/>
+      </test>
+      <test name="mixed_precision_compute" unit="gflops">
+        <metric name="mp" status="unsupported" reason="No half precision support"/>
+        <metric name="mp2" status="unsupported" reason="No half precision support"/>
+        <metric name="mp4" status="unsupported" reason="No half precision support"/>
+        <metric name="mp8" status="unsupported" reason="No half precision support"/>
+        <metric name="mp16" status="unsupported" reason="No half precision support"/>
+      </test>
+    </category>
+    <category name="int_compute">
+      <test name="integer_compute" unit="gops">
+        <metric name="int">1324.5714</metric>
+        <metric name="int2">1324.0692</metric>
+        <metric name="int4">1322.7494</metric>
+        <metric name="int8">1317.7095</metric>
+        <metric name="int16">1324.3257</metric>
+      </test>
+      <test name="integer_compute_fast" unit="gops">
+        <metric name="int">616.2766</metric>
+        <metric name="int2">640.1720</metric>
+        <metric name="int4">639.6265</metric>
+        <metric name="int8">639.2377</metric>
+        <metric name="int16">634.6552</metric>
+      </test>
+      <test name="integer_compute_char" unit="gops">
+        <metric name="char">1323.7797</metric>
+        <metric name="char2">1324.4388</metric>
+        <metric name="char4">1324.2595</metric>
+        <metric name="char8">1324.6956</metric>
+        <metric name="char16">1323.9313</metric>
+      </test>
+      <test name="integer_compute_short" unit="gops">
+        <metric name="short">1324.5437</metric>
+        <metric name="short2">1324.0857</metric>
+        <metric name="short4">1324.5272</metric>
+        <metric name="short8">1323.9863</metric>
+        <metric name="short16">1324.7258</metric>
+      </test>
+      <test name="integer_compute_int8_dp" unit="gops">
+        <metric name="int8_dp" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
+        <metric name="int8_dp2" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
+        <metric name="int8_dp4" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
+        <metric name="int8_dp8" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
+        <metric name="int8_dp16" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
+      </test>
+      <test name="atomic_throughput" unit="gops">
+        <metric name="int_global">24.7437</metric>
+        <metric name="int_local">255.0764</metric>
+      </test>
+    </category>
+    <category name="bandwidth">
+      <test name="global_memory_bandwidth" unit="gbps">
+        <metric name="float">180.1548</metric>
+        <metric name="float2">180.3939</metric>
+        <metric name="float4">182.4035</metric>
+        <metric name="float8">158.1907</metric>
+        <metric name="float16">95.5469</metric>
+      </test>
+      <test name="local_memory_bandwidth" unit="gbps">
+        <metric name="float">1491.0122</metric>
+        <metric name="float2">2151.8333</metric>
+        <metric name="float4">2338.4985</metric>
+        <metric name="float8">1664.6107</metric>
+      </test>
+      <test name="image_memory_bandwidth" unit="gbps">
+        <metric name="float4">171.4519</metric>
+      </test>
+      <test name="transfer_bandwidth" unit="gbps">
+        <metric name="enqueuewritebuffer">44.0213</metric>
+        <metric name="enqueuereadbuffer">45.9029</metric>
+        <metric name="enqueuewritebuffer_nonblocking">55.6417</metric>
+        <metric name="enqueuereadbuffer_nonblocking">56.1083</metric>
+        <metric name="enqueuemapbuffer">0.0000</metric>
+        <metric name="memcpy_from_mapped_ptr">44.1933</metric>
+        <metric name="enqueueunmap">0.0000</metric>
+        <metric name="memcpy_to_mapped_ptr">44.3559</metric>
+      </test>
+    </category>
+    <category name="latency">
+      <test name="kernel_launch_latency" unit="us">
+        <metric name="dispatch">2.2543</metric>
+        <metric name="roundtrip">215.5518</metric>
+      </test>
+    </category>
+  </run>
+</clpeak>

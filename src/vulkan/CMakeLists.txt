@@ -50,7 +50,6 @@ set(CLPEAK_VK_SHADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_mp_v1.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_mp_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_mp_v4.comp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_int4_packed_v1.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_bf16_v1.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_bf16_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_bf16_v4.comp

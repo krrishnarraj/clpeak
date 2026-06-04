@@ -13,7 +13,7 @@ extern "C" __global__ void compute_sp(float *out, float A)
     float x = A;
     float y = (float)threadIdx.x;
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 128; i++)
     {
         MAD_16(x, y)

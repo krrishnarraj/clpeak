@@ -32,7 +32,7 @@ extern "C" __global__ void compute_int8_dp(int *out, int A)
     int y = (int)threadIdx.x;
     int a = (int)threadIdx.x;
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 64; i++)
     {
         STEP_16(x, y, a)
@@ -49,7 +49,7 @@ extern "C" __global__ void compute_int8_dp2(int *out, int A)
     int a0 = (int)threadIdx.x;
     int a1 = (int)threadIdx.x + 7;
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 32; i++)
     {
         STEP_16(x, y0, a0)
@@ -71,7 +71,7 @@ extern "C" __global__ void compute_int8_dp4(int *out, int A)
     int a2 = (int)threadIdx.x + 13;
     int a3 = (int)threadIdx.x + 19;
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 16; i++)
     {
         STEP_16(x, y0, a0)
@@ -104,7 +104,7 @@ extern "C" __global__ void compute_int8_dp8(int *out, int A)
     int a7 = (int)threadIdx.x + 41;
 
     // 8 outer * (16 dots/chain * 8 ops) * 8 chains = 8192 ops/thread.
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 8; i++)
     {
         STEP_16(x, y0, a0)

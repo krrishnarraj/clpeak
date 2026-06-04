@@ -1,13 +1,15 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
+    android:background="?attr/colorSurface"
     android:paddingHorizontal="24dp"
     android:paddingTop="24dp"
-    android:paddingBottom="32dp">
+    android:paddingBottom="32dp"
+>
 
     <!-- Drag handle -->
     <View
@@ -15,7 +17,8 @@
         android:layout_height="4dp"
         android:layout_gravity="center_horizontal"
         android:layout_marginBottom="20dp"
-        android:background="@drawable/bottom_sheet_handle" />
+        android:background="@drawable/bottom_sheet_handle"
+    />
 
     <!-- App name -->
     <TextView
@@ -23,7 +26,8 @@
         android:layout_height="wrap_content"
         android:text="@string/app_name"
         android:textAppearance="?attr/textAppearanceHeadlineSmall"
-        android:textColor="?attr/colorOnSurface" />
+        android:textColor="?attr/colorOnSurface"
+    />
 
     <!-- Version -->
     <TextView
@@ -32,7 +36,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
         android:textAppearance="?attr/textAppearanceBodySmall"
-        android:textColor="?attr/colorOnSurfaceVariant" />
+        android:textColor="?attr/colorOnSurfaceVariant"
+    />
 
     <!-- Description -->
     <TextView
@@ -42,7 +47,8 @@
         android:text="@string/about_clpeak"
         android:textAppearance="?attr/textAppearanceBodyMedium"
         android:textColor="?attr/colorOnSurface"
-        android:lineSpacingMultiplier="1.4" />
+        android:lineSpacingMultiplier="1.4"
+    />
 
     <!-- GitHub link button -->
     <com.google.android.material.button.MaterialButton
@@ -53,6 +59,7 @@
         android:layout_marginTop="20dp"
         android:text="View on GitHub"
         app:icon="@drawable/ic_open_in_new"
-        app:iconGravity="end" />
+        app:iconGravity="end"
+    />
 
 </LinearLayout>

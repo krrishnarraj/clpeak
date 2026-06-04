@@ -27,7 +27,6 @@ enum class Benchmark : unsigned int {
     ComputeChar,
     ComputeShort,
     ComputeInt8DP,
-    ComputeInt4Packed,
     ComputeBF16,
     CoopMatrix,
     Wmma,
@@ -35,6 +34,11 @@ enum class Benchmark : unsigned int {
     SimdgroupMatrix,
     MpsGemm,
     Cublas,
+    Rocwmma,
+    Mfma,
+    Rocblas,
+    JointMatrix,
+    Onemkl,
     AtomicThroughput,
     TransferBW,
     KernelLatency,
@@ -52,7 +56,7 @@ enum class Category {
 
 // Map every benchmark to its primary category.  Tensor / vendor-library
 // tests that span both fp and int variants (Wmma, CoopMatrix, SimdgroupMatrix,
-// Cublas, MpsGemm) are listed under their fp form here; backends iterate
+// Cublas, MpsGemm, Rocwmma, Mfma, Rocblas) are listed under their fp form here; backends iterate
 // them again in the int_compute phase emitting only int variants there.
 // AtomicThroughput is primarily integer, with Metal's atomic_float variant
 // emitted explicitly in the fp_compute phase.
@@ -75,6 +79,11 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::SimdgroupMatrix:
     case Benchmark::Cublas:
     case Benchmark::MpsGemm:
+    case Benchmark::Rocwmma:
+    case Benchmark::Mfma:
+    case Benchmark::Rocblas:
+    case Benchmark::JointMatrix:
+    case Benchmark::Onemkl:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:
@@ -82,7 +91,6 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
-    case Benchmark::ComputeInt4Packed:
     case Benchmark::AtomicThroughput:
     case Benchmark::Bmma:
         return Category::IntCompute;

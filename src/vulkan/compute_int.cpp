@@ -36,25 +36,6 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 }
 #endif
 
-#ifdef VK_HAS_COMPUTE_INT4_PACKED_V1
-int vkPeak::runComputeInt4Packed(VulkanDevice &dev, benchmark_config_t &cfg)
-{
-  int32_t A = 3;
-  vk_compute_desc_t d = {};
-  d.title        = "Packed INT4 compute (emulated)";
-  d.resultTag    = "int4_packed_compute";
-  d.metricLabel  = "int4_packed";
-  d.unit         = "gops";
-  d.spirv        = vk_shaders::compute_int4_packed_v1;
-  d.spirvSize    = vk_shaders::compute_int4_packed_v1_size;
-  d.workPerWI    = COMPUTE_INT4_PACKED_WORK_PER_WI;
-  d.elemSize     = sizeof(int32_t);
-  d.pushData     = &A;
-  d.pushSize     = sizeof(A);
-  return runComputeKernel(dev, cfg, d);
-}
-#endif
-
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
 int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 {

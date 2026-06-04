@@ -19,9 +19,22 @@ if(TARGET peak_cuda)
     target_link_libraries(clpeak PRIVATE peak_cuda)
     target_compile_definitions(clpeak PRIVATE ENABLE_CUDA)
 endif()
+if(TARGET peak_rocm)
+    target_link_libraries(clpeak PRIVATE peak_rocm)
+    target_compile_definitions(clpeak PRIVATE ENABLE_ROCM)
+endif()
 if(TARGET peak_metal)
     target_link_libraries(clpeak PRIVATE peak_metal)
     target_compile_definitions(clpeak PRIVATE ENABLE_METAL)
+endif()
+if(TARGET peak_oneapi)
+    target_link_libraries(clpeak PRIVATE peak_oneapi)
+    target_compile_definitions(clpeak PRIVATE ENABLE_ONEAPI)
+    # main.cpp includes <sycl/sycl.hpp> (via oneapi_peak.h) and the SYCL
+    # device images packed into libpeak_oneapi.a are extracted at the final
+    # link step -- both require the SYCL toolchain, so attach -fsycl to the
+    # executable's compile (main.cpp) and link.
+    add_sycl_to_target(TARGET clpeak SOURCES main.cpp)
 endif()
 
 target_include_directories(clpeak PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)

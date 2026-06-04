@@ -52,24 +52,6 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
   return runComputeKernel(dev, cfg, d);
 }
 
-int CudaPeak::runComputeInt4Packed(CudaDevice &dev, benchmark_config_t &cfg)
-{
-  int A = 3;
-  cuda_compute_desc_t d = {};
-  d.title = "Packed INT4 compute (emulated)";
-  d.resultTag = "int4_packed_compute";
-  d.unit = "gops";
-  d.metricLabel = "int4_packed";
-  d.kernelName = "compute_int4_packed";
-  d.src = cuda_kernels::compute_int4_packed_src;
-  d.srcName = cuda_kernels::compute_int4_packed_name;
-  d.workPerWI = COMPUTE_INT4_PACKED_WORK_PER_WI;
-  d.elemSize = sizeof(int);
-  d.scalarArg = &A;
-  d.scalarSize = sizeof(A);
-  return runComputeKernel(dev, cfg, d);
-}
-
 // ---------------------------------------------------------------------------
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
 // ---------------------------------------------------------------------------

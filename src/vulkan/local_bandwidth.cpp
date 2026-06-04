@@ -29,7 +29,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.createBuffer(bufferBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
-    log->note("Failed to allocate buffer\n");
+    CLPEAK_VLOG("Failed to allocate buffer\n");
     return -1;
   }
 

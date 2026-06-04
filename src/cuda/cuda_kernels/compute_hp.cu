@@ -25,7 +25,7 @@ extern "C" __global__ void compute_hp(float *out, float A)
     __half x1 = __float2half(A + 1.0f);
     __half y1 = __float2half((float)threadIdx.x + 7.0f);
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 64; i++)
     {
         MAD_16(x0, y0)
@@ -44,7 +44,7 @@ extern "C" __global__ void compute_hp2(float *out, float A)
     __half2 x = __float2half2_rn(A);
     __half2 y = __float2half2_rn((float)threadIdx.x);
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 64; i++)
     {
         MAD2_16(x, y)

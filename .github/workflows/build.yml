@@ -47,11 +47,19 @@ jobs:
             binary: build/clpeak
             cuda: true
 
-          - name: Windows x64 CUDA
-            runner: windows-latest
-            artifact: clpeak-windows-x86_64-cuda
-            binary: build/Release/clpeak.exe
-            cuda: true
+          - name: Linux x64 ROCm
+            runner: ubuntu-22.04
+            artifact: clpeak-linux-x86_64-rocm
+            binary: build/clpeak
+            cuda: false
+            rocm: true
+
+          - name: Linux x64 oneAPI
+            runner: ubuntu-latest
+            artifact: clpeak-linux-x86_64-oneapi
+            binary: build/clpeak
+            cuda: false
+            oneapi: true
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -66,13 +74,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake git ca-certificates \
-            ocl-icd-opencl-dev opencl-headers
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
+          sudo apt-get install -y --no-install-recommends build-essential
 
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -84,25 +86,68 @@ jobs:
       - name: Install CUDA Toolkit
         if: matrix.cuda
         uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: "13.2.0"
-          method: network
+
+      # ROCm SDK (HIP runtime + HIPRTC + rocBLAS + rocWMMA): install only for
+      # ROCm-enabled matrix entries.  Ubuntu 22.04 (jammy) is the
+      # best-supported ROCm host.  The runner image has no AMD GPU, so the
+      # built binary will not actually execute the ROCm backend at run time;
+      # this job exercises the compile path.
+      - name: Install ROCm
+        if: matrix.rocm
+        run: |
+          sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+          wget -O- https://repo.radeon.com/rocm/rocm.gpg.key \
+            | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.2 jammy main" \
+            | sudo tee /etc/apt/sources.list.d/rocm.list
+          echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            rocm-hip-runtime-dev hipcc rocblas-dev rocwmma-dev
+
+      # Intel oneAPI Base Toolkit: DPC++ compiler (icpx) + oneMKL.  Same
+      # caveat as ROCm above — the runner has no Intel GPU, so the resulting
+      # binary will skip the oneAPI backend at run time.
+      - name: Install Intel oneAPI
+        if: matrix.oneapi
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            intel-oneapi-compiler-dpcpp-cpp intel-oneapi-mkl-devel
 
       - name: Configure CMake
+        if: ${{ !matrix.oneapi }}
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
+        if: ${{ !matrix.oneapi }}
         run: cmake --build build --config Release -j4
 
+      # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
+      # source it before invoking cmake/build so IntelSYCL can be located.
+      - name: Configure & Build (oneAPI)
+        if: matrix.oneapi
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx
+          cmake --build build --config Release -j4
+
       - name: Print version
-        if: ${{ !matrix.cuda }}
+        if: ${{ !matrix.cuda && !matrix.rocm && !matrix.oneapi }}
         shell: bash
         run: ${{ matrix.binary }} --version 2>&1
 
-      # CUDA binaries cannot launch on the default runner image (libcuda.so.1
-      # missing / no NVIDIA driver), so failure here is expected and ignored.
-      - name: Print version (CUDA, allow failure)
-        if: matrix.cuda
+      # CUDA / ROCm / oneAPI binaries cannot launch on the default runner image
+      # (no NVIDIA / AMD / Intel GPU driver present), so failure here is
+      # expected and ignored.  oneAPI also needs setvars.sh on the path.
+      - name: Print version (allow failure)
+        if: ${{ matrix.cuda || matrix.rocm || matrix.oneapi }}
         shell: bash
         run: ${{ matrix.binary }} --version 2>&1 || true
 
@@ -125,6 +170,12 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -202,12 +253,12 @@ jobs:
         run: |
           mkdir -p release
           # Package each desktop binary into a zip
-          for dir in artifacts/clpeak-linux-x86_64 artifacts/clpeak-linux-x86_64-cuda artifacts/clpeak-linux-arm64 artifacts/clpeak-macos-arm64; do
+          for dir in artifacts/clpeak-linux-x86_64 artifacts/clpeak-linux-x86_64-cuda artifacts/clpeak-linux-x86_64-rocm artifacts/clpeak-linux-x86_64-oneapi artifacts/clpeak-linux-arm64 artifacts/clpeak-macos-arm64; do
             name=$(basename "$dir")
             chmod +x "$dir"/* 2>/dev/null || true
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
-          for dir in artifacts/clpeak-windows-x86_64 artifacts/clpeak-windows-x86_64-cuda; do
+          for dir in artifacts/clpeak-windows-x86_64; do
             name=$(basename "$dir")
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done

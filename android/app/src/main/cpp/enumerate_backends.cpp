@@ -14,12 +14,12 @@
 static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
 {
   std::vector<BackendInventory> out;
-  if (!opts.skipOpenCL)
-    out.push_back(clPeak::enumerate());
 #ifdef ENABLE_VULKAN
   if (!opts.skipVulkan)
     out.push_back(vkPeak::enumerate());
 #endif
+  if (!opts.skipOpenCL)
+    out.push_back(clPeak::enumerate());
   return out;
 }
 

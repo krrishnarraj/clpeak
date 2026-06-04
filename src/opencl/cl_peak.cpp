@@ -2,6 +2,7 @@
 #include <common/inventory.h>
 #include <common/options.h>
 #include <common/common.h>
+#include <algorithm>
 #include <cstring>
 
 // Kernel strings live in cl_kernels.cpp — see clGetMainKernels(), etc.
@@ -11,9 +12,7 @@
 //   transfer_bandwidth.cpp atomic_throughput.cpp kernel_latency.cpp
 //   cl_common.cpp         cl_utils.cpp
 
-clPeak::clPeak() : forcePlatform(false), forcePlatformName(false), forceDevice(false),
-                   forceDeviceName(false), useEventTimer(false),
-                   specifiedPlatform(0), specifiedDevice(0)
+clPeak::clPeak() : useEventTimer(false)
 {
 }
 
@@ -23,15 +22,9 @@ void clPeak::applyOptions(const CliOptions &opts)
     Peak::applyOptions(opts);
 
     // OpenCL-specific device selection
-    forcePlatform     = opts.forcePlatform;
-    specifiedPlatform = opts.platformIndex;
-    forcePlatformName = opts.forcePlatformName;
-    specifiedPlatformName = opts.platformName;
-    forceDevice       = opts.forceDevice;
-    specifiedDevice   = opts.deviceIndex;
-    forceDeviceName   = opts.forceDeviceName;
-    specifiedDeviceName = opts.deviceName;
-    useEventTimer     = opts.useEventTimer;
+    platformIndices = opts.platformIndices;
+    deviceIndices   = opts.deviceIndices;
+    useEventTimer   = opts.useEventTimer;
 }
 
 int clPeak::runAll()
@@ -44,14 +37,13 @@ int clPeak::runAll()
     auto backendScope = log->beginBackend("OpenCL");
     for (size_t p = 0; p < platforms.size(); p++)
     {
-      if (forcePlatform && (p != specifiedPlatform))
+      if (!platformIndices.empty() &&
+          std::find(platformIndices.begin(), platformIndices.end(),
+                    static_cast<unsigned long>(p)) == platformIndices.end())
         continue;
 
       std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
       trimString(platformName);
-
-      if (forcePlatformName && specifiedPlatformName != platformName)
-        continue;
 
       cl_context_properties cps[3] = {
           CL_CONTEXT_PLATFORM,
@@ -73,7 +65,9 @@ int clPeak::runAll()
 
       for (size_t d = 0; d < devices.size(); d++)
       {
-        if (forceDevice && (d != specifiedDevice))
+        if (!deviceIndices.empty() &&
+            std::find(deviceIndices.begin(), deviceIndices.end(),
+                      static_cast<unsigned long>(d)) == deviceIndices.end())
           continue;
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
@@ -81,9 +75,6 @@ int clPeak::runAll()
         cfg.targetTimeUs = targetTimeUs;
         if (forceIters)
           cfg.kernelLatencyIters = specifiedIters;
-
-        if (forceDeviceName && specifiedDeviceName != devInfo.deviceName)
-          continue;
 
         if (useEventTimer)
           log->note("  Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation\n");
@@ -111,7 +102,8 @@ int clPeak::runAll()
         catch (cl::Error &error)
         {
           UNUSED(error);
-          log->note("  Build Log: " + prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]) + "\n\n");
+          CLPEAK_VLOG("  Build Log: %s\n\n",
+                      prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
           currentDeviceScope = nullptr;
           continue;
         }
@@ -129,7 +121,7 @@ int clPeak::runAll()
           }
           catch (cl::Error &)
           {
-            log->note("  " + label + " kernel build failed, test skipped\n");
+            CLPEAK_VLOG("  %s kernel build failed, test skipped\n", label.c_str());
             p = cl::Program(); // return empty/invalid program
           }
           return p;
@@ -213,11 +205,6 @@ int clPeak::runAll()
                        "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
-
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt4Packed,
-                       "Packed INT4 compute (emulated)", "int4_packed_compute",
-                       "compute_int4_packed", "int4_packed", "gops",
-                       COMPUTE_INT4_PACKED_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
         runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
 

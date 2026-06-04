@@ -35,15 +35,22 @@
 //
 // Consumer-Blackwell observation: on RTX 5060 (sm_120) this kernel
 // measures 165 TOPS -- the SAME as dense wmma_int8_k32 (m16n8k32 dense
-// also reads 165 on this part).  There is NO 2x sparsity speedup vs
-// dense at the same shape on consumer Blackwell -- verified by also
+// also reads 165 on this part).  There is NO 2x sparsity speedup for
+// INT8 at the same shape on consumer Blackwell -- verified by also
 // trying 8 chains (168 TOPS), so the cap is not an ILP limit.
-// Hypothesis: NVIDIA gates the sparse data-path acceleration to
-// datacenter SKUs, or the m16n8k32 issue-rate ceiling (documented as
-// half of m16n8k16 in wmma_int8_k32.cu) bounds both dense and sparse at
-// the same number on this part.  Ampere/Hopper datacenter and AMD
-// RDNA4 should still report the expected ~2x; that's the value of
-// having the test.
+//
+// NOTE: this is INT8-SPECIFIC, not a blanket "consumer parts don't do
+// sparsity" rule.  The FP4 sparse kernels (`wmma_nvf4_sparse.cu` /
+// `wmma_mxf4_sparse.cu`) on this same RTX 5060 DO get the full ~2x
+// (632 vs 328 TFLOPS, above the advertised 615 AI-TOPS).  So the FP4
+// sparse data-path IS accelerated on GeForce; only the INT sparse one
+// is held back here.  The likely cause is the m16n8k32 issue-rate
+// ceiling (documented as half of m16n8k16 in wmma_int8_k32.cu): the
+// int8 sparse and dense kernels share that m16n8k32 shape and are both
+// pinned to 165, whereas the FP4 sparse path uses a doubled-K m16n8k128
+// shape that issues at the dense m16n8k64 rate and so reports 2x.
+// Datacenter parts (Ampere/Hopper/B200) and AMD RDNA4 are still expected
+// to show the INT8 ~2x; that's the value of keeping this test.
 
 extern "C" __global__ void wmma_int8_sparse(int *out, int A)
 {

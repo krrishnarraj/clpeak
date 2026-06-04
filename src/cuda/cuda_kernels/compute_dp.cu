@@ -10,7 +10,7 @@ extern "C" __global__ void compute_dp(double *out, double A)
     double x = A;
     double y = (double)threadIdx.x;
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 128; i++)
     {
         MAD_16(x, y)

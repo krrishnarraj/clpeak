@@ -21,7 +21,7 @@ extern "C" __global__ void compute_mp(float *out, float A)
     float x = __half2float(__float2half(A));
     float y = __half2float(__float2half((float)threadIdx.x));
 
-    #pragma unroll 1
+    #pragma unroll
     for (int i = 0; i < 128; i++)
     {
         MAD_16(x, y)

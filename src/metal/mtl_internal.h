@@ -24,6 +24,7 @@
 #include <common/options.h>
 #include <common/inventory.h>
 
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <sstream>

@@ -6,6 +6,7 @@
 #endif
 
 #include <stdlib.h>
+#include <cstdio>
 #include <chrono>
 #include <string>
 #include <cstdint>
@@ -82,11 +83,6 @@ static const unsigned int COMPUTE_DP_WORK_PER_WI = 512;
 
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
-
-// compute_int4_packed_kernels.cl
-// Two int4 lanes per char.  Every variant performs 4096 int4 ops per WI
-// (iter count scaled by vector width).  Labeled emulated in the UI/CLI.
-static const unsigned int COMPUTE_INT4_PACKED_WORK_PER_WI = 4096;
 
 // compute_int8_dp_kernels.cl
 // Each dot_acc_sat(char4, char4, int) is 4 INT8 multiply-adds = 8 ops.
@@ -176,5 +172,21 @@ struct benchmark_config_t {
 
   static benchmark_config_t forDevice(DeviceType type);
 };
+
+// ---------------------------------------------------------------------------
+// Verbose diagnostics gate (--verbose).  Backend build logs, kernel launch /
+// API errors and similar debug spam are suppressed by default and only
+// emitted when verbose is enabled.  A process-global flag is used because the
+// gated sites include free functions and error macros in the *_device.cpp
+// files that have no access to the Peak object or the logger.
+// ---------------------------------------------------------------------------
+namespace clpeak {
+bool verboseEnabled();
+void setVerbose(bool on);
+}
+
+// Gated stderr diagnostic — no-op unless --verbose was passed.
+#define CLPEAK_VLOG(...) \
+    do { if (::clpeak::verboseEnabled()) fprintf(stderr, __VA_ARGS__); } while (0)
 
 #endif  // COMMON_H

@@ -1,15 +1,18 @@
 package kr.clpeak
 
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.materialswitch.MaterialSwitch
 import kr.clpeak.databinding.FragmentSetupBinding
 
 class SetupFragment : Fragment() {
@@ -18,11 +21,6 @@ class SetupFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val viewModel: BenchmarkViewModel by activityViewModels()
-
-    // Track checkboxes so we can sync their state when selection changes
-    // (e.g. master switch toggled, Select-all/Clear) without rebuilding the whole list.
-    private val openclCheckboxes = mutableMapOf<Pair<Int, Int>, MaterialCheckBox>()
-    private val vulkanCheckboxes = mutableMapOf<Int, MaterialCheckBox>()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -40,90 +38,155 @@ class SetupFragment : Fragment() {
         binding.btnSelectAll.setOnClickListener { viewModel.selectAll() }
         binding.btnClear.setOnClickListener { viewModel.resetSelection() }
 
-        binding.switchOpencl.setOnClickListener {
-            viewModel.setOpenClBackendEnabled(binding.switchOpencl.isChecked)
-        }
-        binding.switchVulkan.setOnClickListener {
-            viewModel.setVulkanBackendEnabled(binding.switchVulkan.isChecked)
-        }
-
         viewModel.catalog.observe(viewLifecycleOwner) { catalog ->
-            populateOpenCl(catalog.opencl)
-            populateVulkan(catalog.vulkan)
+            populateBackends(catalog)
             updateEmptyState(catalog)
         }
-        viewModel.selection.observe(viewLifecycleOwner) { syncWithSelection(it) }
+        viewModel.selection.observe(viewLifecycleOwner) { syncSelection(it) }
     }
 
-    private fun populateOpenCl(catalog: OpenClCatalog) {
-        binding.openclPlatforms.removeAllViews()
-        openclCheckboxes.clear()
+    // ---- Dynamic backend cards -----------------------------------------------
 
-        if (catalog.platforms.isEmpty() || catalog.isEmpty) {
-            binding.cardOpencl.visibility = View.GONE
-            return
-        }
-        binding.cardOpencl.visibility = View.VISIBLE
+    private fun populateBackends(catalog: BackendCatalog) {
+        binding.backendContainer.removeAllViews()
 
         val ctx = requireContext()
-        for (platform in catalog.platforms) {
-            if (platform.devices.isEmpty()) continue
+        for (backend in catalog.backends) {
+            if (backend.devices.isEmpty()) continue
 
-            if (catalog.platforms.size > 1) {
-                val header = TextView(ctx).apply {
-                    text = platform.name
-                    setTextAppearance(
-                        com.google.android.material.R.style.TextAppearance_Material3_LabelMedium
-                    )
-                    setPadding(dp(4), dp(8), dp(4), dp(2))
-                }
-                binding.openclPlatforms.addView(header)
-            }
-
-            for (device in platform.devices) {
-                val cb = MaterialCheckBox(ctx).apply {
-                    text = device.name
-                    setOnClickListener {
-                        viewModel.toggleOpenClDevice(platform.index, device.index)
-                    }
-                }
-                binding.openclPlatforms.addView(
-                    cb,
-                    LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                )
-                openclCheckboxes[platform.index to device.index] = cb
-            }
+            val card = buildBackendCard(ctx, backend)
+            binding.backendContainer.addView(card)
         }
     }
 
-    private fun populateVulkan(catalog: VulkanCatalog) {
-        binding.vulkanDevices.removeAllViews()
-        vulkanCheckboxes.clear()
+    private fun buildBackendCard(ctx: Context, backend: BackendInfo): MaterialCardView {
+        val density = ctx.resources.displayMetrics.density
 
-        if (catalog.devices.isEmpty()) {
-            binding.cardVulkan.visibility = View.GONE
-            return
+        val card = MaterialCardView(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = (12 * density).toInt()
+            }
+            radius = (20 * density)
+            cardElevation = 0f
+            setCardBackgroundColor(
+                MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurfaceVariant)
+            )
         }
-        binding.cardVulkan.visibility = View.VISIBLE
 
-        val ctx = requireContext()
-        for (device in catalog.devices) {
+        val cardInner = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * density).toInt(), (16 * density).toInt(),
+                       (16 * density).toInt(), (16 * density).toInt())
+        }
+
+        // Header row: label + master switch
+        val header = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+
+        val title = TextView(ctx).apply {
+            text = backend.name
+            setTextAppearance(
+                com.google.android.material.R.style.TextAppearance_Material3_TitleMedium
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        }
+        header.addView(title)
+
+        // Master switch for the backend
+        val masterSwitch = MaterialSwitch(ctx).apply {
+            tag = "switch|${backend.name}"
+            setOnCheckedChangeListener { _, isChecked ->
+                viewModel.setBackendEnabled(backend.name, isChecked)
+            }
+        }
+        header.addView(masterSwitch)
+        cardInner.addView(header)
+
+        // Device checkboxes
+        val deviceContainer = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, (8 * density).toInt(), 0, 0)
+            tag = "devices|${backend.name}"
+        }
+        for (device in backend.devices) {
             val cb = MaterialCheckBox(ctx).apply {
                 text = device.name
-                setOnClickListener { viewModel.toggleVulkanDevice(device.index) }
+                tag = "cb|${backend.name}|${device.key}"
+                setOnClickListener {
+                    viewModel.toggleDevice(backend.name, device.key)
+                }
             }
-            binding.vulkanDevices.addView(
-                cb,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
-            vulkanCheckboxes[device.index] = cb
+            deviceContainer.addView(cb)
         }
+        cardInner.addView(deviceContainer)
+        card.addView(cardInner)
+
+        return card
+    }
+
+    private fun syncSelection(selection: BenchmarkSelection) {
+        val container = binding.backendContainer
+        for (i in 0 until container.childCount) {
+            val card = container.getChildAt(i) as? MaterialCardView ?: continue
+            syncCardSelection(card, selection)
+        }
+    }
+
+    private fun syncCardSelection(card: MaterialCardView, selection: BenchmarkSelection) {
+        val inner = card.getChildAt(0) as? LinearLayout ?: return
+
+        // Header row (index 0) contains the master switch
+        val header = inner.getChildAt(0) as? LinearLayout ?: return
+        val masterSwitch = findViewByTag(header, MaterialSwitch::class.java) ?: return
+        val backendName = (masterSwitch.tag as? String)?.removePrefix("switch|") ?: return
+
+        // Device container (index 1)
+        val deviceContainer = inner.getChildAt(1) as? LinearLayout ?: return
+        var anyChecked = false
+        for (j in 0 until deviceContainer.childCount) {
+            val cb = deviceContainer.getChildAt(j) as? MaterialCheckBox ?: continue
+            val tag = cb.tag as? String ?: continue
+            val parts = tag.split("|", limit = 3)
+            if (parts.size < 3) continue
+            val cbBackend = parts[1]
+            val deviceKey = parts[2]
+            if (cbBackend != backendName) continue
+            val checked = selection.isSelected(backendName, deviceKey)
+            cb.isChecked = checked
+            if (checked) anyChecked = true
+        }
+
+        masterSwitch.setOnCheckedChangeListener(null)
+        masterSwitch.isChecked = anyChecked
+        masterSwitch.setOnCheckedChangeListener { _, isChecked ->
+            viewModel.setBackendEnabled(backendName, isChecked)
+        }
+    }
+
+    // ---- Helpers -------------------------------------------------------------
+
+    private fun <T : View> findViewByTag(parent: ViewGroup, clazz: Class<T>): T? {
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            if (clazz.isInstance(child)) {
+                @Suppress("UNCHECKED_CAST")
+                return child as T
+            }
+            if (child is ViewGroup) {
+                val found = findViewByTag(child, clazz)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     private fun updateEmptyState(catalog: BackendCatalog) {
@@ -132,24 +195,8 @@ class SetupFragment : Fragment() {
         binding.fabRun.isEnabled = anyDevice
     }
 
-    private fun syncWithSelection(selection: BenchmarkSelection) {
-        for ((key, cb) in openclCheckboxes) {
-            cb.isChecked = key in selection.openclDevices
-        }
-        for ((idx, cb) in vulkanCheckboxes) {
-            cb.isChecked = idx in selection.vulkanDevices
-        }
-        binding.switchOpencl.isChecked = selection.openclDevices.isNotEmpty()
-        binding.switchVulkan.isChecked = selection.vulkanDevices.isNotEmpty()
-    }
-
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
-
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-        openclCheckboxes.clear()
-        vulkanCheckboxes.clear()
     }
 }
