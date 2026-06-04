@@ -193,6 +193,12 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
 #else
   namespace syclex = sycl::ext::oneapi::experimental::matrix;
 
+  // Ground-truth diagnostic (verbose only): what shapes/types does this device
+  // actually accept?  Dump once (FP pass), BEFORE the xmxSupported gate, so even
+  // a device we mis-classify still reveals its real table under --verbose.
+  if (!isInt)
+    dumpMatrixCombinations(dev.dev);
+
   if (!dev.info.xmxSupported)
   {
     if (isInt)
@@ -204,11 +210,6 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
                    "XMX matrix engine not available on this device");
     return 0;
   }
-
-  // Ground-truth diagnostic (verbose only): what shapes/types does this device
-  // actually accept?  Dump once (FP pass) so we can pick tile shapes per device.
-  if (!isInt)
-    dumpMatrixCombinations(dev.dev);
 
   // One sub-group per work-group: joint_matrix executes per sub-group and the
   // ops accounting below counts one matrix chain per block, so the work-group

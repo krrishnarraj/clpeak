@@ -111,11 +111,15 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
       catch (const sycl::exception &e)
       {
         CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
+        // Recover the shared queue: a failed GEMM can wedge the in-order queue
+        // and cascade "kernel launch failed" into every later benchmark.
+        dev.resetQueue();
         return -1.0;
       }
       catch (const std::exception &e)
       {
         CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
+        dev.resetQueue();
         return -1.0;
       }
     };

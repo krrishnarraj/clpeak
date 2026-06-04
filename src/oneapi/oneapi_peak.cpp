@@ -93,9 +93,12 @@ float OneapiPeak::runKernel(OneapiDevice &dev,
       auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
       return (float)((double)ns / 1000.0);
     }
-    catch (const sycl::exception &e)
+    catch (const std::exception &e)
     {
       CLPEAK_VLOG("SYCL submit failed: %s\n", e.what());
+      // A failed submission can leave the in-order queue in a permanent error
+      // state; recreate it so the next benchmark isn't a false-failure cascade.
+      dev.resetQueue();
       return -1.0f;
     }
   };
@@ -106,9 +109,10 @@ float OneapiPeak::runKernel(OneapiDevice &dev,
       submit(dev.stream);
     dev.stream.wait_and_throw();
   }
-  catch (const sycl::exception &e)
+  catch (const std::exception &e)
   {
     CLPEAK_VLOG("SYCL warmup failed: %s\n", e.what());
+    dev.resetQueue();
     return -1.0f;
   }
 
