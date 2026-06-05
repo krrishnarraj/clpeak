@@ -3,6 +3,7 @@
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
 #include <sycl/sycl.hpp>
+#include <algorithm>
 #include <chrono>
 
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
@@ -59,11 +60,15 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
   return 0;
 #else
   namespace mkl = oneapi::mkl;
-  const uint32_t D = pickOnemklGemmDim(dev.info);
-  const std::int64_t M = D, N = D, K = D;
-  const double flops = 2.0 * (double)M * (double)N * (double)K;
+  const std::int64_t D = pickOnemklGemmDim(dev.info);
 
-  const size_t cells = (size_t)D * (size_t)D;
+  // fp64 throughput on most GPUs is a small fraction of fp32 (often 1/16..1/64+,
+  // measured ~1/16 on Arc-class parts).  A full-size fp64 GEMM can therefore run
+  // for many seconds in a SINGLE call and trip the GPU watchdog, surfacing as
+  // CL_OUT_OF_RESOURCES.  Shrink the fp64 tile so one call stays short;
+  // pickIters() then runs proportionally more iterations to still fill the 5 s
+  // budget, so the measured peak is unaffected (a 3584^3 GEMM still saturates).
+  const std::int64_t fp64Dim = std::max<std::int64_t>(1024, D / 4);
 
   // Run ONE GEMM dtype in full isolation: its own context + queue + buffers,
   // all torn down before the next dtype.  Two reasons:
@@ -73,9 +78,13 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
   //  2. Per-dtype isolation means each dtype reports its own pass/fail instead
   //     of one bad dtype poisoning all the rest — a precise signal for the
   //     driver team about exactly which GEMM dtype faults.
-  // gemmFn(q, dA, dB, dC, dCo) issues one GEMM (dCo is the int8 bias buffer,
-  // unused by the FP paths).  Buffers are sized at fp64 width and reinterpreted.
-  auto measure = [&](const char *label, auto gemmFn) {
+  // gemmFn(q, dA, dB, dC, dCo, dim) issues one square dim*dim*dim GEMM (dCo is
+  // the int8 bias buffer, unused by the FP paths).  `dim` lets fp64 use a
+  // smaller tile than the other dtypes.  Buffers are sized at fp64 width and
+  // reinterpreted per dtype.
+  auto measure = [&](const char *label, std::int64_t dim, auto gemmFn) {
+    const size_t cells = (size_t)dim * (size_t)dim;
+    const double flops = 2.0 * (double)dim * (double)dim * (double)dim;
     sycl::queue q = [&]() -> sycl::queue {
       try
       {
@@ -116,7 +125,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
       {
         auto t0 = std::chrono::high_resolution_clock::now();
         for (unsigned int i = 0; i < n; i++)
-          gemmFn(q, dA, dB, dC, dCo);
+          gemmFn(q, dA, dB, dC, dCo, dim);
         q.wait_and_throw();
         auto t1 = std::chrono::high_resolution_clock::now();
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -149,30 +158,33 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
 
   if (fpPhase)
   {
-    measure("fp32", [&](sycl::queue &q, void *dA, void *dB, void *dC, void *) {
+    measure("fp32", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                           std::int64_t n) {
       mkl::blas::row_major::gemm(
         q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-        M, N, K, 1.0f,
-        (const float *)dA, K, (const float *)dB, N, 0.0f, (float *)dC, N);
+        n, n, n, 1.0f,
+        (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
     });
 
     if (dev.info.fp64Supported)
-      measure("fp64", [&](sycl::queue &q, void *dA, void *dB, void *dC, void *) {
+      measure("fp64", fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                                   std::int64_t n) {
         mkl::blas::row_major::gemm(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          M, N, K, 1.0,
-          (const double *)dA, K, (const double *)dB, N, 0.0, (double *)dC, N);
+          n, n, n, 1.0,
+          (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
       });
     else
       test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device");
 
     if (dev.info.fp16Supported)
-      measure("fp16", [&](sycl::queue &q, void *dA, void *dB, void *dC, void *) {
+      measure("fp16", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                             std::int64_t n) {
         mkl::blas::row_major::gemm(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          M, N, K, sycl::half(1.0f),
-          (const sycl::half *)dA, K, (const sycl::half *)dB, N,
-          sycl::half(0.0f), (sycl::half *)dC, N);
+          n, n, n, sycl::half(1.0f),
+          (const sycl::half *)dA, n, (const sycl::half *)dB, n,
+          sycl::half(0.0f), (sycl::half *)dC, n);
       });
     else
       test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device");
@@ -181,12 +193,13 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
 #if defined(CLPEAK_ONEMKL_HAS_BF16)
     if (dev.info.bf16Supported)
-      measure("bf16", [&](sycl::queue &q, void *dA, void *dB, void *dC, void *) {
+      measure("bf16", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                             std::int64_t n) {
         using bfloat16 = sycl::ext::oneapi::bfloat16;
         mkl::blas::row_major::gemm(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          M, N, K, 1.0f,
-          (const bfloat16 *)dA, K, (const bfloat16 *)dB, N, 0.0f, (float *)dC, N);
+          n, n, n, 1.0f,
+          (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
       });
     else
       test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device");
@@ -206,16 +219,17 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
       test.skip("int8", ResultStatus::Unsupported,
                 "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)");
     else
-      measure("int8", [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo) {
+      measure("int8", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
+                             std::int64_t n) {
         // gemm_bias with offset::fix reads a single int32 bias from `co`.
         mkl::blas::row_major::gemm_bias(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
           mkl::offset::fix,
-          M, N, K, 1.0f,
-          (const std::int8_t *)dA, K, (std::int8_t)0,
-          (const std::uint8_t *)dB, N, (std::uint8_t)0,
+          n, n, n, 1.0f,
+          (const std::int8_t *)dA, n, (std::int8_t)0,
+          (const std::uint8_t *)dB, n, (std::uint8_t)0,
           0.0f,
-          (std::int32_t *)dC, N, (const std::int32_t *)dCo);
+          (std::int32_t *)dC, n, (const std::int32_t *)dCo);
       });
   }
 
