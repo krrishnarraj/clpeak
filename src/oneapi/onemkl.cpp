@@ -3,6 +3,7 @@
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
 #include <sycl/sycl.hpp>
+#include <algorithm>
 #include <chrono>
 
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
@@ -59,62 +60,80 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
   return 0;
 #else
   namespace mkl = oneapi::mkl;
-  const uint32_t D = pickOnemklGemmDim(dev.info);
-  const std::int64_t M = D, N = D, K = D;
-  const double flops = 2.0 * (double)M * (double)N * (double)K;
+  const std::int64_t D = pickOnemklGemmDim(dev.info);
 
-  // Allocate enough memory for the widest type (fp64) and reuse for each
-  // precision via reinterpret.  Same trick the rocBLAS benchmark uses.
-  // Skip every label for the active phase with one error message.
-  auto skipPhase = [&](ResultStatus status, const char *msg) {
-    if (fpPhase)
+  // fp64 throughput on most GPUs is a small fraction of fp32 (often 1/16..1/64+,
+  // measured ~1/16 on Arc-class parts).  A full-size fp64 GEMM can therefore run
+  // for many seconds in a SINGLE call and trip the GPU watchdog, surfacing as
+  // CL_OUT_OF_RESOURCES.  Shrink the fp64 tile so one call stays short;
+  // pickIters() then runs proportionally more iterations to still fill the 5 s
+  // budget, so the measured peak is unaffected (a 3584^3 GEMM still saturates).
+  const std::int64_t fp64Dim = std::max<std::int64_t>(1024, D / 4);
+
+  // Run ONE GEMM dtype in full isolation: its own context + queue + buffers,
+  // all torn down before the next dtype.  Two reasons:
+  //  1. A faulting GEMM (e.g. fp64 returning a *sticky* CL_OUT_OF_RESOURCES on
+  //     some drivers) corrupts only this disposable context, so the shared
+  //     dev.stream stays healthy for every later benchmark.
+  //  2. Per-dtype isolation means each dtype reports its own pass/fail instead
+  //     of one bad dtype poisoning all the rest — a precise signal for the
+  //     driver team about exactly which GEMM dtype faults.
+  // gemmFn(q, dA, dB, dC, dCo, dim) issues one square dim*dim*dim GEMM (dCo is
+  // the int8 bias buffer, unused by the FP paths).  `dim` lets fp64 use a
+  // smaller tile than the other dtypes.  Buffers are sized at fp64 width and
+  // reinterpreted per dtype.
+  auto measure = [&](const char *label, std::int64_t dim, auto gemmFn) {
+    const size_t cells = (size_t)dim * (size_t)dim;
+    const double flops = 2.0 * (double)dim * (double)dim * (double)dim;
+    sycl::queue q = [&]() -> sycl::queue {
+      try
+      {
+        return sycl::queue(sycl::context(dev.dev), dev.dev,
+                           sycl::property::queue::in_order{});
+      }
+      catch (const std::exception &e)
+      {
+        CLPEAK_VLOG("oneMKL %s: private context create failed (%s); shared queue\n",
+                    label, e.what());
+        return dev.stream;
+      }
+    }();
+
+    void *dA  = sycl::malloc_device(cells * sizeof(double), q);
+    void *dB  = sycl::malloc_device(cells * sizeof(double), q);
+    void *dC  = sycl::malloc_device(cells * sizeof(double), q);
+    void *dCo = sycl::malloc_device(sizeof(std::int32_t), q);  // int8 bias
+    auto freeAll = [&]() {
+      if (dA)  { try { sycl::free(dA,  q); } catch (...) {} }
+      if (dB)  { try { sycl::free(dB,  q); } catch (...) {} }
+      if (dC)  { try { sycl::free(dC,  q); } catch (...) {} }
+      if (dCo) { try { sycl::free(dCo, q); } catch (...) {} }
+    };
+    if (!dA || !dB || !dC || !dCo)
     {
-      test.skip("fp32", status, msg);
-      test.skip("fp64", status, msg);
-      test.skip("fp16", status, msg);
-      test.skip("bf16", status, msg);
+      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers");
+      freeAll();
+      return;
     }
-    else
-    {
-      test.skip("int8", status, msg);
-    }
-  };
+    try { q.memset(dA,  0x3f, cells * sizeof(double)).wait(); } catch (...) {}
+    try { q.memset(dB,  0x3f, cells * sizeof(double)).wait(); } catch (...) {}
+    try { q.memset(dC,  0,    cells * sizeof(double)).wait(); } catch (...) {}
+    try { q.memset(dCo, 0,    sizeof(std::int32_t)).wait();   } catch (...) {}
 
-  const size_t cells = (size_t)D * (size_t)D;
-  void *dA = sycl::malloc_device(cells * sizeof(double), dev.stream);
-  void *dB = sycl::malloc_device(cells * sizeof(double), dev.stream);
-  void *dC = sycl::malloc_device(cells * sizeof(double), dev.stream);
-  if (!dA || !dB || !dC)
-  {
-    skipPhase(ResultStatus::Error, "Failed to allocate GEMM buffers");
-    if (dA) sycl::free(dA, dev.stream);
-    if (dB) sycl::free(dB, dev.stream);
-    if (dC) sycl::free(dC, dev.stream);
-    return -1;
-  }
-  try { dev.stream.memset(dA, 0x3f, cells * sizeof(double)).wait(); } catch (...) {}
-  try { dev.stream.memset(dB, 0x3f, cells * sizeof(double)).wait(); } catch (...) {}
-  try { dev.stream.memset(dC, 0,    cells * sizeof(double)).wait(); } catch (...) {}
-
-  auto timeBatch = [&](const char *label, auto launchFn) {
     auto runBatch = [&](unsigned int n) -> double {
       try
       {
         auto t0 = std::chrono::high_resolution_clock::now();
         for (unsigned int i = 0; i < n; i++)
-          launchFn();
-        dev.stream.wait_and_throw();
+          gemmFn(q, dA, dB, dC, dCo, dim);
+        q.wait_and_throw();
         auto t1 = std::chrono::high_resolution_clock::now();
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         return (double)ns / 1000.0 / (double)n;
       }
-      catch (const sycl::exception &e)
-      {
-        CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
-        return -1.0;
-      }
       catch (const std::exception &e)
       {
+        // Contained to this dtype's private context (see above).
         CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
         return -1.0;
       }
@@ -123,85 +142,67 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
     double probeUs = runBatch(warm);
     if (probeUs <= 0.0)
-    {
       test.skip(label, ResultStatus::Error, "timing probe failed");
-      return;
-    }
-    unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
-    double meanUs = runBatch(iters);
-    if (meanUs <= 0.0)
+    else
     {
-      test.skip(label, ResultStatus::Error, "oneMKL GEMM failed");
-      return;
+      unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
+      double meanUs = runBatch(iters);
+      if (meanUs <= 0.0)
+        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed");
+      else
+        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12));
     }
-    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12));
+    freeAll();
+    // q and its private context are destroyed here.
   };
 
   if (fpPhase)
   {
-    // FP32
-    timeBatch("fp32", [&]() {
+    measure("fp32", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                           std::int64_t n) {
       mkl::blas::row_major::gemm(
-        dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
-        M, N, K, 1.0f,
-        (const float *)dA, K,
-        (const float *)dB, N,
-        0.0f, (float *)dC, N);
+        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+        n, n, n, 1.0f,
+        (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
     });
 
-    // FP64
     if (dev.info.fp64Supported)
-    {
-      timeBatch("fp64", [&]() {
+      measure("fp64", fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                                   std::int64_t n) {
         mkl::blas::row_major::gemm(
-          dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          M, N, K, 1.0,
-          (const double *)dA, K,
-          (const double *)dB, N,
-          0.0, (double *)dC, N);
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          n, n, n, 1.0,
+          (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
       });
-    }
     else
-    {
       test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device");
-    }
 
-    // FP16
     if (dev.info.fp16Supported)
-    {
-      timeBatch("fp16", [&]() {
+      measure("fp16", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                             std::int64_t n) {
         mkl::blas::row_major::gemm(
-          dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          M, N, K, sycl::half(1.0f),
-          (const sycl::half *)dA, K,
-          (const sycl::half *)dB, N,
-          sycl::half(0.0f), (sycl::half *)dC, N);
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          n, n, n, sycl::half(1.0f),
+          (const sycl::half *)dA, n, (const sycl::half *)dB, n,
+          sycl::half(0.0f), (sycl::half *)dC, n);
       });
-    }
     else
-    {
       test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device");
-    }
 
     // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
     // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
 #if defined(CLPEAK_ONEMKL_HAS_BF16)
     if (dev.info.bf16Supported)
-    {
-      using bfloat16 = sycl::ext::oneapi::bfloat16;
-      timeBatch("bf16", [&]() {
+      measure("bf16", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                             std::int64_t n) {
+        using bfloat16 = sycl::ext::oneapi::bfloat16;
         mkl::blas::row_major::gemm(
-          dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          M, N, K, 1.0f,
-          (const bfloat16 *)dA, K,
-          (const bfloat16 *)dB, N,
-          0.0f, (float *)dC, N);
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          n, n, n, 1.0f,
+          (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
       });
-    }
     else
-    {
       test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device");
-    }
 #else
     test.skip("bf16", ResultStatus::Unsupported,
               "SYCL bfloat16 header not available in this oneAPI toolchain");
@@ -213,41 +214,25 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     // Zero offsets / zero bias -- we only measure throughput, so the numeric
     // result is irrelevant.  Reported in tops.  Gate on XMX (Arc/PVC/Battlemage
     // carry the int8 matmul path); on devices without it gemm_bias throws and
-    // the timeBatch lambda reports a clean skip.
+    // measure() reports a clean skip.
     if (!dev.info.xmxSupported)
-    {
       test.skip("int8", ResultStatus::Unsupported,
                 "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)");
-    }
     else
-    {
-      // gemm_bias with offset::fix reads a single int32 bias from `co`.
-      void *dCo = sycl::malloc_device(sizeof(std::int32_t), dev.stream);
-      if (!dCo)
-      {
-        test.skip("int8", ResultStatus::Error, "Failed to allocate int8 bias buffer");
-      }
-      else
-      {
-        try { dev.stream.memset(dCo, 0, sizeof(std::int32_t)).wait(); } catch (...) {}
-        timeBatch("int8", [&]() {
-          mkl::blas::row_major::gemm_bias(
-            dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
-            mkl::offset::fix,
-            M, N, K, 1.0f,
-            (const std::int8_t *)dA, K, (std::int8_t)0,
-            (const std::uint8_t *)dB, N, (std::uint8_t)0,
-            0.0f,
-            (std::int32_t *)dC, N, (const std::int32_t *)dCo);
-        });
-        sycl::free(dCo, dev.stream);
-      }
-    }
+      measure("int8", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
+                             std::int64_t n) {
+        // gemm_bias with offset::fix reads a single int32 bias from `co`.
+        mkl::blas::row_major::gemm_bias(
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          mkl::offset::fix,
+          n, n, n, 1.0f,
+          (const std::int8_t *)dA, n, (std::int8_t)0,
+          (const std::uint8_t *)dB, n, (std::uint8_t)0,
+          0.0f,
+          (std::int32_t *)dC, n, (const std::int32_t *)dCo);
+      });
   }
 
-  sycl::free(dA, dev.stream);
-  sycl::free(dB, dev.stream);
-  sycl::free(dC, dev.stream);
   return 0;
 #endif
 }

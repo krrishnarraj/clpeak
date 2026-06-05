@@ -48,6 +48,13 @@ public:
 
   bool init(int devIndex, const sycl::device &d);
   void cleanup();
+
+  // Recreate the in-order queue on the same (default) context.  Used to recover
+  // from a poisoned queue: on some runtimes a failed submission leaves the
+  // in-order queue in an error state that makes every subsequent launch fail,
+  // cascading errors across unrelated benchmarks.  USM allocations bound to the
+  // device's default context stay valid across this reset.  Returns success.
+  bool resetQueue();
 };
 
 class OneapiPeak : public Peak

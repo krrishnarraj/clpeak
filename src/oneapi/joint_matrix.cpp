@@ -75,12 +75,9 @@ static std::vector<syclex::combination> queryCombos(const sycl::device &d, bool 
 
 // Verbose-only: print every (a/b/c/d type, M/N/K, max M/N/K) the device accepts.
 // This is the ground truth for picking tile shapes on a new device.
-static void dumpMatrixCombinations(const sycl::device &d)
+static void dumpMatrixCombinations(const std::vector<syclex::combination> &combos)
 {
   if (!::clpeak::verboseEnabled()) return;
-  bool threw = false;
-  auto combos = queryCombos(d, threw);
-  if (threw) return;
   CLPEAK_VLOG("joint_matrix: device reports %zu matrix combination(s):\n",
               combos.size());
   for (const auto &c : combos)
@@ -92,15 +89,14 @@ static void dumpMatrixCombinations(const sycl::device &d)
 }
 
 // Ask whether (atype,btype,ctype) at shape MxNxK is in the device table.
+// `threw` carries through whether the one-time query failed.
 // Returns 1 supported, 0 unsupported (queried OK but absent, incl. empty table),
-// -1 when the query itself threw (caller should attempt and let runKernel report).
-static int jmComboSupport(const sycl::device &d,
+// -1 when the query threw (caller should attempt and let runKernel report).
+static int jmComboSupport(const std::vector<syclex::combination> &combos, bool threw,
                           syclex::matrix_type at, syclex::matrix_type bt,
                           syclex::matrix_type ct,
                           size_t M, size_t N, size_t K)
 {
-  bool threw = false;
-  auto combos = queryCombos(d, threw);
   if (threw) return -1;
   for (const auto &c : combos) {
     if (c.atype != at || c.btype != bt || c.ctype != ct) continue;
@@ -178,7 +174,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   auto test = currentDeviceScope->beginTest(
     {isInt ? "joint-matrix-int" : "joint-matrix-fp",
      isInt ? "joint_matrix int8xint8+int32 8x16x32"
-           : "joint_matrix (bf16/fp16/tf32)xfp32 8x16x{16,16,8}",
+           : "joint_matrix (bf16/fp16/tf32)x(bf16/fp16/tf32)+fp32 8x16x{16,16,8}",
      isInt ? "tops" : "tflops"});
 
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
@@ -193,6 +189,17 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
 #else
   namespace syclex = sycl::ext::oneapi::experimental::matrix;
 
+  // Query the device's matrix-combination table ONCE and reuse it for the dump
+  // and every per-variant support check below.
+  bool combosThrew = false;
+  const auto combos = queryCombos(dev.dev, combosThrew);
+
+  // Ground-truth diagnostic (verbose only): what shapes/types does this device
+  // actually accept?  Dump once (FP pass), BEFORE the xmxSupported gate, so even
+  // a device we mis-classify still reveals its real table under --verbose.
+  if (!isInt && !combosThrew)
+    dumpMatrixCombinations(combos);
+
   if (!dev.info.xmxSupported)
   {
     if (isInt)
@@ -204,11 +211,6 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
                    "XMX matrix engine not available on this device");
     return 0;
   }
-
-  // Ground-truth diagnostic (verbose only): what shapes/types does this device
-  // actually accept?  Dump once (FP pass) so we can pick tile shapes per device.
-  if (!isInt)
-    dumpMatrixCombinations(dev.dev);
 
   // One sub-group per work-group: joint_matrix executes per sub-group and the
   // ops accounting below counts one matrix chain per block, so the work-group
@@ -234,7 +236,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
       test.skip("joint_matrix_int8", ResultStatus::Error, "Failed to allocate output buffer");
       return -1;
     }
-    if (jmComboSupport(dev.dev, syclex::matrix_type::sint8, syclex::matrix_type::sint8,
+    if (jmComboSupport(combos, combosThrew, syclex::matrix_type::sint8, syclex::matrix_type::sint8,
                        syclex::matrix_type::sint32, JM_M, JM_N, 32) == 0)
     {
       test.skip("joint_matrix_int8", ResultStatus::Unsupported,
@@ -261,7 +263,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   }
 
 #ifdef CLPEAK_ONEAPI_JM_HAS_BF16
-  if (jmComboSupport(dev.dev, syclex::matrix_type::bf16, syclex::matrix_type::bf16,
+  if (jmComboSupport(combos, combosThrew, syclex::matrix_type::bf16, syclex::matrix_type::bf16,
                      syclex::matrix_type::fp32, JM_M, JM_N, 16) == 0)
   {
     test.skip("joint_matrix_bf16", ResultStatus::Unsupported,
@@ -280,7 +282,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
             "SYCL bfloat16 header not available in this oneAPI toolchain");
 #endif
 
-  if (jmComboSupport(dev.dev, syclex::matrix_type::fp16, syclex::matrix_type::fp16,
+  if (jmComboSupport(combos, combosThrew, syclex::matrix_type::fp16, syclex::matrix_type::fp16,
                      syclex::matrix_type::fp32, JM_M, JM_N, 16) == 0)
   {
     test.skip("joint_matrix_fp16", ResultStatus::Unsupported,
@@ -294,12 +296,13 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     emitJm(test, "joint_matrix_fp16", us, numBlocks, /*K=*/16);
   }
 
-  if (jmComboSupport(dev.dev, syclex::matrix_type::tf32, syclex::matrix_type::tf32,
+  if (jmComboSupport(combos, combosThrew, syclex::matrix_type::tf32, syclex::matrix_type::tf32,
                      syclex::matrix_type::fp32, JM_M, JM_N, 8) == 0)
   {
-    // tf32 XMX is a PVC/Xe-HPC feature; Xe-HPG (Arc/DG2) reports no tf32 combo.
+    // Not every Xe part exposes tf32 XMX (older Arc/DG2 reported no tf32 combo);
+    // newer parts and PVC do.  Gated purely by the device's combination table.
     test.skip("joint_matrix_tf32", ResultStatus::Unsupported,
-              "tf32 8x16x8 not in this device's matrix-engine combinations (PVC-class only)");
+              "tf32 8x16x8 not in this device's matrix-engine combinations");
   }
   else
   {
