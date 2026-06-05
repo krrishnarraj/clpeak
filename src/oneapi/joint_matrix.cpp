@@ -178,7 +178,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   auto test = currentDeviceScope->beginTest(
     {isInt ? "joint-matrix-int" : "joint-matrix-fp",
      isInt ? "joint_matrix int8xint8+int32 8x16x32"
-           : "joint_matrix (bf16/fp16/tf32)xfp32 8x16x{16,16,8}",
+           : "joint_matrix (bf16/fp16/tf32)x(bf16/fp16/tf32)+fp32 8x16x{16,16,8}",
      isInt ? "tops" : "tflops"});
 
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
