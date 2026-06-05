@@ -80,21 +80,41 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     }
   };
 
+  // Isolate oneMKL on its own throwaway context+queue.  A faulting GEMM (e.g.
+  // fp64 on a device whose OpenCL driver returns a *sticky*
+  // CL_OUT_OF_RESOURCES) corrupts only this disposable context — the shared
+  // dev.stream stays healthy for every later benchmark instead of cascading
+  // "kernel launch failed" across int compute, bandwidth, atomics, etc.
+  // Falls back to the shared queue if a private context can't be created.
+  sycl::queue q = [&]() -> sycl::queue {
+    try
+    {
+      return sycl::queue(sycl::context(dev.dev), dev.dev,
+                         sycl::property::queue::in_order{});
+    }
+    catch (const std::exception &e)
+    {
+      CLPEAK_VLOG("oneMKL: private context create failed (%s); using shared queue\n",
+                  e.what());
+      return dev.stream;
+    }
+  }();
+
   const size_t cells = (size_t)D * (size_t)D;
-  void *dA = sycl::malloc_device(cells * sizeof(double), dev.stream);
-  void *dB = sycl::malloc_device(cells * sizeof(double), dev.stream);
-  void *dC = sycl::malloc_device(cells * sizeof(double), dev.stream);
+  void *dA = sycl::malloc_device(cells * sizeof(double), q);
+  void *dB = sycl::malloc_device(cells * sizeof(double), q);
+  void *dC = sycl::malloc_device(cells * sizeof(double), q);
   if (!dA || !dB || !dC)
   {
     skipPhase(ResultStatus::Error, "Failed to allocate GEMM buffers");
-    if (dA) sycl::free(dA, dev.stream);
-    if (dB) sycl::free(dB, dev.stream);
-    if (dC) sycl::free(dC, dev.stream);
+    if (dA) sycl::free(dA, q);
+    if (dB) sycl::free(dB, q);
+    if (dC) sycl::free(dC, q);
     return -1;
   }
-  try { dev.stream.memset(dA, 0x3f, cells * sizeof(double)).wait(); } catch (...) {}
-  try { dev.stream.memset(dB, 0x3f, cells * sizeof(double)).wait(); } catch (...) {}
-  try { dev.stream.memset(dC, 0,    cells * sizeof(double)).wait(); } catch (...) {}
+  try { q.memset(dA, 0x3f, cells * sizeof(double)).wait(); } catch (...) {}
+  try { q.memset(dB, 0x3f, cells * sizeof(double)).wait(); } catch (...) {}
+  try { q.memset(dC, 0,    cells * sizeof(double)).wait(); } catch (...) {}
 
   auto timeBatch = [&](const char *label, auto launchFn) {
     auto runBatch = [&](unsigned int n) -> double {
@@ -103,23 +123,15 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
         auto t0 = std::chrono::high_resolution_clock::now();
         for (unsigned int i = 0; i < n; i++)
           launchFn();
-        dev.stream.wait_and_throw();
+        q.wait_and_throw();
         auto t1 = std::chrono::high_resolution_clock::now();
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         return (double)ns / 1000.0 / (double)n;
       }
-      catch (const sycl::exception &e)
-      {
-        CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
-        // Recover the shared queue: a failed GEMM can wedge the in-order queue
-        // and cascade "kernel launch failed" into every later benchmark.
-        dev.resetQueue();
-        return -1.0;
-      }
       catch (const std::exception &e)
       {
+        // Contained: the fault stays inside this private context (see above).
         CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
-        dev.resetQueue();
         return -1.0;
       }
     };
@@ -146,7 +158,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     // FP32
     timeBatch("fp32", [&]() {
       mkl::blas::row_major::gemm(
-        dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
+        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
         M, N, K, 1.0f,
         (const float *)dA, K,
         (const float *)dB, N,
@@ -158,7 +170,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     {
       timeBatch("fp64", [&]() {
         mkl::blas::row_major::gemm(
-          dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
           M, N, K, 1.0,
           (const double *)dA, K,
           (const double *)dB, N,
@@ -175,7 +187,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     {
       timeBatch("fp16", [&]() {
         mkl::blas::row_major::gemm(
-          dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
           M, N, K, sycl::half(1.0f),
           (const sycl::half *)dA, K,
           (const sycl::half *)dB, N,
@@ -195,7 +207,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
       using bfloat16 = sycl::ext::oneapi::bfloat16;
       timeBatch("bf16", [&]() {
         mkl::blas::row_major::gemm(
-          dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
+          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
           M, N, K, 1.0f,
           (const bfloat16 *)dA, K,
           (const bfloat16 *)dB, N,
@@ -226,17 +238,17 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     else
     {
       // gemm_bias with offset::fix reads a single int32 bias from `co`.
-      void *dCo = sycl::malloc_device(sizeof(std::int32_t), dev.stream);
+      void *dCo = sycl::malloc_device(sizeof(std::int32_t), q);
       if (!dCo)
       {
         test.skip("int8", ResultStatus::Error, "Failed to allocate int8 bias buffer");
       }
       else
       {
-        try { dev.stream.memset(dCo, 0, sizeof(std::int32_t)).wait(); } catch (...) {}
+        try { q.memset(dCo, 0, sizeof(std::int32_t)).wait(); } catch (...) {}
         timeBatch("int8", [&]() {
           mkl::blas::row_major::gemm_bias(
-            dev.stream, mkl::transpose::nontrans, mkl::transpose::nontrans,
+            q, mkl::transpose::nontrans, mkl::transpose::nontrans,
             mkl::offset::fix,
             M, N, K, 1.0f,
             (const std::int8_t *)dA, K, (std::int8_t)0,
@@ -244,14 +256,16 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
             0.0f,
             (std::int32_t *)dC, N, (const std::int32_t *)dCo);
         });
-        sycl::free(dCo, dev.stream);
+        try { sycl::free(dCo, q); } catch (...) {}
       }
     }
   }
 
-  sycl::free(dA, dev.stream);
-  sycl::free(dB, dev.stream);
-  sycl::free(dC, dev.stream);
+  // A wedged private context can throw on free; swallow it (the context is
+  // disposable and destroyed when `q` goes out of scope anyway).
+  try { sycl::free(dA, q); } catch (...) {}
+  try { sycl::free(dB, q); } catch (...) {}
+  try { sycl::free(dC, q); } catch (...) {}
   return 0;
 #endif
 }
