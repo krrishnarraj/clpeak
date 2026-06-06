@@ -48,6 +48,7 @@ struct cpu_device_info_t {
   bool hasAVX512 = false;
   bool hasNEON   = false;
   bool hasFP16   = false;           // native fp16 arithmetic (AVX512-FP16 / ARM FEAT_FP16)
+  bool hasFP16FML = false;          // widening fp16xfp16 -> fp32 FMLA (ARM FEAT_FP16FML)
   bool hasBF16   = false;           // bf16 dot (AVX512-BF16 / ARM bfdot)
   bool hasInt8DP = false;           // int8 dot (AVX512-VNNI / AVX-VNNI / ARM dotprod)
   bool hasAMX    = false;           // x86 AMX tile matmul (int8 + bf16)

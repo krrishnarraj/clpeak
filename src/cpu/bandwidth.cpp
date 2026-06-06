@@ -6,47 +6,127 @@
 #include "cpu_simd.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
-// Streaming read with 8 explicit SIMD vector accumulators so the loop is
-// load-issue / bandwidth bound (not scalar compute bound).  Accumulators carry
-// across the iters loop; the returned sum is only a sink to keep the loads live.
-static double sumBuffer(const float *p, size_t M, uint64_t iters)
+// Streaming read with explicit SIMD loads and integer XOR sinks.  This keeps
+// the loads observable without turning the read-bandwidth test into an FP-add
+// throughput test.
+//
+// NOTE on why the loads aren't optimized away: XOR is self-inverse, so XORing
+// the same address twice cancels — a compiler that proved the buffer is
+// loop-invariant could in principle strength-reduce the outer `iters` loop to a
+// single pass.  It does not here because (a) the working set is always far
+// larger than the register file, so a whole pass can't be hoisted, and (b) the
+// returned checksum feeds a volatile sink in the caller.  If this is ever
+// refactored to a tiny (register-sized) buffer, re-check the generated asm.
+static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
 {
-  using namespace cpu_simd;
-  const size_t W = (size_t)F32_LANES;
+#if defined(__AVX512F__)
+  constexpr size_t W = 16;
   const size_t step = 8 * W;
-  f32v s0 = f32_set(0), s1 = f32_set(0), s2 = f32_set(0), s3 = f32_set(0);
-  f32v s4 = f32_set(0), s5 = f32_set(0), s6 = f32_set(0), s7 = f32_set(0);
-  float tail = 0.0f;
+  __m512i x0 = _mm512_setzero_si512(), x1 = x0, x2 = x0, x3 = x0;
+  __m512i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
+  uint64_t tail = 0;
 
   for (uint64_t it = 0; it < iters; it++)
   {
     size_t i = 0;
     for (; i + step <= M; i += step)
     {
-      s0 = f32_add(s0, f32_load(p + i + 0 * W));
-      s1 = f32_add(s1, f32_load(p + i + 1 * W));
-      s2 = f32_add(s2, f32_load(p + i + 2 * W));
-      s3 = f32_add(s3, f32_load(p + i + 3 * W));
-      s4 = f32_add(s4, f32_load(p + i + 4 * W));
-      s5 = f32_add(s5, f32_load(p + i + 5 * W));
-      s6 = f32_add(s6, f32_load(p + i + 6 * W));
-      s7 = f32_add(s7, f32_load(p + i + 7 * W));
+      x0 = _mm512_xor_si512(x0, _mm512_castps_si512(_mm512_loadu_ps(p + i + 0 * W)));
+      x1 = _mm512_xor_si512(x1, _mm512_castps_si512(_mm512_loadu_ps(p + i + 1 * W)));
+      x2 = _mm512_xor_si512(x2, _mm512_castps_si512(_mm512_loadu_ps(p + i + 2 * W)));
+      x3 = _mm512_xor_si512(x3, _mm512_castps_si512(_mm512_loadu_ps(p + i + 3 * W)));
+      x4 = _mm512_xor_si512(x4, _mm512_castps_si512(_mm512_loadu_ps(p + i + 4 * W)));
+      x5 = _mm512_xor_si512(x5, _mm512_castps_si512(_mm512_loadu_ps(p + i + 5 * W)));
+      x6 = _mm512_xor_si512(x6, _mm512_castps_si512(_mm512_loadu_ps(p + i + 6 * W)));
+      x7 = _mm512_xor_si512(x7, _mm512_castps_si512(_mm512_loadu_ps(p + i + 7 * W)));
     }
-    for (; i < M; i++) tail += p[i];
+    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
   }
-  f32v s = f32_add(f32_add(f32_add(s0, s1), f32_add(s2, s3)),
-                   f32_add(f32_add(s4, s5), f32_add(s6, s7)));
-  return (double)f32_hsum(s) + (double)tail;
+  __m512i x = _mm512_xor_si512(_mm512_xor_si512(_mm512_xor_si512(x0, x1), _mm512_xor_si512(x2, x3)),
+                               _mm512_xor_si512(_mm512_xor_si512(x4, x5), _mm512_xor_si512(x6, x7)));
+  alignas(64) uint64_t tmp[8]; _mm512_store_si512((__m512i*)tmp, x);
+  for (uint64_t v : tmp) tail ^= v;
+  return tail;
+
+#elif defined(__AVX2__)
+  constexpr size_t W = 8;
+  const size_t step = 8 * W;
+  __m256i x0 = _mm256_setzero_si256(), x1 = x0, x2 = x0, x3 = x0;
+  __m256i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
+  uint64_t tail = 0;
+
+  for (uint64_t it = 0; it < iters; it++)
+  {
+    size_t i = 0;
+    for (; i + step <= M; i += step)
+    {
+      x0 = _mm256_xor_si256(x0, _mm256_castps_si256(_mm256_loadu_ps(p + i + 0 * W)));
+      x1 = _mm256_xor_si256(x1, _mm256_castps_si256(_mm256_loadu_ps(p + i + 1 * W)));
+      x2 = _mm256_xor_si256(x2, _mm256_castps_si256(_mm256_loadu_ps(p + i + 2 * W)));
+      x3 = _mm256_xor_si256(x3, _mm256_castps_si256(_mm256_loadu_ps(p + i + 3 * W)));
+      x4 = _mm256_xor_si256(x4, _mm256_castps_si256(_mm256_loadu_ps(p + i + 4 * W)));
+      x5 = _mm256_xor_si256(x5, _mm256_castps_si256(_mm256_loadu_ps(p + i + 5 * W)));
+      x6 = _mm256_xor_si256(x6, _mm256_castps_si256(_mm256_loadu_ps(p + i + 6 * W)));
+      x7 = _mm256_xor_si256(x7, _mm256_castps_si256(_mm256_loadu_ps(p + i + 7 * W)));
+    }
+    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
+  }
+  __m256i x = _mm256_xor_si256(_mm256_xor_si256(_mm256_xor_si256(x0, x1), _mm256_xor_si256(x2, x3)),
+                               _mm256_xor_si256(_mm256_xor_si256(x4, x5), _mm256_xor_si256(x6, x7)));
+  alignas(32) uint64_t tmp[4]; _mm256_store_si256((__m256i*)tmp, x);
+  for (uint64_t v : tmp) tail ^= v;
+  return tail;
+
+#elif defined(__ARM_NEON) || defined(__aarch64__)
+  constexpr size_t W = 4;
+  const size_t step = 8 * W;
+  uint32x4_t x0 = vdupq_n_u32(0), x1 = x0, x2 = x0, x3 = x0;
+  uint32x4_t x4 = x0, x5 = x0, x6 = x0, x7 = x0;
+  uint64_t tail = 0;
+
+  for (uint64_t it = 0; it < iters; it++)
+  {
+    size_t i = 0;
+    for (; i + step <= M; i += step)
+    {
+      x0 = veorq_u32(x0, vreinterpretq_u32_f32(vld1q_f32(p + i + 0 * W)));
+      x1 = veorq_u32(x1, vreinterpretq_u32_f32(vld1q_f32(p + i + 1 * W)));
+      x2 = veorq_u32(x2, vreinterpretq_u32_f32(vld1q_f32(p + i + 2 * W)));
+      x3 = veorq_u32(x3, vreinterpretq_u32_f32(vld1q_f32(p + i + 3 * W)));
+      x4 = veorq_u32(x4, vreinterpretq_u32_f32(vld1q_f32(p + i + 4 * W)));
+      x5 = veorq_u32(x5, vreinterpretq_u32_f32(vld1q_f32(p + i + 5 * W)));
+      x6 = veorq_u32(x6, vreinterpretq_u32_f32(vld1q_f32(p + i + 6 * W)));
+      x7 = veorq_u32(x7, vreinterpretq_u32_f32(vld1q_f32(p + i + 7 * W)));
+    }
+    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
+  }
+  uint32x4_t x = veorq_u32(veorq_u32(veorq_u32(x0, x1), veorq_u32(x2, x3)),
+                           veorq_u32(veorq_u32(x4, x5), veorq_u32(x6, x7)));
+  alignas(16) uint32_t tmp[4]; vst1q_u32(tmp, x);
+  for (uint32_t v : tmp) tail ^= v;
+  return tail;
+
+#else
+  uint64_t acc = 0;
+  for (uint64_t it = 0; it < iters; it++)
+    for (size_t i = 0; i < M; i++)
+    {
+      uint32_t v;
+      std::memcpy(&v, p + i, sizeof(v));
+      acc ^= v;
+    }
+  return acc;
+#endif
 }
 
 // ---------------------------------------------------------------------------
-// Cache bandwidth: per-core private buffers sized to each level, read-only
-// streaming.  1T = single-core peak; NT = aggregate across all cores (each
-// core streaming its own resident buffer).  Buffers are capped at 8 MB so the
-// NT allocation stays bounded and the L3 working set stays cache-resident.
+// Cache bandwidth: read-only streaming.  1T uses one resident working set.
+// MT keeps private levels resident per thread, but splits shared levels across
+// all threads so the aggregate working set remains inside the target cache.
 // ---------------------------------------------------------------------------
 int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 {
@@ -55,53 +135,68 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(spec);
 
   const int maxT = pool->maxThreads();
-  const uint64_t cap = 8ull * 1024 * 1024;   // bound the per-thread allocation
-  // Per-thread buffer must hold the largest level we stream (the L3 working
-  // set), capped so the NT allocation and the L3 set stay cache-resident.
-  uint64_t allocBytes = std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), cap);
+  const bool appleCpu = info.vendor == "Apple" || info.name.rfind("Apple", 0) == 0;
+  const uint64_t cap = 32ull * 1024 * 1024;  // bound the per-thread allocation
+  // Per-thread buffer must hold the largest single-thread working set we stream.
+  // That is usually the L3 set, but on Apple Silicon the per-cluster L2 (e.g.
+  // 12 MB) can exceed the reported/last-level cache, so size to the max of the
+  // L2 and L3 sets, capped so the NT allocation stays bounded.
+  uint64_t largestLevel = std::max<uint64_t>(info.l2CacheBytes / 2, info.l3CacheBytes / 2);
+  uint64_t allocBytes = std::min<uint64_t>(std::max<uint64_t>(largestLevel, 65536), cap);
   size_t allocFloats = (size_t)(allocBytes / sizeof(float));
   if (allocFloats < 1024) allocFloats = 1024;
 
   std::vector<std::vector<float>> bufs((size_t)maxT);
   for (auto &b : bufs) { b.resize(allocFloats); populate(b.data(), allocFloats); }
 
-  std::vector<double> sink((size_t)maxT, 0.0);
+  std::vector<uint64_t> sink((size_t)maxT, 0);
 
-  struct Level { const char *name; uint64_t bytes; };
+  struct Level { const char *name; uint64_t bytes; bool sharedForMt; };
   const Level levels[] = {
-    {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096)},
-    {"L2", std::max<uint64_t>(info.l2CacheBytes  / 2, 16384)},
-    {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes)},
+    {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false},
+    {"L2", std::max<uint64_t>(info.l2CacheBytes  / 2, 16384), appleCpu},
+    {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true},
   };
 
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   for (const auto &lvl : levels)
   {
-    size_t M = (size_t)(lvl.bytes / sizeof(float));
-    if (M > allocFloats) M = allocFloats;
-    if (M < 64) M = 64;
+    size_t M1 = (size_t)(lvl.bytes / sizeof(float));
+    if (M1 > allocFloats) M1 = allocFloats;
+    if (M1 < 64) M1 = 64;
 
-    Workload body = [&](int tid, uint64_t iters) {
-      sink[(size_t)tid] += sumBuffer(bufs[(size_t)tid].data(), M, iters);
+    uint64_t mtBytes = lvl.sharedForMt
+      ? std::max<uint64_t>(lvl.bytes / (uint64_t)maxT, 4096)
+      : lvl.bytes;
+    size_t MN = (size_t)(mtBytes / sizeof(float));
+    if (MN > allocFloats) MN = allocFloats;
+    if (MN < 64) MN = 64;
+
+    Workload body1 = [&](int tid, uint64_t iters) {
+      sink[(size_t)tid] ^= readBufferChecksum(bufs[(size_t)tid].data(), M1, iters);
+    };
+    Workload bodyN = [&](int tid, uint64_t iters) {
+      sink[(size_t)tid] ^= readBufferChecksum(bufs[(size_t)tid].data(), MN, iters);
     };
 
-    double us1 = runWorkload(1,    body, cfg.targetTimeUs, forced);
-    double usN = runWorkload(maxT, body, cfg.targetTimeUs, forced);
+    double us1 = runWorkload(1,    body1, cfg.targetTimeUs, forced);
+    double usN = runWorkload(maxT, bodyN, cfg.targetTimeUs, forced);
 
-    double perPassBytes = (double)M * sizeof(float);
+    double stPassBytes = (double)M1 * sizeof(float);
+    double mtPassBytes = (double)MN * sizeof(float) * (double)maxT;
     auto gbps = [](double bytes, double meanUs) -> float {
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
     };
 
-    if (us1 > 0) test.emit(std::string(lvl.name) + " ST", gbps(perPassBytes, us1));
+    if (us1 > 0) test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1));
     else         test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed");
-    if (usN > 0) test.emit(std::string(lvl.name) + " MT", gbps(perPassBytes * maxT, usN));
+    if (usN > 0) test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN));
     else         test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed");
   }
 
-  volatile double keep = 0.0;
-  for (double s : sink) keep += s;
+  volatile uint64_t keep = 0;
+  for (uint64_t s : sink) keep ^= s;
   (void)keep;
   return 0;
 }
@@ -125,7 +220,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   std::vector<float> A(N), B(N), C(N);
   populate(B.data(), N);
   populate(C.data(), N);
-  std::vector<double> sink((size_t)maxT, 0.0);
+  std::vector<uint64_t> sink((size_t)maxT, 0);
 
   auto chunk = [&](int tid, size_t &lo, size_t &hi) {
     size_t per = N / (size_t)maxT;
@@ -142,7 +237,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   {
     Workload body = [&](int tid, uint64_t iters) {
       size_t lo, hi; chunk(tid, lo, hi);
-      sink[(size_t)tid] += sumBuffer(A.data() + lo, hi - lo, iters);
+      sink[(size_t)tid] ^= readBufferChecksum(A.data() + lo, hi - lo, iters);
     };
     populate(A.data(), N);
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
@@ -171,8 +266,8 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     test.emit("triad", gbps(3.0 * N * sizeof(float), us));
   }
 
-  volatile double keep = 0.0;
-  for (double v : sink) keep += v;
+  volatile uint64_t keep = 0;
+  for (uint64_t v : sink) keep ^= v;
   (void)keep;
   return 0;
 }

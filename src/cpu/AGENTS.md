@@ -28,14 +28,14 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 | File | Purpose |
 |------|---------|
 | `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup + probe + `pickIters` timed batch via the pool), `enumerate`, `printInventory` |
-| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 sizes (sysfs / sysctl / `GetLogicalProcessorInformationEx` / CPUID), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
+| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning (`pthread_setaffinity_np` / `SetThreadAffinityMask`; advisory no-op on macOS) |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / NEON / scalar) with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics |
-| `compute_float.cpp` | `runComputeSP/DP` (FMA chains), `runComputeHP` (native fp16 FMA), `runComputeBF16` (bf16 dot), `runComputeMP` (fp16-mul→fp32-acc dependent chain) |
+| `compute_float.cpp` | `runComputeSP/DP` (FMA chains), `runComputeHP` (native fp16 FMA), `runComputeBF16` (bf16 dot), `runComputeMP` (conversion-free fp16-mul→fp32-acc widening FMLA where the ISA supports it) |
 | `compute_int.cpp` | `runComputeInt32` (int madd chain), `runComputeInt8DP` (VNNI / dotprod), `runAtomicThroughput` (uncontended / contended / sharded) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — Intel AMX tile matmul (int8 + bf16, Linux) / ARM SMMLA (int8) / BFMMLA (bf16); `Benchmark::Amx`, run in both fp and int phases |
-| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3 read, 1T + NT), `runMemcpyBandwidth` |
+| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3 read, 1T + NT, shared-cache MT sets split across threads, load + integer checksum so FP adds do not bottleneck reads), `runMemcpyBandwidth` |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns), `runThreadLatency` (pool round-trip, us) |
 
 ## Build

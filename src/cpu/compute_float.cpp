@@ -206,19 +206,18 @@ int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
 }
 
 // ---------------------------------------------------------------------------
-// Mixed precision: fp16 multiply -> fp32 accumulate (ARM FEAT_FP16 path).
+// Mixed precision: fp16 multiply -> fp32 accumulate.  Only report this when
+// the ISA has a native widening FMA, so the timed loop is not dominated by
+// fp32<->fp16 conversions.
 // ---------------------------------------------------------------------------
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+#if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
 static constexpr int MP_NACC = 16;
 static double runMpChain(uint64_t outer)
 {
-  // Honest mixed kernel: each step narrows the fp32 accumulator to fp16,
-  // multiplies in fp16 (so the multiply *depends* on acc and can't be hoisted),
-  // then widens the product back and accumulates in fp32.  b<0 with |b| small
-  // makes acc decay (no inf), while the fp16 multiply still executes every step.
   float32x4_t acc[MP_NACC];
-  const float16x4_t b = vdup_n_f16((float16_t)(-0.0005f));
+  const float16x8_t a = vdupq_n_f16((float16_t)0.9995f);
+  const float16x8_t b = vdupq_n_f16((float16_t)0.001f);
   for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
@@ -227,12 +226,13 @@ static double runMpChain(uint64_t outer)
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
       {
-        float16x4_t h = vcvt_f16_f32(acc[j]);          // 4 fp32->fp16 narrow
-        float16x4_t p = vmul_f16(h, b);                // 4 fp16 multiplies
-        acc[j] = vaddq_f32(acc[j], vcvt_f32_f16(p));   // 4 fp32 adds
+        acc[j] = vfmlalq_low_f16(acc[j], a, b);
+        acc[j] = vfmlalq_high_f16(acc[j], a, b);
       }
     }
-  return (double)vaddvq_f32(acc[0]);
+  float32x4_t s = acc[0];
+  for (int j = 1; j < MP_NACC; j++) s = vaddq_f32(s, acc[j]);
+  return (double)vaddvq_f32(s);
 }
 #endif
 
@@ -241,17 +241,18 @@ int CpuPeak::runComputeMP(benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(
     {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "gflops"});
 #ifdef CPU_HAS_MP_KERNEL
-  if (!info.hasFP16)
+  if (!info.hasFP16FML)
   {
-    test.skip("mp", ResultStatus::Unsupported, "no native fp16 arithmetic on this CPU");
+    test.skip("mp", ResultStatus::Unsupported,
+              "no conversion-free fp16xfp16+fp32 widening FMA on this CPU");
     return 0;
   }
-  // 4 fp16 mults + 4 fp32 adds per accumulator update = 8 ops.
-  double ops = (double)INNER * MP_NACC * 8.0;
+  // Two FMLALs per accumulator: 8 fp16 multiplies + 8 fp32 adds = 16 ops.
+  double ops = (double)INNER * MP_NACC * 16.0;
   emitCompute(*this, test, "mp", ops, runMpChain, cfg);
 #else
   test.skip("mp", ResultStatus::Unsupported,
-            "mixed fp16/fp32 not compiled for this target ISA");
+            "conversion-free mixed fp16/fp32 not compiled for this target ISA");
 #endif
   return 0;
 }
