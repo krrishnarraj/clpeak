@@ -25,6 +25,9 @@
 #ifdef ENABLE_ONEAPI
 #include <oneapi/oneapi_peak.h>
 #endif
+#ifdef ENABLE_CPU
+#include <cpu/cpu_peak.h>
+#endif
 
 static void mergeResults(ResultStore &dst, const ResultStore &src)
 {
@@ -48,6 +51,15 @@ struct BackendEntry
 static std::vector<BackendEntry> buildBackends()
 {
     std::vector<BackendEntry> out;
+#ifdef ENABLE_CPU
+    out.push_back({
+        "CPU",
+        []{ return CpuPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os){ CpuPeak::printInventory(inv, os); },
+        []{ return std::make_unique<CpuPeak>(); },
+        &CliOptions::skipCpu,
+    });
+#endif
 #ifdef ENABLE_CUDA
     out.push_back({
         "CUDA",

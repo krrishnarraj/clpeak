@@ -26,6 +26,7 @@ object ArgvBuilder {
                     "ROCm"    -> args += "--no-rocm"
                     "Metal"   -> args += "--no-metal"
                     "oneAPI"  -> args += "--no-oneapi"
+                    "CPU"     -> args += "--no-cpu"
                 }
                 continue
             }

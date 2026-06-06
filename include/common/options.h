@@ -18,6 +18,7 @@ struct CliOptions {
   bool skipRocm   = false;
   bool skipMetal  = false;
   bool skipOneapi = false;
+  bool skipCpu    = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
   // applyOptions can copy it).  Empty = run all enumerated platforms/devices.
@@ -38,6 +39,8 @@ struct CliOptions {
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
   unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time, in us
+  // CPU backend uses its own (longer) budget; --max-time does not affect it.
+  unsigned int targetTimeUsCpu = DEFAULT_CPU_TARGET_TIME_US; // --max-time-cpu, in us
 
   // Test selection.  Default: every category and every test enabled.  The
   // first positive --<test> flag flips enabledTests to allow-list mode

@@ -69,7 +69,7 @@ struct BackendCatalog {
             return BackendInfo(id: name, available: available, devices: devices)
         }
 
-        return BackendCatalog(backends: parsed.filter { $0.name == "Vulkan" || $0.name == "Metal" })
+        return BackendCatalog(backends: parsed.filter { $0.name == "Vulkan" || $0.name == "Metal" || $0.name == "CPU" })
     }
 }
 

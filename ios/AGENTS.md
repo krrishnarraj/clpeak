@@ -34,7 +34,7 @@ or build in cmdline
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `CMakeLists.txt` | Xcode/iOS bundle target; links common, Vulkan, and Metal backends |
+| `CMakeLists.txt` | Xcode/iOS bundle target; links common, CPU, Vulkan, and Metal backends |
 | `Info.plist.in` | App bundle plist template |
 | `App/ClpeakApp.swift` | SwiftUI app entry and top-level navigation |
 | `App/Models.swift` | Catalog, selection, device info, and result grouping models |

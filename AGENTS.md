@@ -1,13 +1,14 @@
 # clpeak — "compute latency peak"
 
-Cross-API GPU benchmark tool. Measures compute, bandwidth, and latency
-across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL backends from
-a single binary.
+Cross-API compute benchmark tool. Measures compute, bandwidth, and latency
+across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL GPU backends —
+plus a native CPU backend — from a single binary.
 
 ## Architecture
 
 ```
 Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
+├── CpuPeak    → src/cpu/                            ← native CPU backend (plain C++ / std::thread; runs first)
 ├── clPeak     → src/opencl/                         ← OpenCL backend
 ├── vkPeak     → src/vulkan/                         ← Vulkan backend
 ├── CudaPeak   → src/cuda/                           ← CUDA backend
@@ -32,6 +33,7 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `include/rocm/` | ROCm/HIP backend header — `rocm_peak.h` |
 | `include/metal/` | Metal backend header — `mtl_peak.h` |
 | `include/oneapi/` | oneAPI/SYCL backend header — `oneapi_peak.h` |
+| `include/cpu/` | Native CPU backend header — `cpu_peak.h` |
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
@@ -39,6 +41,7 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/rocm/` | ROCm/HIP backend: `RocmPeak` class + `.hip` kernels (HIPRTC-compiled at runtime) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
 | `src/oneapi/` | oneAPI/SYCL backend: `OneapiPeak` class + SYCL kernels (inline lambdas, AOT/JIT via DPC++) |
+| `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (`-march`/`-mcpu=native`); cache/DRAM bandwidth + memory latency |
 | `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `android/` | Android app with JNI native module, its own `logger_android.cpp` |

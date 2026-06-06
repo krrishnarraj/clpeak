@@ -10,6 +10,9 @@
 #ifdef ENABLE_METAL
 #include <metal/mtl_peak.h>
 #endif
+#ifdef ENABLE_CPU
+#include <cpu/cpu_peak.h>
+#endif
 
 #include <version.h>
 
@@ -24,6 +27,10 @@ namespace
 std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
 {
   std::vector<BackendInventory> out;
+#ifdef ENABLE_CPU
+  if (!opts.skipCpu)
+    out.push_back(CpuPeak::enumerate());
+#endif
 #ifdef ENABLE_METAL
   if (!opts.skipMetal)
     out.push_back(MetalPeak::enumerate());
@@ -74,6 +81,16 @@ int clpeak_ios_launch(int argc,
   parseCliOptions(argc, mutableArgv.data(), opts);
 
   int status = 0;
+
+#ifdef ENABLE_CPU
+  if (!opts.skipCpu)
+  {
+    CpuPeak cpuObj;
+    cpuObj.log.reset(new LoggerIOS(callbacks, context));
+    cpuObj.applyOptions(opts);
+    status |= cpuObj.runAll();
+  }
+#endif
 
 #ifdef ENABLE_METAL
   if (!opts.skipMetal)

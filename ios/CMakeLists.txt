@@ -60,6 +60,10 @@ if(CLPEAK_IOS_VULKAN_AVAILABLE)
 endif()
 add_subdirectory(${CLPEAK_ROOT}/src/metal ${CMAKE_BINARY_DIR}/metal)
 
+# Native CPU backend — plain C++ / std::thread, no external deps.
+set(CLPEAK_ENABLE_CPU ON CACHE BOOL "" FORCE)
+add_subdirectory(${CLPEAK_ROOT}/src/cpu ${CMAKE_BINARY_DIR}/cpu)
+
 set(CLPEAK_IOS_SWIFT_SOURCES
   App/ClpeakApp.swift
   App/Models.swift
@@ -86,7 +90,7 @@ endif()
 
 add_executable(clpeak_ios MACOSX_BUNDLE ${_clpeak_ios_device_sources})
 
-set(_clpeak_ios_link_libs peak_common peak_metal)
+set(_clpeak_ios_link_libs peak_common peak_metal peak_cpu)
 if(CLPEAK_IOS_VULKAN_AVAILABLE)
   list(APPEND _clpeak_ios_link_libs peak_vulkan "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
 endif()
@@ -98,7 +102,7 @@ target_include_directories(clpeak_ios PRIVATE
   ${CLPEAK_ROOT}/include/common
 )
 
-set(_clpeak_ios_defines ENABLE_METAL)
+set(_clpeak_ios_defines ENABLE_METAL ENABLE_CPU)
 if(CLPEAK_IOS_VULKAN_AVAILABLE)
   list(APPEND _clpeak_ios_defines ENABLE_VULKAN)
 endif()
@@ -164,6 +168,7 @@ add_executable(clpeak_ios_simulator MACOSX_BUNDLE
 target_link_libraries(clpeak_ios_simulator PRIVATE
   peak_common
   peak_metal
+  peak_cpu
 )
 
 target_include_directories(clpeak_ios_simulator PRIVATE
@@ -172,7 +177,7 @@ target_include_directories(clpeak_ios_simulator PRIVATE
   ${CLPEAK_ROOT}/include/common
 )
 
-target_compile_definitions(clpeak_ios_simulator PRIVATE ENABLE_METAL)
+target_compile_definitions(clpeak_ios_simulator PRIVATE ENABLE_METAL ENABLE_CPU)
 target_compile_options(clpeak_ios_simulator PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
 clpeak_setup_version(clpeak_ios_simulator GIT_ROOT ${CLPEAK_GIT_ROOT})
 
@@ -195,7 +200,7 @@ set_target_properties(clpeak_ios_simulator PROPERTIES
   XCODE_GENERATE_SCHEME TRUE
 )
 
-foreach(_sim_dep peak_common peak_metal)
+foreach(_sim_dep peak_common peak_metal peak_cpu)
   if(TARGET ${_sim_dep})
     set_target_properties(${_sim_dep} PROPERTIES
       "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"

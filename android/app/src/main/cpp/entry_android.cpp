@@ -7,6 +7,9 @@
 #ifdef ENABLE_VULKAN
 #include <vulkan/vk_peak.h>
 #endif
+#ifdef ENABLE_CPU
+#include <cpu/cpu_peak.h>
+#endif
 
 #define RECORD_METRIC_CALLBACK "record_metric_callback_from_c"
 #define DEVICE_INFO_CALLBACK   "device_info_callback_from_c"
@@ -42,6 +45,16 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
     jclass cls = _jniEnv->GetObjectClass(_jObject);
 
     int clStatus = 0;
+#ifdef ENABLE_CPU
+    if (!opts.skipCpu)
+    {
+        CpuPeak cpuObj;
+        cpuObj.log.reset(new LoggerAndroid());
+        cpuObj.applyOptions(opts);
+        wireLoggerToJni(static_cast<LoggerAndroid *>(cpuObj.log.get()), _jniEnv, _jObject, cls);
+        clStatus |= cpuObj.runAll();
+    }
+#endif
 #ifdef ENABLE_VULKAN
     if (!opts.skipVulkan)
     {

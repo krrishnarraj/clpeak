@@ -218,6 +218,9 @@ final class BenchmarkViewModel: ObservableObject {
             switch backend.name {
             case "Vulkan": flag = "--vk-device"; noFlag = "--no-vulkan"
             case "Metal":  flag = "--mtl-device"; noFlag = "--no-metal"
+            // CPU is a single device with no per-device selector; only the
+            // deselect (--no-cpu) path is meaningful.
+            case "CPU":    flag = "";            noFlag = "--no-cpu"
             default:       continue
             }
 

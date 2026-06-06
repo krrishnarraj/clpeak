@@ -19,7 +19,11 @@ static const char *helpStr =
     "\n  -v, --version               display version"
     "\n  -i, --iters num             force a fixed iter count (overrides --max-time calibration)"
     "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
-    "\n  --max-time ms               per-test time budget for the timed phase (default: 500 ms)"
+    "\n  --max-time ms               per-test time budget for the timed phase, all backends"
+    "\n                              except CPU (default: 500 ms)"
+#ifdef ENABLE_CPU
+    "\n  --max-time-cpu ms           per-test time budget for the CPU backend (default: 2000 ms)"
+#endif
     "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
     "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
     "\n  --list-devices              list available devices for every backend and exit"
@@ -47,6 +51,9 @@ static const char *helpStr =
 #ifdef ENABLE_ONEAPI
     "\n  --oneapi                    run only the oneAPI/SYCL backend"
 #endif
+#ifdef ENABLE_CPU
+    "\n  --cpu                       run only the native CPU backend"
+#endif
     "\n  (multiple --<backend> flags can be combined)"
 #ifdef ENABLE_OPENCL
     "\n  --no-opencl                 skip the OpenCL backend"
@@ -65,6 +72,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_ONEAPI
     "\n  --no-oneapi                 skip the oneAPI/SYCL backend"
+#endif
+#ifdef ENABLE_CPU
+    "\n  --no-cpu                    skip the native CPU backend"
 #endif
     "\n"
     "\n DEVICE SELECTION (indices are 0-based; comma-separated for multiple,"
@@ -132,10 +142,17 @@ static const char *helpStr =
     "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"
     "\n  --onemkl                          | --no-onemkl                    [oneAPI]"
 #endif
+#ifdef ENABLE_CPU
+    "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM]"
+#endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
     "\n  --image-memory-bandwidth          | --no-image-memory-bandwidth"
     "\n  --transfer-bandwidth              | --no-transfer-bandwidth"
+#ifdef ENABLE_CPU
+    "\n  --cache-bandwidth                 | --no-cache-bandwidth           [CPU]"
+    "\n  --memory-latency                  | --no-memory-latency            [CPU]"
+#endif
     "\n  --atomic-throughput               | --no-atomic-throughput"
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
     "\n"
@@ -190,6 +207,11 @@ static const TestFlag testFlags[] = {
 #ifdef ENABLE_ONEAPI
   {"joint-matrix",              Benchmark::JointMatrix},
   {"onemkl",                    Benchmark::Onemkl},
+#endif
+#ifdef ENABLE_CPU
+  {"amx",                       Benchmark::Amx},
+  {"cache-bandwidth",           Benchmark::CacheBandwidth},
+  {"memory-latency",            Benchmark::MemoryLatency},
 #endif
   {"global-memory-bandwidth",   Benchmark::GlobalBW},
   {"local-memory-bandwidth",    Benchmark::LocalBW},
@@ -351,7 +373,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
@@ -399,6 +421,10 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     else if (!strcmp(a, "--no-oneapi")) out.skipOneapi = true;
     else if (!strcmp(a, "--oneapi"))    { incOneapi = true; includeAny = true; }
 #endif
+#ifdef ENABLE_CPU
+    else if (!strcmp(a, "--no-cpu"))    out.skipCpu = true;
+    else if (!strcmp(a, "--cpu"))       { incCpu = true; includeAny = true; }
+#endif
 
     // ---- iters / warmup -------------------------------------------------
     else if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
@@ -435,6 +461,19 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
       }
       out.targetTimeUs = parsed * 1000u; // ms -> us
     }
+#ifdef ENABLE_CPU
+    else if (!strcmp(a, "--max-time-cpu"))
+    {
+      const char *v = requireArg(argc, argv, i, a);
+      unsigned int parsed;
+      if (!parseUIntArg(v, parsed, /*allowZero=*/false))
+      {
+        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
+        printHelpAndExit(-1);
+      }
+      out.targetTimeUsCpu = parsed * 1000u; // ms -> us
+    }
+#endif
 
     // ---- OpenCL device selection ----------------------------------------
 #ifdef ENABLE_OPENCL
@@ -590,6 +629,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     if (!incRocm)   out.skipRocm   = true;
     if (!incMetal)  out.skipMetal  = true;
     if (!incOneapi) out.skipOneapi = true;
+    if (!incCpu)    out.skipCpu    = true;
   }
 
   return 0;
