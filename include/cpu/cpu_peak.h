@@ -39,7 +39,8 @@ struct cpu_device_info_t {
 
   uint64_t l1dCacheBytes = 0;       // per-core L1 data cache
   uint64_t l2CacheBytes  = 0;       // per-core (or per-cluster) L2
-  uint64_t l3CacheBytes  = 0;       // shared LLC
+  uint64_t l3CacheBytes  = 0;       // one L3 instance (per-CCX/CCD on AMD)
+  uint64_t l3TotalBytes  = 0;       // aggregate L3 across all instances (= l3CacheBytes on a single-LLC chip)
   uint64_t totalMemBytes = 0;
 
   // ISA capability flags (best-effort runtime detection).

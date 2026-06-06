@@ -46,7 +46,9 @@ constexpr int INNER = 4096;
 #if defined(__AVX512F__)
 using f32v = __m512;
 constexpr int F32_LANES = 16;
-constexpr int F32_NACC  = 16;
+// 32 ZMM registers give headroom to hide FMA latency (same rationale as NEON);
+// AVX2 below stays at 12 (only 16 YMM regs, and fp64 confirms 12 suffices).
+constexpr int F32_NACC  = 24;
 static inline f32v f32_set(float a)            { return _mm512_set1_ps(a); }
 static inline f32v f32_load(const float *p)    { return _mm512_loadu_ps(p); }
 static inline f32v f32_fma(f32v a, f32v b, f32v c) { return _mm512_fmadd_ps(a, b, c); }
@@ -97,7 +99,7 @@ static inline float f32_hsum(f32v a)           { return a; }
 #if defined(__AVX512F__)
 using f64v = __m512d;
 constexpr int F64_LANES = 8;
-constexpr int F64_NACC  = 16;
+constexpr int F64_NACC  = 24;   // 32 ZMM regs; hide FMA latency (see fp32)
 static inline f64v f64_set(double a)           { return _mm512_set1_pd(a); }
 static inline f64v f64_fma(f64v a, f64v b, f64v c) { return _mm512_fmadd_pd(a, b, c); }
 static inline f64v f64_add(f64v a, f64v b)     { return _mm512_add_pd(a, b); }
@@ -140,7 +142,7 @@ static inline double f64_hsum(f64v a)          { return a; }
 #if defined(__AVX512F__)
 using i32v = __m512i;
 constexpr int I32_LANES = 16;
-constexpr int I32_NACC  = 16;
+constexpr int I32_NACC  = 24;   // vpmulld has high latency; extra accumulators help
 static inline i32v i32_set(int a)              { return _mm512_set1_epi32(a); }
 static inline i32v i32_madd(i32v a, i32v b, i32v c) { return _mm512_add_epi32(_mm512_mullo_epi32(a, b), c); }
 static inline i32v i32_add(i32v a, i32v b)     { return _mm512_add_epi32(a, b); }

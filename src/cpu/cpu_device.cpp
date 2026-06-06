@@ -2,6 +2,7 @@
 
 #include <cpu/cpu_peak.h>
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -84,6 +85,33 @@ static uint64_t parseCacheSize(const std::string &s)
     return val * 1024ull * 1024ull;
   return val;
 }
+// Count the CPUs in a sysfs cpu-list string like "0-7" or "0-3,16-19".
+static int countCpuList(const std::string &s)
+{
+  int total = 0;
+  size_t i = 0;
+  while (i < s.size())
+  {
+    // parse a number
+    while (i < s.size() && !std::isdigit((unsigned char)s[i])) i++;
+    if (i >= s.size()) break;
+    long a = std::strtol(s.c_str() + i, nullptr, 10);
+    while (i < s.size() && std::isdigit((unsigned char)s[i])) i++;
+    if (i < s.size() && s[i] == '-')
+    {
+      i++;
+      long b = std::strtol(s.c_str() + i, nullptr, 10);
+      while (i < s.size() && std::isdigit((unsigned char)s[i])) i++;
+      total += (int)(b - a + 1);
+    }
+    else
+    {
+      total += 1;
+    }
+  }
+  return total;
+}
+
 static std::string firstLineValue(const std::string &cpuinfo, const char *key)
 {
   size_t pos = cpuinfo.find(key);
@@ -279,7 +307,18 @@ void detectCpuInfo(cpu_device_info_t &info)
     else if (level == 2 && isData)
       info.l2CacheBytes = bytes;
     else if (level == 3 && isData)
-      info.l3CacheBytes = bytes;
+    {
+      info.l3CacheBytes = bytes;   // one instance (per-CCX/CCD on AMD)
+      // Aggregate L3 = per-instance size x number of L3 instances.  The L3 is
+      // shared by `cpusPerL3` logical CPUs, so instances = logicalCores / that.
+      int cpusPerL3 = countCpuList(readFile((std::string(base) + "shared_cpu_list").c_str()));
+      if (cpusPerL3 > 0)
+      {
+        int instances = info.logicalCores / cpusPerL3;
+        if (instances < 1) instances = 1;
+        info.l3TotalBytes = bytes * (uint64_t)instances;
+      }
+    }
   }
 #if defined(_SC_LEVEL1_DCACHE_SIZE)
   if (!info.l1dCacheBytes && sysconf(_SC_LEVEL1_DCACHE_SIZE) > 0)
@@ -339,7 +378,10 @@ void detectCpuInfo(cpu_device_info_t &info)
             else if (c.Level == 2)
               info.l2CacheBytes = c.CacheSize;
             else if (c.Level == 3)
-              info.l3CacheBytes = c.CacheSize;
+            {
+              info.l3CacheBytes  = c.CacheSize;       // one instance
+              info.l3TotalBytes += c.CacheSize;       // sum across instances
+            }
           }
         }
         ptr += e->Size;
@@ -361,6 +403,10 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.l2CacheBytes = 512ull * 1024;
   if (!info.l3CacheBytes)
     info.l3CacheBytes = 8ull * 1024 * 1024;
+  // If the number of L3 instances couldn't be determined, assume a single
+  // shared LLC (correct for Intel client/Apple; conservative elsewhere).
+  if (info.l3TotalBytes < info.l3CacheBytes)
+    info.l3TotalBytes = info.l3CacheBytes;
 }
 
 #endif // ENABLE_CPU

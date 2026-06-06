@@ -28,14 +28,14 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 | File | Purpose |
 |------|---------|
 | `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup + probe + `pickIters` timed batch via the pool), `enumerate`, `printInventory` |
-| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
+| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 per-instance **and aggregate** (`l3TotalBytes`, from `index3/shared_cpu_list` on Linux / summed on Windows) sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning (`pthread_setaffinity_np` / `SetThreadAffinityMask`; advisory no-op on macOS) |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / NEON / scalar) with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics |
 | `compute_float.cpp` | `runComputeSP/DP` (FMA chains), `runComputeHP` (native fp16 FMA), `runComputeBF16` (bf16 dot), `runComputeMP` (conversion-free fp16-mul→fp32-acc widening FMLA where the ISA supports it) |
 | `compute_int.cpp` | `runComputeInt32` (int madd chain), `runComputeInt8DP` (VNNI / dotprod), `runAtomicThroughput` (uncontended / contended / sharded) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — Intel AMX tile matmul (int8 + bf16, Linux) / ARM SMMLA (int8) / BFMMLA (bf16); `Benchmark::Amx`, run in both fp and int phases |
-| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3 read, 1T + NT, shared-cache MT sets split across threads, load + integer checksum so FP adds do not bottleneck reads), `runMemcpyBandwidth` |
+| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3 read, 1T + NT, shared-cache MT sets split across threads, load + integer checksum so FP adds do not bottleneck reads), `runMemcpyBandwidth`. DRAM/memcpy arrays are sized off the **aggregate** L3 (`pickStreamFloats`) and first-touched in parallel for NUMA-local placement |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns), `runThreadLatency` (pool round-trip, us) |
 
 ## Build
@@ -80,6 +80,16 @@ under-enables fp16/bf16/i8mm — hence `-mcpu=native` is preferred there.
 - **macOS has no hard thread affinity**, so single-thread (`ST`) numbers vary
   run-to-run as the kernel lands on a P- or E-core. `MT` numbers are stable.
   Pinning is real on Linux/Windows.
+- **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
+  CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
+  `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from
+  `index3/shared_cpu_list` (Linux) / summed cache entries (Windows); sizing the
+  STREAM arrays off `l3CacheBytes` instead let a 64 MB array sit entirely in the
+  64 MB aggregate L3 and report ~550 GB/s "DRAM" read (> the DDR ceiling).
+- **First-touch the STREAM arrays in parallel.** `std::vector<float> a(N)`
+  zero-fills on the calling thread, so every page lands on one NUMA node and
+  multi-socket/CCD bandwidth collapses. Use `new float[N]` (untouched) and have
+  each worker `populate()` its own chunk so pages are NUMA-local.
 - **Unroll the iteration loop** (`CPU_UNROLL_K`) around every compute chain: the
   per-FMA-group loop-control branch is otherwise a scheduling bubble. On
   Firestorm this is ~13% on fp32 and **~4×** on the cheap int32 madd (where the
@@ -105,10 +115,13 @@ saturate. On Apple M1 Pro (Firestorm: 4 FP pipes) the fp32/fp64 FMLA latency is
 ~545 to ~745 GFLOPS MT (~84% of the ~880 GFLOPS theoretical)** and fp64 from
 ~272 to ~375. fp16 saturates at NACC=16 (wider lanes / lower effective latency),
 which is why fp16 looked like ~3× fp32 before the fix instead of the expected
-~2×. The NEON fp32/fp64 NACC is therefore 24; x86 NACC stays register-file
-limited (AVX2=12, AVX-512=16) and is untuned here — re-measure a NACC sweep when
-validating on an x86 host. The residual gap to 100% is all-core frequency
-throttling + macOS having no hard pinning (ST swings P↔E core).
+~2×. The NEON fp32/fp64 NACC is therefore 24, and AVX-512 fp32/fp64/int32 are
+also 24 (32 ZMM registers give the headroom). AVX2 stays 12 — only 16 YMM
+registers, and fp64 beating oneAPI at 12 confirms it's sufficient there; the
+small fp32 gap to Intel's vectorizer on AVX2 is codegen, not accumulator count.
+Re-measure a NACC sweep when validating on a new x86 host. The residual gap to
+100% is all-core frequency throttling + (on macOS) no hard pinning (ST swings
+P↔E core).
 
 ## When You Change This Directory
 

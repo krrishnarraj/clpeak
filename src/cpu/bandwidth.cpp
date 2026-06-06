@@ -201,9 +201,30 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   return 0;
 }
 
+// Number of floats per STREAM array.  Must exceed the *aggregate* LLC (on
+// multi-CCX/CCD AMD the per-instance L3 is only a slice — sizing off it would
+// let the whole array sit in cache and report cache, not DRAM, bandwidth), and
+// is bounded so we don't hog memory.  Even split across threads.
+static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
+{
+  uint64_t llc = std::max(info.l3TotalBytes, info.l3CacheBytes);
+  uint64_t arrayBytes = std::max<uint64_t>(llc * 4, 64ull << 20);
+  uint64_t cap = info.totalMemBytes ? std::min<uint64_t>(512ull << 20, info.totalMemBytes / 16)
+                                    : (512ull << 20);
+  if (cap < llc * 2) cap = llc * 2;            // always large enough to miss the LLC
+  arrayBytes = std::min(arrayBytes, cap);
+  size_t N = (size_t)(arrayBytes / sizeof(float));
+  N = (N / (size_t)maxT) * (size_t)maxT;
+  if (N < (size_t)maxT) N = (size_t)maxT;
+  return N;
+}
+
 // ---------------------------------------------------------------------------
 // DRAM bandwidth: STREAM-style read / copy / triad over shared arrays far
-// larger than the LLC, partitioned across all cores.
+// larger than the LLC, partitioned across all cores.  Arrays are allocated
+// untouched and first-touched in parallel so their pages land on the NUMA node
+// of the thread that will use them (single-threaded init would place every page
+// on one node and cripple bandwidth on multi-socket / multi-CCD systems).
 // ---------------------------------------------------------------------------
 int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 {
@@ -211,16 +232,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     {"global_memory_bandwidth", "DRAM bandwidth", "gbps"});
 
   const int maxT = pool->maxThreads();
-  uint64_t arrayBytes = std::max<uint64_t>(info.l3CacheBytes * 4, 64ull * 1024 * 1024);
-  arrayBytes = std::min<uint64_t>(arrayBytes, 512ull * 1024 * 1024);
-  size_t N = (size_t)(arrayBytes / sizeof(float));
-  N = (N / (size_t)maxT) * (size_t)maxT;     // even split
-  if (N < (size_t)maxT) N = (size_t)maxT;
-
-  std::vector<float> A(N), B(N), C(N);
-  populate(B.data(), N);
-  populate(C.data(), N);
-  std::vector<uint64_t> sink((size_t)maxT, 0);
+  const size_t N = pickStreamFloats(info, maxT);
 
   auto chunk = [&](int tid, size_t &lo, size_t &hi) {
     size_t per = N / (size_t)maxT;
@@ -228,6 +240,19 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     hi = (tid == maxT - 1) ? N : lo + per;
   };
 
+  // `new float[N]` leaves the pages untouched (floats are not value-initialized),
+  // so the parallel populate below is the first touch.
+  float *A = new float[N];
+  float *B = new float[N];
+  float *C = new float[N];
+  pool->run(maxT, [&](int tid) {
+    size_t lo, hi; chunk(tid, lo, hi);
+    populate(A + lo, hi - lo);
+    populate(B + lo, hi - lo);
+    populate(C + lo, hi - lo);
+  });
+
+  std::vector<uint64_t> sink((size_t)maxT, 0);
   unsigned int forced = forceIters ? specifiedIters : 0;
   auto gbps = [](double bytes, double meanUs) -> float {
     return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
@@ -237,9 +262,8 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   {
     Workload body = [&](int tid, uint64_t iters) {
       size_t lo, hi; chunk(tid, lo, hi);
-      sink[(size_t)tid] ^= readBufferChecksum(A.data() + lo, hi - lo, iters);
+      sink[(size_t)tid] ^= readBufferChecksum(A + lo, hi - lo, iters);
     };
-    populate(A.data(), N);
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
     test.emit("read", gbps((double)N * sizeof(float), us));
   }
@@ -248,7 +272,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     Workload body = [&](int tid, uint64_t iters) {
       size_t lo, hi; chunk(tid, lo, hi);
       for (uint64_t it = 0; it < iters; it++)
-        std::memcpy(A.data() + lo, C.data() + lo, (hi - lo) * sizeof(float));
+        std::memcpy(A + lo, C + lo, (hi - lo) * sizeof(float));
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
     test.emit("copy", gbps(2.0 * N * sizeof(float), us));
@@ -269,6 +293,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   volatile uint64_t keep = 0;
   for (uint64_t v : sink) keep ^= v;
   (void)keep;
+  delete[] A; delete[] B; delete[] C;
   return 0;
 }
 
@@ -281,26 +306,33 @@ int CpuPeak::runMemcpyBandwidth(benchmark_config_t &cfg)
     {"transfer_bandwidth", "memcpy bandwidth", "gbps"});
 
   const int maxT = pool->maxThreads();
-  uint64_t arrayBytes = std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes * 4, 64ull * 1024 * 1024),
-                                           256ull * 1024 * 1024);
-  size_t N = (size_t)(arrayBytes / sizeof(float));
-  N = (N / (size_t)maxT) * (size_t)maxT;
-  if (N < (size_t)maxT) N = (size_t)maxT;
+  const size_t N = pickStreamFloats(info, maxT);
 
-  std::vector<float> src(N), dst(N);
-  populate(src.data(), N);
+  auto chunk = [&](int tid, size_t &lo, size_t &hi) {
+    size_t per = N / (size_t)maxT;
+    lo = (size_t)tid * per;
+    hi = (tid == maxT - 1) ? N : lo + per;
+  };
+
+  // Untouched alloc + parallel first-touch (NUMA-local), as in runDramBandwidth.
+  float *src = new float[N];
+  float *dst = new float[N];
+  pool->run(maxT, [&](int tid) {
+    size_t lo, hi; chunk(tid, lo, hi);
+    populate(src + lo, hi - lo);
+    populate(dst + lo, hi - lo);
+  });
 
   unsigned int forced = forceIters ? specifiedIters : 0;
   Workload body = [&](int tid, uint64_t iters) {
-    size_t per = N / (size_t)maxT;
-    size_t lo  = (size_t)tid * per;
-    size_t hi  = (tid == maxT - 1) ? N : lo + per;
+    size_t lo, hi; chunk(tid, lo, hi);
     for (uint64_t it = 0; it < iters; it++)
-      std::memcpy(dst.data() + lo, src.data() + lo, (hi - lo) * sizeof(float));
+      std::memcpy(dst + lo, src + lo, (hi - lo) * sizeof(float));
   };
   double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
   double bytes = 2.0 * N * sizeof(float);   // read + write
   test.emit("memcpy", us > 0.0 ? (float)(bytes / (us * 1e3)) : -1.0f);
+  delete[] src; delete[] dst;
   return 0;
 }
 
