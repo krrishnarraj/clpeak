@@ -72,7 +72,9 @@ static inline float f32_hsum(f32v a)
 #elif defined(__ARM_NEON) || defined(__aarch64__)
 using f32v = float32x4_t;
 constexpr int F32_LANES = 4;
-constexpr int F32_NACC  = 16;
+// Firestorm fp32 FMLA latency is ~6 cycles across 4 FP pipes, so ~24 in-flight
+// accumulators are needed to saturate (NACC=16 left fp32 at ~62% of peak).
+constexpr int F32_NACC  = 24;
 static inline f32v f32_set(float a)            { return vdupq_n_f32(a); }
 static inline f32v f32_load(const float *p)    { return vld1q_f32(p); }
 static inline f32v f32_fma(f32v a, f32v b, f32v c) { return vfmaq_f32(c, a, b); }
@@ -117,7 +119,7 @@ static inline double f64_hsum(f64v a)
 #elif defined(__aarch64__)
 using f64v = float64x2_t;
 constexpr int F64_LANES = 2;
-constexpr int F64_NACC  = 16;
+constexpr int F64_NACC  = 24;   // same latency-hiding rationale as fp32
 static inline f64v f64_set(double a)           { return vdupq_n_f64(a); }
 static inline f64v f64_fma(f64v a, f64v b, f64v c) { return vfmaq_f64(c, a, b); }
 static inline f64v f64_add(f64v a, f64v b)     { return vaddq_f64(a, b); }

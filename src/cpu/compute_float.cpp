@@ -94,8 +94,14 @@ static double runFp16Chain(uint64_t outer)
       for (int j = 0; j < FP16_NACC; j++)
         acc[j] = vfmaq_f16(c, acc[j], b);
     }
-  float16_t tmp[8]; vst1q_f16(tmp, acc[0]);
-  return (double)tmp[0];
+  // Reduce ALL accumulators so none of the independent chains is dead-code
+  // eliminated (which would leave one latency-bound chain and a fabricated
+  // throughput number).
+  float16x8_t s = acc[0];
+  for (int j = 1; j < FP16_NACC; j++) s = vaddq_f16(s, acc[j]);
+  float16_t tmp[8]; vst1q_f16(tmp, s);
+  double r = 0.0; for (int k = 0; k < 8; k++) r += (double)tmp[k];
+  return r;
 }
 #elif defined(__AVX512FP16__)
 #define CPU_HAS_FP16_KERNEL 1
@@ -115,8 +121,11 @@ static double runFp16Chain(uint64_t outer)
       for (int j = 0; j < FP16_NACC; j++)
         acc[j] = _mm512_fmadd_ph(acc[j], b, c);
     }
-  _Float16 tmp[32]; _mm512_storeu_ph(tmp, acc[0]);
-  return (double)tmp[0];
+  __m512h s = acc[0];
+  for (int j = 1; j < FP16_NACC; j++) s = _mm512_add_ph(s, acc[j]);
+  _Float16 tmp[32]; _mm512_storeu_ph(tmp, s);
+  double r = 0.0; for (int k = 0; k < 32; k++) r += (double)tmp[k];
+  return r;
 }
 #endif
 
@@ -162,7 +171,9 @@ static double runBf16Chain(uint64_t outer)
       for (int j = 0; j < BF16_NACC; j++)
         acc[j] = vbfdotq_f32(acc[j], a, b);
     }
-  return (double)vaddvq_f32(acc[0]);
+  float32x4_t s = acc[0];
+  for (int j = 1; j < BF16_NACC; j++) s = vaddq_f32(s, acc[j]);
+  return (double)vaddvq_f32(s);
 }
 #elif defined(__AVX512BF16__)
 #define CPU_HAS_BF16_KERNEL 1
@@ -182,7 +193,9 @@ static double runBf16Chain(uint64_t outer)
       for (int j = 0; j < BF16_NACC; j++)
         acc[j] = _mm512_dpbf16_ps(acc[j], a, b);
     }
-  return (double)_mm512_reduce_add_ps(acc[0]);
+  __m512 s = acc[0];
+  for (int j = 1; j < BF16_NACC; j++) s = _mm512_add_ps(s, acc[j]);
+  return (double)_mm512_reduce_add_ps(s);
 }
 #endif
 
@@ -212,7 +225,10 @@ int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
 // ---------------------------------------------------------------------------
 #if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
-static constexpr int MP_NACC = 16;
+// 24 accumulators (like fp32/fp64) to hide FMLAL latency; the low+high pair
+// into each accumulator is a 2-deep dependency, so it is latency-sensitive.
+// Ceiling is fp32-class (FMLAL widens 4 fp16->fp32 per instruction), not fp16.
+static constexpr int MP_NACC = 24;
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];

@@ -70,6 +70,13 @@ under-enables fp16/bf16/i8mm — hence `-mcpu=native` is preferred there.
 - **Loop-invariant operands get hoisted.** The mixed-precision kernel multiplies
   a value *derived from the accumulator* (not a constant) so the fp16 multiply
   isn't lifted out of the loop (which would measure only the fp32 adds).
+- **Reduce EVERY accumulator, not just `acc[0]`.** If the final reduction reads
+  only `acc[0]`, `-O3` dead-code-eliminates the other `NACC-1` chains, leaving a
+  single latency-bound chain — and because the op count still assumes all `NACC`
+  chains ran, the reported throughput is fabricated (it happened to land near
+  "peak" when `NACC ≈ pipes × latency`). int8-dot dropped ~22% once this was
+  fixed; fp16/bf16/matrix were affected too. Sum all accumulators (see the fp32
+  chain's reduction loop for the pattern).
 - **macOS has no hard thread affinity**, so single-thread (`ST`) numbers vary
   run-to-run as the kernel lands on a P- or E-core. `MT` numbers are stable.
   Pinning is real on Linux/Windows.
@@ -91,12 +98,17 @@ core counts. Memory-latency is `ST` only (pointer-chase); DRAM bandwidth emits
 ## Reaching peak (investigation notes)
 
 The dependent FMA chains generate optimal code (verified: back-to-back
-`fmla`/`fmadd`, no spills). On Apple M1 Pro fp32 lands ~525 GFLOPS `MT`
-(~60% of the ~860 GFLOPS NEON theoretical); the gap is all-core frequency
-throttling + Firestorm's sustained dependent-FMA rate, not a codegen defect —
-raising `NACC` beyond 16 does not help (measured). On x86 with hard pinning the
-chains should sit closer to peak. `NACC` is tuned per ISA to the register file
-(AVX2=12, AVX-512/NEON=16) — larger spills and regresses.
+`fmla`/`fmadd`, no spills). **`NACC` must hide the FMA latency**: throughput is
+`min(num_pipes, NACC / latency)`, so NACC needs to be ≥ `pipes × latency` to
+saturate. On Apple M1 Pro (Firestorm: 4 FP pipes) the fp32/fp64 FMLA latency is
+~6 cycles, so NACC=16 only reached ~62% of peak — **NACC=24 lifts fp32 from
+~545 to ~745 GFLOPS MT (~84% of the ~880 GFLOPS theoretical)** and fp64 from
+~272 to ~375. fp16 saturates at NACC=16 (wider lanes / lower effective latency),
+which is why fp16 looked like ~3× fp32 before the fix instead of the expected
+~2×. The NEON fp32/fp64 NACC is therefore 24; x86 NACC stays register-file
+limited (AVX2=12, AVX-512=16) and is untuned here — re-measure a NACC sweep when
+validating on an x86 host. The residual gap to 100% is all-core frequency
+throttling + macOS having no hard pinning (ST swings P↔E core).
 
 ## When You Change This Directory
 

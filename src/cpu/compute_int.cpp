@@ -58,7 +58,9 @@ static double runInt8DpChain(uint64_t outer)
       for (int j = 0; j < I8_NACC; j++)
         acc[j] = _mm512_dpbusd_epi32(acc[j], a, b);
     }
-  return (double)_mm512_reduce_add_epi32(acc[0]);
+  __m512i s = acc[0];
+  for (int j = 1; j < I8_NACC; j++) s = _mm512_add_epi32(s, acc[j]);
+  return (double)_mm512_reduce_add_epi32(s);
 }
 #elif defined(__AVXVNNI__)
 #define CPU_HAS_INT8DP_KERNEL 1
@@ -77,8 +79,10 @@ static double runInt8DpChain(uint64_t outer)
       for (int j = 0; j < I8_NACC; j++)
         acc[j] = _mm256_dpbusd_epi32(acc[j], a, b);
     }
-  __m128i lo = _mm256_castsi256_si128(acc[0]);
-  __m128i hi = _mm256_extracti128_si256(acc[0], 1);
+  __m256i sAll = acc[0];
+  for (int j = 1; j < I8_NACC; j++) sAll = _mm256_add_epi32(sAll, acc[j]);
+  __m128i lo = _mm256_castsi256_si128(sAll);
+  __m128i hi = _mm256_extracti128_si256(sAll, 1);
   lo = _mm_add_epi32(lo, hi);
   lo = _mm_hadd_epi32(lo, lo);
   lo = _mm_hadd_epi32(lo, lo);
@@ -101,7 +105,9 @@ static double runInt8DpChain(uint64_t outer)
       for (int j = 0; j < I8_NACC; j++)
         acc[j] = vdotq_s32(acc[j], a, b);
     }
-  return (double)vaddvq_s32(acc[0]);
+  int32x4_t s = acc[0];
+  for (int j = 1; j < I8_NACC; j++) s = vaddq_s32(s, acc[j]);
+  return (double)vaddvq_s32(s);
 }
 #endif
 

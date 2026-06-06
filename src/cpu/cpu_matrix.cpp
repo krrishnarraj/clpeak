@@ -87,8 +87,13 @@ static double runAmxInt8Chain(uint64_t outer)
       _tile_dpbssd(2, 4, 5);
       _tile_dpbssd(3, 4, 5);
     }
-  _tile_stored(0, g_amxC, 64);
-  return (double)g_amxC[0];
+  // Observe all four accumulator tiles so none is eliminated.
+  double sink = 0.0;
+  _tile_stored(0, g_amxC, 64); sink += g_amxC[0];
+  _tile_stored(1, g_amxC, 64); sink += g_amxC[0];
+  _tile_stored(2, g_amxC, 64); sink += g_amxC[0];
+  _tile_stored(3, g_amxC, 64); sink += g_amxC[0];
+  return sink;
 }
 #endif
 
@@ -112,8 +117,13 @@ static double runAmxBf16Chain(uint64_t outer)
       _tile_dpbf16ps(2, 4, 5);
       _tile_dpbf16ps(3, 4, 5);
     }
-  _tile_stored(0, g_amxCf, 64);
-  return (double)g_amxCf[0];
+  // Observe all four accumulator tiles so none is eliminated.
+  double sink = 0.0;
+  _tile_stored(0, g_amxCf, 64); sink += g_amxCf[0];
+  _tile_stored(1, g_amxCf, 64); sink += g_amxCf[0];
+  _tile_stored(2, g_amxCf, 64); sink += g_amxCf[0];
+  _tile_stored(3, g_amxCf, 64); sink += g_amxCf[0];
+  return sink;
 }
 #endif
 
@@ -136,7 +146,9 @@ static double runI8mmChain(uint64_t outer)
       for (int j = 0; j < MM_NACC; j++)
         acc[j] = vmmlaq_s32(acc[j], a, b);
     }
-  return (double)vaddvq_s32(acc[0]);
+  int32x4_t s = acc[0];
+  for (int j = 1; j < MM_NACC; j++) s = vaddq_s32(s, acc[j]);
+  return (double)vaddvq_s32(s);
 }
 #endif
 
@@ -159,7 +171,9 @@ static double runBfmmlaChain(uint64_t outer)
       for (int j = 0; j < BMM_NACC; j++)
         acc[j] = vbfmmlaq_f32(acc[j], a, b);
     }
-  return (double)vaddvq_f32(acc[0]);
+  float32x4_t s = acc[0];
+  for (int j = 1; j < BMM_NACC; j++) s = vaddq_f32(s, acc[j]);
+  return (double)vaddvq_f32(s);
 }
 #endif
 
