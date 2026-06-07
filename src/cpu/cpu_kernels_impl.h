@@ -310,35 +310,38 @@ static double runBf16Chain(uint64_t outer)
 // ---- Mixed precision (fp16 mul -> fp32 acc, widening FMLA) ------------------
 #if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
-static constexpr int MP_NACC = 24, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
+static constexpr int MP_NACC = 16, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];
-  float16x8_t m = vdupq_n_f16((float16_t)0.5f);
-  float16x8_t b = vdupq_n_f16((float16_t)0.001f);
+  // FMLAL can only *add* to the fp32 accumulator (its operands are fp16), so a
+  // pure-FMLAL chain `acc += m*b` is a LINEAR function of the iteration count and
+  // -ffast-math closes it into `acc += N*m*b`, deleting every FMLAL -> a peak that
+  // beats the impossible fp16 ceiling (mp must be <= ~0.5x fp16, FMLAL doing half
+  // the flops/instr).  A live-operand recurrence, distinct per-chain coefficients,
+  // and even an asm("+w") barrier all FAILED on the aarch64 server clang -- the
+  // work stays *linear*, so it's always close-form-able.  The robust fix is the
+  // fp16 chain's trick: feed the accumulator back as a MULTIPLICAND so the
+  // recurrence is genuinely NONLINEAR (no closed form exists).  FMLAL multiplies
+  // fp16, so narrow acc -> fp16 each step:
+  //   acc <- acc + narrow(acc)*(-decay) + 1*refill   ->  fixed point refill/decay.
+  // The vcvt is what makes it nonlinear (and uncollapsible); the constant refill
+  // keeps acc off zero so the feedback term stays meaningful.
+  const float16x8_t decay  = vdupq_n_f16((float16_t)-0.000977f);  // <0: contracts
+  const float16x8_t refill = vdupq_n_f16((float16_t) 0.001953f);
+  const float16x8_t one    = vdupq_n_f16((float16_t) 1.0f);
   for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
-      // FMLAL only *adds* to the fp32 accumulator (its operands are fp16), so a
-      // pure-FMLAL chain `acc += m*b` is a LINEAR function of the iteration count.
-      // -ffast-math then applies scalar evolution: it accumulates a single
-      // running sum and rewrites `acc[j] = acc[j]0 + N*m*b` outside the loop,
-      // deleting every FMLAL -> a fabricated peak that beats the impossible fp16
-      // ceiling (mp must be <= ~0.5x fp16 since FMLAL does half the flops/instr).
-      // The fp16 chain escapes this naturally (its accumulator *is* a multiplicand
-      // -> nonlinear), but FMLAL can't feed an fp32 acc back as an fp16 operand
-      // without a convert.  So force the operands opaque each iteration with an
-      // empty asm barrier (DoNotOptimize): zero instructions emitted, but the
-      // compiler can no longer prove the increment is constant and must run the
-      // FMLALs.  The 24 distinct-destination accumulators then can't be merged.
-      asm volatile("" : "+w"(m), "+w"(b));
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
       {
-        acc[j] = vfmlalq_low_f16(acc[j], m, b);
-        acc[j] = vfmlalq_high_f16(acc[j], m, b);
+        float16x4_t h  = vcvt_f16_f32(acc[j]);          // narrow: nonlinear feedback
+        float16x8_t hh = vcombine_f16(h, h);
+        acc[j] = vfmlalq_low_f16(acc[j], hh, decay);    // acc += narrow(acc)*(-decay)
+        acc[j] = vfmlalq_high_f16(acc[j], one, refill); // acc += 1*refill (off-zero)
       }
     }
   float32x4_t s = acc[0];

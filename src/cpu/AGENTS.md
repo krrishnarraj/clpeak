@@ -99,21 +99,24 @@ TU's flags define.
   `1.0` in fp16, making `acc=acc*1+0` invariant → the loop is deleted and fp16
   reports hundreds of TFLOPS. Use values distinct from `1.0`/`0.0` after fp16
   rounding (e.g. `0.9995`, `0.001`).
-- **The `mp` (FMLAL) kernel needs an optimization barrier — a recurrence isn't
-  enough.** It showed the impossible `mp > fp16` (FMLAL does half the flops/instr
-  of fp16 FMA, so `mp <= ~0.5x fp16`); AppleClang kept the loop, the Android/Linux
-  aarch64 clang fabricated it. The deep cause: FMLAL only *adds* to the fp32
-  accumulator (operands are fp16), so `acc += m*b` is a LINEAR function of the
-  iteration count, and `-ffast-math` scalar-evolution rewrites it to
-  `acc = acc0 + N*m*b` outside the loop (every FMLAL deleted). The fp16 chain
-  escapes naturally (its accumulator *is* a multiplicand → nonlinear); FMLAL
-  can't feed an fp32 acc back as an fp16 operand without a convert. Making the
-  operand a live recurrence and giving each chain a distinct coefficient both
-  FAILED (the work stays linear → still close-form-able). The fix is a hard
-  `asm volatile("" : "+w"(m), "+w"(b))` per iteration (DoNotOptimize): zero
-  instructions, but the operands become opaque so the increment can't be proven
-  constant and the FMLALs must run. Verify with `otool -tv`: the unrolled body is
-  `NACC*2*UNROLL_K` back-to-back `fmlal` (e.g. 24*2*4 = 192), no loads/stores.
+- **The `mp` (FMLAL) chain must be made NONLINEAR — only the accumulator-as-
+  multiplicand trick works.** It showed the impossible `mp > fp16` (FMLAL does
+  half the flops/instr of fp16 FMA, so `mp <= ~0.5x fp16`); AppleClang kept the
+  loop, the aarch64 server clang fabricated it. Root cause: FMLAL only *adds* to
+  the fp32 accumulator (operands are fp16), so `acc += m*b` is a LINEAR function
+  of the iteration count, and `-ffast-math` scalar-evolution rewrites it to
+  `acc = acc0 + N*m*b` outside the loop (every FMLAL deleted). Three fixes FAILED
+  because they left the work *linear*: a live-operand recurrence, distinct
+  per-chain coefficients, AND even an `asm volatile("+w")` barrier (the server
+  clang still closed the form). What works is what the fp16 chain does — make the
+  accumulator a *multiplicand* so the recurrence is genuinely nonlinear (no closed
+  form). FMLAL's operands are fp16, so narrow `acc -> fp16` and feed it back:
+  `acc += narrow(acc)*(-decay) + 1*refill` (fixed point refill/decay keeps it
+  bounded; the `vcvt` is the nonlinearity). Costs ~1 `vcvt` per 2 FMLAL, so `mp`
+  lands ~0.25x fp16 rather than the ideal ~0.5x — accept it; correctness beats a
+  collapsible chain. Diagnostic: a *collapsed* compute kernel reports a NOISY,
+  run-to-run-varying number (tiny timing); a real one is rock-steady. `otool -tv`:
+  the body is `NACC*2*UNROLL_K` `fmlal` (16*2*4 = 128) interleaved with `vcvt`.
 - **Reduce EVERY accumulator, not just `acc[0]`.** If the final reduction reads
   only `acc[0]`, `-O3` dead-code-eliminates the other `NACC-1` chains, leaving a
   single latency-bound chain — and because the op count still assumes all `NACC`
