@@ -97,6 +97,15 @@ int CpuPeak::runAll()
 
   auto backendScope = log->beginBackend("CPU");
 
+#if !CLPEAK_CPU_NATIVE_ARCH
+  // Portable build: tuned for a conservative baseline (SSE4.2 / armv8-a).  Until
+  // runtime ISA dispatch is wired up, higher-ISA paths (AVX2/AVX-512, and the
+  // advanced-dtype kernels) are inactive here.  A local user gets the best
+  // numbers by rebuilding with -DCLPEAK_CPU_NATIVE_ARCH=ON.
+  log->note("CPU: portable build (baseline ISA). For best performance on this "
+            "machine, rebuild with -DCLPEAK_CPU_NATIVE_ARCH=ON.\n");
+#endif
+
   std::vector<logger::Prop> props;
   props.push_back({"Vendor", info.vendor.empty() ? "Unknown" : info.vendor});
   props.push_back({"ISA",    info.isaName});

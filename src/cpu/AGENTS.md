@@ -49,13 +49,31 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 
 ## ISA strategy
 
-The binary is built `-march=native` (x86) / `-mcpu=native` (Apple/ARM), so the
-compiler's `__AVX512F__` / `__ARM_FEATURE_*` macros reflect exactly the build
-host's capabilities — `cpu_device.cpp` reads those into the `info` flags, and
-each advanced kernel is `#if`-guarded on the same macro with a runtime
-`info.has*` check, recording a clean `Unsupported` row when the feature is
-absent (e.g. bf16 / i8mm on Apple M1). Note: AppleClang's `-march=native`
-under-enables fp16/bf16/i8mm — hence `-mcpu=native` is preferred there.
+Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
+
+- **Portable (default, OFF)** — baseline ISA only: SSE4.2 on x86, armv8-a on ARM
+  (`-msse4.2` / toolchain default; MSVC x64 default). Safe to distribute across
+  machines (no illegal instructions on older CPUs). A startup `log->note()`
+  advises rebuilding native for best local numbers. *(Caveat: AppleClang on
+  macOS implicitly targets the host CPU even with no `-mcpu`, so a macOS
+  "portable" build is still host-tuned — Linux is where the baseline downgrade
+  actually takes effect. The runtime-dispatch work below makes this uniform.)*
+- **Native (ON)** — `-march=native` (x86) / `-mcpu=native` (Apple/ARM): tuned for
+  the build host, **not portable**. Fastest for a local build/run.
+
+Today each advanced kernel is `#if`-guarded on a compile feature macro
+(`__AVX512F__` / `__ARM_FEATURE_*`) with a runtime `info.has*` check, recording a
+clean `Unsupported` row when absent. `cpu_device.cpp` fills `info.has*` from those
+compile macros — correct for a native (single-target) build.
+
+**Planned: per-TU runtime ISA dispatch.** To get one *portable* binary that also
+uses AVX2/AVX-512/VNNI/… on capable hosts, the compute/read kernels will be
+compiled once per **feature** TU (each with its own `-m…`/`/arch:` flags) and
+selected at runtime via CPUID (`__builtin_cpu_supports` / `__cpuid`) on x86 and
+HWCAP (`getauxval`) / `sysctlbyname` on ARM. AVX-512 is per-feature (F/BW/VL vs
+VNNI vs BF16 vs FP16 vs AMX are separate TUs, each entered only when its full
+feature set is present). When that lands, `info.has*` moves from compile macros
+to the runtime probe and drives both dispatch and the Unsupported rows.
 
 ## Gotchas
 
