@@ -1,4 +1,25 @@
 cmake_minimum_required(VERSION 3.20)
+
+# On Linux, prefer clang/clang++ over the distro-default GCC when the user has not
+# pinned a compiler.  The CPU backend keeps 24 independent FMA accumulator chains
+# in flight per kernel; clang schedules those cleanly, but GCC<=14 serialises them
+# into a single register (and skips the k-loop unroll), roughly halving fp32/fp64
+# throughput.  Must run before project().  Respects any explicit choice: CC/CXX
+# env vars, -DCMAKE_C[XX]_COMPILER, a toolchain file, or the oneAPI icpx build.
+# (macOS already defaults to AppleClang; Windows to MSVC -- both are left alone.)
+if(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE
+   AND NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER
+   AND NOT DEFINED ENV{CXX} AND NOT DEFINED ENV{CC}
+   AND NOT CMAKE_TOOLCHAIN_FILE)
+    find_program(CLPEAK_CLANG_C   NAMES clang)
+    find_program(CLPEAK_CLANG_CXX NAMES clang++)
+    if(CLPEAK_CLANG_C AND CLPEAK_CLANG_CXX)
+        set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_C}"   CACHE FILEPATH "C compiler")
+        set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CXX}" CACHE FILEPATH "C++ compiler")
+        message(STATUS "clpeak: preferring clang (${CLPEAK_CLANG_CXX}) for CPU-backend codegen; pass -DCMAKE_CXX_COMPILER=g++ to override")
+    endif()
+endif()
+
 project(clpeak)
 
 set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")

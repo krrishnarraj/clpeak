@@ -196,6 +196,14 @@ small fp32 gap to Intel's vectorizer on AVX2 is codegen, not accumulator count.
 Re-measure a NACC sweep when validating on a new x86 host. The residual gap to
 100% is all-core frequency throttling + (on macOS) no hard pinning (ST swings
 P↔E core).
+- **Build the CPU backend with clang, not GCC.** NACC=24 assumes the compiler can
+  schedule 24 independent FMA accumulator chains; clang (and GCC≥15) do, but
+  GCC≤14 serialises them into one register and skips the k-loop unroll, roughly
+  halving fp32/fp64 (a Neoverse CI run sat at ~28% of peak with GCC-13 — objdump
+  showed every `fmla` targeting one reg + in-loop `str`). So the root
+  `CMakeLists.txt` prefers `clang`/`clang++` over GCC on Linux when the user
+  hasn't pinned a compiler, and the CI installs clang. Don't reintroduce
+  per-compiler NACC constants — fix the toolchain instead.
 
 ## When You Change This Directory
 

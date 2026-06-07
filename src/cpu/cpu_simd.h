@@ -98,6 +98,8 @@ using f32v = float32x4_t;
 constexpr int F32_LANES = 4;
 // Firestorm fp32 FMLA latency is ~6 cycles across 4 FP pipes, so ~24 in-flight
 // accumulators are needed to saturate (NACC=16 left fp32 at ~62% of peak).
+// NB: this assumes a compiler that schedules 24 independent chains well (clang
+// does; GCC<=14 serialises them -- the root CMake prefers clang on Linux).
 constexpr int F32_NACC  = 24;
 static inline f32v f32_set(float a)            { return vdupq_n_f32(a); }
 static inline f32v f32_load(const float *p)    { return vld1q_f32(p); }
