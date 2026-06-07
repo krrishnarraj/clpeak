@@ -153,50 +153,6 @@ jobs:
         shell: bash
         run: ${{ matrix.binary }} --cpu 2>&1 || true
 
-      # Linux arm64 only: the FMA compute chains (fp32/fp64/fp16/mp) under-run on
-      # Neoverse while the dot/matrix engines saturate, so dump the disassembly of
-      # the hot kernels from the TU the runtime dispatcher actually selects (i8mm
-      # on a full-feature Neoverse) to tell register spilling (ldr/str in the hot
-      # loop) from plain FMA-latency under-saturation (clean back-to-back fmla).
-      # Printed to the log and uploaded as an artifact.
-      - name: Dump FMA kernel disassembly (Neoverse codegen)
-        if: matrix.name == 'Linux arm64'
-        shell: bash
-        run: |
-          set +e
-          OBJ=$(find build -name 'cpu_kernels_tu.cpp.o' -path '*i8mm*' 2>/dev/null | head -1)
-          [ -z "$OBJ" ] && OBJ=$(find build -name 'cpu_kernels_tu.cpp.o' 2>/dev/null | head -1)
-          if [ -z "$OBJ" ]; then echo "no cpu_kernels_tu.cpp.o found; skipping"; exit 0; fi
-          echo "Disassembling: $OBJ"
-          objdump -dC --no-show-raw-insn "$OBJ" > cpu_kernels_full.s
-          : > cpu_kernels_hot.s
-          for fn in runFp32Chain runFp64Chain runFp16Chain runMpChain runBf16Chain; do
-            blk=$(awk -v RS= -v fn="$fn" '$0 ~ ("<.*"fn".*>:")' cpu_kernels_full.s)
-            echo "================ $fn ================" >> cpu_kernels_hot.s
-            if [ -z "$blk" ]; then echo "(symbol not present in this TU)" >> cpu_kernels_hot.s; continue; fi
-            printf '%s\n' "$blk" >> cpu_kernels_hot.s
-            printf '>>> %s: fmla=%s fmlal=%s cvt=%s ldr/ldp=%s str/stp=%s\n' "$fn" \
-              "$(printf '%s' "$blk" | grep -ciE '\bfmla\b')" \
-              "$(printf '%s' "$blk" | grep -ci  'fmlal')" \
-              "$(printf '%s' "$blk" | grep -ciE '\b[fsu]?cvt')" \
-              "$(printf '%s' "$blk" | grep -ciE '\b(ldr|ldp)\b')" \
-              "$(printf '%s' "$blk" | grep -ciE '\b(str|stp)\b')" >> cpu_kernels_hot.s
-          done
-          echo "===== hot-kernel spill/fmla summary (ldr/str in the loop => register spill) ====="
-          grep '^>>>' cpu_kernels_hot.s || true
-          echo "===== full hot-kernel disassembly ====="
-          cat cpu_kernels_hot.s
-
-      - name: Upload kernel disassembly (Linux arm64)
-        if: matrix.name == 'Linux arm64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clpeak-linux-arm64-kernel-asm
-          path: |
-            cpu_kernels_hot.s
-            cpu_kernels_full.s
-          if-no-files-found: warn
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
