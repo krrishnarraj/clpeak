@@ -3,124 +3,18 @@
 #include <cpu/cpu_peak.h>
 #include <common/common.h>
 #include <common/result_store.h>
-#include "cpu_simd.h"
+#include "cpu_kernels.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
-// Streaming read with explicit SIMD loads and integer XOR sinks.  This keeps
-// the loads observable without turning the read-bandwidth test into an FP-add
-// throughput test.
-//
-// NOTE on why the loads aren't optimized away: XOR is self-inverse, so XORing
-// the same address twice cancels — a compiler that proved the buffer is
-// loop-invariant could in principle strength-reduce the outer `iters` loop to a
-// single pass.  It does not here because (a) the working set is always far
-// larger than the register file, so a whole pass can't be hoisted, and (b) the
-// returned checksum feeds a volatile sink in the caller.  If this is ever
-// refactored to a tiny (register-sized) buffer, re-check the generated asm.
-static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
+// The streaming-read kernel is ISA-dispatched (compiled per-ISA in
+// cpu_kernels_tu.cpp).  Forward to the selected variant.
+static inline uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
 {
-#if defined(__AVX512F__)
-  constexpr size_t W = 16;
-  const size_t step = 8 * W;
-  __m512i x0 = _mm512_setzero_si512(), x1 = x0, x2 = x0, x3 = x0;
-  __m512i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
-  uint64_t tail = 0;
-
-  for (uint64_t it = 0; it < iters; it++)
-  {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
-    {
-      x0 = _mm512_xor_si512(x0, _mm512_castps_si512(_mm512_loadu_ps(p + i + 0 * W)));
-      x1 = _mm512_xor_si512(x1, _mm512_castps_si512(_mm512_loadu_ps(p + i + 1 * W)));
-      x2 = _mm512_xor_si512(x2, _mm512_castps_si512(_mm512_loadu_ps(p + i + 2 * W)));
-      x3 = _mm512_xor_si512(x3, _mm512_castps_si512(_mm512_loadu_ps(p + i + 3 * W)));
-      x4 = _mm512_xor_si512(x4, _mm512_castps_si512(_mm512_loadu_ps(p + i + 4 * W)));
-      x5 = _mm512_xor_si512(x5, _mm512_castps_si512(_mm512_loadu_ps(p + i + 5 * W)));
-      x6 = _mm512_xor_si512(x6, _mm512_castps_si512(_mm512_loadu_ps(p + i + 6 * W)));
-      x7 = _mm512_xor_si512(x7, _mm512_castps_si512(_mm512_loadu_ps(p + i + 7 * W)));
-    }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
-  }
-  __m512i x = _mm512_xor_si512(_mm512_xor_si512(_mm512_xor_si512(x0, x1), _mm512_xor_si512(x2, x3)),
-                               _mm512_xor_si512(_mm512_xor_si512(x4, x5), _mm512_xor_si512(x6, x7)));
-  alignas(64) uint64_t tmp[8]; _mm512_store_si512((__m512i*)tmp, x);
-  for (uint64_t v : tmp) tail ^= v;
-  return tail;
-
-#elif defined(__AVX2__)
-  constexpr size_t W = 8;
-  const size_t step = 8 * W;
-  __m256i x0 = _mm256_setzero_si256(), x1 = x0, x2 = x0, x3 = x0;
-  __m256i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
-  uint64_t tail = 0;
-
-  for (uint64_t it = 0; it < iters; it++)
-  {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
-    {
-      x0 = _mm256_xor_si256(x0, _mm256_castps_si256(_mm256_loadu_ps(p + i + 0 * W)));
-      x1 = _mm256_xor_si256(x1, _mm256_castps_si256(_mm256_loadu_ps(p + i + 1 * W)));
-      x2 = _mm256_xor_si256(x2, _mm256_castps_si256(_mm256_loadu_ps(p + i + 2 * W)));
-      x3 = _mm256_xor_si256(x3, _mm256_castps_si256(_mm256_loadu_ps(p + i + 3 * W)));
-      x4 = _mm256_xor_si256(x4, _mm256_castps_si256(_mm256_loadu_ps(p + i + 4 * W)));
-      x5 = _mm256_xor_si256(x5, _mm256_castps_si256(_mm256_loadu_ps(p + i + 5 * W)));
-      x6 = _mm256_xor_si256(x6, _mm256_castps_si256(_mm256_loadu_ps(p + i + 6 * W)));
-      x7 = _mm256_xor_si256(x7, _mm256_castps_si256(_mm256_loadu_ps(p + i + 7 * W)));
-    }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
-  }
-  __m256i x = _mm256_xor_si256(_mm256_xor_si256(_mm256_xor_si256(x0, x1), _mm256_xor_si256(x2, x3)),
-                               _mm256_xor_si256(_mm256_xor_si256(x4, x5), _mm256_xor_si256(x6, x7)));
-  alignas(32) uint64_t tmp[4]; _mm256_store_si256((__m256i*)tmp, x);
-  for (uint64_t v : tmp) tail ^= v;
-  return tail;
-
-#elif defined(__ARM_NEON) || defined(__aarch64__)
-  constexpr size_t W = 4;
-  const size_t step = 8 * W;
-  uint32x4_t x0 = vdupq_n_u32(0), x1 = x0, x2 = x0, x3 = x0;
-  uint32x4_t x4 = x0, x5 = x0, x6 = x0, x7 = x0;
-  uint64_t tail = 0;
-
-  for (uint64_t it = 0; it < iters; it++)
-  {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
-    {
-      x0 = veorq_u32(x0, vreinterpretq_u32_f32(vld1q_f32(p + i + 0 * W)));
-      x1 = veorq_u32(x1, vreinterpretq_u32_f32(vld1q_f32(p + i + 1 * W)));
-      x2 = veorq_u32(x2, vreinterpretq_u32_f32(vld1q_f32(p + i + 2 * W)));
-      x3 = veorq_u32(x3, vreinterpretq_u32_f32(vld1q_f32(p + i + 3 * W)));
-      x4 = veorq_u32(x4, vreinterpretq_u32_f32(vld1q_f32(p + i + 4 * W)));
-      x5 = veorq_u32(x5, vreinterpretq_u32_f32(vld1q_f32(p + i + 5 * W)));
-      x6 = veorq_u32(x6, vreinterpretq_u32_f32(vld1q_f32(p + i + 6 * W)));
-      x7 = veorq_u32(x7, vreinterpretq_u32_f32(vld1q_f32(p + i + 7 * W)));
-    }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
-  }
-  uint32x4_t x = veorq_u32(veorq_u32(veorq_u32(x0, x1), veorq_u32(x2, x3)),
-                           veorq_u32(veorq_u32(x4, x5), veorq_u32(x6, x7)));
-  alignas(16) uint32_t tmp[4]; vst1q_u32(tmp, x);
-  for (uint32_t v : tmp) tail ^= v;
-  return tail;
-
-#else
-  uint64_t acc = 0;
-  for (uint64_t it = 0; it < iters; it++)
-    for (size_t i = 0; i < M; i++)
-    {
-      uint32_t v;
-      std::memcpy(&v, p + i, sizeof(v));
-      acc ^= v;
-    }
-  return acc;
-#endif
+  return clpeak_cpu::kernels().readsum(p, M, iters);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +152,6 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
   };
 
-  // read: N*4 bytes
   {
     Workload body = [&](int tid, uint64_t iters) {
       size_t lo, hi; chunk(tid, lo, hi);
@@ -267,7 +160,6 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
     test.emit("read", gbps((double)N * sizeof(float), us));
   }
-  // copy: A=C -> N*4 read + N*4 write
   {
     Workload body = [&](int tid, uint64_t iters) {
       size_t lo, hi; chunk(tid, lo, hi);
@@ -277,7 +169,6 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
     test.emit("copy", gbps(2.0 * N * sizeof(float), us));
   }
-  // triad: A = B + s*C -> 2 read + 1 write
   {
     const float s = 1.5f;
     Workload body = [&](int tid, uint64_t iters) {
@@ -314,7 +205,6 @@ int CpuPeak::runMemcpyBandwidth(benchmark_config_t &cfg)
     hi = (tid == maxT - 1) ? N : lo + per;
   };
 
-  // Untouched alloc + parallel first-touch (NUMA-local), as in runDramBandwidth.
   float *src = new float[N];
   float *dst = new float[N];
   pool->run(maxT, [&](int tid) {
@@ -330,7 +220,7 @@ int CpuPeak::runMemcpyBandwidth(benchmark_config_t &cfg)
       std::memcpy(dst + lo, src + lo, (hi - lo) * sizeof(float));
   };
   double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-  double bytes = 2.0 * N * sizeof(float);   // read + write
+  double bytes = 2.0 * N * sizeof(float);
   test.emit("memcpy", us > 0.0 ? (float)(bytes / (us * 1e3)) : -1.0f);
   delete[] src; delete[] dst;
   return 0;

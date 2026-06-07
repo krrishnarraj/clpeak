@@ -1,6 +1,7 @@
 #ifdef ENABLE_CPU
 
 #include <cpu/cpu_peak.h>
+#include "cpu_kernels.h"
 
 #include <cctype>
 #include <cstdint>
@@ -176,55 +177,22 @@ static std::string x86Vendor()
 #endif
 
 // ---------------------------------------------------------------------------
-// ISA capability + name.  The backend is built with -march=native, so the
-// compiler's feature macros already reflect exactly what the build host
-// supports — we read those, and additionally runtime-probe on x86 for the few
-// flags that matter when the binary is moved to a different (older) host.
+// ISA capability + name, from the RUNTIME feature probe (cpu_dispatch.cpp), so
+// these reflect the host the binary is actually running on — not the build host.
 // ---------------------------------------------------------------------------
 static void detectIsa(cpu_device_info_t &info)
 {
-#if defined(__AVX512F__)
-  info.hasAVX512 = true;
-#endif
-#if defined(__AVX2__)
-  info.hasAVX2 = true;
-#endif
-#if defined(__FMA__)
-  info.hasFMA = true;
-#endif
-#if defined(__ARM_NEON) || defined(__aarch64__)
-  info.hasNEON = true;
-#endif
-#if defined(__AVX512FP16__) || defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  info.hasFP16 = true;
-#endif
-#if defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)
-  info.hasFP16FML = true;
-#endif
-#if defined(__AVX512BF16__) || defined(__ARM_FEATURE_BF16) || defined(__ARM_FEATURE_BF16_VECTOR_ARITHMETIC)
-  info.hasBF16 = true;
-#endif
-#if defined(__AVX512VNNI__) || defined(__AVXVNNI__) || defined(__AVXVNNIINT8__) || defined(__ARM_FEATURE_DOTPROD)
-  info.hasInt8DP = true;
-#endif
-#if defined(__AMX_INT8__) || defined(__AMX_BF16__)
-  info.hasAMX = true;
-#endif
-
-  // Name the widest SIMD path the kernels will actually take.
-  if (info.hasAVX512)
-    info.isaName = "AVX-512";
-  else if (info.hasAVX2)
-    info.isaName = info.hasFMA ? "AVX2+FMA" : "AVX2";
-  else if (info.hasNEON)
-    info.isaName = "NEON";
-#if defined(CLPEAK_CPU_X86)
-  else
-    info.isaName = "SSE2";
-#else
-  else
-    info.isaName = "scalar";
-#endif
+  const clpeak_cpu::CpuFeatures &f = clpeak_cpu::cpuFeatures();
+  info.hasAVX2    = f.avx2;
+  info.hasFMA     = f.fma;
+  info.hasAVX512  = f.avx512f;
+  info.hasNEON    = f.neon;
+  info.hasFP16    = f.fp16 || f.avx512fp16;
+  info.hasFP16FML = f.fp16fml;
+  info.hasBF16    = f.bf16 || f.avx512bf16;
+  info.hasInt8DP  = f.dotprod || f.avx512vnni;
+  info.hasAMX     = f.amx_int8 || f.amx_bf16;
+  info.isaName    = clpeak_cpu::isaName();
 }
 
 // ---------------------------------------------------------------------------

@@ -30,12 +30,16 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 | `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup + probe + `pickIters` timed batch via the pool), `enumerate`, `printInventory` |
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 per-instance **and aggregate** (`l3TotalBytes`, from `index3/shared_cpu_list` on Linux / summed on Windows) sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning (`pthread_setaffinity_np` / `SetThreadAffinityMask`; advisory no-op on macOS) |
-| `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / NEON / scalar) with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) |
+| `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *compile flags of the TU it is built in*, with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) + `CPU_UNROLL_*` |
+| **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants for this host) |
+| **`cpu_kernels_impl.h`** | **All** chain bodies (fp32/fp64/int32/fp16/bf16/mp/int8dp/matrix/readsum), `#if`-gated by compile features, + the per-TU `tuTable()` builder. Included once per feature TU |
+| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avx512[vnni\|bf16\|fp16]`, `amx`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`; or `native`) with that ISA's flags |
+| **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`) and `kernels()` assembly — merges supported TUs (`generic` ungated floor, then higher ISA gated on full feature set) picking the widest variant per kernel |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics |
-| `compute_float.cpp` | `runComputeSP/DP` (FMA chains), `runComputeHP` (native fp16 FMA), `runComputeBF16` (bf16 dot), `runComputeMP` (conversion-free fp16-mul→fp32-acc widening FMLA where the ISA supports it) |
-| `compute_int.cpp` | `runComputeInt32` (int madd chain), `runComputeInt8DP` (VNNI / dotprod), `runAtomicThroughput` (uncontended / contended / sharded) |
-| `cpu_matrix.cpp` | `runCpuMatrix` — Intel AMX tile matmul (int8 + bf16, Linux) / ARM SMMLA (int8) / BFMMLA (bf16); `Benchmark::Amx`, run in both fp and int phases |
-| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3 read, 1T + NT, shared-cache MT sets split across threads, load + integer checksum so FP adds do not bottleneck reads), `runMemcpyBandwidth`. DRAM/memcpy arrays are sized off the **aggregate** L3 (`pickStreamFloats`) and first-touched in parallel for NUMA-local placement |
+| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` methods — look up `kernels().fpXX` and emit (or `Unsupported`). Kernel bodies live in `cpu_kernels_impl.h` |
+| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `kernels()`), `runAtomicThroughput` (ISA-neutral, kept here) |
+| `cpu_matrix.cpp` | `runCpuMatrix` — emits `kernels().mat_int8` / `mat_fp` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
+| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads), `runMemcpyBandwidth`. The read kernel is `kernels().readsum`; DRAM/memcpy arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns), `runThreadLatency` (pool round-trip, us) |
 
 ## Build

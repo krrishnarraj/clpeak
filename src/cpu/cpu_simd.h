@@ -71,6 +71,20 @@ static inline float f32_hsum(f32v a)
   lo = _mm_hadd_ps(lo, lo);
   return _mm_cvtss_f32(lo);
 }
+#elif defined(__SSE2__)
+using f32v = __m128;
+constexpr int F32_LANES = 4;
+constexpr int F32_NACC  = 12;   // 16 XMM registers on x86-64
+static inline f32v f32_set(float a)            { return _mm_set1_ps(a); }
+static inline f32v f32_load(const float *p)    { return _mm_loadu_ps(p); }
+static inline f32v f32_fma(f32v a, f32v b, f32v c) { return _mm_add_ps(_mm_mul_ps(a, b), c); } // no FMA on SSE
+static inline f32v f32_add(f32v a, f32v b)     { return _mm_add_ps(a, b); }
+static inline float f32_hsum(f32v a)
+{
+  __m128 t = _mm_add_ps(a, _mm_movehl_ps(a, a));
+  t = _mm_add_ss(t, _mm_shuffle_ps(t, t, 0x55));
+  return _mm_cvtss_f32(t);
+}
 #elif defined(__ARM_NEON) || defined(__aarch64__)
 using f32v = float32x4_t;
 constexpr int F32_LANES = 4;
@@ -118,6 +132,14 @@ static inline double f64_hsum(f64v a)
   lo = _mm_add_pd(lo, hi);
   return _mm_cvtsd_f64(_mm_hadd_pd(lo, lo));
 }
+#elif defined(__SSE2__)
+using f64v = __m128d;
+constexpr int F64_LANES = 2;
+constexpr int F64_NACC  = 12;
+static inline f64v f64_set(double a)           { return _mm_set1_pd(a); }
+static inline f64v f64_fma(f64v a, f64v b, f64v c) { return _mm_add_pd(_mm_mul_pd(a, b), c); }
+static inline f64v f64_add(f64v a, f64v b)     { return _mm_add_pd(a, b); }
+static inline double f64_hsum(f64v a)          { return _mm_cvtsd_f64(_mm_add_sd(a, _mm_unpackhi_pd(a, a))); }
 #elif defined(__aarch64__)
 using f64v = float64x2_t;
 constexpr int F64_LANES = 2;
@@ -162,6 +184,19 @@ static inline int   i32_hsum(i32v a)
   lo = _mm_hadd_epi32(lo, lo);
   lo = _mm_hadd_epi32(lo, lo);
   return _mm_cvtsi128_si32(lo);
+}
+#elif defined(__SSE4_1__)
+using i32v = __m128i;
+constexpr int I32_LANES = 4;
+constexpr int I32_NACC  = 12;
+static inline i32v i32_set(int a)              { return _mm_set1_epi32(a); }
+static inline i32v i32_madd(i32v a, i32v b, i32v c) { return _mm_add_epi32(_mm_mullo_epi32(a, b), c); } // mullo = SSE4.1
+static inline i32v i32_add(i32v a, i32v b)     { return _mm_add_epi32(a, b); }
+static inline int   i32_hsum(i32v a)
+{
+  __m128i t = _mm_add_epi32(a, _mm_shuffle_epi32(a, 0x4E));
+  t = _mm_add_epi32(t, _mm_shuffle_epi32(t, 0xB1));
+  return _mm_cvtsi128_si32(t);
 }
 #elif defined(__ARM_NEON) || defined(__aarch64__)
 using i32v = int32x4_t;
