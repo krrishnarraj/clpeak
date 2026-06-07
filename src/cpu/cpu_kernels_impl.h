@@ -310,45 +310,36 @@ static double runBf16Chain(uint64_t outer)
 // ---- Mixed precision (fp16 mul -> fp32 acc, widening FMLA) ------------------
 #if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
-// NACC halved vs the FP chains: each accumulator also holds a distinct fp16
-// multiplicand (m[j]), so the budget is 2 vector regs per chain (12*2 = 24 of
-// the 32 V-regs, leaving room for b / its recurrence consts / FMLAL temps).
-static constexpr int MP_NACC = 12, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
+static constexpr int MP_NACC = 24, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];
-  float16x8_t m[MP_NACC];
-  // Two pitfalls the operands must dodge, or the reported peak is fabricated:
-  //  (1) const-fold: two *constant* multiplicands make `vfmlalq(acc, m, b)`
-  //      degenerate to `acc += const`, an arithmetic series -ffast-math strength-
-  //      reduces to `acc += N*const` (loop deleted).  -> the shared `b` is a live
-  //      recurrence (b = b*bc + bd, bounded by its fixed point bd/(1-bc)), so the
-  //      per-iter increment varies with k and can't be folded.
-  //  (2) chain dedup: if every acc[j] takes the *same* increment, the NACC
-  //      "independent" chains are identical and the compiler keeps ~1 while the
-  //      op count still bills all NACC -> mp can exceed the fp16 ceiling (it must
-  //      be <= ~0.5x fp16, since FMLAL does half the flops/instr of fp16 FMA).
-  //      -> each acc[j] uses a *distinct* constant multiplicand m[j], so the
-  //      increments differ per chain and the chains can't be merged.
-  float16x8_t b        = vdupq_n_f16((float16_t)0.5f);
-  const float16x8_t bc = vdupq_n_f16((float16_t)0.9995f);
-  const float16x8_t bd = vdupq_n_f16((float16_t)0.001f);
-  for (int j = 0; j < MP_NACC; j++)
-  {
-    acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
-    m[j]   = vdupq_n_f16((float16_t)(0.30f + 0.02f * j));  // distinct per chain
-  }
+  float16x8_t m = vdupq_n_f16((float16_t)0.5f);
+  float16x8_t b = vdupq_n_f16((float16_t)0.001f);
+  for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
+      // FMLAL only *adds* to the fp32 accumulator (its operands are fp16), so a
+      // pure-FMLAL chain `acc += m*b` is a LINEAR function of the iteration count.
+      // -ffast-math then applies scalar evolution: it accumulates a single
+      // running sum and rewrites `acc[j] = acc[j]0 + N*m*b` outside the loop,
+      // deleting every FMLAL -> a fabricated peak that beats the impossible fp16
+      // ceiling (mp must be <= ~0.5x fp16 since FMLAL does half the flops/instr).
+      // The fp16 chain escapes this naturally (its accumulator *is* a multiplicand
+      // -> nonlinear), but FMLAL can't feed an fp32 acc back as an fp16 operand
+      // without a convert.  So force the operands opaque each iteration with an
+      // empty asm barrier (DoNotOptimize): zero instructions emitted, but the
+      // compiler can no longer prove the increment is constant and must run the
+      // FMLALs.  The 24 distinct-destination accumulators then can't be merged.
+      asm volatile("" : "+w"(m), "+w"(b));
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
       {
-        acc[j] = vfmlalq_low_f16(acc[j], m[j], b);
-        acc[j] = vfmlalq_high_f16(acc[j], m[j], b);
+        acc[j] = vfmlalq_low_f16(acc[j], m, b);
+        acc[j] = vfmlalq_high_f16(acc[j], m, b);
       }
-      b = vfmaq_f16(bd, b, bc);   // one shared recurrence update per k (amortized)
     }
   float32x4_t s = acc[0];
   for (int j = 1; j < MP_NACC; j++) s = vaddq_f32(s, acc[j]);
@@ -430,9 +421,11 @@ static double runInt8DpChain(uint64_t outer)
 #define CPU_MAT_INT8_KERNEL 1
 static constexpr double MAT_I8_OPS_PER_K = 4.0 * 16 * 16 * 64 * 2;
 static thread_local bool g_amxI8Cfg = false;
-alignas(64) static int8_t  g_amxA[16 * 64];
+alignas(64) static int8_t  g_amxA[16 * 64];   // inputs: read-only, shared is fine
 alignas(64) static int8_t  g_amxB[16 * 64];
-alignas(64) static int32_t g_amxC[16 * 16];
+// Output is written by every MT worker; thread_local avoids a data race and the
+// cross-thread cache-line invalidation that shared storage would cause.
+alignas(64) static thread_local int32_t g_amxC[16 * 16];
 static void amxConfigTiles()
 {
   struct { uint8_t palette, start_row, reserved[14]; uint16_t colsb[16]; uint8_t rows[16]; } cfg = {};
@@ -483,9 +476,10 @@ static double runMatInt8Chain(uint64_t outer)
 #define CPU_MAT_FP_KERNEL 1
 static constexpr double MAT_FP_OPS_PER_K = 4.0 * 16 * 16 * 32 * 2;
 static thread_local bool g_amxBf16Cfg = false;
-alignas(64) static uint16_t g_amxAb[16 * 32];
+alignas(64) static uint16_t g_amxAb[16 * 32];   // inputs: read-only, shared is fine
 alignas(64) static uint16_t g_amxBb[16 * 32];
-alignas(64) static float    g_amxCf[16 * 16];
+// Output is written by every MT worker; thread_local avoids a data race (see int8).
+alignas(64) static thread_local float g_amxCf[16 * 16];
 static void amxConfigTilesBf16()
 {
   struct { uint8_t palette, start_row, reserved[14]; uint16_t colsb[16]; uint8_t rows[16]; } cfg = {};

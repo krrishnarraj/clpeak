@@ -99,23 +99,21 @@ TU's flags define.
   `1.0` in fp16, making `acc=acc*1+0` invariant → the loop is deleted and fp16
   reports hundreds of TFLOPS. Use values distinct from `1.0`/`0.0` after fp16
   rounding (e.g. `0.9995`, `0.001`).
-- **The `mp` (FMLAL) kernel must dodge BOTH const-fold and chain-dedup.** It
-  showed the impossible `mp > fp16` (FMLAL does half the flops/instr of fp16 FMA,
-  so `mp <= ~0.5x fp16`) — per-toolchain: AppleClang kept the loop, the
-  Android/Linux aarch64 clang fabricated it. Two distinct hazards, both needed:
-  1. *Const-fold:* two constant multiplicands make `vfmlalq(acc, m, b)` =
-     `acc += const`, an arithmetic series `-ffast-math` reduces to `acc += N*const`
-     (loop deleted). The shared `b` is a live recurrence (`b = b*bc + bd`, bounded
-     by its fixed point) so the per-iter increment varies with `k`.
-  2. *Chain dedup:* if every `acc[j]` takes the *same* increment, the NACC chains
-     are identical and the compiler keeps ~1 while the op count bills all NACC —
-     a partial over-count (this was the residual after only fixing 1). Each
-     `acc[j]` uses a *distinct* constant multiplicand `m[j]`, so the chains can't
-     merge. (The fp16 chain sidesteps both because its accumulator *is* its own
-     multiplicand — `acc = acc*b + c` — which FMLAL can't do: fp32 acc can't be an
-     fp16 operand without a convert.) NACC is halved (12) since each chain now
-     also holds an `m[j]` register. Verify with `otool -tv`: the unrolled body is
-     `NACC*2*UNROLL_K` back-to-back `fmlal`, no loads/stores.
+- **The `mp` (FMLAL) kernel needs an optimization barrier — a recurrence isn't
+  enough.** It showed the impossible `mp > fp16` (FMLAL does half the flops/instr
+  of fp16 FMA, so `mp <= ~0.5x fp16`); AppleClang kept the loop, the Android/Linux
+  aarch64 clang fabricated it. The deep cause: FMLAL only *adds* to the fp32
+  accumulator (operands are fp16), so `acc += m*b` is a LINEAR function of the
+  iteration count, and `-ffast-math` scalar-evolution rewrites it to
+  `acc = acc0 + N*m*b` outside the loop (every FMLAL deleted). The fp16 chain
+  escapes naturally (its accumulator *is* a multiplicand → nonlinear); FMLAL
+  can't feed an fp32 acc back as an fp16 operand without a convert. Making the
+  operand a live recurrence and giving each chain a distinct coefficient both
+  FAILED (the work stays linear → still close-form-able). The fix is a hard
+  `asm volatile("" : "+w"(m), "+w"(b))` per iteration (DoNotOptimize): zero
+  instructions, but the operands become opaque so the increment can't be proven
+  constant and the FMLALs must run. Verify with `otool -tv`: the unrolled body is
+  `NACC*2*UNROLL_K` back-to-back `fmlal` (e.g. 24*2*4 = 192), no loads/stores.
 - **Reduce EVERY accumulator, not just `acc[0]`.** If the final reduction reads
   only `acc[0]`, `-O3` dead-code-eliminates the other `NACC-1` chains, leaving a
   single latency-bound chain — and because the op count still assumes all `NACC`
@@ -126,6 +124,20 @@ TU's flags define.
 - **macOS has no hard thread affinity**, so single-thread (`ST`) numbers vary
   run-to-run as the kernel lands on a P- or E-core. `MT` numbers are stable.
   Pinning is real on Linux/Windows.
+- **AMX (Intel) specifics.** The tile intrinsics (`_tile_dpbssd` / `_tile_dpbf16ps`)
+  are *opaque* to the optimizer — it doesn't model tile contents as SSA values —
+  so the accumulate loop can't be scalar-evolved/collapsed the way the FMLAL `mp`
+  chain was (no `asm` barrier needed). 4 accumulator tiles (0–3) + 2 operand tiles
+  (4,5) is the canonical config to hide the ~52-cycle TMUL latency; all 4 are
+  stored so none is DCE'd. The TILECFG struct is exactly 64 B (palette=1, then
+  `colsb`/`rows`), and `_tile_loadconfig` is per-thread (gated by a `thread_local`
+  flag). Input tiles are zero (uninitialized) on purpose — AMX throughput is
+  data-independent and zeros avoid int32/fp32 accumulator overflow. **Output tiles
+  must be `thread_local`** (every MT worker stores to them; shared `static` is a
+  data race + false sharing). `arch_prctl(ARCH_REQ_XCOMP_PERM)` is process-wide
+  and requested once at `kernels()` init before any worker issues a tile op.
+  Untested on real silicon — verify with `objdump` that the hot loop keeps
+  `NACC*INNER` `tdpbssd`/`tdpbf16ps`, and that numbers land near spec.
 - **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
   CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
   `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from
