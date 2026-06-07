@@ -138,18 +138,18 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx
           cmake --build build --config Release -j4
 
-      - name: Print version
+      - name: Run cpu backend
         if: ${{ !matrix.cuda && !matrix.rocm && !matrix.oneapi }}
         shell: bash
-        run: ${{ matrix.binary }} --version 2>&1
+        run: ${{ matrix.binary }} --cpu 2>&1
 
       # CUDA / ROCm / oneAPI binaries cannot launch on the default runner image
       # (no NVIDIA / AMD / Intel GPU driver present), so failure here is
       # expected and ignored.  oneAPI also needs setvars.sh on the path.
-      - name: Print version (allow failure)
+      - name: Run cpu backend (allow failure)
         if: ${{ matrix.cuda || matrix.rocm || matrix.oneapi }}
         shell: bash
-        run: ${{ matrix.binary }} --version 2>&1 || true
+        run: ${{ matrix.binary }} --cpu 2>&1 || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
