@@ -149,9 +149,10 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(cfg);
 
   // ---- Bandwidth ----
+  // No TransferBW: on a CPU there is no host<->device bus, so a libc memcpy
+  // measures the same DRAM path as the STREAM copy above (redundant).
   if (isAllowed(Benchmark::GlobalBW))       runDramBandwidth(cfg);
   if (isAllowed(Benchmark::CacheBandwidth)) runCacheBandwidth(cfg);
-  if (isAllowed(Benchmark::TransferBW))     runMemcpyBandwidth(cfg);
 
   // ---- Latency ----
   if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);

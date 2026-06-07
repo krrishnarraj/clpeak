@@ -188,42 +188,4 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   return 0;
 }
 
-// ---------------------------------------------------------------------------
-// memcpy bandwidth (libc memcpy over a large shared buffer).
-// ---------------------------------------------------------------------------
-int CpuPeak::runMemcpyBandwidth(benchmark_config_t &cfg)
-{
-  auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "memcpy bandwidth", "gbps"});
-
-  const int maxT = pool->maxThreads();
-  const size_t N = pickStreamFloats(info, maxT);
-
-  auto chunk = [&](int tid, size_t &lo, size_t &hi) {
-    size_t per = N / (size_t)maxT;
-    lo = (size_t)tid * per;
-    hi = (tid == maxT - 1) ? N : lo + per;
-  };
-
-  float *src = new float[N];
-  float *dst = new float[N];
-  pool->run(maxT, [&](int tid) {
-    size_t lo, hi; chunk(tid, lo, hi);
-    populate(src + lo, hi - lo);
-    populate(dst + lo, hi - lo);
-  });
-
-  unsigned int forced = forceIters ? specifiedIters : 0;
-  Workload body = [&](int tid, uint64_t iters) {
-    size_t lo, hi; chunk(tid, lo, hi);
-    for (uint64_t it = 0; it < iters; it++)
-      std::memcpy(dst + lo, src + lo, (hi - lo) * sizeof(float));
-  };
-  double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-  double bytes = 2.0 * N * sizeof(float);
-  test.emit("memcpy", us > 0.0 ? (float)(bytes / (us * 1e3)) : -1.0f);
-  delete[] src; delete[] dst;
-  return 0;
-}
-
 #endif // ENABLE_CPU

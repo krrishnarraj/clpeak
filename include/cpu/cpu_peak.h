@@ -120,7 +120,6 @@ public:
   int runCpuMatrix(benchmark_config_t &cfg, Category category);
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);
-  int runMemcpyBandwidth(benchmark_config_t &cfg);
   int runAtomicThroughput(benchmark_config_t &cfg);
   int runMemoryLatency(benchmark_config_t &cfg);
   int runThreadLatency(benchmark_config_t &cfg);
