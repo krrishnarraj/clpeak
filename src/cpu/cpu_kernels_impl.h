@@ -173,7 +173,9 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   alignas(16) uint32_t tmp[4]; _mm_store_si128((__m128i *)tmp, x);
   for (uint32_t v : tmp) tail ^= v;
   return tail;
-#elif defined(__ARM_NEON) || defined(__aarch64__)
+#elif defined(__aarch64__)
+  // AArch64 only (matches cpu_simd.h): 32-bit ARMv7 doesn't pull in arm_neon.h,
+  // so it uses the scalar read fallback below.
   constexpr size_t W = 4;
   const size_t step = 8 * W;
   uint32x4_t x0 = vdupq_n_u32(0), x1 = x0, x2 = x0, x3 = x0;
@@ -308,22 +310,34 @@ static double runBf16Chain(uint64_t outer)
 // ---- Mixed precision (fp16 mul -> fp32 acc, widening FMLA) ------------------
 #if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
-static constexpr int MP_NACC = 24, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
+// NACC halved vs the FP chains: each accumulator also holds a distinct fp16
+// multiplicand (m[j]), so the budget is 2 vector regs per chain (12*2 = 24 of
+// the 32 V-regs, leaving room for b / its recurrence consts / FMLAL temps).
+static constexpr int MP_NACC = 12, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];
-  // The fp16 multiplicand `m` must be a *loop-carried recurrence*, not a
-  // constant: with two constant operands `vfmlalq(acc, a, b)` degenerates to
-  // `acc += a*b` (a constant), an arithmetic series that -ffast-math strength-
-  // reduces to `acc += N*const` and deletes the loop -> a fabricated peak that
-  // can exceed the pure-fp16 ceiling (mp must be <= ~0.5x fp16).  `m = m*mc + md`
-  // converges to md/(1-mc) so it stays bounded yet keeps a real data dependency,
-  // and the single per-k update is hidden under the NACC widening FMAs.
-  float16x8_t m = vdupq_n_f16((float16_t)0.5f);
-  const float16x8_t mc = vdupq_n_f16((float16_t)0.9995f);
-  const float16x8_t md = vdupq_n_f16((float16_t)0.001f);
-  const float16x8_t b  = vdupq_n_f16((float16_t)0.001f);
-  for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
+  float16x8_t m[MP_NACC];
+  // Two pitfalls the operands must dodge, or the reported peak is fabricated:
+  //  (1) const-fold: two *constant* multiplicands make `vfmlalq(acc, m, b)`
+  //      degenerate to `acc += const`, an arithmetic series -ffast-math strength-
+  //      reduces to `acc += N*const` (loop deleted).  -> the shared `b` is a live
+  //      recurrence (b = b*bc + bd, bounded by its fixed point bd/(1-bc)), so the
+  //      per-iter increment varies with k and can't be folded.
+  //  (2) chain dedup: if every acc[j] takes the *same* increment, the NACC
+  //      "independent" chains are identical and the compiler keeps ~1 while the
+  //      op count still bills all NACC -> mp can exceed the fp16 ceiling (it must
+  //      be <= ~0.5x fp16, since FMLAL does half the flops/instr of fp16 FMA).
+  //      -> each acc[j] uses a *distinct* constant multiplicand m[j], so the
+  //      increments differ per chain and the chains can't be merged.
+  float16x8_t b        = vdupq_n_f16((float16_t)0.5f);
+  const float16x8_t bc = vdupq_n_f16((float16_t)0.9995f);
+  const float16x8_t bd = vdupq_n_f16((float16_t)0.001f);
+  for (int j = 0; j < MP_NACC; j++)
+  {
+    acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
+    m[j]   = vdupq_n_f16((float16_t)(0.30f + 0.02f * j));  // distinct per chain
+  }
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
@@ -331,10 +345,10 @@ static double runMpChain(uint64_t outer)
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
       {
-        acc[j] = vfmlalq_low_f16(acc[j], m, b);
-        acc[j] = vfmlalq_high_f16(acc[j], m, b);
+        acc[j] = vfmlalq_low_f16(acc[j], m[j], b);
+        acc[j] = vfmlalq_high_f16(acc[j], m[j], b);
       }
-      m = vfmaq_f16(md, m, mc);   // live recurrence: blocks the const-fold collapse
+      b = vfmaq_f16(bd, b, bc);   // one shared recurrence update per k (amortized)
     }
   float32x4_t s = acc[0];
   for (int j = 1; j < MP_NACC; j++) s = vaddq_f32(s, acc[j]);
