@@ -69,7 +69,12 @@ static double runFp64Chain(uint64_t outer)
 static double runInt32Chain(uint64_t outer)
 {
   i32v acc[I32_NACC];
-  const i32v b = i32_set(1664525);
+  // Opaque multiplier: a compile-time-constant multiplier lets the compiler
+  // strength-reduce `acc*k` into shifts/adds (measuring the shifter, not the
+  // integer multiplier, and varying with -mtune/inlining).  Reading it through
+  // volatile forces a real vpmulld / vmlaq — a consistent, honest IMAD peak.
+  volatile int vmul = 1664525;
+  const i32v b = i32_set((int)vmul);
   const i32v c = i32_set(1013904223);
   for (int j = 0; j < I32_NACC; j++) acc[j] = i32_set(j + 1);
   for (uint64_t o = 0; o < outer; o++)
