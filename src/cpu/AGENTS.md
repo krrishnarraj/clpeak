@@ -99,9 +99,18 @@ TU's flags define.
   `1.0` in fp16, making `acc=acc*1+0` invariant → the loop is deleted and fp16
   reports hundreds of TFLOPS. Use values distinct from `1.0`/`0.0` after fp16
   rounding (e.g. `0.9995`, `0.001`).
-- **Loop-invariant operands get hoisted.** The mixed-precision kernel multiplies
-  a value *derived from the accumulator* (not a constant) so the fp16 multiply
-  isn't lifted out of the loop (which would measure only the fp32 adds).
+- **Two constant FMA operands degenerate to an arithmetic series.** If both
+  multiplicands are compile-time constants, `acc += a*b` is `acc += const`, which
+  `-ffast-math` strength-reduces to `acc += N*const` and deletes the loop — a
+  fabricated peak that can exceed a hard ceiling (e.g. mixed-precision read
+  `mp > fp16`, impossible since FMLAL does half the flops/instr of fp16 FMA).
+  The fp16 chain avoids this because its accumulator *is* a multiplicand
+  (`acc = acc*b + c`, a multiplicative recurrence the compiler won't close-form).
+  The `mp` (FMLAL) kernel can't feed its fp32 accumulator back as an fp16
+  multiplicand without a convert, so it carries a *separate* fp16 recurrence
+  `m = m*mc + md` as the multiplicand (bounded by its fixed point, one cheap
+  per-k update hidden under the NACC widening FMAs). Manifests per-toolchain:
+  AppleClang kept the loop, the Android/Linux aarch64 clang collapsed it.
 - **Reduce EVERY accumulator, not just `acc[0]`.** If the final reduction reads
   only `acc[0]`, `-O3` dead-code-eliminates the other `NACC-1` chains, leaving a
   single latency-bound chain — and because the op count still assumes all `NACC`

@@ -312,8 +312,17 @@ static constexpr int MP_NACC = 24, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];
-  const float16x8_t a = vdupq_n_f16((float16_t)0.9995f);
-  const float16x8_t b = vdupq_n_f16((float16_t)0.001f);
+  // The fp16 multiplicand `m` must be a *loop-carried recurrence*, not a
+  // constant: with two constant operands `vfmlalq(acc, a, b)` degenerates to
+  // `acc += a*b` (a constant), an arithmetic series that -ffast-math strength-
+  // reduces to `acc += N*const` and deletes the loop -> a fabricated peak that
+  // can exceed the pure-fp16 ceiling (mp must be <= ~0.5x fp16).  `m = m*mc + md`
+  // converges to md/(1-mc) so it stays bounded yet keeps a real data dependency,
+  // and the single per-k update is hidden under the NACC widening FMAs.
+  float16x8_t m = vdupq_n_f16((float16_t)0.5f);
+  const float16x8_t mc = vdupq_n_f16((float16_t)0.9995f);
+  const float16x8_t md = vdupq_n_f16((float16_t)0.001f);
+  const float16x8_t b  = vdupq_n_f16((float16_t)0.001f);
   for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
@@ -322,9 +331,10 @@ static double runMpChain(uint64_t outer)
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
       {
-        acc[j] = vfmlalq_low_f16(acc[j], a, b);
-        acc[j] = vfmlalq_high_f16(acc[j], a, b);
+        acc[j] = vfmlalq_low_f16(acc[j], m, b);
+        acc[j] = vfmlalq_high_f16(acc[j], m, b);
       }
+      m = vfmaq_f16(md, m, mc);   // live recurrence: blocks the const-fold collapse
     }
   float32x4_t s = acc[0];
   for (int j = 1; j < MP_NACC; j++) s = vaddq_f32(s, acc[j]);
