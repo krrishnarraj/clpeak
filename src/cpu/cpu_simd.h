@@ -13,7 +13,9 @@
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
-#elif defined(__ARM_NEON) || defined(__aarch64__)
+#elif defined(__aarch64__)
+// Only AArch64 uses the NEON kernels; 32-bit ARMv7 lacks fused-FMA / horizontal
+// reduce intrinsics, so it uses the scalar fallback and needs no arm_neon.h.
 #include <arm_neon.h>
 #endif
 
@@ -54,7 +56,9 @@ static inline f32v f32_load(const float *p)    { return _mm512_loadu_ps(p); }
 static inline f32v f32_fma(f32v a, f32v b, f32v c) { return _mm512_fmadd_ps(a, b, c); }
 static inline f32v f32_add(f32v a, f32v b)     { return _mm512_add_ps(a, b); }
 static inline float f32_hsum(f32v a)           { return _mm512_reduce_add_ps(a); }
-#elif defined(__AVX2__) && defined(__FMA__)
+#elif defined(__AVX2__) && (defined(__FMA__) || defined(_MSC_VER))
+// MSVC enables the FMA intrinsics under /arch:AVX2 but never defines __FMA__
+// (and every AVX2 CPU has FMA3), so accept AVX2 alone on MSVC.
 using f32v = __m256;
 constexpr int F32_LANES = 8;
 constexpr int F32_NACC  = 12;
@@ -71,7 +75,9 @@ static inline float f32_hsum(f32v a)
   lo = _mm_hadd_ps(lo, lo);
   return _mm_cvtss_f32(lo);
 }
-#elif defined(__SSE2__)
+#elif defined(__SSE2__) || defined(_M_X64)
+// MSVC never defines __SSE2__, but x86-64 always has SSE2 (this is the MSVC
+// baseline/sse42 TU, which has no /arch:AVX2 so __AVX2__ is undefined above).
 using f32v = __m128;
 constexpr int F32_LANES = 4;
 constexpr int F32_NACC  = 12;   // 16 XMM registers on x86-64
@@ -85,7 +91,9 @@ static inline float f32_hsum(f32v a)
   t = _mm_add_ss(t, _mm_shuffle_ps(t, t, 0x55));
   return _mm_cvtss_f32(t);
 }
-#elif defined(__ARM_NEON) || defined(__aarch64__)
+#elif defined(__aarch64__)
+// AArch64 only: 32-bit ARMv7 NEON has no fused FMA (vfmaq_f32) and no
+// horizontal reduce (vaddvq_f32), so armeabi-v7a falls through to scalar below.
 using f32v = float32x4_t;
 constexpr int F32_LANES = 4;
 // Firestorm fp32 FMLA latency is ~6 cycles across 4 FP pipes, so ~24 in-flight
@@ -118,7 +126,7 @@ static inline f64v f64_set(double a)           { return _mm512_set1_pd(a); }
 static inline f64v f64_fma(f64v a, f64v b, f64v c) { return _mm512_fmadd_pd(a, b, c); }
 static inline f64v f64_add(f64v a, f64v b)     { return _mm512_add_pd(a, b); }
 static inline double f64_hsum(f64v a)          { return _mm512_reduce_add_pd(a); }
-#elif defined(__AVX2__) && defined(__FMA__)
+#elif defined(__AVX2__) && (defined(__FMA__) || defined(_MSC_VER))
 using f64v = __m256d;
 constexpr int F64_LANES = 4;
 constexpr int F64_NACC  = 12;
@@ -132,7 +140,7 @@ static inline double f64_hsum(f64v a)
   lo = _mm_add_pd(lo, hi);
   return _mm_cvtsd_f64(_mm_hadd_pd(lo, lo));
 }
-#elif defined(__SSE2__)
+#elif defined(__SSE2__) || defined(_M_X64)
 using f64v = __m128d;
 constexpr int F64_LANES = 2;
 constexpr int F64_NACC  = 12;
@@ -185,7 +193,9 @@ static inline int   i32_hsum(i32v a)
   lo = _mm_hadd_epi32(lo, lo);
   return _mm_cvtsi128_si32(lo);
 }
-#elif defined(__SSE4_1__)
+#elif defined(__SSE4_1__) || defined(_MSC_VER)
+// MSVC never defines __SSE4_1__ but exposes _mm_mullo_epi32 unconditionally;
+// the MSVC sse42 TU runs only when CPUID reports SSE4.2 (⊇ SSE4.1) at runtime.
 using i32v = __m128i;
 constexpr int I32_LANES = 4;
 constexpr int I32_NACC  = 12;
@@ -198,7 +208,7 @@ static inline int   i32_hsum(i32v a)
   t = _mm_add_epi32(t, _mm_shuffle_epi32(t, 0xB1));
   return _mm_cvtsi128_si32(t);
 }
-#elif defined(__ARM_NEON) || defined(__aarch64__)
+#elif defined(__aarch64__)
 using i32v = int32x4_t;
 constexpr int I32_LANES = 4;
 constexpr int I32_NACC  = 16;

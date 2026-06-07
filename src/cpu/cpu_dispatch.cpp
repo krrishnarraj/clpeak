@@ -96,6 +96,10 @@ static CpuFeatures detect()
     }
   }
 #elif defined(CLPEAK_ARM)
+  // Only AArch64 has the NEON kernels; 32-bit ARMv7 uses the scalar generic TU
+  // (and its HWCAP bit layout differs from the AArch64 bits below anyway), so
+  // leave every feature false there and let isaName() report "scalar".
+#if defined(__aarch64__)
   f.neon = true;   // mandatory on aarch64
 #if defined(__linux__) || defined(__ANDROID__)
   unsigned long hw = getauxval(AT_HWCAP);
@@ -117,6 +121,7 @@ static CpuFeatures detect()
   f.bf16    = sc("hw.optional.arm.FEAT_BF16");
   f.i8mm    = sc("hw.optional.arm.FEAT_I8MM");
 #endif
+#endif // __aarch64__
 #endif
   return f;
 }

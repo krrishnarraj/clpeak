@@ -20,7 +20,7 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 - FP compute (fp32/fp64/fp16/bf16/mixed)? → `compute_float.cpp`
 - INT compute (int32, int8 dot) + atomic throughput? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA)? → `cpu_matrix.cpp`
-- DRAM / cache / memcpy bandwidth? → `bandwidth.cpp`
+- DRAM / cache bandwidth? → `bandwidth.cpp`
 - Memory (pointer-chase) + thread-dispatch latency? → `latency.cpp`
 
 ## Key Files
@@ -39,7 +39,7 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` methods — look up `kernels().fpXX` and emit (or `Unsupported`). Kernel bodies live in `cpu_kernels_impl.h` |
 | `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `kernels()`), `runAtomicThroughput` (ISA-neutral, kept here) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — emits `kernels().mat_int8` / `mat_fp` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
-| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads), `runMemcpyBandwidth`. The read kernel is `kernels().readsum`; DRAM/memcpy arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement |
+| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns), `runThreadLatency` (pool round-trip, us) |
 
 ## Build
@@ -128,6 +128,19 @@ TU's flags define.
   branch dominated). `CPU_UNROLL_FULL` on the accumulator loop keeps the NACC
   chains in registers. Verified via `otool -tv`: the hot loop should be N
   back-to-back FMA/dot ops with zero loads/stores.
+- **MSVC does not define the GCC/Clang ISA macros.** `cpu_simd.h` gates on
+  `__FMA__` / `__SSE2__` / `__SSE4_1__`, none of which MSVC ever defines (it only
+  defines `__AVX2__` / `__AVX512F__` under `/arch:` and `_M_X64`). The symptom is
+  the giveaway: fp32 == fp64 and both ~10× low (scalar) while `int` is fine
+  (its branch only needs `__AVX2__`). The FP/SSE branches therefore also accept
+  `_MSC_VER` / `_M_X64`. If you add a new `cpu_simd.h` ISA branch, give it an
+  MSVC alias or it silently degrades to scalar on Windows.
+- **The NEON kernels are AArch64-only.** The fused FMA (`vfmaq_f32`), horizontal
+  reduce (`vaddvq_*`) and fp16 store (`vst1q_f16`) intrinsics don't exist in
+  32-bit ARMv7 NEON, so `cpu_simd.h` gates NEON on `__aarch64__` and armeabi-v7a
+  uses the scalar `generic` TU. `CMakeLists.txt` builds the armv8.x feature TUs
+  only when `_clpeak_arm64` (`CMAKE_SIZEOF_VOID_P EQUAL 8`); the `-march=armv8.x`
+  flags are invalid in AArch32 mode regardless.
 
 ## Metrics
 

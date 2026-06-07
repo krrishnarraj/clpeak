@@ -43,10 +43,18 @@ target_compile_options(peak_cpu PRIVATE ${CLPEAK_CPU_OPT})
 # Target arch.
 set(_clpeak_x86 OFF)
 set(_clpeak_arm OFF)
+set(_clpeak_arm64 OFF)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86|x86")
     set(_clpeak_x86 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|ARM64")
     set(_clpeak_arm ON)
+    # The NEON kernels are AArch64-only (fused FMA + horizontal reduce); 32-bit
+    # ARMv7 (armeabi-v7a) lacks those, so it gets the scalar generic TU only and
+    # none of the armv8.x feature TUs (whose -march=armv8.x flags are invalid in
+    # AArch32 mode anyway).
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_clpeak_arm64 ON)
+    endif()
 endif()
 
 # Add one feature TU: compiles cpu_kernels_tu.cpp with `tag` + extra flags into
@@ -160,7 +168,7 @@ else()
             endif()
         endif()
 
-    elseif(_clpeak_arm AND NOT APPLE)
+    elseif(_clpeak_arm64 AND NOT APPLE)
         # Linux / Android aarch64: NEON baseline from the generic TU; advanced
         # features via -march=armv8.x-a+<feat> TUs, runtime-gated by HWCAP.
         # (Apple's advanced dtypes come from the apple-m1 generic floor; bf16 /
