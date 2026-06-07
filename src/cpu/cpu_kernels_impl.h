@@ -401,9 +401,9 @@ static double runInt8DpChain(uint64_t outer)
 #define CPU_MAT_INT8_KERNEL 1
 static constexpr double MAT_I8_OPS_PER_K = 4.0 * 16 * 16 * 64 * 2;
 static thread_local bool g_amxI8Cfg = false;
-static alignas(64) int8_t  g_amxA[16 * 64];
-static alignas(64) int8_t  g_amxB[16 * 64];
-static alignas(64) int32_t g_amxC[16 * 16];
+alignas(64) static int8_t  g_amxA[16 * 64];
+alignas(64) static int8_t  g_amxB[16 * 64];
+alignas(64) static int32_t g_amxC[16 * 16];
 static void amxConfigTiles()
 {
   struct { uint8_t palette, start_row, reserved[14]; uint16_t colsb[16]; uint8_t rows[16]; } cfg = {};
@@ -454,9 +454,9 @@ static double runMatInt8Chain(uint64_t outer)
 #define CPU_MAT_FP_KERNEL 1
 static constexpr double MAT_FP_OPS_PER_K = 4.0 * 16 * 16 * 32 * 2;
 static thread_local bool g_amxBf16Cfg = false;
-static alignas(64) uint16_t g_amxAb[16 * 32];
-static alignas(64) uint16_t g_amxBb[16 * 32];
-static alignas(64) float    g_amxCf[16 * 16];
+alignas(64) static uint16_t g_amxAb[16 * 32];
+alignas(64) static uint16_t g_amxBb[16 * 32];
+alignas(64) static float    g_amxCf[16 * 16];
 static void amxConfigTilesBf16()
 {
   struct { uint8_t palette, start_row, reserved[14]; uint16_t colsb[16]; uint8_t rows[16]; } cfg = {};

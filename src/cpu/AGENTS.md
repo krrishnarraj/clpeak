@@ -51,33 +51,43 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
   help text gate the CPU flags (`--cpu`, `--amx`, `--cache-bandwidth`,
   `--memory-latency`) on that macro.
 
-## ISA strategy
+## ISA strategy — per-TU build + runtime dispatch
 
 Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
 
-- **Portable (default, OFF)** — baseline ISA only: SSE4.2 on x86, armv8-a on ARM
-  (`-msse4.2` / toolchain default; MSVC x64 default). Safe to distribute across
-  machines (no illegal instructions on older CPUs). A startup `log->note()`
-  advises rebuilding native for best local numbers. *(Caveat: AppleClang on
-  macOS implicitly targets the host CPU even with no `-mcpu`, so a macOS
-  "portable" build is still host-tuned — Linux is where the baseline downgrade
-  actually takes effect. The runtime-dispatch work below makes this uniform.)*
-- **Native (ON)** — `-march=native` (x86) / `-mcpu=native` (Apple/ARM): tuned for
-  the build host, **not portable**. Fastest for a local build/run.
+- **Portable (default, OFF)** — produces ONE binary that is safe on any CPU and
+  still uses the best ISA the *running* CPU has. The compute/read kernels
+  (`cpu_kernels_tu.cpp`) are compiled once per **feature** TU, each with its own
+  flags; `cpu_dispatch.cpp` probes the CPU at runtime and assembles `kernels()`
+  by picking, per kernel, the widest variant whose *full* feature set is present.
+  The non-kernel code (methods, dispatcher) is compiled at the safe baseline, so
+  the binary never SIGILLs on an older CPU.
+  - x86 TUs: `generic` (SSE2, ungated floor), `sse42`, `avx2`, `avx512`
+    (F/BW/VL/DQ), then the fragmented sub-features as their own TUs —
+    `avx512vnni`, `avx512bf16`, `avx512fp16`, `amx` (Linux). A TU is only
+    *entered* when every feature it was compiled with is present (AVX-512 ≠ one
+    feature: Skylake-X has F but not VNNI/BF16/FP16).
+  - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
+    floor never bakes in M4-only features), plus Linux/Android `fp16`,
+    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs.
+  - MSVC: core tiers only (`/arch:AVX2`, `/arch:AVX512`) with `CLPEAK_CORE_ONLY`,
+    since it can't isolate AVX-512 sub-features; advanced dtypes need GCC/Clang
+    or a native build.
+- **Native (ON)** — a single `native` TU built `-march=native` / `-mcpu=native`,
+  merged unconditionally (trusting build==run host). Fastest for a local build,
+  **not portable**.
 
-Today each advanced kernel is `#if`-guarded on a compile feature macro
-(`__AVX512F__` / `__ARM_FEATURE_*`) with a runtime `info.has*` check, recording a
-clean `Unsupported` row when absent. `cpu_device.cpp` fills `info.has*` from those
-compile macros — correct for a native (single-target) build.
+Runtime detection lives in `cpu_dispatch.cpp` (`cpuFeatures()`): x86 CPUID +
+XGETBV (checks OS AVX/AVX-512 enablement); ARM `getauxval(AT_HWCAP/2)` on
+Linux/Android, `sysctlbyname("hw.optional.arm.FEAT_*")` on Apple. `cpu_device.cpp`
+fills `info.has*` / `isaName` from this same probe, and methods gate on
+`kernels().<x>.fn != nullptr` (so the `Unsupported` rows reflect the run host).
 
-**Planned: per-TU runtime ISA dispatch.** To get one *portable* binary that also
-uses AVX2/AVX-512/VNNI/… on capable hosts, the compute/read kernels will be
-compiled once per **feature** TU (each with its own `-m…`/`/arch:` flags) and
-selected at runtime via CPUID (`__builtin_cpu_supports` / `__cpuid`) on x86 and
-HWCAP (`getauxval`) / `sysctlbyname` on ARM. AVX-512 is per-feature (F/BW/VL vs
-VNNI vs BF16 vs FP16 vs AMX are separate TUs, each entered only when its full
-feature set is present). When that lands, `info.has*` moves from compile macros
-to the runtime probe and drives both dispatch and the Unsupported rows.
+Adding a TU: add a `clpeak_add_isa_tu(<tag> <flags>)` call in `CMakeLists.txt`
+(guarded by `check_cxx_compiler_flag`) and a matching `#if CLPEAK_TU_<tag>` merge
+(with the right feature predicate) in `cpu_dispatch.cpp`. The kernel bodies are
+shared — `cpu_kernels_impl.h` `#if`-gates them on the compile-feature macros the
+TU's flags define.
 
 ## Gotchas
 
