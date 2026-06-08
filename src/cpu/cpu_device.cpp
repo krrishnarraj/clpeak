@@ -218,6 +218,11 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.l1dCacheBytes = sysctlU64("hw.l1dcachesize");
   if (!info.l2CacheBytes)
     info.l2CacheBytes = sysctlU64("hw.l2cachesize");
+  // On Apple Silicon, L1d is per P-core; L2 is a shared cluster cache.
+  // Report total L1d = per-core x physicalCores; L2 total = L2 as-is.
+  if (info.l1dCacheBytes && info.physicalCores > 0)
+    info.l1dTotalBytes = info.l1dCacheBytes * (uint64_t)info.physicalCores;
+  info.l2TotalBytes = info.l2CacheBytes;
   info.l3CacheBytes = sysctlU64("hw.l3cachesize");
   info.totalMemBytes = sysctlU64("hw.memsize");
   uint64_t hz = sysctlU64("hw.cpufrequency_max");
@@ -270,22 +275,31 @@ void detectCpuInfo(cpu_device_info_t &info)
     int level = std::atoi(lvl.c_str());
     uint64_t bytes = parseCacheSize(size);
     bool isData = type.rfind("Data", 0) == 0 || type.rfind("Unified", 0) == 0;
+    // For each cache level, read shared_cpu_list to compute the number of
+    // instances: instances = logicalCores / cpus_sharing_one_instance.
+    auto computeInstances = [&](const char *b) -> int {
+      int cpusShared = countCpuList(readFile((std::string(b) + "shared_cpu_list").c_str()));
+      if (cpusShared <= 0) return 0;
+      int inst = info.logicalCores / cpusShared;
+      return inst < 1 ? 1 : inst;
+    };
     if (level == 1 && isData && type.rfind("Data", 0) == 0)
+    {
       info.l1dCacheBytes = bytes;
+      int inst = computeInstances(base);
+      if (inst > 0) info.l1dTotalBytes = bytes * (uint64_t)inst;
+    }
     else if (level == 2 && isData)
+    {
       info.l2CacheBytes = bytes;
+      int inst = computeInstances(base);
+      if (inst > 0) info.l2TotalBytes = bytes * (uint64_t)inst;
+    }
     else if (level == 3 && isData)
     {
       info.l3CacheBytes = bytes;   // one instance (per-CCX/CCD on AMD)
-      // Aggregate L3 = per-instance size x number of L3 instances.  The L3 is
-      // shared by `cpusPerL3` logical CPUs, so instances = logicalCores / that.
-      int cpusPerL3 = countCpuList(readFile((std::string(base) + "shared_cpu_list").c_str()));
-      if (cpusPerL3 > 0)
-      {
-        int instances = info.logicalCores / cpusPerL3;
-        if (instances < 1) instances = 1;
-        info.l3TotalBytes = bytes * (uint64_t)instances;
-      }
+      int inst = computeInstances(base);
+      if (inst > 0) info.l3TotalBytes = bytes * (uint64_t)inst;
     }
   }
 #if defined(_SC_LEVEL1_DCACHE_SIZE)
@@ -342,9 +356,15 @@ void detectCpuInfo(cpu_device_info_t &info)
           if (c.Type == CacheData || c.Type == CacheUnified)
           {
             if (c.Level == 1 && c.Type == CacheData)
-              info.l1dCacheBytes = c.CacheSize;
+            {
+              info.l1dCacheBytes  = c.CacheSize;
+              info.l1dTotalBytes += c.CacheSize;
+            }
             else if (c.Level == 2)
-              info.l2CacheBytes = c.CacheSize;
+            {
+              info.l2CacheBytes  = c.CacheSize;
+              info.l2TotalBytes += c.CacheSize;
+            }
             else if (c.Level == 3)
             {
               info.l3CacheBytes  = c.CacheSize;       // one instance
@@ -371,8 +391,11 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.l2CacheBytes = 512ull * 1024;
   if (!info.l3CacheBytes)
     info.l3CacheBytes = 8ull * 1024 * 1024;
-  // If the number of L3 instances couldn't be determined, assume a single
-  // shared LLC (correct for Intel client/Apple; conservative elsewhere).
+  // If totals couldn't be determined, fall back to the per-core size (no breakdown shown).
+  if (info.l1dTotalBytes < info.l1dCacheBytes)
+    info.l1dTotalBytes = info.l1dCacheBytes;
+  if (info.l2TotalBytes < info.l2CacheBytes)
+    info.l2TotalBytes = info.l2CacheBytes;
   if (info.l3TotalBytes < info.l3CacheBytes)
     info.l3TotalBytes = info.l3CacheBytes;
 }

@@ -110,8 +110,20 @@ int CpuPeak::runAll()
   }
   if (info.clockMHz > 0)
     props.push_back({"Clock", std::to_string(info.clockMHz) + " MHz"});
-  props.push_back({"L1d",  fmtBytes(info.l1dCacheBytes)});
-  props.push_back({"L2",   fmtBytes(info.l2CacheBytes)});
+  {
+    std::string l1d = fmtBytes(info.l1dTotalBytes);
+    if (info.l1dTotalBytes > info.l1dCacheBytes)
+      l1d += " (" + fmtBytes(info.l1dCacheBytes) + " x " +
+             std::to_string(info.l1dTotalBytes / info.l1dCacheBytes) + ")";
+    props.push_back({"L1d", l1d});
+  }
+  {
+    std::string l2 = fmtBytes(info.l2TotalBytes);
+    if (info.l2TotalBytes > info.l2CacheBytes)
+      l2 += " (" + fmtBytes(info.l2CacheBytes) + " x " +
+            std::to_string(info.l2TotalBytes / info.l2CacheBytes) + ")";
+    props.push_back({"L2", l2});
+  }
   {
     // Show aggregate L3; note the per-instance size on multi-LLC chips (AMD CCX).
     std::string l3 = fmtBytes(info.l3TotalBytes);
