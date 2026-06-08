@@ -4,6 +4,19 @@ endif()
 
 include(CheckCXXCompilerFlag)
 
+# Benchmark kernels are meaningless unoptimized, so force optimization for the
+# CPU backend in EVERY config -- a user who forgets `--config Release` (or builds
+# the VS-generator default, Debug) would otherwise see CPU numbers ~10x too low.
+# GCC/clang already get this for free (the -O3 we append below overrides Debug's
+# lack of -O).  MSVC needs help: its Debug config injects /Od /RTC1, so rewrite
+# those for this directory only (a non-CACHE set is directory-scoped and applies
+# to the targets defined here, not to other backends).  /RTC1 must go because it
+# is mutually exclusive with the /O2 that /Od is rewritten to.
+if(MSVC)
+    string(REGEX REPLACE "/RTC[1csu]+" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REPLACE     "/Od" "/O2"        CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+endif()
+
 # ---------------------------------------------------------------------------
 # Core library: orchestration + runtime dispatcher.  Compiled at the safe
 # baseline (no advanced ISA) so it never SIGILLs on an older CPU.  The actual
