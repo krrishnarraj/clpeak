@@ -33,8 +33,14 @@ target_compile_definitions(peak_cpu    PRIVATE ENABLE_CPU)
 target_compile_definitions(peak_common PRIVATE ENABLE_CPU)
 
 # ISA-neutral optimization (FMA contraction etc.) for everything in the backend.
+# For MSVC, /O2 is intentionally omitted here: CMake injects it automatically via
+# CMAKE_CXX_FLAGS_RELEASE for Release builds, and adding it explicitly would
+# conflict with /RTC1 (runtime checks) that MSVC's Debug config injects -- the
+# two flags are mutually exclusive.  Only /fp:fast needs explicit addition since
+# CMake never sets it on its own.  GCC/clang keep -O3 (a step above the default
+# -O2) plus -ffast-math.
 if(MSVC)
-    set(CLPEAK_CPU_OPT /O2 /fp:fast)
+    set(CLPEAK_CPU_OPT /fp:fast)
 else()
     set(CLPEAK_CPU_OPT -O3 -ffast-math)
 endif()
