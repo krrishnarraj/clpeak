@@ -75,34 +75,47 @@ set(CLPEAK_IOS_SWIFT_SOURCES
 
 set(CLPEAK_IOS_ASSET_CATALOG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Assets.xcassets")
 
-# Device target sources — Vulkan resource dir is conditional
-set(_clpeak_ios_device_sources
-  ${CLPEAK_IOS_SWIFT_SOURCES}
+# Native sources shared by both device and simulator targets
+set(CLPEAK_IOS_NATIVE_SOURCES
   Native/entry_ios.mm
   Native/logger_ios.mm
   Native/clpeak_ios_bridge.h
   Native/logger_ios.h
+)
+
+# ---- Shared configuration for both iOS targets ------------------------------
+set(CLPEAK_IOS_BASE_SOURCES
+  ${CLPEAK_IOS_SWIFT_SOURCES}
+  ${CLPEAK_IOS_NATIVE_SOURCES}
   ${CLPEAK_IOS_ASSET_CATALOG}
 )
+
+set(CLPEAK_IOS_COMMON_INCLUDE_DIRS
+  ${CMAKE_CURRENT_SOURCE_DIR}/Native
+  ${CLPEAK_ROOT}/include
+  ${CLPEAK_ROOT}/include/common
+)
+
+set(CLPEAK_IOS_BASE_LINK_LIBS peak_common peak_metal peak_cpu)
+set(CLPEAK_IOS_BASE_DEFINES ENABLE_METAL ENABLE_CPU)
+
+# ---- Device target ----------------------------------------------------------
+set(_clpeak_ios_device_sources ${CLPEAK_IOS_BASE_SOURCES})
 if(CLPEAK_IOS_VULKAN_AVAILABLE)
   list(APPEND _clpeak_ios_device_sources ${CLPEAK_VULKAN_RESOURCE_DIR})
 endif()
 
 add_executable(clpeak_ios MACOSX_BUNDLE ${_clpeak_ios_device_sources})
 
-set(_clpeak_ios_link_libs peak_common peak_metal peak_cpu)
+set(_clpeak_ios_link_libs ${CLPEAK_IOS_BASE_LINK_LIBS})
 if(CLPEAK_IOS_VULKAN_AVAILABLE)
   list(APPEND _clpeak_ios_link_libs peak_vulkan "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
 endif()
 target_link_libraries(clpeak_ios PRIVATE ${_clpeak_ios_link_libs})
 
-target_include_directories(clpeak_ios PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/Native
-  ${CLPEAK_ROOT}/include
-  ${CLPEAK_ROOT}/include/common
-)
+target_include_directories(clpeak_ios PRIVATE ${CLPEAK_IOS_COMMON_INCLUDE_DIRS})
 
-set(_clpeak_ios_defines ENABLE_METAL ENABLE_CPU)
+set(_clpeak_ios_defines ${CLPEAK_IOS_BASE_DEFINES})
 if(CLPEAK_IOS_VULKAN_AVAILABLE)
   list(APPEND _clpeak_ios_defines ENABLE_VULKAN)
 endif()
@@ -133,71 +146,51 @@ if(CLPEAK_IOS_VULKAN_AVAILABLE)
   endif()
 endif()
 
+# ---- Common target properties ----------------------------------------------
+foreach(_ios_target clpeak_ios clpeak_ios_simulator)
+  set_target_properties(${_ios_target} PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+    XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
+    XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
+    XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/Native/clpeak_ios_bridge.h"
+    XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES "YES"
+    XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
+    XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+    XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+    XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+    XCODE_GENERATE_SCHEME TRUE
+  )
+endforeach()
+
+# Device-specific properties
 set_target_properties(clpeak_ios PROPERTIES
-  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "kr.clpeak.ios"
-  XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
-  XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
-  XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/Native/clpeak_ios_bridge.h"
-  XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES "YES"
-  XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
-  XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+  XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos"
   XCODE_EMBED_FRAMEWORKS "${_clpeak_embed_frameworks}"
   XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY "YES"
   XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY "YES"
-  XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
-  XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
-  XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos"
-  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
-  XCODE_GENERATE_SCHEME TRUE
 )
 
+# ---- Simulator target (Metal + CPU only, no Vulkan) -----------------------
 # The Vulkan SDK 1.4.350 iOS loader framework is device-only
 # (platform=IOS, arm64/arm64e). Provide a simulator scheme that keeps the same
 # Swift UI and native bridge but runs the Metal backend only.
-add_executable(clpeak_ios_simulator MACOSX_BUNDLE
-  ${CLPEAK_IOS_SWIFT_SOURCES}
-  Native/entry_ios.mm
-  Native/logger_ios.mm
-  Native/clpeak_ios_bridge.h
-  Native/logger_ios.h
-  ${CLPEAK_IOS_ASSET_CATALOG}
-)
+add_executable(clpeak_ios_simulator MACOSX_BUNDLE ${CLPEAK_IOS_BASE_SOURCES})
 
-target_link_libraries(clpeak_ios_simulator PRIVATE
-  peak_common
-  peak_metal
-  peak_cpu
-)
-
-target_include_directories(clpeak_ios_simulator PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/Native
-  ${CLPEAK_ROOT}/include
-  ${CLPEAK_ROOT}/include/common
-)
-
-target_compile_definitions(clpeak_ios_simulator PRIVATE ENABLE_METAL ENABLE_CPU)
+target_link_libraries(clpeak_ios_simulator PRIVATE ${CLPEAK_IOS_BASE_LINK_LIBS})
+target_include_directories(clpeak_ios_simulator PRIVATE ${CLPEAK_IOS_COMMON_INCLUDE_DIRS})
+target_compile_definitions(clpeak_ios_simulator PRIVATE ${CLPEAK_IOS_BASE_DEFINES})
 target_compile_options(clpeak_ios_simulator PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
 clpeak_setup_version(clpeak_ios_simulator GIT_ROOT ${CLPEAK_GIT_ROOT})
 
+# Simulator-specific properties
 set_target_properties(clpeak_ios_simulator PROPERTIES
-  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "kr.clpeak.ios.simulator"
   XCODE_ATTRIBUTE_PRODUCT_NAME "clpeak-sim"
-  XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
-  XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
-  XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/Native/clpeak_ios_bridge.h"
-  XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES "YES"
-  XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
-  XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-  XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
-  XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
   XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphonesimulator"
-  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
   "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"
-  XCODE_GENERATE_SCHEME TRUE
 )
 
 foreach(_sim_dep peak_common peak_metal peak_cpu)
