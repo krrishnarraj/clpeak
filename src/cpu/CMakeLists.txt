@@ -6,15 +6,25 @@ include(CheckCXXCompilerFlag)
 
 # Benchmark kernels are meaningless unoptimized, so force optimization for the
 # CPU backend in EVERY config -- a user who forgets `--config Release` (or builds
-# the VS-generator default, Debug) would otherwise see CPU numbers ~10x too low.
-# GCC/clang already get this for free (the -O3 we append below overrides Debug's
-# lack of -O).  MSVC needs help: its Debug config injects /Od /RTC1, so rewrite
-# those for this directory only (a non-CACHE set is directory-scoped and applies
-# to the targets defined here, not to other backends).  /RTC1 must go because it
-# is mutually exclusive with the /O2 that /Od is rewritten to.
+# the VS-generator default, which is Debug) would otherwise see CPU numbers ~10x
+# too low.  GCC/clang already get this for free (the -O3 we append below overrides
+# Debug's lack of -O).  MSVC needs help: its Debug config injects /Od /Ob0 /RTC1,
+# which respectively disable optimization, disable inlining, and add runtime
+# checks (and /RTC1 is mutually exclusive with /O2).  Strip all three by pattern
+# -- so we don't depend on the exact flag string of a given MSVC/CMake version --
+# and then unconditionally force /O2 /Ob2.  Done with a non-CACHE set() so it is
+# directory-scoped: it applies to the CPU targets defined here (incl. the ISA TU
+# object libs below) but not to other backends.
 if(MSVC)
-    string(REGEX REPLACE "/RTC[1csu]+" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-    string(REPLACE     "/Od" "/O2"        CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    foreach(_cfgflag CMAKE_CXX_FLAGS_DEBUG CMAKE_C_FLAGS_DEBUG)
+        set(_v " ${${_cfgflag}} ")
+        string(REGEX REPLACE " /RTC[1csu]+ " " " _v "${_v}")  # runtime checks (conflict w/ /O2)
+        string(REGEX REPLACE " /Ob[0-9] "    " " _v "${_v}")  # inlining control -> let /O2 set /Ob2
+        string(REGEX REPLACE " /Od "         " " _v "${_v}")  # disable-optimization
+        string(STRIP "${_v}" _v)
+        set(${_cfgflag} "${_v} /O2 /Ob2")   # directory-scoped override
+    endforeach()
+    message(STATUS "clpeak CPU: forcing optimized Debug build -> CMAKE_CXX_FLAGS_DEBUG = [${CMAKE_CXX_FLAGS_DEBUG}]")
 endif()
 
 # ---------------------------------------------------------------------------
