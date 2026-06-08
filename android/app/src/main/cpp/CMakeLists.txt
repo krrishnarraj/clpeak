@@ -76,7 +76,6 @@ endif()
 add_library(clpeak SHARED
     logger_android.cpp
     entry_android.cpp
-    enumerate_backends.cpp
 )
 
 target_link_libraries(clpeak
