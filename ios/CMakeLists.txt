@@ -146,24 +146,6 @@ if(CLPEAK_IOS_VULKAN_AVAILABLE)
   endif()
 endif()
 
-# ---- Common target properties ----------------------------------------------
-foreach(_ios_target clpeak_ios clpeak_ios_simulator)
-  set_target_properties(${_ios_target} PROPERTIES
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
-    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-    XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
-    XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
-    XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/Native/clpeak_ios_bridge.h"
-    XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES "YES"
-    XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
-    XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-    XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
-    XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
-    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
-    XCODE_GENERATE_SCHEME TRUE
-  )
-endforeach()
-
 # Device-specific properties
 set_target_properties(clpeak_ios PROPERTIES
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "kr.clpeak.ios"
@@ -184,6 +166,24 @@ target_include_directories(clpeak_ios_simulator PRIVATE ${CLPEAK_IOS_COMMON_INCL
 target_compile_definitions(clpeak_ios_simulator PRIVATE ${CLPEAK_IOS_BASE_DEFINES})
 target_compile_options(clpeak_ios_simulator PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
 clpeak_setup_version(clpeak_ios_simulator GIT_ROOT ${CLPEAK_GIT_ROOT})
+
+# ---- Common target properties (applied after both targets exist) -----------
+foreach(_ios_target clpeak_ios clpeak_ios_simulator)
+  set_target_properties(${_ios_target} PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+    XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
+    XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
+    XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/Native/clpeak_ios_bridge.h"
+    XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES "YES"
+    XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
+    XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+    XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+    XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+    XCODE_GENERATE_SCHEME TRUE
+  )
+endforeach()
 
 # Simulator-specific properties
 set_target_properties(clpeak_ios_simulator PROPERTIES
