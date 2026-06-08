@@ -85,6 +85,7 @@ target_link_libraries(clpeak
     peak_cpu
     log atomic dl
 )
+target_compile_definitions(clpeak PRIVATE ENABLE_OPENCL)
 target_compile_definitions(clpeak PRIVATE ENABLE_CPU)
 
 if(TARGET peak_vulkan)

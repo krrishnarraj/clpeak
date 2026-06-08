@@ -12,21 +12,21 @@
 #endif
 
 #define RECORD_METRIC_CALLBACK "record_metric_callback_from_c"
-#define DEVICE_INFO_CALLBACK   "device_info_callback_from_c"
+#define DEVICE_INFO_CALLBACK "device_info_callback_from_c"
 
 static void wireLoggerToJni(LoggerAndroid *lg, JNIEnv *jniEnv, jobject jObj, jclass cls)
 {
     lg->jEnv = jniEnv;
     lg->jObj = jObj;
     lg->recordMetricCallback = jniEnv->GetMethodID(cls,
-        RECORD_METRIC_CALLBACK,
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F"
-        "Ljava/lang/String;Ljava/lang/String;)V");
+                                                   RECORD_METRIC_CALLBACK,
+                                                   "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+                                                   "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;F"
+                                                   "Ljava/lang/String;Ljava/lang/String;)V");
     lg->deviceInfoCallback = jniEnv->GetMethodID(cls,
-        DEVICE_INFO_CALLBACK,
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+                                                 DEVICE_INFO_CALLBACK,
+                                                 "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+                                                 "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
 }
 
 jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
@@ -45,6 +45,27 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
     jclass cls = _jniEnv->GetObjectClass(_jObject);
 
     int clStatus = 0;
+
+#ifdef ENABLE_VULKAN
+    if (!opts.skipVulkan)
+    {
+        vkPeak vkObj;
+        vkObj.log.reset(new LoggerAndroid());
+        vkObj.applyOptions(opts);
+        wireLoggerToJni(static_cast<LoggerAndroid *>(vkObj.log.get()), _jniEnv, _jObject, cls);
+        clStatus |= vkObj.runAll();
+    }
+#endif
+#ifdef ENABLE_OPENCL
+    if (!opts.skipOpenCL)
+    {
+        clPeak clObj;
+        clObj.log.reset(new LoggerAndroid());
+        clObj.applyOptions(opts);
+        wireLoggerToJni(static_cast<LoggerAndroid *>(clObj.log.get()), _jniEnv, _jObject, cls);
+        clStatus |= clObj.runAll();
+    }
+#endif
 #ifdef ENABLE_CPU
     if (!opts.skipCpu)
     {
@@ -55,26 +76,6 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
         clStatus |= cpuObj.runAll();
     }
 #endif
-#ifdef ENABLE_VULKAN
-    if (!opts.skipVulkan)
-    {
-        vkPeak vkObj;
-        vkObj.log.reset(new LoggerAndroid());
-        vkObj.applyOptions(opts);
-        wireLoggerToJni(static_cast<LoggerAndroid *>(vkObj.log.get()), _jniEnv, _jObject, cls);
-        clStatus = vkObj.runAll();
-    }
-#endif
-
-    if (!opts.skipOpenCL)
-    {
-        clPeak clObj;
-        clObj.log.reset(new LoggerAndroid());
-        clObj.applyOptions(opts);
-        wireLoggerToJni(static_cast<LoggerAndroid *>(clObj.log.get()), _jniEnv, _jObject, cls);
-        int ocStatus = clObj.runAll();
-        clStatus |= ocStatus;
-    }
 
     if (argv)
         free(argv);

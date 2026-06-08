@@ -17,16 +17,20 @@
 static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
 {
   std::vector<BackendInventory> out;
-#ifdef ENABLE_CPU
-  if (!opts.skipCpu)
-    out.push_back(CpuPeak::enumerate());
-#endif
+
 #ifdef ENABLE_VULKAN
   if (!opts.skipVulkan)
     out.push_back(vkPeak::enumerate());
 #endif
+#ifdef ENABLE_OPENCL
   if (!opts.skipOpenCL)
     out.push_back(clPeak::enumerate());
+#endif
+#ifdef ENABLE_CPU
+  if (!opts.skipCpu)
+    out.push_back(CpuPeak::enumerate());
+#endif
+
   return out;
 }
 
