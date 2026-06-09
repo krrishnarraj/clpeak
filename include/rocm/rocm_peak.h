@@ -129,7 +129,7 @@ public:
   int runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughput(RocmDevice &dev, benchmark_config_t &cfg);
+
   int runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg);
 
 private:
@@ -200,8 +200,7 @@ namespace rocm_kernels {
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
   extern const char *image_bandwidth_name;
-  extern const char *atomic_throughput_src;
-  extern const char *atomic_throughput_name;
+
   extern const char *kernel_latency_src;
   extern const char *kernel_latency_name;
 }

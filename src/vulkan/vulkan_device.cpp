@@ -151,17 +151,15 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.bfloat16Supported = false;
   self->info.cooperativeMatrixSupported = false;
   self->info.fp8Supported = false;
-  self->info.atomicFloat32Supported = false;
-  self->info.atomicInt64Supported = false;
-  self->info.coopmatFP16Supported = false;
-  self->info.coopmatBF16Supported = false;
-  self->info.coopmatINT8K = 0;
-  self->info.coopmatFP8E4M3Supported = false;
-  self->info.coopmatFP8E5M2Supported = false;
-  self->info.coopmatFP32Supported = false;
+  self->info.coopmatFP32 = {};
+  self->info.coopmatFP16 = {};
+  self->info.coopmatBF16 = {};
+  self->info.coopmatFP8E4M3 = {};
+  self->info.coopmatFP8E5M2 = {};
+  self->info.coopmatINT8 = {};
   self->info.calibratedTimestampsSupported = false;
 
-#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
+#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
@@ -182,14 +180,6 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
 #endif
 #endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {};
-  atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-  VkPhysicalDeviceShaderAtomicInt64Features atomicInt64Features = {};
-  atomicInt64Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
-#endif
   VkPhysicalDeviceFeatures2 baseFeatures2 = {};
   baseFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 
@@ -200,12 +190,6 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
 #endif
 #ifdef VK_HAS_ANY_COOPMAT_FP8
   bool hasFP8Ext = false;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  bool hasAtomicFloatExt = false;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-  bool hasAtomicInt64Ext = false;
 #endif
   {
     void *chain = nullptr;
@@ -232,16 +216,6 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
       chain = chainPNext(chain, &fp8Features);
 #endif
 #endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-    hasAtomicFloatExt = hasExt("VK_EXT_shader_atomic_float");
-    if (hasAtomicFloatExt)
-      chain = chainPNext(chain, &atomicFloatFeatures);
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-    hasAtomicInt64Ext = hasExt(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
-    if (hasAtomicInt64Ext)
-      chain = chainPNext(chain, &atomicInt64Features);
-#endif
 
     VkPhysicalDeviceFeatures2 features2 = {};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -258,20 +232,6 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
 #ifdef VK_HAS_COMPUTE_DP_V1
     if (features2.features.shaderFloat64)
       self->info.float64Supported = true;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-    if (hasAtomicFloatExt && atomicFloatFeatures.shaderBufferFloat32AtomicAdd)
-    {
-      enabledExts.push_back("VK_EXT_shader_atomic_float");
-      self->info.atomicFloat32Supported = true;
-    }
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-    if (hasAtomicInt64Ext && atomicInt64Features.shaderBufferInt64Atomics)
-    {
-      enabledExts.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
-      self->info.atomicInt64Supported = true;
-    }
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V1
     if (f16i8Features.shaderFloat16)
@@ -374,7 +334,7 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
-#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
+#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1)
   // Re-chain the feature structs we actually enabled for vkCreateDevice.
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
@@ -395,14 +355,6 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   VkPhysicalDeviceShaderFloat8FeaturesEXT fp8Features = {};
   fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
 #endif
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {};
-  atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-  VkPhysicalDeviceShaderAtomicInt64Features atomicInt64Features = {};
-  atomicInt64Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
 #endif
 
   VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
@@ -446,20 +398,6 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
     enabledChain = chainPNext(enabledChain, &fp8Features);
   }
 #endif
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  if (self->info.atomicFloat32Supported)
-  {
-    atomicFloatFeatures.pNext = nullptr;
-    enabledChain = chainPNext(enabledChain, &atomicFloatFeatures);
-  }
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-  if (self->info.atomicInt64Supported)
-  {
-    atomicInt64Features.pNext = nullptr;
-    enabledChain = chainPNext(enabledChain, &atomicInt64Features);
-  }
 #endif
   bool haveBaseFeats = enabledFeatures2.features.shaderFloat64 != VK_FALSE;
   if (enabledChain || haveBaseFeats)
@@ -575,7 +513,8 @@ bool VulkanDevice::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize,
                                          VkDescriptorSetLayout dsLayout,
                                          VkPipelineLayout pipeLayout,
-                                         VkPipeline &pipeline)
+                                         VkPipeline &pipeline,
+                                         const VkSpecializationInfo *specInfo)
 {
   VkShaderModuleCreateInfo smCI = {};
   smCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -591,6 +530,7 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   stageCI.stage = VK_SHADER_STAGE_COMPUTE_BIT;
   stageCI.module = shaderModule;
   stageCI.pName = "main";
+  stageCI.pSpecializationInfo = specInfo;
 
   VkComputePipelineCreateInfo pipelineCI = {};
   pipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;

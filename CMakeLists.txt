@@ -1,4 +1,25 @@
 cmake_minimum_required(VERSION 3.20)
+
+# On Linux, prefer clang/clang++ over the distro-default GCC when the user has not
+# pinned a compiler.  The CPU backend keeps 24 independent FMA accumulator chains
+# in flight per kernel; clang schedules those cleanly, but GCC<=14 serialises them
+# into a single register (and skips the k-loop unroll), roughly halving fp32/fp64
+# throughput.  Must run before project().  Respects any explicit choice: CC/CXX
+# env vars, -DCMAKE_C[XX]_COMPILER, a toolchain file, or the oneAPI icpx build.
+# (macOS already defaults to AppleClang; Windows to MSVC -- both are left alone.)
+if(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE
+   AND NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER
+   AND NOT DEFINED ENV{CXX} AND NOT DEFINED ENV{CC}
+   AND NOT CMAKE_TOOLCHAIN_FILE)
+    find_program(CLPEAK_CLANG_C   NAMES clang)
+    find_program(CLPEAK_CLANG_CXX NAMES clang++)
+    if(CLPEAK_CLANG_C AND CLPEAK_CLANG_CXX)
+        set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_C}"   CACHE FILEPATH "C compiler")
+        set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CXX}" CACHE FILEPATH "C++ compiler")
+        message(STATUS "clpeak: preferring clang (${CLPEAK_CLANG_CXX}) for CPU-backend codegen; pass -DCMAKE_CXX_COMPILER=g++ to override")
+    endif()
+endif()
+
 project(clpeak)
 
 set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -16,6 +37,18 @@ option(CLPEAK_ENABLE_CUDA   "Build CUDA backend"   ON)
 option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
 option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
 option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
+option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
+# OFF (default): build a portable binary (SSE4.2 / armv8-a baseline) that runtime-
+# dispatches to higher ISA — safe to distribute across machines.  ON: tune the
+# whole CPU backend for the BUILD host (-march/-mcpu=native); fastest for a local
+# build, but the resulting binary may use illegal instructions on an older CPU.
+option(CLPEAK_CPU_NATIVE_ARCH "Tune the CPU backend for the build host (non-portable binary)" OFF)
+
+# The native CPU backend needs a threading library (always available).
+if(CLPEAK_ENABLE_CPU)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package(Threads QUIET)
+endif()
 
 # Find Vulkan (needed by src/vulkan/CMakeLists.txt)
 if(CLPEAK_ENABLE_VULKAN)
@@ -105,6 +138,7 @@ add_subdirectory(src/cuda)
 add_subdirectory(src/rocm)
 add_subdirectory(src/metal)
 add_subdirectory(src/oneapi)
+add_subdirectory(src/cpu)
 
 # CLI executable
 add_subdirectory(src/cli)
@@ -183,6 +217,13 @@ elseif(CLPEAK_ENABLE_ONEAPI)
     endif()
 else()
     string(APPEND _clpeak_summary "  oneAPI : disabled (CLPEAK_ENABLE_ONEAPI=OFF)\n")
+endif()
+if(CLPEAK_ENABLE_CPU AND CLPEAK_CPU_NATIVE_ARCH)
+    string(APPEND _clpeak_summary "  CPU    : ENABLED  (NATIVE_ARCH=ON -- tuned for build host, non-portable binary)\n")
+elseif(CLPEAK_ENABLE_CPU)
+    string(APPEND _clpeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch, -DCLPEAK_CPU_NATIVE_ARCH=ON to tune for this host)\n")
+else()
+    string(APPEND _clpeak_summary "  CPU    : disabled (CLPEAK_ENABLE_CPU=OFF)\n")
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")

@@ -84,7 +84,7 @@ public:
   int runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughput(OneapiDevice &dev, benchmark_config_t &cfg);
+
   int runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg);
 
   // Timed launcher used by every compute / bandwidth benchmark.  Runs

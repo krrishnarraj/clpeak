@@ -1,5 +1,5 @@
 if(NOT CLPEAK_ENABLE_CUDA OR NOT CUDAToolkit_FOUND)
-    return()
+  return()
 endif()
 
 add_library(peak_cuda STATIC
@@ -15,7 +15,6 @@ add_library(peak_cuda STATIC
     image_bandwidth.cpp
     transfer_bandwidth.cpp
     kernel_latency.cpp
-    atomic_throughput.cpp
 )
 target_link_libraries(peak_cuda PUBLIC
     peak_common
@@ -57,7 +56,7 @@ int main() {
 }" CLPEAK_CUBLASLT_HAS_FP4)
 unset(CMAKE_REQUIRED_INCLUDES)
 if(CLPEAK_CUBLASLT_HAS_FP4)
-    target_compile_definitions(peak_cuda PRIVATE CLPEAK_CUBLASLT_HAS_FP4)
+  target_compile_definitions(peak_cuda PRIVATE CLPEAK_CUBLASLT_HAS_FP4)
 endif()
 
 # Embed .cu kernel sources as C++ raw-string literals
@@ -89,7 +88,6 @@ set(CLPEAK_CUDA_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/wmma_bmma_b1.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/local_bandwidth.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/image_bandwidth.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/atomic_throughput.cu
 )
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
 embed_cuda_kernels(

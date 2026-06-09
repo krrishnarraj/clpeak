@@ -12,11 +12,10 @@ static library.  Source files are Objective-C++ (`.mm`).
 - Looking for Metal library/pipeline caching (`mtlGetLibrary`, `mtlGetPipeline`)? → `mtl_utils.mm`
 - Looking for the internal header (ObjC types + pimpls + helpers)? → `mtl_internal.h`
 - Looking for FP compute benchmarks? → `compute_float.mm`
-- Looking for int compute benchmarks? → `simdgroup.mm`, `mtl_blas.mm`, `atomic_throughput.mm`
+- Looking for int compute benchmarks? → `simdgroup.mm`, `mtl_blas.mm`
 - Looking for simdgroup matrix benchmarks? → `simdgroup.mm`
 - Looking for MPSGraph GEMM benchmarks? → `mtl_blas.mm`
 - Looking for bandwidth benchmarks? → `global_bandwidth.mm`, `local_bandwidth.mm`, `image_bandwidth.mm`
-- Looking for atomic benchmarks? → `atomic_throughput.mm`
 - Looking for kernel latency? → `kernel_latency.mm`
 - Looking for .metal kernel sources? → `mtl_kernels/*.metal`
 - Looking for kernel embedding logic? → `cmake/EmbedMetalKernels.cmake`
@@ -36,7 +35,6 @@ static library.  Source files are Objective-C++ (`.mm`).
 | `global_bandwidth.mm` | `runGlobalBandwidth` |
 | `local_bandwidth.mm` | `runLocalBandwidth` |
 | `image_bandwidth.mm` | `runImageBandwidth` |
-| `atomic_throughput.mm` | `runAtomicThroughput` + `runAtomicThroughputFp` |
 | `kernel_latency.mm` | `runKernelLatency` |
 | `mtl_kernels/` | Metal Shading Language kernels (`.metal`) embedded as C++ string literals |
 | `cmake/EmbedMetalKernels.cmake` | `embed_metal_kernels()` — .metal → C++ raw-string arrays |

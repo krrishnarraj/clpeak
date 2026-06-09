@@ -21,7 +21,7 @@ build time and the SYCL runtime JITs it on first launch.
 - Looking for joint_matrix (XMX) benchmarks? → `joint_matrix.cpp`
 - Looking for oneMKL GEMM benchmark? → `onemkl.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-- Looking for atomic benchmarks? → `atomic_throughput.cpp`
+
 - Looking for kernel latency? → `kernel_latency.cpp`
 
 ## Key Files
@@ -39,7 +39,7 @@ build time and the SYCL runtime JITs it on first launch.
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
 | `image_bandwidth.cpp` | `runImageBandwidth` (float4 via `sycl::image<2>`) |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` (H2D / D2H via `queue.memcpy` on USM-host pinned memory) |
-| `atomic_throughput.cpp` | `runAtomicThroughput` (global + SLM via `sycl::atomic_ref`) |
+
 | `kernel_latency.cpp` | `runKernelLatency` (empty kernel submit + `queue.wait_and_throw()`) |
 
 

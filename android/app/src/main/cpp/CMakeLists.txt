@@ -19,6 +19,13 @@ include(${CLPEAK_ROOT}/src/common/cmake/version.cmake)
 add_subdirectory(${CLPEAK_ROOT}/src/common ${CMAKE_BINARY_DIR}/common)
 
 # -----------------------------------------------------------------------
+# Native CPU backend — plain C++ / std::thread, no external deps.
+# (Threads come from Bionic libc; no find_package(Threads) needed.)
+# -----------------------------------------------------------------------
+set(CLPEAK_ENABLE_CPU ON)
+add_subdirectory(${CLPEAK_ROOT}/src/cpu ${CMAKE_BINARY_DIR}/cpu)
+
+# -----------------------------------------------------------------------
 # OpenCL backend — predefine OpenCL vars so src/opencl/CMakeLists.txt
 # skips find_package and uses the stub
 # -----------------------------------------------------------------------
@@ -69,14 +76,16 @@ endif()
 add_library(clpeak SHARED
     logger_android.cpp
     entry_android.cpp
-    enumerate_backends.cpp
 )
 
 target_link_libraries(clpeak
     peak_common
     peak_opencl
+    peak_cpu
     log atomic dl
 )
+target_compile_definitions(clpeak PRIVATE ENABLE_OPENCL)
+target_compile_definitions(clpeak PRIVATE ENABLE_CPU)
 
 if(TARGET peak_vulkan)
     target_link_libraries(clpeak peak_vulkan)

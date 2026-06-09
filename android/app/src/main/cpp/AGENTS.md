@@ -21,7 +21,12 @@ by `BenchmarkRepository.kt`.
 | `logger_android.cpp` | Android logcat + JNI callback logger |
 | `jni_entry.h` | JNI function prototypes for Kotlin callbacks |
 | `libopencl-stub/` | Stub OpenCL library — dlopens real driver at runtime |
-| `CMakeLists.txt` | Builds `libclpeak.so`, compiles common + OpenCL (+ Vulkan) sources |
+| `CMakeLists.txt` | Builds `libclpeak.so`, compiles common + CPU + OpenCL (+ Vulkan) sources |
+
+The native CPU backend (`src/cpu/`, plain C++ / std::thread) is always built and
+runs first (before Vulkan/OpenCL) in both `entry_android.cpp` and
+`enumerate_backends.cpp`. It appears in the UI automatically via the data-driven
+`BackendCatalog.kt`; `ArgvBuilder.kt` maps a deselected CPU to `--no-cpu`.
 
 ## When You Change This Directory
 

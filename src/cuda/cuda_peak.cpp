@@ -176,9 +176,6 @@ int CudaPeak::runAll()
       runWmma(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Cublas, Category::IntCompute))
       runCublas(dev, cfg, Category::IntCompute);
-    if (isAllowed(Benchmark::AtomicThroughput))
-      runAtomicThroughput(dev, cfg);
-
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
     if (isAllowed(Benchmark::GlobalBW))
       runGlobalBandwidth(dev, cfg);
@@ -204,7 +201,7 @@ int CudaPeak::runAll()
 //   cuda_device.cpp       compute_kernel.cpp
 //   compute_float.cpp     compute_int.cpp       wmma.cpp
 //   cuda_blas.cpp         global_bandwidth.cpp  local_bandwidth.cpp
-//   image_bandwidth.cpp   transfer_bandwidth.cpp atomic_throughput.cpp
+//   image_bandwidth.cpp   transfer_bandwidth.cpp
 //   kernel_latency.cpp
 // ---------------------------------------------------------------------------
 

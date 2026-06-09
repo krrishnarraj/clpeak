@@ -57,18 +57,6 @@ static const unsigned int FETCH_PER_WI = 16;
 // local_bandwidth_kernels.cl
 static const unsigned int LMEM_REPS = 64;
 
-// atomic_throughput_kernels.cl
-// Was 512.  Cut to 256 because float atomicAdd on AMD/RADV (and likely other
-// vendors lacking native fp32 atomic add) is emitted as a shader CAS loop:
-// each "atomic add" can run 5-20x slower than int_atomic, which at the old
-// 512 reps * 33M WIs * 8 iters pushed the dispatch past the GPU watchdog
-// (RX 9070 XT was hard-recovering on the float_global variant).  256 keeps
-// the per-dispatch window long enough that GPU frequency scaling can ramp
-// to peak (cutting further to 64 under-measured M1 by ~20%) while still
-// giving 2x headroom against TDR on the slowest atomic_float path.
-// Hardcoded inside each shader/kernel -- keep all sites in sync.
-static const unsigned int ATOMIC_REPS = 256;
-
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 
@@ -131,6 +119,11 @@ static inline uint64_t targetGlobalThreads(uint32_t numCUs)
 // Keep the "500 ms" mention in the --help text in src/common/options.cpp in sync.
 static const unsigned int DEFAULT_TARGET_TIME_US = 500000;
 
+// The native CPU backend has no GPU watchdog to dodge, and its per-test timed
+// phases complete much faster, so a longer budget steadies the numbers against
+// turbo / scheduler jitter.  Selectable separately via --max-time-cpu.
+static const unsigned int DEFAULT_CPU_TARGET_TIME_US = 2000000;  // 2000 ms
+
 // Pick an iteration count from a measured per-iter time and a per-test
 // time budget.  Used by every backend's runKernel/runDispatches helper to
 // size the timed batch so it lands at ~target_us regardless of device
@@ -144,10 +137,14 @@ static const unsigned int DEFAULT_TARGET_TIME_US = 500000;
 //   forced       if non-zero, short-circuit and return this value (the
 //                user passed --iters)
 //
-// Result is clamped to [1, 10000] so a single dispatch/copy can be used when
-// one iteration already exceeds the target budget, while still bounding
-// command-buffer / event-pool size on fast paths.
-unsigned int pickIters(double per_iter_us, unsigned int target_us, unsigned int forced);
+// Result is clamped to [1, max_iters].  max_iters defaults to 10000 so a single
+// dispatch/copy can be used when one iteration already exceeds the target
+// budget, while still bounding command-buffer / event-pool size on the GPU
+// backends' fast paths.  The CPU backend has no such per-dispatch limit and
+// passes a much larger cap so a cheap kernel actually fills its time budget
+// instead of stopping at 10000 iterations.
+unsigned int pickIters(double per_iter_us, unsigned int target_us,
+                       unsigned int forced, unsigned int max_iters = 10000);
 
 // ---------------------------------------------------------------------------
 // Benchmark data initialisation

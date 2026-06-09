@@ -1,5 +1,5 @@
 if(NOT CLPEAK_ENABLE_ROCM OR NOT hip_FOUND OR NOT CLPEAK_HIPRTC_FOUND)
-    return()
+  return()
 endif()
 
 add_library(peak_rocm STATIC
@@ -18,7 +18,6 @@ add_library(peak_rocm STATIC
     local_bandwidth.cpp
     image_bandwidth.cpp
     transfer_bandwidth.cpp
-    atomic_throughput.cpp
     kernel_latency.cpp
 )
 
@@ -28,12 +27,12 @@ target_link_libraries(peak_rocm PUBLIC
     ${CLPEAK_HIPRTC_LINK}
 )
 if(rocblas_FOUND AND TARGET roc::rocblas)
-    target_link_libraries(peak_rocm PUBLIC roc::rocblas)
-    target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_ROCBLAS)
+  target_link_libraries(peak_rocm PUBLIC roc::rocblas)
+  target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_ROCBLAS)
 endif()
 if(hipblaslt_FOUND AND TARGET roc::hipblaslt)
-    target_link_libraries(peak_rocm PUBLIC roc::hipblaslt)
-    target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_HIPBLASLT)
+  target_link_libraries(peak_rocm PUBLIC roc::hipblaslt)
+  target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_HIPBLASLT)
 endif()
 target_include_directories(peak_rocm PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
@@ -42,15 +41,15 @@ target_compile_features(peak_rocm PRIVATE cxx_std_14)
 
 set(_clpeak_rocm_inc "/opt/rocm/include")
 if(TARGET hip::host)
-    get_target_property(_clpeak_hip_incs hip::host INTERFACE_INCLUDE_DIRECTORIES)
-    if(_clpeak_hip_incs)
-        foreach(_clpeak_hip_inc IN LISTS _clpeak_hip_incs)
-            if(NOT _clpeak_hip_inc MATCHES "^\\$<")
-                set(_clpeak_rocm_inc "${_clpeak_hip_inc}")
-                break()
-            endif()
-        endforeach()
-    endif()
+  get_target_property(_clpeak_hip_incs hip::host INTERFACE_INCLUDE_DIRECTORIES)
+  if(_clpeak_hip_incs)
+    foreach(_clpeak_hip_inc IN LISTS _clpeak_hip_incs)
+      if(NOT _clpeak_hip_inc MATCHES "^\\$<")
+        set(_clpeak_rocm_inc "${_clpeak_hip_inc}")
+        break()
+      endif()
+    endforeach()
+  endif()
 endif()
 
 target_compile_definitions(peak_rocm PRIVATE
@@ -62,10 +61,10 @@ target_compile_definitions(peak_rocm PRIVATE
 # (gfx950 / MI350, recent ROCm).  Feature-test by compilation so the build stays
 # green on ROCm versions without it and auto-enables the mxfp4 path where present.
 if(hipblaslt_FOUND AND TARGET roc::hipblaslt)
-    include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_INCLUDES "${_clpeak_rocm_inc}")
-    set(CMAKE_REQUIRED_DEFINITIONS "-D__HIP_PLATFORM_AMD__")
-    check_cxx_source_compiles("
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_INCLUDES "${_clpeak_rocm_inc}")
+  set(CMAKE_REQUIRED_DEFINITIONS "-D__HIP_PLATFORM_AMD__")
+  check_cxx_source_compiles("
 #include <hipblaslt/hipblaslt.h>
 int main() {
   hipblasLtMatmulMatrixScale_t s = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
@@ -74,14 +73,14 @@ int main() {
   (void)s; (void)a; (void)t;
   return 0;
 }" CLPEAK_HIPBLASLT_HAS_FP4)
-    unset(CMAKE_REQUIRED_INCLUDES)
-    unset(CMAKE_REQUIRED_DEFINITIONS)
-    if(CLPEAK_HIPBLASLT_HAS_FP4)
-        target_compile_definitions(peak_rocm PRIVATE CLPEAK_HIPBLASLT_HAS_FP4)
-    endif()
+  unset(CMAKE_REQUIRED_INCLUDES)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  if(CLPEAK_HIPBLASLT_HAS_FP4)
+    target_compile_definitions(peak_rocm PRIVATE CLPEAK_HIPBLASLT_HAS_FP4)
+  endif()
 endif()
 if(CLPEAK_ROCWMMA_FOUND)
-    target_compile_definitions(peak_rocm PRIVATE
+  target_compile_definitions(peak_rocm PRIVATE
         CLPEAK_ROCM_HAS_ROCWMMA
         CLPEAK_ROCWMMA_INCLUDE_DIR="${CLPEAK_ROCWMMA_INCLUDE_DIR}"
     )
@@ -115,7 +114,6 @@ set(CLPEAK_ROCM_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/global_bandwidth.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/local_bandwidth.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/image_bandwidth.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/atomic_throughput.hip
     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/kernel_latency.hip
 )
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedRocmKernels.cmake)

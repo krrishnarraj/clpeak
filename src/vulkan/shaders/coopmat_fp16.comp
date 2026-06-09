@@ -4,16 +4,23 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
 
 // Cooperative-matrix FP16 x FP16 + FP32 accumulator.
-// Fixed 16x16x16 tile -- the most widely advertised shape on NVIDIA
-// Turing/Ampere/Ada/Hopper, AMD MI200/MI300, and Intel Arc.  Host gates
-// the test on a matching property from
-// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, so devices that do
-// not advertise this exact shape skip cleanly.
+// M/N/K and the loop count ITERS arrive as specialization constants: the
+// host queries vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, picks the
+// tile the driver advertises for this dtype (16x16x16 on NVIDIA/AMD/Intel
+// fp16), and binds it at pipeline creation -- so this single module runs
+// whatever shape the hardware exposes, and skips cleanly when none matches.
 //
-// One subgroup per workgroup; each subgroup performs ITERS dependent
-// coopMatMulAdd's, so the accumulator chain prevents the compiler
-// folding the MMA away.  The final coopMatStore materializes the result
-// and keeps the chain observable.
+// One subgroup per workgroup; ITERS dependent coopMatMulAdd's keep the MMA
+// observable (the compiler can't fold it away) and the final coopMatStore
+// materializes the result.
+//
+// NOTE: this is a single accumulator chain.  On NVIDIA, fp16/bf16 coopmat
+// reads ~1/4 of the CUDA WMMA tensor peak; that gap is *not* the c -> c
+// dependency -- explicit multi-chain ILP (4 independent MMAs, as CUDA WMMA
+// uses) was measured to make no difference on an RTX 5060, so the limit is
+// NVIDIA's Vulkan cooperative-matrix code path itself.  Kept single-chain
+// for simplicity; revisit with multi-chain only if AMD/Intel data shows
+// their coopmat fp16 is latency-bound.
 
 layout(local_size_x = 32) in;
 
@@ -25,10 +32,10 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-const int ITERS = 256;
-const uint M = 16u;
-const uint N = 16u;
-const uint K = 16u;
+layout(constant_id = 0) const uint M     = 16u;
+layout(constant_id = 1) const uint N     = 16u;
+layout(constant_id = 2) const uint K     = 16u;
+layout(constant_id = 3) const int  ITERS = 256;
 
 void main()
 {

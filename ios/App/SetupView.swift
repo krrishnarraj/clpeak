@@ -18,7 +18,7 @@ struct SetupView: View {
                     }
 
                     if !viewModel.catalog.hasAnyDevice {
-                        Text("No Vulkan or Metal devices were found.")
+                        Text("No Vulkan, Metal, or CPU devices were found.")
                             .font(.body)
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity)

@@ -16,7 +16,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 - Looking for int compute benchmarks? → `compute_int.cpp`
 - Looking for cooperative matrix benchmarks? → `coopmat.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-- Looking for atomic benchmarks? → `atomic_throughput.cpp`
+
 - Looking for kernel latency? → `kernel_latency.cpp`
 
 ## Key Files
@@ -33,7 +33,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-| `atomic_throughput.cpp` | `runAtomicThroughput` + `runAtomicThroughputFp` |
+
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |

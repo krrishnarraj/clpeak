@@ -10,6 +10,9 @@
 #ifdef ENABLE_METAL
 #include <metal/mtl_peak.h>
 #endif
+#ifdef ENABLE_CPU
+#include <cpu/cpu_peak.h>
+#endif
 
 #include <version.h>
 
@@ -24,6 +27,7 @@ namespace
 std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
 {
   std::vector<BackendInventory> out;
+
 #ifdef ENABLE_METAL
   if (!opts.skipMetal)
     out.push_back(MetalPeak::enumerate());
@@ -32,6 +36,11 @@ std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
   if (!opts.skipVulkan)
     out.push_back(vkPeak::enumerate());
 #endif
+#ifdef ENABLE_CPU
+  if (!opts.skipCpu)
+    out.push_back(CpuPeak::enumerate());
+#endif
+
   return out;
 }
 
@@ -81,7 +90,7 @@ int clpeak_ios_launch(int argc,
     MetalPeak mtlObj;
     mtlObj.log.reset(new LoggerIOS(callbacks, context));
     mtlObj.applyOptions(opts);
-    status = mtlObj.runAll();
+    status |= mtlObj.runAll();
   }
 #endif
 
@@ -93,6 +102,16 @@ int clpeak_ios_launch(int argc,
     vkObj.applyOptions(opts);
     int vkStatus = vkObj.runAll();
     status |= vkStatus;
+  }
+#endif
+
+#ifdef ENABLE_CPU
+  if (!opts.skipCpu)
+  {
+    CpuPeak cpuObj;
+    cpuObj.log.reset(new LoggerIOS(callbacks, context));
+    cpuObj.applyOptions(opts);
+    status |= cpuObj.runAll();
   }
 #endif
 

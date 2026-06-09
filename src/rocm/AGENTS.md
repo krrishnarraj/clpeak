@@ -20,7 +20,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
 - Looking for hipBLASLt FP8 GEMM benchmarks? → `hipblaslt_gemm.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-- Looking for atomic benchmarks? → `atomic_throughput.cpp`
+
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .hip kernel sources? → `rocm_kernels/*.hip`
 - Looking for kernel embedding logic? → `cmake/EmbedRocmKernels.cmake`
@@ -44,7 +44,7 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` via HIP texture object |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-| `atomic_throughput.cpp` | `runAtomicThroughput` |
+
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `rocm_kernels/` | HIP kernel sources (`.hip`) embedded as C++ string literals |
 | `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — .hip → C++ raw-string arrays |

@@ -159,7 +159,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   for (const auto &v : variants)
   {
     VkPipeline pipeline;
-    if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline))
+    if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline, d.specInfo))
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed");
       continue;

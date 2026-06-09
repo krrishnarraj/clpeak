@@ -19,10 +19,6 @@ static const std::string stringifiedLocalKernels =
 #include "kernels/local_bandwidth_kernels.cl"
     ;
 
-static const std::string stringifiedAtomicKernels =
-#include "kernels/atomic_throughput_kernels.cl"
-    ;
-
 static const std::string stringifiedImageKernels =
 #include "kernels/image_bandwidth_kernels.cl"
     ;
@@ -33,6 +29,5 @@ static const std::string stringifiedInt8DpKernels =
 
 const std::string& clGetMainKernels()    { return stringifiedKernels; }
 const std::string& clGetLocalKernels()   { return stringifiedLocalKernels; }
-const std::string& clGetAtomicKernels()  { return stringifiedAtomicKernels; }
 const std::string& clGetImageKernels()   { return stringifiedImageKernels; }
 const std::string& clGetInt8DpKernels()  { return stringifiedInt8DpKernels; }

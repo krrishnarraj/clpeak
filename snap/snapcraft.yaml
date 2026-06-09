@@ -7,11 +7,11 @@ description: |
   performance of GPU compute devices. It exercises tight vector/MAD/MMA loops
   and vendor-SDK GEMM libraries across multiple backends.
 
-  Supported backends: OpenCL, Vulkan, CUDA, Metal
+  Supported backends: OpenCL, Vulkan, CUDA, ROCm, Metal, oneAPI, CPU
 
   Benchmarks include: global/local/image memory bandwidth, single/half/double
   precision compute, integer throughput, tensor operations (WMMA, cooperative
-  matrices), vendor GEMM peaks, atomic throughput, and kernel launch latency.
+  matrices), vendor GEMM peaks and kernel launch latency.
 
   Output formats: plain text, XML, JSON, CSV
 

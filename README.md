@@ -5,11 +5,11 @@
 
 **clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops and vendor-SDK GEMM libraries (cuBLASLt on NVIDIA, MPS on Apple) to expose what the hardware is capable of &mdash; from raw ALU peaks to near-vendor-advertised matrix throughput.
 
-clpeak began as an OpenCL-only tool. It has since been repurposed into a multi-backend benchmark, shipping multiple interchangeable backends &mdash; OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL &mdash; running back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) become visible alongside the raw peak numbers.
+clpeak began as an OpenCL-only tool and is now a multi-backend benchmark &mdash; OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, plus a native CPU backend &mdash; run back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) surface alongside the raw peak numbers.
 
 ## Sample output
 
-Condensed, peak-revealing lines straight from the tool. Numbers below are real runs.
+Condensed peak-revealing lines from real runs.
 
 Apple M1 Pro, Metal backend:
 
@@ -36,10 +36,6 @@ Backend: Metal
 
     Image memory bandwidth (GBPS)
       rgba32f  : 162.67
-
-    Atomic throughput (GOPS)
-      int_global : 24.78
-      int_local  : 255.52
 ```
 
 NVIDIA RTX 5060, CUDA backend:
@@ -155,7 +151,7 @@ cmake -S . -B build -DCLPEAK_ENABLE_VULKAN=OFF -DCLPEAK_ENABLE_METAL=OFF
 cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ```
 
-> **oneAPI/SYCL note:** the oneAPI backend must be configured with `-DCMAKE_CXX_COMPILER=icpx` (the DPC++ compiler). SYCL kernels are compiled inline by the host compiler, so configuring with a non-`icpx` compiler silently skips the backend.
+> **oneAPI/SYCL note:** the oneAPI backend needs `-DCMAKE_CXX_COMPILER=icpx` (the DPC++ compiler); SYCL kernels compile inline, so any other compiler silently skips the backend.
 
 | CMake option | Default | Effect when `OFF` |
 |---|---|---|
@@ -165,27 +161,27 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_ROCM` | `ON` | Skip ROCm/HIP even if ROCm SDK is present |
 | `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
+| `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (no SDK; otherwise always available) |
 
 ## What it measures
 
-| Test | OpenCL | Vulkan | CUDA | ROCm/HIP | Metal | oneAPI/SYCL |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Global memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; |
-| Local / shared memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; |
-| Image / texture bandwidth | &check; | &check; | &check; | &check; | &check; | &check; |
-| Transfer bandwidth (host&harr;device) | &check; | &check; | &check; | &check; | &mdash; | &check; |
-| Compute SP / HP / DP / MP / BF16 | &check; | &check; | &check; | &check; | &check; | &check; |
-| Compute INT (int32) | &check; | &check; | &check; | &check; | &mdash; | &check; |
-| Compute INT24 / INT8 / INT16 | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
-| INT8 dot-product (DP4a) | &check; | &check; | &check; | &check; | &mdash; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`) | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync + FP4/MXFP4/NVFP4 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8/mxfp4 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) |
-| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 |
-| Atomic throughput (global + local) | &check; | &check; | &check; | &check; | &check; | &check; |
-| Kernel launch latency | &check; | &check; | &check; | &check; | &check; | &check; |
+| Test | OpenCL | Vulkan | CUDA | ROCm/HIP | Metal | oneAPI/SYCL | CPU |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Global memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; | &check; |
+| Local / shared memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; | &check; |
+| Image / texture bandwidth | &check; | &check; | &check; | &check; | &check; | &check; | &mdash; |
+| Transfer bandwidth (host&harr;device) | &check; | &check; | &check; | &check; | &mdash; | &check; | &mdash; |
+| Compute SP / HP / DP / MP / BF16 | &check; | &check; | &check; | &check; | &check; | &check; | &check; |
+| Compute INT (int32) | &check; | &check; | &check; | &check; | &mdash; | &check; | &check; |
+| Compute INT24 / INT8 / INT16 | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
+| INT8 dot-product (DP4a) | &check; | &check; | &check; | &check; | &mdash; | &check; | &check; |
+| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`, `--amx`) | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync + FP4/MXFP4/NVFP4 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8/mxfp4 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) | AMX / SMMLA / BFMMLA (int8/fp16/bf16) |
+| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 | &mdash; |
+| Kernel launch latency | &check; | &check; | &check; | &check; | &check; | &check; | &mdash; |
 
 ## CLI
 
-`./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, or oneAPI/SYCL is doing the work.
+`./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, or CPU is doing the work.
 
 ```console
 ./clpeak                              # run every test on every available backend
@@ -194,6 +190,7 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ./clpeak --cuda --vulkan              # combine multiple --<backend> flags
 ./clpeak --rocm                       # run only the ROCm/HIP backend
 ./clpeak --oneapi                     # run only the oneAPI/SYCL backend
+./clpeak --cpu                        # run only the native CPU backend
 ./clpeak --no-opencl --no-cuda        # or skip the ones you don't want
 ./clpeak --wmma                       # CUDA tensor-core tests (hand-rolled WMMA)
 ./clpeak --cublas                     # CUDA vendor-SDK GEMM peak (cuBLASLt, all dtypes)
@@ -204,13 +201,14 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ./clpeak --mps-gemm                   # Apple vendor-SDK GEMM peak (MPS / MPSGraph)
 ./clpeak --joint-matrix               # Intel XMX matrix-engine tests (hand-rolled joint_matrix)
 ./clpeak --onemkl                     # Intel vendor-SDK GEMM peak (oneMKL)
+./clpeak --amx                        # CPU matrix-engine tests (AMX / SMMLA / BFMMLA)
 ./clpeak --coopmat                    # Vulkan tensor-core tests
 ./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
 ./clpeak --compare baseline.json      # diff this run against a saved baseline JSON
 ./clpeak --list-devices               # enumerate devices for every backend, no benchmarks
 ```
 
-`--compare baseline.json` re-runs the selected tests and prints each result next to the value recorded in `baseline.json` (saved earlier with `--json-file`), so regressions or driver/SDK upgrades show up as a per-test delta instead of two outputs you have to eyeball side by side.
+`--compare baseline.json` re-runs the selected tests and prints each result next to the value saved earlier with `--json-file`, so regressions or driver/SDK upgrades show up as a per-test delta.
 
 ### Selecting a specific device
 
@@ -225,6 +223,8 @@ a comma-separated list; omitting it runs every device in that backend:
 ./clpeak --mtl-device 0                  # Metal device index
 ./clpeak --oneapi-device 0               # oneAPI/SYCL device index
 ```
+
+The CPU backend is a single device with no index flag — use `--no-cpu` to skip it.
 
 ## For AI agents
 

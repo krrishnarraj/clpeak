@@ -16,7 +16,6 @@ struct CliOptions;
 // Kernel string accessors (defined in cl_kernels.cpp)
 const std::string& clGetMainKernels();
 const std::string& clGetLocalKernels();
-const std::string& clGetAtomicKernels();
 const std::string& clGetImageKernels();
 const std::string& clGetInt8DpKernels();
 
@@ -64,8 +63,6 @@ public:
                               device_info_t &devInfo, benchmark_config_t &cfg);
     int runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
                               device_info_t &devInfo, benchmark_config_t &cfg);
-    int runAtomicThroughputTest(cl::CommandQueue &queue, cl::Program &prog,
-                                device_info_t &devInfo, benchmark_config_t &cfg);
     int runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
                                  device_info_t &devInfo, benchmark_config_t &cfg);
     int runKernelLatency(cl::CommandQueue &queue, cl::Program &prog,

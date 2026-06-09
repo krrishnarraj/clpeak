@@ -25,6 +25,16 @@ struct BackendInventory; // forward decl
 #define VK_HAS_ANY_COOPMAT 1
 #endif
 
+// One cooperative-matrix tile (subgroup scope) selected for a given dtype.
+// M/N/K are whatever the driver advertised via
+// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR -- the shaders take these
+// as specialization constants, so a single SPIR-V module runs any advertised
+// shape (NVIDIA 8-bit types use K=32, fp16/bf16 use K=16, etc.).
+struct coopmat_tile_t {
+  bool     supported = false;
+  uint32_t M = 0, N = 0, K = 0;
+};
+
 // Vulkan device info (mirrors OpenCL device_info_t for display)
 struct vk_device_info_t {
   std::string deviceName;
@@ -48,32 +58,26 @@ struct vk_device_info_t {
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
-  bool atomicFloat32Supported;    // VK_EXT_shader_atomic_float + shaderBufferFloat32AtomicAdd
-  bool atomicInt64Supported;      // VK_KHR_shader_atomic_int64 + shaderBufferInt64Atomics
   bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
 
-  // Cached subset of vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR used
-  // to gate individual coopmat dtype tests.  Each flag means "a subgroup-
-  // scope property exists advertising this input/accumulator combination
-  // at a tile we have a pre-compiled shader for".
-  //
-  // FP16/BF16/FP8 tests are compiled at 16x16x16 (widely supported on
-  // NVIDIA/AMD/Intel).  INT8 is trickier: NVIDIA tensor cores advertise
-  // INT8 only at K=32 (typically 16x16x32), reflecting how DP4a lanes
-  // naturally accumulate four INT8s per 32-bit slot -- so we ship two
-  // INT8 shader variants (K=16, K=32) and select whichever matches.
-  bool coopmatFP16Supported;      // fp16 A/B, fp32 C  @ 16x16x16
-  bool coopmatBF16Supported;      // bf16 A/B, fp32 C  @ 16x16x16
-  bool coopmatFP8E4M3Supported;   // fp8 E4M3 A/B, fp32 C  @ 16x16x16
-  bool coopmatFP8E5M2Supported;   // fp8 E5M2 A/B, fp32 C  @ 16x16x16
-  bool coopmatFP32Supported;      // fp32 A/B/C  @ 16x16x16
-  // INT8: store the selected K so host can pick the right shader variant.
-  // 0 = unsupported; 16 or 32 = supported at 16x16xK.
-  uint32_t coopmatINT8K;
+  // Canonical cooperative-matrix tile selected per dtype from
+  // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.  We don't assume a
+  // fixed shape: whatever subgroup-scope tile the driver advertises for an
+  // input/accumulator combination is recorded here, and the coopmat shaders
+  // take M/N/K as specialization constants so one SPIR-V module runs it.
+  // This is how fp8/int8 land on NVIDIA's K=32 tiles while fp16/bf16 stay at
+  // K=16 -- no per-K shader variants needed.  .supported == false means no
+  // matching subgroup-scope property was advertised.
+  coopmat_tile_t coopmatFP32;     // fp32 A/B,    fp32 C
+  coopmat_tile_t coopmatFP16;     // fp16 A/B,    fp32 C
+  coopmat_tile_t coopmatBF16;     // bf16 A/B,    fp32 C
+  coopmat_tile_t coopmatFP8E4M3;  // fp8 E4M3 A/B, fp32 C
+  coopmat_tile_t coopmatFP8E5M2;  // fp8 E5M2 A/B, fp32 C
+  coopmat_tile_t coopmatINT8;     // int8 A/B,    int32 C
 };
 
 // Dispatch-sizing helper used by runComputeKernel and several benchmark
-// files (local_bandwidth, image_bandwidth, atomic_throughput, etc.).
+// files (local_bandwidth, image_bandwidth, etc.).
 static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
 {
   if (info.numCUs > 0)
@@ -111,11 +115,14 @@ public:
                     VkMemoryPropertyFlags memProps,
                     VkBuffer &buffer, VkDeviceMemory &memory);
 
-  // Create compute pipeline from SPIR-V
+  // Create compute pipeline from SPIR-V.  specInfo (optional) supplies
+  // specialization constants -- used by the coopmat shaders to bind the
+  // selected M/N/K tile + loop count at pipeline-creation time.
   bool createComputePipeline(const uint32_t *spirv, size_t spirvSize,
                              VkDescriptorSetLayout dsLayout,
                              VkPipelineLayout pipeLayout,
-                             VkPipeline &pipeline);
+                             VkPipeline &pipeline,
+                             const VkSpecializationInfo *specInfo = nullptr);
 
   // Submit a command buffer and wait.  Returns the worst VkResult seen
   // across vkQueueSubmit / vkQueueWaitIdle so callers can detect and skip
@@ -172,12 +179,17 @@ struct vk_compute_desc_t
                              // Cooperative-matrix shaders use 32 (one subgroup).
   uint32_t outElemsPerWG;    // number of output buffer elements the shader
                              // writes per work-group.  0 => defaults to wgSize
-                             // (one element per WI).  Coopmat shaders write
-                             // an M*N tile = 256 elements per WG.
+                             // (one element per WI).  Coopmat shaders write an
+                             // M*N tile (the selected tile's M*N) per WG.
 
   // Push-constant payload.  nullptr => no push constants bound.
   const void *pushData;
   uint32_t pushSize;
+
+  // Optional specialization constants, applied to every variant's pipeline.
+  // Used by the coopmat shaders to bind the selected M/N/K tile + loop count.
+  // nullptr => none.
+  const VkSpecializationInfo *specInfo;
 
   // Optional feature gate.  If skip==true, emit skipMsg and close the tag.
   bool skip;
@@ -223,10 +235,6 @@ public:
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  int runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg);
-#endif
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
   static BackendInventory enumerate();
@@ -327,18 +335,6 @@ namespace vk_shaders {
   extern const size_t   local_bandwidth_v4_size;
   extern const uint32_t image_bandwidth_v1[];
   extern const size_t   image_bandwidth_v1_size;
-  extern const uint32_t atomic_throughput_global[];
-  extern const size_t   atomic_throughput_global_size;
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  extern const uint32_t atomic_throughput_global_float[];
-  extern const size_t   atomic_throughput_global_float_size;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-  extern const uint32_t atomic_throughput_global_uint64[];
-  extern const size_t   atomic_throughput_global_uint64_size;
-#endif
-  extern const uint32_t atomic_throughput_local[];
-  extern const size_t   atomic_throughput_local_size;
   extern const uint32_t kernel_latency[];
   extern const size_t   kernel_latency_size;
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
@@ -386,10 +382,8 @@ namespace vk_shaders {
   extern const size_t   coopmat_bf16_size;
 #endif
 #ifdef VK_HAS_COOPMAT_INT8
-  extern const uint32_t coopmat_int8[];       // 16x16x16 tile (AMD/Intel path)
+  extern const uint32_t coopmat_int8[];       // M/N/K bound via spec constants
   extern const size_t   coopmat_int8_size;
-  extern const uint32_t coopmat_int8_k32[];   // 16x16x32 tile (NVIDIA tensor-core INT8)
-  extern const size_t   coopmat_int8_k32_size;
 #endif
 #ifdef VK_HAS_COOPMAT_FP8_E4M3
   extern const uint32_t coopmat_fp8_e4m3[];

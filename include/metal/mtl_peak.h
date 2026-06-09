@@ -35,7 +35,6 @@ struct mtl_device_info_t {
   bool simdgroupMatrixBF16Supported; // M3+ (Apple9)
   bool simdgroupMatrixInt8Supported; // M3+ (Apple9) -- int8 simdgroup_matrix
   bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: OS support + Apple9
-  bool atomic64Supported;         // 64-bit int atomics: Apple8+ (M2)
   uint32_t appleFamily;           // largest MTLGPUFamilyApple<N> the device supports
   uint32_t gpuCoreCount;          // GPU core count (e.g. 8 on M1 base, 32 on M1 Max). 0 = unknown.
 };
@@ -119,8 +118,6 @@ public:
   int runMpsGemmInt(MetalDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughput(MetalDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughputFp(MetalDevice &dev, benchmark_config_t &cfg);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
@@ -157,12 +154,7 @@ namespace mtl_kernels {
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
   extern const char *image_bandwidth_name;
-  extern const char *atomic_throughput_src;
-  extern const char *atomic_throughput_name;
-  extern const char *atomic_throughput_float_src;
-  extern const char *atomic_throughput_float_name;
-  extern const char *atomic_throughput_ulong_src;
-  extern const char *atomic_throughput_ulong_name;
+
 }
 
 #endif // ENABLE_METAL

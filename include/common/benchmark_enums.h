@@ -39,8 +39,10 @@ enum class Benchmark : unsigned int {
     Rocblas,
     JointMatrix,
     Onemkl,
-    AtomicThroughput,
+    Amx,                // CPU matrix engine (Intel AMX / ARM I8MM)
     TransferBW,
+    CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
+    MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM)
     KernelLatency,
     COUNT
 };
@@ -56,10 +58,8 @@ enum class Category {
 
 // Map every benchmark to its primary category.  Tensor / vendor-library
 // tests that span both fp and int variants (Wmma, CoopMatrix, SimdgroupMatrix,
-// Cublas, MpsGemm, Rocwmma, Mfma, Rocblas) are listed under their fp form here; backends iterate
+// Cublas, MpsGemm, Rocwmma, Mfma, Rocblas, Amx) are listed under their fp form here; backends iterate
 // them again in the int_compute phase emitting only int variants there.
-// AtomicThroughput is primarily integer, with Metal's atomic_float variant
-// emitted explicitly in the fp_compute phase.
 inline Category categoryOf(Benchmark b)
 {
     switch (b) {
@@ -67,6 +67,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::LocalBW:
     case Benchmark::ImageBW:
     case Benchmark::TransferBW:
+    case Benchmark::CacheBandwidth:
         return Category::Bandwidth;
 
     case Benchmark::ComputeSP:
@@ -84,6 +85,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::Rocblas:
     case Benchmark::JointMatrix:
     case Benchmark::Onemkl:
+    case Benchmark::Amx:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:
@@ -91,11 +93,11 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
-    case Benchmark::AtomicThroughput:
     case Benchmark::Bmma:
         return Category::IntCompute;
 
     case Benchmark::KernelLatency:
+    case Benchmark::MemoryLatency:
         return Category::Latency;
 
     case Benchmark::COUNT:

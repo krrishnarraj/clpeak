@@ -16,7 +16,7 @@ CUDA kernels (in `cuda_kernels/`) compiled via NVRTC at runtime.  Built as
 - Looking for WMMA/MMA benchmarks? → `wmma.cpp`
 - Looking for cuBLAS benchmarks? → `cuda_blas.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-- Looking for atomic benchmarks? → `atomic_throughput.cpp`
+
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .cu kernel sources? → `cuda_kernels/*.cu`
 - Looking for kernel embedding logic? → `cmake/EmbedCudaKernels.cmake`
@@ -36,7 +36,7 @@ CUDA kernels (in `cuda_kernels/`) compiled via NVRTC at runtime.  Built as
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-| `atomic_throughput.cpp` | `runAtomicThroughput` |
+
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `cuda_kernels/` | CUDA kernel sources (`.cu`) embedded as C++ string literals |
 | `cmake/EmbedCudaKernels.cmake` | `embed_cuda_kernels()` — .cu → C++ raw-string arrays |

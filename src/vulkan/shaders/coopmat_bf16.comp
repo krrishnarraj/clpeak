@@ -5,8 +5,9 @@
 
 // Cooperative-matrix BF16 x BF16 + FP32 accumulator (tensor-core BF16).
 // Requires VK_KHR_cooperative_matrix + VK_KHR_shader_bfloat16, and a
-// matching property advertised by the driver.  See coopmat_fp16.comp
-// for the design notes; this file only swaps the input dtype.
+// matching property advertised by the driver.  See coopmat_fp16.comp for
+// design notes (spec-constant tile; single accumulator chain); this file
+// only swaps the input dtype.
 
 layout(local_size_x = 32) in;
 
@@ -18,10 +19,10 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-const int ITERS = 256;
-const uint M = 16u;
-const uint N = 16u;
-const uint K = 16u;
+layout(constant_id = 0) const uint M     = 16u;
+layout(constant_id = 1) const uint N     = 16u;
+layout(constant_id = 2) const uint K     = 16u;
+layout(constant_id = 3) const int  ITERS = 256;
 
 void main()
 {

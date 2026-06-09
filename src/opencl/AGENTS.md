@@ -24,7 +24,6 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `global_bandwidth.cpp` | `runGlobalBandwidthTest()` — global memory bandwidth |
 | `local_bandwidth.cpp` | `runLocalBandwidthTest()` — local memory bandwidth |
 | `image_bandwidth.cpp` | `runImageBandwidthTest()` — image object bandwidth |
-| `atomic_throughput.cpp` | `runAtomicThroughputTest()` — atomic operation throughput |
 | `transfer_bandwidth.cpp` | `runTransferBandwidthTest()` — host↔device transfer |
 | `kernel_latency.cpp` | `runKernelLatency()` — single-dispatch kernel latency |
 | `kernels/` | OpenCL C kernel sources (`.cl` files) |
