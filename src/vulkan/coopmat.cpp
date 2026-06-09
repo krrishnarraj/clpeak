@@ -21,35 +21,45 @@
 
 namespace {
 
-// Plain-old-data spec-constant payload (constant_id 0..3 in the shaders).
-struct CoopSpecData { uint32_t M, N, K; int32_t iters; };
+// Must match MAX_CHAINS in the coopmat shaders (sizes the acc[] array).
+const uint32_t COOPMAT_MAX_CHAINS = 8;
+
+// Plain-old-data spec-constant payload (constant_id 0..4 in the shaders).
+struct CoopSpecData { uint32_t M, N, K; int32_t iters; uint32_t chains; };
 
 // Spec-constant storage for one tile.  Must outlive the runComputeKernel call
 // that consumes specInfo, so callers declare it in the dispatching scope.
 struct CoopTileRun {
   CoopSpecData             data;
-  VkSpecializationMapEntry entries[4];
+  VkSpecializationMapEntry entries[5];
   VkSpecializationInfo     specInfo;
   std::string              title;
 };
 
 // Bind a selected tile into a desc: build the spec constants, scale the outer
-// loop so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
-// and label the row with the actual MxNxK that will run.
+// loop so total work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile
+// volume or chain count, and label the row with the actual MxNxK that runs.
+// `chains` independent accumulators expose ILP -- a single chain is
+// latency-bound far below peak on un-throttled paths (fp16/bf16 on NVIDIA).
 void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
                   const coopmat_tile_t &t, uint32_t wgSize,
-                  const char *dtypeLabel)
+                  const char *dtypeLabel, uint32_t chains = 4)
 {
+  if (chains < 1) chains = 1;
+  if (chains > COOPMAT_MAX_CHAINS) chains = COOPMAT_MAX_CHAINS;
+
   const uint64_t volume = (uint64_t)t.M * t.N * t.K;   // MACs per coopMatMulAdd
-  uint64_t iters = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
+  // Total MMAs/WI = chains*iters; hold total work ~= COOPMAT_WORK_PER_WI.
+  uint64_t iters = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2 * chains);
   if (iters < 1) iters = 1;
 
-  r.data = { t.M, t.N, t.K, (int32_t)iters };
-  r.entries[0] = { 0, (uint32_t)offsetof(CoopSpecData, M),     sizeof(uint32_t) };
-  r.entries[1] = { 1, (uint32_t)offsetof(CoopSpecData, N),     sizeof(uint32_t) };
-  r.entries[2] = { 2, (uint32_t)offsetof(CoopSpecData, K),     sizeof(uint32_t) };
-  r.entries[3] = { 3, (uint32_t)offsetof(CoopSpecData, iters), sizeof(int32_t) };
-  r.specInfo.mapEntryCount = 4;
+  r.data = { t.M, t.N, t.K, (int32_t)iters, chains };
+  r.entries[0] = { 0, (uint32_t)offsetof(CoopSpecData, M),      sizeof(uint32_t) };
+  r.entries[1] = { 1, (uint32_t)offsetof(CoopSpecData, N),      sizeof(uint32_t) };
+  r.entries[2] = { 2, (uint32_t)offsetof(CoopSpecData, K),      sizeof(uint32_t) };
+  r.entries[3] = { 3, (uint32_t)offsetof(CoopSpecData, iters),  sizeof(int32_t) };
+  r.entries[4] = { 4, (uint32_t)offsetof(CoopSpecData, chains), sizeof(uint32_t) };
+  r.specInfo.mapEntryCount = 5;
   r.specInfo.pMapEntries   = r.entries;
   r.specInfo.dataSize      = sizeof(r.data);
   r.specInfo.pData         = &r.data;
@@ -60,9 +70,9 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
   d.title         = r.title.c_str();
   d.wgSize        = wgSize;
   d.outElemsPerWG = t.M * t.N;
-  // Reported work per WI = 2*MACs*ITERS / subgroup-size; exact since M*N is a
-  // multiple of the subgroup width for every advertised tile.
-  d.workPerWI     = (uint32_t)((volume * 2 * iters) / wgSize);
+  // Reported work per WI = 2*MACs*chains*ITERS / subgroup-size; exact since
+  // M*N is a multiple of the subgroup width for every advertised tile.
+  d.workPerWI     = (uint32_t)((volume * 2 * chains * iters) / wgSize);
 }
 
 } // namespace

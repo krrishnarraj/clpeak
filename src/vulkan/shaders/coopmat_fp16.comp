@@ -10,10 +10,10 @@
 // fp16), and binds it at pipeline creation -- so this single module runs
 // whatever shape the hardware exposes, and skips cleanly when none matches.
 //
-// One subgroup per workgroup; each subgroup performs ITERS dependent
-// coopMatMulAdd's, so the accumulator chain prevents the compiler
-// folding the MMA away.  The final coopMatStore materializes the result
-// and keeps the chain observable.
+// One subgroup per workgroup.  Each subgroup runs CHAINS independent
+// accumulator chains x ITERS coopMatMulAdd's (see the loop below) to keep
+// the tensor pipeline saturated; the final fold + coopMatStore materializes
+// every chain so none is optimized away.
 
 layout(local_size_x = 32) in;
 
@@ -25,10 +25,12 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-layout(constant_id = 0) const uint M     = 16u;
-layout(constant_id = 1) const uint N     = 16u;
-layout(constant_id = 2) const uint K     = 16u;
-layout(constant_id = 3) const int  ITERS = 256;
+layout(constant_id = 0) const uint M      = 16u;
+layout(constant_id = 1) const uint N      = 16u;
+layout(constant_id = 2) const uint K      = 16u;
+layout(constant_id = 3) const int  ITERS  = 256;
+layout(constant_id = 4) const uint CHAINS = 4u;   // independent accumulator chains (ILP)
+const uint MAX_CHAINS = 8u;                        // sizes acc[]; CHAINS must be <= this
 
 void main()
 {
@@ -36,13 +38,22 @@ void main()
         coopmat<float16_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(float16_t(pc.A));
     coopmat<float16_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
         coopmat<float16_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(float16_t(pc.A));
-    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
-        coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+    // CHAINS independent accumulators expose ILP so the tensor unit can issue
+    // back-to-back MMAs instead of stalling on a single accumulator's c -> c
+    // dependency -- a single chain is latency-bound well below peak on
+    // un-throttled paths (fp16/bf16 on NVIDIA capped at ~1/4 otherwise).
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> acc[MAX_CHAINS];
+    for (uint c = 0u; c < CHAINS; c++)
+        acc[c] = coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
 
     for (int i = 0; i < ITERS; i++)
-    {
-        matC = coopMatMulAdd(matA, matB, matC);
-    }
+        for (uint c = 0u; c < CHAINS; c++)
+            acc[c] = coopMatMulAdd(matA, matB, acc[c]);
+
+    // Fold every chain into the stored tile so none is dead-code eliminated.
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC = acc[0];
+    for (uint c = 1u; c < CHAINS; c++)
+        matC = matC + acc[c];
 
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
                  gl_CooperativeMatrixLayoutRowMajor);
