@@ -6,7 +6,7 @@
 
 // Cooperative-matrix INT8 x INT8 + INT32 accumulator (tensor-core INT8).
 // Requires VK_KHR_cooperative_matrix + shaderInt8 + 8-bit storage.  See
-// coopmat_fp16.comp for design notes.
+// coopmat_fp16.comp for design notes (explicit c0..c3 ILP chains).
 
 layout(local_size_x = 32) in;
 
@@ -18,12 +18,13 @@ layout(push_constant) uniform PushConstants {
     int32_t A;
 } pc;
 
-layout(constant_id = 0) const uint M      = 16u;
-layout(constant_id = 1) const uint N      = 16u;
-layout(constant_id = 2) const uint K      = 16u;
-layout(constant_id = 3) const int  ITERS  = 256;
-layout(constant_id = 4) const uint CHAINS = 4u;   // independent accumulator chains (ILP)
-const uint MAX_CHAINS = 8u;                        // sizes acc[]; CHAINS must be <= this
+layout(constant_id = 0) const uint M     = 16u;
+layout(constant_id = 1) const uint N     = 16u;
+layout(constant_id = 2) const uint K     = 16u;
+layout(constant_id = 3) const int  ITERS = 256;
+
+// Accumulator type; chain count below must match COOPMAT_CHAINS in coopmat.cpp.
+#define ACC coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>
 
 void main()
 {
@@ -31,23 +32,17 @@ void main()
         coopmat<int8_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(int8_t(pc.A));
     coopmat<int8_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
         coopmat<int8_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(int8_t(pc.A));
-    // CHAINS independent accumulators expose ILP so the tensor unit can issue
-    // back-to-back MMAs instead of stalling on a single accumulator's c -> c
-    // dependency -- a single chain is latency-bound well below peak on
-    // un-throttled paths.
-    coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> acc[MAX_CHAINS];
-    for (uint c = 0u; c < CHAINS; c++)
-        acc[c] = coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0);
 
+    ACC c0 = ACC(0), c1 = ACC(0), c2 = ACC(0), c3 = ACC(0);
     for (int i = 0; i < ITERS; i++)
-        for (uint c = 0u; c < CHAINS; c++)
-            acc[c] = coopMatMulAdd(matA, matB, acc[c]);
+    {
+        c0 = coopMatMulAdd(matA, matB, c0);
+        c1 = coopMatMulAdd(matA, matB, c1);
+        c2 = coopMatMulAdd(matA, matB, c2);
+        c3 = coopMatMulAdd(matA, matB, c3);
+    }
 
-    // Fold every chain into the stored tile so none is dead-code eliminated.
-    coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC = acc[0];
-    for (uint c = 1u; c < CHAINS; c++)
-        matC = matC + acc[c];
-
+    ACC matC = (c0 + c1) + (c2 + c3);
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
                  gl_CooperativeMatrixLayoutRowMajor);
 }
