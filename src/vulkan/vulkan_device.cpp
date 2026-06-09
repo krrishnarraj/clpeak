@@ -153,12 +153,12 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.fp8Supported = false;
   self->info.atomicFloat32Supported = false;
   self->info.atomicInt64Supported = false;
-  self->info.coopmatFP16Supported = false;
-  self->info.coopmatBF16Supported = false;
-  self->info.coopmatINT8K = 0;
-  self->info.coopmatFP8E4M3Supported = false;
-  self->info.coopmatFP8E5M2Supported = false;
-  self->info.coopmatFP32Supported = false;
+  self->info.coopmatFP32 = {};
+  self->info.coopmatFP16 = {};
+  self->info.coopmatBF16 = {};
+  self->info.coopmatFP8E4M3 = {};
+  self->info.coopmatFP8E5M2 = {};
+  self->info.coopmatINT8 = {};
   self->info.calibratedTimestampsSupported = false;
 
 #if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT) || defined(VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64)
@@ -575,7 +575,8 @@ bool VulkanDevice::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize,
                                          VkDescriptorSetLayout dsLayout,
                                          VkPipelineLayout pipeLayout,
-                                         VkPipeline &pipeline)
+                                         VkPipeline &pipeline,
+                                         const VkSpecializationInfo *specInfo)
 {
   VkShaderModuleCreateInfo smCI = {};
   smCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -591,6 +592,7 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   stageCI.stage = VK_SHADER_STAGE_COMPUTE_BIT;
   stageCI.module = shaderModule;
   stageCI.pName = "main";
+  stageCI.pSpecializationInfo = specInfo;
 
   VkComputePipelineCreateInfo pipelineCI = {};
   pipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;

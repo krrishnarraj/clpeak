@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <sstream>
+#include <utility>
 #include <chrono>
 #include <cfloat>
 #if defined(_WIN32)
@@ -228,37 +229,38 @@ int vkPeak::runAll()
         for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
         if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
         {
-          // Tile matcher: subgroup-scope property at the requested MxNxK
-          // with matching A/B input type and C/Result accumulator type.
-          auto matches = [](const VkCooperativeMatrixPropertiesKHR &p,
-                            uint32_t m, uint32_t n, uint32_t k,
-                            VkComponentTypeKHR ab, VkComponentTypeKHR c) {
-            return p.MSize == m && p.NSize == n && p.KSize == k &&
-                   p.scope == VK_SCOPE_SUBGROUP_KHR &&
-                   p.AType == ab && p.BType == ab &&
-                   p.CType == c && p.ResultType == c;
+          // Pick the canonical subgroup-scope tile for one input/accumulator
+          // dtype combination.  We don't assume a shape -- among the tiles the
+          // driver advertises we prefer a square 16x16 face (the shaders run
+          // one subgroup per 16x16 output tile), then the largest volume
+          // (M*N*K) to minimize loop overhead.  Whatever K the hardware wants
+          // (16 for fp16/bf16, 32 for NVIDIA's 8-bit types, ...) flows through
+          // to the shader as a specialization constant.
+          auto pickTile = [&](VkComponentTypeKHR ab, VkComponentTypeKHR c) {
+            coopmat_tile_t best;
+            for (auto &p : props)
+            {
+              if (p.scope != VK_SCOPE_SUBGROUP_KHR) continue;
+              if (p.AType != ab || p.BType != ab) continue;
+              if (p.CType != c || p.ResultType != c) continue;
+              coopmat_tile_t cand{true, p.MSize, p.NSize, p.KSize};
+              if (!best.supported) { best = cand; continue; }
+              auto rank = [](const coopmat_tile_t &t) {
+                bool square16 = (t.M == 16 && t.N == 16);
+                // smaller is better: prefer square16, then larger volume.
+                return std::make_pair(square16 ? 0 : 1,
+                                      -(int64_t)t.M * (int64_t)t.N * (int64_t)t.K);
+              };
+              if (rank(cand) < rank(best)) best = cand;
+            }
+            return best;
           };
-          for (auto &p : props)
-          {
-            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
-              dev.info.coopmatFP16Supported = true;
-            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT32_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
-              dev.info.coopmatFP32Supported = true;
-            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_BFLOAT16_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR))
-              dev.info.coopmatBF16Supported = true;
-            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
-              dev.info.coopmatFP8E4M3Supported = true;
-            if (matches(p, 16,16,16, VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR))
-              dev.info.coopmatFP8E5M2Supported = true;
-            // INT8: prefer K=16 (AMD/Intel) but fall back to K=32 (NVIDIA
-            // Turing+ advertises INT8 tensor-core tiles only with K=32).
-            if (dev.info.coopmatINT8K == 0 &&
-                matches(p, 16,16,16, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
-              dev.info.coopmatINT8K = 16;
-            if (dev.info.coopmatINT8K != 16 &&
-                matches(p, 16,16,32, VK_COMPONENT_TYPE_SINT8_KHR, VK_COMPONENT_TYPE_SINT32_KHR))
-              dev.info.coopmatINT8K = 32;
-          }
+          dev.info.coopmatFP32    = pickTile(VK_COMPONENT_TYPE_FLOAT32_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+          dev.info.coopmatFP16    = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+          dev.info.coopmatBF16    = pickTile(VK_COMPONENT_TYPE_BFLOAT16_KHR,    VK_COMPONENT_TYPE_FLOAT32_KHR);
+          dev.info.coopmatFP8E4M3 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
+          dev.info.coopmatFP8E5M2 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
+          dev.info.coopmatINT8    = pickTile(VK_COMPONENT_TYPE_SINT8_KHR,       VK_COMPONENT_TYPE_SINT32_KHR);
         }
       }
     }

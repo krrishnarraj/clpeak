@@ -4,11 +4,11 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
 
 // Cooperative-matrix FP16 x FP16 + FP32 accumulator.
-// Fixed 16x16x16 tile -- the most widely advertised shape on NVIDIA
-// Turing/Ampere/Ada/Hopper, AMD MI200/MI300, and Intel Arc.  Host gates
-// the test on a matching property from
-// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, so devices that do
-// not advertise this exact shape skip cleanly.
+// M/N/K and the loop count ITERS arrive as specialization constants: the
+// host queries vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, picks the
+// tile the driver advertises for this dtype (16x16x16 on NVIDIA/AMD/Intel
+// fp16), and binds it at pipeline creation -- so this single module runs
+// whatever shape the hardware exposes, and skips cleanly when none matches.
 //
 // One subgroup per workgroup; each subgroup performs ITERS dependent
 // coopMatMulAdd's, so the accumulator chain prevents the compiler
@@ -25,10 +25,10 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-const int ITERS = 256;
-const uint M = 16u;
-const uint N = 16u;
-const uint K = 16u;
+layout(constant_id = 0) const uint M     = 16u;
+layout(constant_id = 1) const uint N     = 16u;
+layout(constant_id = 2) const uint K     = 16u;
+layout(constant_id = 3) const int  ITERS = 256;
 
 void main()
 {

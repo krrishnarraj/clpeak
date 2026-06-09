@@ -7,8 +7,9 @@
 // some AMD / Intel / mobile drivers do advertise this shape and it can
 // expose driver-tile differences vs. the hand-rolled compute_sp.
 //
-// Host gates the test on a matching subgroup-scope property at 16x16x16
-// from vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.
+// Host gates the test on a matching subgroup-scope property from
+// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR and binds its M/N/K as
+// specialization constants.  See coopmat_fp16.comp for design notes.
 
 layout(local_size_x = 32) in;
 
@@ -20,10 +21,10 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-const int ITERS = 256;
-const uint M = 16u;
-const uint N = 16u;
-const uint K = 16u;
+layout(constant_id = 0) const uint M     = 16u;
+layout(constant_id = 1) const uint N     = 16u;
+layout(constant_id = 2) const uint K     = 16u;
+layout(constant_id = 3) const int  ITERS = 256;
 
 void main()
 {
