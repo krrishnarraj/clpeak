@@ -21,13 +21,6 @@
 
 namespace {
 
-// Number of explicit independent accumulator chains in the coopmat shaders
-// (c0..c3).  Exposes ILP so the tensor unit issues back-to-back MMAs instead
-// of stalling on a single accumulator's dependency -- single-chain is
-// latency-bound far below peak on un-throttled paths (fp16/bf16 on NVIDIA).
-// MUST match the explicit accumulator count hard-coded in the .comp shaders.
-const uint32_t COOPMAT_CHAINS = 4;
-
 // Plain-old-data spec-constant payload (constant_id 0..3 in the shaders).
 struct CoopSpecData { uint32_t M, N, K; int32_t iters; };
 
@@ -41,16 +34,19 @@ struct CoopTileRun {
 };
 
 // Bind a selected tile into a desc: build the spec constants, scale the outer
-// loop so total work-per-WI (across all COOPMAT_CHAINS chains) stays
-// ~COOPMAT_WORK_PER_WI regardless of tile volume, and label the row with the
-// actual MxNxK that runs.
+// loop so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
+// and label the row with the actual MxNxK that runs.
+//
+// Single accumulator chain: explicit multi-chain ILP was measured to make no
+// difference to NVIDIA's Vulkan coopmat throughput (fp16/bf16 stay ~1/4 of
+// CUDA WMMA -- a driver-path limit, not the dependency chain), so it is not
+// worth the host/shader coupling here.
 void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
                   const coopmat_tile_t &t, uint32_t wgSize,
                   const char *dtypeLabel)
 {
   const uint64_t volume = (uint64_t)t.M * t.N * t.K;   // MACs per coopMatMulAdd
-  // Total MMAs/WI = COOPMAT_CHAINS*iters; hold total work ~= COOPMAT_WORK_PER_WI.
-  uint64_t iters = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2 * COOPMAT_CHAINS);
+  uint64_t iters = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
   if (iters < 1) iters = 1;
 
   r.data = { t.M, t.N, t.K, (int32_t)iters };
@@ -69,9 +65,9 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
   d.title         = r.title.c_str();
   d.wgSize        = wgSize;
   d.outElemsPerWG = t.M * t.N;
-  // Reported work per WI = 2*MACs*COOPMAT_CHAINS*ITERS / subgroup-size; exact
-  // since M*N is a multiple of the subgroup width for every advertised tile.
-  d.workPerWI     = (uint32_t)((volume * 2 * COOPMAT_CHAINS * iters) / wgSize);
+  // Reported work per WI = 2*MACs*ITERS / subgroup-size; exact since M*N is a
+  // multiple of the subgroup width for every advertised tile.
+  d.workPerWI     = (uint32_t)((volume * 2 * iters) / wgSize);
 }
 
 } // namespace

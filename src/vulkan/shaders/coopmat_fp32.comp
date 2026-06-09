@@ -9,8 +9,7 @@
 //
 // Host gates the test on a matching subgroup-scope property from
 // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR and binds its M/N/K as
-// specialization constants.  See coopmat_fp16.comp for design notes
-// (explicit c0..c3 ILP chains).
+// specialization constants.  See coopmat_fp16.comp for design notes.
 
 layout(local_size_x = 32) in;
 
@@ -27,26 +26,20 @@ layout(constant_id = 1) const uint N     = 16u;
 layout(constant_id = 2) const uint K     = 16u;
 layout(constant_id = 3) const int  ITERS = 256;
 
-// Accumulator type; chain count below must match COOPMAT_CHAINS in coopmat.cpp.
-#define ACC coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>
-
 void main()
 {
     coopmat<float, gl_ScopeSubgroup, M, K, gl_MatrixUseA> matA =
         coopmat<float, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(pc.A);
     coopmat<float, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
         coopmat<float, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(pc.A);
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
+        coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
 
-    ACC c0 = ACC(0.0), c1 = ACC(0.0), c2 = ACC(0.0), c3 = ACC(0.0);
     for (int i = 0; i < ITERS; i++)
     {
-        c0 = coopMatMulAdd(matA, matB, c0);
-        c1 = coopMatMulAdd(matA, matB, c1);
-        c2 = coopMatMulAdd(matA, matB, c2);
-        c3 = coopMatMulAdd(matA, matB, c3);
+        matC = coopMatMulAdd(matA, matB, matC);
     }
 
-    ACC matC = (c0 + c1) + (c2 + c3);
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
                  gl_CooperativeMatrixLayoutRowMajor);
 }
