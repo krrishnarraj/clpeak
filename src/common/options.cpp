@@ -153,7 +153,6 @@ static const char *helpStr =
     "\n  --cache-bandwidth                 | --no-cache-bandwidth           [CPU]"
     "\n  --memory-latency                  | --no-memory-latency            [CPU]"
 #endif
-    "\n  --atomic-throughput               | --no-atomic-throughput"
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
     "\n"
 #ifdef ENABLE_OPENCL
@@ -217,7 +216,6 @@ static const TestFlag testFlags[] = {
   {"local-memory-bandwidth",    Benchmark::LocalBW},
   {"image-memory-bandwidth",    Benchmark::ImageBW},
   {"transfer-bandwidth",        Benchmark::TransferBW},
-  {"atomic-throughput",         Benchmark::AtomicThroughput},
   {"kernel-launch-latency",     Benchmark::KernelLatency},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);

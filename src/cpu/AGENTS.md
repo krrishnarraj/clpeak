@@ -8,7 +8,7 @@ CPU. No external dependencies (only a threading library). Built as the
 
 The CPU is modelled as a single device (index 0). The GPU mental model maps
 across: SIMD lane ↔ work-item, thread/core ↔ work-group, cache hierarchy ↔
-local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
+local memory, DRAM ↔ global memory.
 
 ## Quick Lookups
 
@@ -18,10 +18,10 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 - SIMD abstraction (per-ISA vector wrappers)? → `cpu_simd.h`
 - Shared 1T/NT compute runner + gflops/gops emit? → `compute_common.h`
 - FP compute (fp32/fp64/fp16/bf16/mixed)? → `compute_float.cpp`
-- INT compute (int32, int8 dot) + atomic throughput? → `compute_int.cpp`
+- INT compute (int32, int8 dot)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA)? → `cpu_matrix.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
-- Memory (pointer-chase) + thread-dispatch latency? → `latency.cpp`
+- Memory (pointer-chase) latency? → `latency.cpp`
 
 ## Key Files
 
@@ -37,10 +37,10 @@ local memory, DRAM ↔ global memory, thread-dispatch ↔ kernel launch.
 | **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`) and `kernels()` assembly — merges supported TUs (`generic` ungated floor, then higher ISA gated on full feature set) picking the widest variant per kernel |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` methods — look up `kernels().fpXX` and emit (or `Unsupported`). Kernel bodies live in `cpu_kernels_impl.h` |
-| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `kernels()`), `runAtomicThroughput` (ISA-neutral, kept here) |
+| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `kernels()`) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — emits `kernels().mat_int8` / `mat_fp` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
-| `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns), `runThreadLatency` (pool round-trip, us) |
+| `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns) |
 
 ## Build
 
@@ -173,11 +173,11 @@ TU's flags define.
 
 ## Metrics
 
-Compute / cache-bandwidth / thread-latency tests emit an `ST` (single-thread,
+Compute / cache-bandwidth tests emit an `ST` (single-thread,
 one pinned core) and an `MT` (all logical cores) variant — `ST`/`MT` rather than
 literal thread counts so results are comparable across machines with different
 core counts. Memory-latency is `ST` only (pointer-chase); DRAM bandwidth emits
-`read`/`copy`/`triad`; atomics emit `uncontended`/`contended MT`/`sharded MT`.
+`read`/`copy`/`triad`.
 
 ## Reaching peak (investigation notes)
 

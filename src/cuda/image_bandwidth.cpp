@@ -92,9 +92,4 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   return 0;
 }
 
-// ---------------------------------------------------------------------------
-// Atomic throughput (CUDA -- global + local atomics)
-// ---------------------------------------------------------------------------
-
-
 #endif // ENABLE_CUDA

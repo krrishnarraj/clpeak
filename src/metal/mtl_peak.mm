@@ -24,7 +24,7 @@ void MetalPeak::applyOptions(const CliOptions &opts)
 //   mtl_device.mm          compute_kernel.mm     mtl_utils.mm
 //   compute_float.mm       compute_int.mm        simdgroup.mm
 //   mtl_blas.mm            global_bandwidth.mm   local_bandwidth.mm
-//   image_bandwidth.mm     atomic_throughput.mm  kernel_latency.mm
+//   image_bandwidth.mm     kernel_latency.mm
 // ---------------------------------------------------------------------------
 
 int MetalPeak::runAll()
@@ -92,8 +92,6 @@ int MetalPeak::runAll()
             runSimdgroupMatrix(dev, cfg);
         if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
-        if (isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
-            runAtomicThroughputFp(dev, cfg);
 
         // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
 
@@ -101,8 +99,6 @@ int MetalPeak::runAll()
             runSimdgroupMatrixInt(dev, cfg);
         if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
             runMpsGemmInt(dev, cfg);
-        if (isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
-            runAtomicThroughput(dev, cfg);
 
         // ---- Phase 3: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);

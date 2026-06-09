@@ -8,7 +8,6 @@
 #include <common/logger.h>
 #include <common/peak.h>
 
-#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -122,9 +121,7 @@ public:
   int runCpuMatrix(benchmark_config_t &cfg, Category category);
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);
-  int runAtomicThroughput(benchmark_config_t &cfg);
   int runMemoryLatency(benchmark_config_t &cfg);
-  int runThreadLatency(benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
   cpu_device_info_t    info;

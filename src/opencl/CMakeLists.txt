@@ -64,7 +64,6 @@ add_library(peak_opencl STATIC
     global_bandwidth.cpp
     local_bandwidth.cpp
     image_bandwidth.cpp
-    atomic_throughput.cpp
     transfer_bandwidth.cpp
     kernel_latency.cpp
 )

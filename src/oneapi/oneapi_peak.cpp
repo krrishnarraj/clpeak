@@ -193,7 +193,7 @@ int OneapiPeak::runAll()
       runJointMatrix(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Onemkl, Category::IntCompute))
       runOnemkl(dev, cfg, Category::IntCompute);
-    if (isAllowed(Benchmark::AtomicThroughput))   runAtomicThroughput(dev, cfg);
+
 
     if (isAllowed(Benchmark::GlobalBW))     runGlobalBandwidth(dev, cfg);
     if (isAllowed(Benchmark::LocalBW))      runLocalBandwidth(dev, cfg);

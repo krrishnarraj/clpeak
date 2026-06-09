@@ -58,8 +58,6 @@ struct vk_device_info_t {
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
-  bool atomicFloat32Supported;    // VK_EXT_shader_atomic_float + shaderBufferFloat32AtomicAdd
-  bool atomicInt64Supported;      // VK_KHR_shader_atomic_int64 + shaderBufferInt64Atomics
   bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
 
   // Canonical cooperative-matrix tile selected per dtype from
@@ -79,7 +77,7 @@ struct vk_device_info_t {
 };
 
 // Dispatch-sizing helper used by runComputeKernel and several benchmark
-// files (local_bandwidth, image_bandwidth, atomic_throughput, etc.).
+// files (local_bandwidth, image_bandwidth, etc.).
 static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
 {
   if (info.numCUs > 0)
@@ -237,10 +235,6 @@ public:
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughput(VulkanDevice &dev, benchmark_config_t &cfg);
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  int runAtomicThroughputFp(VulkanDevice &dev, benchmark_config_t &cfg);
-#endif
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
   static BackendInventory enumerate();
@@ -341,18 +335,6 @@ namespace vk_shaders {
   extern const size_t   local_bandwidth_v4_size;
   extern const uint32_t image_bandwidth_v1[];
   extern const size_t   image_bandwidth_v1_size;
-  extern const uint32_t atomic_throughput_global[];
-  extern const size_t   atomic_throughput_global_size;
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-  extern const uint32_t atomic_throughput_global_float[];
-  extern const size_t   atomic_throughput_global_float_size;
-#endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_UINT64
-  extern const uint32_t atomic_throughput_global_uint64[];
-  extern const size_t   atomic_throughput_global_uint64_size;
-#endif
-  extern const uint32_t atomic_throughput_local[];
-  extern const size_t   atomic_throughput_local_size;
   extern const uint32_t kernel_latency[];
   extern const size_t   kernel_latency_size;
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1

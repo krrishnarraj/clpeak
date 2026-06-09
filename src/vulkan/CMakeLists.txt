@@ -1,5 +1,5 @@
 if(NOT CLPEAK_ENABLE_VULKAN OR NOT Vulkan_FOUND)
-    return()
+  return()
 endif()
 
 add_library(peak_vulkan STATIC
@@ -13,7 +13,6 @@ add_library(peak_vulkan STATIC
     local_bandwidth.cpp
     image_bandwidth.cpp
     transfer_bandwidth.cpp
-    atomic_throughput.cpp
     kernel_latency.cpp
 )
 target_link_libraries(peak_vulkan PUBLIC peak_common ${Vulkan_LIBRARIES})
@@ -63,10 +62,6 @@ set(CLPEAK_VK_SHADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/local_bandwidth_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/local_bandwidth_v4.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/image_bandwidth_v1.comp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atomic_throughput_global.comp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atomic_throughput_global_float.comp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atomic_throughput_global_uint64.comp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atomic_throughput_local.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/kernel_latency.comp
 )
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake)

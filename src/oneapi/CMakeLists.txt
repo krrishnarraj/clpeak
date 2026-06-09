@@ -1,5 +1,5 @@
 if(NOT CLPEAK_ENABLE_ONEAPI OR NOT IntelSYCL_FOUND OR NOT CLPEAK_ONEAPI_COMPILER_OK)
-    return()
+  return()
 endif()
 
 add_library(peak_oneapi STATIC
@@ -14,7 +14,6 @@ add_library(peak_oneapi STATIC
     local_bandwidth.cpp
     image_bandwidth.cpp
     transfer_bandwidth.cpp
-    atomic_throughput.cpp
     kernel_latency.cpp
 )
 
@@ -34,8 +33,8 @@ add_sycl_to_target(TARGET peak_oneapi SOURCES ${_clpeak_oneapi_srcs})
 
 # Optional oneMKL (SYCL-enabled BLAS) for the vendor-library GEMM benchmark.
 if(MKL_FOUND AND TARGET MKL::MKL_SYCL)
-    target_link_libraries(peak_oneapi PUBLIC MKL::MKL_SYCL)
-    target_compile_definitions(peak_oneapi PRIVATE CLPEAK_ONEAPI_HAS_ONEMKL)
+  target_link_libraries(peak_oneapi PUBLIC MKL::MKL_SYCL)
+  target_compile_definitions(peak_oneapi PRIVATE CLPEAK_ONEAPI_HAS_ONEMKL)
 endif()
 
 # joint_matrix is a header-only SYCL extension.  Probe for the matrix header
@@ -50,7 +49,7 @@ check_cxx_source_compiles(
     CLPEAK_ONEAPI_HAS_JOINT_MATRIX)
 unset(CMAKE_REQUIRED_FLAGS)
 if(CLPEAK_ONEAPI_HAS_JOINT_MATRIX)
-    target_compile_definitions(peak_oneapi PRIVATE CLPEAK_ONEAPI_HAS_JOINT_MATRIX)
+  target_compile_definitions(peak_oneapi PRIVATE CLPEAK_ONEAPI_HAS_JOINT_MATRIX)
 endif()
 # Re-export so the top-level summary can show the joint_matrix feature.
 set(CLPEAK_ONEAPI_HAS_JOINT_MATRIX ${CLPEAK_ONEAPI_HAS_JOINT_MATRIX} PARENT_SCOPE)

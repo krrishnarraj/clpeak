@@ -306,12 +306,6 @@ int vkPeak::runAll()
     if (isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/false);
 #endif
-#ifdef VK_HAS_ATOMIC_THROUGHPUT_GLOBAL_FLOAT
-    // Float atomic add is reported in the fp-compute phase (mirrors Metal).
-    if (isAllowedAs(Benchmark::AtomicThroughput, Category::FpCompute))
-        runAtomicThroughputFp(dev, cfg);
-#endif
-
     // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
 #ifdef VK_HAS_COMPUTE_INT32_V1
     if (isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
@@ -323,9 +317,6 @@ int vkPeak::runAll()
     if (isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
         runCoopMatrix(dev, cfg, /*intPart=*/true);
 #endif
-    if (isAllowedAs(Benchmark::AtomicThroughput, Category::IntCompute))
-        runAtomicThroughput(dev, cfg);
-
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
     if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
     if (isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
@@ -348,7 +339,7 @@ int vkPeak::runAll()
 //   vulkan_device.cpp     compute_kernel.cpp
 //   compute_float.cpp     compute_int.cpp       coopmat.cpp
 //   global_bandwidth.cpp  local_bandwidth.cpp   image_bandwidth.cpp
-//   transfer_bandwidth.cpp atomic_throughput.cpp kernel_latency.cpp
+//   transfer_bandwidth.cpp kernel_latency.cpp
 // ---------------------------------------------------------------------------
 
 // Free-function enumeration used by --list-devices (desktop) and the Android

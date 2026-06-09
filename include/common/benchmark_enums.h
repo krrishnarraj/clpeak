@@ -40,7 +40,6 @@ enum class Benchmark : unsigned int {
     JointMatrix,
     Onemkl,
     Amx,                // CPU matrix engine (Intel AMX / ARM I8MM)
-    AtomicThroughput,
     TransferBW,
     CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
     MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM)
@@ -61,8 +60,6 @@ enum class Category {
 // tests that span both fp and int variants (Wmma, CoopMatrix, SimdgroupMatrix,
 // Cublas, MpsGemm, Rocwmma, Mfma, Rocblas, Amx) are listed under their fp form here; backends iterate
 // them again in the int_compute phase emitting only int variants there.
-// AtomicThroughput is primarily integer, with Metal's atomic_float variant
-// emitted explicitly in the fp_compute phase.
 inline Category categoryOf(Benchmark b)
 {
     switch (b) {
@@ -96,7 +93,6 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
-    case Benchmark::AtomicThroughput:
     case Benchmark::Bmma:
         return Category::IntCompute;
 

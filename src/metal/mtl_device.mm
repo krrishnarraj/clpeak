@@ -77,10 +77,6 @@ bool MetalDevice::init(int devIndex)
     info.simdgroupMatrixFP16Supported = info.appleFamily >= 7;
     info.simdgroupMatrixBF16Supported = info.appleFamily >= 9;
     info.simdgroupMatrixInt8Supported = info.appleFamily >= 9;
-    // 64-bit integer atomics (atomic_ulong / atomic_long fetch_add) light up
-    // on Apple8 (M2) and newer.  Apple7 lacks the hardware path entirely; the
-    // MSL compile would succeed but the dispatch produces wrong results.
-    info.atomic64Supported            = info.appleFamily >= 8;
 
     // MPSGraph bf16 dtype was added in macOS 14 (Sonoma) and only lights up
     // on Apple9+ (M3); below that it falls back to a slow software path.

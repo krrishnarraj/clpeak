@@ -57,18 +57,6 @@ static const unsigned int FETCH_PER_WI = 16;
 // local_bandwidth_kernels.cl
 static const unsigned int LMEM_REPS = 64;
 
-// atomic_throughput_kernels.cl
-// Was 512.  Cut to 256 because float atomicAdd on AMD/RADV (and likely other
-// vendors lacking native fp32 atomic add) is emitted as a shader CAS loop:
-// each "atomic add" can run 5-20x slower than int_atomic, which at the old
-// 512 reps * 33M WIs * 8 iters pushed the dispatch past the GPU watchdog
-// (RX 9070 XT was hard-recovering on the float_global variant).  256 keeps
-// the per-dispatch window long enough that GPU frequency scaling can ramp
-// to peak (cutting further to 64 under-measured M1 by ~20%) while still
-// giving 2x headroom against TDR on the slowest atomic_float path.
-// Hardcoded inside each shader/kernel -- keep all sites in sync.
-static const unsigned int ATOMIC_REPS = 256;
-
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 

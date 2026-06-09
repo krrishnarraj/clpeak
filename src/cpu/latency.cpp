@@ -92,33 +92,4 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   return 0;
 }
 
-// ---------------------------------------------------------------------------
-// Thread-dispatch latency: round-trip of waking the pool on an empty job.  The
-// CPU analog of GPU kernel-launch latency.
-// ---------------------------------------------------------------------------
-int CpuPeak::runThreadLatency(benchmark_config_t &cfg)
-{
-  auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Thread dispatch latency", "us"});
-
-  const int maxT = pool->maxThreads();
-  unsigned int iters = forceIters ? specifiedIters
-                                  : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 2000);
-  auto noop = [](int) {};
-
-  using clock = std::chrono::steady_clock;
-  auto usFor = [&](int n) -> double {
-    for (unsigned int w = 0; w < warmupCount; w++) pool->run(n, noop);
-    auto t0 = clock::now();
-    for (unsigned int i = 0; i < iters; i++) pool->run(n, noop);
-    auto t1 = clock::now();
-    return (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
-           / 1000.0 / (double)iters;
-  };
-
-  test.emit("ST", (float)usFor(1));
-  test.emit("MT", (float)usFor(maxT));
-  return 0;
-}
-
 #endif // ENABLE_CPU

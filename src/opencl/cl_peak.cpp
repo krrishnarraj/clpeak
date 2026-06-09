@@ -9,7 +9,7 @@
 // Benchmark methods live in separate files:
 //   cl_kernels.cpp        compute_test.cpp
 //   global_bandwidth.cpp  local_bandwidth.cpp  image_bandwidth.cpp
-//   transfer_bandwidth.cpp atomic_throughput.cpp kernel_latency.cpp
+//   transfer_bandwidth.cpp kernel_latency.cpp
 //   cl_common.cpp         cl_utils.cpp
 
 clPeak::clPeak() : useEventTimer(false)
@@ -127,14 +127,13 @@ int clPeak::runAll()
           return p;
         };
 
-        // Local-BW and atomic kernels use __local pointer arguments.
+        // Local-BW kernels use __local pointer arguments.
         // Image kernels use image2d_t / sampler_t.
         // All three cause NVIDIA CUDA-OpenCL to reserve module-level resources
         // that compress the register budget for every other kernel in the same
         // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
         // Each gets its own isolated program object.
         cl::Program localProg = buildAuxProg(clGetLocalKernels(), "Local bandwidth");
-        cl::Program atomicProg = buildAuxProg(clGetAtomicKernels(), "Atomic throughput");
         cl::Program imgProg;
         if (devInfo.imageSupported)
           imgProg = buildAuxProg(clGetImageKernels(), "Image bandwidth");
@@ -205,8 +204,6 @@ int clPeak::runAll()
                        "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "gops",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
-
-        runAtomicThroughputTest(queue, atomicProg, devInfo, cfg);
 
         // ---- Phase 3: bandwidth ----------------------------------------
         runGlobalBandwidthTest(queue, prog, devInfo, cfg);

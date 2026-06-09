@@ -158,7 +158,6 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeInt8DP)) runComputeInt8DP(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::IntCompute))
     runCpuMatrix(cfg, Category::IntCompute);
-  if (isAllowed(Benchmark::AtomicThroughput)) runAtomicThroughput(cfg);
 
   // ---- Bandwidth ----
   // No TransferBW: on a CPU there is no host<->device bus, so a libc memcpy
@@ -168,7 +167,6 @@ int CpuPeak::runAll()
 
   // ---- Latency ----
   if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
-  if (isAllowed(Benchmark::KernelLatency)) runThreadLatency(cfg);
 
   currentDeviceScope = nullptr;
   return 0;

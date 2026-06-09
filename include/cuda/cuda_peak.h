@@ -166,7 +166,6 @@ public:
   int runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category);
   int runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg);
-  int runAtomicThroughput(CudaDevice &dev, benchmark_config_t &cfg);
 
 private:
   bool initialised;
@@ -244,8 +243,7 @@ namespace cuda_kernels {
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
   extern const char *image_bandwidth_name;
-  extern const char *atomic_throughput_src;
-  extern const char *atomic_throughput_name;
+
 }
 
 #endif // ENABLE_CUDA

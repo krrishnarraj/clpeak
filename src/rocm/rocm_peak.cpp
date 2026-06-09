@@ -200,8 +200,7 @@ int RocmPeak::runAll()
       runSparseMfma(dev, cfg, Category::IntCompute);
     if (isAllowedAs(Benchmark::Rocblas, Category::IntCompute))
       runRocblas(dev, cfg, Category::IntCompute);
-    if (isAllowed(Benchmark::AtomicThroughput))
-      runAtomicThroughput(dev, cfg);
+
 
     if (isAllowed(Benchmark::GlobalBW))
       runGlobalBandwidth(dev, cfg);
