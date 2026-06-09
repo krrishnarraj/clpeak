@@ -44,8 +44,8 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (`-march`/`-mcpu=native`); cache/DRAM bandwidth + memory latency |
 | `src/cli/` | Desktop CLI: `main.cpp`, `logger.cpp` (stdout output) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
-| `android/` | Android app with JNI native module, its own `logger_android.cpp` |
-| `ios/` | iOS SwiftUI app with Vulkan-over-MoltenVK and Metal backends |
+| `android/` | Android app (Vulkan, OpenCL, CPU) with JNI native module, its own `logger_android.cpp` |
+| `ios/` | iOS SwiftUI app with Vulkan-over-MoltenVK, Metal, and CPU backends |
 
 ## Build
 

@@ -7,7 +7,7 @@ description: |
   performance of GPU compute devices. It exercises tight vector/MAD/MMA loops
   and vendor-SDK GEMM libraries across multiple backends.
 
-  Supported backends: OpenCL, Vulkan, CUDA, Metal, ROCm, oneAPI, cpu
+  Supported backends: OpenCL, Vulkan, CUDA, ROCm, Metal, oneAPI, CPU
 
   Benchmarks include: global/local/image memory bandwidth, single/half/double
   precision compute, integer throughput, tensor operations (WMMA, cooperative

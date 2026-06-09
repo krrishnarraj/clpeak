@@ -13,7 +13,7 @@ struct AboutView: View {
                 }
 
                 Section {
-                    Text("A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops to expose what the hardware is capable of in isolation, not real-world workload performance.")
+                    Text("A synthetic micro-benchmark that measures the peak achievable performance of your device's GPU and CPU. It exercises tight vector / MAD / MMA loops to expose what the hardware is capable of in isolation, not real-world workload performance. Backends: Vulkan, Metal, and CPU.")
                         .font(.body)
                 }
             }
