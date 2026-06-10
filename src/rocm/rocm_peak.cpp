@@ -38,6 +38,7 @@ bool RocmPeak::initRuntime()
   hipError_t r = hipGetDeviceCount(&n);
   if (r != hipSuccess)
   {
+    m_initResult = r;
     fprintf(stderr, "hipGetDeviceCount failed: %s\n", hipErrStr(r));
     return false;
   }
@@ -117,6 +118,11 @@ int RocmPeak::runAll()
 {
   if (!initRuntime())
   {
+    if (m_initResult == hipErrorNoDevice)
+    {
+      log->note("ROCm: no devices found\n");
+      return 0;
+    }
     log->note("ROCm: runtime init failed\n");
     return -1;
   }

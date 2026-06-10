@@ -243,6 +243,7 @@ public:
 private:
   VkInstance instance;
   std::vector<VkPhysicalDevice> physicalDevices;
+  VkResult m_instanceResult = VK_SUCCESS;
 
   bool initInstance();
   void cleanup();

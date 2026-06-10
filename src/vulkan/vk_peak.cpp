@@ -87,7 +87,8 @@ bool vkPeak::initInstance()
   instCI.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
 #endif
 
-  if (vkCreateInstance(&instCI, nullptr, &instance) != VK_SUCCESS)
+  m_instanceResult = vkCreateInstance(&instCI, nullptr, &instance);
+  if (m_instanceResult != VK_SUCCESS)
     return false;
 
   uint32_t devCount = 0;
@@ -195,7 +196,13 @@ int vkPeak::runAll()
   auto backendScope = log->beginBackend("Vulkan");
   if (!initInstance())
   {
-    log->note("Vulkan: failed to create instance\n");
+    if (m_instanceResult == VK_ERROR_INCOMPATIBLE_DRIVER)
+    {
+      log->note("Vulkan: no compatible driver found\n");
+      return 0;
+    }
+    log->note("Vulkan: failed to create instance (VkResult " +
+              std::to_string(m_instanceResult) + ")\n");
     return -1;
   }
   if (physicalDevices.empty())
