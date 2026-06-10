@@ -123,7 +123,7 @@ int RocmPeak::runAll()
   if (devIndices.empty())
   {
     log->note("ROCm: no devices found\n");
-    return -1;
+    return 0;
   }
 
   auto backendScope = log->beginBackend("ROCm");

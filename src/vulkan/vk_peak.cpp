@@ -92,11 +92,11 @@ bool vkPeak::initInstance()
 
   uint32_t devCount = 0;
   vkEnumeratePhysicalDevices(instance, &devCount, nullptr);
-  if (devCount == 0)
-    return false;
-
-  physicalDevices.resize(devCount);
-  vkEnumeratePhysicalDevices(instance, &devCount, physicalDevices.data());
+  if (devCount > 0)
+  {
+    physicalDevices.resize(devCount);
+    vkEnumeratePhysicalDevices(instance, &devCount, physicalDevices.data());
+  }
 
   return true;
 }
@@ -195,8 +195,13 @@ int vkPeak::runAll()
   auto backendScope = log->beginBackend("Vulkan");
   if (!initInstance())
   {
-    log->note("Vulkan: failed to create instance or no devices found\n");
+    log->note("Vulkan: failed to create instance\n");
     return -1;
+  }
+  if (physicalDevices.empty())
+  {
+    log->note("Vulkan: no devices found\n");
+    return 0;
   }
 
   for (size_t d = 0; d < physicalDevices.size(); d++)

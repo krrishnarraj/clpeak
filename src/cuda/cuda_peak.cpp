@@ -112,7 +112,7 @@ int CudaPeak::runAll()
   if (devIndices.empty())
   {
     log->note("CUDA: no devices found\n");
-    return -1;
+    return 0;
   }
 
   auto backendScope = log->beginBackend("CUDA");

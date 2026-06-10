@@ -33,8 +33,8 @@ int MetalPeak::runAll()
     impl->allDevices = copyClpeakMetalDevices();
     if (impl->allDevices.count == 0)
     {
-        log->note("Metal: no devices found");
-        return -1;
+        log->note("Metal: no devices found\n");
+        return 0;
     }
 
     auto backendScope = log->beginBackend("Metal");
