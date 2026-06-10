@@ -55,7 +55,7 @@ int MetalPeak::runAll()
         if (!dev.info.isAppleSilicon)
         {
             log->note("Metal: skipping " + dev.info.deviceName +
-                      " -- requires Apple silicon (M1 or newer)");
+                      " -- requires Apple silicon (M1 or newer)\n");
             continue;
         }
 #endif
