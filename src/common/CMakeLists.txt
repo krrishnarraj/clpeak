@@ -13,7 +13,15 @@ target_include_directories(peak_common PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include/common
 )
 target_compile_features(peak_common PUBLIC cxx_std_11)
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU|AppleClang")
+if(MSVC)
+    # Covers clang-cl too: -fPIC is meaningless on Windows (warns), and
+    # clang-cl aliases -Wall to MSVC /Wall (≈ -Weverything spam), so route the
+    # GNU-style warnings through the /clang: passthrough instead.
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        target_compile_options(peak_common PRIVATE
+            /clang:-Wall /clang:-Wextra /clang:-Wno-unused-parameter)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU|AppleClang")
     target_compile_options(peak_common PRIVATE -fPIC -Wall -Wextra -Wno-unused-parameter)
 endif()
 

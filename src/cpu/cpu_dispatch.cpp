@@ -152,15 +152,17 @@ static CpuFeatures detect()
   return f;
 }
 
+// Only referenced under CLPEAK_TU_amx (maybe_unused: avoids -Wunused-function
+// on the platforms where that TU isn't built).
 #if defined(__linux__) && defined(CLPEAK_X86)
-static bool amxPermOk()
+[[maybe_unused]] static bool amxPermOk()
 {
   // ARCH_REQ_XCOMP_PERM = 0x1023, XFEATURE_XTILEDATA = 18. Process-wide.
   static bool ok = (syscall(SYS_arch_prctl, 0x1023, 18) == 0);
   return ok;
 }
 #else
-static bool amxPermOk() { return false; }
+[[maybe_unused]] static bool amxPermOk() { return false; }
 #endif
 
 static void merge(CpuKernelTable &d, const CpuKernelTable *s)

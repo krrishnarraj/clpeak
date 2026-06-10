@@ -185,7 +185,10 @@ TU's flags define.
   exists — that broke the first Windows ARM64 build. Every NEON branch
   (`cpu_simd.h`, the `readBufferChecksum` NEON path, `cpu_dispatch.cpp`) accepts
   `__aarch64__ || _M_ARM64`, and the int32 SSE4.1 branch gates MSVC on
-  `_M_X64 || _M_IX86`.
+  `_M_X64 || _M_IX86` **and `!__clang__`** — clang-cl defines `_MSC_VER`/`_M_X64`
+  too but, unlike cl.exe, enforces target features (always_inline error when an
+  SSE4.1 intrinsic lands in an SSE2-baseline TU), so it must enter intrinsic
+  branches via the GNU feature macros (`__SSE4_1__` etc.) only.
 - **The NEON kernels are AArch64-only.** The fused FMA (`vfmaq_f32`), horizontal
   reduce (`vaddvq_*`) and fp16 store (`vst1q_f16`) intrinsics don't exist in
   32-bit ARMv7 NEON, so `cpu_simd.h` gates NEON on `__aarch64__` and armeabi-v7a

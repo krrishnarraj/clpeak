@@ -197,11 +197,15 @@ static inline int   i32_hsum(i32v a)
   lo = _mm_hadd_epi32(lo, lo);
   return _mm_cvtsi128_si32(lo);
 }
-#elif defined(__SSE4_1__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
-// MSVC never defines __SSE4_1__ but exposes _mm_mullo_epi32 unconditionally on
-// x86; the MSVC sse42 TU runs only when CPUID reports SSE4.2 (⊇ SSE4.1) at
+#elif defined(__SSE4_1__) || \
+    (defined(_MSC_VER) && !defined(__clang__) && (defined(_M_X64) || defined(_M_IX86)))
+// cl.exe never defines __SSE4_1__ but exposes _mm_mullo_epi32 unconditionally
+// on x86; the MSVC sse42 TU runs only when CPUID reports SSE4.2 (⊇ SSE4.1) at
 // runtime.  Gate on _M_X64/_M_IX86, not bare _MSC_VER: MSVC ARM64 must fall
-// through to the NEON branch below.
+// through to the NEON branch below.  And exclude clang-cl (!__clang__): clang
+// enforces target features (always_inline error for _mm_mullo_epi32 in an
+// SSE2-baseline TU), so like GNU clang it must come in via __SSE4_1__ — its
+// generic TU takes the scalar fallback, same as the Linux generic TU.
 using i32v = __m128i;
 constexpr int I32_LANES = 4;
 constexpr int I32_NACC  = 12;
