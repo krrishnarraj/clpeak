@@ -35,6 +35,12 @@ jobs:
             binary: build/Release/clpeak.exe
             cuda: false
 
+          - name: Windows arm64
+            runner: windows-11-arm
+            artifact: clpeak-windows-arm64
+            binary: build/Release/clpeak.exe
+            cuda: false
+
           - name: macOS arm64
             runner: macos-latest
             artifact: clpeak-macos-arm64
@@ -260,7 +266,7 @@ jobs:
             chmod +x "$dir"/* 2>/dev/null || true
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
-          for dir in artifacts/clpeak-windows-x86_64; do
+          for dir in artifacts/clpeak-windows-x86_64 artifacts/clpeak-windows-arm64; do
             name=$(basename "$dir")
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
