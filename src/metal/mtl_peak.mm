@@ -93,14 +93,7 @@ int MetalPeak::runAll()
         if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
 
-        // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
-
-        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::IntCompute))
-            runSimdgroupMatrixInt(dev, cfg);
-        if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
-            runMpsGemmInt(dev, cfg);
-
-        // ---- Phase 3: bandwidth (GBPS) -----------------------------------
+        // ---- Phase 2: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
         if (isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
         if (isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);

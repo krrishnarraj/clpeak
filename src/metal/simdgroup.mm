@@ -5,29 +5,6 @@
 // SIMD-group matrix multiply (Apple tensor cores)
 // ---------------------------------------------------------------------------
 
-int MetalPeak::runSimdgroupMatrixInt(MetalDevice &dev, benchmark_config_t &cfg)
-{
-    int A = 1;
-    mtl_compute_desc_t d = {};
-    d.title            = "simdgroup_matrix int8xint8+int32 8x8x8";
-    d.resultTag           = "simdgroup_matrix_int8";
-    d.unit             = "tops";
-    d.unitDivider      = 1e12;
-    d.metricLabel      = "simdgroup_int8";
-    d.kernelName       = "simdgroup_matrix_int8";
-    d.src              = mtl_kernels::simdgroup_matrix_int8_src;
-    d.srcName          = mtl_kernels::simdgroup_matrix_int8_name;
-    d.workPerWI        = MTL_SIMDGROUP_WORK_PER_WI;
-    d.elemSize         = sizeof(int);
-    d.threadsPerGroup  = 32;
-    d.outElemsPerGroup = 64;
-    d.scalarArg        = &A;
-    d.scalarSize       = sizeof(A);
-    d.skip             = !dev.info.simdgroupMatrixInt8Supported;
-    d.skipMsg          = "int8 simdgroup_matrix requires Apple9 (M3) or newer! Skipped";
-    return runComputeKernel(dev, cfg, d);
-}
-
 int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
 {
     {
