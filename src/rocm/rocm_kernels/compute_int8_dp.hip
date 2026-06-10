@@ -5,18 +5,17 @@
 // ops. This is the vector shader-core INT8 path, distinct from the matrix-core
 // MFMA int8 (mfma_int8).
 //
-// The builtin differs by arch: older GCN/CDNA1-2 and RDNA1-2 expose the
-// signed v_dot4_i32_i8 (__builtin_amdgcn_sdot4, gated by the dot1-insts
-// feature); CDNA3 (gfx94x/gfx950) and RDNA3/4 (gfx11xx/gfx12xx) replaced it
-// with the mixed-sign v_dot4_i32_iu8 (__builtin_amdgcn_sudot4) and no longer
-// carry dot1-insts -- so sdot4 fails to compile there (the gfx12 "needs target
-// feature dot1-insts" error). Select per-arch via clang's predefined
-// __gfxNNNN__ processor macros; signed*signed maps to sudot4 with both sign
-// flags set. Arches not listed fall back to sdot4 (unchanged behavior); if a
-// part has neither, the compile fails and the test reports compile/load failed.
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) ||       \
-    defined(__gfx950__) ||                                                     \
-    defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||    \
+// The builtin differs by arch: GCN/CDNA (including gfx94x/gfx950) and RDNA1-2
+// expose the signed v_dot4_i32_i8 (__builtin_amdgcn_sdot4, gated by the
+// dot1-insts feature). RDNA3/4 (gfx11xx/gfx12xx) dropped dot1-insts and
+// instead carry the mixed-sign v_dot4_i32_iu8 (__builtin_amdgcn_sudot4, gated
+// by dot8-insts -- a feature the CDNA line never had, so sudot4 fails to
+// compile on gfx94x and sdot4 fails on gfx12 with the "needs target feature
+// dot1-insts" error). Select per-arch via clang's predefined __gfxNNNN__
+// processor macros; signed*signed maps to sudot4 with both sign flags set.
+// Arches not listed fall back to sdot4 (unchanged behavior); if a part has
+// neither, the compile fails and the test reports compile/load failed.
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||    \
     defined(__gfx1103__) ||                                                    \
     defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) ||    \
     defined(__gfx1200__) || defined(__gfx1201__)

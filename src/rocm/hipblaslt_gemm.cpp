@@ -15,8 +15,22 @@
 
 #ifdef CLPEAK_ROCM_HAS_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
+#include <cstdio>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <io.h>
+#define CLPEAK_DUP   _dup
+#define CLPEAK_DUP2  _dup2
+#define CLPEAK_CLOSE _close
+#define CLPEAK_DEVNULL "NUL"
+#else
+#include <unistd.h>
+#define CLPEAK_DUP   dup
+#define CLPEAK_DUP2  dup2
+#define CLPEAK_CLOSE close
+#define CLPEAK_DEVNULL "/dev/null"
+#endif
 #endif
 
 namespace {
@@ -38,6 +52,48 @@ uint32_t pickGemmDim(const rocm_device_info_t &info)
 }
 
 #ifdef CLPEAK_ROCM_HAS_HIPBLASLT
+// hipBLASLt has no "is this dtype supported on this device?" capability query;
+// the only arch-agnostic answer is to ask hipblasLtMatmulAlgoGetHeuristic and
+// treat zero algorithms as Unsupported. But the heuristic doesn't conclude
+// quietly: on parts without the hardware its Tensile/rocRoller internals print
+// per-candidate diagnostics straight to the console while walking instruction
+// tables (e.g. FP4 on gfx942: pages of "Warning: Latency not found" and
+// rocRoller XCC FatalError lines), bypassing the HIPBLASLT_LOG_* mechanism.
+// Mute stdout+stderr at the fd level for the duration of the query; the
+// returned status and algo count still tell the truth. Same policy as the
+// HIPRTC compile logs: under --verbose the mute is a no-op so the library
+// diagnostics stay visible.
+class ScopedConsoleMute
+{
+public:
+  ScopedConsoleMute()
+  {
+    if (clpeak::verboseEnabled())
+      return;
+    (void)fflush(stdout);
+    (void)fflush(stderr);
+    savedOut = CLPEAK_DUP(fileno(stdout));
+    savedErr = CLPEAK_DUP(fileno(stderr));
+    FILE *nul = fopen(CLPEAK_DEVNULL, "w");
+    if (nul)
+    {
+      if (savedOut >= 0) (void)CLPEAK_DUP2(fileno(nul), fileno(stdout));
+      if (savedErr >= 0) (void)CLPEAK_DUP2(fileno(nul), fileno(stderr));
+      (void)fclose(nul);
+    }
+  }
+  ~ScopedConsoleMute()
+  {
+    (void)fflush(stdout);
+    (void)fflush(stderr);
+    if (savedOut >= 0) { (void)CLPEAK_DUP2(savedOut, fileno(stdout)); (void)CLPEAK_CLOSE(savedOut); }
+    if (savedErr >= 0) { (void)CLPEAK_DUP2(savedErr, fileno(stderr)); (void)CLPEAK_CLOSE(savedErr); }
+  }
+private:
+  int savedOut = -1;
+  int savedErr = -1;
+};
+
 // Run `n` hipblasLtMatmul calls between an event pair; return mean us/iter.
 double timeHipblasLt(hipStream_t stream, hipblasLtHandle_t lt,
                      hipblasLtMatmulDesc_t opDesc,
@@ -172,9 +228,13 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 
     std::vector<hipblasLtMatmulHeuristicResult_t> heurs(kCandidates);
     int returnedResults = 0;
-    hipblasStatus_t hs = hipblasLtMatmulAlgoGetHeuristic(
-        lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
-        pref, kCandidates, heurs.data(), &returnedResults);
+    hipblasStatus_t hs;
+    {
+      ScopedConsoleMute mute;
+      hs = hipblasLtMatmulAlgoGetHeuristic(
+          lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
+          pref, kCandidates, heurs.data(), &returnedResults);
+    }
     (void)hipblasLtMatmulPreferenceDestroy(pref);
 
     if (hs != HIPBLAS_STATUS_SUCCESS || returnedResults == 0)
@@ -295,9 +355,13 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
             pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
         std::vector<hipblasLtMatmulHeuristicResult_t> heurs(kCandidates);
         int returnedResults = 0;
-        hipblasStatus_t hs = hipblasLtMatmulAlgoGetHeuristic(
-            lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
-            pref, kCandidates, heurs.data(), &returnedResults);
+        hipblasStatus_t hs;
+        {
+          ScopedConsoleMute mute;
+          hs = hipblasLtMatmulAlgoGetHeuristic(
+              lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
+              pref, kCandidates, heurs.data(), &returnedResults);
+        }
         (void)hipblasLtMatmulPreferenceDestroy(pref);
 
         if (hs != HIPBLAS_STATUS_SUCCESS || returnedResults == 0)
