@@ -136,7 +136,7 @@ int OneapiPeak::runAll()
   {
     log->note("oneAPI: no SYCL devices found (no GPU, CPU, or accelerator "
               "visible to the SYCL runtime)\n");
-    return -1;
+    return 0;
   }
 
   auto backendScope = log->beginBackend("oneAPI");

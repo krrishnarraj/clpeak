@@ -55,7 +55,7 @@ bool MetalDevice::init(int devIndex)
     }
 
     // Probe Apple GPU family.  Apple7 = M1/A15 baseline for simdgroup_matrix;
-    // Apple9 = M3/A17 generation where bf16/int8 paths light up.
+    // Apple9 = M3/A17 generation where the bf16 path lights up.
     info.appleFamily = 0;
     info.isAppleSilicon = false;
     for (int f = 1; f <= 10; f++)
@@ -76,7 +76,6 @@ bool MetalDevice::init(int devIndex)
     info.deviceType                   = DeviceType::Gpu;  // Apple Silicon GPU
     info.simdgroupMatrixFP16Supported = info.appleFamily >= 7;
     info.simdgroupMatrixBF16Supported = info.appleFamily >= 9;
-    info.simdgroupMatrixInt8Supported = info.appleFamily >= 9;
 
     // MPSGraph bf16 dtype was added in macOS 14 (Sonoma) and only lights up
     // on Apple9+ (M3); below that it falls back to a slow software path.

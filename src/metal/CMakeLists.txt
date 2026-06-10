@@ -60,7 +60,6 @@ set(CLPEAK_MTL_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/kernel_latency.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/simdgroup_matrix_fp16.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/simdgroup_matrix_bf16.metal
-    ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/simdgroup_matrix_int8.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/local_bandwidth.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/image_bandwidth.metal
 )

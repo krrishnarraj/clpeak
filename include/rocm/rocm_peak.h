@@ -135,6 +135,7 @@ public:
 private:
   bool initialised;
   std::vector<int> devIndices;
+  hipError_t m_initResult = hipSuccess;
   logger::DeviceScope *currentDeviceScope = nullptr;
 
   bool initRuntime();

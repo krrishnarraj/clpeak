@@ -328,6 +328,26 @@ void detectCpuInfo(cpu_device_info_t &info)
   info.vendor = x86Vendor();
 #endif
   if (info.name.empty())
+  {
+    // ARM64 has no CPUID; the registry carries the marketing name (and the
+    // x86 path uses this as a fallback too if CPUID yields nothing).
+    HKEY key;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                      "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                      0, KEY_READ, &key) == ERROR_SUCCESS)
+    {
+      char buf[128];
+      DWORD sz = sizeof(buf) - 1, type = 0;
+      if (RegQueryValueExA(key, "ProcessorNameString", nullptr, &type,
+                           (LPBYTE)buf, &sz) == ERROR_SUCCESS && type == REG_SZ)
+      {
+        buf[sz] = '\0';   // registry strings are not guaranteed NUL-terminated
+        info.name = buf;
+      }
+      RegCloseKey(key);
+    }
+  }
+  if (info.name.empty())
     info.name = "Windows CPU";
   MEMORYSTATUSEX ms;
   ms.dwLength = sizeof(ms);

@@ -2,9 +2,13 @@ name: Build
 
 on:
   push:
+    paths-ignore:
+      - 'results/**'
     branches: [master, main]
     tags: ["*"]
   pull_request:
+    paths-ignore:
+        - 'results/**'
     branches: [master, main]
   workflow_dispatch:
 
@@ -32,6 +36,12 @@ jobs:
           - name: Windows x64
             runner: windows-latest
             artifact: clpeak-windows-x86_64
+            binary: build/Release/clpeak.exe
+            cuda: false
+
+          - name: Windows arm64
+            runner: windows-11-arm
+            artifact: clpeak-windows-arm64
             binary: build/Release/clpeak.exe
             cuda: false
 
@@ -79,6 +89,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential clang
 
       - name: Install Vulkan SDK
+        if: runner.os != 'macOS'
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
           install_runtime: true
@@ -140,18 +151,18 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx
           cmake --build build --config Release -j4
 
-      - name: Run cpu backend
+      - name: Run
         if: ${{ !matrix.cuda && !matrix.rocm && !matrix.oneapi }}
         shell: bash
-        run: ${{ matrix.binary }} --cpu 2>&1
+        run: ${{ matrix.binary }}
 
       # CUDA / ROCm / oneAPI binaries cannot launch on the default runner image
       # (no NVIDIA / AMD / Intel GPU driver present), so failure here is
       # expected and ignored.  oneAPI also needs setvars.sh on the path.
-      - name: Run cpu backend (allow failure)
+      - name: Run (allow failure)
         if: ${{ matrix.cuda || matrix.rocm || matrix.oneapi }}
         shell: bash
-        run: ${{ matrix.binary }} --cpu 2>&1 || true
+        run: ${{ matrix.binary }} || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -260,7 +271,7 @@ jobs:
             chmod +x "$dir"/* 2>/dev/null || true
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done
-          for dir in artifacts/clpeak-windows-x86_64; do
+          for dir in artifacts/clpeak-windows-x86_64 artifacts/clpeak-windows-arm64; do
             name=$(basename "$dir")
             (cd "$dir" && zip -j "../../release/${name}.zip" *)
           done

@@ -170,6 +170,7 @@ public:
 private:
   bool initialised;
   std::vector<int> devIndices;
+  CUresult m_initResult = CUDA_SUCCESS;
   logger::DeviceScope *currentDeviceScope = nullptr;  // set during runAll
 
   bool initDriver();

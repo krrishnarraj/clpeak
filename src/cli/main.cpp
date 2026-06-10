@@ -172,10 +172,10 @@ int main(int argc, char **argv)
 
     ResultStore combined;
 
-    // Run every enabled backend in order.  If a backend fails but at least
-    // one preceding backend succeeded, we suppress the error so that a
-    // single broken device doesn't mask results from healthy ones.
-    bool anyPrecedingSucceeded = false;
+    // Run every enabled backend in order.  No devices is not an error
+    // (normal in VM/CI environments).  Only real failures (driver init,
+    // runtime errors) produce a non-zero status.  We OR the statuses so
+    // any real error from any backend surfaces in the exit code.
     int lastError = 0;
 
     for (const auto &be : backends)
@@ -189,12 +189,8 @@ int main(int argc, char **argv)
         int status = peak->runAll();
         mergeResults(combined, peak->log->results);
 
-        if (status != 0 && anyPrecedingSucceeded)
-            status = 0;
-        if (status == 0)
-            anyPrecedingSucceeded = true;
         if (status != 0)
-            lastError = status;
+            lastError |= status;
     }
 
     // Centralized file dump: one file per enabled format.

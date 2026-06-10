@@ -29,12 +29,12 @@ void clPeak::applyOptions(const CliOptions &opts)
 
 int clPeak::runAll()
 {
+  auto backendScope = log->beginBackend("OpenCL");
   try
   {
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
 
-    auto backendScope = log->beginBackend("OpenCL");
     for (size_t p = 0; p < platforms.size(); p++)
     {
       if (!platformIndices.empty() &&

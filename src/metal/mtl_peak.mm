@@ -33,8 +33,8 @@ int MetalPeak::runAll()
     impl->allDevices = copyClpeakMetalDevices();
     if (impl->allDevices.count == 0)
     {
-        log->note("Metal: no devices found");
-        return -1;
+        log->note("Metal: no devices found\n");
+        return 0;
     }
 
     auto backendScope = log->beginBackend("Metal");
@@ -48,14 +48,14 @@ int MetalPeak::runAll()
         MetalDevice dev;
         if (!dev.init((int)d))
         {
-            log->note("Metal: failed to init device " + std::to_string(d));
+            log->note("Metal: failed to init device " + std::to_string(d) + "\n");
             continue;
         }
 #if !TARGET_OS_IPHONE
         if (!dev.info.isAppleSilicon)
         {
             log->note("Metal: skipping " + dev.info.deviceName +
-                      " -- requires Apple silicon (M1 or newer)");
+                      " -- requires Apple silicon (M1 or newer)\n");
             continue;
         }
 #endif
@@ -93,14 +93,7 @@ int MetalPeak::runAll()
         if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
 
-        // ---- Phase 2: integer compute (GOPS / TOPS) ----------------------
-
-        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::IntCompute))
-            runSimdgroupMatrixInt(dev, cfg);
-        if (isAllowedAs(Benchmark::MpsGemm, Category::IntCompute))
-            runMpsGemmInt(dev, cfg);
-
-        // ---- Phase 3: bandwidth (GBPS) -----------------------------------
+        // ---- Phase 2: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
         if (isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
         if (isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);

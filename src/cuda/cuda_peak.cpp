@@ -44,13 +44,17 @@ bool CudaPeak::initDriver()
   CUresult r = cuInit(0);
   if (r != CUDA_SUCCESS)
   {
+    m_initResult = r;
     fprintf(stderr, "cuInit failed: %s\n", cuErrStr(r));
     return false;
   }
   int n = 0;
   r = cuDeviceGetCount(&n);
   if (r != CUDA_SUCCESS)
+  {
+    m_initResult = r;
     return false;
+  }
   for (int i = 0; i < n; i++)
     devIndices.push_back(i);
   initialised = true;
@@ -106,13 +110,18 @@ int CudaPeak::runAll()
 {
   if (!initDriver())
   {
+    if (m_initResult == CUDA_ERROR_NO_DEVICE)
+    {
+      log->note("CUDA: no devices found\n");
+      return 0;
+    }
     log->note("CUDA: driver init failed\n");
     return -1;
   }
   if (devIndices.empty())
   {
     log->note("CUDA: no devices found\n");
-    return -1;
+    return 0;
   }
 
   auto backendScope = log->beginBackend("CUDA");
