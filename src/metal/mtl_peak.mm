@@ -48,7 +48,7 @@ int MetalPeak::runAll()
         MetalDevice dev;
         if (!dev.init((int)d))
         {
-            log->note("Metal: failed to init device " + std::to_string(d));
+            log->note("Metal: failed to init device " + std::to_string(d) + "\n");
             continue;
         }
 #if !TARGET_OS_IPHONE
