@@ -13,9 +13,11 @@
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
 // Only AArch64 uses the NEON kernels; 32-bit ARMv7 lacks fused-FMA / horizontal
 // reduce intrinsics, so it uses the scalar fallback and needs no arm_neon.h.
+// MSVC ARM64 defines _M_ARM64 (never __aarch64__) and ships the full AArch64
+// ACLE in its arm_neon.h.
 #include <arm_neon.h>
 #endif
 
@@ -91,7 +93,7 @@ static inline float f32_hsum(f32v a)
   t = _mm_add_ss(t, _mm_shuffle_ps(t, t, 0x55));
   return _mm_cvtss_f32(t);
 }
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
 // AArch64 only: 32-bit ARMv7 NEON has no fused FMA (vfmaq_f32) and no
 // horizontal reduce (vaddvq_f32), so armeabi-v7a falls through to scalar below.
 using f32v = float32x4_t;
@@ -150,7 +152,7 @@ static inline f64v f64_set(double a)           { return _mm_set1_pd(a); }
 static inline f64v f64_fma(f64v a, f64v b, f64v c) { return _mm_add_pd(_mm_mul_pd(a, b), c); }
 static inline f64v f64_add(f64v a, f64v b)     { return _mm_add_pd(a, b); }
 static inline double f64_hsum(f64v a)          { return _mm_cvtsd_f64(_mm_add_sd(a, _mm_unpackhi_pd(a, a))); }
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
 using f64v = float64x2_t;
 constexpr int F64_LANES = 2;
 constexpr int F64_NACC  = 24;   // same latency-hiding rationale as fp32
@@ -195,9 +197,11 @@ static inline int   i32_hsum(i32v a)
   lo = _mm_hadd_epi32(lo, lo);
   return _mm_cvtsi128_si32(lo);
 }
-#elif defined(__SSE4_1__) || defined(_MSC_VER)
-// MSVC never defines __SSE4_1__ but exposes _mm_mullo_epi32 unconditionally;
-// the MSVC sse42 TU runs only when CPUID reports SSE4.2 (⊇ SSE4.1) at runtime.
+#elif defined(__SSE4_1__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
+// MSVC never defines __SSE4_1__ but exposes _mm_mullo_epi32 unconditionally on
+// x86; the MSVC sse42 TU runs only when CPUID reports SSE4.2 (⊇ SSE4.1) at
+// runtime.  Gate on _M_X64/_M_IX86, not bare _MSC_VER: MSVC ARM64 must fall
+// through to the NEON branch below.
 using i32v = __m128i;
 constexpr int I32_LANES = 4;
 constexpr int I32_NACC  = 12;
@@ -210,7 +214,7 @@ static inline int   i32_hsum(i32v a)
   t = _mm_add_epi32(t, _mm_shuffle_epi32(t, 0xB1));
   return _mm_cvtsi128_si32(t);
 }
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
 using i32v = int32x4_t;
 constexpr int I32_LANES = 4;
 constexpr int I32_NACC  = 16;

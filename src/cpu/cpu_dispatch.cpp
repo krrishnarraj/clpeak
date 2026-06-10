@@ -11,12 +11,15 @@
 #else
 #include <cpuid.h>
 #endif
-#elif defined(__aarch64__) || defined(__arm__)
+#elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64)
 #define CLPEAK_ARM 1
 #if defined(__linux__) || defined(__ANDROID__)
 #include <sys/auxv.h>
 #elif defined(__APPLE__)
 #include <sys/sysctl.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 #endif
 
@@ -99,7 +102,7 @@ static CpuFeatures detect()
   // Only AArch64 has the NEON kernels; 32-bit ARMv7 uses the scalar generic TU
   // (and its HWCAP bit layout differs from the AArch64 bits below anyway), so
   // leave every feature false there and let isaName() report "scalar".
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(_M_ARM64)
   f.neon = true;   // mandatory on aarch64
 #if defined(__linux__) || defined(__ANDROID__)
   unsigned long hw = getauxval(AT_HWCAP);
@@ -120,8 +123,31 @@ static CpuFeatures detect()
   f.fp16fml = sc("hw.optional.arm.FEAT_FHM");
   f.bf16    = sc("hw.optional.arm.FEAT_BF16");
   f.i8mm    = sc("hw.optional.arm.FEAT_I8MM");
+#elif defined(_WIN32)
+  // Windows has no IsProcessorFeaturePresent() constant for most of these,
+  // but the kernel exports the (sanitised) AArch64 ID registers as REG_QWORD
+  // values "CP <enc>" under CentralProcessor\0, enc = 0x4000 | CRm<<3 | op2
+  // (op0=3,op1=0,CRn=0):  CP 4000 = MIDR_EL1, CP 4020 = ID_AA64PFR0_EL1,
+  // CP 4030 = ID_AA64ISAR0_EL1, CP 4031 = ID_AA64ISAR1_EL1.
+  auto idreg = [](const char *value) -> uint64_t {
+    uint64_t v = 0;
+    DWORD sz = sizeof(v);
+    if (RegGetValueA(HKEY_LOCAL_MACHINE,
+                     "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                     value, RRF_RT_REG_QWORD, nullptr, &v, &sz) != ERROR_SUCCESS)
+      return 0;
+    return v;
+  };
+  const uint64_t pfr0  = idreg("CP 4020");
+  const uint64_t isar0 = idreg("CP 4030");
+  const uint64_t isar1 = idreg("CP 4031");
+  f.fp16    = ((pfr0 >> 16) & 0xF) == 1;   // PFR0.FP: 1 = FP + FEAT_FP16 (0xF = no FP)
+  f.dotprod = ((isar0 >> 44) & 0xF) >= 1;  // ISAR0.DP   (FEAT_DotProd)
+  f.fp16fml = ((isar0 >> 48) & 0xF) >= 1;  // ISAR0.FHM  (FEAT_FHM)
+  f.bf16    = ((isar1 >> 44) & 0xF) >= 1;  // ISAR1.BF16 (FEAT_BF16)
+  f.i8mm    = ((isar1 >> 52) & 0xF) >= 1;  // ISAR1.I8MM (FEAT_I8MM)
 #endif
-#endif // __aarch64__
+#endif // __aarch64__ || _M_ARM64
 #endif
   return f;
 }

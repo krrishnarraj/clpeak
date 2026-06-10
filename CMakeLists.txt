@@ -1,22 +1,62 @@
 cmake_minimum_required(VERSION 3.20)
 
-# On Linux, prefer clang/clang++ over the distro-default GCC when the user has not
-# pinned a compiler.  The CPU backend keeps 24 independent FMA accumulator chains
-# in flight per kernel; clang schedules those cleanly, but GCC<=14 serialises them
-# into a single register (and skips the k-loop unroll), roughly halving fp32/fp64
-# throughput.  Must run before project().  Respects any explicit choice: CC/CXX
-# env vars, -DCMAKE_C[XX]_COMPILER, a toolchain file, or the oneAPI icpx build.
-# (macOS already defaults to AppleClang; Windows to MSVC -- both are left alone.)
-if(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE
-   AND NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER
+# Prefer clang over the platform-default compiler when the user has not pinned
+# one.  Two reasons, both from the CPU backend:
+#  - codegen: the kernels keep 24 independent FMA accumulator chains in flight;
+#    clang schedules those cleanly, but GCC<=14 serialises them into a single
+#    register (and skips the k-loop unroll), roughly halving fp32/fp64.
+#  - dtype coverage: MSVC has no GNU -m/-march ISA flags and defines no
+#    __ARM_FEATURE_* / AVX-512 sub-feature macros, so the advanced-dtype TUs
+#    (fp16 / bf16 / int8-dot / matrix) cannot be built with cl.exe at all;
+#    clang-cl gives Windows dtype parity with the Linux build.
+# Must run before project().  Respects any explicit choice: CC/CXX env vars,
+# -DCMAKE_C[XX]_COMPILER, -T <toolset>, or a toolchain file.  (macOS already
+# defaults to AppleClang and is left alone.)
+if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER
    AND NOT DEFINED ENV{CXX} AND NOT DEFINED ENV{CC}
    AND NOT CMAKE_TOOLCHAIN_FILE)
-    find_program(CLPEAK_CLANG_C   NAMES clang)
-    find_program(CLPEAK_CLANG_CXX NAMES clang++)
-    if(CLPEAK_CLANG_C AND CLPEAK_CLANG_CXX)
-        set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_C}"   CACHE FILEPATH "C compiler")
-        set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CXX}" CACHE FILEPATH "C++ compiler")
-        message(STATUS "clpeak: preferring clang (${CLPEAK_CLANG_CXX}) for CPU-backend codegen; pass -DCMAKE_CXX_COMPILER=g++ to override")
+    if(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE)
+        find_program(CLPEAK_CLANG_C   NAMES clang)
+        find_program(CLPEAK_CLANG_CXX NAMES clang++)
+        if(CLPEAK_CLANG_C AND CLPEAK_CLANG_CXX)
+            set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_C}"   CACHE FILEPATH "C compiler")
+            set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CXX}" CACHE FILEPATH "C++ compiler")
+            message(STATUS "clpeak: preferring clang (${CLPEAK_CLANG_CXX}) for CPU-backend codegen; pass -DCMAKE_CXX_COMPILER=g++ to override")
+        endif()
+    elseif(CMAKE_HOST_WIN32)
+        if(CMAKE_GENERATOR MATCHES "Visual Studio")
+            # The VS generator selects the compiler via the toolset (-T), not
+            # CMAKE_CXX_COMPILER.  Switch to ClangCL only when the VS "C++
+            # Clang compiler" component is actually installed (probed via
+            # vswhere), so a stock MSVC install still configures fine.
+            # CMAKE_GENERATOR_TOOLSET is cached after the first configure, so
+            # this runs once per build dir and stays consistent on reconfigure.
+            if(NOT CMAKE_GENERATOR_TOOLSET)
+                set(_clpeak_pf86 "ProgramFiles(x86)")  # indirection: () in $ENV{} confuses the parser
+                set(_clpeak_vswhere "$ENV{${_clpeak_pf86}}/Microsoft Visual Studio/Installer/vswhere.exe")
+                if(NOT EXISTS "${_clpeak_vswhere}")
+                    set(_clpeak_vswhere "$ENV{ProgramFiles}/Microsoft Visual Studio/Installer/vswhere.exe")
+                endif()
+                if(EXISTS "${_clpeak_vswhere}")
+                    execute_process(
+                        COMMAND "${_clpeak_vswhere}" -latest -products * -find "VC/Tools/Llvm/**/bin/clang-cl.exe"
+                        OUTPUT_VARIABLE _clpeak_vs_clang
+                        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+                    if(_clpeak_vs_clang)
+                        set(CMAKE_GENERATOR_TOOLSET "ClangCL")
+                        message(STATUS "clpeak: preferring clang-cl (-T ClangCL) for CPU-backend dtype coverage; pass -T v143 to keep MSVC")
+                    endif()
+                endif()
+            endif()
+        else()
+            # Ninja / Makefiles on Windows: pick clang-cl from PATH (LLVM install).
+            find_program(CLPEAK_CLANG_CL NAMES clang-cl)
+            if(CLPEAK_CLANG_CL)
+                set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_CL}" CACHE FILEPATH "C compiler")
+                set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CL}" CACHE FILEPATH "C++ compiler")
+                message(STATUS "clpeak: preferring clang-cl (${CLPEAK_CLANG_CL}) for CPU-backend dtype coverage; pass -DCMAKE_CXX_COMPILER=cl to override")
+            endif()
+        endif()
     endif()
 endif()
 

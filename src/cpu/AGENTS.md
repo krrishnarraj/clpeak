@@ -70,16 +70,31 @@ Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
   - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
     floor never bakes in M4-only features), plus Linux/Android `fp16`,
     `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs.
-  - MSVC: core tiers only (`/arch:AVX2`, `/arch:AVX512`) with `CLPEAK_CORE_ONLY`,
-    since it can't isolate AVX-512 sub-features; advanced dtypes need GCC/Clang
-    or a native build.
+  - Windows: only **real MSVC** (cl.exe, `CMAKE_CXX_COMPILER_ID == "MSVC"`) is
+    restricted. clang-cl reports `MSVC=TRUE` in CMake but is classified as
+    clang (`_clpeak_real_msvc=OFF`) and takes the GNU-flag path — every `-m` /
+    `-march` ISA flag is routed through clang-cl's `/clang:` passthrough
+    (`_clpeak_gnuflag`), giving Windows full dtype parity with Linux. The root
+    `CMakeLists.txt` auto-prefers clang-cl when no compiler/toolset is pinned
+    (`-T ClangCL` for the VS generator, gated on a vswhere probe for the VS
+    Clang component; clang-cl from PATH for Ninja/Makefiles).
+  - cl.exe x86: core tiers only (`/arch:AVX2`, `/arch:AVX512`) with
+    `CLPEAK_CORE_ONLY`, since it can't isolate AVX-512 sub-features.
+  - cl.exe ARM64 (`_M_ARM64`): the `generic` TU only, which is already the
+    NEON floor (no `-march` flags exist, and MSVC defines no `__ARM_FEATURE_*`
+    macros, so the advanced-dtype TUs can't be built). CPU name comes from the
+    registry (`ProcessorNameString`) since there is no CPUID.
 - **Native (ON)** — a single `native` TU built `-march=native` / `-mcpu=native`,
   merged unconditionally (trusting build==run host). Fastest for a local build,
   **not portable**.
 
 Runtime detection lives in `cpu_dispatch.cpp` (`cpuFeatures()`): x86 CPUID +
 XGETBV (checks OS AVX/AVX-512 enablement); ARM `getauxval(AT_HWCAP/2)` on
-Linux/Android, `sysctlbyname("hw.optional.arm.FEAT_*")` on Apple. `cpu_device.cpp`
+Linux/Android, `sysctlbyname("hw.optional.arm.FEAT_*")` on Apple, and on
+Windows ARM64 the kernel-exported AArch64 ID registers in the registry
+(`CentralProcessor\0` values `CP 4020`/`CP 4030`/`CP 4031` =
+`ID_AA64PFR0/ISAR0/ISAR1_EL1`; there is no `IsProcessorFeaturePresent()`
+constant for most of these features). `cpu_device.cpp`
 fills `info.has*` / `isaName` from this same probe, and methods gate on
 `kernels().<x>.fn != nullptr` (so the `Unsupported` rows reflect the run host).
 
@@ -163,7 +178,14 @@ TU's flags define.
   the giveaway: fp32 == fp64 and both ~10× low (scalar) while `int` is fine
   (its branch only needs `__AVX2__`). The FP/SSE branches therefore also accept
   `_MSC_VER` / `_M_X64`. If you add a new `cpu_simd.h` ISA branch, give it an
-  MSVC alias or it silently degrades to scalar on Windows.
+  MSVC alias or it silently degrades to scalar on Windows. **The alias must be
+  an architecture macro, not bare `_MSC_VER`**: MSVC ARM64 defines `_M_ARM64`
+  (never `__aarch64__`, `_M_X64`, or any `__SSE*`/`__AVX*`), so a bare
+  `_MSC_VER` gate selects x86 vector types on Windows ARM64 where no x86 header
+  exists — that broke the first Windows ARM64 build. Every NEON branch
+  (`cpu_simd.h`, the `readBufferChecksum` NEON path, `cpu_dispatch.cpp`) accepts
+  `__aarch64__ || _M_ARM64`, and the int32 SSE4.1 branch gates MSVC on
+  `_M_X64 || _M_IX86`.
 - **The NEON kernels are AArch64-only.** The fused FMA (`vfmaq_f32`), horizontal
   reduce (`vaddvq_*`) and fp16 store (`vst1q_f16`) intrinsics don't exist in
   32-bit ARMv7 NEON, so `cpu_simd.h` gates NEON on `__aarch64__` and armeabi-v7a
@@ -203,7 +225,10 @@ P↔E core).
   showed every `fmla` targeting one reg + in-loop `str`). So the root
   `CMakeLists.txt` prefers `clang`/`clang++` over GCC on Linux when the user
   hasn't pinned a compiler, and the CI installs clang. Don't reintroduce
-  per-compiler NACC constants — fix the toolchain instead.
+  per-compiler NACC constants — fix the toolchain instead. The same policy
+  holds on Windows: the root `CMakeLists.txt` prefers clang-cl over cl.exe
+  (see the ISA strategy section) — both for codegen and because cl.exe can't
+  build the advanced-dtype TUs at all.
 
 ## When You Change This Directory
 

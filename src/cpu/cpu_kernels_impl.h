@@ -173,9 +173,10 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   alignas(16) uint32_t tmp[4]; _mm_store_si128((__m128i *)tmp, x);
   for (uint32_t v : tmp) tail ^= v;
   return tail;
-#elif defined(__aarch64__)
-  // AArch64 only (matches cpu_simd.h): 32-bit ARMv7 doesn't pull in arm_neon.h,
-  // so it uses the scalar read fallback below.
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  // AArch64 only (matches cpu_simd.h, incl. the MSVC ARM64 _M_ARM64 alias):
+  // 32-bit ARMv7 doesn't pull in arm_neon.h, so it uses the scalar read
+  // fallback below.
   constexpr size_t W = 4;
   const size_t step = 8 * W;
   uint32x4_t x0 = vdupq_n_u32(0), x1 = x0, x2 = x0, x3 = x0;
