@@ -1,64 +1,188 @@
 <?xml version="1.0" encoding="utf-8"?>
-<clpeak format_version="2" clpeak_version="2.0.9-31-g6dd8fbf" os="Linux x64">
-  <run backend="OpenCL" platform="AMD Accelerated Parallel Processing" device="gfx942:sramecc+:xnack-" driver="3581.0 (HSA1.1,LC)">
+<clpeak format_version="2" clpeak_version="2.0.12-1-g6bc6ce7" os="Linux x64">
+  <run backend="ROCm" platform="ROCm" device="AMD Instinct MI300X VF" driver="7.2.26015">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">134630.7031</metric>
-        <metric name="float2">134912.7812</metric>
-        <metric name="float4">132584.9531</metric>
-        <metric name="float8">131209.1250</metric>
-        <metric name="float16">125772.9297</metric>
+        <metric name="float">130369.7188</metric>
+        <metric name="float2">130878.0078</metric>
+        <metric name="float4">131543.7969</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
-        <metric name="half">39492.8008</metric>
-        <metric name="half2">153599.4531</metric>
-        <metric name="half4">152995.0312</metric>
-        <metric name="half8">151488.2031</metric>
-        <metric name="half16">148948.2969</metric>
+        <metric name="half">147243.4375</metric>
+        <metric name="half2">147751.9688</metric>
       </test>
       <test name="double_precision_compute" unit="gflops">
-        <metric name="double">70400.7734</metric>
-        <metric name="double2">69986.3203</metric>
-        <metric name="double4">69669.6719</metric>
-        <metric name="double8">68470.3359</metric>
-        <metric name="double16">66047.3828</metric>
+        <metric name="double">62959.7578</metric>
+        <metric name="double2">61766.7734</metric>
+        <metric name="double4">58973.8477</metric>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">25984.4648</metric>
-        <metric name="mp2">28703.6172</metric>
-        <metric name="mp4">29251.9414</metric>
-        <metric name="mp8">29690.7012</metric>
-        <metric name="mp16">29614.9688</metric>
+        <metric name="mp">81086.1016</metric>
+      </test>
+      <test name="bfloat16_compute" unit="gflops">
+        <metric name="bf16">114553.3125</metric>
+      </test>
+      <test name="wmma_fp16" unit="tflops">
+        <metric name="wmma_fp16" status="unsupported" reason="WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; absent on this architecture"/>
+      </test>
+      <test name="wmma_bf16" unit="tflops">
+        <metric name="wmma_bf16" status="unsupported" reason="WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; absent on this architecture"/>
+      </test>
+      <test name="wmma_fp8_e4m3" unit="tflops">
+        <metric name="wmma_fp8_e4m3" status="unsupported" reason="WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; absent on this architecture"/>
+      </test>
+      <test name="wmma_fp8_e5m2" unit="tflops">
+        <metric name="wmma_fp8_e5m2" status="unsupported" reason="WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; absent on this architecture"/>
+      </test>
+      <test name="rocwmma-fp" unit="tflops">
+        <metric name="rocwmma_fp16">1089.7710</metric>
+      </test>
+      <test name="mfma_fp16" unit="tflops">
+        <metric name="mfma_fp16">1104.1667</metric>
+      </test>
+      <test name="mfma_bf16" unit="tflops">
+        <metric name="mfma_bf16">1099.4125</metric>
+      </test>
+      <test name="mfma_fp8" unit="tflops">
+        <metric name="mfma_fp8">2127.3328</metric>
+      </test>
+      <test name="mfma_mxfp4" unit="tflops">
+        <metric name="mfma_mxfp4" status="unsupported" reason="MFMA instruction for this datatype not available on this GPU"/>
+      </test>
+      <test name="smfmac_fp16" unit="tflops">
+        <metric name="smfmac_fp16">2109.0972</metric>
+      </test>
+      <test name="smfmac_bf16" unit="tflops">
+        <metric name="smfmac_bf16">2093.1406</metric>
+      </test>
+      <test name="smfmac_fp8" unit="tflops">
+        <metric name="smfmac_fp8">4092.6055</metric>
+      </test>
+      <test name="rocblas-fp" unit="tflops">
+        <metric name="fp32">127.0066</metric>
+        <metric name="fp64">99.6291</metric>
+        <metric name="fp16">826.1176</metric>
+        <metric name="bf16">827.2405</metric>
+      </test>
+      <test name="hipblaslt-fp8" unit="tflops">
+        <metric name="fp8_e4m3">1550.7546</metric>
+        <metric name="fp8_e5m2">1489.6078</metric>
+        <metric name="mxf4_e2m1" status="unsupported" reason="no mxfp4 GEMM algorithm for this device (gfx942:sramecc+:xnack-)"/>
       </test>
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">45410.0820</metric>
-        <metric name="int2">46267.5469</metric>
-        <metric name="int4">46764.2109</metric>
-        <metric name="int8">46642.0586</metric>
-        <metric name="int16">46526.1367</metric>
+        <metric name="int">45158.4453</metric>
+        <metric name="int2">48348.9492</metric>
+        <metric name="int4">48531.5312</metric>
+      </test>
+      <test name="integer_compute_int8_dp" unit="gops">
+        <metric name="int8_dp">123586.7344</metric>
+        <metric name="int8_dp2">126717.4297</metric>
+        <metric name="int8_dp4">125141.7891</metric>
+        <metric name="int8_dp8">127597.7031</metric>
+      </test>
+      <test name="wmma_int8" unit="tops">
+        <metric name="wmma_int8" status="unsupported" reason="WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; absent on this architecture"/>
+      </test>
+      <test name="rocwmma-int" unit="tops">
+        <metric name="rocwmma_int8">1081.5583</metric>
+      </test>
+      <test name="mfma_int8" unit="tops">
+        <metric name="mfma_int8">2293.2815</metric>
+      </test>
+      <test name="smfmac_int8" unit="tops">
+        <metric name="smfmac_int8">4391.7393</metric>
+      </test>
+      <test name="rocblas-int" unit="tops">
+        <metric name="int8">1177.5240</metric>
+      </test>
+    </category>
+    <category name="bandwidth">
+      <test name="global_memory_bandwidth" unit="gbps">
+        <metric name="float">3448.1582</metric>
+        <metric name="float2">3452.8345</metric>
+        <metric name="float4">3472.9873</metric>
+      </test>
+      <test name="local_memory_bandwidth" unit="gbps">
+        <metric name="float">48978.3711</metric>
+        <metric name="float2">63074.7266</metric>
+        <metric name="float4">65055.9961</metric>
+      </test>
+      <test name="image_memory_bandwidth" unit="gbps">
+        <metric name="float4" status="unsupported" reason="Device has no image/texture support"/>
+      </test>
+      <test name="transfer_bandwidth" unit="gbps">
+        <metric name="h2d_pinned">55.0480</metric>
+        <metric name="d2h_pinned">56.4506</metric>
+      </test>
+    </category>
+    <category name="latency">
+      <test name="kernel_launch_latency" unit="us">
+        <metric name="dispatch" status="unsupported" reason="Not measurable via HIP runtime/module API"/>
+        <metric name="roundtrip">8.6595</metric>
+      </test>
+    </category>
+  </run>
+  <run backend="OpenCL" platform="AMD Accelerated Parallel Processing" device="gfx942:sramecc+:xnack-" driver="3581.0 (HSA1.1,LC)">
+    <category name="fp_compute">
+      <test name="single_precision_compute" unit="gflops">
+        <metric name="float">130398.7031</metric>
+        <metric name="float2">131042.7344</metric>
+        <metric name="float4">129906.3438</metric>
+        <metric name="float8">127172.3047</metric>
+        <metric name="float16">122103.3906</metric>
+      </test>
+      <test name="half_precision_compute" unit="gflops">
+        <metric name="half">39527.9297</metric>
+        <metric name="half2">148627.9688</metric>
+        <metric name="half4">147896.5312</metric>
+        <metric name="half8">146739.5781</metric>
+        <metric name="half16">144446.9062</metric>
+      </test>
+      <test name="double_precision_compute" unit="gflops">
+        <metric name="double">68227.2109</metric>
+        <metric name="double2">67826.7812</metric>
+        <metric name="double4">67478.0781</metric>
+        <metric name="double8">66559.3125</metric>
+        <metric name="double16">64709.6406</metric>
+      </test>
+      <test name="mixed_precision_compute" unit="gflops">
+        <metric name="mp">25347.7930</metric>
+        <metric name="mp2">27902.3418</metric>
+        <metric name="mp4">28414.6660</metric>
+        <metric name="mp8">28956.9785</metric>
+        <metric name="mp16">28907.8262</metric>
+      </test>
+    </category>
+    <category name="int_compute">
+      <test name="integer_compute" unit="gops">
+        <metric name="int">43340.7461</metric>
+        <metric name="int2">44517.1680</metric>
+        <metric name="int4">45553.7266</metric>
+        <metric name="int8">44746.1914</metric>
+        <metric name="int16">44743.7539</metric>
       </test>
       <test name="integer_compute_fast" unit="gops">
-        <metric name="int">64804.7539</metric>
-        <metric name="int2">63465.6641</metric>
-        <metric name="int4">64284.0859</metric>
-        <metric name="int8">63747.3945</metric>
-        <metric name="int16">64191.5977</metric>
+        <metric name="int">63662.0234</metric>
+        <metric name="int2">62856.4570</metric>
+        <metric name="int4">62560.4023</metric>
+        <metric name="int8">63047.9453</metric>
+        <metric name="int16">63767.7344</metric>
       </test>
       <test name="integer_compute_char" unit="gops">
-        <metric name="char">68957.4766</metric>
-        <metric name="char2">51531.4727</metric>
-        <metric name="char4">49130.2617</metric>
-        <metric name="char8">42680.9883</metric>
-        <metric name="char16">43812.7148</metric>
+        <metric name="char">68303.0312</metric>
+        <metric name="char2">50815.5234</metric>
+        <metric name="char4">47886.5781</metric>
+        <metric name="char8">42333.4727</metric>
+        <metric name="char16">42739.2812</metric>
       </test>
       <test name="integer_compute_short" unit="gops">
-        <metric name="short">68353.5000</metric>
-        <metric name="short2">80950.0938</metric>
-        <metric name="short4">79301.2344</metric>
-        <metric name="short8">79718.9922</metric>
-        <metric name="short16">77842.1797</metric>
+        <metric name="short">67514.2891</metric>
+        <metric name="short2">79958.7422</metric>
+        <metric name="short4">78487.6875</metric>
+        <metric name="short8">77850.2734</metric>
+        <metric name="short16">76953.3438</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
         <metric name="int8_dp" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
@@ -67,151 +191,39 @@
         <metric name="int8_dp8" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
         <metric name="int8_dp16" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
       </test>
-      <test name="atomic_throughput" unit="gops">
-        <metric name="int_global">251.7877</metric>
-        <metric name="int_local">9417.5000</metric>
-      </test>
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">3504.1792</metric>
-        <metric name="float2">3521.3877</metric>
-        <metric name="float4">3536.0928</metric>
-        <metric name="float8">3593.2517</metric>
-        <metric name="float16">3673.5327</metric>
+        <metric name="float">3529.1716</metric>
+        <metric name="float2">3655.3428</metric>
+        <metric name="float4">3753.9922</metric>
+        <metric name="float8">3777.1543</metric>
+        <metric name="float16">3755.6638</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">51684.0312</metric>
-        <metric name="float2">63430.0078</metric>
-        <metric name="float4">65198.8828</metric>
-        <metric name="float8">40100.0078</metric>
+        <metric name="float">51508.3672</metric>
+        <metric name="float2">63492.1523</metric>
+        <metric name="float4">65214.9688</metric>
+        <metric name="float8">40118.8750</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
         <metric name="float4" status="unsupported" reason="Device has no image support"/>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="enqueuewritebuffer">13.7911</metric>
-        <metric name="enqueuereadbuffer">14.3608</metric>
-        <metric name="enqueuewritebuffer_nonblocking">15.1352</metric>
-        <metric name="enqueuereadbuffer_nonblocking">15.4047</metric>
+        <metric name="enqueuewritebuffer">14.1067</metric>
+        <metric name="enqueuereadbuffer">15.2835</metric>
+        <metric name="enqueuewritebuffer_nonblocking">15.5877</metric>
+        <metric name="enqueuereadbuffer_nonblocking">14.6495</metric>
         <metric name="enqueuemapbuffer">0.0000</metric>
-        <metric name="memcpy_from_mapped_ptr">13.3130</metric>
+        <metric name="memcpy_from_mapped_ptr">14.0257</metric>
         <metric name="enqueueunmap">0.0000</metric>
-        <metric name="memcpy_to_mapped_ptr">13.7939</metric>
+        <metric name="memcpy_to_mapped_ptr">14.3708</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">22.4057</metric>
-        <metric name="roundtrip">25.9309</metric>
-      </test>
-    </category>
-  </run>
-  <run backend="ROCm" platform="ROCm" device="AMD Instinct MI300X VF" driver="7.2.26015">
-    <category name="fp_compute">
-      <test name="single_precision_compute" unit="gflops">
-        <metric name="float">133359.3906</metric>
-        <metric name="float2">133813.7031</metric>
-        <metric name="float4">134252.0156</metric>
-      </test>
-      <test name="half_precision_compute" unit="gflops">
-        <metric name="half">150388.7656</metric>
-        <metric name="half2">150907.8906</metric>
-      </test>
-      <test name="double_precision_compute" unit="gflops">
-        <metric name="double">63676.9453</metric>
-        <metric name="double2">62850.8398</metric>
-        <metric name="double4">60185.7461</metric>
-      </test>
-      <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">82863.3516</metric>
-      </test>
-      <test name="bfloat16_compute" unit="gflops">
-        <metric name="bf16">117012.5703</metric>
-      </test>
-      <test name="rocwmma-fp" unit="tflops">
-        <metric name="rocwmma_fp16">1112.4594</metric>
-      </test>
-      <test name="mfma_fp16" unit="tflops">
-        <metric name="mfma_fp16">1125.2140</metric>
-      </test>
-      <test name="mfma_bf16" unit="tflops">
-        <metric name="mfma_bf16">1121.4922</metric>
-      </test>
-      <test name="mfma_fp8" unit="tflops">
-        <metric name="mfma_fp8">2164.3196</metric>
-      </test>
-      <test name="mfma_mxfp4" unit="tflops">
-        <metric name="mfma_mxfp4" status="unsupported" reason="MFMA instruction for this datatype not available on this GPU"/>
-      </test>
-      <test name="smfmac_fp16" unit="tflops">
-        <metric name="smfmac_fp16">2149.4961</metric>
-      </test>
-      <test name="smfmac_bf16" unit="tflops">
-        <metric name="smfmac_bf16">2133.4697</metric>
-      </test>
-      <test name="smfmac_fp8" unit="tflops">
-        <metric name="smfmac_fp8">4136.9814</metric>
-      </test>
-      <test name="rocblas-fp" unit="tflops">
-        <metric name="fp32">129.8615</metric>
-        <metric name="fp64">100.7577</metric>
-        <metric name="fp16">839.3248</metric>
-      </test>
-      <test name="hipblaslt-fp8" unit="tflops">
-        <metric name="fp8_e4m3">1560.1028</metric>
-        <metric name="fp8_e5m2">1539.0220</metric>
-      </test>
-    </category>
-    <category name="int_compute">
-      <test name="integer_compute" unit="gops">
-        <metric name="int">45808.4648</metric>
-        <metric name="int2">49104.0898</metric>
-        <metric name="int4">49510.9531</metric>
-      </test>
-      <test name="integer_compute_int8_dp" unit="gops">
-        <metric name="int8_dp">126066.1250</metric>
-        <metric name="int8_dp2">129355.1250</metric>
-        <metric name="int8_dp4">126281.0703</metric>
-        <metric name="int8_dp8">129344.6016</metric>
-      </test>
-      <test name="rocwmma-int" unit="tops">
-        <metric name="rocwmma_int8">1080.4893</metric>
-      </test>
-      <test name="mfma_int8" unit="tops">
-        <metric name="mfma_int8">2339.5911</metric>
-      </test>
-      <test name="smfmac_int8" unit="tops">
-        <metric name="smfmac_int8">4495.7539</metric>
-      </test>
-      <test name="atomic_throughput" unit="gops">
-        <metric name="int_global">277.9147</metric>
-        <metric name="int_local">6390.5361</metric>
-      </test>
-    </category>
-    <category name="bandwidth">
-      <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">3513.6570</metric>
-        <metric name="float2">3520.2825</metric>
-        <metric name="float4">3569.1853</metric>
-      </test>
-      <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">49003.6875</metric>
-        <metric name="float2">63068.0195</metric>
-        <metric name="float4">65040.4688</metric>
-      </test>
-      <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4" status="unsupported" reason="Device has no image/texture support"/>
-      </test>
-      <test name="transfer_bandwidth" unit="gbps">
-        <metric name="h2d_pinned">55.0590</metric>
-        <metric name="d2h_pinned">56.4376</metric>
-      </test>
-    </category>
-    <category name="latency">
-      <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch" status="unsupported" reason="Not measurable via HIP runtime/module API"/>
-        <metric name="roundtrip">8.6428</metric>
+        <metric name="dispatch">23.6237</metric>
+        <metric name="roundtrip">28.0942</metric>
       </test>
     </category>
   </run>
