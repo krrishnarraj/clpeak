@@ -220,7 +220,12 @@ else()
             if(_clpeak_f_fp16x)
                 clpeak_add_isa_tu(avx512fp16 ${_avx512_core} ${_clpeak_gnuflag}-mavx512fp16)
             endif()
-            if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # AMX is a 64-bit-only ISA: GCC/clang accept the -mamx-* flags in
+            # 32-bit mode (so check_cxx_compiler_flag passes), but <immintrin.h>
+            # only declares the _tile_* intrinsics under #ifdef __x86_64__, so an
+            # i686 build would compile the AMX TU and then fail with "_tile_loadd
+            # was not declared".  Gate on a 64-bit target.
+            if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
                 set(_amx ${_avx512_core} -mamx-tile -mamx-int8 -mamx-bf16)
                 check_cxx_compiler_flag("${_amx}" _clpeak_f_amx)
                 if(_clpeak_f_amx)
