@@ -124,6 +124,18 @@ define.
   -ffast-math` deletes the work and reports a fabricated peak. The FMA chains
   use `acc = acc*b + c` with `b<1` (converges to a finite fixed point, no
   inf/denormal) and a *runtime* trip count.
+- **fp32/fp64 affine coefficients (`b`,`c`) must be `volatile`-seeded.** On
+  non-FMA targets (the SSE2 `generic` TU, scalar fallback) `f32_fma`/`f64_fma`
+  are a *transparent* `mul`+`add`, not an opaque hardware FMA. With `b`,`c` as
+  compile-time constants, `-ffast-math` closes the `CPU_UNROLL_K`-unrolled chain
+  — `N` steps of `acc=b*acc+c` fold to `acc*b^N + const` (verified: 4 steps →
+  one `mulps`+`addps`) — deleting most of the work while `opsPerIter` still
+  counts it, so SSE2 reported an impossible peak *above* AVX2. Seeding `b`,`c`
+  through `volatile` (read once into a register before the loop, exactly like
+  the int32 chain's multiplier) blocks the fold and is a no-op on FMA targets
+  (AVX2/AVX-512/NEON keep their real FMAs). This only surfaced once the run-all
+  `kernelMenu()` started exercising the SSE2 fp variant — the old best-only
+  dispatch never ran it.
 - **fp16/bf16 constants must survive narrowing.** `b=0.999999` rounds to exactly
   `1.0` in fp16, making `acc=acc*1+0` invariant → the loop is deleted and fp16
   reports hundreds of TFLOPS. Use values distinct from `1.0`/`0.0` after fp16
