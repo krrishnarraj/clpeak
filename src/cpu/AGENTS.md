@@ -16,7 +16,8 @@ local memory, DRAM ↔ global memory.
 - CPU detection (name, cores, cache sizes, ISA flags)? → `cpu_device.cpp`
 - Pinned barrier thread pool? → `thread_pool.cpp`
 - SIMD abstraction (per-ISA vector wrappers)? → `cpu_simd.h`
-- Shared 1T/NT compute runner + gflops/gops emit? → `compute_common.h`
+- Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
+- Shared 1T/NT compute runner + per-ISA test emit (`emitVariants`)? → `compute_common.h`
 - FP compute (fp32/fp64/fp16/bf16/mixed)? → `compute_float.cpp`
 - INT compute (int32, int8 dot)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA)? → `cpu_matrix.cpp`
@@ -31,14 +32,14 @@ local memory, DRAM ↔ global memory.
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 per-instance **and aggregate** (`l3TotalBytes`, from `index3/shared_cpu_list` on Linux / summed on Windows) sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning (`pthread_setaffinity_np` / `SetThreadAffinityMask`; advisory no-op on macOS) |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *compile flags of the TU it is built in*, with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) + `CPU_UNROLL_*` |
-| **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants for this host) |
+| **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants — bandwidth only), and `kernelMenu()` returning `CpuKernelMenu` (per-slot `std::vector<IsaVariant>` = **every** supported ISA variant + its canonical label, baseline-first) for the compute tests |
 | **`cpu_kernels_impl.h`** | **All** chain bodies (fp32/fp64/int32/fp16/bf16/mp/int8dp/matrix/readsum), `#if`-gated by compile features, + the per-TU `tuTable()` builder. Included once per feature TU |
 | **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avx512[vnni\|bf16\|fp16]`, `amx`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`; or `native`) with that ISA's flags |
-| **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`) and `kernels()` assembly — merges supported TUs (`generic` ungated floor, then higher ISA gated on full feature set) picking the widest variant per kernel |
-| `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics |
-| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` methods — look up `kernels().fpXX` and emit (or `Unsupported`). Kernel bodies live in `cpu_kernels_impl.h` |
-| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `kernels()`) |
-| `cpu_matrix.cpp` | `runCpuMatrix` — emits `kernels().mat_int8` / `mat_fp` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
+| **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`); `kernels()` assembly (merges supported TUs, widest variant per kernel — bandwidth only); and `kernelMenu()` which collects **every** supported variant per kernel with its canonical ISA label (explicit per-slot pushes — encodes the "collapse identical SSE float" rule by pushing only int32 from the `sse42` TU, and labels base vs feature kernels per-slot) |
+| `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics; `emitVariants()` — runs **every** ISA variant from a `kernelMenu()` slot as its own test (ISA appended to the display name, `isaSlug()` into the tag for unique result keys), or one untagged `Unsupported` test if none |
+| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). Kernel bodies live in `cpu_kernels_impl.h` |
+| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `emitVariants` + `kernelMenu()`) |
+| `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_int8 / mat_fp, ...)` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns) |
 
@@ -52,6 +53,16 @@ local memory, DRAM ↔ global memory.
   `--memory-latency`) on that macro.
 
 ## ISA strategy — per-TU build + runtime dispatch
+
+**Compute tests run EVERY supported ISA variant, not just the best.** The compute
+methods iterate `kernelMenu()` and emit a separate test per ISA — header decorated
+with the canonical label, e.g. `Single-precision compute (SSE2)`,
+`… (AVX2+FMA)`, `… (AVX-512)` — so users can compare instruction sets. Each ISA's
+tag is slugged (`single_precision_compute_avx_512`) so dump/baseline rows stay
+unique. fp32/fp64 SSE2 and SSE4.2 codegen is identical, so the `sse42` TU
+contributes only its (genuinely different) int32 variant — no duplicate SSE float
+row. Bandwidth still uses the single best kernel via `kernels().readsum`, and the
+device-header `ISA:` property is still the widest active ISA (`isaName()`).
 
 Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
 
@@ -95,14 +106,17 @@ Windows ARM64 the kernel-exported AArch64 ID registers in the registry
 (`CentralProcessor\0` values `CP 4020`/`CP 4030`/`CP 4031` =
 `ID_AA64PFR0/ISAR0/ISAR1_EL1`; there is no `IsProcessorFeaturePresent()`
 constant for most of these features). `cpu_device.cpp`
-fills `info.has*` / `isaName` from this same probe, and methods gate on
-`kernels().<x>.fn != nullptr` (so the `Unsupported` rows reflect the run host).
+fills `info.has*` / `isaName` from this same probe, and the compute tests emit an
+`Unsupported` row when a `kernelMenu()` slot is empty (so the skips reflect the run
+host).
 
 Adding a TU: add a `clpeak_add_isa_tu(<tag> <flags>)` call in `CMakeLists.txt`
-(guarded by `check_cxx_compiler_flag`) and a matching `#if CLPEAK_TU_<tag>` merge
-(with the right feature predicate) in `cpu_dispatch.cpp`. The kernel bodies are
-shared — `cpu_kernels_impl.h` `#if`-gates them on the compile-feature macros the
-TU's flags define.
+(guarded by `check_cxx_compiler_flag`), a matching `#if CLPEAK_TU_<tag>` merge in
+`kernels()` (best-variant, bandwidth), **and** a `#if CLPEAK_TU_<tag>` push in
+`kernelMenu()` (with the right feature predicate + the canonical ISA label) so the
+new ISA shows up as its own compute test. The kernel bodies are shared —
+`cpu_kernels_impl.h` `#if`-gates them on the compile-feature macros the TU's flags
+define.
 
 ## Gotchas
 

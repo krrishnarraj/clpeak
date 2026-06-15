@@ -9,27 +9,21 @@
 // (ARM).  The variant is compiled per-ISA and selected at runtime; run in both
 // the fp (bf16) and int (int8) phases like the GPU tensor tests.
 
-using clpeak_cpu::kernels;
+using clpeak_cpu::kernelMenu;
 
 int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
 {
   if (category == Category::FpCompute)
   {
-    auto test = currentDeviceScope->beginTest(
-      {"cpu_matrix_fp", "CPU matrix engine (bf16)", "gflops"});
-    const auto &v = kernels().mat_fp;
-    if (v.fn) emitCompute(*this, test, "matrix_bf16", v.opsPerIter, v.fn, cfg);
-    else      test.skip("matrix_bf16", ResultStatus::Unsupported,
-                        "no CPU bf16 matrix engine (AMX / BFMMLA) on this CPU");
+    emitVariants(*this, {"cpu_matrix_fp", "CPU matrix engine (bf16)", "gflops"},
+                 "matrix_bf16", kernelMenu().mat_fp,
+                 "no CPU bf16 matrix engine (AMX / BFMMLA) on this CPU", cfg);
     return 0;
   }
 
-  auto test = currentDeviceScope->beginTest(
-    {"cpu_matrix_int", "CPU matrix engine (int8)", "gops"});
-  const auto &v = kernels().mat_int8;
-  if (v.fn) emitCompute(*this, test, "matrix_int8", v.opsPerIter, v.fn, cfg);
-  else      test.skip("matrix_int8", ResultStatus::Unsupported,
-                      "no CPU int8 matrix engine (AMX / I8MM) on this CPU");
+  emitVariants(*this, {"cpu_matrix_int", "CPU matrix engine (int8)", "gops"},
+               "matrix_int8", kernelMenu().mat_int8,
+               "no CPU int8 matrix engine (AMX / I8MM) on this CPU", cfg);
   return 0;
 }
 

@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 // ===========================================================================
 // Runtime ISA dispatch.  The compute / read kernels are compiled once per
@@ -48,8 +49,28 @@ struct CpuKernelTable {
   const char  *isaName = "";
 };
 
-// The best kernels for THIS host (assembled once on first call).
+// The best kernels for THIS host (assembled once on first call).  Used by the
+// bandwidth path (readsum), which is memory-bound and only needs one variant.
 const CpuKernelTable &kernels();
+
+// One compute variant tagged with its canonical ISA label (e.g. "AVX-512").
+// The label lives here, not in ChainVariant, so it can differ per kernel slot
+// for the same TU (a feature TU's int8dp is "AVX-512 VNNI" while its base fp32
+// would be "AVX-512").
+struct IsaVariant {
+  ChainVariant v;
+  const char  *isa = "";
+};
+
+// ALL supported variants of each compute kernel for THIS host, baseline-first
+// (low ISA -> high ISA).  The compute tests run every entry so the user can
+// compare instruction sets, rather than only the widest one (see kernels()).
+struct CpuKernelMenu {
+  std::vector<IsaVariant> fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
+};
+
+// Assembled once on first call.
+const CpuKernelMenu &kernelMenu();
 
 } // namespace clpeak_cpu
 
