@@ -407,11 +407,13 @@ const CpuKernelMenu &kernelMenu()
     {
       const CpuKernelTable *t = clpeak_table_bf16();
       add(m.bf16, t->bf16, "NEON BF16");
-      add(m.mat_fp, t->mat_fp, "NEON BF16");   // BFMMLA is part of FEAT_BF16
+      // Matrix engine: tag with the matrix instruction itself (BFMMLA, part of
+      // FEAT_BF16) rather than the feature name, paralleling x86 "AMX".
+      add(m.mat_fp, t->mat_fp, "BFMMLA");
     }
 #endif
 #if CLPEAK_TU_i8mm
-    if (f.i8mm) add(m.mat_int8, clpeak_table_i8mm()->mat_int8, "NEON I8MM");
+    if (f.i8mm) add(m.mat_int8, clpeak_table_i8mm()->mat_int8, "SMMLA");  // FEAT_I8MM matrix instr
 #endif
 #endif // CLPEAK_NATIVE_BUILD
     return m;
