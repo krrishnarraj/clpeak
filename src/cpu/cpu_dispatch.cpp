@@ -306,6 +306,121 @@ const CpuKernelTable &kernels()
   return sel;
 }
 
+// ---- Run-all menu: every supported variant, baseline-first -----------------
+// Unlike kernels() (which merges down to the single widest variant per kernel),
+// this exposes ALL supported ISA variants so the compute tests can report each
+// one separately.  Labels are the canonical isaName() style.  The "collapse
+// identical SSE float" rule is encoded by only pushing int32 (not fp32/fp64)
+// from the sse42 TU: SSE4.2 fp32/fp64 codegen is identical to the SSE2 floor.
+const CpuKernelMenu &kernelMenu()
+{
+  static CpuKernelMenu menu = [] {
+    CpuKernelMenu m{};
+    const CpuFeatures &f = cpuFeatures();
+    (void)f;
+
+    auto add = [](std::vector<IsaVariant> &vec, const ChainVariant &v, const char *isa) {
+      if (v.fn) vec.push_back({v, isa});
+    };
+    // Push the base dtypes (fp32/fp64/int32) a tier TU provides, all one label.
+    auto addBase = [&](const CpuKernelTable *t, const char *isa) {
+      add(m.fp32, t->fp32, isa);
+      add(m.fp64, t->fp64, isa);
+      add(m.int32, t->int32, isa);
+    };
+
+#if CLPEAK_NATIVE_BUILD
+    // Single native TU: trust build==run host, label everything the runtime ISA.
+    const CpuKernelTable *t = clpeak_table_native();
+    const char *isa = isaName();
+    addBase(t, isa);
+    add(m.fp16, t->fp16, isa);
+    add(m.bf16, t->bf16, isa);
+    add(m.mp, t->mp, isa);
+    add(m.int8dp, t->int8dp, isa);
+    add(m.mat_int8, t->mat_int8, isa);
+    add(m.mat_fp, t->mat_fp, isa);
+#else
+    // ---- x86 tier TUs (base dtypes) ----
+#if CLPEAK_TU_generic
+    // The ungated floor: SSE2 on x86, NEON on aarch64, scalar elsewhere.
+#if defined(CLPEAK_X86)
+    const char *genIsa = "SSE2";
+#elif defined(CLPEAK_ARM) && (defined(__aarch64__) || defined(_M_ARM64))
+    const char *genIsa = "NEON";
+#else
+    const char *genIsa = "scalar";
+#endif
+    {
+      const CpuKernelTable *t = clpeak_table_generic();
+      addBase(t, genIsa);
+      // On Apple the generic (apple-m1) floor also carries the advanced NEON
+      // dtypes; push whatever it actually provides, labeled by feature.
+      if (f.fp16)    add(m.fp16, t->fp16, "NEON FP16");
+      if (f.dotprod) add(m.int8dp, t->int8dp, "NEON DotProd");
+      if (f.fp16fml) add(m.mp, t->mp, "NEON FP16FML");
+    }
+#endif
+#if CLPEAK_TU_sse42
+    if (f.sse42) add(m.int32, clpeak_table_sse42()->int32, "SSE4.2");  // fp32/fp64 == SSE2
+#endif
+#if CLPEAK_TU_avx2
+    if (f.avx2 && f.fma) addBase(clpeak_table_avx2(), "AVX2+FMA");
+#endif
+#if CLPEAK_TU_avx512
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq)
+      addBase(clpeak_table_avx512(), "AVX-512");
+#endif
+    // ---- x86 feature TUs (advanced dtypes only) ----
+#if CLPEAK_TU_avx512vnni
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512vnni)
+      add(m.int8dp, clpeak_table_avx512vnni()->int8dp, "AVX-512 VNNI");
+#endif
+#if CLPEAK_TU_avx512bf16
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512bf16)
+      add(m.bf16, clpeak_table_avx512bf16()->bf16, "AVX-512 BF16");
+#endif
+#if CLPEAK_TU_avx512fp16
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512fp16)
+      add(m.fp16, clpeak_table_avx512fp16()->fp16, "AVX-512 FP16");
+#endif
+#if CLPEAK_TU_amx
+    if (f.amx_tile && f.amx_int8 && f.amx_bf16 && amxPermOk())
+    {
+      const CpuKernelTable *t = clpeak_table_amx();
+      add(m.mat_int8, t->mat_int8, "AMX");
+      add(m.mat_fp, t->mat_fp, "AMX");
+    }
+#endif
+    // ---- ARM feature TUs (advanced dtypes only; base == generic NEON) ----
+#if CLPEAK_TU_fp16
+    if (f.fp16) add(m.fp16, clpeak_table_fp16()->fp16, "NEON FP16");
+#endif
+#if CLPEAK_TU_fp16fml
+    if (f.fp16fml) add(m.mp, clpeak_table_fp16fml()->mp, "NEON FP16FML");
+#endif
+#if CLPEAK_TU_dotprod
+    if (f.dotprod) add(m.int8dp, clpeak_table_dotprod()->int8dp, "NEON DotProd");
+#endif
+#if CLPEAK_TU_bf16
+    if (f.bf16)
+    {
+      const CpuKernelTable *t = clpeak_table_bf16();
+      add(m.bf16, t->bf16, "NEON BF16");
+      // Matrix engine: tag with the matrix instruction itself (BFMMLA, part of
+      // FEAT_BF16) rather than the feature name, paralleling x86 "AMX".
+      add(m.mat_fp, t->mat_fp, "BFMMLA");
+    }
+#endif
+#if CLPEAK_TU_i8mm
+    if (f.i8mm) add(m.mat_int8, clpeak_table_i8mm()->mat_int8, "SMMLA");  // FEAT_I8MM matrix instr
+#endif
+#endif // CLPEAK_NATIVE_BUILD
+    return m;
+  }();
+  return menu;
+}
+
 } // namespace clpeak_cpu
 
 #endif // ENABLE_CPU

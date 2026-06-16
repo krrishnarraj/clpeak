@@ -5,7 +5,9 @@
 
 #include <cpu/cpu_peak.h>
 #include <common/result_store.h>
+#include "cpu_kernels.h"
 
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,52 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
 
   if (usN > 0.0) test.emit(label + " MT", giga(opsPerIterPerThread, maxT, usN));
   else           test.skip(label + " MT", ResultStatus::Error, "workload failed");
+}
+
+// Canonical ISA label -> tag suffix, e.g. "AVX-512" -> "avx_512",
+// "AVX2+FMA" -> "avx2_fma".  Lowercased; each run of non-alphanumeric chars
+// becomes a single '_'.  Appended to the test tag so each ISA's rows stay
+// unique in the dump / baseline files.
+static inline std::string isaSlug(const std::string &isa)
+{
+  std::string s;
+  bool pendingSep = false;
+  for (char c : isa)
+  {
+    if (std::isalnum((unsigned char)c))
+    {
+      if (pendingSep && !s.empty()) s += '_';
+      pendingSep = false;
+      s += (char)std::tolower((unsigned char)c);
+    }
+    else
+      pendingSep = true;
+  }
+  return s;
+}
+
+// Run EVERY supported ISA variant of one compute kernel: a separate test (with
+// its own header) per variant, the ISA appended to the display name and slugged
+// into the tag.  If no variant is supported, emit one untagged Unsupported test.
+static void emitVariants(CpuPeak &peak, const logger::TestSpec &base,
+                         const std::string &metric,
+                         const std::vector<clpeak_cpu::IsaVariant> &vars,
+                         const char *unsupReason, benchmark_config_t &cfg)
+{
+  if (vars.empty())
+  {
+    auto test = peak.currentDeviceScope->beginTest(base);
+    test.skip(metric + " ST", ResultStatus::Unsupported, unsupReason);
+    return;
+  }
+  for (const auto &iv : vars)
+  {
+    logger::TestSpec spec = base;
+    spec.tag     = base.tag + "_" + isaSlug(iv.isa);
+    spec.display = base.display + " (" + iv.isa + ")";
+    auto test = peak.currentDeviceScope->beginTest(spec);
+    emitCompute(peak, test, metric, iv.v.opsPerIter, iv.v.fn, cfg);
+  }
 }
 
 #endif // ENABLE_CPU

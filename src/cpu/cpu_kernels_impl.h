@@ -19,7 +19,7 @@
 #define CLPEAK_ISA_NAME_STR "scalar"
 #endif
 
-#if (defined(__AMX_INT8__) || defined(__AMX_BF16__)) && defined(__linux__)
+#if (defined(__AMX_INT8__) || defined(__AMX_BF16__)) && defined(__linux__) && defined(__x86_64__)
 #include <immintrin.h>
 #endif
 
@@ -32,8 +32,16 @@ using namespace cpu_simd;
 static double runFp32Chain(uint64_t outer)
 {
   f32v acc[F32_NACC];
-  const f32v b = f32_set(0.999999f);
-  const f32v c = f32_set(0.000001f);
+  // Seed the coefficients through volatile so the compiler can't prove their
+  // values and close the affine recurrence acc=acc*b+c.  On non-FMA targets
+  // (SSE2 / scalar) f32_fma is a transparent mul+add; with -ffast-math the
+  // CPU_UNROLL_K-unrolled chain would otherwise fold N steps into one
+  // (acc*b^N + const), deleting most of the work while opsPerIter still counts
+  // it -> an impossible peak (SSE2 reported > AVX2).  Same guard as the int32
+  // chain.  No-op on FMA targets (b/c become runtime operands loaded once).
+  volatile float vb = 0.999999f, vc = 0.000001f;
+  const f32v b = f32_set(vb);
+  const f32v c = f32_set(vc);
   for (int j = 0; j < F32_NACC; j++) acc[j] = f32_set(0.1f * (float)(j + 1));
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
@@ -50,8 +58,11 @@ static double runFp32Chain(uint64_t outer)
 static double runFp64Chain(uint64_t outer)
 {
   f64v acc[F64_NACC];
-  const f64v b = f64_set(0.999999);
-  const f64v c = f64_set(0.000001);
+  // Volatile-seed the coefficients to keep the affine chain from collapsing on
+  // non-FMA (SSE2 / scalar) targets under -ffast-math.  See runFp32Chain.
+  volatile double vb = 0.999999, vc = 0.000001;
+  const f64v b = f64_set(vb);
+  const f64v c = f64_set(vc);
   for (int j = 0; j < F64_NACC; j++) acc[j] = f64_set(0.1 * (double)(j + 1));
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
@@ -421,7 +432,7 @@ static double runInt8DpChain(uint64_t outer)
 
 // ---- Matrix engine: int8 (AMX / SMMLA) and bf16 (AMX / BFMMLA) -------------
 // ops are PER-k; the table multiplies by INNER (the chain loops INNER per outer).
-#if defined(__AMX_INT8__) && defined(__linux__)
+#if defined(__AMX_INT8__) && defined(__linux__) && defined(__x86_64__)
 #define CPU_MAT_INT8_KERNEL 1
 static constexpr double MAT_I8_OPS_PER_K = 4.0 * 16 * 16 * 64 * 2;
 static thread_local bool g_amxI8Cfg = false;
@@ -476,7 +487,7 @@ static double runMatInt8Chain(uint64_t outer)
 }
 #endif
 
-#if defined(__AMX_BF16__) && defined(__linux__)
+#if defined(__AMX_BF16__) && defined(__linux__) && defined(__x86_64__)
 #define CPU_MAT_FP_KERNEL 1
 static constexpr double MAT_FP_OPS_PER_K = 4.0 * 16 * 16 * 32 * 2;
 static thread_local bool g_amxBf16Cfg = false;
