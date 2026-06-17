@@ -26,6 +26,9 @@
 #if defined(__linux__) && defined(CLPEAK_X86)
 #include <unistd.h>
 #include <sys/syscall.h>
+#elif defined(_WIN32) && defined(CLPEAK_X86)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 namespace clpeak_cpu {
@@ -153,12 +156,36 @@ static CpuFeatures detect()
 }
 
 // Only referenced under CLPEAK_TU_amx (maybe_unused: avoids -Wunused-function
-// on the platforms where that TU isn't built).
+// on the platforms where that TU isn't built).  AMX tile XSTATE (component 18)
+// is disabled by default and must be granted by the OS on first use; the grant
+// is process-wide, so request it once and cache the result.
 #if defined(__linux__) && defined(CLPEAK_X86)
 [[maybe_unused]] static bool amxPermOk()
 {
-  // ARCH_REQ_XCOMP_PERM = 0x1023, XFEATURE_XTILEDATA = 18. Process-wide.
+  // ARCH_REQ_XCOMP_PERM = 0x1023, XFEATURE_XTILEDATA = 18.
   static bool ok = (syscall(SYS_arch_prctl, 0x1023, 18) == 0);
+  return ok;
+}
+#elif defined(_WIN32) && defined(CLPEAK_X86)
+[[maybe_unused]] static bool amxPermOk()
+{
+  // Windows 11 / Server 2022 equivalent of the Linux arch_prctl grant:
+  // EnableProcessOptionalXStateFeatures(XSTATE_MASK_AMX_TILE_DATA).  Resolve it
+  // dynamically from kernel32 so the binary still loads on Win10 (where the
+  // export is absent) and on a non-AMX host -> amxPermOk() is simply false and
+  // the matrix tests emit the Unsupported row.
+  static bool ok = [] {
+    // XSTATE component 18 == XFEATURE_XTILEDATA; mask bit (winnt.h may not
+    // define XSTATE_MASK_AMX_TILE_DATA on older SDKs, so spell it out).
+    const DWORD64 amxTileData = 1ULL << 18;
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    if (!k32) return false;
+    using EnableFn = BOOL(WINAPI *)(DWORD64);
+    auto enableFn = reinterpret_cast<EnableFn>(
+        GetProcAddress(k32, "EnableProcessOptionalXStateFeatures"));
+    if (!enableFn) return false;
+    return enableFn(amxTileData) != 0;
+  }();
   return ok;
 }
 #else

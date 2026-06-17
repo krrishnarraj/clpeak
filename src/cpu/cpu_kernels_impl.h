@@ -19,7 +19,7 @@
 #define CLPEAK_ISA_NAME_STR "scalar"
 #endif
 
-#if (defined(__AMX_INT8__) || defined(__AMX_BF16__)) && defined(__linux__) && defined(__x86_64__)
+#if (defined(__AMX_INT8__) || defined(__AMX_BF16__)) && (defined(__x86_64__) || defined(_M_X64))
 #include <immintrin.h>
 #endif
 
@@ -432,7 +432,7 @@ static double runInt8DpChain(uint64_t outer)
 
 // ---- Matrix engine: int8 (AMX / SMMLA) and bf16 (AMX / BFMMLA) -------------
 // ops are PER-k; the table multiplies by INNER (the chain loops INNER per outer).
-#if defined(__AMX_INT8__) && defined(__linux__) && defined(__x86_64__)
+#if defined(__AMX_INT8__) && (defined(__x86_64__) || defined(_M_X64))
 #define CPU_MAT_INT8_KERNEL 1
 static constexpr double MAT_I8_OPS_PER_K = 4.0 * 16 * 16 * 64 * 2;
 static thread_local bool g_amxI8Cfg = false;
@@ -487,7 +487,7 @@ static double runMatInt8Chain(uint64_t outer)
 }
 #endif
 
-#if defined(__AMX_BF16__) && defined(__linux__) && defined(__x86_64__)
+#if defined(__AMX_BF16__) && (defined(__x86_64__) || defined(_M_X64))
 #define CPU_MAT_FP_KERNEL 1
 static constexpr double MAT_FP_OPS_PER_K = 4.0 * 16 * 16 * 32 * 2;
 static thread_local bool g_amxBf16Cfg = false;

@@ -75,7 +75,8 @@ Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
   the binary never SIGILLs on an older CPU.
   - x86 TUs: `generic` (SSE2, ungated floor), `sse42`, `avx2`, `avx512`
     (F/BW/VL/DQ), then the fragmented sub-features as their own TUs —
-    `avx512vnni`, `avx512bf16`, `avx512fp16`, `amx` (Linux). A TU is only
+    `avx512vnni`, `avx512bf16`, `avx512fp16`, `amx` (clang/clang-cl, x86-64;
+    Linux + Windows). A TU is only
     *entered* when every feature it was compiled with is present (AVX-512 ≠ one
     feature: Skylake-X has F but not VNNI/BF16/FP16).
   - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
@@ -178,10 +179,15 @@ define.
   flag). Input tiles are zero (uninitialized) on purpose — AMX throughput is
   data-independent and zeros avoid int32/fp32 accumulator overflow. **Output tiles
   must be `thread_local`** (every MT worker stores to them; shared `static` is a
-  data race + false sharing). `arch_prctl(ARCH_REQ_XCOMP_PERM)` is process-wide
-  and requested once at `kernels()` init before any worker issues a tile op.
-  Untested on real silicon — verify with `objdump` that the hot loop keeps
-  `NACC*INNER` `tdpbssd`/`tdpbf16ps`, and that numbers land near spec.
+  data race + false sharing). The tile XSTATE (component 18) must be granted by
+  the OS on first use; `amxPermOk()` in `cpu_dispatch.cpp` requests it once,
+  process-wide, before any worker issues a tile op — `arch_prctl(ARCH_REQ_XCOMP_PERM)`
+  on Linux, `EnableProcessOptionalXStateFeatures(XSTATE_MASK_AMX_TILE_DATA)` on
+  Windows 11/Server 2022 (resolved via `GetProcAddress` so the binary still loads
+  on Win10, where it returns false → the Unsupported row). The AMX TU is built on
+  both Linux and Windows but clang/clang-cl only (real cl.exe is core-only and
+  can't build it). Untested on real silicon — verify with `objdump`/`dumpbin` that
+  the hot loop keeps `NACC*INNER` `tdpbssd`/`tdpbf16ps`, and that numbers land near spec.
 - **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
   CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
   `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from
