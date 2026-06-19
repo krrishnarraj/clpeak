@@ -12,6 +12,7 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+#include <common/dynlib.h>   // must stay at file scope (defines namespace clpeak)
 
 #ifdef CLPEAK_ROCM_HAS_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
@@ -55,7 +56,6 @@ uint32_t pickGemmDim(const rocm_device_info_t &info)
 // Optional hipBLASLt loader -- not part of the HIP runtime, so it is resolved at
 // run time; if absent the FP8 GEMM benchmark is skipped.  Function-pointer types
 // come from the header via decltype; macros redirect the call sites unchanged.
-#include <common/dynlib.h>
 struct HipblasLtApi
 {
   void *lib = nullptr;

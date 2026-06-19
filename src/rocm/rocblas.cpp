@@ -60,6 +60,9 @@ bool RocblasApi::load()
 #define rocblas_set_stream     g_rb.set_stream
 #define rocblas_sgemm          g_rb.sgemm
 #define rocblas_dgemm          g_rb.dgemm
+// rocBLAS's header defines rocblas_gemm_ex as a function-like macro; drop it so
+// our object-like redirect to the loaded pointer takes over cleanly.
+#undef rocblas_gemm_ex
 #define rocblas_gemm_ex        g_rb.gemm_ex
 #endif
 
