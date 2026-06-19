@@ -95,16 +95,33 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedRocmKernels.cmake)
 set(CLPEAK_ROCM_CDNA   "gfx908;gfx90a;gfx942;gfx950")   # MFMA-capable CDNA
 set(CLPEAK_ROCM_RDNAW  "gfx1100;gfx1101;gfx1102;gfx1200;gfx1201") # WMMA RDNA3+
 set(CLPEAK_ROCM_ALL    "gfx906;${CLPEAK_ROCM_CDNA};gfx1030;${CLPEAK_ROCM_RDNAW}")
+# Texture/image sampling is a graphics feature: Vega (gfx906) and all RDNA parts
+# have it, but the compute-only CDNA dies (gfx908/90a/942/950) do not -- the HIP
+# tex2D API is marked unavailable there, so image_bandwidth must skip CDNA or the
+# AOT compile hard-fails.
+set(CLPEAK_ROCM_IMG    "gfx906;gfx1030;${CLPEAK_ROCM_RDNAW}")
 
 # Generic compute + bandwidth -- every supported gfx.
 embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_ALL}"
     KERNELS compute_sp compute_hp compute_dp compute_mp compute_bf16
             compute_int32 compute_int8_dp
-            global_bandwidth local_bandwidth image_bandwidth kernel_latency)
+            global_bandwidth local_bandwidth kernel_latency)
 
-# MFMA matrix core -- CDNA (gfx9xx).
+# Image-sampling bandwidth -- texture-capable parts only (Vega + RDNA).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_IMG}"
+    KERNELS image_bandwidth)
+
+# MFMA matrix core.  The builtins gate per sub-target with no fallback, so each
+# is grouped to exactly the archs that select it:
+#   fp16 (mfma_f32_16x16x16f16)        -- all CDNA
+#   bf16 (mfma_f32_16x16x16bf16_1k)    -- the "1k" form is gfx90a+ (not gfx908)
+#   int8 (mfma_i32_16x16x32_i8)        -- the K=32 form is CDNA3+ (gfx942/950)
 embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_CDNA}"
-    KERNELS mfma_fp16 mfma_bf16 mfma_int8)
+    KERNELS mfma_fp16)
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx90a;gfx942;gfx950"
+    KERNELS mfma_bf16)
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx942;gfx950"
+    KERNELS mfma_int8)
 # fp8 MFMA -- CDNA3+ (gfx942/950).
 embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx942;gfx950"
     KERNELS mfma_fp8)
