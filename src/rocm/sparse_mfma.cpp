@@ -27,8 +27,7 @@ struct SparseEntry
   const char *metric;
   const char *title;
   const char *unit;     // "tflops" or "tops"
-  const char *src;
-  const char *srcName;
+  const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, Kdense; // dense-equivalent K for op accounting
   bool isInt;
@@ -55,18 +54,18 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
 
   static const SparseEntry fpEntries[] = {
     {"smfmac_fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "tflops",
-     rocm_kernels::smfmac_fp16_src, rocm_kernels::smfmac_fp16_name, "smfmac_fp16",
+     &rocm_kernels::smfmac_fp16, "smfmac_fp16",
      16, 16, 32, false},
     {"smfmac_bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "tflops",
-     rocm_kernels::smfmac_bf16_src, rocm_kernels::smfmac_bf16_name, "smfmac_bf16",
+     &rocm_kernels::smfmac_bf16, "smfmac_bf16",
      16, 16, 32, false},
     {"smfmac_fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "tflops",
-     rocm_kernels::smfmac_fp8_src, rocm_kernels::smfmac_fp8_name, "smfmac_fp8",
+     &rocm_kernels::smfmac_fp8, "smfmac_fp8",
      16, 16, 64, false},
   };
   static const SparseEntry intEntries[] = {
     {"smfmac_int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "tops",
-     rocm_kernels::smfmac_int8_src, rocm_kernels::smfmac_int8_name, "smfmac_int8",
+     &rocm_kernels::smfmac_int8, "smfmac_int8",
      16, 16, 64, true},
   };
 
@@ -96,7 +95,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     hipFunction_t fn;
     // A compile failure here just means the datatype isn't supported on this
     // arch; the HIPRTC log is --verbose-only so it never breaks result output.
-    if (!dev.getKernel(se.src, se.srcName, se.kernelName, fn))
+    if (!dev.getKernel(*se.blob, se.kernelName, fn))
     {
       test.skip(se.metric, ResultStatus::Unsupported,
                 "Sparse MFMA instruction for this datatype not available on this GPU");

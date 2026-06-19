@@ -58,8 +58,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
       key.pop_back();
 
     CUfunction fn;
-    if (!dev.getKernel(cuda_kernels::global_bandwidth_src,
-                       cuda_kernels::global_bandwidth_name,
+    if (!dev.getKernel(cuda_kernels::global_bandwidth,
                        v.kernelName, fn))
     {
       test.skip(key, ResultStatus::Error, "Kernel compile failed");

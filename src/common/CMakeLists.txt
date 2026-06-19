@@ -1,11 +1,14 @@
 add_library(peak_common STATIC
     peak.cpp
     common.cpp
+    dynlib.cpp
     inventory.cpp
     logger.cpp
     options.cpp
     result_store.cpp
 )
+# dlopen lives in libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it's in libc.
+target_link_libraries(peak_common PUBLIC ${CMAKE_DL_LIBS})
 # logger.cpp lives in src/cli/ (desktop) or android/ (Android JNI) —
 # each consumer brings its own output implementation.
 target_include_directories(peak_common PUBLIC

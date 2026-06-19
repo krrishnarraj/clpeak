@@ -1,16 +1,11 @@
 #ifdef ENABLE_CUDA
 
 #include <cuda/cuda_peak.h>
-#include <nvrtc.h>
 #include <cstring>
 #include <cstdio>
 #include <sstream>
 #include <vector>
 #include <string>
-
-#ifndef CLPEAK_CUDA_INCLUDE_DIR
-#define CLPEAK_CUDA_INCLUDE_DIR "/usr/local/cuda/include"
-#endif
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -68,10 +63,11 @@ bool CudaDevice::init(int devIndex)
     info.driverVersion = ss.str();
   }
   {
-    int major = 0, minor = 0;
-    nvrtcVersion(&major, &minor);
+    // The kernels are precompiled fatbins; report the CUDA toolkit the build
+    // was compiled against (CUDA_VERSION from <cuda.h>) rather than an NVRTC
+    // version, since NVRTC is no longer used at runtime.
     std::stringstream ss;
-    ss << major << "." << minor;
+    ss << (CUDA_VERSION / 1000) << "." << (CUDA_VERSION % 1000) / 10;
     info.runtimeVersion = ss.str();
   }
   {
@@ -136,13 +132,12 @@ void CudaDevice::cleanup()
   }
 }
 
-bool CudaDevice::getKernel(const char *src, const char *srcName,
-                           const char *kernelName, CUfunction &fn,
-                           const std::vector<const char *> &extraOpts)
+bool CudaDevice::getKernel(const cuda_kernels::Blob &blob,
+                           const char *kernelName, CUfunction &fn)
 {
-  // Cache by source-pointer identity: every embedded .cu blob is a distinct
-  // extern in cuda_kernels_generated.cpp, so pointer equality is sufficient.
-  auto it = moduleCache.find(src);
+  // Cache by blob-data pointer: every embedded fatbin is a distinct array in
+  // cuda_kernels_generated.cpp, so pointer equality is sufficient.
+  auto it = moduleCache.find(blob.data);
   CUmodule mod = nullptr;
   if (it != moduleCache.end())
   {
@@ -150,93 +145,23 @@ bool CudaDevice::getKernel(const char *src, const char *srcName,
   }
   else
   {
-    nvrtcProgram prog;
-    nvrtcResult nr = nvrtcCreateProgram(&prog, src, srcName, 0, nullptr, nullptr);
-    if (nr != NVRTC_SUCCESS)
+    // The blob is a precompiled multi-arch fatbin.  cuModuleLoadData selects
+    // the cubin matching this device's compute capability, or JITs the
+    // embedded PTX via the driver -- no NVRTC, no toolkit headers needed.
+    CUresult lr = cuModuleLoadData(&mod, blob.data);
+    if (lr != CUDA_SUCCESS)
     {
-      CLPEAK_VLOG("nvrtcCreateProgram failed: %s\n", nvrtcGetErrorString(nr));
+      CLPEAK_VLOG("cuModuleLoadData(%s) failed: %s\n", blob.name, cuErrStr(lr));
       return false;
     }
-
-    // Build the option list.  --gpu-architecture=sm_<cc> targets cubin
-    // directly; the driver still JITs from PTX if needed but we get the
-    // straightest path on the matching arch.  -I<CUDA_INCLUDE_DIR> resolves
-    // <mma.h>, <cuda_fp16.h>, <cuda_bf16.h>, <cuda_fp8.h> at runtime.
-    std::stringstream archOpt;
-    archOpt << "--gpu-architecture=sm_" << info.major << info.minor;
-    std::string archStr = archOpt.str();
-
-    std::string incOpt = std::string("-I") + CLPEAK_CUDA_INCLUDE_DIR;
-
-    std::vector<const char *> opts;
-    bool hasArchOverride = false;
-    for (auto *e : extraOpts)
-    {
-      if (e && (std::strncmp(e, "--gpu-architecture=", 19) == 0 ||
-                std::strncmp(e, "-arch=", 6) == 0))
-      {
-        hasArchOverride = true;
-        break;
-      }
-    }
-    if (!hasArchOverride)
-      opts.push_back(archStr.c_str());
-    opts.push_back(incOpt.c_str());
-    for (auto *e : extraOpts)
-      opts.push_back(e);
-
-    nr = nvrtcCompileProgram(prog, (int)opts.size(), opts.data());
-    if (nr != NVRTC_SUCCESS)
-    {
-      size_t logSize = 0;
-      nvrtcGetProgramLogSize(prog, &logSize);
-      std::string log(logSize, '\0');
-      if (logSize > 1)
-        nvrtcGetProgramLog(prog, &log[0]);
-      CLPEAK_VLOG("NVRTC compile of %s failed:\n%s\n", srcName, log.c_str());
-      nvrtcDestroyProgram(&prog);
-      return false;
-    }
-
-    // Prefer cubin for the matching architecture; fall back to PTX if
-    // cubin retrieval is unsupported in this NVRTC build.
-    size_t cubinSize = 0;
-    nr = nvrtcGetCUBINSize(prog, &cubinSize);
-    if (nr == NVRTC_SUCCESS && cubinSize > 0)
-    {
-      std::vector<char> cubin(cubinSize);
-      nvrtcGetCUBIN(prog, cubin.data());
-      CUresult lr = cuModuleLoadData(&mod, cubin.data());
-      if (lr != CUDA_SUCCESS)
-      {
-        CLPEAK_VLOG("cuModuleLoadData(cubin %s) failed: %s\n", srcName, cuErrStr(lr));
-        nvrtcDestroyProgram(&prog);
-        return false;
-      }
-    }
-    else
-    {
-      size_t ptxSize = 0;
-      nvrtcGetPTXSize(prog, &ptxSize);
-      std::vector<char> ptx(ptxSize);
-      nvrtcGetPTX(prog, ptx.data());
-      CUresult lr = cuModuleLoadData(&mod, ptx.data());
-      if (lr != CUDA_SUCCESS)
-      {
-        CLPEAK_VLOG("cuModuleLoadData(ptx %s) failed: %s\n", srcName, cuErrStr(lr));
-        nvrtcDestroyProgram(&prog);
-        return false;
-      }
-    }
-    nvrtcDestroyProgram(&prog);
-    moduleCache[src] = mod;
+    moduleCache[blob.data] = mod;
   }
 
   CUresult r = cuModuleGetFunction(&fn, mod, kernelName);
   if (r != CUDA_SUCCESS)
   {
     CLPEAK_VLOG("cuModuleGetFunction(%s in %s) failed: %s\n",
-                kernelName, srcName, cuErrStr(r));
+                kernelName, blob.name, cuErrStr(r));
     return false;
   }
   return true;

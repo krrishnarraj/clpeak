@@ -19,8 +19,7 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
   d.unit = "gops";
   d.metricLabel = "int";
   d.kernelName = "compute_int32";
-  d.src = cuda_kernels::compute_int32_src;
-  d.srcName = cuda_kernels::compute_int32_name;
+  d.blob = &cuda_kernels::compute_int32;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI; // 4096 ops/thread (same scaling)
   d.elemSize = sizeof(int);
   d.scalarArg = &A;
@@ -31,10 +30,10 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
 int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   static const cuda_compute_variant_t variants[] = {
-      {"int8_dp", "compute_int8_dp", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
-      {"int8_dp2", "compute_int8_dp2", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
-      {"int8_dp4", "compute_int8_dp4", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
-      {"int8_dp8", "compute_int8_dp8", cuda_kernels::compute_int8_dp_src, cuda_kernels::compute_int8_dp_name},
+      {"int8_dp", "compute_int8_dp", &cuda_kernels::compute_int8_dp},
+      {"int8_dp2", "compute_int8_dp2", &cuda_kernels::compute_int8_dp},
+      {"int8_dp4", "compute_int8_dp4", &cuda_kernels::compute_int8_dp},
+      {"int8_dp8", "compute_int8_dp8", &cuda_kernels::compute_int8_dp},
   };
   int A = 4;
   cuda_compute_desc_t d = {};

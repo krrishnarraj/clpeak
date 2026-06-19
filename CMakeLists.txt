@@ -102,29 +102,16 @@ endif()
 if(CLPEAK_ENABLE_ROCM)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip QUIET CONFIG)
-    find_package(hiprtc QUIET CONFIG)
     find_package(rocblas QUIET CONFIG)
     find_package(hipblaslt QUIET CONFIG)
 
-    set(CLPEAK_HIPRTC_LINK "")
-    if(TARGET hiprtc::hiprtc)
-        set(CLPEAK_HIPRTC_LINK hiprtc::hiprtc)
-    elseif(TARGET hiprtc)
-        set(CLPEAK_HIPRTC_LINK hiprtc)
-    elseif(TARGET hip::hiprtc)
-        set(CLPEAK_HIPRTC_LINK hip::hiprtc)
+    # Kernels are compiled ahead-of-time with hipcc (--genco), so the shipped
+    # binary needs only the HIP runtime -- no HIPRTC, no ROCm headers.
+    find_program(CLPEAK_HIPCC NAMES hipcc HINTS /opt/rocm/bin)
+    if(CLPEAK_HIPCC)
+        set(CLPEAK_HIPCC_FOUND TRUE)
     else()
-        find_library(CLPEAK_HIPRTC_LIBRARY NAMES hiprtc
-            HINTS /opt/rocm/lib /opt/rocm/lib64)
-        if(CLPEAK_HIPRTC_LIBRARY)
-            set(CLPEAK_HIPRTC_LINK "${CLPEAK_HIPRTC_LIBRARY}")
-        endif()
-    endif()
-
-    if(NOT "${CLPEAK_HIPRTC_LINK}" STREQUAL "")
-        set(CLPEAK_HIPRTC_FOUND TRUE)
-    else()
-        set(CLPEAK_HIPRTC_FOUND FALSE)
+        set(CLPEAK_HIPCC_FOUND FALSE)
     endif()
 
     find_path(CLPEAK_ROCWMMA_INCLUDE_DIR
@@ -206,7 +193,7 @@ elseif(CLPEAK_ENABLE_CUDA)
 else()
     string(APPEND _clpeak_summary "  CUDA   : disabled (CLPEAK_ENABLE_CUDA=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_ROCM AND hip_FOUND AND CLPEAK_HIPRTC_FOUND)
+if(CLPEAK_ENABLE_ROCM AND hip_FOUND AND CLPEAK_HIPCC_FOUND)
     set(_clpeak_rocm_features "HIP")
     if(rocblas_FOUND AND TARGET roc::rocblas)
         string(APPEND _clpeak_rocm_features ", rocBLAS")
@@ -221,7 +208,7 @@ if(CLPEAK_ENABLE_ROCM AND hip_FOUND AND CLPEAK_HIPRTC_FOUND)
 elseif(CLPEAK_ENABLE_ROCM AND NOT hip_FOUND)
     string(APPEND _clpeak_summary "  ROCm   : disabled (ROCm/HIP package not found)\n")
 elseif(CLPEAK_ENABLE_ROCM)
-    string(APPEND _clpeak_summary "  ROCm   : disabled (HIPRTC library not found)\n")
+    string(APPEND _clpeak_summary "  ROCm   : disabled (hipcc not found)\n")
 else()
     string(APPEND _clpeak_summary "  ROCm   : disabled (CLPEAK_ENABLE_ROCM=OFF)\n")
 endif()
@@ -280,10 +267,59 @@ endforeach()
 message(STATUS "===============================================================")
 message(STATUS "")
 
-install(TARGETS clpeak RUNTIME DESTINATION bin)
-install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
+# Install the binary + license at the package root so the release zip's
+# top-level folder holds them directly (not under bin/).  Bundled runtime libs
+# (below) land beside the binary; RPATH $ORIGIN lets them resolve there.
+if(APPLE)
+  set_target_properties(clpeak PROPERTIES INSTALL_RPATH "@loader_path")
+elseif(NOT WIN32)
+  set_target_properties(clpeak PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
+install(TARGETS clpeak RUNTIME DESTINATION .)
+install(FILES LICENSE DESTINATION .)
 enable_testing()
 add_test(clpeak_test_run clpeak)
-set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${CLPEAK_VERSION_STR}")
+
+# Best-effort bundling of the optional GEMM / SYCL runtime libraries next to the
+# binary so the release zip works out of the box.  These are loaded at run time
+# (dlopen / SYCL runtime); if a glob finds nothing the install is a no-op and the
+# benchmark simply skips that path.  OPTIONAL guards missing files.
+if(CLPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
+  file(GLOB _clpeak_cuda_redist
+    "${CUDAToolkit_LIBRARY_DIR}/libcublasLt.so*"
+    "${CUDAToolkit_BIN_DIR}/cublasLt64_*.dll")
+  install(FILES ${_clpeak_cuda_redist} DESTINATION . OPTIONAL)
+endif()
+if(CLPEAK_ENABLE_ROCM AND hip_FOUND)
+  file(GLOB _clpeak_rocm_redist
+    "/opt/rocm/lib/librocblas.so*"
+    "/opt/rocm/lib/libhipblaslt.so*")
+  install(FILES ${_clpeak_rocm_redist} DESTINATION . OPTIONAL)
+endif()
+if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND)
+  get_filename_component(_clpeak_icx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  file(GLOB _clpeak_sycl_redist
+    "${_clpeak_icx_dir}/../lib/libsycl.so*"
+    "${_clpeak_icx_dir}/../lib/libur_*.so*"
+    "${_clpeak_icx_dir}/libsycl*.dll")
+  install(FILES ${_clpeak_sycl_redist} DESTINATION . OPTIONAL)
+endif()
+
+# --- CPack: self-contained, clearly-named zip per build --------------------
+# Name: clpeak-<version>-<os>-<arch>[-<backend>], e.g.
+# clpeak-1.1.8-linux-x86_64-cuda.  Archive generators wrap the contents in a
+# top-level dir of the same name, so each zip extracts to one clean folder.
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" _clpeak_os)
+if(_clpeak_os STREQUAL "darwin")
+  set(_clpeak_os "macos")
+endif()
+set(CLPEAK_PACKAGE_SUFFIX "" CACHE STRING
+    "Backend tag appended to the package name (e.g. cuda, rocm, oneapi)")
+set(_clpeak_pkg "clpeak-${CLPEAK_VERSION_STR}-${_clpeak_os}-${CMAKE_SYSTEM_PROCESSOR}")
+if(NOT CLPEAK_PACKAGE_SUFFIX STREQUAL "")
+  set(_clpeak_pkg "${_clpeak_pkg}-${CLPEAK_PACKAGE_SUFFIX}")
+endif()
+set(CPACK_PACKAGE_FILE_NAME "${_clpeak_pkg}")
 set(CPACK_GENERATOR "ZIP")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY 1)
 include(CPack)

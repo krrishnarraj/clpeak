@@ -50,11 +50,8 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   }
 
   hipFunction_t fn;
-  const char *opts[] = {"--std=c++17"};
-  if (!dev.getKernel(isInt ? rocm_kernels::rocwmma_int8_src : rocm_kernels::rocwmma_fp16_src,
-                     isInt ? rocm_kernels::rocwmma_int8_name : rocm_kernels::rocwmma_fp16_name,
-                     isInt ? "rocwmma_int8" : "rocwmma_fp16", fn,
-                     std::vector<const char *>(opts, opts + 1)))
+  if (!dev.getKernel(isInt ? rocm_kernels::rocwmma_int8 : rocm_kernels::rocwmma_fp16,
+                     isInt ? "rocwmma_int8" : "rocwmma_fp16", fn))
   {
     (void)hipFree(outBuf);
     test.skip(metric, ResultStatus::Error, "Kernel compile failed");

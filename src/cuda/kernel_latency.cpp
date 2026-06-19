@@ -12,8 +12,7 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
     {"kernel_launch_latency", "Kernel launch latency", "us"});
 
   CUfunction fn;
-  if (!dev.getKernel(cuda_kernels::kernel_latency_src,
-                     cuda_kernels::kernel_latency_name,
+  if (!dev.getKernel(cuda_kernels::kernel_latency,
                      "kernel_latency_noop", fn))
   {
     test.skip("dispatch", ResultStatus::Error, "Kernel compile failed");

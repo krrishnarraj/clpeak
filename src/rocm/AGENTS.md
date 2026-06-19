@@ -1,13 +1,15 @@
 # src/rocm — ROCm Backend Implementation
 
 `RocmPeak` class implementation: HIP runtime init, per-benchmark runners, and
-HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
-`peak_rocm` static library.
+HIP kernels (in `rocm_kernels/`) compiled **ahead-of-time** by hipcc (`--genco`)
+to bundled code objects at build time and loaded via the HIP runtime at run
+time. The shipped binary needs only the HIP runtime (amdhip64) — no HIPRTC, no
+ROCm headers. Built as `peak_rocm` static library.
 
 ## Quick Lookups
 
 - Looking for the main class / orchestrator? → `rocm_peak.cpp`
-- Looking for RocmDevice class (device init, HIPRTC compilation, caching)? → `rocm_device.cpp`
+- Looking for RocmDevice class (device init, code-object module load, caching)? → `rocm_device.cpp`
 - Looking for HIP runtime init / device enumeration? → `rocm_peak.cpp` (`initRuntime`)
 - Looking for the unified compute kernel runner? → `compute_kernel.cpp` (`runComputeKernel`)
 - Looking for kernel timing/calibration? → `rocm_peak.cpp` (`runKernel`)
@@ -23,14 +25,14 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .hip kernel sources? → `rocm_kernels/*.hip`
-- Looking for kernel embedding logic? → `cmake/EmbedRocmKernels.cmake`
+- Looking for AOT compile + embedding logic? → `cmake/EmbedRocmKernels.cmake` (+ `cmake/EmbedBin.cmake`)
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `rocm_peak.cpp` | `RocmPeak` class: ctor, `applyOptions()`, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
-| `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (HIPRTC compilation + module caching) |
+| `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (code-object `hipModuleLoadData` + module caching) |
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP` |
@@ -46,12 +48,13 @@ HIP kernels (in `rocm_kernels/`) compiled via HIPRTC at runtime. Built as
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
 
 | `kernel_latency.cpp` | `runKernelLatency` |
-| `rocm_kernels/` | HIP kernel sources (`.hip`) embedded as C++ string literals |
-| `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — .hip → C++ raw-string arrays |
+| `rocm_kernels/` | HIP kernel sources (`.hip`), AOT-compiled to code objects and embedded as byte arrays |
+| `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed |
+| `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
 
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
-- If you add a new `.hip` kernel → add to `CLPEAK_ROCM_KERNELS` in `CMakeLists.txt`.
+- If you add a new `.hip` kernel → add it to the appropriate `embed_rocm_kernels()` gfx group in `CMakeLists.txt`, and declare its `Blob` extern in `include/rocm/rocm_peak.h`.
+- If a kernel uses a builtin valid only on certain gfx families → put it in (or create) the matching `ARCHS` group so hipcc never targets an unsupported arch (the genco compile would fail the build).
 - If you change `RocmPeak` interface → update `include/rocm/rocm_peak.h`.
-- If you change the HIPRTC include path → check `CLPEAK_ROCM_INCLUDE_DIR` compile definition.

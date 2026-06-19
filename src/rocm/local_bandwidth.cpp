@@ -39,8 +39,7 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       key.pop_back();
 
     hipFunction_t fn;
-    if (!dev.getKernel(rocm_kernels::local_bandwidth_src,
-                       rocm_kernels::local_bandwidth_name, v.kname, fn))
+    if (!dev.getKernel(rocm_kernels::local_bandwidth, v.kname, fn))
     {
       test.skip(key, ResultStatus::Error, "Kernel compile failed");
       continue;

@@ -15,11 +15,16 @@
 
 struct CliOptions; // forward decl
 
+// One embedded kernel: a precompiled multi-arch fatbin (nvcc -fatbin at build
+// time) plus its file stem for diagnostics.  Defined fully at the bottom of
+// this header; forward-declared here so the descriptor structs can point at it.
+namespace cuda_kernels { struct Blob; }
+
 // CUDA device info (mirrors vk_device_info_t for display + per-test gating).
 struct cuda_device_info_t {
   std::string deviceName;
   std::string driverVersion;     // e.g. "12.6"
-  std::string runtimeVersion;    // NVRTC version
+  std::string runtimeVersion;    // CUDA toolkit the fatbins were built with
   std::string archName;          // "sm_120" etc.
 
   DeviceType deviceType = DeviceType::Unknown;
@@ -67,20 +72,19 @@ public:
   bool init(int devIndex);
   void cleanup();
 
-  // NVRTC-compile a .cu source string and load the resulting PTX into a
-  // module, then resolve named kernels.  Caches by source pointer; the same
-  // source compiled for two device archs lives in two cache entries.
-  // Returns true on success; on compile failure logs the NVRTC log to stderr
-  // and returns false.
-  bool getKernel(const char *src, const char *srcName,
-                 const char *kernelName, CUfunction &fn,
-                 const std::vector<const char *> &extraOpts = {});
+  // Load a precompiled fatbin blob into a module (the driver selects the
+  // matching cubin for this device or JITs the embedded PTX), then resolve a
+  // named kernel.  Caches by blob-data pointer; needs only the CUDA driver at
+  // runtime -- no NVRTC, no toolkit headers.  Returns true on success; on
+  // failure logs via CLPEAK_VLOG and returns false.
+  bool getKernel(const cuda_kernels::Blob &blob,
+                 const char *kernelName, CUfunction &fn);
 
 private:
-  // moduleCache key = source pointer (string identity is the simplest
-  // viable cache key because every .cu blob is a unique extern in the
-  // generated cpp).  Value = loaded module handle.
-  std::unordered_map<const char *, CUmodule> moduleCache;
+  // moduleCache key = blob-data pointer (each embedded fatbin is a unique
+  // array in the generated cpp, so pointer identity is sufficient).
+  // Value = loaded module handle.
+  std::unordered_map<const void *, CUmodule> moduleCache;
 };
 
 // Variant of a single compute-peak kernel.  All variants of one benchmark
@@ -90,9 +94,8 @@ struct cuda_compute_variant_t
 {
   const char *label;             // column / result metric, e.g. "mp", "mp2"
   const char *kernelName;        // CUDA kernel symbol (extern "C")
-  const char *src;               // .cu source text (may be shared by sibling
+  const cuda_kernels::Blob *blob;// embedded fatbin (may be shared by sibling
                                  // variants emitting from one file)
-  const char *srcName;           // file stem for NVRTC diagnostics
 };
 
 struct cuda_compute_desc_t
@@ -105,8 +108,7 @@ struct cuda_compute_desc_t
   // Single-variant fallback (used when variants==nullptr).
   const char *metricLabel;
   const char *kernelName;
-  const char *src;
-  const char *srcName;
+  const cuda_kernels::Blob *blob;
 
   // Multi-variant (preferred when set).
   const cuda_compute_variant_t *variants;
@@ -129,12 +131,6 @@ struct cuda_compute_desc_t
   // Optional gates / attributes
   bool        skip;
   const char *skipMsg;
-
-  // Optional NVRTC compile flags shared by all variants (e.g. wmma needs
-  // --gpu-architecture matching the device, but per-test extras like
-  // -default-device or -DSOMETHING go here).
-  const char *const *extraNvrtcOpts;
-  uint32_t           numExtraNvrtcOpts;
 };
 
 class CudaPeak : public Peak
@@ -188,63 +184,42 @@ private:
                        const cuda_compute_desc_t &d);
 };
 
-// Embedded CUDA kernel source text (generated at build time).
+// Embedded CUDA kernel fatbins (nvcc-compiled at build time, generated into
+// cuda_kernels_generated.cpp by EmbedCudaKernels.cmake).
 namespace cuda_kernels {
-  extern const char *compute_sp_src;
-  extern const char *compute_sp_name;
-  extern const char *compute_hp_src;
-  extern const char *compute_hp_name;
-  extern const char *compute_dp_src;
-  extern const char *compute_dp_name;
-  extern const char *compute_mp_src;
-  extern const char *compute_mp_name;
-  extern const char *compute_bf16_src;
-  extern const char *compute_bf16_name;
-  extern const char *compute_int8_dp_src;
-  extern const char *compute_int8_dp_name;
-  extern const char *compute_int32_src;
-  extern const char *compute_int32_name;
-  extern const char *global_bandwidth_src;
-  extern const char *global_bandwidth_name;
-  extern const char *kernel_latency_src;
-  extern const char *kernel_latency_name;
-  extern const char *wmma_fp16_src;
-  extern const char *wmma_fp16_name;
-  extern const char *wmma_bf16_src;
-  extern const char *wmma_bf16_name;
-  extern const char *wmma_int8_src;
-  extern const char *wmma_int8_name;
-  extern const char *wmma_int8_k32_src;
-  extern const char *wmma_int8_k32_name;
-  extern const char *wmma_int8_sparse_src;
-  extern const char *wmma_int8_sparse_name;
-  extern const char *wmma_fp8_e4m3_src;
-  extern const char *wmma_fp8_e4m3_name;
-  extern const char *wmma_fp8_e5m2_src;
-  extern const char *wmma_fp8_e5m2_name;
-  extern const char *wmma_fp4_e2m1_src;
-  extern const char *wmma_fp4_e2m1_name;
-  extern const char *wmma_mxf4_e2m1_src;
-  extern const char *wmma_mxf4_e2m1_name;
-  extern const char *wmma_nvf4_e2m1_src;
-  extern const char *wmma_nvf4_e2m1_name;
-  extern const char *wmma_mxf4_sparse_src;
-  extern const char *wmma_mxf4_sparse_name;
-  extern const char *wmma_nvf4_sparse_src;
-  extern const char *wmma_nvf4_sparse_name;
-  extern const char *wmma_tf32_src;
-  extern const char *wmma_tf32_name;
-  extern const char *wmma_fp64_src;
-  extern const char *wmma_fp64_name;
-  extern const char *wmma_int4_src;
-  extern const char *wmma_int4_name;
-  extern const char *wmma_bmma_b1_src;
-  extern const char *wmma_bmma_b1_name;
-  extern const char *local_bandwidth_src;
-  extern const char *local_bandwidth_name;
-  extern const char *image_bandwidth_src;
-  extern const char *image_bandwidth_name;
+  struct Blob {
+    const unsigned char *data;   // multi-arch fatbin bytes
+    unsigned int         len;    // byte count
+    const char          *name;   // file stem, e.g. "compute_sp.cu"
+  };
 
+  extern const Blob compute_sp;
+  extern const Blob compute_hp;
+  extern const Blob compute_dp;
+  extern const Blob compute_mp;
+  extern const Blob compute_bf16;
+  extern const Blob compute_int8_dp;
+  extern const Blob compute_int32;
+  extern const Blob global_bandwidth;
+  extern const Blob kernel_latency;
+  extern const Blob wmma_fp16;
+  extern const Blob wmma_bf16;
+  extern const Blob wmma_int8;
+  extern const Blob wmma_int8_k32;
+  extern const Blob wmma_int8_sparse;
+  extern const Blob wmma_fp8_e4m3;
+  extern const Blob wmma_fp8_e5m2;
+  extern const Blob wmma_fp4_e2m1;
+  extern const Blob wmma_mxf4_e2m1;
+  extern const Blob wmma_nvf4_e2m1;
+  extern const Blob wmma_mxf4_sparse;
+  extern const Blob wmma_nvf4_sparse;
+  extern const Blob wmma_tf32;
+  extern const Blob wmma_fp64;
+  extern const Blob wmma_int4;
+  extern const Blob wmma_bmma_b1;
+  extern const Blob local_bandwidth;
+  extern const Blob image_bandwidth;
 }
 
 #endif // ENABLE_CUDA

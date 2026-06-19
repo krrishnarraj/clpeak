@@ -26,8 +26,7 @@ struct WmmaEntry
   const char *metric;
   const char *title;
   const char *unit;     // "tflops" or "tops"
-  const char *src;
-  const char *srcName;
+  const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, K;
   bool isInt;           // output buffer element type
@@ -54,21 +53,21 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
 
   static const WmmaEntry fpEntries[] = {
     {"wmma_fp16", "WMMA fp16xfp16+fp32 16x16x16", "tflops",
-     rocm_kernels::wmma_fp16_src, rocm_kernels::wmma_fp16_name, "wmma_fp16",
+     &rocm_kernels::wmma_fp16, "wmma_fp16",
      16, 16, 16, false},
     {"wmma_bf16", "WMMA bf16xbf16+fp32 16x16x16", "tflops",
-     rocm_kernels::wmma_bf16_src, rocm_kernels::wmma_bf16_name, "wmma_bf16",
+     &rocm_kernels::wmma_bf16, "wmma_bf16",
      16, 16, 16, false},
     {"wmma_fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "tflops",
-     rocm_kernels::wmma_fp8_src, rocm_kernels::wmma_fp8_name, "wmma_fp8_e4m3",
+     &rocm_kernels::wmma_fp8, "wmma_fp8_e4m3",
      16, 16, 16, false},
     {"wmma_fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "tflops",
-     rocm_kernels::wmma_fp8_src, rocm_kernels::wmma_fp8_name, "wmma_fp8_e5m2",
+     &rocm_kernels::wmma_fp8, "wmma_fp8_e5m2",
      16, 16, 16, false},
   };
   static const WmmaEntry intEntries[] = {
     {"wmma_int8", "WMMA int8xint8+int32 16x16x16", "tops",
-     rocm_kernels::wmma_int8_src, rocm_kernels::wmma_int8_name, "wmma_int8",
+     &rocm_kernels::wmma_int8, "wmma_int8",
      16, 16, 16, true},
   };
 
@@ -109,7 +108,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     // Compiler-driven capability check: a missing builtin for this datatype
     // fails the HIPRTC compile (log is --verbose-only); report Unsupported.
     hipFunction_t fn;
-    if (!dev.getKernel(me.src, me.srcName, me.kernelName, fn))
+    if (!dev.getKernel(*me.blob, me.kernelName, fn))
     {
       test.skip(me.metric, ResultStatus::Unsupported,
                 "WMMA instruction for this datatype not available on this GPU");

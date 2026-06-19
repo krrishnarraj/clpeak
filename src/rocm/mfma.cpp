@@ -32,8 +32,7 @@ struct MfmaEntry
   const char *metric;
   const char *title;
   const char *unit;     // "tflops" or "tops"
-  const char *src;
-  const char *srcName;
+  const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, K;
   bool isInt;           // output buffer element type
@@ -61,21 +60,21 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
 
   static const MfmaEntry fpEntries[] = {
     {"mfma_fp16", "MFMA fp16xfp16+fp32 16x16x16", "tflops",
-     rocm_kernels::mfma_fp16_src, rocm_kernels::mfma_fp16_name, "mfma_fp16",
+     &rocm_kernels::mfma_fp16, "mfma_fp16",
      16, 16, 16, false},
     {"mfma_bf16", "MFMA bf16xbf16+fp32 16x16x16", "tflops",
-     rocm_kernels::mfma_bf16_src, rocm_kernels::mfma_bf16_name, "mfma_bf16",
+     &rocm_kernels::mfma_bf16, "mfma_bf16",
      16, 16, 16, false},
     {"mfma_fp8", "MFMA fp8xfp8+fp32 16x16x32", "tflops",
-     rocm_kernels::mfma_fp8_src, rocm_kernels::mfma_fp8_name, "mfma_fp8",
+     &rocm_kernels::mfma_fp8, "mfma_fp8",
      16, 16, 32, false},
     {"mfma_mxfp4", "MFMA mxfp4(e2m1)+fp32 16x16x128", "tflops",
-     rocm_kernels::mfma_mxfp4_src, rocm_kernels::mfma_mxfp4_name, "mfma_mxfp4",
+     &rocm_kernels::mfma_mxfp4, "mfma_mxfp4",
      16, 16, 128, false},
   };
   static const MfmaEntry intEntries[] = {
     {"mfma_int8", "MFMA int8xint8+int32 16x16x32", "tops",
-     rocm_kernels::mfma_int8_src, rocm_kernels::mfma_int8_name, "mfma_int8",
+     &rocm_kernels::mfma_int8, "mfma_int8",
      16, 16, 32, true},
   };
 
@@ -108,7 +107,7 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     hipFunction_t fn;
     // A compile failure here just means the datatype isn't supported on this
     // arch; the HIPRTC log is --verbose-only so it never breaks result output.
-    if (!dev.getKernel(me.src, me.srcName, me.kernelName, fn))
+    if (!dev.getKernel(*me.blob, me.kernelName, fn))
     {
       test.skip(me.metric, ResultStatus::Unsupported,
                 "MFMA instruction for this datatype not available on this GPU");

@@ -153,6 +153,19 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 
 > **oneAPI/SYCL note:** the oneAPI backend needs `-DCMAKE_CXX_COMPILER=icpx` (the DPC++ compiler); SYCL kernels compile inline, so any other compiler silently skips the backend.
 
+### Runtime requirements (prebuilt binaries)
+
+CUDA and ROCm kernels are compiled **ahead of time** into the binary (NVIDIA
+fatbins / AMD code objects), so a downloaded release runs with **only the GPU
+driver** installed — no CUDA Toolkit, no ROCm SDK, no NVRTC/HIPRTC. The vendor
+GEMM libraries (cuBLASLt, hipBLASLt, rocBLAS) are *optional*: they are loaded at
+run time if present (the release zip bundles them where possible) and the GEMM
+tests are skipped cleanly when absent. AOT kernels target the GPU generations
+known at build time; a brand-new architecture may need a build refresh for its
+arch-specific tensor tests (generic compute/bandwidth stay forward-compatible
+via embedded PTX). Each release zip extracts to a single
+`clpeak-<version>-<os>-<arch>[-backend]/` folder.
+
 | CMake option | Default | Effect when `OFF` |
 |---|---|---|
 | `CLPEAK_ENABLE_OPENCL` | `ON` | Skip OpenCL backend |

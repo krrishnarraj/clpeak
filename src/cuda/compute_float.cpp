@@ -16,8 +16,7 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
   d.unit = "gflops";
   d.metricLabel = "float";
   d.kernelName = "compute_sp";
-  d.src = cuda_kernels::compute_sp_src;
-  d.srcName = cuda_kernels::compute_sp_name;
+  d.blob = &cuda_kernels::compute_sp;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(float);
   d.scalarArg = &A;
@@ -28,8 +27,8 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
 int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   static const cuda_compute_variant_t variants[] = {
-      {"half", "compute_hp", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
-      {"half2", "compute_hp2", cuda_kernels::compute_hp_src, cuda_kernels::compute_hp_name},
+      {"half", "compute_hp", &cuda_kernels::compute_hp},
+      {"half2", "compute_hp2", &cuda_kernels::compute_hp},
   };
   float A = 1.3f;
   cuda_compute_desc_t d = {};
@@ -56,8 +55,7 @@ int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
   d.unit = "gflops";
   d.metricLabel = "double";
   d.kernelName = "compute_dp";
-  d.src = cuda_kernels::compute_dp_src;
-  d.srcName = cuda_kernels::compute_dp_name;
+  d.blob = &cuda_kernels::compute_dp;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(double);
   d.scalarArg = &A;
@@ -76,8 +74,7 @@ int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
   d.unit = "gflops";
   d.metricLabel = "mp";
   d.kernelName = "compute_mp";
-  d.src = cuda_kernels::compute_mp_src;
-  d.srcName = cuda_kernels::compute_mp_name;
+  d.blob = &cuda_kernels::compute_mp;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(float);
   d.scalarArg = &A;
@@ -100,8 +97,7 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   d.unit = "gflops";
   d.metricLabel = "bf16";
   d.kernelName = "compute_bf16";
-  d.src = cuda_kernels::compute_bf16_src;
-  d.srcName = cuda_kernels::compute_bf16_name;
+  d.blob = &cuda_kernels::compute_bf16;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(float);
   d.scalarArg = &A;

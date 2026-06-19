@@ -8,9 +8,9 @@ int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
   // Native HIP SDK vector widths: int, int2, int4. Each variant does the same
   // 4096 ops/thread (loop count divided by the vector width).
   static const rocm_compute_variant_t variants[] = {
-      {"int", "compute_int32", rocm_kernels::compute_int32_src, rocm_kernels::compute_int32_name},
-      {"int2", "compute_int32_v2", rocm_kernels::compute_int32_src, rocm_kernels::compute_int32_name},
-      {"int4", "compute_int32_v4", rocm_kernels::compute_int32_src, rocm_kernels::compute_int32_name},
+      {"int", "compute_int32", &rocm_kernels::compute_int32},
+      {"int2", "compute_int32_v2", &rocm_kernels::compute_int32},
+      {"int4", "compute_int32_v4", &rocm_kernels::compute_int32},
   };
   int A = 3;
   rocm_compute_desc_t d = {};
@@ -32,10 +32,10 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   // INT8 MFMA peak (runMfma). All four variants do 8192 ops/thread, so the
   // numbers are directly comparable; they differ only in ILP (chain count).
   static const rocm_compute_variant_t variants[] = {
-      {"int8_dp", "compute_int8_dp", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
-      {"int8_dp2", "compute_int8_dp2", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
-      {"int8_dp4", "compute_int8_dp4", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
-      {"int8_dp8", "compute_int8_dp8", rocm_kernels::compute_int8_dp_src, rocm_kernels::compute_int8_dp_name},
+      {"int8_dp", "compute_int8_dp", &rocm_kernels::compute_int8_dp},
+      {"int8_dp2", "compute_int8_dp2", &rocm_kernels::compute_int8_dp},
+      {"int8_dp4", "compute_int8_dp4", &rocm_kernels::compute_int8_dp},
+      {"int8_dp8", "compute_int8_dp8", &rocm_kernels::compute_int8_dp},
   };
   int A = 4;
   rocm_compute_desc_t d = {};

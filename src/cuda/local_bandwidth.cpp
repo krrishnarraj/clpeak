@@ -35,8 +35,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   for (const auto &v : vs)
   {
     CUfunction fn;
-    if (!dev.getKernel(cuda_kernels::local_bandwidth_src,
-                       cuda_kernels::local_bandwidth_name, v.kname, fn))
+    if (!dev.getKernel(cuda_kernels::local_bandwidth, v.kname, fn))
     {
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ')

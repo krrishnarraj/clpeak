@@ -21,9 +21,86 @@
 #include <cuda/cuda_peak.h>
 #include <cublasLt.h>
 #include <common/common.h>
+#include <common/dynlib.h>
 #include <chrono>
 #include <sstream>
 #include <vector>
+
+// ---------------------------------------------------------------------------
+// Optional cuBLASLt loader.  cuBLASLt is not part of the NVIDIA driver, so it
+// is resolved at run time; if absent the GEMM benchmark is skipped and the rest
+// of the CUDA backend still runs with just the driver.  Function-pointer types
+// are taken from the header via decltype (exact signatures), and macros redirect
+// the existing call sites to the loaded pointers -- so the body below is
+// unchanged.
+// ---------------------------------------------------------------------------
+namespace {
+struct CublasLtApi
+{
+  void *lib = nullptr;
+  decltype(&::cublasLtCreate)                       Create = nullptr;
+  decltype(&::cublasLtDestroy)                      Destroy = nullptr;
+  decltype(&::cublasLtMatmul)                       Matmul = nullptr;
+  decltype(&::cublasLtMatmulAlgoGetHeuristic)       AlgoGetHeuristic = nullptr;
+  decltype(&::cublasLtMatmulDescCreate)             DescCreate = nullptr;
+  decltype(&::cublasLtMatmulDescDestroy)            DescDestroy = nullptr;
+  decltype(&::cublasLtMatmulDescSetAttribute)       DescSetAttribute = nullptr;
+  decltype(&::cublasLtMatmulPreferenceCreate)       PrefCreate = nullptr;
+  decltype(&::cublasLtMatmulPreferenceDestroy)      PrefDestroy = nullptr;
+  decltype(&::cublasLtMatmulPreferenceSetAttribute) PrefSetAttribute = nullptr;
+  decltype(&::cublasLtMatrixLayoutCreate)           LayoutCreate = nullptr;
+  decltype(&::cublasLtMatrixLayoutDestroy)          LayoutDestroy = nullptr;
+  bool load();
+};
+CublasLtApi g_lt;
+bool CublasLtApi::load()
+{
+  if (lib)
+    return true;
+  lib = clpeak::dynOpen({"libcublasLt.so", "libcublasLt.so.13",
+                         "libcublasLt.so.12", "libcublasLt.so.11",
+                         "cublasLt64_13.dll", "cublasLt64_12.dll",
+                         "cublasLt64_11.dll"});
+  if (!lib)
+    return false;
+  bool ok = true;
+#define CLPEAK_LT_SYM(member, name)                                      \
+  member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+  ok = ok && (member != nullptr)
+  CLPEAK_LT_SYM(Create,           "cublasLtCreate");
+  CLPEAK_LT_SYM(Destroy,          "cublasLtDestroy");
+  CLPEAK_LT_SYM(Matmul,           "cublasLtMatmul");
+  CLPEAK_LT_SYM(AlgoGetHeuristic, "cublasLtMatmulAlgoGetHeuristic");
+  CLPEAK_LT_SYM(DescCreate,       "cublasLtMatmulDescCreate");
+  CLPEAK_LT_SYM(DescDestroy,      "cublasLtMatmulDescDestroy");
+  CLPEAK_LT_SYM(DescSetAttribute, "cublasLtMatmulDescSetAttribute");
+  CLPEAK_LT_SYM(PrefCreate,       "cublasLtMatmulPreferenceCreate");
+  CLPEAK_LT_SYM(PrefDestroy,      "cublasLtMatmulPreferenceDestroy");
+  CLPEAK_LT_SYM(PrefSetAttribute, "cublasLtMatmulPreferenceSetAttribute");
+  CLPEAK_LT_SYM(LayoutCreate,     "cublasLtMatrixLayoutCreate");
+  CLPEAK_LT_SYM(LayoutDestroy,    "cublasLtMatrixLayoutDestroy");
+#undef CLPEAK_LT_SYM
+  if (!ok)
+  {
+    clpeak::dynClose(lib);
+    lib = nullptr;
+  }
+  return ok;
+}
+} // namespace
+
+#define cublasLtCreate                       g_lt.Create
+#define cublasLtDestroy                      g_lt.Destroy
+#define cublasLtMatmul                       g_lt.Matmul
+#define cublasLtMatmulAlgoGetHeuristic       g_lt.AlgoGetHeuristic
+#define cublasLtMatmulDescCreate             g_lt.DescCreate
+#define cublasLtMatmulDescDestroy            g_lt.DescDestroy
+#define cublasLtMatmulDescSetAttribute       g_lt.DescSetAttribute
+#define cublasLtMatmulPreferenceCreate       g_lt.PrefCreate
+#define cublasLtMatmulPreferenceDestroy      g_lt.PrefDestroy
+#define cublasLtMatmulPreferenceSetAttribute g_lt.PrefSetAttribute
+#define cublasLtMatrixLayoutCreate           g_lt.LayoutCreate
+#define cublasLtMatrixLayoutDestroy          g_lt.LayoutDestroy
 
 namespace {
 
@@ -114,6 +191,18 @@ double timeCublasLt(cublasLtHandle_t lt, CUstream stream,
 int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category)
 {
     (void)cfg;
+
+    // cuBLASLt is an optional runtime dependency (not part of the driver).
+    if (!g_lt.load())
+    {
+        const bool isInt = category == Category::IntCompute;
+        auto t = currentDeviceScope->beginTest(
+            {isInt ? "cublas-int" : "cublas-fp", "cuBLASLt GEMM peak",
+             isInt ? "tops" : "tflops"});
+        t.skip(isInt ? "int8" : "fp32", ResultStatus::Unsupported,
+               "cuBLASLt library not found; GEMM skipped");
+        return 0;
+    }
 
     const uint32_t D = pickGemmDim(dev.info);
     const uint32_t M = D, N = D, K = D;

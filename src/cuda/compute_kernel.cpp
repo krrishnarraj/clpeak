@@ -34,16 +34,15 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   {
     const char *label;
     const char *kernelName;
-    const char *src;
-    const char *srcName;
+    const cuda_kernels::Blob *blob;
   };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
-                          d.variants[i].src, d.variants[i].srcName});
+                          d.variants[i].blob});
   else
-    variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName});
+    variants.push_back({d.metricLabel, d.kernelName, d.blob});
 
   // Scale to numSMs so high-SM parts (H100, B200, …) don't get under-saturated;
   // floor at 32M preserves behavior on small dev cards.  Clamp by VRAM below.
@@ -65,14 +64,10 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     return -1;
   }
 
-  std::vector<const char *> nvrtcOpts;
-  for (uint32_t i = 0; i < d.numExtraNvrtcOpts; i++)
-    nvrtcOpts.push_back(d.extraNvrtcOpts[i]);
-
   for (const auto &v : variants)
   {
     CUfunction fn;
-    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, nvrtcOpts))
+    if (!dev.getKernel(*v.blob, v.kernelName, fn))
     {
       test.skip(v.label, ResultStatus::Error, "compile/load failed");
       continue;

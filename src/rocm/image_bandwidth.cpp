@@ -74,8 +74,7 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   }
 
   hipFunction_t fn;
-  if (!dev.getKernel(rocm_kernels::image_bandwidth_src,
-                     rocm_kernels::image_bandwidth_name,
+  if (!dev.getKernel(rocm_kernels::image_bandwidth,
                      "image_bandwidth", fn))
   {
     (void)hipFree(outBuf);
