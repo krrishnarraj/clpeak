@@ -141,10 +141,13 @@ embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx1200;gfx1201"
 
 # rocWMMA library kernels (header-only templates, need C++17 + the rocWMMA
 # include).  Only buildable when the headers are present; otherwise emit stubs
-# (host code is #ifdef CLPEAK_ROCM_HAS_ROCWMMA gated and skips them).
+# (host code is #ifdef CLPEAK_ROCM_HAS_ROCWMMA gated and skips them).  rocWMMA in
+# ROCm 6.4 does not support gfx950 (its config.hpp hard-asserts on that arch), so
+# the rocWMMA arch set drops gfx950 even though the hand-rolled MFMA path covers it.
+set(CLPEAK_ROCM_ROCWMMA "gfx908;gfx90a;gfx942;${CLPEAK_ROCM_RDNAW}")
 if(CLPEAK_ROCWMMA_FOUND)
   embed_rocm_kernels(TARGET peak_rocm
-      ARCHS "${CLPEAK_ROCM_CDNA};${CLPEAK_ROCM_RDNAW}" CXX17 ROCWMMA
+      ARCHS "${CLPEAK_ROCM_ROCWMMA}" CXX17 ROCWMMA
       KERNELS rocwmma_fp16 rocwmma_int8)
 else()
   embed_rocm_kernels(TARGET peak_rocm ARCHS "" KERNELS rocwmma_fp16 rocwmma_int8)

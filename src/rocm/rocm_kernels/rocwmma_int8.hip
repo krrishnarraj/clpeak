@@ -8,7 +8,10 @@ extern "C" __global__ void rocwmma_int8(int *out)
 {
     constexpr int M = 16;
     constexpr int N = 16;
-    constexpr int K = 16;
+    // int8 needs BlockK >= the arch minimum: CDNA3 (gfx942/950) requires K=32,
+    // while CDNA1/2 and RDNA3+ accept K>=16.  K=32 satisfies all of them, so the
+    // one kernel builds across every rocWMMA-supported arch.
+    constexpr int K = 32;
 
     using FragA = rocwmma::fragment<rocwmma::matrix_a, M, N, K,
                                     int8_t, rocwmma::row_major>;

@@ -8,7 +8,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   const bool isInt = category == Category::IntCompute;
   auto test = currentDeviceScope->beginTest(
     {isInt ? "rocwmma-int" : "rocwmma-fp",
-     isInt ? "rocWMMA int8xint8+int32 16x16x16"
+     isInt ? "rocWMMA int8xint8+int32 16x16x32"
            : "rocWMMA fp16xfp16+fp32 16x16x16",
      isInt ? "tops" : "tflops"});
 
@@ -30,7 +30,8 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
 
   constexpr uint32_t M = 16;
   constexpr uint32_t N = 16;
-  constexpr uint32_t K = 16;
+  // Must match the kernels: int8 uses BlockK=32 (CDNA3 minimum), fp16 uses 16.
+  const uint32_t K = isInt ? 32u : 16u;
   constexpr uint32_t Iters = 256;
   uint64_t wantBlocks = globalThreads / blockSize;
   uint64_t bytesPerBlock = (uint64_t)M * N * sizeof(float);
