@@ -109,8 +109,6 @@ jobs:
       - name: Install CUDA Toolkit
         if: matrix.cuda
         uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: "12.8.0"
 
       # ROCm SDK (HIP runtime + hipcc + rocBLAS + hipBLASLt + rocWMMA): install
       # only for ROCm-enabled matrix entries.  ROCm 6.4 on Ubuntu 24.04 (noble)
