@@ -166,13 +166,28 @@ jobs:
         shell: bash
         run: ${{ matrix.binary }}
 
-      # CUDA / ROCm binaries: no NVIDIA / AMD GPU on the runner, so launch may
-      # fail (CUDA hard-needs the driver's libcuda.so.1, which is absent without
-      # a GPU) -- expected and ignored.
+      # ROCm: HIP runtime is on the system loader path, so the binary loads and
+      # reports "no device" (no AMD GPU on the runner).  Failure ignored.
       - name: Run (allow failure)
-        if: ${{ matrix.cuda || matrix.rocm }}
+        if: matrix.rocm
         shell: bash
         run: ${{ matrix.binary }} || true
+
+      # CUDA: the runner has no GPU, so the real driver's libcuda.so.1 is absent.
+      # The toolkit ships a stub libcuda.so (link-time placeholder) -- expose it
+      # as libcuda.so.1 on LD_LIBRARY_PATH so the binary loads and exercises the
+      # graceful no-device path (cuInit returns CUDA_ERROR_STUB_LIBRARY) instead
+      # of dying in the loader.  Failure is still ignored.
+      - name: Run (CUDA, allow failure)
+        if: matrix.cuda
+        shell: bash
+        run: |
+          stubs="${CUDA_PATH}/lib64/stubs"
+          if [ -f "$stubs/libcuda.so" ] && [ ! -e "$stubs/libcuda.so.1" ]; then
+            ln -s libcuda.so "$stubs/libcuda.so.1"
+          fi
+          export LD_LIBRARY_PATH="$stubs:${LD_LIBRARY_PATH}"
+          ${{ matrix.binary }} || true
 
       # oneAPI: the SYCL/OpenCL runtime libs live in the oneAPI install dir, so
       # source setvars.sh to put them on LD_LIBRARY_PATH (the build step does the
