@@ -70,6 +70,13 @@ jobs:
             suffix: cuda
             cuda: true
 
+          - name: Windows x64 CUDA
+            runner: windows-latest
+            artifact: clpeak-windows-x86_64-cuda
+            binary: build/Release/clpeak.exe
+            suffix: cuda
+            cuda: true
+
           - name: Linux x64 ROCm
             runner: ubuntu-24.04
             artifact: clpeak-linux-x86_64-rocm
@@ -165,8 +172,12 @@ jobs:
       # as libcuda.so.1 on LD_LIBRARY_PATH so the binary loads and exercises the
       # graceful no-device path (cuInit returns CUDA_ERROR_STUB_LIBRARY) instead
       # of dying in the loader.
+      # Linux only: the stub libcuda.so trick is Linux-specific.  On the GPU-less
+      # Windows runner the driver (nvcuda.dll, linked via CUDA::cuda_driver) is
+      # absent and the toolkit ships no stub, so the binary can't load -- that
+      # job just builds + packages, exercising the AOT fatbin compile path.
       - name: Run CUDA
-        if: matrix.cuda
+        if: ${{ matrix.cuda && runner.os == 'Linux' }}
         shell: bash
         run: |
           # The toolkit stubs dir is root-owned, so symlink into a writable temp
