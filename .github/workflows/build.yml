@@ -173,11 +173,14 @@ jobs:
         if: matrix.cuda
         shell: bash
         run: |
-          stubs="${CUDA_PATH}/lib64/stubs"
-          if [ -f "$stubs/libcuda.so" ] && [ ! -e "$stubs/libcuda.so.1" ]; then
-            ln -s libcuda.so "$stubs/libcuda.so.1"
-          fi
-          export LD_LIBRARY_PATH="$stubs:${LD_LIBRARY_PATH}"
+          # The toolkit stubs dir is root-owned, so symlink into a writable temp
+          # dir (libcuda.so -> libcuda.so.1, the SONAME the binary needs) and put
+          # that on LD_LIBRARY_PATH rather than mutating the toolkit.
+          stub="${CUDA_PATH}/lib64/stubs/libcuda.so"
+          link_dir="${RUNNER_TEMP}/cuda-stub"
+          mkdir -p "$link_dir"
+          [ -f "$stub" ] && ln -sf "$stub" "$link_dir/libcuda.so.1"
+          export LD_LIBRARY_PATH="$link_dir:${LD_LIBRARY_PATH}"
           ${{ matrix.binary }} || true
 
       # oneAPI: the SYCL/OpenCL runtime libs live in the oneAPI install dir, so
