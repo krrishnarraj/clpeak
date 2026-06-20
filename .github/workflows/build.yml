@@ -63,6 +63,13 @@ jobs:
             suffix: cuda
             cuda: true
 
+          - name: Linux arm64 CUDA
+            runner: ubuntu-24.04-arm
+            artifact: clpeak-linux-arm64-cuda
+            binary: build/clpeak
+            suffix: cuda
+            cuda: true
+
           - name: Linux x64 ROCm
             runner: ubuntu-24.04
             artifact: clpeak-linux-x86_64-rocm
@@ -103,18 +110,10 @@ jobs:
           install_runtime: true
           cache: true
 
-      # CUDA Toolkit: install only for CUDA-enabled matrix entries.  Pin to a
-      # Blackwell-capable toolkit (12.8+) so nvcc can target sm_100/sm_120 and
-      # the fp4/mxfp4 fatbins are built rather than stubbed.
       - name: Install CUDA Toolkit
         if: matrix.cuda
         uses: Jimver/cuda-toolkit@v0.2.35
 
-      # ROCm SDK (HIP runtime + hipcc + rocBLAS + hipBLASLt + rocWMMA): install
-      # only for ROCm-enabled matrix entries.  ROCm 6.4 on Ubuntu 24.04 (noble)
-      # covers gfx950 / gfx12 (RDNA4) so the AOT code objects target current
-      # GPUs.  The runner image has no AMD GPU, so the built binary will not
-      # execute the ROCm backend here; this job exercises the AOT compile path.
       - name: Install ROCm
         if: matrix.rocm
         run: |
@@ -129,9 +128,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             rocm-hip-runtime-dev hipcc rocblas-dev hipblaslt-dev rocwmma-dev
 
-      # Intel oneAPI Base Toolkit: DPC++ compiler (icpx) + oneMKL.  Same
-      # caveat as ROCm above — the runner has no Intel GPU, so the resulting
-      # binary will skip the oneAPI backend at run time.
       - name: Install Intel oneAPI
         if: matrix.oneapi
         run: |
