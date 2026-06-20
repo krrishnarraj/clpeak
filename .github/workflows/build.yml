@@ -143,17 +143,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             intel-oneapi-compiler-dpcpp-cpp intel-oneapi-mkl-devel
 
-      - name: Configure CMake
+      - name: Configure CMake & Build
         if: ${{ !matrix.oneapi }}
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
-
-      - name: Build
-        if: ${{ !matrix.oneapi }}
-        run: cmake --build build --config Release -j4
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake --build build --config Release -j4
 
       # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
       # source it before invoking cmake/build so IntelSYCL can be located.
-      - name: Configure & Build (oneAPI)
+      - name: Configure Cmake & Build oneAPI
         if: matrix.oneapi
         shell: bash
         run: |
@@ -162,23 +160,16 @@ jobs:
           cmake --build build --config Release -j4
 
       - name: Run
-        if: ${{ !matrix.cuda && !matrix.rocm && !matrix.oneapi }}
+        if: ${{ !matrix.cuda && !matrix.oneapi }}
         shell: bash
         run: ${{ matrix.binary }}
-
-      # ROCm: HIP runtime is on the system loader path, so the binary loads and
-      # reports "no device" (no AMD GPU on the runner).  Failure ignored.
-      - name: Run (allow failure)
-        if: matrix.rocm
-        shell: bash
-        run: ${{ matrix.binary }} || true
 
       # CUDA: the runner has no GPU, so the real driver's libcuda.so.1 is absent.
       # The toolkit ships a stub libcuda.so (link-time placeholder) -- expose it
       # as libcuda.so.1 on LD_LIBRARY_PATH so the binary loads and exercises the
       # graceful no-device path (cuInit returns CUDA_ERROR_STUB_LIBRARY) instead
-      # of dying in the loader.  Failure is still ignored.
-      - name: Run (CUDA, allow failure)
+      # of dying in the loader.
+      - name: Run CUDA
         if: matrix.cuda
         shell: bash
         run: |
@@ -192,8 +183,8 @@ jobs:
       # oneAPI: the SYCL/OpenCL runtime libs live in the oneAPI install dir, so
       # source setvars.sh to put them on LD_LIBRARY_PATH (the build step does the
       # same).  Without it the loader can't find libOpenCL.so.1 and the binary
-      # dies before main().  No Intel GPU on the runner, so failure is ignored.
-      - name: Run (oneAPI, allow failure)
+      # dies before main().
+      - name: Run oneAPI
         if: matrix.oneapi
         shell: bash
         run: |
@@ -215,10 +206,10 @@ jobs:
           path: build/clpeak-*.zip
 
   # ---------------------------------------------------------------------------
-  # Android APK
+  # Android
   # ---------------------------------------------------------------------------
   build-android:
-    name: Android APK
+    name: Android
     runs-on: ubuntu-latest
 
     steps:
@@ -259,10 +250,10 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
 
   # ---------------------------------------------------------------------------
-  # iOS app
+  # iOS
   # ---------------------------------------------------------------------------
   build-ios:
-    name: iOS App
+    name: iOS
     runs-on: macos-latest
 
     steps:
@@ -281,13 +272,13 @@ jobs:
         run: cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS
 
       - name: Build (iOS device)
-        run: cmake --build ios/build --config Debug --target clpeak_ios -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+        run: cmake --build ios/build --config Release --target clpeak_ios -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: clpeak-ios-app
-          path: ios/build/Debug-iphoneos/clpeak_ios.app
+          path: ios/build/Release-iphoneos/clpeak_ios.app
 
   # ---------------------------------------------------------------------------
   # GitHub Release — attach binaries on tag push
