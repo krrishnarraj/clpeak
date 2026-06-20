@@ -267,43 +267,10 @@ endforeach()
 message(STATUS "===============================================================")
 message(STATUS "")
 
-# Install the binary + license at the package root so the release zip's
-# top-level folder holds them directly (not under bin/).  Bundled runtime libs
-# (below) land beside the binary; RPATH $ORIGIN lets them resolve there.
-if(APPLE)
-  set_target_properties(clpeak PROPERTIES INSTALL_RPATH "@loader_path")
-elseif(NOT WIN32)
-  set_target_properties(clpeak PROPERTIES INSTALL_RPATH "$ORIGIN")
-endif()
 install(TARGETS clpeak RUNTIME DESTINATION .)
 install(FILES LICENSE DESTINATION .)
 enable_testing()
 add_test(clpeak_test_run clpeak)
-
-# Best-effort bundling of the optional GEMM / SYCL runtime libraries next to the
-# binary so the release zip works out of the box.  These are loaded at run time
-# (dlopen / SYCL runtime); if a glob finds nothing the install is a no-op and the
-# benchmark simply skips that path.  OPTIONAL guards missing files.
-if(CLPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
-  file(GLOB _clpeak_cuda_redist
-    "${CUDAToolkit_LIBRARY_DIR}/libcublasLt.so*"
-    "${CUDAToolkit_BIN_DIR}/cublasLt64_*.dll")
-  install(FILES ${_clpeak_cuda_redist} DESTINATION . OPTIONAL)
-endif()
-if(CLPEAK_ENABLE_ROCM AND hip_FOUND)
-  file(GLOB _clpeak_rocm_redist
-    "/opt/rocm/lib/librocblas.so*"
-    "/opt/rocm/lib/libhipblaslt.so*")
-  install(FILES ${_clpeak_rocm_redist} DESTINATION . OPTIONAL)
-endif()
-if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND)
-  get_filename_component(_clpeak_icx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-  file(GLOB _clpeak_sycl_redist
-    "${_clpeak_icx_dir}/../lib/libsycl.so*"
-    "${_clpeak_icx_dir}/../lib/libur_*.so*"
-    "${_clpeak_icx_dir}/libsycl*.dll")
-  install(FILES ${_clpeak_sycl_redist} DESTINATION . OPTIONAL)
-endif()
 
 # --- CPack: self-contained, clearly-named zip per build --------------------
 # Name: clpeak-<version>-<os>-<arch>[-<backend>], e.g.
