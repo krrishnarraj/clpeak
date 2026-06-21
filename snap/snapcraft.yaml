@@ -28,6 +28,7 @@ parts:
     plugin: cmake
     build-packages:
       - build-essential
+      - clang
       - git
       - cmake
       - libvulkan-dev
