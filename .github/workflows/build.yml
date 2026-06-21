@@ -4,11 +4,15 @@ on:
   push:
     paths-ignore:
       - 'results/**'
+      - 'snap/**'
+      - 'packaging/**'
     branches: [master, main]
     tags: ["*"]
   pull_request:
     paths-ignore:
         - 'results/**'
+        - 'snap/**'
+        - 'packaging/**'
     branches: [master, main]
   workflow_dispatch:
 
