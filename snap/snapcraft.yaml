@@ -20,7 +20,7 @@ confinement: classic
 
 apps:
   clpeak:
-    command: usr/local/bin/clpeak
+    command: usr/local/clpeak
 
 parts:
   clpeak:
