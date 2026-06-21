@@ -26,6 +26,8 @@ parts:
   clpeak:
     source: .
     plugin: cmake
+    build-attributes:
+      - enable-patchelf
     build-packages:
       - build-essential
       - git
