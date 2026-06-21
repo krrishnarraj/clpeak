@@ -119,7 +119,7 @@ jobs:
 
       - name: Install CUDA Toolkit
         if: matrix.cuda
-        uses: Jimver/cuda-toolkit@v0.2.35
+        uses: Jimver/cuda-toolkit@master
 
       - name: Install ROCm
         if: matrix.rocm
@@ -127,7 +127,7 @@ jobs:
           sudo mkdir --parents --mode=0755 /etc/apt/keyrings
           wget -O- https://repo.radeon.com/rocm/rocm.gpg.key \
             | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.4 noble main" \
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest noble main" \
             | sudo tee /etc/apt/sources.list.d/rocm.list
           echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" \
             | sudo tee /etc/apt/preferences.d/rocm-pin-600
