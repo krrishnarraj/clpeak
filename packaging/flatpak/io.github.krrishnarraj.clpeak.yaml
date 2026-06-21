@@ -22,6 +22,15 @@ runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
 command: clpeak
 
+# Build-time only: clpeak's CMake auto-prefers clang over gcc for the CPU
+# backend (GCC<=14 serialises the FMA accumulator chains, ~halving fp32/fp64);
+# see the find_program(clang) block at the top of CMakeLists.txt.  The base SDK
+# only ships gcc, so pull in the LLVM SDK extension and put it on PATH for the
+# clpeak module (below).  llvm19 is the 24.08-branch extension; bump it together
+# with runtime-version.
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.llvm19
+
 finish-args:
   - --device=dri          # GPU access for Vulkan / OpenCL
   - --share=ipc           # required alongside DRI on some drivers
@@ -94,6 +103,11 @@ modules:
   # --- clpeak ------------------------------------------------------------
   - name: clpeak
     buildsystem: cmake-ninja
+    # Put the LLVM extension's clang on PATH so CMake's find_program(clang)
+    # picks it over the SDK's gcc for the CPU-backend codegen.
+    build-options:
+      append-path: /usr/lib/sdk/llvm19/bin
+      prepend-ld-library-path: /usr/lib/sdk/llvm19/lib
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
     # The in-tree `install(TARGETS clpeak RUNTIME DESTINATION .)` rule lands the
