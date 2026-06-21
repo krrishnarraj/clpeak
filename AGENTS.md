@@ -46,6 +46,8 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `android/` | Android app (Vulkan, OpenCL, CPU) with JNI native module, its own `logger_android.cpp` |
 | `ios/` | iOS SwiftUI app with Vulkan-over-MoltenVK, Metal, and CPU backends |
+| `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
+| `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 
 ## Build
 

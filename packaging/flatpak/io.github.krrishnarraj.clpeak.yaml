@@ -1,0 +1,117 @@
+# Flatpak manifest for clpeak — Flathub submission.
+#
+# Scope: only the backends that can work inside the org.freedesktop sandbox are
+# enabled — Vulkan, OpenCL, and the native CPU backend.  CUDA / ROCm / oneAPI
+# need vendor toolkits + proprietary drivers that Flathub cannot ship, and Metal
+# is macOS-only; those builds remain available via the GitHub release zips.
+#
+# Build chain provided by helper modules:
+#   * shaderc        -> provides `glslc`, used at build time to compile the
+#                       Vulkan GLSL compute shaders to SPIR-V
+#                       (src/vulkan/cmake/CompileShaders.cmake hard-requires it).
+#   * OpenCL-Headers + OpenCL-ICD-Loader -> link target for find_package(OpenCL).
+#
+# Local build / test:
+#   flatpak install flathub org.freedesktop.Sdk//24.08 org.freedesktop.Platform//24.08
+#   flatpak run org.flatpak.Builder --force-clean --user --install \
+#       build-dir packaging/flatpak/io.github.krrishnarraj.clpeak.yaml
+#   flatpak run io.github.krrishnarraj.clpeak --list-devices
+id: io.github.krrishnarraj.clpeak
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: clpeak
+
+finish-args:
+  - --device=dri          # GPU access for Vulkan / OpenCL
+  - --share=ipc           # required alongside DRI on some drivers
+  # The host NVIDIA Vulkan/GL driver is auto-mounted by Flatpak as a GL
+  # extension; no extra arg needed.
+
+modules:
+  # --- glslc (shaderc) ---------------------------------------------------
+  # Flathub builds offline, so shaderc's third-party deps are vendored into
+  # third_party/ at the exact revisions pinned by shaderc's DEPS file
+  # (v2026.2).  Tests/examples are skipped, so the test-only deps (effcee,
+  # re2, abseil, googletest) are not required.
+  - name: shaderc
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSHADERC_SKIP_TESTS=ON
+      - -DSHADERC_SKIP_EXAMPLES=ON
+      - -DSHADERC_SKIP_COPYRIGHT_CHECK=ON
+      - -DSPIRV_SKIP_EXECUTABLES=ON
+      - -DENABLE_GLSLANG_BINARIES=OFF
+    cleanup:
+      - /bin
+      - /include
+      - /lib/cmake
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/google/shaderc.git
+        tag: v2026.2
+        commit: baec0c74d6dca70c52d937e2e5bf6ffcd449e430
+      - type: git
+        url: https://github.com/KhronosGroup/glslang.git
+        commit: 5ed4003a18a10a9d1bd7e43aaf1664499abffa83
+        dest: third_party/glslang
+      - type: git
+        url: https://github.com/KhronosGroup/SPIRV-Tools.git
+        commit: c1cb30bb04e2bf911755a40df1242cc6e3d83e26
+        dest: third_party/spirv-tools
+      - type: git
+        url: https://github.com/KhronosGroup/SPIRV-Headers.git
+        commit: ad9184e76a66b1001c29db9b0a3e87f646c64de0
+        dest: third_party/spirv-headers
+
+  # --- OpenCL loader + headers (link target for find_package(OpenCL)) -----
+  - name: opencl-headers
+    buildsystem: cmake-ninja
+    cleanup:
+      - '*'
+    sources:
+      - type: git
+        url: https://github.com/KhronosGroup/OpenCL-Headers.git
+        tag: v2026.05.29
+        commit: 657b6d0f74eff94f31e567ab1f67159b0997048a
+
+  - name: opencl-icd-loader
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    cleanup:
+      - /include
+      - /lib/cmake
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/KhronosGroup/OpenCL-ICD-Loader.git
+        tag: v2026.05.29
+        commit: 9417a37f3b8cbf2421560724bae452d53ef01a31
+
+  # --- clpeak ------------------------------------------------------------
+  - name: clpeak
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    # The in-tree `install(TARGETS clpeak RUNTIME DESTINATION .)` rule lands the
+    # binary at /app/clpeak and LICENSE at /app/LICENSE (kept flat for the
+    # release zips).  Relocate to the FHS layout Flatpak expects.
+    post-install:
+      - install -Dm755 /app/clpeak /app/bin/clpeak
+      - rm -f /app/clpeak
+      - install -Dm644 /app/LICENSE /app/share/licenses/io.github.krrishnarraj.clpeak/LICENSE
+      - rm -f /app/LICENSE
+      - install -Dm644 io.github.krrishnarraj.clpeak.metainfo.xml
+          /app/share/metainfo/io.github.krrishnarraj.clpeak.metainfo.xml
+    sources:
+      - type: git
+        url: https://github.com/krrishnarraj/clpeak.git
+        tag: '2.0.13'
+        commit: fc0325cb1860f6eea5da6802c39393578b91a79d
+      # The MetaInfo ships in the Flathub submission repo next to this manifest
+      # (tag 2.0.13 predates it), so it is pulled in as a separate file source.
+      - type: file
+        path: io.github.krrishnarraj.clpeak.metainfo.xml
