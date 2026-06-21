@@ -53,7 +53,6 @@ struct cuda_device_info_t {
                                  // dropped on sm_90+ (Hopper) where the s4 imma
                                  // path was removed.
   bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
-  bool bmmaSupported;            // cc >= 7.5 (Turing) -- b1 XOR-popc bmma
 };
 
 // One CUDA device + the bookkeeping needed to launch kernels through the
@@ -217,7 +216,6 @@ namespace cuda_kernels {
   extern const Blob wmma_tf32;
   extern const Blob wmma_fp64;
   extern const Blob wmma_int4;
-  extern const Blob wmma_bmma_b1;
   extern const Blob local_bandwidth;
   extern const Blob image_bandwidth;
 }

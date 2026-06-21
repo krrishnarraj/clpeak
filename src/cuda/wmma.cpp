@@ -348,27 +348,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.skipMsg = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
     runComputeKernel(dev, cfg, d);
   }
-  // BMMA b1 mma.sync m8n8k128 (XOR-popc) -- sm_75+
-  {
-    int A = 3;
-    cuda_compute_desc_t d = {};
-    d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc";
-    d.resultTag = "wmma_bmma_b1";
-    d.unit = "tops";
-    d.unitDivider = 1e12;
-    d.metricLabel = "bmma_b1";
-    d.kernelName = "wmma_bmma_b1";
-    d.blob = &cuda_kernels::wmma_bmma_b1;
-    d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 256 outer * 4 chains * 8*8*128*2 / 32
-    d.elemSize = sizeof(int);
-    d.blockSize = warp;
-    d.outElemsPerBlock = 8 * 8;
-    d.scalarArg = &A;
-    d.scalarSize = sizeof(A);
-    d.skip = !dev.info.wmmaSupported || !dev.info.bmmaSupported;
-    d.skipMsg = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
-    runComputeKernel(dev, cfg, d);
-  }
 
   return 0;
 }

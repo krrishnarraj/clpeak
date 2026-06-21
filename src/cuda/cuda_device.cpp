@@ -96,7 +96,6 @@ bool CudaDevice::init(int devIndex)
     int cc = info.major * 10 + info.minor;
     info.int4MmaSupported = (cc >= 75) && (cc <= 89);
   }
-  info.bmmaSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int8MmaSparseSupported = (info.major >= 8);
 
   info.deviceType = DeviceType::Gpu;   // CUDA devices are always GPUs

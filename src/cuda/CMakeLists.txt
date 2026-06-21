@@ -75,10 +75,6 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 72
     KERNELS wmma_int8)
 
-# Binary (b1 XOR-popc) bmma -- sm_75+.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75
-    KERNELS wmma_bmma_b1)
-
 # INT4 mma.sync -- sm_75..sm_89 only (removed on Hopper+).
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89
     KERNELS wmma_int4)

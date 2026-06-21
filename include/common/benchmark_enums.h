@@ -30,7 +30,6 @@ enum class Benchmark : unsigned int {
     ComputeBF16,
     CoopMatrix,
     Wmma,
-    Bmma,
     SimdgroupMatrix,
     MpsGemm,
     Cublas,
@@ -93,7 +92,6 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
-    case Benchmark::Bmma:
         return Category::IntCompute;
 
     case Benchmark::KernelLatency:
