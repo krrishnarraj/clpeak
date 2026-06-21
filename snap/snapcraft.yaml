@@ -26,14 +26,10 @@ parts:
   clpeak:
     source: .
     plugin: cmake
-    build-attributes:
-      - enable-patchelf
     build-packages:
       - build-essential
       - git
       - cmake
-      - ocl-icd-opencl-dev
-      - opencl-headers
       - libvulkan-dev
       - glslang-tools
       - spirv-tools
@@ -42,6 +38,3 @@ parts:
       craftctl default
       version=$(git describe --tags --abbrev=0)
       craftctl set version="$version"
-    stage-packages:
-      - ocl-icd-libopencl1
-      - libvulkan1
