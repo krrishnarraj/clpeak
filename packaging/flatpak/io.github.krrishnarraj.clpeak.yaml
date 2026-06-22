@@ -110,6 +110,9 @@ modules:
       prepend-ld-library-path: /usr/lib/sdk/llvm19/lib
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
+      - -DCLPEAK_ENABLE_CUDA=OFF
+      - -DCLPEAK_ENABLE_ROCM=OFF
+      - -DCLPEAK_ENABLE_ONEAPI=OFF
     # The in-tree `install(TARGETS clpeak RUNTIME DESTINATION .)` rule lands the
     # binary at /app/clpeak and LICENSE at /app/LICENSE (kept flat for the
     # release zips).  Relocate to the FHS layout Flatpak expects.
