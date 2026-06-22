@@ -48,6 +48,7 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `ios/` | iOS SwiftUI app with Vulkan-over-MoltenVK, Metal, and CPU backends |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
+| `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
 
 ## Build
 
