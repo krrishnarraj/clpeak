@@ -8,9 +8,9 @@ int RocmPeak::runComputeSP(RocmDevice &dev, benchmark_config_t &cfg)
   // Native HIP SDK vector widths: float, float2, float4 (hip_vector_types.h
   // has no float8/float16). Each variant does the same 4096 flops/thread.
   static const rocm_compute_variant_t variants[] = {
-      {"float", "compute_sp", rocm_kernels::compute_sp_src, rocm_kernels::compute_sp_name},
-      {"float2", "compute_sp_v2", rocm_kernels::compute_sp_src, rocm_kernels::compute_sp_name},
-      {"float4", "compute_sp_v4", rocm_kernels::compute_sp_src, rocm_kernels::compute_sp_name},
+      {"float", "compute_sp", &rocm_kernels::compute_sp},
+      {"float2", "compute_sp_v2", &rocm_kernels::compute_sp},
+      {"float4", "compute_sp_v4", &rocm_kernels::compute_sp},
   };
   float A = 1.3f;
   rocm_compute_desc_t d = {};
@@ -29,8 +29,8 @@ int RocmPeak::runComputeSP(RocmDevice &dev, benchmark_config_t &cfg)
 int RocmPeak::runComputeHP(RocmDevice &dev, benchmark_config_t &cfg)
 {
   static const rocm_compute_variant_t variants[] = {
-      {"half", "compute_hp", rocm_kernels::compute_hp_src, rocm_kernels::compute_hp_name},
-      {"half2", "compute_hp2", rocm_kernels::compute_hp_src, rocm_kernels::compute_hp_name},
+      {"half", "compute_hp", &rocm_kernels::compute_hp},
+      {"half2", "compute_hp2", &rocm_kernels::compute_hp},
   };
   float A = 1.3f;
   rocm_compute_desc_t d = {};
@@ -53,9 +53,9 @@ int RocmPeak::runComputeDP(RocmDevice &dev, benchmark_config_t &cfg)
   // Native HIP SDK vector widths: double, double2, double4. Each variant does
   // the same 512 flops/thread (loop count divided by the vector width).
   static const rocm_compute_variant_t variants[] = {
-      {"double", "compute_dp", rocm_kernels::compute_dp_src, rocm_kernels::compute_dp_name},
-      {"double2", "compute_dp_v2", rocm_kernels::compute_dp_src, rocm_kernels::compute_dp_name},
-      {"double4", "compute_dp_v4", rocm_kernels::compute_dp_src, rocm_kernels::compute_dp_name},
+      {"double", "compute_dp", &rocm_kernels::compute_dp},
+      {"double2", "compute_dp_v2", &rocm_kernels::compute_dp},
+      {"double4", "compute_dp_v4", &rocm_kernels::compute_dp},
   };
   double A = 1.3;
   rocm_compute_desc_t d = {};
@@ -80,8 +80,7 @@ int RocmPeak::runComputeMP(RocmDevice &dev, benchmark_config_t &cfg)
   d.unit = "gflops";
   d.metricLabel = "mp";
   d.kernelName = "compute_mp";
-  d.src = rocm_kernels::compute_mp_src;
-  d.srcName = rocm_kernels::compute_mp_name;
+  d.blob = &rocm_kernels::compute_mp;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(float);
   d.scalarArg = &A;
@@ -100,8 +99,7 @@ int RocmPeak::runComputeBF16(RocmDevice &dev, benchmark_config_t &cfg)
   d.unit = "gflops";
   d.metricLabel = "bf16";
   d.kernelName = "compute_bf16";
-  d.src = rocm_kernels::compute_bf16_src;
-  d.srcName = rocm_kernels::compute_bf16_name;
+  d.blob = &rocm_kernels::compute_bf16;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
   d.elemSize = sizeof(float);
   d.scalarArg = &A;

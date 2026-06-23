@@ -28,16 +28,15 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
   {
     const char *label;
     const char *kernelName;
-    const char *src;
-    const char *srcName;
+    const rocm_kernels::Blob *blob;
   };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
-                          d.variants[i].src, d.variants[i].srcName});
+                          d.variants[i].blob});
   else
-    variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName});
+    variants.push_back({d.metricLabel, d.kernelName, d.blob});
 
   const uint32_t blockSize = d.blockSize ? d.blockSize : 256;
   const uint32_t outPerBlock = d.outElemsPerBlock ? d.outElemsPerBlock : blockSize;
@@ -59,14 +58,10 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     return -1;
   }
 
-  std::vector<const char *> hiprtcOpts;
-  for (uint32_t i = 0; i < d.numExtraHiprtcOpts; i++)
-    hiprtcOpts.push_back(d.extraHiprtcOpts[i]);
-
   for (const auto &v : variants)
   {
     hipFunction_t fn;
-    if (!dev.getKernel(v.src, v.srcName, v.kernelName, fn, hiprtcOpts))
+    if (!dev.getKernel(*v.blob, v.kernelName, fn))
     {
       test.skip(v.label, ResultStatus::Error, "compile/load failed");
       continue;

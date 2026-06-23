@@ -2,8 +2,6 @@
 
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
-#include <cstdio>
-#include <sstream>
 
 // ---------------------------------------------------------------------------
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
@@ -33,8 +31,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_fp16";
       d.kernelName = "wmma_fp16";
-      d.src = cuda_kernels::wmma_fp16_src;
-      d.srcName = cuda_kernels::wmma_fp16_name;
+      d.blob = &cuda_kernels::wmma_fp16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -55,8 +52,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_bf16";
       d.kernelName = "wmma_bf16";
-      d.src = cuda_kernels::wmma_bf16_src;
-      d.srcName = cuda_kernels::wmma_bf16_name;
+      d.blob = &cuda_kernels::wmma_bf16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4;
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -77,8 +73,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_tf32";
       d.kernelName = "wmma_tf32";
-      d.src = cuda_kernels::wmma_tf32_src;
-      d.srcName = cuda_kernels::wmma_tf32_name;
+      d.blob = &cuda_kernels::wmma_tf32;
       d.workPerWI = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -99,8 +94,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_fp64";
       d.kernelName = "wmma_fp64";
-      d.src = cuda_kernels::wmma_fp64_src;
-      d.srcName = cuda_kernels::wmma_fp64_name;
+      d.blob = &cuda_kernels::wmma_fp64;
       d.workPerWI = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
       d.elemSize = sizeof(double);
       d.blockSize = warp;
@@ -121,8 +115,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "fp8_e4m3";
       d.kernelName = "wmma_fp8_e4m3";
-      d.src = cuda_kernels::wmma_fp8_e4m3_src;
-      d.srcName = cuda_kernels::wmma_fp8_e4m3_name;
+      d.blob = &cuda_kernels::wmma_fp8_e4m3;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -143,8 +136,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "fp8_e5m2";
       d.kernelName = "wmma_fp8_e5m2";
-      d.src = cuda_kernels::wmma_fp8_e5m2_src;
-      d.srcName = cuda_kernels::wmma_fp8_e5m2_name;
+      d.blob = &cuda_kernels::wmma_fp8_e5m2;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8;
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -158,10 +150,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     // FP4 mma.sync E2M1 (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;
-      std::stringstream archOpt;
-      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
-      std::string archOptStr = archOpt.str();
-      const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
       d.title = "FP4(E2M1) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp4_e2m1";
@@ -169,8 +157,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "fp4_e2m1";
       d.kernelName = "wmma_fp4_e2m1";
-      d.src = cuda_kernels::wmma_fp4_e2m1_src;
-      d.srcName = cuda_kernels::wmma_fp4_e2m1_name;
+      d.blob = &cuda_kernels::wmma_fp4_e2m1;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8;
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -179,17 +166,11 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
       d.skipMsg = "FP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
-      d.extraNvrtcOpts = fp4Opts;
-      d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
     // MXFP4 mma.sync E2M1 + UE8M0 block scale (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;
-      std::stringstream archOpt;
-      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
-      std::string archOptStr = archOpt.str();
-      const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
       d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32";
       d.resultTag = "wmma_mxf4_e2m1";
@@ -197,8 +178,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "mxf4_e2m1";
       d.kernelName = "wmma_mxf4_e2m1";
-      d.src = cuda_kernels::wmma_mxf4_e2m1_src;
-      d.srcName = cuda_kernels::wmma_mxf4_e2m1_name;
+      d.blob = &cuda_kernels::wmma_mxf4_e2m1;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16;
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -207,17 +187,11 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
       d.skipMsg = "MXFP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
-      d.extraNvrtcOpts = fp4Opts;
-      d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
     // NVFP4 mma.sync E2M1 + UE4M3 block scale (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;
-      std::stringstream archOpt;
-      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
-      std::string archOptStr = archOpt.str();
-      const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
       d.title = "NVFP4(E2M1) mma.sync m16n8k64+fp32";
       d.resultTag = "wmma_nvf4_e2m1";
@@ -225,8 +199,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "nvf4_e2m1";
       d.kernelName = "wmma_nvf4_e2m1";
-      d.src = cuda_kernels::wmma_nvf4_e2m1_src;
-      d.srcName = cuda_kernels::wmma_nvf4_e2m1_name;
+      d.blob = &cuda_kernels::wmma_nvf4_e2m1;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16;
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -235,17 +208,11 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSupported;
       d.skipMsg = "NVFP4 mma.sync requires Blackwell sm_120a or newer! Skipped";
-      d.extraNvrtcOpts = fp4Opts;
-      d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
     // MXFP4 mma.sp 2:4 sparsity E2M1 + UE8M0 block scale (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;
-      std::stringstream archOpt;
-      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
-      std::string archOptStr = archOpt.str();
-      const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
       d.title = "MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
       d.resultTag = "wmma_mxf4_sparse";
@@ -253,8 +220,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "mxf4_sparse";
       d.kernelName = "wmma_mxf4_sparse";
-      d.src = cuda_kernels::wmma_mxf4_sparse_src;
-      d.srcName = cuda_kernels::wmma_mxf4_sparse_name;
+      d.blob = &cuda_kernels::wmma_mxf4_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -263,17 +229,11 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSparseSupported;
       d.skipMsg = "MXFP4 mma.sp 2:4 sparsity requires Blackwell sm_120a or newer! Skipped";
-      d.extraNvrtcOpts = fp4Opts;
-      d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
     // NVFP4 mma.sp 2:4 sparsity E2M1 + UE4M3 block scale (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;
-      std::stringstream archOpt;
-      archOpt << "--gpu-architecture=sm_" << dev.info.major << dev.info.minor << "a";
-      std::string archOptStr = archOpt.str();
-      const char *fp4Opts[] = {archOptStr.c_str()};
       cuda_compute_desc_t d = {};
       d.title = "NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
       d.resultTag = "wmma_nvf4_sparse";
@@ -281,8 +241,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.unitDivider = 1e12;
       d.metricLabel = "nvf4_sparse";
       d.kernelName = "wmma_nvf4_sparse";
-      d.src = cuda_kernels::wmma_nvf4_sparse_src;
-      d.srcName = cuda_kernels::wmma_nvf4_sparse_name;
+      d.blob = &cuda_kernels::wmma_nvf4_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
       d.elemSize = sizeof(float);
       d.blockSize = warp;
@@ -291,8 +250,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.fp4MmaSparseSupported;
       d.skipMsg = "NVFP4 mma.sp 2:4 sparsity requires Blackwell sm_120a or newer! Skipped";
-      d.extraNvrtcOpts = fp4Opts;
-      d.numExtraNvrtcOpts = 1;
       runComputeKernel(dev, cfg, d);
     }
   }
@@ -317,8 +274,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.unitDivider = 1e12;
     d.metricLabel = "wmma_int8";
     d.kernelName = "wmma_int8";
-    d.src = cuda_kernels::wmma_int8_src;
-    d.srcName = cuda_kernels::wmma_int8_name;
+    d.blob = &cuda_kernels::wmma_int8;
     d.workPerWI = COOPMAT_WORK_PER_WI * 4;
     d.elemSize = sizeof(int);
     d.blockSize = warp;
@@ -339,8 +295,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.unitDivider = 1e12;
     d.metricLabel = "int8_k32";
     d.kernelName = "wmma_int8_k32";
-    d.src = cuda_kernels::wmma_int8_k32_src;
-    d.srcName = cuda_kernels::wmma_int8_k32_name;
+    d.blob = &cuda_kernels::wmma_int8_k32;
     d.workPerWI = COOPMAT_WORK_PER_WI * 4;
     d.elemSize = sizeof(int);
     d.blockSize = warp;
@@ -361,8 +316,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.unitDivider = 1e12;
     d.metricLabel = "int8_sparse";
     d.kernelName = "wmma_int8_sparse";
-    d.src = cuda_kernels::wmma_int8_sparse_src;
-    d.srcName = cuda_kernels::wmma_int8_sparse_name;
+    d.blob = &cuda_kernels::wmma_int8_sparse;
     d.workPerWI = COOPMAT_WORK_PER_WI * 4;
     d.elemSize = sizeof(int);
     d.blockSize = warp;
@@ -383,8 +337,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.unitDivider = 1e12;
     d.metricLabel = "int4";
     d.kernelName = "wmma_int4";
-    d.src = cuda_kernels::wmma_int4_src;
-    d.srcName = cuda_kernels::wmma_int4_name;
+    d.blob = &cuda_kernels::wmma_int4;
     d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 256 outer * 4 chains * 8*8*32*2 / 32
     d.elemSize = sizeof(int);
     d.blockSize = warp;
@@ -393,28 +346,6 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.scalarSize = sizeof(A);
     d.skip = !dev.info.wmmaSupported || !dev.info.int4MmaSupported;
     d.skipMsg = "INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped";
-    runComputeKernel(dev, cfg, d);
-  }
-  // BMMA b1 mma.sync m8n8k128 (XOR-popc) -- sm_75+
-  {
-    int A = 3;
-    cuda_compute_desc_t d = {};
-    d.title = "BMMA b1 mma.sync m8n8k128+int32 xor.popc";
-    d.resultTag = "wmma_bmma_b1";
-    d.unit = "tops";
-    d.unitDivider = 1e12;
-    d.metricLabel = "bmma_b1";
-    d.kernelName = "wmma_bmma_b1";
-    d.src = cuda_kernels::wmma_bmma_b1_src;
-    d.srcName = cuda_kernels::wmma_bmma_b1_name;
-    d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 256 outer * 4 chains * 8*8*128*2 / 32
-    d.elemSize = sizeof(int);
-    d.blockSize = warp;
-    d.outElemsPerBlock = 8 * 8;
-    d.scalarArg = &A;
-    d.scalarSize = sizeof(A);
-    d.skip = !dev.info.wmmaSupported || !dev.info.bmmaSupported;
-    d.skipMsg = "BMMA b1 requires sm_75 or newer (Turing+)! Skipped";
     runComputeKernel(dev, cfg, d);
   }
 

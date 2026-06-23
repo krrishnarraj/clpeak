@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.krrishnarraj.clpeak</id>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>clpeak</name>
+  <summary>Measure peak compute, bandwidth and latency of GPU and CPU devices</summary>
+
+  <description>
+    <p>
+      clpeak is a synthetic micro-benchmark that measures the peak achievable
+      performance of GPU and CPU compute devices. It exercises tight
+      vector / MAD / MMA loops and vendor-SDK GEMM libraries to expose what the
+      hardware is actually capable of, from raw ALU peaks to near-vendor-advertised
+      matrix throughput.
+    </p>
+    <p>This Flatpak enables the backends that work inside the sandbox:</p>
+    <ul>
+      <li>Vulkan — compute, bandwidth, cooperative-matrix (tensor) and latency</li>
+      <li>OpenCL — when the host exposes an ICD the sandbox can see</li>
+      <li>Native CPU — SIMD compute, cache/DRAM bandwidth and memory latency</li>
+    </ul>
+    <p>
+      Benchmarks include global/local/image memory bandwidth, single/half/double
+      precision compute, integer throughput, tensor / cooperative-matrix
+      operations, and kernel launch latency. Results can be written as plain
+      text, XML, JSON or CSV, and compared against a saved baseline.
+    </p>
+    <p>
+      The CUDA, ROCm, oneAPI and Metal backends are not available in this Flatpak
+      because they require vendor toolkits or proprietary drivers that cannot be
+      shipped through Flathub; use the upstream binary releases for those.
+    </p>
+  </description>
+
+  <launchable type="service">io.github.krrishnarraj.clpeak</launchable>
+
+  <provides>
+    <binary>clpeak</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+  </categories>
+
+  <keywords>
+    <keyword>benchmark</keyword>
+    <keyword>GPU</keyword>
+    <keyword>OpenCL</keyword>
+    <keyword>Vulkan</keyword>
+    <keyword>compute</keyword>
+    <keyword>bandwidth</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/krrishnarraj/clpeak</url>
+  <url type="bugtracker">https://github.com/krrishnarraj/clpeak/issues</url>
+  <url type="vcs-browser">https://github.com/krrishnarraj/clpeak</url>
+
+  <developer id="io.github.krrishnarraj">
+    <name>Krishnaraj Bhat</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="2.0.13" date="2026-06-10" />
+    <release version="2.0.12" date="2026-06-10" />
+    <release version="2.0.11" date="2026-06-09" />
+    <release version="2.0.10" date="2026-06-04" />
+  </releases>
+</component>

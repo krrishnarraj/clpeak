@@ -13,8 +13,7 @@ int RocmPeak::runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg)
     {"kernel_launch_latency", "Kernel launch latency", "us"});
 
   hipFunction_t fn;
-  if (!dev.getKernel(rocm_kernels::kernel_latency_src,
-                     rocm_kernels::kernel_latency_name,
+  if (!dev.getKernel(rocm_kernels::kernel_latency,
                      "kernel_latency_noop", fn))
   {
     test.skip("dispatch", ResultStatus::Error, "Kernel compile failed");

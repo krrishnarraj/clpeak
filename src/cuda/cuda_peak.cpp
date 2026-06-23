@@ -149,8 +149,8 @@ int CudaPeak::runAll()
       "",   // platform defaults to "CUDA"
       dev.info.driverVersion,
       {
-        {"Arch",  dev.info.archName},
-        {"NVRTC", dev.info.runtimeVersion},
+        {"Arch",    dev.info.archName},
+        {"Toolkit", dev.info.runtimeVersion},
         {"SMs",   std::to_string(dev.info.numSMs)},
         {"VRAM",  std::to_string(dev.info.totalGlobalMem / (1024 * 1024)) + " MB"},
       },

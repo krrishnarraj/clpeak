@@ -68,8 +68,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       key.pop_back();
 
     hipFunction_t fn;
-    if (!dev.getKernel(rocm_kernels::global_bandwidth_src,
-                       rocm_kernels::global_bandwidth_name,
+    if (!dev.getKernel(rocm_kernels::global_bandwidth,
                        v.kernelName, fn))
     {
       test.skip(key, ResultStatus::Error, "Kernel compile failed");

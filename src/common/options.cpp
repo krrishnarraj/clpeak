@@ -123,7 +123,6 @@ static const char *helpStr =
     "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
 #ifdef ENABLE_CUDA
     "\n  --wmma                            | --no-wmma                      [CUDA]"
-    "\n  --bmma                            | --no-bmma                      [CUDA]"
     "\n  --cublas                          | --no-cublas                    [CUDA]"
 #endif
 #ifdef ENABLE_ROCM
@@ -184,7 +183,6 @@ static const TestFlag testFlags[] = {
   {"int8-dot-product-compute",  Benchmark::ComputeInt8DP},
 #ifdef ENABLE_CUDA
   {"wmma",                      Benchmark::Wmma},
-  {"bmma",                      Benchmark::Bmma},
 #endif
 #ifdef ENABLE_VULKAN
   {"coopmat",                   Benchmark::CoopMatrix},

@@ -20,7 +20,7 @@ confinement: classic
 
 apps:
   clpeak:
-    command: usr/local/bin/clpeak
+    command: usr/local/clpeak
 
 parts:
   clpeak:
@@ -28,10 +28,9 @@ parts:
     plugin: cmake
     build-packages:
       - build-essential
+      - clang
       - git
       - cmake
-      - ocl-icd-opencl-dev
-      - opencl-headers
       - libvulkan-dev
       - glslang-tools
       - spirv-tools
@@ -40,6 +39,3 @@ parts:
       craftctl default
       version=$(git describe --tags --abbrev=0)
       craftctl set version="$version"
-    stage-packages:
-      - ocl-icd-libopencl1
-      - libvulkan1

@@ -12,6 +12,7 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+#include <common/dynlib.h>   // must stay at file scope (defines namespace clpeak)
 
 #ifdef CLPEAK_ROCM_HAS_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
@@ -52,6 +53,72 @@ uint32_t pickGemmDim(const rocm_device_info_t &info)
 }
 
 #ifdef CLPEAK_ROCM_HAS_HIPBLASLT
+// Optional hipBLASLt loader -- not part of the HIP runtime, so it is resolved at
+// run time; if absent the FP8 GEMM benchmark is skipped.  Function-pointer types
+// come from the header via decltype; macros redirect the call sites unchanged.
+struct HipblasLtApi
+{
+  void *lib = nullptr;
+  decltype(&::hipblasLtCreate)                       Create = nullptr;
+  decltype(&::hipblasLtDestroy)                      Destroy = nullptr;
+  decltype(&::hipblasLtMatmul)                       Matmul = nullptr;
+  decltype(&::hipblasLtMatmulAlgoGetHeuristic)       AlgoGetHeuristic = nullptr;
+  decltype(&::hipblasLtMatmulDescCreate)             DescCreate = nullptr;
+  decltype(&::hipblasLtMatmulDescDestroy)            DescDestroy = nullptr;
+  decltype(&::hipblasLtMatmulDescSetAttribute)       DescSetAttribute = nullptr;
+  decltype(&::hipblasLtMatmulPreferenceCreate)       PrefCreate = nullptr;
+  decltype(&::hipblasLtMatmulPreferenceDestroy)      PrefDestroy = nullptr;
+  decltype(&::hipblasLtMatmulPreferenceSetAttribute) PrefSetAttribute = nullptr;
+  decltype(&::hipblasLtMatrixLayoutCreate)           LayoutCreate = nullptr;
+  decltype(&::hipblasLtMatrixLayoutDestroy)          LayoutDestroy = nullptr;
+  bool load();
+};
+static HipblasLtApi g_hlt;
+bool HipblasLtApi::load()
+{
+  if (lib)
+    return true;
+  lib = clpeak::dynOpen({"libhipblaslt.so", "libhipblaslt.so.0", "hipblaslt.dll"});
+  if (!lib)
+    return false;
+  bool ok = true;
+#define CLPEAK_HLT_SYM(member, name)                                      \
+  member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+  ok = ok && (member != nullptr)
+  CLPEAK_HLT_SYM(Create,           "hipblasLtCreate");
+  CLPEAK_HLT_SYM(Destroy,          "hipblasLtDestroy");
+  CLPEAK_HLT_SYM(Matmul,           "hipblasLtMatmul");
+  CLPEAK_HLT_SYM(AlgoGetHeuristic, "hipblasLtMatmulAlgoGetHeuristic");
+  CLPEAK_HLT_SYM(DescCreate,       "hipblasLtMatmulDescCreate");
+  CLPEAK_HLT_SYM(DescDestroy,      "hipblasLtMatmulDescDestroy");
+  CLPEAK_HLT_SYM(DescSetAttribute, "hipblasLtMatmulDescSetAttribute");
+  CLPEAK_HLT_SYM(PrefCreate,       "hipblasLtMatmulPreferenceCreate");
+  CLPEAK_HLT_SYM(PrefDestroy,      "hipblasLtMatmulPreferenceDestroy");
+  CLPEAK_HLT_SYM(PrefSetAttribute, "hipblasLtMatmulPreferenceSetAttribute");
+  CLPEAK_HLT_SYM(LayoutCreate,     "hipblasLtMatrixLayoutCreate");
+  CLPEAK_HLT_SYM(LayoutDestroy,    "hipblasLtMatrixLayoutDestroy");
+#undef CLPEAK_HLT_SYM
+  if (!ok)
+  {
+    clpeak::dynClose(lib);
+    lib = nullptr;
+  }
+  return ok;
+}
+
+#define hipblasLtCreate                       g_hlt.Create
+#define hipblasLtDestroy                      g_hlt.Destroy
+#define hipblasLtMatmul                       g_hlt.Matmul
+#define hipblasLtMatmulAlgoGetHeuristic       g_hlt.AlgoGetHeuristic
+#define hipblasLtMatmulDescCreate             g_hlt.DescCreate
+#define hipblasLtMatmulDescDestroy            g_hlt.DescDestroy
+#define hipblasLtMatmulDescSetAttribute       g_hlt.DescSetAttribute
+#define hipblasLtMatmulPreferenceCreate       g_hlt.PrefCreate
+#define hipblasLtMatmulPreferenceDestroy      g_hlt.PrefDestroy
+#define hipblasLtMatmulPreferenceSetAttribute g_hlt.PrefSetAttribute
+#define hipblasLtMatrixLayoutCreate           g_hlt.LayoutCreate
+#define hipblasLtMatrixLayoutDestroy          g_hlt.LayoutDestroy
+
 // hipBLASLt has no "is this dtype supported on this device?" capability query;
 // the only arch-agnostic answer is to ask hipblasLtMatmulAlgoGetHeuristic and
 // treat zero algorithms as Unsupported. But the heuristic doesn't conclude
@@ -155,6 +222,14 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   test.skip("mxf4_e2m1", ResultStatus::Unsupported, "hipBLASLt not found at configure time");
   return 0;
 #else
+  // hipBLASLt is an optional runtime dependency (not part of the HIP runtime).
+  if (!g_hlt.load())
+  {
+    test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt library not found; GEMM skipped");
+    test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt library not found; GEMM skipped");
+    return 0;
+  }
+
   const uint32_t D = pickGemmDim(dev.info);
   const int64_t M = (int64_t)D, N = (int64_t)D, K = (int64_t)D;
   const double flops = 2.0 * (double)M * (double)N * (double)K;

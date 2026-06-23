@@ -8,6 +8,62 @@
 #ifdef CLPEAK_ROCM_HAS_ROCBLAS
 #include <rocblas/rocblas.h>
 #include <hip/hip_fp16.h>
+#include <common/dynlib.h>
+
+// Optional rocBLAS loader -- rocBLAS is not part of the HIP runtime, so it is
+// resolved at run time; if absent the GEMM benchmark is skipped and the rest of
+// the ROCm backend still runs.  Function-pointer types come from the header via
+// decltype; macros redirect the call sites so the body below is unchanged.
+namespace {
+struct RocblasApi
+{
+  void *lib = nullptr;
+  decltype(&::rocblas_create_handle)  create_handle = nullptr;
+  decltype(&::rocblas_destroy_handle) destroy_handle = nullptr;
+  decltype(&::rocblas_set_stream)     set_stream = nullptr;
+  decltype(&::rocblas_sgemm)          sgemm = nullptr;
+  decltype(&::rocblas_dgemm)          dgemm = nullptr;
+  decltype(&::rocblas_gemm_ex)        gemm_ex = nullptr;
+  bool load();
+};
+RocblasApi g_rb;
+bool RocblasApi::load()
+{
+  if (lib)
+    return true;
+  lib = clpeak::dynOpen({"librocblas.so", "librocblas.so.4", "librocblas.so.3",
+                         "rocblas.dll"});
+  if (!lib)
+    return false;
+  bool ok = true;
+#define CLPEAK_RB_SYM(member, name)                                       \
+  member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+  ok = ok && (member != nullptr)
+  CLPEAK_RB_SYM(create_handle,  "rocblas_create_handle");
+  CLPEAK_RB_SYM(destroy_handle, "rocblas_destroy_handle");
+  CLPEAK_RB_SYM(set_stream,     "rocblas_set_stream");
+  CLPEAK_RB_SYM(sgemm,          "rocblas_sgemm");
+  CLPEAK_RB_SYM(dgemm,          "rocblas_dgemm");
+  CLPEAK_RB_SYM(gemm_ex,        "rocblas_gemm_ex");
+#undef CLPEAK_RB_SYM
+  if (!ok)
+  {
+    clpeak::dynClose(lib);
+    lib = nullptr;
+  }
+  return ok;
+}
+} // namespace
+
+#define rocblas_create_handle  g_rb.create_handle
+#define rocblas_destroy_handle g_rb.destroy_handle
+#define rocblas_set_stream     g_rb.set_stream
+#define rocblas_sgemm          g_rb.sgemm
+#define rocblas_dgemm          g_rb.dgemm
+// rocBLAS's header defines rocblas_gemm_ex as a function-like macro; drop it so
+// our object-like redirect to the loaded pointer takes over cleanly.
+#undef rocblas_gemm_ex
+#define rocblas_gemm_ex        g_rb.gemm_ex
 #endif
 
 namespace {
@@ -110,6 +166,13 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
       test.skip("int8", status, msg);
     }
   };
+
+  // rocBLAS is an optional runtime dependency (not part of the HIP runtime).
+  if (!g_rb.load())
+  {
+    skipPhase(ResultStatus::Unsupported, "rocBLAS library not found; GEMM skipped");
+    return 0;
+  }
 
   void *dA = nullptr, *dB = nullptr, *dC = nullptr;
   if (hipMalloc(&dA, aBytes) != hipSuccess ||

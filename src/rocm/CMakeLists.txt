@@ -1,4 +1,4 @@
-if(NOT CLPEAK_ENABLE_ROCM OR NOT hip_FOUND OR NOT CLPEAK_HIPRTC_FOUND)
+if(NOT CLPEAK_ENABLE_ROCM OR NOT hip_FOUND OR NOT CLPEAK_HIPCC_FOUND)
   return()
 endif()
 
@@ -24,14 +24,15 @@ add_library(peak_rocm STATIC
 target_link_libraries(peak_rocm PUBLIC
     peak_common
     hip::host
-    ${CLPEAK_HIPRTC_LINK}
 )
+# rocBLAS / hipBLASLt are loaded at run time via dlopen (rocblas.cpp,
+# hipblaslt_gemm.cpp), not linked, so the binary runs without them present.  We
+# still compile against their headers (resolved via the HIP include dir that
+# hip::host exposes) and keep the CLPEAK_ROCM_HAS_* defines for the GEMM types.
 if(rocblas_FOUND AND TARGET roc::rocblas)
-  target_link_libraries(peak_rocm PUBLIC roc::rocblas)
   target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_ROCBLAS)
 endif()
 if(hipblaslt_FOUND AND TARGET roc::hipblaslt)
-  target_link_libraries(peak_rocm PUBLIC roc::hipblaslt)
   target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_HIPBLASLT)
 endif()
 target_include_directories(peak_rocm PUBLIC
@@ -52,10 +53,10 @@ if(TARGET hip::host)
   endif()
 endif()
 
-target_compile_definitions(peak_rocm PRIVATE
-    ENABLE_ROCM
-    CLPEAK_ROCM_INCLUDE_DIR="${_clpeak_rocm_inc}"
-)
+target_compile_definitions(peak_rocm PRIVATE ENABLE_ROCM)
+
+# _clpeak_rocm_inc above is used only for the configure-time hipBLASLt header
+# probe below; it is no longer baked into the binary (kernels are AOT-compiled).
 
 # Probe whether the installed hipBLASLt exposes the block-scaled FP4 GEMM API
 # (gfx950 / MI350, recent ROCm).  Feature-test by compilation so the build stays
@@ -80,44 +81,74 @@ int main() {
   endif()
 endif()
 if(CLPEAK_ROCWMMA_FOUND)
-  target_compile_definitions(peak_rocm PRIVATE
-        CLPEAK_ROCM_HAS_ROCWMMA
-        CLPEAK_ROCWMMA_INCLUDE_DIR="${CLPEAK_ROCWMMA_INCLUDE_DIR}"
-    )
+  target_compile_definitions(peak_rocm PRIVATE CLPEAK_ROCM_HAS_ROCWMMA)
 endif()
 target_compile_definitions(peak_common PRIVATE ENABLE_ROCM)
 
-set(CLPEAK_ROCM_KERNELS
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_sp.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_hp.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_dp.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_mp.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_bf16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_int32.hip
-
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/compute_int8_dp.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_fp16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_bf16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_fp8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/wmma_int8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/rocwmma_fp16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/rocwmma_int8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_fp16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_bf16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_int8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_fp8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/mfma_mxfp4.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_fp16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_bf16.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_int8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/smfmac_fp8.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/global_bandwidth.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/local_bandwidth.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/image_bandwidth.hip
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/kernel_latency.hip
-)
+# Ahead-of-time compile each .hip to a bundled code object and embed the bytes.
+# Kernels are grouped by the gfx families they are valid for so hipcc is never
+# asked to target an arch a kernel cannot build for (MFMA is CDNA-only, WMMA is
+# RDNA3+, fp8/mxfp4 are newest-gen only).  The candidate arches are intersected
+# with what the installed hipcc actually supports.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedRocmKernels.cmake)
-embed_rocm_kernels(
-    TARGET peak_rocm
-    KERNELS ${CLPEAK_ROCM_KERNELS}
-)
+
+set(CLPEAK_ROCM_CDNA   "gfx908;gfx90a;gfx942;gfx950")   # MFMA-capable CDNA
+set(CLPEAK_ROCM_RDNAW  "gfx1100;gfx1101;gfx1102;gfx1200;gfx1201") # WMMA RDNA3+
+set(CLPEAK_ROCM_ALL    "gfx906;${CLPEAK_ROCM_CDNA};gfx1030;${CLPEAK_ROCM_RDNAW}")
+# Texture/image sampling is a graphics feature: Vega (gfx906) and all RDNA parts
+# have it, but the compute-only CDNA dies (gfx908/90a/942/950) do not -- the HIP
+# tex2D API is marked unavailable there, so image_bandwidth must skip CDNA or the
+# AOT compile hard-fails.
+set(CLPEAK_ROCM_IMG    "gfx906;gfx1030;${CLPEAK_ROCM_RDNAW}")
+
+# Generic compute + bandwidth -- every supported gfx.
+embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_ALL}"
+    KERNELS compute_sp compute_hp compute_dp compute_mp compute_bf16
+            compute_int32 compute_int8_dp
+            global_bandwidth local_bandwidth kernel_latency)
+
+# Image-sampling bandwidth -- texture-capable parts only (Vega + RDNA).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_IMG}"
+    KERNELS image_bandwidth)
+
+# MFMA matrix core.  The builtins gate per sub-target with no fallback, so each
+# is grouped to exactly the archs that select it:
+#   fp16 (mfma_f32_16x16x16f16)        -- all CDNA
+#   bf16 (mfma_f32_16x16x16bf16_1k)    -- the "1k" form is gfx90a+ (not gfx908)
+#   int8 (mfma_i32_16x16x32_i8)        -- the K=32 form is CDNA3+ (gfx942/950)
+embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_CDNA}"
+    KERNELS mfma_fp16)
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx90a;gfx942;gfx950"
+    KERNELS mfma_bf16)
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx942;gfx950"
+    KERNELS mfma_int8)
+# fp8 MFMA -- CDNA3+ (gfx942/950).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx942;gfx950"
+    KERNELS mfma_fp8)
+# mxfp4 scaled MFMA -- CDNA4 (gfx950).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx950"
+    KERNELS mfma_mxfp4)
+# Sparse MFMA (2:4) -- CDNA3+ (gfx942/950).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx942;gfx950"
+    KERNELS smfmac_fp16 smfmac_bf16 smfmac_int8 smfmac_fp8)
+
+# WMMA matrix core -- RDNA3+ (gfx11/gfx12).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "${CLPEAK_ROCM_RDNAW}"
+    KERNELS wmma_fp16 wmma_bf16 wmma_int8)
+# fp8 WMMA -- RDNA4 (gfx12).
+embed_rocm_kernels(TARGET peak_rocm ARCHS "gfx1200;gfx1201"
+    KERNELS wmma_fp8)
+
+# rocWMMA library kernels (header-only templates, need C++17 + the rocWMMA
+# include).  Only buildable when the headers are present; otherwise emit stubs
+# (host code is #ifdef CLPEAK_ROCM_HAS_ROCWMMA gated and skips them).  rocWMMA in
+# ROCm 6.4 does not support gfx950 (its config.hpp hard-asserts on that arch), so
+# the rocWMMA arch set drops gfx950 even though the hand-rolled MFMA path covers it.
+set(CLPEAK_ROCM_ROCWMMA "gfx908;gfx90a;gfx942;${CLPEAK_ROCM_RDNAW}")
+if(CLPEAK_ROCWMMA_FOUND)
+  embed_rocm_kernels(TARGET peak_rocm
+      ARCHS "${CLPEAK_ROCM_ROCWMMA}" CXX17 ROCWMMA
+      KERNELS rocwmma_fp16 rocwmma_int8)
+else()
+  embed_rocm_kernels(TARGET peak_rocm ARCHS "" KERNELS rocwmma_fp16 rocwmma_int8)
+endif()

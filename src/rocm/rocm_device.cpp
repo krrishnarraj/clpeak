@@ -4,11 +4,6 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
-#include <vector>
-
-#ifndef CLPEAK_ROCM_INCLUDE_DIR
-#define CLPEAK_ROCM_INCLUDE_DIR "/opt/rocm/include"
-#endif
 
 static const char *hipErrStr(hipError_t r)
 {
@@ -102,11 +97,12 @@ void RocmDevice::cleanup()
   }
 }
 
-bool RocmDevice::getKernel(const char *src, const char *srcName,
-                           const char *kernelName, hipFunction_t &fn,
-                           const std::vector<const char *> &extraOpts)
+bool RocmDevice::getKernel(const rocm_kernels::Blob &blob,
+                           const char *kernelName, hipFunction_t &fn)
 {
-  auto it = moduleCache.find(src);
+  // Cache by blob-data pointer: every embedded code object is a distinct array
+  // in rocm_kernels_generated, so pointer equality is sufficient.
+  auto it = moduleCache.find(blob.data);
   hipModule_t mod = nullptr;
   if (it != moduleCache.end())
   {
@@ -114,76 +110,27 @@ bool RocmDevice::getKernel(const char *src, const char *srcName,
   }
   else
   {
-    hiprtcProgram prog;
-    hiprtcResult rr = hiprtcCreateProgram(&prog, src, srcName, 0, nullptr, nullptr);
-    if (rr != HIPRTC_SUCCESS)
+    if (blob.len == 0 || blob.data == nullptr)
     {
-      CLPEAK_VLOG("hiprtcCreateProgram failed: %s\n", hiprtcGetErrorString(rr));
+      CLPEAK_VLOG("kernel %s was not built for any supported gfx arch\n", blob.name);
       return false;
     }
-
-    std::vector<std::string> ownedOpts;
-    if (!info.archName.empty())
-      ownedOpts.push_back(std::string("--gpu-architecture=") + info.archName);
-    ownedOpts.push_back(std::string("-I") + CLPEAK_ROCM_INCLUDE_DIR);
-#ifdef CLPEAK_ROCWMMA_INCLUDE_DIR
-    ownedOpts.push_back(std::string("-I") + CLPEAK_ROCWMMA_INCLUDE_DIR);
-#endif
-    ownedOpts.push_back("-D__HIP_PLATFORM_AMD__=1");
-    ownedOpts.push_back("-O3");
-
-    std::vector<const char *> opts;
-    for (const auto &o : ownedOpts)
-      opts.push_back(o.c_str());
-    for (auto *e : extraOpts)
-      opts.push_back(e);
-
-    rr = hiprtcCompileProgram(prog, (int)opts.size(), opts.data());
-    if (rr != HIPRTC_SUCCESS)
-    {
-      size_t logSize = 0;
-      hiprtcGetProgramLogSize(prog, &logSize);
-      std::string log(logSize, '\0');
-      if (logSize > 1)
-        hiprtcGetProgramLog(prog, &log[0]);
-      CLPEAK_VLOG("HIPRTC compile of %s failed:\n%s\n", srcName, log.c_str());
-      hiprtcDestroyProgram(&prog);
-      return false;
-    }
-
-    size_t codeSize = 0;
-    rr = hiprtcGetCodeSize(prog, &codeSize);
-    if (rr != HIPRTC_SUCCESS || codeSize == 0)
-    {
-      CLPEAK_VLOG("hiprtcGetCodeSize(%s) failed: %s\n",
-                  srcName, hiprtcGetErrorString(rr));
-      hiprtcDestroyProgram(&prog);
-      return false;
-    }
-
-    std::vector<char> code(codeSize);
-    rr = hiprtcGetCode(prog, code.data());
-    hiprtcDestroyProgram(&prog);
-    if (rr != HIPRTC_SUCCESS)
-    {
-      CLPEAK_VLOG("hiprtcGetCode(%s) failed: %s\n", srcName, hiprtcGetErrorString(rr));
-      return false;
-    }
-
-    hipError_t hr = hipModuleLoadData(&mod, code.data());
+    // The blob is a precompiled code-object bundle; the HIP runtime selects the
+    // slice matching this device's gfx arch -- no HIPRTC, no ROCm headers.
+    hipError_t hr = hipModuleLoadData(&mod, blob.data);
     if (hr != hipSuccess)
     {
-      CLPEAK_VLOG("hipModuleLoadData(%s) failed: %s\n", srcName, hipErrStr(hr));
+      CLPEAK_VLOG("hipModuleLoadData(%s) failed: %s\n", blob.name, hipErrStr(hr));
       return false;
     }
-    moduleCache[src] = mod;
+    moduleCache[blob.data] = mod;
   }
 
   hipError_t r = hipModuleGetFunction(&fn, mod, kernelName);
   if (r != hipSuccess)
   {
     CLPEAK_VLOG("hipModuleGetFunction(%s in %s) failed: %s\n",
-                kernelName, srcName, hipErrStr(r));
+                kernelName, blob.name, hipErrStr(r));
     return false;
   }
   return true;

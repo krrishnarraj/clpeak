@@ -67,8 +67,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   cuMemAlloc(&outBuf, globalThreads * sizeof(float));
 
   CUfunction fn;
-  if (!dev.getKernel(cuda_kernels::image_bandwidth_src,
-                     cuda_kernels::image_bandwidth_name,
+  if (!dev.getKernel(cuda_kernels::image_bandwidth,
                      "image_bandwidth", fn))
   {
     test.skip("float4", ResultStatus::Error, "Kernel compile failed");
