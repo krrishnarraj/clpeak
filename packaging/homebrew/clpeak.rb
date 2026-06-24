@@ -13,8 +13,8 @@ class Clpeak < Formula
   desc "Benchmark to measure peak compute, bandwidth, and latency of GPU/CPU devices"
   homepage "https://github.com/krrishnarraj/clpeak"
   url "https://github.com/krrishnarraj/clpeak.git",
-      tag:      "2.0.13",
-      revision: "fc0325cb1860f6eea5da6802c39393578b91a79d"
+      tag:      "2.0.14",
+      revision: "72c11fd5905de4e8099c1717906c29c7771b7774"
   license "Apache-2.0"
   head "https://github.com/krrishnarraj/clpeak.git", branch: "master"
 
@@ -57,7 +57,7 @@ class Clpeak < Formula
     # Build with clang for the CPU-backend codegen.  macOS already uses
     # AppleClang; on Linux point CMake at the brewed LLVM clang explicitly.
     if OS.linux?
-      llvm = Formula["llvm"].opt_bin
+      llvm = formula_opt_bin("llvm")
       args << "-DCMAKE_C_COMPILER=#{llvm}/clang"
       args << "-DCMAKE_CXX_COMPILER=#{llvm}/clang++"
     end
