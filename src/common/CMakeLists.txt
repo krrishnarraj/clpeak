@@ -15,7 +15,7 @@ target_include_directories(peak_common PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
     ${CMAKE_CURRENT_LIST_DIR}/../../include/common
 )
-target_compile_features(peak_common PUBLIC cxx_std_11)
+target_compile_features(peak_common PUBLIC cxx_std_14)
 if(MSVC)
     # Covers clang-cl too: -fPIC is meaningless on Windows (warns), and
     # clang-cl aliases -Wall to MSVC /Wall (≈ -Weverything spam), so route the
