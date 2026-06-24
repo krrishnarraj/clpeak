@@ -267,8 +267,7 @@ endforeach()
 message(STATUS "===============================================================")
 message(STATUS "")
 
-install(TARGETS clpeak RUNTIME DESTINATION .)
-install(FILES LICENSE DESTINATION .)
+install(TARGETS clpeak RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 enable_testing()
 add_test(clpeak_test_run clpeak)
 
