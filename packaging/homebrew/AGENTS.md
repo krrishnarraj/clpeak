@@ -6,6 +6,18 @@ Homebrew formula for clpeak (macOS + Linuxbrew), targeting Homebrew/homebrew-cor
 |------|---------|
 | `clpeak.rb` | The formula. Builds via CMake; enables Metal/OpenCL/Vulkan(MoltenVK) on macOS and Vulkan/OpenCL/CPU on Linux. CUDA/ROCm/oneAPI are disabled (no vendor toolkits in Homebrew). |
 
+## Local Build
+
+```console
+brew tap-new local/clpeak
+cp packaging/homebrew/clpeak.rb "$(brew --repository)/Library/Taps/local/homebrew-clpeak/Formula/"
+brew install --build-from-source --verbose -y local/clpeak/clpeak
+brew test clpeak
+brew audit --strict --online local/clpeak/clpeak
+brew uninstall clpeak
+brew untap local/clpeak
+```
+
 ## Notes
 - Source is a **git URL pinned to `tag` + `revision`** (not a tarball) so
   `git describe` in `src/common/cmake/version.cmake` reports the real version.

@@ -11,6 +11,14 @@ Flathub packaging for clpeak (Linux Flatpak; CLI / console-application).
 | `io.github.krrishnarraj.clpeak.yaml` | Flatpak manifest. Enables Vulkan+OpenCL+CPU only; builds `shaderc` (for `glslc`) and the OpenCL ICD loader, then clpeak pinned to a git tag+commit. |
 | `io.github.krrishnarraj.clpeak.metainfo.xml` | AppStream MetaInfo. `console-application` component — no `.desktop`/icon needed. |
 
+## Local Build
+
+```console
+flatpak run org.flatpak.Builder --force-clean --user --install build-dir packaging/flatpak/io.github.krrishnarraj.clpeak.yaml
+flatpak run io.github.krrishnarraj.clpeak --list-devices
+flatpak uninstall -y clpeak
+```
+
 ## Notes
 - App ID `io.github.krrishnarraj.clpeak` (Flathub form for GitHub-hosted projects).
 - The manifest pins clpeak to a release tag+commit; bump both on each release and
