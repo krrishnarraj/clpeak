@@ -6,8 +6,8 @@ class Clpeak < Formula
   desc "Benchmark to measure peak compute, bandwidth, and latency of GPU/CPU devices"
   homepage "https://github.com/krrishnarraj/clpeak"
   url "https://github.com/krrishnarraj/clpeak.git",
-      tag:      "2.0.14",
-      revision: "72c11fd5905de4e8099c1717906c29c7771b7774"
+      tag:      "2.0.15",
+      revision: "5d7b3da31023054c0d8aa7b354647141d85f47ee"
   license "Apache-2.0"
   head "https://github.com/krrishnarraj/clpeak.git", branch: "master"
 
