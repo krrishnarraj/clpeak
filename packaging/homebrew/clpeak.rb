@@ -1,10 +1,3 @@
-# Homebrew formula for clpeak — intended for Homebrew/homebrew-core.
-#
-# Copy this file to `Formula/c/clpeak.rb` in a homebrew-core PR (or a tap).
-# Bump `tag` + `revision` on every release; `revision` is the full commit SHA
-# the tag points at (git rev-parse <tag>).  Homebrew CI appends the `bottle do`
-# block — do not add it by hand.
-#
 # Why a git URL instead of a release tarball: clpeak derives its version from
 # `git describe` (src/common/cmake/version.cmake).  A GitHub source tarball has
 # no .git, so the build would fall back to a stale hardcoded version.  Passing
@@ -65,9 +58,7 @@ class Clpeak < Formula
     system "cmake", "-S", ".", "-B", "build", "-G", "Ninja",
                     "-DCMAKE_BUILD_TYPE=Release", *args, *std_cmake_args
     system "cmake", "--build", "build"
-    # The in-tree install rule keeps a flat layout for the release zips; install
-    # the binary into Homebrew's bin/ directly instead.
-    bin.install "build/clpeak"
+    system "cmake", "--install", "build"
   end
 
   test do

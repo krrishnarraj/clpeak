@@ -90,14 +90,9 @@ modules:
       - -DCLPEAK_ENABLE_CUDA=OFF
       - -DCLPEAK_ENABLE_ROCM=OFF
       - -DCLPEAK_ENABLE_ONEAPI=OFF
-    # The in-tree `install(TARGETS clpeak RUNTIME DESTINATION .)` rule lands the
-    # binary at /app/clpeak and LICENSE at /app/LICENSE (kept flat for the
-    # release zips).  Relocate to the FHS layout Flatpak expects.
     post-install:
-      - install -Dm755 /app/clpeak /app/bin/clpeak
-      - rm -f /app/clpeak
-      - install -Dm644 /app/LICENSE /app/share/licenses/io.github.krrishnarraj.clpeak/LICENSE
-      - rm -f /app/LICENSE
+      - install -Dm644 /app/share/clpeak/LICENSE /app/share/licenses/io.github.krrishnarraj.clpeak/LICENSE
+      - rm -f /app/share/clpeak/LICENSE
       - install -Dm644 packaging/flatpak/io.github.krrishnarraj.clpeak.metainfo.xml
           /app/share/metainfo/io.github.krrishnarraj.clpeak.metainfo.xml
     sources:

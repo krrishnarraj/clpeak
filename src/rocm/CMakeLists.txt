@@ -38,7 +38,6 @@ endif()
 target_include_directories(peak_rocm PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
-target_compile_features(peak_rocm PRIVATE cxx_std_14)
 
 set(_clpeak_rocm_inc "/opt/rocm/include")
 if(TARGET hip::host)
