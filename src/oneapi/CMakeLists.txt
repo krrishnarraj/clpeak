@@ -21,7 +21,6 @@ target_link_libraries(peak_oneapi PUBLIC peak_common)
 target_include_directories(peak_oneapi PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
-target_compile_features(peak_oneapi PRIVATE cxx_std_17)
 target_compile_definitions(peak_oneapi PRIVATE ENABLE_ONEAPI)
 target_compile_definitions(peak_common  PRIVATE ENABLE_ONEAPI)
 
