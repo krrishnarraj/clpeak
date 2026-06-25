@@ -60,7 +60,7 @@ endif()
 # Kernels are grouped by the compute capabilities they are valid for so nvcc is
 # never asked to target an arch a kernel cannot build for (e.g. fp8 < sm_89,
 # int4 removed on sm_90+, fp4 only on sm_120a).
-set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;120" CACHE STRING
+set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;120;121" CACHE STRING
     "CUDA compute capabilities to bake into the fatbins (ascending)")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
@@ -75,8 +75,10 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 72
     KERNELS wmma_int8)
 
-# INT4 mma.sync -- sm_75..sm_89 only (removed on Hopper+).
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89
+# INT4 mma.sync -- sm_75..sm_89, removed on Hopper/datacenter Blackwell, but
+# re-added on consumer Blackwell sm_121 (GB10); hence the explicit EXTRA_ARCHS
+# after the MAX_ARCH 89 cutoff. (sm_120 not yet listed -- needs verification.)
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89 EXTRA_ARCHS "121"
     KERNELS wmma_int4)
 
 # Ampere+ tensor cores: bf16 / tf32 / fp64 / int8 m16n8k32 + int8 2:4 sparse
@@ -88,8 +90,10 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 89
     KERNELS wmma_fp8_e4m3 wmma_fp8_e5m2)
 
-# FP4 / MXFP4 / NVFP4 mma.sync (dense + 2:4 sparse) -- Blackwell sm_120a.
+# FP4 / MXFP4 / NVFP4 mma.sync (dense + 2:4 sparse) -- consumer Blackwell
+# sm_120a (RTX 50) and sm_121a (GB10). Datacenter Blackwell (sm_100a/103a) uses
+# the tcgen05 path instead and is not covered by these mma.sync kernels.
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 999
-    EXTRA_ARCHS "120a"
+    EXTRA_ARCHS "120a;121a"
     KERNELS wmma_fp4_e2m1 wmma_mxf4_e2m1 wmma_nvf4_e2m1
             wmma_mxf4_sparse wmma_nvf4_sparse)

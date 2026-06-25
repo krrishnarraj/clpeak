@@ -49,9 +49,9 @@ struct cuda_device_info_t {
   bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
   bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
   bool dpTensorSupported;        // cc >= 8.0 (Ampere) -- fp64 wmma m8n8k4
-  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
-                                 // dropped on sm_90+ (Hopper) where the s4 imma
-                                 // path was removed.
+  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) + 12.1 (GB10)
+                                 // -- s4 mma.sync; dropped on Hopper/datacenter
+                                 // Blackwell, re-added on consumer Blackwell GB10.
   bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
 };
 
