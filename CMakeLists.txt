@@ -268,6 +268,7 @@ message(STATUS "==============================================================="
 message(STATUS "")
 
 install(TARGETS clpeak RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
 enable_testing()
 add_test(clpeak_test_run clpeak)
 
