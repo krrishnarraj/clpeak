@@ -60,7 +60,7 @@ endif()
 # Kernels are grouped by the compute capabilities they are valid for so nvcc is
 # never asked to target an arch a kernel cannot build for (e.g. fp8 < sm_89,
 # int4 removed on sm_90+, fp4 only on sm_120a).
-set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;120;121" CACHE STRING
+set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;120;121" CACHE STRING
     "CUDA compute capabilities to bake into the fatbins (ascending)")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
