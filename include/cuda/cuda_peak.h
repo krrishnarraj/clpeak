@@ -43,15 +43,22 @@ struct cuda_device_info_t {
   bool wmmaSupported;            // cc >= 7.0 (Volta) -- fp16 wmma
   bool wmmaInt8Supported;        // cc >= 7.2 (Turing) -- int8 wmma fragments
   bool fp8MmaSupported;          // cc >= 8.9 (Ada) -- inline mma.sync.e4m3/e5m2
-  bool fp4MmaSupported;          // cc >= 12.0 (Blackwell) -- sm_120a mma FP4/MXFP4
-  bool fp4MmaSparseSupported;    // cc >= 12.0 (Blackwell) -- sm_120a mma.sp FP4 2:4
+  bool fp4MmaSupported;          // cc 12.x (consumer Blackwell) -- sm_120a/121a
+                                 // raw mma.sync FP4/MXFP4 microbench kernels
+  bool fp4MmaSparseSupported;    // cc 12.x (consumer Blackwell) -- sm_120a/121a
+                                 // raw mma.sp FP4 2:4 microbench kernels
+  bool fp4GemmSupported;         // cc >= 10.0 (all Blackwell) -- block-scaled
+                                 // FP4 GEMM via cuBLASLt; covers datacenter
+                                 // (sm_100/103, tcgen05) too, where the raw
+                                 // mma.sync kernels above do not apply. cuBLASLt
+                                 // self-skips (0 heuristics) if truly absent.
   bool tf32GemmSupported;        // cc >= 8.0 (Ampere) -- TF32 tensor cores
   bool int8GemmSupported;        // cc >= 7.5 (Turing) -- imma int8 GEMM
   bool int4GemmSupported;        // cc >= 9.0 (Hopper)  -- imma int4 GEMM
   bool dpTensorSupported;        // cc >= 8.0 (Ampere) -- fp64 wmma m8n8k4
-  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) -- s4 mma.sync;
-                                 // dropped on sm_90+ (Hopper) where the s4 imma
-                                 // path was removed.
+  bool int4MmaSupported;         // cc 7.5..8.9 (Turing/Ampere/Ada) + 12.1 (GB10)
+                                 // -- s4 mma.sync; dropped on Hopper/datacenter
+                                 // Blackwell, re-added on consumer Blackwell GB10.
   bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
 };
 

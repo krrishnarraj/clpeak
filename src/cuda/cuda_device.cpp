@@ -86,15 +86,21 @@ bool CudaDevice::init(int devIndex)
   info.fp8MmaSupported = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
   info.fp4MmaSupported = (info.major >= 12);
   info.fp4MmaSparseSupported = (info.major >= 12);
+  // Block-scaled FP4 GEMM via cuBLASLt exists across the whole Blackwell line
+  // (datacenter sm_100/103 + consumer sm_120/121), unlike the raw mma.sync FP4
+  // microbench which is consumer-only.  cuBLASLt returns 0 heuristics where it
+  // can't actually run, so this gate only decides whether we *attempt* it.
+  info.fp4GemmSupported = (info.major >= 10);
   info.tf32GemmSupported = (info.major >= 8);
   info.int8GemmSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int4GemmSupported = (info.major >= 9);
   info.dpTensorSupported = (info.major >= 8);
   // s4 mma.sync was added on Turing (sm_75), kept on Ampere/Ada, removed on
-  // Hopper+ (sm_90+).  Allow 7.5..8.9 inclusive.
+  // Hopper and datacenter Blackwell, but re-added on consumer Blackwell GB10
+  // (sm_121).  Allow 7.5..8.9 inclusive, plus 12.1.
   {
     int cc = info.major * 10 + info.minor;
-    info.int4MmaSupported = (cc >= 75) && (cc <= 89);
+    info.int4MmaSupported = ((cc >= 75) && (cc <= 89)) || (cc == 121);
   }
   info.int8MmaSparseSupported = (info.major >= 8);
 

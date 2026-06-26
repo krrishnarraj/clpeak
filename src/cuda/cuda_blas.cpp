@@ -614,9 +614,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
 
         // mxfp4 / nvfp4: block-scaled 4-bit GEMM on Blackwell tensor cores.
         // Same dtypes the wmma microbench measures (mxf4_e2m1 / nvf4_e2m1), so
-        // the cublas-fp rows line up against the wmma rows.
+        // the cublas-fp rows line up against the wmma rows.  Gated on
+        // fp4GemmSupported (all Blackwell) rather than fp4MmaSupported (the
+        // consumer-only raw-mma microbench): the library FP4 path runs on
+        // datacenter sm_100/103 as well, and self-skips where it can't.
 #if defined(CLPEAK_CUBLASLT_HAS_FP4)
-        if (dev.info.fp4MmaSupported)
+        if (dev.info.fp4GemmSupported)
         {
             // 0x7F = 1.0 in UE8M0 (exponent-only, bias 127);
             // 0x38 = 1.0 in UE4M3 (e4m3, bias 7).
