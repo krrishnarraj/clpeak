@@ -281,6 +281,7 @@ jobs:
         with:
           install_runtime: true
           cache: true
+          optional_components: com.lunarg.vulkan.ios
 
       - name: Configure CMake (iOS)
         run: cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS
