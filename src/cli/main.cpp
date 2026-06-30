@@ -3,7 +3,7 @@
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/result_store.h>
-#include <cli/logger_cli.h>
+#include <common/logger_text.h>
 #include <functional>
 #include <iostream>
 
@@ -184,7 +184,7 @@ int main(int argc, char **argv)
             continue;
 
         auto peak = be.create();
-        peak->log.reset(new LoggerCli(opts.compareFile));
+        peak->log.reset(new LoggerText(std::cout, opts.compareFile));
         peak->applyOptions(opts);
         int status = peak->runAll();
         mergeResults(combined, peak->log->results);

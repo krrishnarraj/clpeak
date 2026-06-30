@@ -4,13 +4,15 @@ add_library(peak_common STATIC
     dynlib.cpp
     inventory.cpp
     logger.cpp
+    logger_text.cpp
     options.cpp
     result_store.cpp
 )
 # dlopen lives in libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it's in libc.
 target_link_libraries(peak_common PUBLIC ${CMAKE_DL_LIBS})
-# logger.cpp lives in src/cli/ (desktop) or android/ (Android JNI) —
-# each consumer brings its own output implementation.
+# logger.cpp (base) + logger_text.cpp (shared text formatter, writes to an
+# injectable std::ostream) live here.  Consumers that need a non-text channel
+# (Android JNI, iOS callbacks) subclass these in their own tree.
 target_include_directories(peak_common PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
     ${CMAKE_CURRENT_LIST_DIR}/../../include/common

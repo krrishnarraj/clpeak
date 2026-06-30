@@ -1,20 +1,29 @@
-#ifndef LOGGER_CLI_HPP
-#define LOGGER_CLI_HPP
+#ifndef LOGGER_TEXT_HPP
+#define LOGGER_TEXT_HPP
 
 #include <common/logger.h>
+#include <iostream>
 #include <vector>
 
-// ── Desktop CLI logger ─────────────────────────────────────────────────────
+// ── Text logger ────────────────────────────────────────────────────────────
 //
-// Formats benchmark output to stdout with automatic indentation, metric-name
-// alignment, and optional baseline-comparison deltas.  Accumulated
-// ResultEntry rows are stored in the base-class `results` member for later
-// file dump (JSON / CSV / XML).
+// Formats benchmark output as indented, column-aligned text with optional
+// baseline-comparison deltas.  Output is written to an injectable std::ostream
+// (defaults to std::cout), so the same formatting drives:
+//   - the desktop CLI (std::cout),
+//   - the Android app (an ostream backed by a logcat streambuf),
+//   - and any future text channel (iOS, file export, …).
+//
+// Accumulated ResultEntry rows are stored in the base-class `results` member
+// for later file dump (JSON / CSV / XML) — see result_store.h.
 
-class LoggerCli : public logger
+class LoggerText : public logger
 {
 public:
-    using logger::logger;  // inherit constructor
+    // `out` is captured by reference and must outlive this logger.
+    explicit LoggerText(std::ostream &out = std::cout,
+                        std::string compareFileName = "")
+        : logger(std::move(compareFileName)), out(out) {}
 
     void note(const std::string &msg) override;
 
@@ -39,6 +48,9 @@ protected:
     void onTestEnd() override;
     void onDeviceEnd() override;
     void onBackendEnd() override;
+
+    // Destination stream for all formatted output.
+    std::ostream &out;
 
 private:
     // ── Indentation state ────────────────────────────────────────────────
@@ -73,4 +85,4 @@ private:
     void printBaselineDelta(const std::string &metric, float value);
 };
 
-#endif // LOGGER_CLI_HPP
+#endif // LOGGER_TEXT_HPP
