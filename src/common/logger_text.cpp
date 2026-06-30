@@ -1,7 +1,6 @@
-#include <cli/logger_cli.h>
+#include <common/logger_text.h>
 #include <algorithm>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -10,30 +9,30 @@ static const int MIN_METRIC_PAD = 8;   // minimum column width for metric names
 
 // ── note ───────────────────────────────────────────────────────────────────
 
-void LoggerCli::note(const std::string &msg)
+void LoggerText::note(const std::string &msg)
 {
-    std::cout << msg;
-    std::cout.flush();
+    out << msg;
+    out.flush();
 }
 
 // ── onBackendBegin ─────────────────────────────────────────────────────────
 
-void LoggerCli::onBackendBegin(const std::string &name)
+void LoggerText::onBackendBegin(const std::string &name)
 {
     indentLevel = 0;
-    std::cout << "Backend: " << name << "\n";
-    std::cout.flush();
+    out << "Backend: " << name << "\n";
+    out.flush();
 }
 
 // ── onDeviceBegin ──────────────────────────────────────────────────────────
 
-void LoggerCli::onDeviceBegin(const std::string &name,
-                              const std::string &platform,
-                              const std::string &driverVersion,
-                              const std::vector<Prop> &props,
-                              bool _showPlatformLine,
-                              int platformIndex,
-                              int deviceIndex)
+void LoggerText::onDeviceBegin(const std::string &name,
+                               const std::string &platform,
+                               const std::string &driverVersion,
+                               const std::vector<Prop> &props,
+                               bool _showPlatformLine,
+                               int platformIndex,
+                               int deviceIndex)
 {
     showPlatformLine = _showPlatformLine;
 
@@ -74,16 +73,16 @@ void LoggerCli::onDeviceBegin(const std::string &name,
         writeLine(propIndent, line);
     }
 
-    std::cout.flush();
+    out.flush();
 }
 
 // ── onTestBegin ────────────────────────────────────────────────────────────
 
-void LoggerCli::onTestBegin(const std::string & /*tag*/,
-                            const std::string &display,
-                            const std::string &unit)
+void LoggerText::onTestBegin(const std::string & /*tag*/,
+                             const std::string &display,
+                             const std::string &unit)
 {
-    std::cout << "\n";
+    out << "\n";
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
@@ -100,12 +99,12 @@ void LoggerCli::onTestBegin(const std::string & /*tag*/,
 
     writeLine(header);
     metricLines.clear();
-    std::cout.flush();
+    out.flush();
 }
 
 // ── onMetricEmitted ────────────────────────────────────────────────────────
 
-void LoggerCli::onMetricEmitted(const ResultEntry &e, float value, bool subMetric)
+void LoggerText::onMetricEmitted(const ResultEntry &e, float value, bool subMetric)
 {
     metricLines.push_back({MetricLine::Ok, e.metric, value,
                            ResultStatus::Ok, "", subMetric});
@@ -113,7 +112,7 @@ void LoggerCli::onMetricEmitted(const ResultEntry &e, float value, bool subMetri
 
 // ── onMetricSkipped ────────────────────────────────────────────────────────
 
-void LoggerCli::onMetricSkipped(const ResultEntry &e)
+void LoggerText::onMetricSkipped(const ResultEntry &e)
 {
     metricLines.push_back({MetricLine::Skipped, e.metric, 0.0f,
                            e.status, e.reason, false});
@@ -121,7 +120,7 @@ void LoggerCli::onMetricSkipped(const ResultEntry &e)
 
 // ── onTestSkippedAll ───────────────────────────────────────────────────────
 
-void LoggerCli::onTestSkippedAll(ResultStatus status, const std::string &reason)
+void LoggerText::onTestSkippedAll(ResultStatus status, const std::string &reason)
 {
     std::string tag;
     switch (status)
@@ -133,12 +132,12 @@ void LoggerCli::onTestSkippedAll(ResultStatus status, const std::string &reason)
     }
 
     writeLine(metricIndent, "[" + tag + "] " + reason);
-    std::cout.flush();
+    out.flush();
 }
 
 // ── onTestEnd ──────────────────────────────────────────────────────────────
 
-void LoggerCli::onTestEnd()
+void LoggerText::onTestEnd()
 {
     flushMetrics();
     indentLevel = propIndent;
@@ -146,28 +145,28 @@ void LoggerCli::onTestEnd()
 
 // ── onDeviceEnd ────────────────────────────────────────────────────────────
 
-void LoggerCli::onDeviceEnd()
+void LoggerText::onDeviceEnd()
 {
     // Ensure any remaining metrics are flushed (shouldn't happen if well-formed)
     if (!metricLines.empty())
         flushMetrics();
 
-    std::cout << "\n";
+    out << "\n";
     indentLevel = 0;
-    std::cout.flush();
+    out.flush();
 }
 
 // ── onBackendEnd ───────────────────────────────────────────────────────────
 
-void LoggerCli::onBackendEnd()
+void LoggerText::onBackendEnd()
 {
     indentLevel = 0;
-    std::cout.flush();
+    out.flush();
 }
 
 // ── flushMetrics ───────────────────────────────────────────────────────────
 
-void LoggerCli::flushMetrics()
+void LoggerText::flushMetrics()
 {
     if (metricLines.empty())
         return;
@@ -200,13 +199,13 @@ void LoggerCli::flushMetrics()
             ss << std::fixed << std::setprecision(2) << ml.value;
 
             // Print metric line without trailing newline (baseline delta may follow)
-            std::cout << indentStr(lineIndent) << padded << " : " << ss.str();
+            out << indentStr(lineIndent) << padded << " : " << ss.str();
 
             // Baseline delta on the same line (if enabled)
             if (compareEnabled)
                 printBaselineDelta(ml.metric, ml.value);
 
-            std::cout << "\n";
+            out << "\n";
         }
         else
         {
@@ -219,35 +218,35 @@ void LoggerCli::flushMetrics()
             default:                        tag = "unknown";     break;
             }
 
-            std::cout << indentStr(lineIndent) << padded << " : ["
-                      << tag << "] " << ml.reason << "\n";
+            out << indentStr(lineIndent) << padded << " : ["
+                << tag << "] " << ml.reason << "\n";
         }
     }
 
     metricLines.clear();
-    std::cout.flush();
+    out.flush();
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-std::string LoggerCli::indentStr(int level) const
+std::string LoggerText::indentStr(int level) const
 {
     if (level <= 0)
         return "";
     return std::string(static_cast<size_t>(level) * 2, ' ');
 }
 
-void LoggerCli::writeLine(int level, const std::string &text)
+void LoggerText::writeLine(int level, const std::string &text)
 {
-    std::cout << indentStr(level) << text << "\n";
+    out << indentStr(level) << text << "\n";
 }
 
-void LoggerCli::writeLine(const std::string &text)
+void LoggerText::writeLine(const std::string &text)
 {
     writeLine(indentLevel, text);
 }
 
-void LoggerCli::printBaselineDelta(const std::string &metric, float value)
+void LoggerText::printBaselineDelta(const std::string &metric, float value)
 {
     // Build key from current context
     std::string key = curBackend + "/" + curPlatform + "/" +
@@ -264,6 +263,6 @@ void LoggerCli::printBaselineDelta(const std::string &metric, float value)
     char  sign     = (delta >= 0.0f) ? '+' : '-';
     float absDelta = (delta < 0.0f)  ? -delta : delta;
 
-    std::cout << "  (was " << std::fixed << std::setprecision(2) << base
-              << ", " << sign << std::setprecision(1) << absDelta << "%)";
+    out << "  (was " << std::fixed << std::setprecision(2) << base
+        << ", " << sign << std::setprecision(1) << absDelta << "%)";
 }

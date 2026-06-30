@@ -1,9 +1,12 @@
 # src/common — Shared Backend-Neutral Code
 
 Base classes, utilities, result store, and inventory shared
-by every backend. Does NOT contain a logger implementation — each consumer
-(desktop CLI, Android) provides its own (`src/cli/logger_cli.cpp` or
-`android/.../logger_android.cpp`).
+by every backend. Also owns the shared text logger (`logger_text.cpp` —
+`LoggerText`, writes to an injectable `std::ostream`). Consumers that need a
+non-text channel subclass it: the desktop CLI uses `LoggerText` directly over
+`std::cout`; Android (`android/.../logger_android.cpp`) and iOS
+(`ios/.../logger_ios.mm`) subclass to also forward structured data over JNI /
+callbacks.
 
 ## Quick Lookups
 
@@ -23,6 +26,7 @@ by every backend. Does NOT contain a logger implementation — each consumer
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration |
 | `result_store.cpp` | `ResultEntry`/`ResultStore` serialization: JSON, CSV, XML |
 | `logger.cpp` | Base `logger` class: result-scope API, `emit()`, `recordSkip` |
+| `logger_text.cpp` | `LoggerText` — indented/aligned text formatting to an injectable `std::ostream` + baseline deltas (derives from `logger`); shared by CLI + Android |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
 | `options.cpp` | `parseCliOptions()` — CLI argument parsing |
 

@@ -1,23 +1,20 @@
 #include "logger_android.h"
 #include <sstream>
 
-// ── note (no-op: text channel removed) ─────────────────────────────────────
-
-void LoggerAndroid::note(const std::string & /*msg*/)
-{
-    // Text channel is dead — Android UI consumes structured data only.
-}
-
-// ── onDeviceBegin → device_info_callback_from_c ────────────────────────────
+// ── onDeviceBegin → text + device_info_callback_from_c ─────────────────────
 
 void LoggerAndroid::onDeviceBegin(const std::string &name,
                                   const std::string &platform,
                                   const std::string &driverVersion,
                                   const std::vector<Prop> &props,
-                                  bool /*showPlatformLine*/,
+                                  bool showPlatformLine,
                                   int platformIndex,
                                   int deviceIndex)
 {
+    // Emit the formatted device block to logcat.
+    LoggerText::onDeviceBegin(name, platform, driverVersion, props,
+                             showPlatformLine, platformIndex, deviceIndex);
+
     if (!deviceInfoCallback)
         return;
 
@@ -52,10 +49,22 @@ void LoggerAndroid::onDeviceBegin(const std::string &name,
     jEnv->DeleteLocalRef(jDeviceIndex);
 }
 
-// ── onMetricEmitted → record_metric_callback_from_c ────────────────────────
+// ── onTestBegin → text + remember display name for JNI ─────────────────
 
-void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*subMetric*/)
+void LoggerAndroid::onTestBegin(const std::string &tag,
+                                const std::string &display,
+                                const std::string &unit)
 {
+    LoggerText::onTestBegin(tag, display, unit);
+    curDisplay = display;
+}
+
+// ── onMetricEmitted → text + record_metric_callback_from_c ─────────────
+
+void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool subMetric)
+{
+    LoggerText::onMetricEmitted(e, value, subMetric);
+
     if (!recordMetricCallback)
         return;
 
@@ -90,10 +99,12 @@ void LoggerAndroid::onMetricEmitted(const ResultEntry &e, float value, bool /*su
     jEnv->DeleteLocalRef(jReason);
 }
 
-// ── onMetricSkipped → record_metric_callback_from_c ────────────────────────
+// ── onMetricSkipped → text + record_metric_callback_from_c ─────────────
 
 void LoggerAndroid::onMetricSkipped(const ResultEntry &e)
 {
+    LoggerText::onMetricSkipped(e);
+
     if (!recordMetricCallback)
         return;
 

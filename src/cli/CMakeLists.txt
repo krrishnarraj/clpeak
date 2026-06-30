@@ -1,6 +1,5 @@
 add_executable(clpeak
     main.cpp
-    logger_cli.cpp
 )
 # peak_common comes transitively through every backend target
 # Place binary at build root (not under src/cli/)

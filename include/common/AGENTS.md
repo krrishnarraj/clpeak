@@ -10,7 +10,7 @@ No backend-specific includes live here.
 - Looking for benchmark constants + calibration? → `common.h`
 - Looking for CLI options struct? → `options.h`
 - Looking for result output format? → `result_store.h`
-- Looking for logger interface? → `logger.h`
+- Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
 - Looking for device inventory structs? → `inventory.h`
 - Looking for gating? → `peak.h` (gating is part of Peak)
 
@@ -23,7 +23,8 @@ No backend-specific includes live here.
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` declaration |
 | `result_store.h` | `ResultEntry`/`ResultStore` + JSON/CSV/XML serialization |
-| `logger.h` | `logger` class — result-scope API, stdout, baseline compare |
+| `logger.h` | `logger` abstract base — result-scope API, hooks, accumulated `results` |
+| `logger_text.h` | `LoggerText` — indented/aligned text formatting to an injectable `std::ostream` + baseline deltas; shared by CLI + Android |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` |
 
 ## When You Change This Directory
