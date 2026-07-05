@@ -156,6 +156,15 @@ unsigned int pickIters(double per_iter_us, unsigned int target_us,
 void populate(float *ptr, uint64_t N);
 
 // ---------------------------------------------------------------------------
+// String helpers
+// ---------------------------------------------------------------------------
+
+// Escape a string for embedding in a JSON string literal (quotes, backslash,
+// \n \r \t, and \u%04x for remaining control chars).  Shared by the result
+// dump and the device-inventory JSON emitters.
+std::string jsonEscape(const std::string &s);
+
+// ---------------------------------------------------------------------------
 // Per-device benchmark tuning knobs
 // ---------------------------------------------------------------------------
 

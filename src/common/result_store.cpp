@@ -72,24 +72,7 @@ BaselineMap buildBaselineMap(const ResultStore &store)
 }
 
 // ---- Shared escapers ------------------------------------------------------
-
-static std::string jsonEscape(const std::string &s)
-{
-    std::string out;
-    out.reserve(s.size() + 4);
-    for (char c : s)
-    {
-        switch (c)
-        {
-        case '"':  out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n";  break;
-        case '\r': out += "\\r";  break;
-        default:   out += c;      break;
-        }
-    }
-    return out;
-}
+// jsonEscape comes from common.h (shared with the inventory JSON emitter).
 
 static std::string csvField(const std::string &s)
 {
@@ -134,13 +117,13 @@ static std::string fmtValue(float v)
 //   {"format_version":2,"clpeak_version":"...","os":"...","entries":[ … ]}
 // Each entry on its own line for easy line-by-line parsing.
 
-void saveJson(const ResultStore &store, const std::string &filename)
+bool saveJson(const ResultStore &store, const std::string &filename)
 {
     std::ofstream f(filename);
     if (!f.is_open())
     {
         std::cerr << "clpeak: cannot open JSON output file: " << filename << "\n";
-        return;
+        return false;
     }
     f << "{\"format_version\":" << RESULT_FORMAT_VERSION
       << ",\"clpeak_version\":\"" << jsonEscape(CLPEAK_VERSION_STR) << "\""
@@ -174,6 +157,7 @@ void saveJson(const ResultStore &store, const std::string &filename)
         f << "\n";
     }
     f << "]}\n";
+    return f.good();
 }
 
 // ---- CSV save -------------------------------------------------------------
@@ -184,13 +168,13 @@ void saveJson(const ResultStore &store, const std::string &filename)
 // and populate `value`; non-Ok rows leave `value` empty and populate
 // `reason`.
 
-void saveCsv(const ResultStore &store, const std::string &filename)
+bool saveCsv(const ResultStore &store, const std::string &filename)
 {
     std::ofstream f(filename);
     if (!f.is_open())
     {
         std::cerr << "clpeak: cannot open CSV output file: " << filename << "\n";
-        return;
+        return false;
     }
     f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason\n";
     for (const ResultEntry &e : store)
@@ -209,6 +193,7 @@ void saveCsv(const ResultStore &store, const std::string &filename)
             f << fmtValue(e.value);
         f << "," << csvField(e.reason) << "\n";
     }
+    return f.good();
 }
 
 // ---- XML save -------------------------------------------------------------
@@ -274,13 +259,13 @@ void closeRun(std::ofstream &f, XmlPos &p)
 }
 } // namespace
 
-void saveXml(const ResultStore &store, const std::string &filename)
+bool saveXml(const ResultStore &store, const std::string &filename)
 {
     std::ofstream f(filename);
     if (!f.is_open())
     {
         std::cerr << "clpeak: cannot open XML output file: " << filename << "\n";
-        return;
+        return false;
     }
 
     f << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
@@ -340,6 +325,7 @@ void saveXml(const ResultStore &store, const std::string &filename)
 
     closeRun(f, p);
     f << "</clpeak>\n";
+    return f.good();
 }
 
 // ---- Loaders --------------------------------------------------------------
@@ -503,9 +489,11 @@ ResultStore loadJson(const std::string &filename)
 
 // ---- CSV loader -----------------------------------------------------------
 
-static std::vector<std::string> parseCsvLine(const std::string &line)
+// Returns false when the line is malformed (a quoted field is never closed);
+// the caller skips such lines rather than silently mis-splitting them.
+static bool parseCsvLine(const std::string &line, std::vector<std::string> &fields)
 {
-    std::vector<std::string> fields;
+    fields.clear();
     std::string field;
     bool inQuotes = false;
     for (size_t i = 0; i < line.size(); i++)
@@ -538,8 +526,10 @@ static std::vector<std::string> parseCsvLine(const std::string &line)
             else                field += c;
         }
     }
+    if (inQuotes)
+        return false;
     fields.push_back(field);
-    return fields;
+    return true;
 }
 
 ResultStore loadCsv(const std::string &filename)
@@ -560,7 +550,13 @@ ResultStore loadCsv(const std::string &filename)
         if (header) { header = false; continue; }
         if (line.empty() || line[0] == '\r') continue;
 
-        std::vector<std::string> fields = parseCsvLine(line);
+        std::vector<std::string> fields;
+        if (!parseCsvLine(line, fields))
+        {
+            std::cerr << "clpeak: warning: skipping malformed CSV line in: "
+                      << filename << "\n";
+            continue;
+        }
         // v2 has 12 fields; reject anything shorter (v1 had 7).
         if (fields.size() < 12)
         {

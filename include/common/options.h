@@ -48,8 +48,8 @@ struct CliOptions {
   // The first positive --<category> flag flips enabledCategories the same
   // way; --no-<category> always subtracts.  A test runs iff its primary
   // category is enabled AND its own bit is set (see isAllowed).
-  std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
-  std::bitset<4>                                     enabledCategories;
+  std::bitset<static_cast<size_t>(Benchmark::COUNT)>  enabledTests;
+  std::bitset<static_cast<size_t>(Category::Unknown)> enabledCategories;
   // OpenCL-only timing knob.
   bool useEventTimer = false;
 

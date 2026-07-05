@@ -193,13 +193,14 @@ int main(int argc, char **argv)
             lastError |= status;
     }
 
-    // Centralized file dump: one file per enabled format.
-    if (opts.enableJson)
-        saveJson(combined, opts.jsonFile);
-    if (opts.enableCsv)
-        saveCsv(combined, opts.csvFile);
-    if (opts.enableXml)
-        saveXml(combined, opts.xmlFile);
+    // Centralized file dump: one file per enabled format.  A failed dump
+    // surfaces in the exit code like any backend failure.
+    if (opts.enableJson && !saveJson(combined, opts.jsonFile))
+        lastError |= 1;
+    if (opts.enableCsv && !saveCsv(combined, opts.csvFile))
+        lastError |= 1;
+    if (opts.enableXml && !saveXml(combined, opts.xmlFile))
+        lastError |= 1;
 
     return lastError;
 }
