@@ -72,7 +72,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       timed = run_kernel(queue, kernel_v1, globalSize, localSize, cfg.targetTimeUs, forced);
 
       // Each WI reads IMAGE_FETCH_PER_WI float4 pixels = IMAGE_FETCH_PER_WI * 4 * sizeof(float) bytes
-      uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * globalWIs;
+      uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * ndRangeTotal(globalSize);
       gbps = (float)bytesPerCall / timed / 1e3f;
 
       test.emit("float4", gbps);

@@ -37,6 +37,10 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     kernel.setArg(0, inputBuf);
     kernel.setArg(1, outputBuf);
 
+    // Direct enqueue site (not via run_kernel): clamp explicitly so a kernel
+    // work-group limit below the device max does not fail with -54.
+    clampToKernelWG(queue.getInfo<CL_QUEUE_DEVICE>(), kernel, globalSize, localSize);
+
     // Warmup
     queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
     queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);

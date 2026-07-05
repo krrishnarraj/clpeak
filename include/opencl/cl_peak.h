@@ -42,9 +42,25 @@ public:
 
     // Time a kernel batched as `iters` dispatches, where `iters` is calibrated
     // from a one-shot warmup so the timed phase lands at ~targetTimeUs.
+    // Clamps the local size to the kernel's own work-group limit first (see
+    // clampToKernelWG), so callers may pass the device-max local size freely.
     float run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
                      cl::NDRange &globalSize, cl::NDRange &localSize,
                      unsigned int targetTimeUs, unsigned int forcedIters);
+
+    // A kernel's own max work-group size (CL_KERNEL_WORK_GROUP_SIZE) can be
+    // smaller than the device max -- e.g. register pressure on wide vector
+    // widths, or a driver quirk -- and launching above it fails with -54
+    // (CL_INVALID_WORK_GROUP_SIZE). Clamp the (1-D) local size to that limit and
+    // re-align the global size down to a multiple of it, in place. No-op when
+    // the requested local size already fits. run_kernel calls this for every
+    // launch that goes through it; direct enqueue sites call it themselves.
+    static void clampToKernelWG(const cl::Device &dev, cl::Kernel &kernel,
+                                cl::NDRange &globalSize, cl::NDRange &localSize);
+
+    // Total work-item count of an NDRange (product of its dimensions). Used to
+    // compute throughput from the effective global size after clampToKernelWG.
+    static uint64_t ndRangeTotal(const cl::NDRange &range);
 
     // Unified compute benchmark helper — replaces 7 nearly-identical runCompute* methods.
     int runComputeTest(cl::CommandQueue &queue, cl::Program &prog,

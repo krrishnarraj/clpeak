@@ -68,9 +68,6 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, globalWIs * elemSize);
 
-    cl::NDRange globalSize = globalWIs;
-    cl::NDRange localSize = devInfo.maxWGSize;
-
     // Create kernels and set arguments
     cl::Kernel kernels[5];
     for (int w = 0; w < 5; w++)
@@ -107,14 +104,29 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     }
 
-    // Run each vector width
+    // Run each vector width. run_kernel clamps the local size to each kernel's
+    // own work-group limit (wide vector widths can be capped by register
+    // pressure), so widths run at whatever size the kernel actually supports.
+    // Isolate per-width failures so one constrained width does not mark the
+    // whole group as errored.
     for (int w = 0; w < 5; w++)
     {
-      float timed = run_kernel(queue, kernels[w], globalSize, localSize,
-                               cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-      float throughput = (static_cast<float>(globalWIs) * static_cast<float>(workPerWI)) / timed / 1e3f;
+      try
+      {
+        cl::NDRange globalSize = globalWIs;
+        cl::NDRange localSize = devInfo.maxWGSize;
 
-      test.emit(labels[w], throughput);
+        float timed = run_kernel(queue, kernels[w], globalSize, localSize,
+                                 cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+        float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed / 1e3f;
+
+        test.emit(labels[w], throughput);
+      }
+      catch (cl::Error &error)
+      {
+        std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+        test.skip(labels[w], ResultStatus::Error, reason);
+      }
     }
   }
   catch (cl::Error &error)

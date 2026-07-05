@@ -62,17 +62,20 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     const int widths[] = {1, 2, 4, 8, 16};
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
 
-    localSize = devInfo.maxWGSize;
-
     for (int w = 0; w < 5; w++)
     {
+      // Reset each iteration: run_kernel may clamp global/local for a kernel
+      // whose work-group limit is below the device max.
       globalSize = numItems / widths[w] / FETCH_PER_WI;
+      localSize = devInfo.maxWGSize;
 
       timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
       timed_go = run_kernel(queue, *go_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
       timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-      gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+      // Bytes actually moved = effective work-items * per-WI fetch.
+      uint64_t movedFloats = ndRangeTotal(globalSize) * widths[w] * FETCH_PER_WI;
+      gbps = ((float)movedFloats * sizeof(float)) / timed / 1e3f;
 
       test.emit(labels[w], gbps);
      }

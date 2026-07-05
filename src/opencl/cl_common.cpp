@@ -1,7 +1,6 @@
 #include <opencl/cl_common.h>
 #include <opencl/cl_utils.h>
 #include <vector>
-#include <cctype>
 
 device_info_t getDeviceInfo(cl::Device &d)
 {
@@ -20,15 +19,9 @@ device_info_t getDeviceInfo(cl::Device &d)
     // Cap work-group size to what hardware reports (up to MAX_WG_SIZE)
     devInfo.maxWGSize = std::min(devInfo.maxWGSize, (unsigned int)MAX_WG_SIZE);
 
-    // FIXME limit max-workgroup size for qualcomm platform to 128
-    // Kernel launch fails for workgroup size 256(CL_DEVICE_MAX_WORK_ITEM_SIZES)
-    std::string vendor = d.getInfo<CL_DEVICE_VENDOR>();
-    std::string vendorLower = vendor;
-    std::transform(vendorLower.begin(), vendorLower.end(), vendorLower.begin(), ::tolower);
-    if (vendorLower.find("qualcomm") != std::string::npos)
-    {
-        devInfo.maxWGSize = std::min(devInfo.maxWGSize, (unsigned int)128);
-    }
+    // Per-kernel work-group limits (CL_KERNEL_WORK_GROUP_SIZE) are enforced at
+    // launch time by clPeak::clampToKernelWG, which supersedes the old
+    // Qualcomm-specific 128 cap for kernels that could not run at the device max.
 
     devInfo.maxAllocSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>());
     devInfo.localMemSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>());
