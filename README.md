@@ -22,7 +22,7 @@ Backend: Metal
       half     : 4989.62
 
     simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)
-      simdgroup_fp16 : 15.84
+      simdgroup_fp16 : 5.14
 
     MPS GEMM peak (TFLOPS)
       fp32     : 4.09

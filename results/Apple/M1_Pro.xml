@@ -20,7 +20,7 @@
         <metric name="mp4">4776.9897</metric>
       </test>
       <test name="simdgroup_matrix_fp16" unit="tflops">
-        <metric name="simdgroup_fp16">15.8267</metric>
+        <metric name="simdgroup_fp16">5.14</metric>
       </test>
       <test name="simdgroup_matrix_bf16" unit="tflops">
         <metric name="simdgroup_bf16" status="unsupported" reason="bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped"/>
