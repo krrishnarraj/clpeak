@@ -32,9 +32,11 @@ extern "C" __global__ void wmma_int8(int *out, int A)
         mma_sync(c3, a, b, c3);
     }
 
-    mma_sync(c0, a, b, c1);
-    mma_sync(c2, a, b, c3);
-    mma_sync(c0, a, b, c2);
+    // Sum all four chains element-wise; see wmma_fp16.cu for why an mma_sync
+    // fold would dead-code chains and inflate the number.
+    #pragma unroll
+    for (int t = 0; t < c0.num_elements; t++)
+        c0.x[t] += c1.x[t] + c2.x[t] + c3.x[t];
 
     store_matrix_sync(out + blockIdx.x * 16 * 16, c0, 16, mem_row_major);
 }

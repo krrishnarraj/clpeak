@@ -5,8 +5,12 @@
 // Four independent accumulator chains (c0..c3) so the tensor unit's
 // multi-cycle pipeline can issue back-to-back MMAs instead of stalling
 // on the c -> c dependency every iter.  Single-chain on RTX 5060 topped
-// out at ~42 TFLOPS = 35% of the spec peak; same fix we used for Metal
-// simdgroup_matrix and the Vulkan int8_dp4 variant.
+// out at ~42 TFLOPS = 35% of the spec peak.  All four chains are reduced
+// element-wise at the end (NOT folded via mma_sync, which overwrites its
+// destination and would dead-code the extra chains) so the host's 4x op
+// count stays honest; same lesson as the Metal simdgroup_matrix fix.  If
+// four chains still fall short of peak on a given arch, raise the chain
+// count (like the fp8/fp4 kernels' 8/16) -- needs on-device measurement.
 //
 // Per warp ops = 256 outer * 4 chains * (16*16*16*2) = 8,388,608;
 // per thread = 262,144 (= 4 * COOPMAT_WORK_PER_WI).
@@ -38,12 +42,14 @@ extern "C" __global__ void wmma_fp16(float *out, float A)
         mma_sync(c3, a, b, c3);
     }
 
-    // Fold so every accumulator contributes to the stored tile -- prevents
-    // the compiler from dropping any chain it sees as dead.  3 extra MMAs
-    // is ~0.3% noise on the measured TFLOPS.
-    mma_sync(c0, a, b, c1);
-    mma_sync(c2, a, b, c3);
-    mma_sync(c0, a, b, c2);
+    // Reduce all four chains element-wise before the store.  mma_sync writes
+    // its FIRST argument, so folding via mma_sync(c0, a, b, c1) overwrites c0
+    // instead of accumulating into it -- that dead-codes the chains the host
+    // still counts and inflates the reported TFLOPS by up to 4x.  Summing the
+    // accumulator fragments keeps every chain live.
+    #pragma unroll
+    for (int t = 0; t < c0.num_elements; t++)
+        c0.x[t] += c1.x[t] + c2.x[t] + c3.x[t];
 
     store_matrix_sync(out + blockIdx.x * 16 * 16, c0, 16, mem_row_major);
 }
