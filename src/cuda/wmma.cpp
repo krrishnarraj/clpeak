@@ -32,7 +32,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.metricLabel = "wmma_fp16";
       d.kernelName = "wmma_fp16";
       d.blob = &cuda_kernels::wmma_fp16;
-      d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains per kernel
       d.elemSize = sizeof(float);
       d.blockSize = warp;
       d.outElemsPerBlock = outElems;
@@ -53,7 +53,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.metricLabel = "wmma_bf16";
       d.kernelName = "wmma_bf16";
       d.blob = &cuda_kernels::wmma_bf16;
-      d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8;
       d.elemSize = sizeof(float);
       d.blockSize = warp;
       d.outElemsPerBlock = outElems;
@@ -74,7 +74,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.metricLabel = "wmma_tf32";
       d.kernelName = "wmma_tf32";
       d.blob = &cuda_kernels::wmma_tf32;
-      d.workPerWI = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
+      d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 8 chains * m16n16k8 (half K of fp16)
       d.elemSize = sizeof(float);
       d.blockSize = warp;
       d.outElemsPerBlock = outElems;
@@ -275,7 +275,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     d.metricLabel = "wmma_int8";
     d.kernelName = "wmma_int8";
     d.blob = &cuda_kernels::wmma_int8;
-    d.workPerWI = COOPMAT_WORK_PER_WI * 4;
+    d.workPerWI = COOPMAT_WORK_PER_WI * 8;
     d.elemSize = sizeof(int);
     d.blockSize = warp;
     d.outElemsPerBlock = outElems;
