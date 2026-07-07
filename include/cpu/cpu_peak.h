@@ -51,9 +51,13 @@ struct cpu_device_info_t {
   bool hasNEON   = false;
   bool hasFP16   = false;           // native fp16 arithmetic (AVX512-FP16 / ARM FEAT_FP16)
   bool hasFP16FML = false;          // widening fp16xfp16 -> fp32 FMLA (ARM FEAT_FP16FML)
-  bool hasBF16   = false;           // bf16 dot (AVX512-BF16 / ARM bfdot)
-  bool hasInt8DP = false;           // int8 dot (AVX512-VNNI / AVX-VNNI / ARM dotprod)
+  bool hasBF16   = false;           // bf16 dot (AVX512-BF16 / ARM bfdot / SVE bfdot)
+  bool hasInt8DP = false;           // int8 dot (AVX512-VNNI / AVX-VNNI / ARM dotprod / SVE sdot)
+  bool hasAVXVNNI = false;          // 256-bit AVX-VNNI int8 dot (no AVX-512 needed)
   bool hasAMX    = false;           // x86 AMX tile matmul (int8 + bf16)
+  bool hasSVE    = false;           // ARM SVE (vector-length-agnostic)
+  bool hasSVE2   = false;           // ARM SVE2
+  int  sveVLBytes = 0;              // active SVE vector length in bytes (0 if no SVE)
 };
 
 // Populate `info` from the host (cpu_device.cpp).

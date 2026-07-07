@@ -33,8 +33,8 @@ local memory, DRAM ↔ global memory.
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning (`pthread_setaffinity_np` / `SetThreadAffinityMask`; advisory no-op on macOS) |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *compile flags of the TU it is built in*, with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) + `CPU_UNROLL_*` |
 | **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants — bandwidth only), and `kernelMenu()` returning `CpuKernelMenu` (per-slot `std::vector<IsaVariant>` = **every** supported ISA variant + its canonical label, baseline-first) for the compute tests |
-| **`cpu_kernels_impl.h`** | **All** chain bodies (fp32/fp64/int32/fp16/bf16/mp/int8dp/matrix/readsum), `#if`-gated by compile features, + the per-TU `tuTable()` builder. Included once per feature TU |
-| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avx512[vnni\|bf16\|fp16]`, `amx`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`; or `native`) with that ISA's flags |
+| **`cpu_kernels_impl.h`** | **All** chain bodies (fp32/fp64/int32/fp16/bf16/mp/int8dp/matrix/readsum + the vector-length-agnostic SVE chains), `#if`-gated by compile features, + the per-TU `tuTable()` builder. Included once per feature TU |
+| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `sve`, `svebf16`, `svei8mm`; or `native`) with that ISA's flags |
 | **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`); `kernels()` assembly (merges supported TUs, widest variant per kernel — bandwidth only); and `kernelMenu()` which collects **every** supported variant per kernel with its canonical ISA label (explicit per-slot pushes — encodes the "collapse identical SSE float" rule by pushing only int32 from the `sse42` TU, and labels base vs feature kernels per-slot) |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics; `emitVariants()` — runs **every** ISA variant from a `kernelMenu()` slot as its own test (ISA appended to the display name, `isaSlug()` into the tag for unique result keys), or one untagged `Unsupported` test if none |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). Kernel bodies live in `cpu_kernels_impl.h` |
@@ -73,15 +73,32 @@ Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
   by picking, per kernel, the widest variant whose *full* feature set is present.
   The non-kernel code (methods, dispatcher) is compiled at the safe baseline, so
   the binary never SIGILLs on an older CPU.
-  - x86 TUs: `generic` (SSE2, ungated floor), `sse42`, `avx2`, `avx512`
+  - x86 TUs: `generic` (SSE2, ungated floor), `sse42`, `avx2`, `avxvnni`
+    (256-bit VEX AVX-VNNI int8 dot — the client-x86 int8 path for Alder Lake→
+    Arrow Lake, Sierra Forest, Zen 5, none of which have AVX-512), `avxvnniint8`
+    (256-bit signed×signed int8 dot; Zen 6, Lunar/Arrow Lake), `avx512`
     (F/BW/VL/DQ), then the fragmented sub-features as their own TUs —
-    `avx512vnni`, `avx512bf16`, `avx512fp16`, `amx` (clang/clang-cl, x86-64;
-    Linux + Windows). A TU is only
+    `avx512vnni`, `avx512bf16`, `avx512fp16`, `avx10bf16` (AVX10.2-512 native
+    full-rate bf16 vector FMA — a *different* peak from the bf16 dot: real bf16
+    multiply-add, Diamond Rapids), `amx` (int8+bf16), and the newer AMX-dtype TUs
+    `amxfp16` (Granite Rapids), `amxtf32`, `amxfp8` (Diamond Rapids) —
+    clang/clang-cl, x86-64; Linux + Windows. A TU is only
     *entered* when every feature it was compiled with is present (AVX-512 ≠ one
-    feature: Skylake-X has F but not VNNI/BF16/FP16).
+    feature: Skylake-X has F but not VNNI/BF16/FP16). The `avxvnni`/`avxvnniint8`
+    TUs are merged **before** `avx512` in `kernels()` so a wider AVX-512 base
+    kernel still wins per-slot; their real contribution is the 256-bit int8dp.
+    The new matrix dtypes emit their own tests via extra `mat_fp16`/`mat_tf32`/
+    `mat_fp8` menu slots (all under the same `Benchmark::Amx` gate, so no new enum),
+    and the bf16 FMA via a `bf16fma` slot in the BF16 phase.
   - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
     floor never bakes in M4-only features), plus Linux/Android `fp16`,
-    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs.
+    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs, and the **SVE** family —
+    `sve` (vector-length-agnostic base compute + int8 SDOT), `svebf16` (BFDOT +
+    BFMMLA), `svei8mm` (SMMLA). The SVE TUs are `NOT APPLE` (Apple Silicon has no
+    non-streaming SVE — that's SME's streaming mode, a separate future backend
+    task). One `sve` binary runs any VL (128-bit Oryon/Vera/Graviton4, 256-bit
+    Graviton3); `svebf16`/`svei8mm` are on base SVE too (present on Neoverse V1
+    without SVE2), runtime-gated by `HWCAP2_SVEBF16`/`HWCAP2_SVEI8MM`.
   - Windows: only **real MSVC** (cl.exe, `CMAKE_CXX_COMPILER_ID == "MSVC"`) is
     restricted. clang-cl reports `MSVC=TRUE` in CMake but is classified as
     clang (`_clpeak_real_msvc=OFF`) and takes the GNU-flag path — every `-m` /
@@ -188,6 +205,46 @@ define.
   both Linux and Windows but clang/clang-cl only (real cl.exe is core-only and
   can't build it). Untested on real silicon — verify with `objdump`/`dumpbin` that
   the hot loop keeps `NACC*INNER` `tdpbssd`/`tdpbf16ps`, and that numbers land near spec.
+- **The newer x86 AI dtypes (AMX-FP16/TF32/FP8, AVX-VNNI-INT8, AVX10.2 bf16 FMA)
+  are enumerated in scattered CPUID bits — getting one wrong risks a SIGILL, so
+  they're triple-gated.** Bit positions (verified against Intel's ISA ref /
+  `klauspost/cpuid`): leaf 7 **sub-leaf 1** EAX[21]=AMX-FP16, EDX[4]=AVX-VNNI-INT8,
+  EDX[7]=AMX-TF32, EDX[19]=AVX10; leaf 7 **sub-leaf 0** ECX[3]=AMX-FP8 (note the
+  odd sub-leaf — it's *not* with the other AMX dtypes); AVX10.2-512 needs leaf
+  `0x24` EBX low-byte version ≥ 2 **and** EBX[18] (512-bit) **and** the AVX-512 OS
+  XSTATE grant. Every AMX dtype additionally requires `amx_tile` + the XTILEDATA
+  permission (`amxPermOk()`), so even a mis-read feature bit can't issue a tile op
+  on a non-AMX CPU. The three new AMX kernels share `amxConfig16x64()` (the same
+  palette-1 / 16-row / 64-colsb TILECFG as int8/bf16); only the element width sets
+  K-per-tile (fp16 K=32, tf32 K=16, fp8 K=64) and the DP intrinsic differ. The
+  AVX10.2 `bf16fma` is the one *non-dot* bf16 path — `_mm512_fmadd_pbh` full-rate,
+  reduced via a raw bf16→fp32 widening (`memcpy` + `<<16`) because no cast
+  intrinsic takes a whole `__m512bh`; its `b` coefficient must not round to 1.0 in
+  bf16 (0.98828 is exact). **None of these run on hardware yet** — all
+  codegen-verified only (`llvm-objdump --mattr=+amx-fp16,+amx-tf32,+amx-fp8,`
+  `+avxvnniint8,+avx10.2-512`: hot loops emit `tdpfp16ps`/`tmmultf32ps`/`tdphf8ps`/
+  `vpdpbssd`/`vfmadd*bf16`). Validate on Granite Rapids (AMX-FP16) / Diamond Rapids
+  (the rest) when reachable; re-check the tf32/fp8 K-dim ops-per-instr against spec.
+- **SVE is vector-length-agnostic, so its kernels break two assumptions the
+  fixed-width path bakes in.** (1) *Sizeless types can't be array/struct
+  members* — `svfloat32_t acc[NACC]` is a compile error, so the NACC independent
+  accumulator chains are declared as individual named registers via the
+  `SVE_REP16`/`SVE_REP24` X-macros in `cpu_kernels_impl.h` (each `X(i)` expands to
+  one `a##i`). (2) *`opsPerIter` is VL-dependent* — it's computed from
+  `svcntw()`/`svcntd()`/`svcntb()` at table-build time (in `tuTable()`, only ever
+  reached when SVE is the running host's ISA), not a compile-time constant; the VL
+  in bytes rides in `CpuKernelTable::sveVLBytes` (propagated by `merge()`) and is
+  reported as `ISA: SVE2 (VL=256b)` in the device header. The base compute uses
+  `svmad` (`acc = acc*b + c`, one MAD, no reload — the SVE analogue of the NEON
+  FMLA chain); int8 is `svdot` (SDOT), bf16 `svbfdot`/`svbfmmla`, int8 matrix
+  `svmmla`. NACC=24 for fp/int32 (32 Z-regs give headroom), 16 for the dot/matrix
+  kernels — **re-sweep on real Neoverse V2 / Grace silicon** (the NEON NACC=24 was
+  tuned on Firestorm; SVE latency/pipe counts differ). Codegen-verified with
+  `llvm-objdump --mattr=+sve,+bf16,+i8mm` (Apple's `otool` can't decode SMMLA — it
+  prints `.long 0x45189b2X`): the hot loop must be exactly `NACC*CPU_UNROLL_K`
+  back-to-back `fmad`/`sdot`/`bfdot`/`bfmmla`/`smmla` on `z` registers with no
+  loads/stores. Not yet run on SVE hardware — validate on Graviton3/4, Grace, or a
+  GitHub arm64 runner (Cobalt/Neoverse N2 has SVE2).
 - **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
   CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
   `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from

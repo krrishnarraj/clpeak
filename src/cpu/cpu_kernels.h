@@ -24,13 +24,23 @@ struct CpuFeatures {
   bool sse42 = false, avx2 = false, fma = false;
   bool avx512f = false, avx512bw = false, avx512vl = false, avx512dq = false;
   bool avx512vnni = false, avx512bf16 = false, avx512fp16 = false;
+  bool avxvnni = false;      // 256-bit VEX AVX-VNNI (Alder Lake+, Zen 5, Sierra Forest)
+  bool avxvnniint8 = false;  // 256-bit AVX-VNNI-INT8 (signed×signed dpbssd; Zen 6, Lunar Lake)
+  bool avx10 = false, avx10_2_512 = false;  // AVX10.2 512-bit (Diamond Rapids): native bf16 FMA
   bool amx_tile = false, amx_int8 = false, amx_bf16 = false;
+  bool amx_fp16 = false, amx_tf32 = false, amx_fp8 = false;  // Granite/Diamond Rapids AMX dtypes
   // ARM
   bool neon = false, fp16 = false, fp16fml = false, dotprod = false, bf16 = false, i8mm = false;
+  // ARM SVE.  The compute kernels are vector-length-agnostic (one binary runs
+  // 128-bit Oryon/Vera and 256-bit Graviton3); svebf16/svei8mm gate the SVE
+  // BFDOT/BFMMLA and SMMLA paths independently (present on Neoverse V1 without
+  // SVE2, and on every SVE2 core).
+  bool sve = false, sve2 = false, svebf16 = false, svei8mm = false;
 };
 
 const CpuFeatures &cpuFeatures();   // cached runtime probe
 const char       *isaName();        // widest active compute ISA, e.g. "AVX-512" / "NEON"
+int               sveVLBytes();     // active SVE vector length in bytes (0 if no SVE)
 
 // A compute chain runs `outer` outer-iterations and returns a sink value.
 using ChainFn = double (*)(uint64_t outer);
@@ -45,8 +55,14 @@ struct ChainVariant {
 // One feature TU's offered kernels (null entries = not provided by that ISA).
 struct CpuKernelTable {
   ChainVariant fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
+  // Newer x86 matrix/vector dtypes: AMX fp16 (Granite Rapids), AMX tf32 / AMX fp8
+  // (Diamond Rapids), and native bf16 vector FMA (AVX10.2, full-rate, not a dot).
+  ChainVariant mat_fp16, mat_tf32, mat_fp8, bf16fma;
   ReadFn       readsum = nullptr;
   const char  *isaName = "";
+  // SVE vector length in bytes (svcntb()), set only by an SVE TU's table so the
+  // dispatcher can report it in the device header.  0 on non-SVE tables.
+  int          sveVLBytes = 0;
 };
 
 // The best kernels for THIS host (assembled once on first call).  Used by the
@@ -67,6 +83,7 @@ struct IsaVariant {
 // compare instruction sets, rather than only the widest one (see kernels()).
 struct CpuKernelMenu {
   std::vector<IsaVariant> fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
+  std::vector<IsaVariant> mat_fp16, mat_tf32, mat_fp8, bf16fma;
 };
 
 // Assembled once on first call.

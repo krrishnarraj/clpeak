@@ -200,6 +200,26 @@ else()
             if(_clpeak_f_avx2)
                 clpeak_add_isa_tu(avx2 ${_avx2})
             endif()
+            # 256-bit AVX-VNNI: int8 dot for the huge installed base of client
+            # x86 without AVX-512 (Alder Lake -> Arrow Lake, Sierra Forest, Zen 5).
+            # Implies AVX2; the TU's int8dp comes in via the __AVXVNNI__ path.
+            set(_avxvnni ${_avx2} ${_clpeak_gnuflag}-mavxvnni)
+            check_cxx_compiler_flag("${_avxvnni}" _clpeak_f_avxvnni)
+            if(_clpeak_f_avxvnni)
+                clpeak_add_isa_tu(avxvnni ${_avxvnni})
+            endif()
+            # AVX-VNNI-INT8 (256-bit signed×signed int8 dot): Zen 6, Lunar/Arrow Lake.
+            set(_avxvnniint8 ${_avx2} ${_clpeak_gnuflag}-mavxvnniint8)
+            check_cxx_compiler_flag("${_avxvnniint8}" _clpeak_f_avxvnniint8)
+            if(_clpeak_f_avxvnniint8)
+                clpeak_add_isa_tu(avxvnniint8 ${_avxvnniint8})
+            endif()
+            # AVX10.2 (512-bit): native full-rate bf16 vector FMA (Diamond Rapids).
+            set(_avx10bf16 ${_clpeak_gnuflag}-mavx10.2)
+            check_cxx_compiler_flag("${_avx10bf16}" _clpeak_f_avx10bf16)
+            if(_clpeak_f_avx10bf16)
+                clpeak_add_isa_tu(avx10bf16 ${_avx10bf16})
+            endif()
             set(_avx512_core ${_clpeak_gnuflag}-mavx512f ${_clpeak_gnuflag}-mavx512bw
                              ${_clpeak_gnuflag}-mavx512vl ${_clpeak_gnuflag}-mavx512dq)
             check_cxx_compiler_flag("${_avx512_core}" _clpeak_f_avx512)
@@ -235,6 +255,26 @@ else()
                 if(_clpeak_f_amx)
                     clpeak_add_isa_tu(amx ${_amx})
                 endif()
+                # Newer AMX dtypes as their own TUs (each is a separate CPUID
+                # feature + a newer compiler; runtime-gated so an older CPU never
+                # issues them).  amx-tile is the common base; the -mamx-fp16 /
+                # -mamx-tf32 / -mamx-fp8 flags need clang>=~18/20 (older toolchains
+                # fail the check and simply skip the TU -> Unsupported row).
+                set(_amxfp16 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp16)
+                check_cxx_compiler_flag("${_amxfp16}" _clpeak_f_amxfp16)
+                if(_clpeak_f_amxfp16)
+                    clpeak_add_isa_tu(amxfp16 ${_amxfp16})
+                endif()
+                set(_amxtf32 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-tf32)
+                check_cxx_compiler_flag("${_amxtf32}" _clpeak_f_amxtf32)
+                if(_clpeak_f_amxtf32)
+                    clpeak_add_isa_tu(amxtf32 ${_amxtf32})
+                endif()
+                set(_amxfp8 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp8)
+                check_cxx_compiler_flag("${_amxfp8}" _clpeak_f_amxfp8)
+                if(_clpeak_f_amxfp8)
+                    clpeak_add_isa_tu(amxfp8 ${_amxfp8})
+                endif()
             endif()
         endif()
 
@@ -266,6 +306,24 @@ else()
             check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+i8mm"    _clpeak_f_a_i8mm)
             if(_clpeak_f_a_i8mm)
                 clpeak_add_isa_tu(i8mm ${_clpeak_gnuflag}-march=armv8.6-a+i8mm)
+            endif()
+            # SVE (vector-length-agnostic): base compute + int8 SDOT from a plain
+            # +sve TU (covers Graviton3/Neoverse V1 without SVE2, and every SVE2
+            # core: Neoverse V2, Grace/Vera, Cortex-X925, Oryon Gen3).  BFDOT/
+            # BFMMLA and SMMLA ride in separate feature TUs (present on V1 too),
+            # runtime-gated by HWCAP2_SVEBF16 / HWCAP2_SVEI8MM.  Apple Silicon has
+            # no non-streaming SVE, so this whole block is NOT APPLE.
+            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+sve"      _clpeak_f_sve)
+            if(_clpeak_f_sve)
+                clpeak_add_isa_tu(sve ${_clpeak_gnuflag}-march=armv8.2-a+sve)
+            endif()
+            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16" _clpeak_f_svebf16)
+            if(_clpeak_f_svebf16)
+                clpeak_add_isa_tu(svebf16 ${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16)
+            endif()
+            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm" _clpeak_f_svei8mm)
+            if(_clpeak_f_svei8mm)
+                clpeak_add_isa_tu(svei8mm ${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm)
             endif()
         endif()
     endif()

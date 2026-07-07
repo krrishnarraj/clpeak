@@ -189,10 +189,18 @@ static void detectIsa(cpu_device_info_t &info)
   info.hasNEON    = f.neon;
   info.hasFP16    = f.fp16 || f.avx512fp16;
   info.hasFP16FML = f.fp16fml;
-  info.hasBF16    = f.bf16 || f.avx512bf16;
-  info.hasInt8DP  = f.dotprod || f.avx512vnni;
-  info.hasAMX     = f.amx_int8 || f.amx_bf16;
+  info.hasBF16    = f.bf16 || f.avx512bf16 || f.svebf16 || f.avx10_2_512;
+  info.hasInt8DP  = f.dotprod || f.avx512vnni || f.avxvnni || f.avxvnniint8 || f.sve;
+  info.hasAVXVNNI = f.avxvnni || f.avxvnniint8;
+  info.hasAMX     = f.amx_int8 || f.amx_bf16 || f.amx_fp16 || f.amx_tf32 || f.amx_fp8;
+  info.hasSVE     = f.sve;
+  info.hasSVE2    = f.sve2;
+  info.sveVLBytes = clpeak_cpu::sveVLBytes();
   info.isaName    = clpeak_cpu::isaName();
+  // Report the active SVE vector length alongside the ISA name, e.g.
+  // "SVE2 (VL=256b)" -- it's the defining knob for SVE peak throughput.
+  if (info.sveVLBytes > 0)
+    info.isaName += " (VL=" + std::to_string(info.sveVLBytes * 8) + "b)";
 }
 
 // ---------------------------------------------------------------------------

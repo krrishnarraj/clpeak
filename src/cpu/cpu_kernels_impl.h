@@ -23,6 +23,10 @@
 #include <immintrin.h>
 #endif
 
+#if defined(__ARM_FEATURE_SVE)
+#include <arm_sve.h>
+#endif
+
 namespace clpeak_cpu {
 namespace {
 
@@ -408,6 +412,33 @@ static double runInt8DpChain(uint64_t outer)
   lo = _mm_hadd_epi32(lo, lo);
   return (double)_mm_cvtsi128_si32(lo);
 }
+#elif defined(__AVXVNNIINT8__)
+// 256-bit AVX-VNNI-INT8: signed×signed int8 dot (VPDPBSSD).  Same throughput as
+// AVX-VNNI's VPDPBUSD but a distinct ISA row (Zen 6, Lunar Lake, Arrow Lake+).
+#define CPU_HAS_INT8DP_KERNEL 1
+static constexpr int I8_NACC = 12, I8_OPS_PER_INSTR = 64;
+static double runInt8DpChain(uint64_t outer)
+{
+  __m256i acc[I8_NACC];
+  const __m256i a = _mm256_set1_epi8((char)3);
+  const __m256i b = _mm256_set1_epi8((char)5);
+  for (int j = 0; j < I8_NACC; j++) acc[j] = _mm256_setzero_si256();
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < I8_NACC; j++) acc[j] = _mm256_dpbssd_epi32(acc[j], a, b);
+    }
+  __m256i sAll = acc[0];
+  for (int j = 1; j < I8_NACC; j++) sAll = _mm256_add_epi32(sAll, acc[j]);
+  __m128i lo = _mm256_castsi256_si128(sAll);
+  __m128i hi = _mm256_extracti128_si256(sAll, 1);
+  lo = _mm_add_epi32(lo, hi);
+  lo = _mm_hadd_epi32(lo, lo);
+  lo = _mm_hadd_epi32(lo, lo);
+  return (double)_mm_cvtsi128_si32(lo);
+}
 #elif defined(__ARM_FEATURE_DOTPROD)
 #define CPU_HAS_INT8DP_KERNEL 1
 static constexpr int I8_NACC = 16, I8_OPS_PER_INSTR = 32;
@@ -543,6 +574,321 @@ static double runMatFpChain(uint64_t outer)
 }
 #endif
 
+// ---- Newer x86 AMX matrix dtypes: fp16 / tf32 / fp8 ------------------------
+// Same 4-accumulator-tile config as the int8/bf16 AMX kernels (opaque tiles, so
+// the accumulate loop can't be scalar-evolved; inputs zero => data-independent
+// throughput; output tiles thread_local so every MT worker gets its own).  The
+// TILECFG is the canonical palette-1 / 16-row / 64-colsb layout for all of them;
+// only the element width (hence K per tile) and the DP intrinsic differ.
+#if (defined(__AMX_FP16__) || defined(__AMX_TF32__) || defined(__AMX_FP8__)) && \
+    (defined(__x86_64__) || defined(_M_X64))
+static void amxConfig16x64()
+{
+  struct { uint8_t palette, start_row, reserved[14]; uint16_t colsb[16]; uint8_t rows[16]; } cfg = {};
+  cfg.palette = 1;
+  for (int t = 0; t < 6; t++) { cfg.rows[t] = 16; cfg.colsb[t] = 64; }
+  _tile_loadconfig(&cfg);
+}
+#endif
+
+#if defined(__AMX_FP16__) && (defined(__x86_64__) || defined(_M_X64))
+#define CPU_MAT_FP16_KERNEL 1
+static constexpr double MAT_FP16_OPS_PER_K = 4.0 * 16 * 16 * 32 * 2;  // K=32 fp16/row
+static thread_local bool g_amxFp16Cfg = false;
+alignas(64) static uint16_t g_amxAf16[16 * 32];
+alignas(64) static uint16_t g_amxBf16m[16 * 32];
+alignas(64) static thread_local float g_amxCf16[16 * 16];
+static double runMatFp16Chain(uint64_t outer)
+{
+  if (!g_amxFp16Cfg) { amxConfig16x64(); g_amxFp16Cfg = true; }
+  _tile_loadd(4, g_amxAf16, 64);
+  _tile_loadd(5, g_amxBf16m, 64);
+  _tile_zero(0); _tile_zero(1); _tile_zero(2); _tile_zero(3);
+  for (uint64_t o = 0; o < outer; o++)
+    for (int k = 0; k < INNER; k++)
+    { _tile_dpfp16ps(0, 4, 5); _tile_dpfp16ps(1, 4, 5); _tile_dpfp16ps(2, 4, 5); _tile_dpfp16ps(3, 4, 5); }
+  double sink = 0.0;
+  _tile_stored(0, g_amxCf16, 64); sink += g_amxCf16[0];
+  _tile_stored(1, g_amxCf16, 64); sink += g_amxCf16[0];
+  _tile_stored(2, g_amxCf16, 64); sink += g_amxCf16[0];
+  _tile_stored(3, g_amxCf16, 64); sink += g_amxCf16[0];
+  return sink;
+}
+#endif
+
+#if defined(__AMX_TF32__) && (defined(__x86_64__) || defined(_M_X64))
+#define CPU_MAT_TF32_KERNEL 1
+static constexpr double MAT_TF32_OPS_PER_K = 4.0 * 16 * 16 * 16 * 2;  // K=16 tf32(fp32-stored)/row
+static thread_local bool g_amxTf32Cfg = false;
+alignas(64) static float g_amxAt32[16 * 16];
+alignas(64) static float g_amxBt32[16 * 16];
+alignas(64) static thread_local float g_amxCt32[16 * 16];
+static double runMatTf32Chain(uint64_t outer)
+{
+  if (!g_amxTf32Cfg) { amxConfig16x64(); g_amxTf32Cfg = true; }
+  _tile_loadd(4, g_amxAt32, 64);
+  _tile_loadd(5, g_amxBt32, 64);
+  _tile_zero(0); _tile_zero(1); _tile_zero(2); _tile_zero(3);
+  for (uint64_t o = 0; o < outer; o++)
+    for (int k = 0; k < INNER; k++)
+    { _tile_mmultf32ps(0, 4, 5); _tile_mmultf32ps(1, 4, 5); _tile_mmultf32ps(2, 4, 5); _tile_mmultf32ps(3, 4, 5); }
+  double sink = 0.0;
+  _tile_stored(0, g_amxCt32, 64); sink += g_amxCt32[0];
+  _tile_stored(1, g_amxCt32, 64); sink += g_amxCt32[0];
+  _tile_stored(2, g_amxCt32, 64); sink += g_amxCt32[0];
+  _tile_stored(3, g_amxCt32, 64); sink += g_amxCt32[0];
+  return sink;
+}
+#endif
+
+#if defined(__AMX_FP8__) && (defined(__x86_64__) || defined(_M_X64))
+#define CPU_MAT_FP8_KERNEL 1
+static constexpr double MAT_FP8_OPS_PER_K = 4.0 * 16 * 16 * 64 * 2;  // K=64 fp8/row
+static thread_local bool g_amxFp8Cfg = false;
+alignas(64) static uint8_t g_amxAf8[16 * 64];
+alignas(64) static uint8_t g_amxBf8[16 * 64];
+alignas(64) static thread_local float g_amxCf8[16 * 16];
+static double runMatFp8Chain(uint64_t outer)
+{
+  if (!g_amxFp8Cfg) { amxConfig16x64(); g_amxFp8Cfg = true; }
+  _tile_loadd(4, g_amxAf8, 64);
+  _tile_loadd(5, g_amxBf8, 64);
+  _tile_zero(0); _tile_zero(1); _tile_zero(2); _tile_zero(3);
+  // hf8 = e4m3 (the common ML fp8); throughput is format-independent.
+  for (uint64_t o = 0; o < outer; o++)
+    for (int k = 0; k < INNER; k++)
+    { _tile_dphf8ps(0, 4, 5); _tile_dphf8ps(1, 4, 5); _tile_dphf8ps(2, 4, 5); _tile_dphf8ps(3, 4, 5); }
+  double sink = 0.0;
+  _tile_stored(0, g_amxCf8, 64); sink += g_amxCf8[0];
+  _tile_stored(1, g_amxCf8, 64); sink += g_amxCf8[0];
+  _tile_stored(2, g_amxCf8, 64); sink += g_amxCf8[0];
+  _tile_stored(3, g_amxCf8, 64); sink += g_amxCf8[0];
+  return sink;
+}
+#endif
+
+// ---- AVX10.2 native bf16 vector FMA (full-rate, not a dot) ------------------
+// Distinct from the AVX512-BF16 dot path: VFMADD*PBF16 does a real bf16 multiply-
+// add at full 512-bit vector rate (32 lanes).  Same affine chain as fp16; b must
+// not round to 1.0 in bf16 (0.98828 is exact and distinct).
+#if defined(__AVX10_2_512__)
+#define CPU_HAS_BF16FMA_KERNEL 1
+static constexpr int BF16FMA_LANES = 32, BF16FMA_NACC = 16;
+static double runBf16FmaChain(uint64_t outer)
+{
+  __m512bh acc[BF16FMA_NACC];
+  const __m512bh b = _mm512_set1_pbh((__bf16)0.98828f);
+  const __m512bh c = _mm512_set1_pbh((__bf16)0.0117f);
+  for (int j = 0; j < BF16FMA_NACC; j++) acc[j] = _mm512_set1_pbh((__bf16)(0.1f * (j + 1)));
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < BF16FMA_NACC; j++) acc[j] = _mm512_fmadd_pbh(acc[j], b, c);
+    }
+  __m512bh s = acc[0];
+  for (int j = 1; j < BF16FMA_NACC; j++) s = _mm512_add_pbh(s, acc[j]);
+  // Reduce via a raw bf16->fp32 widening (no cast intrinsic takes __m512bh whole).
+  uint16_t tmp[32]; std::memcpy(tmp, &s, sizeof(tmp));
+  double r = 0.0;
+  for (int i = 0; i < 32; i++)
+  { uint32_t u = (uint32_t)tmp[i] << 16; float f; std::memcpy(&f, &u, sizeof(f)); r += (double)f; }
+  return r;
+}
+#endif
+
+// ---- ARM SVE (vector-length-agnostic) -------------------------------------
+// SVE registers are "sizeless": svfloat32_t etc. can't be array/struct members,
+// so the NACC independent accumulator chains are declared as individual named
+// registers via the SVE_REP macros instead of the acc[NACC] loop the fixed-width
+// kernels use.  The kernels are VL-agnostic (one binary runs 128-bit Oryon/Vera,
+// 256-bit Graviton3, ...); the op count is therefore VL-dependent and computed
+// from svcntw()/svcntd() at table-build time (only ever reached when SVE is the
+// running host's ISA).  b/c coefficients ride in loop-invariant Z registers, so
+// each svmad is one back-to-back MAD with no reload -- the SVE analogue of the
+// NEON FMLA chain.
+#if defined(__ARM_FEATURE_SVE) && !defined(CLPEAK_CORE_ONLY)
+#define CPU_HAS_SVE_KERNELS 1
+
+// Expand X(i) for i in [0, N).  32 architectural Z registers give headroom for
+// 24 fp accumulators + the 2 coefficient regs (same latency-hiding rationale as
+// the NEON NACC=24; revisit with a sweep when validating on real SVE silicon).
+#define SVE_REP16(X) X(0)X(1)X(2)X(3)X(4)X(5)X(6)X(7)X(8)X(9)X(10)X(11)X(12)X(13)X(14)X(15)
+#define SVE_REP24(X) SVE_REP16(X) X(16)X(17)X(18)X(19)X(20)X(21)X(22)X(23)
+static constexpr int SVE_NACC_FP  = 24;   // fp32/fp64/int32 MAD chains
+static constexpr int SVE_NACC_DOT = 16;   // SDOT / BFDOT / *MMLA (wider per-instr)
+
+// acc = acc*b + c  (svmad: MAD Zdn = Zdn*Zm + Za, destructive on the accumulator)
+static double runSveFp32Chain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  volatile float vb = 0.999999f, vc = 0.000001f;
+  const svfloat32_t b = svdup_f32(vb), c = svdup_f32(vc);
+#define DECL(i) svfloat32_t a##i = svdup_f32(0.1f * (float)((i) + 1));
+  SVE_REP24(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svmad_f32_x(pg, a##i, b, c);
+      SVE_REP24(STEP)
+#undef STEP
+    }
+  svfloat32_t s = svdup_f32(0.0f);
+#define RED(i) s = svadd_f32_x(pg, s, a##i);
+  SVE_REP24(RED)
+#undef RED
+  return (double)svaddv_f32(pg, s);
+}
+
+static double runSveFp64Chain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b64();
+  volatile double vb = 0.999999, vc = 0.000001;
+  const svfloat64_t b = svdup_f64(vb), c = svdup_f64(vc);
+#define DECL(i) svfloat64_t a##i = svdup_f64(0.1 * (double)((i) + 1));
+  SVE_REP24(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svmad_f64_x(pg, a##i, b, c);
+      SVE_REP24(STEP)
+#undef STEP
+    }
+  svfloat64_t s = svdup_f64(0.0);
+#define RED(i) s = svadd_f64_x(pg, s, a##i);
+  SVE_REP24(RED)
+#undef RED
+  return (double)svaddv_f64(pg, s);
+}
+
+static double runSveInt32Chain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  volatile int vmul = 1664525;
+  const svint32_t b = svdup_s32(vmul), c = svdup_s32(1013904223);
+#define DECL(i) svint32_t a##i = svdup_s32((i) + 1);
+  SVE_REP24(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svmad_s32_x(pg, a##i, b, c);
+      SVE_REP24(STEP)
+#undef STEP
+    }
+  svint32_t s = svdup_s32(0);
+#define RED(i) s = svadd_s32_x(pg, s, a##i);
+  SVE_REP24(RED)
+#undef RED
+  return (double)svaddv_s32(pg, s);
+}
+
+// int8 4-way dot product into int32 lanes (SDOT: base SVE, no SVE2 needed).
+static double runSveInt8DpChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  const svint8_t a = svdup_s8(3), b = svdup_s8(5);
+#define DECL(i) svint32_t acc##i = svdup_s32(0);
+  SVE_REP16(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) acc##i = svdot_s32(acc##i, a, b);
+      SVE_REP16(STEP)
+#undef STEP
+    }
+  svint32_t s = svdup_s32(0);
+#define RED(i) s = svadd_s32_x(pg, s, acc##i);
+  SVE_REP16(RED)
+#undef RED
+  return (double)svaddv_s32(pg, s);
+}
+#endif // __ARM_FEATURE_SVE
+
+// SVE BF16: BFDOT (2-way bf16 dot -> fp32) and BFMMLA (2x2 matrix accumulate).
+#if defined(__ARM_FEATURE_SVE_BF16) && !defined(CLPEAK_CORE_ONLY)
+#define CPU_HAS_SVE_BF16_KERNEL 1
+static double runSveBf16Chain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  // 0x3F81 ~= 1.0039 in bf16 (nonzero, distinct from an exact 1.0 collapse).
+  const svbfloat16_t a = svreinterpret_bf16_u16(svdup_u16(0x3F81));
+  const svbfloat16_t b = a;
+#define DECL(i) svfloat32_t acc##i = svdup_f32(0.0f);
+  SVE_REP16(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) acc##i = svbfdot_f32(acc##i, a, b);
+      SVE_REP16(STEP)
+#undef STEP
+    }
+  svfloat32_t s = svdup_f32(0.0f);
+#define RED(i) s = svadd_f32_x(pg, s, acc##i);
+  SVE_REP16(RED)
+#undef RED
+  return (double)svaddv_f32(pg, s);
+}
+static double runSveMatBf16Chain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  const svbfloat16_t a = svreinterpret_bf16_u16(svdup_u16(0x3F81));
+  const svbfloat16_t b = a;
+#define DECL(i) svfloat32_t acc##i = svdup_f32(0.0f);
+  SVE_REP16(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) acc##i = svbfmmla_f32(acc##i, a, b);
+      SVE_REP16(STEP)
+#undef STEP
+    }
+  svfloat32_t s = svdup_f32(0.0f);
+#define RED(i) s = svadd_f32_x(pg, s, acc##i);
+  SVE_REP16(RED)
+#undef RED
+  return (double)svaddv_f32(pg, s);
+}
+#endif // __ARM_FEATURE_SVE_BF16
+
+// SVE I8MM: SMMLA (int8 2x2 matrix accumulate into int32).
+#if defined(__ARM_FEATURE_SVE_MATMUL_INT8) && !defined(CLPEAK_CORE_ONLY)
+#define CPU_HAS_SVE_I8MM_KERNEL 1
+static double runSveMatInt8Chain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  const svint8_t a = svdup_s8(3), b = svdup_s8(5);
+#define DECL(i) svint32_t acc##i = svdup_s32(0);
+  SVE_REP16(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) acc##i = svmmla_s32(acc##i, a, b);
+      SVE_REP16(STEP)
+#undef STEP
+    }
+  svint32_t s = svdup_s32(0);
+#define RED(i) s = svadd_s32_x(pg, s, acc##i);
+  SVE_REP16(RED)
+#undef RED
+  return (double)svaddv_s32(pg, s);
+}
+#endif // __ARM_FEATURE_SVE_MATMUL_INT8
+
 #endif // CLPEAK_CORE_ONLY
 
 // ---- Table builder (this TU's offered kernels) ----------------------------
@@ -571,6 +917,40 @@ static const CpuKernelTable *tuTable()
 #endif
 #ifdef CPU_MAT_FP_KERNEL
     t.mat_fp = {runMatFpChain, (double)INNER * MAT_FP_OPS_PER_K};
+#endif
+#ifdef CPU_MAT_FP16_KERNEL
+    t.mat_fp16 = {runMatFp16Chain, (double)INNER * MAT_FP16_OPS_PER_K};
+#endif
+#ifdef CPU_MAT_TF32_KERNEL
+    t.mat_tf32 = {runMatTf32Chain, (double)INNER * MAT_TF32_OPS_PER_K};
+#endif
+#ifdef CPU_MAT_FP8_KERNEL
+    t.mat_fp8 = {runMatFp8Chain, (double)INNER * MAT_FP8_OPS_PER_K};
+#endif
+#ifdef CPU_HAS_BF16FMA_KERNEL
+    t.bf16fma = {runBf16FmaChain, (double)INNER * BF16FMA_NACC * BF16FMA_LANES * 2.0};
+#endif
+    // SVE overrides (vector-length-agnostic; ops derived from the runtime VL).
+    // These win over the NEON base/advanced kernels the SVE TUs also compile:
+    // a +sve TU still carries the NEON f32v path, but we want the SVE variant.
+#ifdef CPU_HAS_SVE_KERNELS
+    {
+      const double w = (double)svcntw();   // 32-bit lanes at the running VL
+      const double d = (double)svcntd();   // 64-bit lanes
+      const double bcnt = (double)svcntb(); // bytes
+      t.sveVLBytes = (int)svcntb();
+      t.fp32   = {runSveFp32Chain,   (double)INNER * SVE_NACC_FP  * w * 2.0};
+      t.fp64   = {runSveFp64Chain,   (double)INNER * SVE_NACC_FP  * d * 2.0};
+      t.int32  = {runSveInt32Chain,  (double)INNER * SVE_NACC_FP  * w * 2.0};
+      t.int8dp = {runSveInt8DpChain, (double)INNER * SVE_NACC_DOT * w * 8.0};
+#ifdef CPU_HAS_SVE_BF16_KERNEL
+      t.bf16   = {runSveBf16Chain,    (double)INNER * SVE_NACC_DOT * w * 4.0};
+      t.mat_fp = {runSveMatBf16Chain, (double)INNER * SVE_NACC_DOT * bcnt * 2.0};
+#endif
+#ifdef CPU_HAS_SVE_I8MM_KERNEL
+      t.mat_int8 = {runSveMatInt8Chain, (double)INNER * SVE_NACC_DOT * bcnt * 4.0};
+#endif
+    }
 #endif
     t.isaName = CLPEAK_ISA_NAME_STR;
     return t;

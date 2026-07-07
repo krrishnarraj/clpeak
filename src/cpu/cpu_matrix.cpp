@@ -18,6 +18,17 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
     emitVariants(*this, {"cpu_matrix_fp", "CPU matrix engine (bf16)", "gflops"},
                  "matrix_bf16", kernelMenu().mat_fp,
                  "no CPU bf16 matrix engine (AMX / BFMMLA) on this CPU", cfg);
+    // Newer AMX fp dtypes (Granite/Diamond Rapids); each emits its own test, or
+    // an Unsupported row when the running CPU lacks that tile instruction.
+    emitVariants(*this, {"cpu_matrix_fp16", "CPU matrix engine (fp16)", "gflops"},
+                 "matrix_fp16", kernelMenu().mat_fp16,
+                 "no CPU fp16 matrix engine (AMX-FP16) on this CPU", cfg);
+    emitVariants(*this, {"cpu_matrix_tf32", "CPU matrix engine (tf32)", "gflops"},
+                 "matrix_tf32", kernelMenu().mat_tf32,
+                 "no CPU tf32 matrix engine (AMX-TF32) on this CPU", cfg);
+    emitVariants(*this, {"cpu_matrix_fp8", "CPU matrix engine (fp8)", "gflops"},
+                 "matrix_fp8", kernelMenu().mat_fp8,
+                 "no CPU fp8 matrix engine (AMX-FP8) on this CPU", cfg);
     return 0;
   }
 
