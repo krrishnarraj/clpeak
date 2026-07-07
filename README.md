@@ -30,12 +30,6 @@ Backend: Metal
 
     Global memory bandwidth (GBPS)
       float    : 184.49
-
-    Local memory bandwidth (GBPS)
-      float    : 2938.50
-
-    Image memory bandwidth (GBPS)
-      rgba32f  : 162.67
 ```
 
 NVIDIA RTX 5060, CUDA backend:
@@ -49,22 +43,21 @@ Backend: CUDA
       half     : 21077.21
       bf16     : 20042.78
 
-    WMMA fp16xfp16+fp32 16x16x16 (TFLOPS)
-      wmma_fp16 : 165.90
+    FP16 mma.sync m16n8k16+fp16 (TFLOPS)
+      fp16_f16acc : 83.36
 
-    WMMA int8xint8+int32 16x16x16 (TOPS)
-      wmma_int8 : 325.18
-
-    FP8(E4M3) mma.sync m16n8k32+fp32 (TFLOPS)
-      fp8_e4m3 : 85.08
+    INT8 mma.sync m16n8k32+int32 (TOPS)
+      int8_k32 : 164.68
 
     MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
       mxf4_e2m1 : 324.54
+
     NVFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
       nvf4_e2m1 : 327.00
 
     MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32 (TFLOPS)
       mxf4_sparse : 630.37
+
     NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32 (TFLOPS)
       nvf4_sparse : 630.45
 
@@ -76,14 +69,12 @@ Backend: CUDA
       bf16     : 41.14
       fp8_e4m3 : 143.89
       nvf4_e2m1 : 298.99
+
     cuBLASLt GEMM peak (TOPS)
       int8     : 149.18
 
     Global memory bandwidth (GBPS)
       float4   : 418.82
-
-    Local memory bandwidth (GBPS)
-      float4   : 9118.74
 
     Kernel launch latency (US)
       roundtrip : 6.24
@@ -103,17 +94,22 @@ Backend: ROCm
 
     MFMA fp16xfp16+fp32 16x16x16 (TFLOPS)
       mfma_fp16 : 1128.18
+
     MFMA bf16xbf16+fp32 16x16x16 (TFLOPS)
       mfma_bf16 : 1124.29
+
     MFMA fp8xfp8+fp32 16x16x32 (TFLOPS)
       mfma_fp8 : 2166.78
+
     MFMA int8xint8+int32 16x16x32 (TOPS)
       mfma_int8 : 2339.26
 
     Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)
       smfmac_fp16 : 2154.45
+
     Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)
       smfmac_fp8 : 4138.86
+
     Sparse MFMA int8 2:4 16x16x64 (TOPS)
       smfmac_int8 : 4499.68
 
@@ -121,14 +117,12 @@ Backend: ROCm
       fp32     : 129.70
       fp64     : 100.48
       fp16     : 840.05
+
     hipBLASLt FP8 GEMM peak (TFLOPS)
       fp8_e4m3 : 1588.02
 
     Global memory bandwidth (GBPS)
       float4   : 3577.33
-
-    Local memory bandwidth (GBPS)
-      float4   : 65024.37
 
     Kernel launch latency (US)
       roundtrip : 8.66

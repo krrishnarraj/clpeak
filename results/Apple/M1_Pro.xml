@@ -1,83 +1,75 @@
 <?xml version="1.0" encoding="utf-8"?>
-<clpeak format_version="2" clpeak_version="2.0.10-40-g4c2d982" os="Macintosh">
-  <run backend="Metal" platform="Metal" device="Apple M1 Pro" driver="macOS 26.5.1">
+<clpeak format_version="2" clpeak_version="2.0.16-15-g630e912" os="Macintosh">
+  <run backend="Metal" platform="Metal" device="Apple M1 Pro" driver="macOS 26.5.2">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">4487.5415</metric>
-        <metric name="float2">4786.7808</metric>
-        <metric name="float4">4740.7432</metric>
-        <metric name="float8">2402.5984</metric>
+        <metric name="float">4487.2896</metric>
+        <metric name="float2">4786.0342</metric>
+        <metric name="float4">4742.9116</metric>
+        <metric name="float8">2403.2437</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
-        <metric name="half">4474.7393</metric>
-        <metric name="half2">4846.3135</metric>
-        <metric name="half4">4989.6211</metric>
-        <metric name="half8">4770.6606</metric>
+        <metric name="half">4475.2114</metric>
+        <metric name="half2">4846.5913</metric>
+        <metric name="half4">4989.6138</metric>
+        <metric name="half8">4770.9004</metric>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">4397.8550</metric>
-        <metric name="mp2">4675.3311</metric>
-        <metric name="mp4">4776.9897</metric>
+        <metric name="mp">4398.2671</metric>
+        <metric name="mp2">4675.3247</metric>
+        <metric name="mp4">4777.0244</metric>
       </test>
       <test name="simdgroup_matrix_fp16" unit="tflops">
-        <metric name="simdgroup_fp16">5.14</metric>
+        <metric name="simdgroup_fp16">5.1362</metric>
       </test>
       <test name="simdgroup_matrix_bf16" unit="tflops">
         <metric name="simdgroup_bf16" status="unsupported" reason="bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped"/>
       </test>
       <test name="mps-gemm-fp" unit="tflops">
-        <metric name="fp32">4.1056</metric>
-        <metric name="fp16">3.9758</metric>
+        <metric name="fp32">4.1109</metric>
+        <metric name="fp16">3.9751</metric>
         <metric name="bf16" status="unsupported" reason="bf16 requires Apple9 (M3) -- unsupported on this device"/>
-      </test>
-    </category>
-    <category name="int_compute">
-      <test name="simdgroup_matrix_int8" unit="tops">
-        <metric name="simdgroup_int8" status="unsupported" reason="int8 simdgroup_matrix requires Apple9 (M3) or newer! Skipped"/>
-      </test>
-      <test name="mps-gemm-int" unit="tops">
-        <metric name="int8" status="unsupported" reason="requires Apple9 (M3) or newer -- unsupported on this device"/>
       </test>
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">180.2276</metric>
-        <metric name="float2">184.1242</metric>
-        <metric name="float4">182.7391</metric>
-        <metric name="float8">183.3107</metric>
-        <metric name="float16">182.6269</metric>
+        <metric name="float">181.6882</metric>
+        <metric name="float2">184.2619</metric>
+        <metric name="float4">182.6710</metric>
+        <metric name="float8">183.4395</metric>
+        <metric name="float16">182.9985</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">2937.9150</metric>
-        <metric name="float2">2767.2493</metric>
-        <metric name="float4">2706.3350</metric>
-        <metric name="float8">2581.7883</metric>
+        <metric name="float">2938.6396</metric>
+        <metric name="float2">2767.1113</metric>
+        <metric name="float4">2705.7183</metric>
+        <metric name="float8">2581.0823</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="rgba32f">160.2991</metric>
-        <metric name="rgba16f">151.2685</metric>
-        <metric name="rgba8">96.8273</metric>
-        <metric name="r32f">97.5882</metric>
+        <metric name="rgba32f">162.9772</metric>
+        <metric name="rgba16f">152.7135</metric>
+        <metric name="rgba8">96.8265</metric>
+        <metric name="r32f">97.7640</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">5.1273</metric>
-        <metric name="roundtrip">185.9497</metric>
+        <metric name="dispatch">5.2083</metric>
+        <metric name="roundtrip">188.0165</metric>
       </test>
     </category>
   </run>
   <run backend="Vulkan" platform="Vulkan" device="Apple M1 Pro" driver="0.2.2209">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">4415.0161</metric>
-        <metric name="float2">4755.7935</metric>
-        <metric name="float4">4564.0723</metric>
+        <metric name="float">4407.6152</metric>
+        <metric name="float2">4755.8311</metric>
+        <metric name="float4">4562.2017</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
-        <metric name="half">4447.7935</metric>
-        <metric name="half2">4821.1323</metric>
-        <metric name="half4">4949.1069</metric>
+        <metric name="half">4445.3760</metric>
+        <metric name="half2">4821.5166</metric>
+        <metric name="half4">4952.2666</metric>
       </test>
       <test name="double_precision_compute" unit="gflops">
         <metric name="double" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
@@ -85,9 +77,9 @@
         <metric name="double4" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">4370.0054</metric>
-        <metric name="mp2">4647.1416</metric>
-        <metric name="mp4">4708.3291</metric>
+        <metric name="mp">4370.9292</metric>
+        <metric name="mp2">4648.0630</metric>
+        <metric name="mp4">4710.2046</metric>
       </test>
       <test name="bfloat16_compute" unit="gflops">
         <metric name="bf16" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
@@ -112,14 +104,14 @@
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">1321.4073</metric>
-        <metric name="int2">1321.3882</metric>
-        <metric name="int4">1320.4725</metric>
+        <metric name="int">1321.8635</metric>
+        <metric name="int2">1321.1449</metric>
+        <metric name="int4">1320.1753</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
-        <metric name="int8_dp">378.3571</metric>
-        <metric name="int8_dp2">378.6414</metric>
-        <metric name="int8_dp4">377.4957</metric>
+        <metric name="int8_dp">378.3612</metric>
+        <metric name="int8_dp2">378.3662</metric>
+        <metric name="int8_dp4">377.8278</metric>
       </test>
       <test name="coopmat_int8" unit="tops">
         <metric name="coopmat_int8" status="unsupported" reason="No int8xint8+int32 coopmat property! Skipped"/>
@@ -127,38 +119,38 @@
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">180.4719</metric>
-        <metric name="float2">180.0760</metric>
-        <metric name="float4">179.8484</metric>
+        <metric name="float">181.6798</metric>
+        <metric name="float2">179.6804</metric>
+        <metric name="float4">179.1588</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">2851.7419</metric>
-        <metric name="float2">2724.1123</metric>
-        <metric name="float4">2673.6523</metric>
+        <metric name="float">2853.0776</metric>
+        <metric name="float2">2725.0740</metric>
+        <metric name="float4">2673.7195</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">155.9192</metric>
+        <metric name="float4">159.2306</metric>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="h2d">92.6292</metric>
-        <metric name="d2h">92.7882</metric>
+        <metric name="h2d">92.6662</metric>
+        <metric name="d2h">92.7297</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">148.1174</metric>
-        <metric name="roundtrip">320.2363</metric>
+        <metric name="dispatch">150.9182</metric>
+        <metric name="roundtrip">324.1237</metric>
       </test>
     </category>
   </run>
   <run backend="OpenCL" platform="Apple" device="Apple M1 Pro" driver="1.2 1.0">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">2409.2356</metric>
-        <metric name="float2">2455.6445</metric>
-        <metric name="float4">2467.1362</metric>
-        <metric name="float8">2056.4971</metric>
-        <metric name="float16">2586.7563</metric>
+        <metric name="float">2409.3201</metric>
+        <metric name="float2">2454.8962</metric>
+        <metric name="float4">2467.5066</metric>
+        <metric name="float8">2057.3376</metric>
+        <metric name="float16">2586.3831</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
         <metric name="half" status="unsupported" reason="No half precision support"/>
@@ -184,32 +176,32 @@
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">1324.7039</metric>
-        <metric name="int2">1324.0857</metric>
-        <metric name="int4">1323.3470</metric>
-        <metric name="int8">1317.1306</metric>
-        <metric name="int16">1324.1133</metric>
+        <metric name="int">1324.5824</metric>
+        <metric name="int2">1323.7988</metric>
+        <metric name="int4">1323.3278</metric>
+        <metric name="int8">1317.3954</metric>
+        <metric name="int16">1324.3424</metric>
       </test>
       <test name="integer_compute_fast" unit="gops">
-        <metric name="int">616.2427</metric>
-        <metric name="int2">640.3576</metric>
-        <metric name="int4">639.5180</metric>
-        <metric name="int8">639.1347</metric>
-        <metric name="int16">634.8597</metric>
+        <metric name="int">616.2999</metric>
+        <metric name="int2">640.1230</metric>
+        <metric name="int4">639.5154</metric>
+        <metric name="int8">638.9472</metric>
+        <metric name="int16">634.7125</metric>
       </test>
       <test name="integer_compute_char" unit="gops">
-        <metric name="char">1324.4498</metric>
-        <metric name="char2">1324.3754</metric>
-        <metric name="char4">1324.1271</metric>
-        <metric name="char8">1324.5272</metric>
-        <metric name="char16">1323.9863</metric>
+        <metric name="char">1324.7314</metric>
+        <metric name="char2">1324.3257</metric>
+        <metric name="char4">1324.5326</metric>
+        <metric name="char8">1323.1982</metric>
+        <metric name="char16">1324.2457</metric>
       </test>
       <test name="integer_compute_short" unit="gops">
-        <metric name="short">1324.7203</metric>
-        <metric name="short2">1324.4084</metric>
-        <metric name="short4">1324.5437</metric>
-        <metric name="short8">1324.2098</metric>
-        <metric name="short16">1324.6899</metric>
+        <metric name="short">1324.7535</metric>
+        <metric name="short2">1324.1932</metric>
+        <metric name="short4">1324.2733</metric>
+        <metric name="short8">1324.0222</metric>
+        <metric name="short16">1325.0074</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
         <metric name="int8_dp" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
@@ -221,98 +213,98 @@
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">179.9943</metric>
-        <metric name="float2">179.9305</metric>
-        <metric name="float4">181.1226</metric>
-        <metric name="float8">157.6947</metric>
-        <metric name="float16">95.6798</metric>
+        <metric name="float">180.7819</metric>
+        <metric name="float2">181.7870</metric>
+        <metric name="float4">180.4045</metric>
+        <metric name="float8">157.7619</metric>
+        <metric name="float16">95.6876</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">1491.6219</metric>
-        <metric name="float2">2150.8315</metric>
-        <metric name="float4">2338.7197</metric>
-        <metric name="float8">1664.4286</metric>
+        <metric name="float">1491.6096</metric>
+        <metric name="float2">2151.8379</metric>
+        <metric name="float4">2338.9883</metric>
+        <metric name="float8">1664.3794</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">166.9693</metric>
+        <metric name="float4">165.4660</metric>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="enqueuewritebuffer">44.9108</metric>
-        <metric name="enqueuereadbuffer">45.7086</metric>
-        <metric name="enqueuewritebuffer_nonblocking">55.7912</metric>
-        <metric name="enqueuereadbuffer_nonblocking">55.1193</metric>
+        <metric name="enqueuewritebuffer">40.8204</metric>
+        <metric name="enqueuereadbuffer">40.8106</metric>
+        <metric name="enqueuewritebuffer_nonblocking">54.1577</metric>
+        <metric name="enqueuereadbuffer_nonblocking">54.1994</metric>
         <metric name="enqueuemapbuffer">0.0000</metric>
-        <metric name="memcpy_from_mapped_ptr">44.1946</metric>
+        <metric name="memcpy_from_mapped_ptr">44.4076</metric>
         <metric name="enqueueunmap">0.0000</metric>
-        <metric name="memcpy_to_mapped_ptr">44.3485</metric>
+        <metric name="memcpy_to_mapped_ptr">44.5983</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">2.3361</metric>
-        <metric name="roundtrip">220.9068</metric>
+        <metric name="dispatch">2.2074</metric>
+        <metric name="roundtrip">197.0650</metric>
       </test>
     </category>
   </run>
   <run backend="CPU" platform="CPU" device="Apple M1 Pro" driver="">
     <category name="fp_compute">
-      <test name="single_precision_compute" unit="gflops">
-        <metric name="float ST">94.8356</metric>
-        <metric name="float MT">746.0557</metric>
+      <test name="single_precision_compute_neon" unit="gflops">
+        <metric name="float ST">85.7328</metric>
+        <metric name="float MT">669.9529</metric>
       </test>
-      <test name="half_precision_compute" unit="gflops">
-        <metric name="half ST">197.7458</metric>
-        <metric name="half MT">1675.5631</metric>
+      <test name="half_precision_compute_neon_fp16" unit="gflops">
+        <metric name="half ST">198.8999</metric>
+        <metric name="half MT">1657.0118</metric>
       </test>
-      <test name="double_precision_compute" unit="gflops">
-        <metric name="double ST">47.3814</metric>
-        <metric name="double MT">382.6173</metric>
+      <test name="double_precision_compute_neon" unit="gflops">
+        <metric name="double ST">43.1550</metric>
+        <metric name="double MT">336.7155</metric>
       </test>
-      <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp ST">46.4803</metric>
-        <metric name="mp MT">385.5875</metric>
+      <test name="mixed_precision_compute_neon_fp16fml" unit="gflops">
+        <metric name="mp ST">47.1500</metric>
+        <metric name="mp MT">381.7129</metric>
       </test>
       <test name="bfloat16_compute" unit="gflops">
-        <metric name="bf16" status="unsupported" reason="no bf16 dot instruction on this CPU"/>
+        <metric name="bf16 ST" status="unsupported" reason="no bf16 dot instruction on this CPU"/>
       </test>
       <test name="cpu_matrix_fp" unit="gflops">
-        <metric name="matrix_bf16" status="unsupported" reason="no CPU bf16 matrix engine (AMX / BFMMLA) on this CPU"/>
+        <metric name="matrix_bf16 ST" status="unsupported" reason="no CPU bf16 matrix engine (AMX / BFMMLA) on this CPU"/>
       </test>
     </category>
     <category name="int_compute">
-      <test name="integer_compute" unit="gops">
-        <metric name="int ST">57.1334</metric>
-        <metric name="int MT">477.4409</metric>
+      <test name="integer_compute_neon" unit="gops">
+        <metric name="int ST">57.1419</metric>
+        <metric name="int MT">472.7869</metric>
       </test>
-      <test name="int8_dot_product_compute" unit="gops">
-        <metric name="int8_dp ST">407.5111</metric>
-        <metric name="int8_dp MT">3175.3945</metric>
+      <test name="int8_dot_product_compute_neon_dotprod" unit="gops">
+        <metric name="int8_dp ST">408.3621</metric>
+        <metric name="int8_dp MT">3217.1130</metric>
       </test>
       <test name="cpu_matrix_int" unit="gops">
-        <metric name="matrix_int8" status="unsupported" reason="no CPU int8 matrix engine (AMX / I8MM) on this CPU"/>
+        <metric name="matrix_int8 ST" status="unsupported" reason="no CPU int8 matrix engine (AMX / I8MM) on this CPU"/>
       </test>
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="read">125.5149</metric>
-        <metric name="copy">173.5511</metric>
-        <metric name="triad">141.3301</metric>
+        <metric name="read">125.5112</metric>
+        <metric name="copy">173.0649</metric>
+        <metric name="triad">139.1933</metric>
       </test>
       <test name="cache_bandwidth" unit="gbps">
-        <metric name="L1 ST">110.0766</metric>
-        <metric name="L1 MT">901.5956</metric>
-        <metric name="L2 ST">84.6086</metric>
-        <metric name="L2 MT">689.2823</metric>
-        <metric name="L3 ST">84.6192</metric>
-        <metric name="L3 MT">681.8680</metric>
+        <metric name="L1 ST">110.0942</metric>
+        <metric name="L1 MT">874.3682</metric>
+        <metric name="L2 ST">81.4712</metric>
+        <metric name="L2 MT">699.2899</metric>
+        <metric name="L3 ST">81.2359</metric>
+        <metric name="L3 MT">687.5227</metric>
       </test>
     </category>
     <category name="latency">
       <test name="memory_latency" unit="ns">
-        <metric name="L1">1.2747</metric>
-        <metric name="L2">6.6128</metric>
-        <metric name="L3">6.1695</metric>
-        <metric name="DRAM">119.0328</metric>
+        <metric name="L1">1.2524</metric>
+        <metric name="L2">6.8825</metric>
+        <metric name="L3">6.3012</metric>
+        <metric name="DRAM">118.9981</metric>
       </test>
     </category>
   </run>
