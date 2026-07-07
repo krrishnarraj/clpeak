@@ -36,11 +36,15 @@ int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
 {
   emitVariants(*this, {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops"},
                "bf16", kernelMenu().bf16, "no bf16 dot instruction on this CPU", cfg);
-  // Native full-rate bf16 vector FMA (AVX10.2) -- a genuinely different peak from
-  // the bf16 dot above (real bf16 multiply-add, no fp32-accumulate widening).
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+  // Native full-rate bf16 vector FMA is AVX10.2-only (x86 exclusive) -- a
+  // genuinely different peak from the bf16 dot above (real bf16 multiply-add, no
+  // fp32-accumulate widening).  Only emit it on an x86 build; on ARM there is no
+  // native-bf16-FMA instruction, so the row would be meaningless noise.
   emitVariants(*this, {"bfloat16_fma_compute", "BF16 FMA compute bf16xbf16+bf16", "gflops"},
                "bf16_fma", kernelMenu().bf16fma,
                "no native bf16 vector FMA (AVX10.2) on this CPU", cfg);
+#endif
   return 0;
 }
 
