@@ -223,9 +223,7 @@ namespace cuda_kernels {
   extern const Blob wmma_tf32;
   extern const Blob wmma_fp64;
   extern const Blob wmma_int4;
-  extern const Blob wmma_fp16_mma;
-  extern const Blob wmma_bf16_mma;
-  extern const Blob wmma_tf32_mma;
+  extern const Blob wmma_fp16_f16;
   extern const Blob local_bandwidth;
   extern const Blob image_bandwidth;
 }

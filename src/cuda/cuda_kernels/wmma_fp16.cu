@@ -3,12 +3,11 @@
 // src/shaders/coopmat_fp16.comp at the same tile shape and iteration count.
 //
 // Four independent accumulator chains (c0..c3) to hide the tensor MMA
-// latency.  Measured on RTX 5060 (sm_120): this fragment K=16 path tops out
-// at ~42 TFLOPS and does NOT move with more chains (8 chains == 4 chains ==
-// 42) -- it is the fragment path's structural ceiling, ~half of what the
-// device can do (cuBLASLt fp16 ~78).  The native-tile inline mma.sync path
-// (wmma_fp16_mma, m16n8k16) is the one that chases peak; this kernel is kept
-// as the portable-API reference and the fragment-vs-mma delta is useful data.
+// latency.  Measured on RTX 5060 (sm_120): this fp32-accumulate path tops out
+// at ~42 TFLOPS and does NOT move with more chains or a native mma.sync tile
+// (both 42) -- on GeForce fp16xfp16 with an fp32 accumulator runs at HALF
+// rate.  The full-rate ~78 (cuBLASLt) number needs an fp16 accumulator; see
+// wmma_fp16_f16.cu.  This kernel is the honest fp32-accumulate measurement.
 //
 // All four chains are reduced element-wise at the end (NOT folded via
 // mma_sync, which overwrites its destination and would dead-code the extra

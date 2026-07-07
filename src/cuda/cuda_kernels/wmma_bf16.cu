@@ -1,8 +1,9 @@
 // WMMA bf16xbf16+fp32 m16n16k16 -- Ampere+ tensor-core throughput via the
 // nvcuda::wmma fragment API.  Same 4-chain structure as wmma_fp16; only the
-// input fragment type differs.  Like wmma_fp16 this fragment K=16 path
-// under-saturates consumer Blackwell (~42 TFLOPS, flat vs chain count); the
-// native mma.sync path (wmma_bf16_mma, m16n8k16) chases peak.
+// input fragment type differs.  bf16 tensor MMA ALWAYS accumulates in fp32
+// (no fp16-accumulate mode), so this fragment path already reaches peak on
+// RTX 5060 (~42.5, at/above cuBLASLt bf16 41.4) -- a native mma.sync tile
+// was measured to make no difference.  Kept as-is.
 //
 // Per warp ops = 256 outer * 4 chains * (16*16*16*2) = 8,388,608;
 // per thread = 262,144 (= 4 * COOPMAT_WORK_PER_WI).
