@@ -96,9 +96,13 @@ Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
     `sve` (vector-length-agnostic base compute + int8 SDOT), `svebf16` (BFDOT +
     BFMMLA), `svei8mm` (SMMLA). The SVE TUs are `NOT APPLE` (Apple Silicon has no
     non-streaming SVE — that's SME's streaming mode, a separate future backend
-    task). One `sve` binary runs any VL (128-bit Oryon/Vera/Graviton4, 256-bit
-    Graviton3); `svebf16`/`svei8mm` are on base SVE too (present on Neoverse V1
-    without SVE2), runtime-gated by `HWCAP2_SVEBF16`/`HWCAP2_SVEI8MM`.
+    task) **and `NOT WIN32`** (clang's MSVC C++ ABI can't mangle the SVE sizeless
+    types, so `#include <arm_sve.h>` fails to compile under clang-cl 19 — the NEON
+    feature TUs still build there because NEON types mangle fine; Windows SVE
+    detection is disabled to match, so it never claims SVE2 it can't run). One
+    `sve` binary runs any VL (128-bit Oryon/Vera/Graviton4, 256-bit Graviton3);
+    `svebf16`/`svei8mm` are on base SVE too (present on Neoverse V1 without SVE2),
+    runtime-gated by `HWCAP2_SVEBF16`/`HWCAP2_SVEI8MM`.
   - Windows: only **real MSVC** (cl.exe, `CMAKE_CXX_COMPILER_ID == "MSVC"`) is
     restricted. clang-cl reports `MSVC=TRUE` in CMake but is classified as
     clang (`_clpeak_real_msvc=OFF`) and takes the GNU-flag path — every `-m` /

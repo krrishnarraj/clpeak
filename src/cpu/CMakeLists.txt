@@ -313,17 +313,26 @@ else()
             # BFMMLA and SMMLA ride in separate feature TUs (present on V1 too),
             # runtime-gated by HWCAP2_SVEBF16 / HWCAP2_SVEI8MM.  Apple Silicon has
             # no non-streaming SVE, so this whole block is NOT APPLE.
-            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+sve"      _clpeak_f_sve)
-            if(_clpeak_f_sve)
-                clpeak_add_isa_tu(sve ${_clpeak_gnuflag}-march=armv8.2-a+sve)
-            endif()
-            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16" _clpeak_f_svebf16)
-            if(_clpeak_f_svebf16)
-                clpeak_add_isa_tu(svebf16 ${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16)
-            endif()
-            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm" _clpeak_f_svei8mm)
-            if(_clpeak_f_svei8mm)
-                clpeak_add_isa_tu(svei8mm ${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm)
+            #
+            # NOT WIN32: clang's Windows/MSVC C++ ABI can't mangle the SVE sizeless
+            # types (`__SVBool_t`, `__SVFloat32_t`, ...), so merely #including
+            # <arm_sve.h> fails to compile with clang-cl ("cannot mangle this
+            # built-in ... type yet") -- it's the overloaded intrinsic declarations
+            # in the header, not our kernels.  Windows-on-ARM SVE runtime support is
+            # nascent anyway; restrict SVE to the Itanium-ABI (Linux/Android) targets.
+            if(NOT WIN32)
+                check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+sve"      _clpeak_f_sve)
+                if(_clpeak_f_sve)
+                    clpeak_add_isa_tu(sve ${_clpeak_gnuflag}-march=armv8.2-a+sve)
+                endif()
+                check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16" _clpeak_f_svebf16)
+                if(_clpeak_f_svebf16)
+                    clpeak_add_isa_tu(svebf16 ${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16)
+                endif()
+                check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm" _clpeak_f_svei8mm)
+                if(_clpeak_f_svei8mm)
+                    clpeak_add_isa_tu(svei8mm ${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm)
+                endif()
             endif()
         endif()
     endif()

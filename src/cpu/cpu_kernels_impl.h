@@ -937,7 +937,9 @@ static const CpuKernelTable *tuTable()
     {
       const double w = (double)svcntw();   // 32-bit lanes at the running VL
       const double d = (double)svcntd();   // 64-bit lanes
-      const double bcnt = (double)svcntb(); // bytes
+      // bytes -- only used by the bf16/i8mm matrix ops-per-instr below, which the
+      // plain `sve` TU doesn't compile, so mark maybe_unused to avoid a warning.
+      [[maybe_unused]] const double bcnt = (double)svcntb();
       t.sveVLBytes = (int)svcntb();
       t.fp32   = {runSveFp32Chain,   (double)INNER * SVE_NACC_FP  * w * 2.0};
       t.fp64   = {runSveFp64Chain,   (double)INNER * SVE_NACC_FP  * d * 2.0};

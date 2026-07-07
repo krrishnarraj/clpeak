@@ -179,17 +179,10 @@ static CpuFeatures detect()
   f.fp16fml = ((isar0 >> 48) & 0xF) >= 1;  // ISAR0.FHM  (FEAT_FHM)
   f.bf16    = ((isar1 >> 44) & 0xF) >= 1;  // ISAR1.BF16 (FEAT_BF16)
   f.i8mm    = ((isar1 >> 52) & 0xF) >= 1;  // ISAR1.I8MM (FEAT_I8MM)
-  // SVE: ID_AA64PFR0_EL1.SVE (bits 35:32) >= 1, feature detail in ID_AA64ZFR0_EL1
-  // (CP 4024).  Best-effort only: real MSVC can't build the SVE TUs (no SVE
-  // intrinsics), so this just reports; a clang-cl aarch64 build would use it.
-  f.sve = ((pfr0 >> 32) & 0xF) >= 1;
-  if (f.sve)
-  {
-    const uint64_t zfr0 = idreg("CP 4024");
-    f.sve2    = ((zfr0 >> 0)  & 0xF) >= 1;  // ZFR0.SVEver (>=1 => SVE2)
-    f.svebf16 = ((zfr0 >> 20) & 0xF) >= 1;  // ZFR0.BF16
-    f.svei8mm = ((zfr0 >> 44) & 0xF) >= 1;  // ZFR0.I8MM
-  }
+  // No SVE on Windows: clang's MSVC C++ ABI can't mangle the SVE sizeless types,
+  // so <arm_sve.h> won't compile and no SVE TU is built (see CMakeLists.txt).
+  // Detecting SVE here would only make isaName() claim "SVE2" with no SVE test
+  // rows and VL=0, so leave f.sve/sve2 false until that toolchain gap closes.
 #endif
 #endif // __aarch64__ || _M_ARM64
 #endif
