@@ -6,13 +6,16 @@ on:
       - 'results/**'
       - 'snap/**'
       - 'packaging/**'
+      - '**/*.md'
     branches: [master, main]
     tags: ["*"]
+
   pull_request:
     paths-ignore:
-        - 'results/**'
-        - 'snap/**'
-        - 'packaging/**'
+      - 'results/**'
+      - 'snap/**'
+      - 'packaging/**'
+      - '**/*.md'
     branches: [master, main]
   workflow_dispatch:
 
