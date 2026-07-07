@@ -38,6 +38,35 @@ unsigned int pickIters(double per_iter_us, unsigned int target_us,
   return (unsigned int)want;
 }
 
+std::string jsonEscape(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s)
+    {
+        switch (c)
+        {
+        case '"':  out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n";  break;
+        case '\r': out += "\\r";  break;
+        case '\t': out += "\\t";  break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20)
+            {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                out += buf;
+            }
+            else
+            {
+                out += c;
+            }
+        }
+    }
+    return out;
+}
+
 void populate(float *ptr, uint64_t N)
 {
     // Use pseudo-random data to defeat hardware memory compression (some GPUs

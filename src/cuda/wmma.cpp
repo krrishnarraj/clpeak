@@ -42,6 +42,29 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "WMMA requires sm_70 or newer (Volta+)! Skipped";
       runComputeKernel(dev, cfg, d);
     }
+    // FP16 mma.sync m16n8k16 with fp16 accumulate (PTX) -- Ampere+.  Full-rate
+    // fp16 path: on GeForce fp16+fp32-accum is half rate (the +fp32 test above
+    // ~42), fp16+fp16-accum reaches the ~78 cuBLASLt fp16 peak.
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "FP16 mma.sync m16n8k16+fp16";
+      d.resultTag = "wmma_fp16_f16";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp16_f16acc";
+      d.kernelName = "wmma_fp16_f16";
+      d.blob = &cuda_kernels::wmma_fp16_f16;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 8 chains * m16n8k16
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = warp; // one fp32 reduction per thread
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.bf16Supported; // sm_80+
+      d.skipMsg = "FP16 mma.sync m16n8k16 requires sm_80 or newer (Ampere+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
     // BF16 WMMA
     {
       float A = 1.3f;
@@ -63,25 +86,27 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "bf16 WMMA requires sm_80 or newer (Ampere+)! Skipped";
       runComputeKernel(dev, cfg, d);
     }
-    // TF32 WMMA m16n16k8 -- Ampere+
+    // TF32 mma.sync m16n8k8 (native tile, PTX) -- Ampere+.  Replaces the old
+    // wmma-fragment m16n16k8 path, which under-saturated Blackwell (~10.7); the
+    // native tile reaches the ~20.6 cuBLASLt tf32 peak.
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA tf32xtf32+fp32 16x16x8";
+      d.title = "TF32 mma.sync m16n8k8+fp32";
       d.resultTag = "wmma_tf32";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_tf32";
       d.kernelName = "wmma_tf32";
       d.blob = &cuda_kernels::wmma_tf32;
-      d.workPerWI = COOPMAT_WORK_PER_WI * 2; // m16n16k8 = half the K of fp16
+      d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 8 chains * m16n8k8 (half K of fp16)
       d.elemSize = sizeof(float);
       d.blockSize = warp;
-      d.outElemsPerBlock = outElems;
+      d.outElemsPerBlock = 16 * 8;
       d.scalarArg = &A;
       d.scalarSize = sizeof(A);
       d.skip = !dev.info.wmmaSupported || !dev.info.tf32GemmSupported;
-      d.skipMsg = "TF32 WMMA requires sm_80 or newer (Ampere+)! Skipped";
+      d.skipMsg = "TF32 mma.sync m16n8k8 requires sm_80 or newer (Ampere+)! Skipped";
       runComputeKernel(dev, cfg, d);
     }
     // FP64 WMMA m8n8k4 -- Ampere+ DP tensor cores

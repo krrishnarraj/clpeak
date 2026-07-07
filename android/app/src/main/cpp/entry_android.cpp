@@ -1,3 +1,5 @@
+#include <vector>
+
 #include <common/peak.h>
 #include <common/options.h>
 #include <common/inventory.h>
@@ -11,7 +13,7 @@
 #ifdef ENABLE_CPU
 #include <cpu/cpu_peak.h>
 #endif
-#ifdef ENABLE_CPU
+#ifdef ENABLE_OPENCL
 #include <opencl/cl_peak.h>
 #endif
 
@@ -31,6 +33,11 @@ static void wireLoggerToJni(LoggerAndroid *lg, JNIEnv *jniEnv, jobject jObj, jcl
                                                  DEVICE_INFO_CALLBACK,
                                                  "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
                                                  "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+    // A failed GetMethodID leaves a NoSuchMethodError pending, which makes
+    // further JNI calls undefined behavior.  LoggerAndroid null-checks the
+    // callbacks, so clearing and running text-only is safe.
+    if (!lg->recordMetricCallback || !lg->deviceInfoCallback)
+        jniEnv->ExceptionClear();
 }
 
 static std::vector<BackendInventory> enumerateAllBackends(const CliOptions &opts)
@@ -57,14 +64,24 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
                                                              jobject _jObject, jint argc, jobjectArray _argv)
 {
     char **argv = (char **)malloc(sizeof(char *) * argc);
+    std::vector<jstring> argRefs(argc);
     for (int i = 0; i < argc; i++)
     {
-        jstring strObj = (jstring)_jniEnv->GetObjectArrayElement(_argv, i);
-        argv[i] = (char *)_jniEnv->GetStringUTFChars(strObj, 0);
+        argRefs[i] = (jstring)_jniEnv->GetObjectArrayElement(_argv, i);
+        argv[i] = (char *)_jniEnv->GetStringUTFChars(argRefs[i], 0);
     }
 
     CliOptions opts;
     parseCliOptions(argc, argv, opts);
+
+    // CliOptions copies everything it needs, so the JNI string refs can go.
+    for (int i = 0; i < argc; i++)
+    {
+        _jniEnv->ReleaseStringUTFChars(argRefs[i], argv[i]);
+        _jniEnv->DeleteLocalRef(argRefs[i]);
+    }
+    free(argv);
+    argv = nullptr;
 
     jclass cls = _jniEnv->GetObjectClass(_jObject);
 
@@ -100,9 +117,6 @@ jint JNICALL Java_kr_clpeak_BenchmarkRepository_launchClpeak(JNIEnv *_jniEnv,
         clStatus |= cpuObj.runAll();
     }
 #endif
-
-    if (argv)
-        free(argv);
 
     return clStatus;
 }

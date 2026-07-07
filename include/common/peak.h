@@ -20,7 +20,9 @@ public:
 
     // ---- Gating state (was BackendGating) -------------------------------
     std::bitset<static_cast<size_t>(Benchmark::COUNT)> enabledTests;
-    std::bitset<4> enabledCategories;
+    // Unknown is the sentinel and never gets a bit (isCategoryEnabled
+    // rejects it), so it doubles as the count of real categories.
+    std::bitset<static_cast<size_t>(Category::Unknown)> enabledCategories;
 
     Peak() {
         enabledTests.set();

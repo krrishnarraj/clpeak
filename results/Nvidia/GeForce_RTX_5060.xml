@@ -1,216 +1,216 @@
 <?xml version="1.0" encoding="utf-8"?>
-<clpeak format_version="2" clpeak_version="2.0.10-38-gd2f39e1" os="Linux x64">
+<clpeak format_version="2" clpeak_version="2.0.15-15-g387a301" os="Linux x64">
   <run backend="CUDA" platform="CUDA" device="NVIDIA GeForce RTX 5060" driver="13.2">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">21180.7363</metric>
+        <metric name="float">21104.9707</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
-        <metric name="half">20875.5820</metric>
-        <metric name="half2">21153.1875</metric>
+        <metric name="half">20817.4395</metric>
+        <metric name="half2">21138.2227</metric>
       </test>
       <test name="double_precision_compute" unit="gflops">
-        <metric name="double">335.0068</metric>
+        <metric name="double">333.5593</metric>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">17774.4902</metric>
+        <metric name="mp">17708.3262</metric>
       </test>
       <test name="bfloat16_compute" unit="gflops">
-        <metric name="bf16">20115.3555</metric>
+        <metric name="bf16">20034.8594</metric>
       </test>
       <test name="wmma_fp16" unit="tflops">
-        <metric name="wmma_fp16">165.9600</metric>
+        <metric name="wmma_fp16">42.5629</metric>
+      </test>
+      <test name="wmma_fp16_f16" unit="tflops">
+        <metric name="fp16_f16acc">83.3619</metric>
       </test>
       <test name="wmma_bf16" unit="tflops">
-        <metric name="wmma_bf16">165.9158</metric>
+        <metric name="wmma_bf16">42.5265</metric>
       </test>
       <test name="wmma_tf32" unit="tflops">
-        <metric name="wmma_tf32">42.1118</metric>
+        <metric name="wmma_tf32">21.2786</metric>
       </test>
       <test name="wmma_fp64" unit="tflops">
-        <metric name="wmma_fp64">1.1737</metric>
+        <metric name="wmma_fp64">0.2927</metric>
       </test>
       <test name="wmma_fp8_e4m3" unit="tflops">
-        <metric name="fp8_e4m3">85.1064</metric>
+        <metric name="fp8_e4m3">85.0154</metric>
       </test>
       <test name="wmma_fp8_e5m2" unit="tflops">
-        <metric name="fp8_e5m2">85.1194</metric>
+        <metric name="fp8_e5m2">85.0957</metric>
       </test>
       <test name="wmma_fp4_e2m1" unit="tflops">
-        <metric name="fp4_e2m1">85.1224</metric>
+        <metric name="fp4_e2m1">85.1017</metric>
       </test>
       <test name="wmma_mxf4_e2m1" unit="tflops">
-        <metric name="mxf4_e2m1">325.8861</metric>
+        <metric name="mxf4_e2m1">325.5649</metric>
       </test>
       <test name="wmma_nvf4_e2m1" unit="tflops">
-        <metric name="nvf4_e2m1">328.3848</metric>
+        <metric name="nvf4_e2m1">328.2463</metric>
       </test>
       <test name="wmma_mxf4_sparse" unit="tflops">
-        <metric name="mxf4_sparse">632.9941</metric>
+        <metric name="mxf4_sparse">632.4342</metric>
       </test>
       <test name="wmma_nvf4_sparse" unit="tflops">
-        <metric name="nvf4_sparse">633.1628</metric>
+        <metric name="nvf4_sparse">632.3868</metric>
       </test>
       <test name="cublas-fp" unit="tflops">
-        <metric name="fp32">14.8686</metric>
-        <metric name="fp64">0.2921</metric>
-        <metric name="tf32">20.6015</metric>
-        <metric name="fp16">78.0982</metric>
-        <metric name="bf16">41.3713</metric>
-        <metric name="fp8_e4m3">144.7754</metric>
-        <metric name="fp8_e5m2">144.7041</metric>
+        <metric name="fp32">14.8606</metric>
+        <metric name="fp64">0.2919</metric>
+        <metric name="tf32">20.5507</metric>
+        <metric name="fp16">77.9731</metric>
+        <metric name="bf16">41.3470</metric>
+        <metric name="fp8_e4m3">144.6230</metric>
+        <metric name="fp8_e5m2">143.9104</metric>
         <metric name="mxf4_e2m1" status="unsupported" reason="unsupported on sm_120"/>
-        <metric name="nvf4_e2m1">292.5161</metric>
+        <metric name="nvf4_e2m1">298.9867</metric>
       </test>
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">10551.0430</metric>
+        <metric name="int">10525.7744</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
-        <metric name="int8_dp">33973.2930</metric>
-        <metric name="int8_dp2">34900.3828</metric>
-        <metric name="int8_dp4">33394.9727</metric>
-        <metric name="int8_dp8">34119.6758</metric>
+        <metric name="int8_dp">33905.2656</metric>
+        <metric name="int8_dp2">34851.8047</metric>
+        <metric name="int8_dp4">33350.9922</metric>
+        <metric name="int8_dp8">34040.0547</metric>
       </test>
       <test name="wmma_int8" unit="tops">
-        <metric name="wmma_int8">326.7196</metric>
+        <metric name="wmma_int8">84.3133</metric>
       </test>
       <test name="wmma_int8_k32" unit="tops">
-        <metric name="int8_k32">164.8584</metric>
+        <metric name="int8_k32">164.6800</metric>
       </test>
       <test name="wmma_int8_sparse" unit="tops">
-        <metric name="int8_sparse">164.8853</metric>
+        <metric name="int8_sparse">164.7004</metric>
       </test>
       <test name="wmma_int4" unit="tops">
         <metric name="int4" status="unsupported" reason="INT4 mma.sync requires sm_75..sm_89 (Turing/Ampere/Ada)! Skipped"/>
       </test>
-      <test name="wmma_bmma_b1" unit="tops">
-        <metric name="bmma_b1">32.0889</metric>
-      </test>
       <test name="cublas-int" unit="tops">
-        <metric name="int8">149.0285</metric>
+        <metric name="int8">140.7573</metric>
         <metric name="int4" status="unsupported" reason="unsupported on sm_120"/>
       </test>
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">392.7002</metric>
-        <metric name="float2">411.3534</metric>
-        <metric name="float4">419.5569</metric>
+        <metric name="float">392.7649</metric>
+        <metric name="float2">410.4248</metric>
+        <metric name="float4">418.8029</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">4428.7017</metric>
-        <metric name="float2">8129.4277</metric>
-        <metric name="float4">9141.9316</metric>
+        <metric name="float">4425.1909</metric>
+        <metric name="float2">8123.3418</metric>
+        <metric name="float4">9133.1719</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">271.4852</metric>
+        <metric name="float4">271.6570</metric>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="h2d_pinned">13.9254</metric>
-        <metric name="d2h_pinned">14.3063</metric>
+        <metric name="h2d_pinned">13.9231</metric>
+        <metric name="d2h_pinned">14.3053</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
         <metric name="dispatch" status="unsupported" reason="Not measurable via CUDA driver API"/>
-        <metric name="roundtrip">5.9137</metric>
+        <metric name="roundtrip">6.1040</metric>
       </test>
     </category>
   </run>
   <run backend="Vulkan" platform="Vulkan" device="NVIDIA GeForce RTX 5060" driver="595.284.320">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">20839.5762</metric>
-        <metric name="float2">20771.0137</metric>
-        <metric name="float4">16875.7363</metric>
+        <metric name="float">20840.1250</metric>
+        <metric name="float2">20738.7344</metric>
+        <metric name="float4">16877.3652</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
-        <metric name="half">10592.3262</metric>
-        <metric name="half2">20939.2852</metric>
-        <metric name="half4">20810.4512</metric>
+        <metric name="half">10591.4277</metric>
+        <metric name="half2">20917.3047</metric>
+        <metric name="half4">20806.7910</metric>
       </test>
       <test name="double_precision_compute" unit="gflops">
-        <metric name="double">330.8883</metric>
-        <metric name="double2">324.6031</metric>
-        <metric name="double4">315.2488</metric>
+        <metric name="double">330.2903</metric>
+        <metric name="double2">324.6228</metric>
+        <metric name="double4">315.2083</metric>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">17581.6152</metric>
-        <metric name="mp2">17164.5996</metric>
-        <metric name="mp4">14466.2324</metric>
+        <metric name="mp">17548.9922</metric>
+        <metric name="mp2">17160.6738</metric>
+        <metric name="mp4">14450.2158</metric>
       </test>
       <test name="bfloat16_compute" unit="gflops">
-        <metric name="bf16">18662.0195</metric>
-        <metric name="bf16_2">18524.8242</metric>
-        <metric name="bf16_4">17580.5723</metric>
+        <metric name="bf16">18646.8672</metric>
+        <metric name="bf16_2">18438.0430</metric>
+        <metric name="bf16_4">17472.3047</metric>
       </test>
       <test name="coopmat_fp32" unit="tflops">
         <metric name="coopmat_fp32" status="unsupported" reason="No fp32xfp32+fp32 coopmat property! Skipped"/>
       </test>
       <test name="coopmat_fp16" unit="tflops">
-        <metric name="coopmat_fp16">42.4581</metric>
+        <metric name="coopmat_fp16">42.4045</metric>
       </test>
       <test name="coopmat_bf16" unit="tflops">
-        <metric name="coopmat_bf16">42.4858</metric>
+        <metric name="coopmat_bf16">42.3949</metric>
       </test>
       <test name="coopmat_fp8_e4m3" unit="tflops">
-        <metric name="coopmat_fp8_e4m3">84.8847</metric>
+        <metric name="coopmat_fp8_e4m3">84.7975</metric>
       </test>
       <test name="coopmat_fp8_e5m2" unit="tflops">
-        <metric name="coopmat_fp8_e5m2">84.8668</metric>
+        <metric name="coopmat_fp8_e5m2">84.8111</metric>
       </test>
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">6938.2144</metric>
-        <metric name="int2">6902.8784</metric>
-        <metric name="int4">6907.0264</metric>
+        <metric name="int">6931.9702</metric>
+        <metric name="int2">6901.1084</metric>
+        <metric name="int4">6904.8232</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
-        <metric name="int8_dp">17284.6582</metric>
-        <metric name="int8_dp2">19990.8203</metric>
-        <metric name="int8_dp4">20734.8965</metric>
+        <metric name="int8_dp">17296.4766</metric>
+        <metric name="int8_dp2">19987.5488</metric>
+        <metric name="int8_dp4">20703.5312</metric>
       </test>
       <test name="coopmat_int8" unit="tops">
-        <metric name="coopmat_int8">168.0887</metric>
+        <metric name="coopmat_int8">168.0898</metric>
       </test>
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">396.7579</metric>
-        <metric name="float2">416.4587</metric>
-        <metric name="float4">425.3504</metric>
+        <metric name="float">393.4231</metric>
+        <metric name="float2">414.4529</metric>
+        <metric name="float4">424.8464</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">4357.5293</metric>
-        <metric name="float2">7698.5723</metric>
-        <metric name="float4">8693.3936</metric>
+        <metric name="float">4358.4790</metric>
+        <metric name="float2">7698.3101</metric>
+        <metric name="float4">8681.7285</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">412.0220</metric>
+        <metric name="float4">410.5938</metric>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="h2d">12.6574</metric>
-        <metric name="d2h">13.1926</metric>
+        <metric name="h2d">12.6528</metric>
+        <metric name="d2h">13.1858</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">6.4097</metric>
-        <metric name="roundtrip">44.8847</metric>
+        <metric name="dispatch">6.6488</metric>
+        <metric name="roundtrip">44.1416</metric>
       </test>
     </category>
   </run>
   <run backend="OpenCL" platform="NVIDIA CUDA" device="NVIDIA GeForce RTX 5060" driver="595.71.05">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">20491.6270</metric>
-        <metric name="float2">20217.9941</metric>
-        <metric name="float4">20233.2578</metric>
-        <metric name="float8">20220.4355</metric>
-        <metric name="float16">20039.4121</metric>
+        <metric name="float">20472.9082</metric>
+        <metric name="float2">20201.6973</metric>
+        <metric name="float4">20216.4492</metric>
+        <metric name="float8">20217.3047</metric>
+        <metric name="float16">19900.7109</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
         <metric name="half" status="unsupported" reason="No half precision support"/>
@@ -220,11 +220,11 @@
         <metric name="half16" status="unsupported" reason="No half precision support"/>
       </test>
       <test name="double_precision_compute" unit="gflops">
-        <metric name="double">332.6049</metric>
-        <metric name="double2">333.7733</metric>
-        <metric name="double4">332.9391</metric>
-        <metric name="double8">331.2982</metric>
-        <metric name="double16">328.2657</metric>
+        <metric name="double">332.2776</metric>
+        <metric name="double2">333.2822</metric>
+        <metric name="double4">332.4738</metric>
+        <metric name="double8">330.8443</metric>
+        <metric name="double16">327.8000</metric>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
         <metric name="mp" status="unsupported" reason="No half precision support"/>
@@ -236,32 +236,32 @@
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">10516.0859</metric>
-        <metric name="int2">10462.1309</metric>
-        <metric name="int4">10316.8291</metric>
-        <metric name="int8">10347.5322</metric>
-        <metric name="int16">10350.1719</metric>
+        <metric name="int">10504.8711</metric>
+        <metric name="int2">10431.7842</metric>
+        <metric name="int4">10298.4912</metric>
+        <metric name="int8">10338.4199</metric>
+        <metric name="int16">10341.7598</metric>
       </test>
       <test name="integer_compute_fast" unit="gops">
-        <metric name="int">10434.8311</metric>
-        <metric name="int2">10461.6045</metric>
-        <metric name="int4">10327.8955</metric>
-        <metric name="int8">10244.5146</metric>
-        <metric name="int16">10104.6885</metric>
+        <metric name="int">10319.7178</metric>
+        <metric name="int2">10334.1289</metric>
+        <metric name="int4">10300.1270</metric>
+        <metric name="int8">10234.3789</metric>
+        <metric name="int16">10095.4707</metric>
       </test>
       <test name="integer_compute_char" unit="gops">
-        <metric name="char">9772.4287</metric>
-        <metric name="char2">9101.9326</metric>
-        <metric name="char4">9173.4619</metric>
-        <metric name="char8">7998.9893</metric>
-        <metric name="char16">6602.6362</metric>
+        <metric name="char">9756.3555</metric>
+        <metric name="char2">9087.6426</metric>
+        <metric name="char4">9159.3428</metric>
+        <metric name="char8">7991.8257</metric>
+        <metric name="char16">6598.1016</metric>
       </test>
       <test name="integer_compute_short" unit="gops">
-        <metric name="short">9651.9326</metric>
-        <metric name="short2">9198.5420</metric>
-        <metric name="short4">9179.8594</metric>
-        <metric name="short8">8102.8477</metric>
-        <metric name="short16">6315.0308</metric>
+        <metric name="short">9645.5498</metric>
+        <metric name="short2">9181.7939</metric>
+        <metric name="short4">9168.3330</metric>
+        <metric name="short8">8094.7354</metric>
+        <metric name="short16">6310.5156</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
         <metric name="int8_dp" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
@@ -273,54 +273,54 @@
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">392.3264</metric>
-        <metric name="float2">409.3792</metric>
-        <metric name="float4">419.6476</metric>
-        <metric name="float8">422.7611</metric>
-        <metric name="float16">424.5021</metric>
+        <metric name="float">390.8878</metric>
+        <metric name="float2">407.8872</metric>
+        <metric name="float4">418.8080</metric>
+        <metric name="float8">421.9803</metric>
+        <metric name="float16">423.8199</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">4384.0859</metric>
-        <metric name="float2">7952.1431</metric>
-        <metric name="float4">9131.7246</metric>
-        <metric name="float8">5015.9741</metric>
+        <metric name="float">4380.7944</metric>
+        <metric name="float2">7945.9707</metric>
+        <metric name="float4">9124.2578</metric>
+        <metric name="float8">5011.9180</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">272.1934</metric>
+        <metric name="float4">271.9965</metric>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="enqueuewritebuffer">12.9489</metric>
-        <metric name="enqueuereadbuffer">11.7339</metric>
-        <metric name="enqueuewritebuffer_nonblocking">12.7656</metric>
-        <metric name="enqueuereadbuffer_nonblocking">11.3336</metric>
-        <metric name="enqueuemapbuffer">14.3014</metric>
-        <metric name="memcpy_from_mapped_ptr">16.4583</metric>
-        <metric name="enqueueunmap">13.9214</metric>
-        <metric name="memcpy_to_mapped_ptr">16.3053</metric>
+        <metric name="enqueuewritebuffer">13.0044</metric>
+        <metric name="enqueuereadbuffer">11.9209</metric>
+        <metric name="enqueuewritebuffer_nonblocking">12.7908</metric>
+        <metric name="enqueuereadbuffer_nonblocking">11.5488</metric>
+        <metric name="enqueuemapbuffer">14.3004</metric>
+        <metric name="memcpy_from_mapped_ptr">17.4179</metric>
+        <metric name="enqueueunmap">13.9196</metric>
+        <metric name="memcpy_to_mapped_ptr">17.1823</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">6.5654</metric>
-        <metric name="roundtrip">16.5930</metric>
+        <metric name="dispatch">6.5453</metric>
+        <metric name="roundtrip">15.7344</metric>
       </test>
     </category>
   </run>
   <run backend="OpenCL" platform="clvk" device="NVIDIA GeForce RTX 5060" driver="3.0 CLVK on Vulkan v1.4.329 driver 2496774464">
     <category name="fp_compute">
       <test name="single_precision_compute" unit="gflops">
-        <metric name="float">12274.6279</metric>
-        <metric name="float2">12484.3848</metric>
-        <metric name="float4">12328.3291</metric>
-        <metric name="float8">12345.4258</metric>
-        <metric name="float16">12320.4941</metric>
+        <metric name="float">12217.8379</metric>
+        <metric name="float2">12437.8877</metric>
+        <metric name="float4">12312.0107</metric>
+        <metric name="float8">12298.9658</metric>
+        <metric name="float16">12309.6006</metric>
       </test>
       <test name="half_precision_compute" unit="gflops">
-        <metric name="half">9886.4648</metric>
-        <metric name="half2">18418.0625</metric>
-        <metric name="half4">18484.6855</metric>
-        <metric name="half8">18144.4492</metric>
-        <metric name="half16">17511.9766</metric>
+        <metric name="half">9840.6592</metric>
+        <metric name="half2">18457.4727</metric>
+        <metric name="half4">18319.9531</metric>
+        <metric name="half8">17843.2207</metric>
+        <metric name="half16">17387.8477</metric>
       </test>
       <test name="double_precision_compute" unit="gflops">
         <metric name="double" status="unsupported" reason="No double precision support"/>
@@ -330,41 +330,41 @@
         <metric name="double16" status="unsupported" reason="No double precision support"/>
       </test>
       <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">5461.3921</metric>
-        <metric name="mp2">6561.5747</metric>
-        <metric name="mp4">6109.1543</metric>
-        <metric name="mp8">5585.3906</metric>
-        <metric name="mp16">5323.0605</metric>
+        <metric name="mp">5451.9570</metric>
+        <metric name="mp2">6531.9502</metric>
+        <metric name="mp4">6110.2148</metric>
+        <metric name="mp8">5565.3237</metric>
+        <metric name="mp16">5307.0059</metric>
       </test>
     </category>
     <category name="int_compute">
       <test name="integer_compute" unit="gops">
-        <metric name="int">6161.3335</metric>
-        <metric name="int2">6228.8550</metric>
-        <metric name="int4">6240.9287</metric>
-        <metric name="int8">6238.3804</metric>
-        <metric name="int16">6134.8857</metric>
+        <metric name="int">6144.1152</metric>
+        <metric name="int2">6213.8320</metric>
+        <metric name="int4">6218.1274</metric>
+        <metric name="int8">6207.2686</metric>
+        <metric name="int16">6132.8574</metric>
       </test>
       <test name="integer_compute_fast" unit="gops">
-        <metric name="int">6159.1040</metric>
-        <metric name="int2">6241.2915</metric>
-        <metric name="int4">6235.3242</metric>
-        <metric name="int8">6245.3022</metric>
-        <metric name="int16">6143.3608</metric>
+        <metric name="int">6134.5845</metric>
+        <metric name="int2">6221.5693</metric>
+        <metric name="int4">6217.9302</metric>
+        <metric name="int8">6222.9917</metric>
+        <metric name="int16">6139.0474</metric>
       </test>
       <test name="integer_compute_char" unit="gops">
-        <metric name="char">6328.4922</metric>
-        <metric name="char2">6328.5903</metric>
-        <metric name="char4">6292.7280</metric>
-        <metric name="char8">6183.9316</metric>
-        <metric name="char16">6250.8291</metric>
+        <metric name="char">6304.5195</metric>
+        <metric name="char2">6306.2954</metric>
+        <metric name="char4">6274.3174</metric>
+        <metric name="char8">6160.9429</metric>
+        <metric name="char16">6208.6553</metric>
       </test>
       <test name="integer_compute_short" unit="gops">
-        <metric name="short">6326.4775</metric>
-        <metric name="short2">6327.9707</metric>
-        <metric name="short4">6282.3682</metric>
-        <metric name="short8">6185.8350</metric>
-        <metric name="short16">6249.4688</metric>
+        <metric name="short">6291.5933</metric>
+        <metric name="short2">6307.0225</metric>
+        <metric name="short4">6282.9453</metric>
+        <metric name="short8">6150.1045</metric>
+        <metric name="short16">6228.4951</metric>
       </test>
       <test name="integer_compute_int8_dp" unit="gops">
         <metric name="int8_dp" status="error" reason="clCreateKernel (-44)"/>
@@ -376,36 +376,36 @@
     </category>
     <category name="bandwidth">
       <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">12.6098</metric>
-        <metric name="float2">12.6205</metric>
-        <metric name="float4">12.6400</metric>
-        <metric name="float8">8.1674</metric>
-        <metric name="float16">2.2029</metric>
+        <metric name="float">12.6018</metric>
+        <metric name="float2">12.6218</metric>
+        <metric name="float4">12.6338</metric>
+        <metric name="float8">8.1554</metric>
+        <metric name="float16">2.2227</metric>
       </test>
       <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">1530.7285</metric>
-        <metric name="float2">3090.2300</metric>
-        <metric name="float4">6110.7559</metric>
-        <metric name="float8">4770.5020</metric>
+        <metric name="float">1533.6404</metric>
+        <metric name="float2">3083.2925</metric>
+        <metric name="float4">6088.7217</metric>
+        <metric name="float8">4763.2402</metric>
       </test>
       <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">408.6929</metric>
+        <metric name="float4">407.4844</metric>
       </test>
       <test name="transfer_bandwidth" unit="gbps">
-        <metric name="enqueuewritebuffer">17.8269</metric>
-        <metric name="enqueuereadbuffer">17.6802</metric>
-        <metric name="enqueuewritebuffer_nonblocking">17.8352</metric>
-        <metric name="enqueuereadbuffer_nonblocking">17.6899</metric>
+        <metric name="enqueuewritebuffer">17.3311</metric>
+        <metric name="enqueuereadbuffer">17.3299</metric>
+        <metric name="enqueuewritebuffer_nonblocking">17.4621</metric>
+        <metric name="enqueuereadbuffer_nonblocking">17.3250</metric>
         <metric name="enqueuemapbuffer">0.0000</metric>
-        <metric name="memcpy_from_mapped_ptr">16.8980</metric>
+        <metric name="memcpy_from_mapped_ptr">17.4203</metric>
         <metric name="enqueueunmap">0.0000</metric>
-        <metric name="memcpy_to_mapped_ptr">16.4746</metric>
+        <metric name="memcpy_to_mapped_ptr">17.5693</metric>
       </test>
     </category>
     <category name="latency">
       <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">17.4027</metric>
-        <metric name="roundtrip">75.1814</metric>
+        <metric name="dispatch">19.7490</metric>
+        <metric name="roundtrip">79.8975</metric>
       </test>
     </category>
   </run>

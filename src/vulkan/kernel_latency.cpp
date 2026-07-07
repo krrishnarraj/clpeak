@@ -138,7 +138,16 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   allocInfo.commandBufferCount = 1;
   VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
+  if (vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf) != VK_SUCCESS)
+  {
+    if (queryPool != VK_NULL_HANDLE)
+      vkDestroyQueryPool(dev.device, queryPool, nullptr);
+    vkDestroyPipeline(dev.device, pipeline, nullptr);
+    vkDestroyShaderModule(dev.device, shaderModule, nullptr);
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+    CLPEAK_VLOG("command buffer allocation failed\n");
+    return -1;
+  }
 
   VkCommandBufferBeginInfo beginInfo = {};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;

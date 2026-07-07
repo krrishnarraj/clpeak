@@ -1,6 +1,12 @@
-// WMMA bf16xbf16+fp32 m16n16k16 -- Ampere+ tensor-core throughput test.
-// Same 4-chain ILP structure as wmma_fp16; only the input fragment type
-// differs.
+// WMMA bf16xbf16+fp32 m16n16k16 -- Ampere+ tensor-core throughput via the
+// nvcuda::wmma fragment API.  Same 4-chain structure as wmma_fp16; only the
+// input fragment type differs.  bf16 tensor MMA ALWAYS accumulates in fp32
+// (no fp16-accumulate mode), so this fragment path already reaches peak on
+// RTX 5060 (~42.5, at/above cuBLASLt bf16 41.4) -- a native mma.sync tile
+// was measured to make no difference.  Kept as-is.
+//
+// Per warp ops = 256 outer * 4 chains * (16*16*16*2) = 8,388,608;
+// per thread = 262,144 (= 4 * COOPMAT_WORK_PER_WI).
 
 #include <mma.h>
 #include <cuda_bf16.h>
@@ -29,9 +35,11 @@ extern "C" __global__ void wmma_bf16(float *out, float A)
         mma_sync(c3, a, b, c3);
     }
 
-    mma_sync(c0, a, b, c1);
-    mma_sync(c2, a, b, c3);
-    mma_sync(c0, a, b, c2);
+    // Sum all four chains element-wise; see wmma_fp16.cu for why an mma_sync
+    // fold would dead-code chains and inflate the number.
+    #pragma unroll
+    for (int t = 0; t < c0.num_elements; t++)
+        c0.x[t] += c1.x[t] + c2.x[t] + c3.x[t];
 
     store_matrix_sync(out + blockIdx.x * 16 * 16, c0, 16, mem_row_major);
 }

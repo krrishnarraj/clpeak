@@ -248,10 +248,49 @@ int clPeak::runAll()
   return 0;
 }
 
+void clPeak::clampToKernelWG(const cl::Device &dev, cl::Kernel &kernel,
+                             cl::NDRange &globalSize, cl::NDRange &localSize)
+{
+  // Driver picks the local size -- nothing to clamp.
+  if (localSize.dimensions() == 0)
+    return;
+
+  size_t kernelWG = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(dev);
+  if (kernelWG == 0)
+    return;
+
+  const size_t *l = static_cast<const size_t *>(localSize);
+  if (l[0] <= kernelWG)
+    return; // requested local size already fits this kernel
+
+  const size_t *g = static_cast<const size_t *>(globalSize);
+  size_t local = kernelWG;
+  size_t global = (g[0] / local) * local;
+  if (global == 0)
+    global = local;
+
+  globalSize = cl::NDRange(global);
+  localSize  = cl::NDRange(local);
+}
+
+uint64_t clPeak::ndRangeTotal(const cl::NDRange &range)
+{
+  const size_t *s = static_cast<const size_t *>(range);
+  cl_uint dims = range.dimensions();
+  uint64_t total = dims ? 1 : 0;
+  for (cl_uint i = 0; i < dims; i++)
+    total *= (uint64_t)s[i];
+  return total;
+}
+
 float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
                          cl::NDRange &globalSize, cl::NDRange &localSize,
                          unsigned int targetTimeUsLocal, unsigned int forcedIters)
 {
+  // Keep every launch within the kernel's own work-group limit.
+  cl::Device dev = queue.getInfo<CL_QUEUE_DEVICE>();
+  clampToKernelWG(dev, kernel, globalSize, localSize);
+
   // Time `n` dispatches batched into one submit; returns total time in us.
   // Used for both the calibration probe and the real timed run so the timing
   // methodology matches in both phases.

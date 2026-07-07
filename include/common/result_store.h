@@ -69,9 +69,11 @@ BaselineMap buildBaselineMap(const ResultStore &store);
 // Serialize the store to one of three formats.  Each format is
 // self-describing (carries `format_version`) and produced by a single
 // pass at program exit so all three formats agree on row count + ordering.
-void saveJson(const ResultStore &store, const std::string &filename);
-void saveCsv (const ResultStore &store, const std::string &filename);
-void saveXml (const ResultStore &store, const std::string &filename);
+// Returns false (after a stderr message) when the file cannot be opened or
+// the stream fails while writing.
+bool saveJson(const ResultStore &store, const std::string &filename);
+bool saveCsv (const ResultStore &store, const std::string &filename);
+bool saveXml (const ResultStore &store, const std::string &filename);
 
 // Parse a previously-written file.  Rejects v1 (or unversioned) files with
 // a stderr message and returns an empty store.  loadResultFile dispatches

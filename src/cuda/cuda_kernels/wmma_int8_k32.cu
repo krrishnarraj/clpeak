@@ -1,20 +1,16 @@
 // INT8 tensor-core throughput at the m16n8k32 tile via inline mma.sync
-// PTX.  Originally added on the hypothesis that the wmma.h K=16 path
-// (m16n16k16) was halving INT8 tensor throughput; the actual measurement
-// flipped that.
+// PTX.  Added on the hypothesis that the wmma.h K=16 path (m16n16k16)
+// was halving INT8 tensor throughput -- which, once the wmma kernels'
+// dead-chain fold bug was fixed, turned out to be exactly right.
 //
-// RTX 5060 (sm_120): wmma_int8 (K=16) hits 327 TIOPS; this kernel
-// (K=32, m16n8k32, 4 chains, single non-volatile asm block) hits 165
-// TIOPS -- exactly HALF the wmma path.  Likely cause: nvcc lowers wmma
-// m16n16k16 INT8 to multiple mma.sync.m16n8k16 instructions issued
-// back-to-back, exposing more ILP for ptxas to interleave than our
-// explicit K=32 chain.  Or m16n8k32 INT8 has half the issue rate of
-// m16n8k16 on this arch.
-//
-// We keep this kernel because the K=16 vs K=32 throughput delta IS
-// useful data -- it documents that the wmma fragment API is the right
-// path for INT8 on consumer Blackwell, not raw mma.sync.  Datacenter
-// (sm_100) parts may behave differently.
+// RTX 5060 (sm_120): this kernel (K=32, m16n8k32, 4 chains) hits 165
+// TIOPS; wmma_int8 (fragment API, K=16) hits 84 TIOPS -- HALF this path.
+// (Before the fold fix, wmma_int8 mis-reported 327 because 3 of its 4
+// accumulator chains were dead-coded and inflated the count 4x, which had
+// made the fragment API look 2x FASTER than it really is.)  So on consumer
+// Blackwell the native-tile mma.sync path is the one that reaches peak
+// (cuBLASLt int8 = 141 TOPS); the wmma fragment K=16 path under-saturates.
+// Datacenter (sm_100) parts may behave differently.
 //
 // Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major):
 //   A: m16 x k32 = 512 bytes / 32 threads = 16 bytes/thread = 4 x .b32

@@ -81,10 +81,12 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89 EXTRA_ARCHS "121"
     KERNELS wmma_int4)
 
-# Ampere+ tensor cores: bf16 / tf32 / fp64 / int8 m16n8k32 + int8 2:4 sparse
-# (all inline mma.sync m16n8k32, sm_80+).
+# Ampere+ tensor cores: bf16 / tf32 (native mma.sync m16n8k8) / fp64 / int8
+# m16n8k32 + int8 2:4 sparse, plus the fp16-accumulate full-rate fp16 kernel
+# (all sm_80+).
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 80
-    KERNELS compute_bf16 wmma_bf16 wmma_tf32 wmma_fp64 wmma_int8_k32 wmma_int8_sparse)
+    KERNELS compute_bf16 wmma_bf16 wmma_tf32 wmma_fp64 wmma_int8_k32 wmma_int8_sparse
+            wmma_fp16_f16)
 
 # FP8 mma.sync (E4M3 / E5M2) -- sm_89+.
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 89

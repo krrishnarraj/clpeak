@@ -20,9 +20,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));
 
-    globalSize = globalWIs;
-    localSize  = devInfo.maxWGSize;
-
     const int widths[] = {1, 2, 4, 8};
     const char *knames[] = {"local_bandwidth_v1", "local_bandwidth_v2", "local_bandwidth_v4", "local_bandwidth_v8"};
     const char *labels[] = {"float", "float2", "float4", "float8"};
@@ -41,10 +38,15 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
         continue;
 
+      // Reset each iteration: run_kernel may clamp global/local for a kernel
+      // whose work-group limit is below the device max.
+      globalSize = globalWIs;
+      localSize  = devInfo.maxWGSize;
+
       timed = run_kernel(queue, kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
 
       // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
-      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * globalWIs;
+      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
       gbps = (float)bytesPerCall / timed / 1e3f;
 
       test.emit(labels[w], gbps);

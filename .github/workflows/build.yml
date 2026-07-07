@@ -6,13 +6,16 @@ on:
       - 'results/**'
       - 'snap/**'
       - 'packaging/**'
+      - '**/*.md'
     branches: [master, main]
     tags: ["*"]
+
   pull_request:
     paths-ignore:
-        - 'results/**'
-        - 'snap/**'
-        - 'packaging/**'
+      - 'results/**'
+      - 'snap/**'
+      - 'packaging/**'
+      - '**/*.md'
     branches: [master, main]
   workflow_dispatch:
 
@@ -281,6 +284,7 @@ jobs:
         with:
           install_runtime: true
           cache: true
+          optional_components: com.lunarg.vulkan.ios
 
       - name: Configure CMake (iOS)
         run: cmake -S ios -B ios/build -G Xcode -DCMAKE_SYSTEM_NAME=iOS

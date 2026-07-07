@@ -450,7 +450,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     {
       const char *v = requireArg(argc, argv, i, a);
       unsigned int parsed;
-      if (!parseUIntArg(v, parsed, /*allowZero=*/false))
+      if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
+          parsed > std::numeric_limits<unsigned int>::max() / 1000u)
       {
         std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
         printHelpAndExit(-1);
@@ -462,7 +463,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     {
       const char *v = requireArg(argc, argv, i, a);
       unsigned int parsed;
-      if (!parseUIntArg(v, parsed, /*allowZero=*/false))
+      if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
+          parsed > std::numeric_limits<unsigned int>::max() / 1000u)
       {
         std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
         printHelpAndExit(-1);
