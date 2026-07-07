@@ -157,22 +157,6 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (no SDK; otherwise always available) |
 
-## What it measures
-
-| Test | OpenCL | Vulkan | CUDA | ROCm/HIP | Metal | oneAPI/SYCL | CPU |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Global memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; | &check; |
-| Local / shared memory bandwidth | &check; | &check; | &check; | &check; | &check; | &check; | &check; |
-| Image / texture bandwidth | &check; | &check; | &check; | &check; | &check; | &check; | &mdash; |
-| Transfer bandwidth (host&harr;device) | &check; | &check; | &check; | &check; | &mdash; | &check; | &mdash; |
-| Compute SP / HP / DP / MP / BF16 | &check; | &check; | &check; | &check; | &check; | &check; | &check; |
-| Compute INT (int32) | &check; | &check; | &check; | &check; | &mdash; | &check; | &check; |
-| Compute INT24 / INT8 / INT16 | &check; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; | &mdash; |
-| INT8 dot-product (DP4a) | &check; | &check; | &check; | &check; | &mdash; | &check; | &check; |
-| Tensor / matrix-engine MMA (`--wmma`, `--simdgroup-matrix`, `--coopmat`, `--rocwmma`, `--mfma`, `--joint-matrix`, `--amx`) | &mdash; | coopmat fp32/fp16/bf16/int8/fp8 | WMMA fp16/bf16/int8 + FP8 mma.sync + FP4/MXFP4/NVFP4 mma.sync | rocWMMA fp16/int8 + raw MFMA fp16/bf16/int8/fp8/mxfp4 | simdgroup_matrix fp16/bf16 | joint_matrix bf16/int8 (XMX) | AMX / SMMLA / BFMMLA (int8/fp16/bf16) |
-| Vendor-SDK GEMM peak (`--cublas`, `--rocblas`, `--mps-gemm`, `--onemkl`) | &mdash; | &mdash; | cuBLASLt: fp32/tf32/fp16/bf16/fp8&#x2011;e4m3/fp8&#x2011;e5m2/int8/int4 | rocBLAS: fp32/fp64/fp16 + hipBLASLt: fp8&#x2011;e4m3/fp8&#x2011;e5m2 | MPS: fp32/fp16/bf16 | oneMKL: fp32/fp64/fp16 | &mdash; |
-| Kernel launch latency | &check; | &check; | &check; | &check; | &check; | &check; | &mdash; |
-
 ## CLI
 
 `./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, or CPU is doing the work.
@@ -218,7 +202,7 @@ a comma-separated list; omitting it runs every device in that backend:
 ./clpeak --oneapi-device 0               # oneAPI/SYCL device index
 ```
 
-The CPU backend is a single device with no index flag — use `--no-cpu` to skip it.
+The CPU backend is a single device with no index flag. Use `--no-cpu` to skip it.
 
 ## For AI agents
 
