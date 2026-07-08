@@ -1,10 +1,11 @@
 #ifndef CPU_SIMD_H
 #define CPU_SIMD_H
 
-// Backend-internal SIMD abstraction for the CPU compute kernels.  The backend
-// is compiled with -march=native (see src/cpu/CMakeLists.txt), so the widest
-// vector ISA the build host supports is selected here at compile time, with a
-// scalar fallback that always works.  Each "Vec" exposes set1 / fma / hsum and
+// Backend-internal SIMD abstraction for the CPU compute kernels.  Each feature
+// TU is compiled with its own -m/-arch flags (see src/cpu/CMakeLists.txt), so
+// the widest vector ISA those flags enable is selected here at compile time,
+// with a scalar fallback that always works.  Each "Vec" exposes set1 / fma /
+// hsum and
 // a lane count + a per-ISA accumulator count (NACC) chosen to (a) hide the FMA
 // latency*throughput product and (b) stay within the architectural register
 // file so the independent chains don't spill.

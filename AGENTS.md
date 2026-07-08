@@ -40,7 +40,7 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/rocm/` | ROCm/HIP backend: `RocmPeak` class + `.hip` kernels (AOT-compiled with hipcc --genco at build time, embedded in the binary) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
 | `src/oneapi/` | oneAPI/SYCL backend: `OneapiPeak` class + SYCL kernels (inline lambdas, AOT/JIT via DPC++) |
-| `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (`-march`/`-mcpu=native`); cache/DRAM bandwidth + memory latency |
+| `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (one feature TU per ISA, runtime-dispatched); cache/DRAM bandwidth + memory latency |
 | `src/cli/` | Desktop CLI: `main.cpp` |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `android/` | Android app (Vulkan, OpenCL, CPU) with JNI native module, its own `logger_android.cpp` |

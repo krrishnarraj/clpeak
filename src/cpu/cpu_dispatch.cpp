@@ -1,6 +1,7 @@
 #ifdef ENABLE_CPU
 
 #include "cpu_kernels.h"
+#include "cpu_tu_registry.h"
 
 #include <cstdint>
 
@@ -249,80 +250,12 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
 } // anonymous namespace
 
 // ---- TU accessors (defined in each compiled cpu_kernels_tu.cpp) ------------
+// Declared unconditionally from the TU registry: a declaration for a TU CMake
+// didn't build is harmless (the symbol is never referenced -- every call site in
+// kernels()/kernelMenu() is guarded by #if CLPEAK_TU_<tag>).
 #define DECL_TU(tag) extern "C" const CpuKernelTable *clpeak_table_##tag();
-#if CLPEAK_NATIVE_BUILD
-DECL_TU(native)
-#else
-#if CLPEAK_TU_generic
-DECL_TU(generic)
-#endif
-#if CLPEAK_TU_sse42
-DECL_TU(sse42)
-#endif
-#if CLPEAK_TU_avx2
-DECL_TU(avx2)
-#endif
-#if CLPEAK_TU_avx512
-DECL_TU(avx512)
-#endif
-#if CLPEAK_TU_avx512vnni
-DECL_TU(avx512vnni)
-#endif
-#if CLPEAK_TU_avx512bf16
-DECL_TU(avx512bf16)
-#endif
-#if CLPEAK_TU_avx512fp16
-DECL_TU(avx512fp16)
-#endif
-#if CLPEAK_TU_avxvnni
-DECL_TU(avxvnni)
-#endif
-#if CLPEAK_TU_avxvnniint8
-DECL_TU(avxvnniint8)
-#endif
-#if CLPEAK_TU_avx10bf16
-DECL_TU(avx10bf16)
-#endif
-#if CLPEAK_TU_amx
-DECL_TU(amx)
-#endif
-#if CLPEAK_TU_amxfp16
-DECL_TU(amxfp16)
-#endif
-#if CLPEAK_TU_amxtf32
-DECL_TU(amxtf32)
-#endif
-#if CLPEAK_TU_amxfp8
-DECL_TU(amxfp8)
-#endif
-#if CLPEAK_TU_neon
-DECL_TU(neon)
-#endif
-#if CLPEAK_TU_sve
-DECL_TU(sve)
-#endif
-#if CLPEAK_TU_svebf16
-DECL_TU(svebf16)
-#endif
-#if CLPEAK_TU_svei8mm
-DECL_TU(svei8mm)
-#endif
-#if CLPEAK_TU_fp16
-DECL_TU(fp16)
-#endif
-#if CLPEAK_TU_fp16fml
-DECL_TU(fp16fml)
-#endif
-#if CLPEAK_TU_dotprod
-DECL_TU(dotprod)
-#endif
-#if CLPEAK_TU_bf16
-DECL_TU(bf16)
-#endif
-#if CLPEAK_TU_i8mm
-DECL_TU(i8mm)
-#endif
-#endif // CLPEAK_NATIVE_BUILD
+CLPEAK_TU_REGISTRY(DECL_TU)
+#undef DECL_TU
 
 const CpuFeatures &cpuFeatures()
 {
@@ -348,18 +281,12 @@ const CpuKernelTable &kernels()
     CpuKernelTable t{};
     const CpuFeatures &f = cpuFeatures();
     (void)f;
-#if CLPEAK_NATIVE_BUILD
-    merge(t, clpeak_table_native());   // native build: trust build==run host
-#else
     // Merge supported TUs from baseline up, so the widest variant wins per kernel.
 #if CLPEAK_TU_generic
     merge(t, clpeak_table_generic());     // ungated floor (SSE2 x86 / NEON arm / scalar)
 #endif
 #if CLPEAK_TU_sse42
     if (f.sse42) merge(t, clpeak_table_sse42());
-#endif
-#if CLPEAK_TU_neon
-    if (f.neon) merge(t, clpeak_table_neon());
 #endif
 #if CLPEAK_TU_avx2
     if (f.avx2 && f.fma) merge(t, clpeak_table_avx2());
@@ -423,7 +350,6 @@ const CpuKernelTable &kernels()
 #if CLPEAK_TU_svei8mm
     if (f.sve && f.svei8mm) merge(t, clpeak_table_svei8mm());
 #endif
-#endif // CLPEAK_NATIVE_BUILD
     t.isaName = isaName();
     return t;
   }();
@@ -460,22 +386,6 @@ const CpuKernelMenu &kernelMenu()
       add(m.int32, t->int32, isa);
     };
 
-#if CLPEAK_NATIVE_BUILD
-    // Single native TU: trust build==run host, label everything the runtime ISA.
-    const CpuKernelTable *t = clpeak_table_native();
-    const char *isa = isaName();
-    addBase(t, isa);
-    add(m.fp16, t->fp16, isa);
-    add(m.bf16, t->bf16, isa);
-    add(m.mp, t->mp, isa);
-    add(m.int8dp, t->int8dp, isa);
-    add(m.mat_int8, t->mat_int8, isa);
-    add(m.mat_fp, t->mat_fp, isa);
-    add(m.mat_fp16, t->mat_fp16, isa);
-    add(m.mat_tf32, t->mat_tf32, isa);
-    add(m.mat_fp8, t->mat_fp8, isa);
-    add(m.bf16fma, t->bf16fma, isa);
-#else
     // ---- x86 tier TUs (base dtypes) ----
 #if CLPEAK_TU_generic
     // The ungated floor: SSE2 on x86, NEON on aarch64, scalar elsewhere.
@@ -604,7 +514,6 @@ const CpuKernelMenu &kernelMenu()
     if (f.sve && f.svei8mm)
       add(m.mat_int8, clpeak_table_svei8mm()->mat_int8, "SVE SMMLA");
 #endif
-#endif // CLPEAK_NATIVE_BUILD
     return m;
   }();
   return menu;

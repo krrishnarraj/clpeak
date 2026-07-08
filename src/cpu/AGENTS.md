@@ -2,9 +2,10 @@
 
 `CpuPeak` class: a plain-C++ / `std::thread` backend that benchmarks the host
 CPU. No external dependencies (only a threading library). Built as the
-`peak_cpu` static library and compiled with aggressive flags
-(`-O3 -ffast-math -march=native` / `-mcpu=native` on Apple/ARM; `/O2 /fp:fast
-/arch:AVX2` on MSVC) so the kernels reach CPU peak.
+`peak_cpu` static library and compiled with aggressive flags (`-O3 -ffast-math`;
+`/O2 /fp:fast` on MSVC) so the kernels reach CPU peak. The compute/read kernels
+are compiled once **per feature TU** (each with its own `-m`/`-arch` flags) and
+selected at runtime — see the ISA strategy section below.
 
 The CPU is modelled as a single device (index 0). The GPU mental model maps
 across: SIMD lane ↔ work-item, thread/core ↔ work-group, cache hierarchy ↔
@@ -23,21 +24,29 @@ local memory, DRAM ↔ global memory.
 - CPU matrix engine (AMX / SMMLA / BFMMLA)? → `cpu_matrix.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
 - Memory (pointer-chase) latency? → `latency.cpp`
+- **Kernel bodies** (fp32/fp64/int32/read; fp16/bf16/mp/int8/bf16fma; AMX/NEON
+  matrix; SVE)? → the `kernels/` sub-headers (see below)
+- **The list of feature TUs** (single source of truth)? → `cpu_tu_registry.h`
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup + probe + `pickIters` timed batch via the pool), `enumerate`, `printInventory` |
-| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 per-instance **and aggregate** (`l3TotalBytes`, from `index3/shared_cpu_list` on Linux / summed on Windows) sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from compiler feature macros (host-accurate under `-march`/`-mcpu=native`) |
+| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`), core counts (incl. P/E split), L1d/L2/L3 per-instance **and aggregate** (`l3TotalBytes`, from `index3/shared_cpu_list` on Linux / summed on Windows) sizes (sysfs / `GetLogicalProcessorInformationEx` / CPUID; on Apple, `hw.perflevel0.*` for the P-core L1/L2 with a fallback to the generic `hw.*` keys), and ISA flags from the `cpu_dispatch.cpp` runtime probe (CPUID / HWCAP / sysctl) |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning (`pthread_setaffinity_np` / `SetThreadAffinityMask`; advisory no-op on macOS) |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *compile flags of the TU it is built in*, with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) + `CPU_UNROLL_*` |
 | **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants — bandwidth only), and `kernelMenu()` returning `CpuKernelMenu` (per-slot `std::vector<IsaVariant>` = **every** supported ISA variant + its canonical label, baseline-first) for the compute tests |
-| **`cpu_kernels_impl.h`** | **All** chain bodies (fp32/fp64/int32/fp16/bf16/mp/int8dp/matrix/readsum + the vector-length-agnostic SVE chains), `#if`-gated by compile features, + the per-TU `tuTable()` builder. Included once per feature TU |
-| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `sve`, `svebf16`, `svei8mm`; or `native`) with that ISA's flags |
-| **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`); `kernels()` assembly (merges supported TUs, widest variant per kernel — bandwidth only); and `kernelMenu()` which collects **every** supported variant per kernel with its canonical ISA label (explicit per-slot pushes — encodes the "collapse identical SSE float" rule by pushing only int32 from the `sse42` TU, and labels base vs feature kernels per-slot) |
+| **`cpu_kernels_impl.h`** | Per-TU **aggregator**: `#include`s the `kernels/` sub-headers + emits this TU's `tuTable()` from whatever kernels its build flags enabled. Included once per feature TU |
+| **`kernels/base_compute.h`** | fp32 / fp64 / int32 FMA-chains + the streaming XOR read. Present in every TU (goes through `cpu_simd.h`) |
+| **`kernels/lowp_compute.h`** | Low/mixed-precision compute: fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, AVX10.2 bf16 vector FMA. `#if`-gated per feature; whole file excluded under `CLPEAK_CORE_ONLY` |
+| **`kernels/matrix_compute.h`** | CPU matrix engines: x86 AMX (int8/bf16/fp16/tf32/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA. `CLPEAK_CORE_ONLY`-excluded |
+| **`kernels/sve_compute.h`** | ARM SVE (vector-length-agnostic) compute + SVE bf16/i8mm matrix. Gated on `__ARM_FEATURE_SVE`, `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sve.h>` |
+| **`cpu_tu_registry.h`** | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of every feature-TU tag. Drives the unconditional `clpeak_table_<tag>()` forward declarations in `cpu_dispatch.cpp` |
+| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `sve`, `svebf16`, `svei8mm`) with that ISA's flags |
+| **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`); TU accessor decls (from `cpu_tu_registry.h`); `kernels()` assembly (merges supported TUs, widest variant per kernel — bandwidth only); and `kernelMenu()` which collects **every** supported variant per kernel with its canonical ISA label (explicit per-slot pushes — encodes the "collapse identical SSE float" rule by pushing only int32 from the `sse42` TU, and labels base vs feature kernels per-slot) |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics; `emitVariants()` — runs **every** ISA variant from a `kernelMenu()` slot as its own test (ISA appended to the display name, `isaSlug()` into the tag for unique result keys), or one untagged `Unsupported` test if none |
-| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). Kernel bodies live in `cpu_kernels_impl.h` |
+| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). Kernel bodies live in the `kernels/` sub-headers |
 | `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `emitVariants` + `kernelMenu()`) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_int8 / mat_fp, ...)` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
@@ -64,15 +73,15 @@ contributes only its (genuinely different) int32 variant — no duplicate SSE fl
 row. Bandwidth still uses the single best kernel via `kernels().readsum`, and the
 device-header `ISA:` property is still the widest active ISA (`isaName()`).
 
-Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
+One **portable** build mode (there is no native/`-march=native` mode — every ISA
+is covered by a feature TU + runtime dispatch instead): produces ONE binary that
+is safe on any CPU and still uses the best ISA the *running* CPU has. The
+compute/read kernels (`cpu_kernels_tu.cpp`) are compiled once per **feature** TU,
+each with its own flags; `cpu_dispatch.cpp` probes the CPU at runtime and
+assembles `kernels()` by picking, per kernel, the widest variant whose *full*
+feature set is present. The non-kernel code (methods, dispatcher) is compiled at
+the safe baseline, so the binary never SIGILLs on an older CPU.
 
-- **Portable (default, OFF)** — produces ONE binary that is safe on any CPU and
-  still uses the best ISA the *running* CPU has. The compute/read kernels
-  (`cpu_kernels_tu.cpp`) are compiled once per **feature** TU, each with its own
-  flags; `cpu_dispatch.cpp` probes the CPU at runtime and assembles `kernels()`
-  by picking, per kernel, the widest variant whose *full* feature set is present.
-  The non-kernel code (methods, dispatcher) is compiled at the safe baseline, so
-  the binary never SIGILLs on an older CPU.
   - x86 TUs: `generic` (SSE2, ungated floor), `sse42`, `avx2`, `avxvnni`
     (256-bit VEX AVX-VNNI int8 dot — the client-x86 int8 path for Alder Lake→
     Arrow Lake, Sierra Forest, Zen 5, none of which have AVX-512), `avxvnniint8`
@@ -92,17 +101,31 @@ Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
     and the bf16 FMA via a `bf16fma` slot in the BF16 phase.
   - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
     floor never bakes in M4-only features), plus Linux/Android `fp16`,
-    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs, and the **SVE** family —
-    `sve` (vector-length-agnostic base compute + int8 SDOT), `svebf16` (BFDOT +
-    BFMMLA), `svei8mm` (SMMLA). The SVE TUs are `NOT APPLE` (Apple Silicon has no
-    non-streaming SVE — that's SME's streaming mode, a separate future backend
-    task) **and `NOT WIN32`** (clang's MSVC C++ ABI can't mangle the SVE sizeless
-    types, so `#include <arm_sve.h>` fails to compile under clang-cl 19 — the NEON
-    feature TUs still build there because NEON types mangle fine; Windows SVE
-    detection is disabled to match, so it never claims SVE2 it can't run). One
-    `sve` binary runs any VL (128-bit Oryon/Vera/Graviton4, 256-bit Graviton3);
-    `svebf16`/`svei8mm` are on base SVE too (present on Neoverse V1 without SVE2),
-    runtime-gated by `HWCAP2_SVEBF16`/`HWCAP2_SVEI8MM`.
+    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs, and the
+    **SVE** family — `sve` (vector-length-agnostic base compute + int8 SDOT),
+    `svebf16` (BFDOT + BFMMLA), `svei8mm` (SMMLA). The SVE TUs are `NOT APPLE`
+    (Apple Silicon has no non-streaming SVE — that's SME's streaming mode, a
+    separate future backend task) **and disabled on Windows** (clang's MSVC C++ ABI
+    can't mangle the SVE sizeless types, so `#include <arm_sve.h>` fails to compile
+    under clang-cl 19 — the NEON feature TUs still build there because NEON types
+    mangle fine; Windows SVE detection is disabled to match, so it never claims
+    SVE2 it can't run). The Windows exclusion is one toggle — the
+    `CLPEAK_CPU_ENABLE_WIN_SVE` option gates the `_clpeak_sve_ok` variable in
+    `CMakeLists.txt`; flip it (and add the Windows-ARM64 SVE runtime probe in
+    `cpu_dispatch.cpp`) once the clang-cl ABI gap closes. One `sve` binary runs any
+    VL (128-bit Oryon/Vera/Graviton4, 256-bit Graviton3); `svebf16`/`svei8mm` are
+    on base SVE too (present on Neoverse V1 without SVE2), runtime-gated by
+    `HWCAP2_SVEBF16`/`HWCAP2_SVEI8MM`.
+  - **Apple Silicon** gets the `apple-m1` `generic` floor
+    (NEON+fp16+dotprod+fp16fml, shown as `NEON` / `NEON FP16` / `NEON DotProd` /
+    `NEON FP16FML`) **plus** an Apple-only `bf16` + `i8mm` TU pair (the
+    `elseif(_clpeak_arm64 AND APPLE)` branch), which the M1 floor lacks. So on M2+
+    the bf16 (`NEON BF16`), BFMMLA, and SMMLA rows populate via the portable path
+    (runtime-gated by `sysctlbyname(FEAT_BF16/I8MM)`, so they stay Unsupported on an
+    M1). fp16/dotprod/fp16fml are **not** re-built as Apple feature TUs — they
+    already come from the floor, and the `-march=armv8.6-a+bf16`/`+i8mm` flags don't
+    enable FullFP16, so the pair doesn't duplicate the floor's fp16 kernel. SVE is
+    still `NOT APPLE` (no non-streaming SVE — a future SME backend).
   - Windows: only **real MSVC** (cl.exe, `CMAKE_CXX_COMPILER_ID == "MSVC"`) is
     restricted. clang-cl reports `MSVC=TRUE` in CMake but is classified as
     clang (`_clpeak_real_msvc=OFF`) and takes the GNU-flag path — every `-m` /
@@ -117,9 +140,6 @@ Two build modes, selected by `CLPEAK_CPU_NATIVE_ARCH` (default OFF):
     NEON floor (no `-march` flags exist, and MSVC defines no `__ARM_FEATURE_*`
     macros, so the advanced-dtype TUs can't be built). CPU name comes from the
     registry (`ProcessorNameString`) since there is no CPUID.
-- **Native (ON)** — a single `native` TU built `-march=native` / `-mcpu=native`,
-  merged unconditionally (trusting build==run host). Fastest for a local build,
-  **not portable**.
 
 Runtime detection lives in `cpu_dispatch.cpp` (`cpuFeatures()`): x86 CPUID +
 XGETBV (checks OS AVX/AVX-512 enablement); ARM `getauxval(AT_HWCAP/2)` on
@@ -132,13 +152,20 @@ fills `info.has*` / `isaName` from this same probe, and the compute tests emit a
 `Unsupported` row when a `kernelMenu()` slot is empty (so the skips reflect the run
 host).
 
-Adding a TU: add a `clpeak_add_isa_tu(<tag> <flags>)` call in `CMakeLists.txt`
-(guarded by `check_cxx_compiler_flag`), a matching `#if CLPEAK_TU_<tag>` merge in
-`kernels()` (best-variant, bandwidth), **and** a `#if CLPEAK_TU_<tag>` push in
-`kernelMenu()` (with the right feature predicate + the canonical ISA label) so the
-new ISA shows up as its own compute test. The kernel bodies are shared —
-`cpu_kernels_impl.h` `#if`-gates them on the compile-feature macros the TU's flags
-define.
+Adding a TU (four edits, one per concern):
+1. **Kernel body** — put it in the matching `kernels/` sub-header (`base_compute.h`
+   for fp32/fp64/int32, `lowp_compute.h` for narrow-scalar/vector dtypes,
+   `matrix_compute.h` for tile/matmul engines, `sve_compute.h` for SVE), `#if`-gated
+   on the compile-feature macro the TU's flags define, plus a `CPU_HAS_<X>` /
+   `CPU_MAT_<X>` define, and a table slot in `cpu_kernels_impl.h`'s `tuTable()`.
+2. **Registry** — add `CLPEAK_TU(<tag>)` to `cpu_tu_registry.h` (this alone gets the
+   accessor forward-declared; the declaration is unconditional so no `#if` needed).
+3. **CMake** — add a `clpeak_add_isa_tu(<tag> <flags>)` call in `CMakeLists.txt`,
+   guarded by `check_cxx_compiler_flag`.
+4. **Dispatch wiring** — a `#if CLPEAK_TU_<tag>` merge in `kernels()` (best-variant,
+   bandwidth) **and** a `#if CLPEAK_TU_<tag>` push in `kernelMenu()` (with the right
+   feature predicate + canonical ISA label) so the new ISA shows up as its own
+   compute test.
 
 ## Gotchas
 
@@ -233,8 +260,8 @@ define.
   fixed-width path bakes in.** (1) *Sizeless types can't be array/struct
   members* — `svfloat32_t acc[NACC]` is a compile error, so the NACC independent
   accumulator chains are declared as individual named registers via the
-  `SVE_REP16`/`SVE_REP24` X-macros in `cpu_kernels_impl.h` (each `X(i)` expands to
-  one `a##i`). (2) *`opsPerIter` is VL-dependent* — it's computed from
+  `SVE_REP16`/`SVE_REP24` X-macros in `kernels/sve_compute.h` (each `X(i)` expands
+  to one `a##i`). (2) *`opsPerIter` is VL-dependent* — it's computed from
   `svcntw()`/`svcntd()`/`svcntb()` at table-build time (in `tuTable()`, only ever
   reached when SVE is the running host's ISA), not a compile-time constant; the VL
   in bytes rides in `CpuKernelTable::sveVLBytes` (propagated by `merge()`) and is
