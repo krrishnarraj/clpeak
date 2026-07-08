@@ -3,9 +3,9 @@
 [![Google Play](https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg)](https://play.google.com/store/apps/details?id=kr.clpeak)
 [![Build](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml)
 
-**clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark that measures the peak achievable performance of GPU compute devices. It exercises tight vector / MAD / MMA loops and vendor-SDK GEMM libraries (cuBLASLt on NVIDIA, MPS on Apple) to expose what the hardware is capable of &mdash; from raw ALU peaks to near-vendor-advertised matrix throughput.
+**clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs and GPUs. It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.
 
-clpeak began as an OpenCL-only tool and is now a multi-backend benchmark &mdash; OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, plus a native CPU backend &mdash; run back-to-back on the same hardware, so cross-stack differences (driver lowering, instruction scheduling, extension exposure) surface alongside the raw peak numbers.
+Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
 
 ## Sample output
 
