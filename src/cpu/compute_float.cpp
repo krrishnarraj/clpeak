@@ -55,4 +55,19 @@ int CpuPeak::runComputeMP(benchmark_config_t &cfg)
   return 0;
 }
 
+int CpuPeak::runComputeFP8DP(benchmark_config_t &cfg)
+{
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // Native fp8 vector dot is ARM-only today (FEAT_FP8DOT4 -- NVIDIA Vera first;
+  // x86 has no fp8 *vector* instruction, only the AMX-FP8 tile path, which is
+  // its own matrix row).  Only emit on an arm64 build, mirroring how the
+  // x86-only bf16-FMA row is handled.
+  emitVariants(*this, {"fp8_dot_product_compute", "FP8 dot-product compute fp8xfp8+fp32", "gflops"},
+               "fp8_dp", kernelMenu().fp8dp, "no fp8 dot instruction (FEAT_FP8DOT4) on this CPU", cfg);
+#else
+  (void)cfg;
+#endif
+  return 0;
+}
+
 #endif // ENABLE_CPU

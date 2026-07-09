@@ -27,6 +27,7 @@
   CLPEAK_TU(avx2)                                                           \
   CLPEAK_TU(avxvnni)      /* 256-bit AVX-VNNI int8 dot */                   \
   CLPEAK_TU(avxvnniint8)  /* 256-bit AVX-VNNI-INT8 signed dot */            \
+  CLPEAK_TU(avxvnniint16) /* 256-bit AVX-VNNI-INT16 int16 dot */            \
   CLPEAK_TU(avx512)                                                         \
   CLPEAK_TU(avx512vnni)                                                     \
   CLPEAK_TU(avx512bf16)                                                     \
@@ -42,9 +43,14 @@
   CLPEAK_TU(dotprod)                                                        \
   CLPEAK_TU(bf16)                                                           \
   CLPEAK_TU(i8mm)                                                           \
+  CLPEAK_TU(fp8dot)       /* NEON fp8 4-way dot (FEAT_FP8DOT4; Vera) */     \
   /* ARM SVE (vector-length-agnostic) */                                    \
   CLPEAK_TU(sve)                                                            \
   CLPEAK_TU(svebf16)                                                        \
-  CLPEAK_TU(svei8mm)
+  CLPEAK_TU(svei8mm)                                                        \
+  CLPEAK_TU(svefp8dot)    /* SVE2 fp8 4-way dot */                          \
+  /* ARM SME (streaming; menu-push only, never merged into kernels()) */    \
+  CLPEAK_TU(sme)          /* FMOPA/BFMOPA/SMOPA + streaming-SVE vectors */  \
+  CLPEAK_TU(smef64)       /* FMOPA fp64 (FEAT_SME_F64F64) */
 
 #endif // CPU_TU_REGISTRY_H

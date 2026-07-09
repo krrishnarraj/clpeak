@@ -121,6 +121,10 @@ static const char *helpStr =
     "\n  --integer-compute-short           | --no-integer-compute-short     [OpenCL]"
 #endif
     "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
+#ifdef ENABLE_CPU
+    "\n  --int16-dot-product-compute       | --no-int16-dot-product-compute [CPU: x86 VNNI]"
+    "\n  --fp8-dot-product-compute         | --no-fp8-dot-product-compute   [CPU: ARM FP8]"
+#endif
 #ifdef ENABLE_CUDA
     "\n  --wmma                            | --no-wmma                      [CUDA]"
     "\n  --cublas                          | --no-cublas                    [CUDA]"
@@ -142,7 +146,7 @@ static const char *helpStr =
     "\n  --onemkl                          | --no-onemkl                    [oneAPI]"
 #endif
 #ifdef ENABLE_CPU
-    "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM]"
+    "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM/SME]"
 #endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
@@ -181,6 +185,10 @@ static const TestFlag testFlags[] = {
   {"integer-compute-short",     Benchmark::ComputeShort},
 #endif
   {"int8-dot-product-compute",  Benchmark::ComputeInt8DP},
+#ifdef ENABLE_CPU
+  {"int16-dot-product-compute", Benchmark::ComputeInt16DP},
+  {"fp8-dot-product-compute",   Benchmark::ComputeFP8DP},
+#endif
 #ifdef ENABLE_CUDA
   {"wmma",                      Benchmark::Wmma},
 #endif

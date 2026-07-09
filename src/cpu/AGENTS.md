@@ -19,13 +19,13 @@ local memory, DRAM ↔ global memory.
 - SIMD abstraction (per-ISA vector wrappers)? → `cpu_simd.h`
 - Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
 - Shared 1T/NT compute runner + per-ISA test emit (`emitVariants`)? → `compute_common.h`
-- FP compute (fp32/fp64/fp16/bf16/mixed)? → `compute_float.cpp`
-- INT compute (int32, int8 dot)? → `compute_int.cpp`
-- CPU matrix engine (AMX / SMMLA / BFMMLA)? → `cpu_matrix.cpp`
+- FP compute (fp32/fp64/fp16/bf16/mixed/fp8 dot)? → `compute_float.cpp`
+- INT compute (int32, int8 dot, int16 dot)? → `compute_int.cpp`
+- CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
 - Memory (pointer-chase) latency? → `latency.cpp`
-- **Kernel bodies** (fp32/fp64/int32/read; fp16/bf16/mp/int8/bf16fma; AMX/NEON
-  matrix; SVE)? → the `kernels/` sub-headers (see below)
+- **Kernel bodies** (fp32/fp64/int32/read; fp16/bf16/mp/int8/int16/fp8/bf16fma;
+  AMX/NEON matrix; SVE; SME)? → the `kernels/` sub-headers (see below)
 - **The list of feature TUs** (single source of truth)? → `cpu_tu_registry.h`
 
 ## Key Files
@@ -39,16 +39,17 @@ local memory, DRAM ↔ global memory.
 | **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants — bandwidth only), and `kernelMenu()` returning `CpuKernelMenu` (per-slot `std::vector<IsaVariant>` = **every** supported ISA variant + its canonical label, baseline-first) for the compute tests |
 | **`cpu_kernels_impl.h`** | Per-TU **aggregator**: `#include`s the `kernels/` sub-headers + emits this TU's `tuTable()` from whatever kernels its build flags enabled. Included once per feature TU |
 | **`kernels/base_compute.h`** | fp32 / fp64 / int32 FMA-chains + the streaming XOR read. Present in every TU (goes through `cpu_simd.h`) |
-| **`kernels/lowp_compute.h`** | Low/mixed-precision compute: fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, AVX10.2 bf16 vector FMA. `#if`-gated per feature; whole file excluded under `CLPEAK_CORE_ONLY` |
+| **`kernels/lowp_compute.h`** | Low/mixed-precision compute: fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, int16 dot (x86 VPDPWSSD/WSUD), NEON fp8 dot (FEAT_FP8DOT4), AVX10.2 bf16 vector FMA. `#if`-gated per feature; whole file excluded under `CLPEAK_CORE_ONLY` |
 | **`kernels/matrix_compute.h`** | CPU matrix engines: x86 AMX (int8/bf16/fp16/tf32/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA. `CLPEAK_CORE_ONLY`-excluded |
-| **`kernels/sve_compute.h`** | ARM SVE (vector-length-agnostic) compute + SVE bf16/i8mm matrix. Gated on `__ARM_FEATURE_SVE`, `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sve.h>` |
+| **`kernels/sve_compute.h`** | ARM SVE (vector-length-agnostic) compute + SVE bf16/i8mm matrix + SVE2 fp8 dot. Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME` (an SME TU must never pick up non-streaming SVE — Apple has none), `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sve.h>` |
+| **`kernels/sme_compute.h`** | ARM SME (streaming matrix engine; Apple M4+, Oryon Gen 3): ZA outer products (fp32/fp64/bf16/fp16-widening/int8 — FMOPA/BFMOPA/SMOPA, 4 tiles like AMX; fp64 uses all 8 za.d tiles) + streaming-SVE fp32/fp64 vector chains. Gated on `__ARM_FEATURE_SME`, `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sme.h>` |
 | **`cpu_tu_registry.h`** | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of every feature-TU tag. Drives the unconditional `clpeak_table_<tag>()` forward declarations in `cpu_dispatch.cpp` |
-| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `sve`, `svebf16`, `svei8mm`) with that ISA's flags |
+| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avxvnniint16`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `fp8dot`, `sve`, `svebf16`, `svei8mm`, `svefp8dot`, `sme`, `smef64`) with that ISA's flags |
 | **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`); TU accessor decls (from `cpu_tu_registry.h`); `kernels()` assembly (merges supported TUs, widest variant per kernel — bandwidth only); and `kernelMenu()` which collects **every** supported variant per kernel with its canonical ISA label (explicit per-slot pushes — encodes the "collapse identical SSE float" rule by pushing only int32 from the `sse42` TU, and labels base vs feature kernels per-slot) |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics; `emitVariants()` — runs **every** ISA variant from a `kernelMenu()` slot as its own test (ISA appended to the display name, `isaSlug()` into the tag for unique result keys), or one untagged `Unsupported` test if none |
-| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). Kernel bodies live in the `kernels/` sub-headers |
-| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP` (via `emitVariants` + `kernelMenu()`) |
-| `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_int8 / mat_fp, ...)` (AMX / SMMLA / BFMMLA); `Benchmark::Amx`, run in both fp and int phases |
+| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). The fp8-dot row is arm64-only (`Benchmark::ComputeFP8DP`). Kernel bodies live in the `kernels/` sub-headers |
+| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP`/`runComputeInt16DP` (via `emitVariants` + `kernelMenu()`; the int16-dot row is x86-only, `Benchmark::ComputeInt16DP`) |
+| `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_* ...)` (AMX / SMMLA / BFMMLA / SME); `Benchmark::Amx`, run in both fp and int phases. fp16 row on x86+arm64 (AMX-FP16 / SME); tf32/fp8 rows x86-only (AMX); fp32/fp64 rows arm64-only (SME) |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns) |
 
@@ -85,7 +86,11 @@ the safe baseline, so the binary never SIGILLs on an older CPU.
   - x86 TUs: `generic` (SSE2, ungated floor), `sse42`, `avx2`, `avxvnni`
     (256-bit VEX AVX-VNNI int8 dot — the client-x86 int8 path for Alder Lake→
     Arrow Lake, Sierra Forest, Zen 5, none of which have AVX-512), `avxvnniint8`
-    (256-bit signed×signed int8 dot; Zen 6, Lunar/Arrow Lake), `avx512`
+    (256-bit signed×signed int8 dot; Zen 6, Lunar/Arrow Lake), `avxvnniint16`
+    (256-bit mixed-sign int16 dot VPDPWSUD; Diamond Rapids, Nova Lake — the
+    classic signed VPDPWSSD int16 dot rides in the `avxvnni`/`avx512vnni` TUs,
+    having shipped with VNNI all along, so the int16 test gets up to three ISA
+    rows), `avx512`
     (F/BW/VL/DQ), then the fragmented sub-features as their own TUs —
     `avx512vnni`, `avx512bf16`, `avx512fp16`, `avx10bf16` (AVX10.2-512 native
     full-rate bf16 vector FMA — a *different* peak from the bf16 dot: real bf16
@@ -101,11 +106,14 @@ the safe baseline, so the binary never SIGILLs on an older CPU.
     and the bf16 FMA via a `bf16fma` slot in the BF16 phase.
   - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
     floor never bakes in M4-only features), plus Linux/Android `fp16`,
-    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs, and the
+    `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs, a `fp8dot` TU (NEON fp8 4-way
+    dot FDOT, FEAT_FP8DOT4 — first shipped by NVIDIA Vera; also built on Apple,
+    runtime-gated for future cores), and the
     **SVE** family — `sve` (vector-length-agnostic base compute + int8 SDOT),
-    `svebf16` (BFDOT + BFMMLA), `svei8mm` (SMMLA). The SVE TUs are `NOT APPLE`
-    (Apple Silicon has no non-streaming SVE — that's SME's streaming mode, a
-    separate future backend task) **and disabled on Windows** (clang's MSVC C++ ABI
+    `svebf16` (BFDOT + BFMMLA), `svei8mm` (SMMLA), `svefp8dot` (SVE2 FDOT).
+    The SVE TUs are `NOT APPLE`
+    (Apple Silicon has no non-streaming SVE — that's SME's streaming mode, see
+    the SME TUs below) **and disabled on Windows** (clang's MSVC C++ ABI
     can't mangle the SVE sizeless types, so `#include <arm_sve.h>` fails to compile
     under clang-cl 19 — the NEON feature TUs still build there because NEON types
     mangle fine; Windows SVE detection is disabled to match, so it never claims
@@ -116,6 +124,20 @@ the safe baseline, so the binary never SIGILLs on an older CPU.
     VL (128-bit Oryon/Vera/Graviton4, 256-bit Graviton3); `svebf16`/`svei8mm` are
     on base SVE too (present on Neoverse V1 without SVE2), runtime-gated by
     `HWCAP2_SVEBF16`/`HWCAP2_SVEI8MM`.
+  - **ARM SME TUs** (`sme`, `smef64`): built on Apple **and** Linux/Android
+    (Apple M4+; Snapdragon X2 Elite / 8 Elite Gen 5 clusters), disabled on
+    Windows behind the same `_clpeak_sve_ok` toggle (same sizeless-type ABI
+    gap, plus unproven Windows ZA-state support). Compiled with
+    `-march=armv8.6-a+sme[-f64f64]`, which deliberately does NOT imply `+sve`,
+    and gated by a `check_cxx_source_compiles` probe (the flag alone doesn't
+    prove `<arm_sme.h>` + the `__arm_locally_streaming`/`__arm_new("za")`
+    keyword attributes work — clang ≥ ~18). The `sme` TU provides the ZA
+    outer-product kernels (menu slots `mat_fp32`, and SME variants of
+    `mat_fp`/`mat_fp16`/`mat_int8`) plus streaming-SVE fp32/fp64 vector chains
+    (pushed into the base fp32/fp64 menus as an "SSVE" row); `smef64` provides
+    the fp64 outer product (`mat_fp64`, FEAT_SME_F64F64 — runtime-gated;
+    Apple M4+ has it). **The SME TUs are never merged into `kernels()`** —
+    menu-push only — so nothing from them is reachable via a non-SME gate.
   - **Apple Silicon** gets the `apple-m1` `generic` floor
     (NEON+fp16+dotprod+fp16fml, shown as `NEON` / `NEON FP16` / `NEON DotProd` /
     `NEON FP16FML`) **plus** an Apple-only `bf16` + `i8mm` TU pair (the
@@ -125,7 +147,9 @@ the safe baseline, so the binary never SIGILLs on an older CPU.
     M1). fp16/dotprod/fp16fml are **not** re-built as Apple feature TUs — they
     already come from the floor, and the `-march=armv8.6-a+bf16`/`+i8mm` flags don't
     enable FullFP16, so the pair doesn't duplicate the floor's fp16 kernel. SVE is
-    still `NOT APPLE` (no non-streaming SVE — a future SME backend).
+    still `NOT APPLE` (no non-streaming SVE); the scalable-vector story on Apple
+    is the SME TU pair above (M4+ via streaming mode, runtime-gated by
+    `sysctlbyname(FEAT_SME/SME2/SME_F64F64)` — M1–M3 show Unsupported rows).
   - Windows: only **real MSVC** (cl.exe, `CMAKE_CXX_COMPILER_ID == "MSVC"`) is
     restricted. clang-cl reports `MSVC=TRUE` in CMake but is classified as
     clang (`_clpeak_real_msvc=OFF`) and takes the GNU-flag path — every `-m` /
@@ -276,6 +300,46 @@ Adding a TU (four edits, one per concern):
   back-to-back `fmad`/`sdot`/`bfdot`/`bfmmla`/`smmla` on `z` registers with no
   loads/stores. Not yet run on SVE hardware — validate on Graviton3/4, Grace, or a
   GitHub arm64 runner (Cobalt/Neoverse N2 has SVE2).
+- **SME kernels are streaming functions with ZA state — five specifics.**
+  (1) Each kernel is `__arm_locally_streaming` (+ `__arm_new("za")` when it
+  touches ZA): streaming mode is entered/exited per call, so the fn-ptr
+  dispatch and thread pool need no changes. (2) The FMOPA/SMOPA intrinsics are
+  opaque ZA-state updates (like AMX tiles) — no scalar-evolution collapse —
+  and inputs are zero on purpose (data-independent throughput, no overflow).
+  All 4 za32 tiles (8 za64 tiles for fp64) are issued and read back so none is
+  dead. (3) `opsPerIter` comes from `svcntsw()`/`svcntsd()`/`svcntsb()` — the
+  *streaming* VL forms, callable from non-streaming code — in `tuTable()`,
+  reached only under the runtime `f.sme` gate; the SVL is reported as
+  `+ SME2 (SVL=512b)` in the device header. (4) **The SME unit is shared per
+  cluster** on every current implementation (Apple: 1/cluster; X2 Elite: 3;
+  8 Elite Gen 5: 2), so MT ≈ #clusters × unit peak, NOT #cores × ST — that's
+  hardware behaviour, not a bug. (5) AppleClang 21 enables the `+sme-f64f64`
+  *feature* without defining the ACLE `__ARM_FEATURE_SME_F64F64` macro, so the
+  fp64 kernel is gated on the macro OR the CMake-passed `CLPEAK_SME_F64F64`
+  define (the `clpeak_check_sme_f64` probe proves the intrinsic compiles).
+  Codegen-verified (back-to-back `fmopa za0-3.s`/`bfmopa`/`smopa`/`fmopa za.d`,
+  streaming `fmad z` chains, `smstart`/`zero {za}` in the prologue); **not yet
+  run on SME silicon** — validate on an M4/M5 Mac and a Snapdragon X2 device,
+  and expect community M4 baselines (~2 TFLOPS-class fp32 FMOPA per unit,
+  ~2× bf16/fp16, ~4× int8).
+- **The int16 dot chains must be NONLINEAR — clang models VPDPWSSD.** Unlike
+  the int8 VPDPBUSD (opaque), instcombine knows the int16 dot's semantics:
+  with constant operands `acc += dot(a,b)` is linear in the trip count, and
+  the 4-unrolled 512-bit chain was strength-reduced to 1 VPDPWSSD + 3 VPADDD
+  (observed; same collapse class as the FMLAL `mp` chain). Fix: feed the
+  accumulator back as the multiplicand — `acc = dp(acc, acc, b)` — with a
+  volatile-seeded initial value (int wraparound is well-defined for the
+  intrinsic, keeps values bounded, throughput data-independent). Verified:
+  16×4 back-to-back `vpdpwssd` / 12×4 `vpdpwsud` after the fix.
+- **The ARM fp8 dot needs FPMR set once, not per instruction.** The `_fpm`
+  intrinsics take an `fpm_t` operand that programs the FPMR format register;
+  the compiler hoists the `msr FPMR` out of the hot loop (verified — exactly
+  one `msr FPMR, xzr` before back-to-back `fdot`). The chain is linear
+  (`acc += dot(const,const)`) but FDOT is currently an opaque target intrinsic
+  so it doesn't collapse — **re-verify with objdump on new clang majors**, and
+  if it ever collapses apply the int16 accumulator-feedback fix (fp8 has FCVT
+  narrowing under FEAT_FP8 for the feedback). Not yet run on FP8 silicon
+  (needs NVIDIA Vera / Olympus).
 - **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
   CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
   `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from

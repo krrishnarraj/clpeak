@@ -58,6 +58,9 @@ struct cpu_device_info_t {
   bool hasSVE    = false;           // ARM SVE (vector-length-agnostic)
   bool hasSVE2   = false;           // ARM SVE2
   int  sveVLBytes = 0;              // active SVE vector length in bytes (0 if no SVE)
+  bool hasSME    = false;           // ARM SME (streaming matrix engine; Apple M4+, Oryon Gen 3)
+  bool hasSME2   = false;           // ARM SME2
+  int  smeSVLBytes = 0;             // active SME streaming vector length in bytes (0 if no SME)
 };
 
 // Populate `info` from the host (cpu_device.cpp).
@@ -120,8 +123,10 @@ public:
   int runComputeHP(benchmark_config_t &cfg);
   int runComputeBF16(benchmark_config_t &cfg);
   int runComputeMP(benchmark_config_t &cfg);
+  int runComputeFP8DP(benchmark_config_t &cfg);
   int runComputeInt32(benchmark_config_t &cfg);
   int runComputeInt8DP(benchmark_config_t &cfg);
+  int runComputeInt16DP(benchmark_config_t &cfg);
   int runCpuMatrix(benchmark_config_t &cfg, Category category);
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);

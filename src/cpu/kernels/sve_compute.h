@@ -17,12 +17,15 @@
 //
 // The whole set is #if-gated on __ARM_FEATURE_SVE and excluded under
 // CLPEAK_CORE_ONLY, so this header only contributes kernels in an SVE TU.
+// Also excluded when the TU has SME (__ARM_FEATURE_SME): these are
+// NON-streaming SVE kernels, and an SME TU must never pick them up -- on Apple
+// Silicon (SME without any non-streaming SVE) they would SIGILL if selected.
 // ===========================================================================
 
 #include "cpu_kernels.h"
 #include "cpu_simd.h"
 
-#if defined(__ARM_FEATURE_SVE) && !defined(CLPEAK_CORE_ONLY)
+#if defined(__ARM_FEATURE_SVE) && !defined(__ARM_FEATURE_SME) && !defined(CLPEAK_CORE_ONLY)
 #include <arm_sve.h>
 
 namespace clpeak_cpu {
@@ -206,6 +209,36 @@ static double runSveMatInt8Chain(uint64_t outer)
   return (double)svaddv_s32(pg, s);
 }
 #endif // __ARM_FEATURE_SVE_MATMUL_INT8
+
+// SVE2 FP8: 4-way fp8 dot -> fp32 lanes (FEAT_FP8DOT4 SVE form; NVIDIA Vera).
+// Same FPMR/fpm_t setup as the NEON fp8 kernel in lowp_compute.h; the msr is
+// hoisted out of the loop (verified via objdump).
+#if defined(__ARM_FEATURE_FP8DOT4) && defined(__ARM_FEATURE_SVE2)
+#define CPU_HAS_SVE_FP8DP_KERNEL 1
+static double runSveFp8DpChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  const fpm_t fpm = __arm_fpm_init();
+  const svmfloat8_t a = svreinterpret_mf8_u8(svdup_u8(0x38));  // 0.5 in e4m3
+  const svmfloat8_t b = a;
+#define DECL(i) svfloat32_t acc##i = svdup_f32(0.0f);
+  SVE_REP16(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) acc##i = svdot_f32_mf8_fpm(acc##i, a, b, fpm);
+      SVE_REP16(STEP)
+#undef STEP
+    }
+  svfloat32_t s = svdup_f32(0.0f);
+#define RED(i) s = svadd_f32_x(pg, s, acc##i);
+  SVE_REP16(RED)
+#undef RED
+  return (double)svaddv_f32(pg, s);
+}
+#endif // __ARM_FEATURE_FP8DOT4 && __ARM_FEATURE_SVE2
 
 } // anonymous namespace
 } // namespace clpeak_cpu

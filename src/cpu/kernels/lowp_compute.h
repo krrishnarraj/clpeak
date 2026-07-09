@@ -253,6 +253,126 @@ static double runInt8DpChain(uint64_t outer)
 }
 #endif
 
+// ---- INT16 dot product (x86) ------------------------------------------------
+// VPDPWSSD (2-way signed int16 dot -> int32) has shipped with VNNI since
+// Cascade Lake / Alder Lake; AVX-VNNI-INT16 (Diamond Rapids, Nova Lake) adds
+// the mixed-sign forms (VPDPWSUD etc.) as a separate CPUID feature.
+//
+// Unlike the int8 VPDPBUSD (opaque to the optimizer), clang MODELS the int16
+// dot's semantics: with constant operands `acc += dot(a,b)` is linear in the
+// iteration count and instcombine strength-reduced 4 unrolled 512-bit VPDPWSSD
+// into 1 VPDPWSSD + 3 VPADDD (observed) -- the same collapse class as the ARM
+// FMLAL `mp` chain.  Same fix: make the recurrence NONLINEAR by feeding the
+// accumulator back as the multiplicand, `acc = dp(acc, acc, b)` (no closed
+// form; int wraparound keeps it bounded and is well-defined for intrinsics),
+// with a volatile-seeded initial acc so it can't constant-propagate.
+#if defined(__AVX512VNNI__)
+#define CPU_HAS_INT16DP_KERNEL 1
+static constexpr int I16_NACC = 16, I16_OPS_PER_INSTR = 64;
+static double runInt16DpChain(uint64_t outer)
+{
+  __m512i acc[I16_NACC];
+  volatile int vseed = 3;
+  const int seed = vseed;
+  const __m512i b = _mm512_set1_epi16(5);
+  for (int j = 0; j < I16_NACC; j++) acc[j] = _mm512_set1_epi32(seed + j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < I16_NACC; j++) acc[j] = _mm512_dpwssd_epi32(acc[j], acc[j], b);
+    }
+  __m512i s = acc[0];
+  for (int j = 1; j < I16_NACC; j++) s = _mm512_add_epi32(s, acc[j]);
+  return (double)_mm512_reduce_add_epi32(s);
+}
+#elif defined(__AVXVNNI__)
+#define CPU_HAS_INT16DP_KERNEL 1
+static constexpr int I16_NACC = 12, I16_OPS_PER_INSTR = 32;
+static double runInt16DpChain(uint64_t outer)
+{
+  __m256i acc[I16_NACC];
+  volatile int vseed = 3;
+  const int seed = vseed;
+  const __m256i b = _mm256_set1_epi16(5);
+  for (int j = 0; j < I16_NACC; j++) acc[j] = _mm256_set1_epi32(seed + j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < I16_NACC; j++) acc[j] = _mm256_dpwssd_avx_epi32(acc[j], acc[j], b);
+    }
+  __m256i sAll = acc[0];
+  for (int j = 1; j < I16_NACC; j++) sAll = _mm256_add_epi32(sAll, acc[j]);
+  __m128i lo = _mm256_castsi256_si128(sAll);
+  __m128i hi = _mm256_extracti128_si256(sAll, 1);
+  lo = _mm_add_epi32(lo, hi);
+  lo = _mm_hadd_epi32(lo, lo);
+  lo = _mm_hadd_epi32(lo, lo);
+  return (double)_mm_cvtsi128_si32(lo);
+}
+#elif defined(__AVXVNNIINT16__)
+// The AVX-VNNI-INT16 TU: mixed-sign VPDPWSUD (its distinct contribution --
+// the ssd form already rides in the VNNI TUs above).  Same rate, own ISA row.
+#define CPU_HAS_INT16DP_KERNEL 1
+static constexpr int I16_NACC = 12, I16_OPS_PER_INSTR = 32;
+static double runInt16DpChain(uint64_t outer)
+{
+  __m256i acc[I16_NACC];
+  volatile int vseed = 3;
+  const int seed = vseed;
+  const __m256i b = _mm256_set1_epi16(5);
+  for (int j = 0; j < I16_NACC; j++) acc[j] = _mm256_set1_epi32(seed + j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < I16_NACC; j++) acc[j] = _mm256_dpwsud_epi32(acc[j], acc[j], b);
+    }
+  __m256i sAll = acc[0];
+  for (int j = 1; j < I16_NACC; j++) sAll = _mm256_add_epi32(sAll, acc[j]);
+  __m128i lo = _mm256_castsi256_si128(sAll);
+  __m128i hi = _mm256_extracti128_si256(sAll, 1);
+  lo = _mm_add_epi32(lo, hi);
+  lo = _mm_hadd_epi32(lo, lo);
+  lo = _mm_hadd_epi32(lo, lo);
+  return (double)_mm_cvtsi128_si32(lo);
+}
+#endif
+
+// ---- FP8 dot product (ARM FEAT_FP8DOT4) --------------------------------------
+// Native fp8 4-way dot -> fp32 (FDOT), first shipped by NVIDIA Vera.  The fpm_t
+// operand programs the FPMR format register; the compiler hoists the msr out of
+// the loop (verified), so the hot loop is back-to-back fdot.  Inputs are a
+// nonzero constant (0x38 = 0.5 in e4m3); throughput is format-independent, and
+// like the int8/bf16 dot chains the intrinsic is opaque enough that the
+// accumulate loop isn't scalar-evolved -- re-verify with objdump on new clangs.
+#if defined(__ARM_FEATURE_FP8DOT4)
+#define CPU_HAS_FP8DP_KERNEL 1
+static constexpr int FP8_NACC = 16, FP8_OPS_PER_INSTR = 32;  // 4 lanes x (4 mul + 4 add)
+static double runFp8DpChain(uint64_t outer)
+{
+  const fpm_t fpm = __arm_fpm_init();
+  const mfloat8x16_t a = vreinterpretq_mf8_u8(vdupq_n_u8(0x38));
+  const mfloat8x16_t b = a;
+  float32x4_t acc[FP8_NACC];
+  for (int j = 0; j < FP8_NACC; j++) acc[j] = vdupq_n_f32(0.0f);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < FP8_NACC; j++) acc[j] = vdotq_f32_mf8_fpm(acc[j], a, b, fpm);
+    }
+  float32x4_t s = acc[0];
+  for (int j = 1; j < FP8_NACC; j++) s = vaddq_f32(s, acc[j]);
+  return (double)vaddvq_f32(s);
+}
+#endif
+
 // ---- AVX10.2 native bf16 vector FMA (full-rate, not a dot) ------------------
 // Distinct from the AVX512-BF16 dot path: VFMADD*PBF16 does a real bf16 multiply-
 // add at full 512-bit vector rate (32 lanes).  Same affine chain as fp16; b must

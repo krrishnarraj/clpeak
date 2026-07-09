@@ -196,11 +196,19 @@ static void detectIsa(cpu_device_info_t &info)
   info.hasSVE     = f.sve;
   info.hasSVE2    = f.sve2;
   info.sveVLBytes = clpeak_cpu::sveVLBytes();
+  info.hasSME     = f.sme;
+  info.hasSME2    = f.sme2;
+  info.smeSVLBytes = clpeak_cpu::smeSVLBytes();
   info.isaName    = clpeak_cpu::isaName();
   // Report the active SVE vector length alongside the ISA name, e.g.
   // "SVE2 (VL=256b)" -- it's the defining knob for SVE peak throughput.
   if (info.sveVLBytes > 0)
     info.isaName += " (VL=" + std::to_string(info.sveVLBytes * 8) + "b)";
+  // SME rides alongside the vector ISA (it's a separate streaming engine, not
+  // the "widest" vector ISA), with its streaming VL: "NEON + SME2 (SVL=512b)".
+  if (info.smeSVLBytes > 0)
+    info.isaName += std::string(" + ") + (info.hasSME2 ? "SME2" : "SME") +
+                    " (SVL=" + std::to_string(info.smeSVLBytes * 8) + "b)";
 }
 
 // ---------------------------------------------------------------------------

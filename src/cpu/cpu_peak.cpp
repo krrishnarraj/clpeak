@@ -150,12 +150,14 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeDP))   runComputeDP(cfg);
   if (isAllowed(Benchmark::ComputeMP))   runComputeMP(cfg);
   if (isAllowed(Benchmark::ComputeBF16)) runComputeBF16(cfg);
+  if (isAllowed(Benchmark::ComputeFP8DP)) runComputeFP8DP(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::FpCompute))
     runCpuMatrix(cfg, Category::FpCompute);
 
   // ---- INT compute ----
-  if (isAllowed(Benchmark::ComputeInt))    runComputeInt32(cfg);
-  if (isAllowed(Benchmark::ComputeInt8DP)) runComputeInt8DP(cfg);
+  if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
+  if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
+  if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::IntCompute))
     runCpuMatrix(cfg, Category::IntCompute);
 

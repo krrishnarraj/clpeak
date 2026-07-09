@@ -8,9 +8,11 @@
 // this TU's CpuKernelTable from whatever kernels its build flags enabled.
 //
 //   kernels/base_compute.h    fp32 / fp64 / int32 chains + streaming read (all TUs)
-//   kernels/lowp_compute.h    fp16 / bf16-dot / mixed-precision / int8-dot / bf16-FMA
+//   kernels/lowp_compute.h    fp16 / bf16-dot / mixed-precision / int8-dot / int16-dot
+//                             / fp8-dot (NEON) / bf16-FMA
 //   kernels/matrix_compute.h  AMX (int8/bf16/fp16/tf32/fp8) + NEON SMMLA/BFMMLA
-//   kernels/sve_compute.h     ARM SVE compute + SVE bf16/i8mm matrix
+//   kernels/sve_compute.h     ARM SVE compute + SVE bf16/i8mm matrix + SVE fp8 dot
+//   kernels/sme_compute.h     ARM SME ZA outer products + streaming-SVE vectors
 //
 // cpu_simd.h selects the base SIMD path from the TU's flags, and each advanced
 // kernel is #if-gated on the compile-feature macros those flags define, so a
@@ -28,6 +30,7 @@
 #include "kernels/lowp_compute.h"
 #include "kernels/matrix_compute.h"
 #include "kernels/sve_compute.h"
+#include "kernels/sme_compute.h"
 
 #ifndef CLPEAK_ISA_NAME_STR
 #define CLPEAK_ISA_NAME_STR "scalar"
@@ -58,6 +61,12 @@ static const CpuKernelTable *tuTable()
 #endif
 #ifdef CPU_HAS_INT8DP_KERNEL
     t.int8dp = {runInt8DpChain, (double)INNER * I8_NACC * I8_OPS_PER_INSTR};
+#endif
+#ifdef CPU_HAS_INT16DP_KERNEL
+    t.int16dp = {runInt16DpChain, (double)INNER * I16_NACC * I16_OPS_PER_INSTR};
+#endif
+#ifdef CPU_HAS_FP8DP_KERNEL
+    t.fp8dp = {runFp8DpChain, (double)INNER * FP8_NACC * FP8_OPS_PER_INSTR};
 #endif
 #ifdef CPU_MAT_INT8_KERNEL
     t.mat_int8 = {runMatInt8Chain, (double)INNER * MAT_I8_OPS_PER_K};
@@ -98,6 +107,32 @@ static const CpuKernelTable *tuTable()
 #endif
 #ifdef CPU_HAS_SVE_I8MM_KERNEL
       t.mat_int8 = {runSveMatInt8Chain, (double)INNER * SVE_NACC_DOT * bcnt * 4.0};
+#endif
+#ifdef CPU_HAS_SVE_FP8DP_KERNEL
+      t.fp8dp = {runSveFp8DpChain, (double)INNER * SVE_NACC_DOT * w * 8.0};
+#endif
+    }
+#endif
+    // SME (streaming-VL-agnostic; ops derived from the runtime *streaming* VL
+    // via the svcnts* forms, which are readable from this non-streaming code).
+    // Only ever reached when the running host has SME -- the dispatcher calls
+    // this TU's accessor under an f.sme guard.  Per instruction: an outer
+    // product updates a (SVL/esize)^2 ZA tile; widening forms do a 2-way
+    // (bf16/fp16) or 4-way (int8) dot per element.  x4 (or x8 for fp64) chained
+    // accumulator tiles per k-step, mirroring the AMX 4-tile pattern.
+#ifdef CPU_HAS_SME_KERNELS
+    {
+      const double w = (double)svcntsw();   // 32-bit lanes at the streaming VL
+      const double d = (double)svcntsd();   // 64-bit lanes
+      t.smeSVLBytes = (int)svcntsb();
+      t.mat_fp32  = {runSmeMatFp32Chain, (double)INNER * 4.0 * w * w * 2.0};
+      t.mat_fp    = {runSmeMatBf16Chain, (double)INNER * 4.0 * w * w * 4.0};
+      t.mat_fp16  = {runSmeMatFp16Chain, (double)INNER * 4.0 * w * w * 4.0};
+      t.mat_int8  = {runSmeMatInt8Chain, (double)INNER * 4.0 * w * w * 8.0};
+      t.ssve_fp32 = {runSsveFp32Chain,   (double)INNER * SME_NACC_FP * w * 2.0};
+      t.ssve_fp64 = {runSsveFp64Chain,   (double)INNER * SME_NACC_FP * d * 2.0};
+#ifdef CPU_MAT_F64_KERNEL
+      t.mat_fp64  = {runSmeMatFp64Chain, (double)INNER * 8.0 * d * d * 2.0};
 #endif
     }
 #endif

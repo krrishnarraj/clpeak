@@ -27,7 +27,9 @@ enum class Benchmark : unsigned int {
     ComputeChar,
     ComputeShort,
     ComputeInt8DP,
+    ComputeInt16DP,     // int16 dot product (x86 VPDPWSSD / AVX-VNNI-INT16)
     ComputeBF16,
+    ComputeFP8DP,       // fp8 dot product (ARM FEAT_FP8DOT4)
     CoopMatrix,
     Wmma,
     SimdgroupMatrix,
@@ -74,6 +76,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeDP:
     case Benchmark::ComputeMP:
     case Benchmark::ComputeBF16:
+    case Benchmark::ComputeFP8DP:
     case Benchmark::Wmma:
     case Benchmark::CoopMatrix:
     case Benchmark::SimdgroupMatrix:
@@ -92,6 +95,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
+    case Benchmark::ComputeInt16DP:
         return Category::IntCompute;
 
     case Benchmark::KernelLatency:
