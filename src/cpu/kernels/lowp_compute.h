@@ -27,19 +27,24 @@ namespace {
 // ---- FP16 native FMA -------------------------------------------------------
 #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_FP16_KERNEL 1
+// Self-quadratic acc = acc + acc*acc, same shape (and rationale) as the NEON
+// fp32/fp64 chains in base_compute.h: FMLA is destructive on the addend, so
+// the affine acc*b+c form costs a MOV per FMLA on cores without move
+// elimination (Neoverse/Oryon).  From acc0 in (-1,0) the value decays toward 0
+// and freezes near ~-5e-4 in fp16 (once acc^2 < ulp/2) -- always normal.
 static constexpr int FP16_LANES = 8, FP16_NACC = 16;
 static double runFp16Chain(uint64_t outer)
 {
   float16x8_t acc[FP16_NACC];
-  const float16x8_t b = vdupq_n_f16((float16_t)0.9995f);
-  const float16x8_t c = vdupq_n_f16((float16_t)0.001f);
-  for (int j = 0; j < FP16_NACC; j++) acc[j] = vdupq_n_f16((float16_t)(0.1f * (j + 1)));
+  volatile float vseed = -0.5f;
+  const float seed = vseed;
+  for (int j = 0; j < FP16_NACC; j++) acc[j] = vdupq_n_f16((float16_t)(seed + 0.01f * j));
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
       CPU_UNROLL_FULL
-      for (int j = 0; j < FP16_NACC; j++) acc[j] = vfmaq_f16(c, acc[j], b);
+      for (int j = 0; j < FP16_NACC; j++) acc[j] = vfmaq_f16(acc[j], acc[j], acc[j]);
     }
   float16x8_t s = acc[0];
   for (int j = 1; j < FP16_NACC; j++) s = vaddq_f16(s, acc[j]);

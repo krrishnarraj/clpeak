@@ -21,6 +21,60 @@ namespace {
 using namespace cpu_simd;
 
 // ---- FP32 / FP64 FMA-chains -----------------------------------------------
+#if defined(__aarch64__) || defined(_M_ARM64)
+// NEON-specific chain shape.  AArch64 NEON has no FMAD-form instruction:
+// FMLA is destructive on the ADDEND (Vd = Vd + Vn*Vm), so the generic affine
+// chain acc = acc*b + c makes the compiler re-materialise the loop-invariant
+// addend c with one MOV per FMLA.  Apple cores hide that (zero-cycle move
+// elimination in rename) but Neoverse/Oryon don't: NEON fp32 measured ~2.4x
+// below the SVE rows on Neoverse N2 (mov + fmla = 2 vector slots per FMA).
+//
+// Fix: a SELF-QUADRATIC recurrence, acc = acc + acc*acc, which maps to a
+// single `fmla v,v,v` -- the destructive operand IS the accumulator, so the
+// hot loop is pure back-to-back FMLA with no coefficient registers at all.
+// It is genuinely nonlinear, so neither -ffast-math factoring (x + x*C ->
+// x*(C+1)) nor scalar evolution has a closed form to collapse it with (the
+// same argument as the FMLAL `mp` chain fix).  Dynamics: from acc0 in (-1,0)
+// it decays HARMONICALLY (acc_n ~ -1/n) toward 0 and freezes once acc^2 drops
+// below half an ulp of acc (~-1e-10 for fp32) -- values stay normal for the
+// whole run: no denormal, inf, or NaN phase.  The volatile seed keeps the
+// start value opaque so the recurrence can't be constant-evaluated.
+static double runFp32Chain(uint64_t outer)
+{
+  float32x4_t acc[F32_NACC];
+  volatile float vseed = -0.5f;
+  const float seed = vseed;
+  for (int j = 0; j < F32_NACC; j++) acc[j] = vdupq_n_f32(seed + 0.01f * (float)j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < F32_NACC; j++) acc[j] = vfmaq_f32(acc[j], acc[j], acc[j]);
+    }
+  float32x4_t s = acc[0];
+  for (int j = 1; j < F32_NACC; j++) s = vaddq_f32(s, acc[j]);
+  return (double)vaddvq_f32(s);
+}
+
+static double runFp64Chain(uint64_t outer)
+{
+  float64x2_t acc[F64_NACC];
+  volatile double vseed = -0.5;
+  const double seed = vseed;
+  for (int j = 0; j < F64_NACC; j++) acc[j] = vdupq_n_f64(seed + 0.01 * (double)j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < F64_NACC; j++) acc[j] = vfmaq_f64(acc[j], acc[j], acc[j]);
+    }
+  float64x2_t s = acc[0];
+  for (int j = 1; j < F64_NACC; j++) s = vaddq_f64(s, acc[j]);
+  return (double)vaddvq_f64(s);
+}
+#else // !aarch64: generic affine chains through the cpu_simd.h abstraction
 static double runFp32Chain(uint64_t outer)
 {
   f32v acc[F32_NACC];
@@ -67,6 +121,7 @@ static double runFp64Chain(uint64_t outer)
   for (int j = 1; j < F64_NACC; j++) s = f64_add(s, acc[j]);
   return (double)f64_hsum(s);
 }
+#endif // aarch64 NEON vs generic
 
 // ---- INT32 multiply-accumulate chain --------------------------------------
 static double runInt32Chain(uint64_t outer)

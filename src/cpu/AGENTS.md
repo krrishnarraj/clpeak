@@ -197,7 +197,8 @@ Adding a TU (four edits, one per concern):
   -ffast-math` deletes the work and reports a fabricated peak. The FMA chains
   use `acc = acc*b + c` with `b<1` (converges to a finite fixed point, no
   inf/denormal) and a *runtime* trip count.
-- **fp32/fp64 affine coefficients (`b`,`c`) must be `volatile`-seeded.** On
+- **fp32/fp64 affine coefficients (`b`,`c`) must be `volatile`-seeded** (the
+  generic non-NEON chains). On
   non-FMA targets (the SSE2 `generic` TU, scalar fallback) `f32_fma`/`f64_fma`
   are a *transparent* `mul`+`add`, not an opaque hardware FMA. With `b`,`c` as
   compile-time constants, `-ffast-math` closes the `CPU_UNROLL_K`-unrolled chain
@@ -206,9 +207,27 @@ Adding a TU (four edits, one per concern):
   counts it, so SSE2 reported an impossible peak *above* AVX2. Seeding `b`,`c`
   through `volatile` (read once into a register before the loop, exactly like
   the int32 chain's multiplier) blocks the fold and is a no-op on FMA targets
-  (AVX2/AVX-512/NEON keep their real FMAs). This only surfaced once the run-all
+  (AVX2/AVX-512 keep their real FMAs). This only surfaced once the run-all
   `kernelMenu()` started exercising the SSE2 fp variant — the old best-only
   dispatch never ran it.
+- **The NEON fp32/fp64/fp16 chains are SELF-QUADRATIC (`acc = acc + acc*acc`),
+  not affine — FMLA is destructive on the ADDEND.** AArch64 NEON has no
+  FMAD-form instruction: `vfmaq(c, acc, b)` (= `acc*b + c`) forces the compiler
+  to re-materialise the loop-invariant addend `c` with one `mov.16b` per FMLA.
+  Apple cores hide the mov (zero-cycle move elimination) but Neoverse/Oryon
+  don't — NEON fp32 measured **~2.4x below the SVE rows on Neoverse N2** (mov +
+  fmla = 2 vector slots per FMA). `acc = acc + acc*acc` maps to a single
+  `fmla v,v,v` (destructive operand IS the accumulator, no coefficient
+  registers at all), and being genuinely nonlinear it has no closed form for
+  fast-math factoring or scalar evolution to collapse (same argument as the
+  FMLAL `mp` fix). Dynamics: from `acc0` in (-1,0) the value decays
+  *harmonically* (`acc_n ~ -1/n`) toward 0 and freezes once `acc^2 < ulp/2`
+  (~-1e-10 fp32, ~-5e-4 fp16) — always normal, never denormal/inf. Verified:
+  hot loops are 96/96/64 back-to-back `fmla` with ZERO vector movs on both
+  darwin and linux targets, and even M1 Pro (where the mov was "free") gained
+  ~18%: fp32 MT 673→796, fp64 320→388, fp16 1521→1570. Expect ~2x on
+  Neoverse/Oryon NEON rows. The x86/scalar chains keep the affine+volatile
+  form (FMA3 `vfmadd213` is accumulator-destructive already).
 - **fp16/bf16 constants must survive narrowing.** `b=0.999999` rounds to exactly
   `1.0` in fp16, making `acc=acc*1+0` invariant → the loop is deleted and fp16
   reports hundreds of TFLOPS. Use values distinct from `1.0`/`0.0` after fp16
@@ -394,9 +413,10 @@ The dependent FMA chains generate optimal code (verified: back-to-back
 `fmla`/`fmadd`, no spills). **`NACC` must hide the FMA latency**: throughput is
 `min(num_pipes, NACC / latency)`, so NACC needs to be ≥ `pipes × latency` to
 saturate. On Apple M1 Pro (Firestorm: 4 FP pipes) the fp32/fp64 FMLA latency is
-~6 cycles, so NACC=16 only reached ~62% of peak — **NACC=24 lifts fp32 from
-~545 to ~745 GFLOPS MT (~84% of the ~880 GFLOPS theoretical)** and fp64 from
-~272 to ~375. fp16 saturates at NACC=16 (wider lanes / lower effective latency),
+~6 cycles, so NACC=16 only reached ~62% of peak — NACC=24 plus the
+self-quadratic NEON chain shape (see the FMLA-destructive-addend gotcha) lifts
+**fp32 to ~796 GFLOPS MT (~90% of the ~880 GFLOPS theoretical)** and fp64 to
+~388. fp16 saturates at NACC=16 (wider lanes / lower effective latency),
 which is why fp16 looked like ~3× fp32 before the fix instead of the expected
 ~2×. The NEON fp32/fp64 NACC is therefore 24, and AVX-512 fp32/fp64/int32 are
 also 24 (32 ZMM registers give the headroom). AVX2 stays 12 — only 16 YMM
