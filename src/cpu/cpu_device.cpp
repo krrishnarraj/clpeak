@@ -455,9 +455,15 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.vendor = x86Vendor();
 #endif
 #if defined(__aarch64__)
-  // ARM machines usually have no "model name"; decode MIDR instead.
-  if (info.name.empty())
-    info.name = armCpuNameFromMidrs(collectMidrs(cpuinfo), info.vendor);
+  // ARM machines usually have no "model name"; decode MIDR instead.  The
+  // decode also fills the vendor from the implementer byte when cpuinfo had
+  // no vendor_id (always the case on ARM), even if the name came from
+  // elsewhere.
+  {
+    std::string midrName = armCpuNameFromMidrs(collectMidrs(cpuinfo), info.vendor);
+    if (info.name.empty())
+      info.name = midrName;
+  }
 #endif
   if (info.name.empty())
     info.name = "Linux CPU";
@@ -569,10 +575,15 @@ void detectCpuInfo(cpu_device_info_t &info)
     }
   }
 #if defined(_M_ARM64) || defined(__aarch64__)
-  // No marketing string in the registry either -> decode the per-core MIDRs
-  // the kernel exports as "CP 4000".
-  if (info.name.empty())
-    info.name = armCpuNameFromMidrs(collectMidrs(), info.vendor);
+  // Decode the per-core MIDRs the kernel exports as "CP 4000": the name is a
+  // fallback for when the registry has no marketing string, but the vendor
+  // comes from the implementer byte either way (Windows-on-ARM registry
+  // entries carry a name like "Cobalt 100" yet no vendor).
+  {
+    std::string midrName = armCpuNameFromMidrs(collectMidrs(), info.vendor);
+    if (info.name.empty())
+      info.name = midrName;
+  }
 #endif
   if (info.name.empty())
     info.name = "Windows CPU";
