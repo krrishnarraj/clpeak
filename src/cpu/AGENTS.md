@@ -19,13 +19,15 @@ local memory, DRAM ↔ global memory.
 - SIMD abstraction (per-ISA vector wrappers)? → `cpu_simd.h`
 - Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
 - Shared 1T/NT compute runner + per-ISA test emit (`emitVariants`)? → `compute_common.h`
-- FP compute (fp32/fp64/fp16/bf16/mixed/fp8 dot)? → `compute_float.cpp`
-- INT compute (int32, int8 dot, int16 dot)? → `compute_int.cpp`
+- FP compute (fp32/fp64/fp16/bf16/mixed/fp8 dot, divide/sqrt)? → `compute_float.cpp`
+- INT compute (int32, int8 dot, int16 dot, u64 divide)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
+- Crypto throughput (AES / SHA-256 / SHA-512 / CRC32-C)? → `crypto.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
 - Memory (pointer-chase) latency? → `latency.cpp`
-- **Kernel bodies** (fp32/fp64/int32/read; fp16/bf16/mp/int8/int16/fp8/bf16fma;
-  AMX/NEON matrix; SVE; SME)? → the `kernels/` sub-headers (see below)
+- **Kernel bodies** (fp32/fp64/int32/read/div/sqrt/intdiv; fp16/bf16/mp/int8/
+  int16/fp8/bf16fma; AMX/NEON matrix; AES/SHA/CRC; SVE; SME)? → the
+  `kernels/` sub-headers (see below)
 - **The list of feature TUs** (single source of truth)? → `cpu_tu_registry.h`
 
 ## Key Files
@@ -38,17 +40,19 @@ local memory, DRAM ↔ global memory.
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *compile flags of the TU it is built in*, with `set`/`load`/`fma`/`add`/`hsum` + a per-ISA accumulator count (`*_NACC`) + `CPU_UNROLL_*` |
 | **`cpu_kernels.h`** | Dispatch API: `CpuFeatures`, `CpuKernelTable` (fn-ptr + opsPerIter per kernel), `cpuFeatures()`, `isaName()`, `kernels()` (best variants — bandwidth only), and `kernelMenu()` returning `CpuKernelMenu` (per-slot `std::vector<IsaVariant>` = **every** supported ISA variant + its canonical label, baseline-first) for the compute tests |
 | **`cpu_kernels_impl.h`** | Per-TU **aggregator**: `#include`s the `kernels/` sub-headers + emits this TU's `tuTable()` from whatever kernels its build flags enabled. Included once per feature TU |
-| **`kernels/base_compute.h`** | fp32 / fp64 / int32 FMA-chains + the streaming XOR read. Present in every TU (goes through `cpu_simd.h`) |
+| **`kernels/base_compute.h`** | fp32 / fp64 / int32 FMA-chains, the fp divide/sqrt chains (Moebius `acc=(acc+c1)/(acc+c2)` / `acc=sqrt(acc+c)` -- see the fast-math-estimate gotcha), the scalar u64 integer-divide chain, + the streaming XOR read. Present in every TU (goes through `cpu_simd.h`) |
+| **`kernels/crypto_compute.h`** | Crypto/hash throughput chains: AES-128 (AES-NI / VAES-512 / NEON AESE+AESMC), SHA-256 full compression (SHA-NI / NEON), SHA-512 full compression (NEON FEAT_SHA512 only -- no x86 kernel yet), CRC32-C (SSE4.2 / FEAT_CRC32). `opsPerIter` counts BYTES per outer iteration so `emitCompute()` lands in GB/s. A carry-less-multiply (PMULL/PCLMUL) test existed briefly and was REMOVED: its "GB/s of multiplied operands" was a made-up convention that dwarfed the DRAM-bandwidth rows (1.1 TB/s MT on M1 Pro) and read as misleading -- if the primitive returns, frame it as real GHASH GB/s or Gops. `CLPEAK_CORE_ONLY`-excluded |
 | **`kernels/lowp_compute.h`** | Low/mixed-precision compute: fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, int16 dot (x86 VPDPWSSD/WSUD), NEON fp8 dot (FEAT_FP8DOT4), AVX10.2 bf16 vector FMA. `#if`-gated per feature; whole file excluded under `CLPEAK_CORE_ONLY` |
 | **`kernels/matrix_compute.h`** | CPU matrix engines: x86 AMX (int8/bf16/fp16/tf32/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA. `CLPEAK_CORE_ONLY`-excluded |
 | **`kernels/sve_compute.h`** | ARM SVE (vector-length-agnostic) compute + SVE bf16/i8mm matrix + SVE2 fp8 dot. Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME` (an SME TU must never pick up non-streaming SVE — Apple has none), `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sve.h>` |
 | **`kernels/sme_compute.h`** | ARM SME (streaming matrix engine; Apple M4+, Oryon Gen 3): ZA outer products (fp32/fp64/bf16/fp16-widening/int8 — FMOPA/BFMOPA/SMOPA, 4 tiles like AMX; fp64 uses all 8 za.d tiles) + streaming-SVE fp32/fp64 vector chains. Gated on `__ARM_FEATURE_SME`, `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sme.h>` |
 | **`cpu_tu_registry.h`** | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of every feature-TU tag. Drives the unconditional `clpeak_table_<tag>()` forward declarations in `cpu_dispatch.cpp` |
-| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avxvnniint16`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `fp8dot`, `sve`, `svebf16`, `svei8mm`, `svefp8dot`, `sme`, `smef64`) with that ISA's flags |
+| **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avxvnniint16`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; crypto: `aes`, `vaes`, `sha`, `sha512`, `crc` — the `aes`/`sha`/`sha512` tags are shared between the x86 and ARM branches, only one arch builds each; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `fp8dot`, `sve`, `svebf16`, `svei8mm`, `svefp8dot`, `sme`, `smef64`) with that ISA's flags |
 | **`cpu_dispatch.cpp`** | Runtime feature probe (x86 CPUID+XGETBV / ARM `getauxval` HWCAP / Apple `sysctlbyname`); TU accessor decls (from `cpu_tu_registry.h`); `kernels()` assembly (merges supported TUs, widest variant per kernel — bandwidth only); and `kernelMenu()` which collects **every** supported variant per kernel with its canonical ISA label (explicit per-slot pushes — encodes the "collapse identical SSE float" rule by pushing only int32 from the `sse42` TU, and labels base vs feature kernels per-slot) |
 | `compute_common.h` | `emitCompute()` — runs a chain single-threaded (`ST`) and across all cores (`MT`), emits both metrics; `emitVariants()` — runs **every** ISA variant from a `kernelMenu()` slot as its own test (ISA appended to the display name, `isaSlug()` into the tag for unique result keys), or one untagged `Unsupported` test if none |
-| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). The fp8-dot row is arm64-only (`Benchmark::ComputeFP8DP`). Kernel bodies live in the `kernels/` sub-headers |
-| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP`/`runComputeInt16DP` (via `emitVariants` + `kernelMenu()`; the int16-dot row is x86-only, `Benchmark::ComputeInt16DP`) |
+| `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). The fp8-dot row is arm64-only (`Benchmark::ComputeFP8DP`); `runComputeDivSqrt` emits four rows (fp32/fp64 divide + sqrt, `Benchmark::ComputeDivSqrt`). Kernel bodies live in the `kernels/` sub-headers |
+| `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP`/`runComputeInt16DP` (via `emitVariants` + `kernelMenu()`; the int16-dot row is x86-only, `Benchmark::ComputeInt16DP`) + `runComputeIntDiv` (scalar u64 DIV; single un-suffixed test read from `kernels().intdiv`, `Benchmark::ComputeIntDiv`) |
+| `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` tests in GB/s (unit `gbps` with the category passed EXPLICITLY in the `TestSpec`, since `categoryFromUnit("gbps")` would file them under Bandwidth). Own `--crypto` category flag + per-test `--aes/--sha256/--sha512/--crc32c` flags |
 | `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_* ...)` (AMX / SMMLA / BFMMLA / SME); `Benchmark::Amx`, run in both fp and int phases. fp16 row on x86+arm64 (AMX-FP16 / SME); tf32/fp8 rows x86-only (AMX); fp32/fp64 rows arm64-only (SME) |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
 | `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns) |
@@ -104,11 +108,22 @@ the safe baseline, so the binary never SIGILLs on an older CPU.
     The new matrix dtypes emit their own tests via extra `mat_fp16`/`mat_tf32`/
     `mat_fp8` menu slots (all under the same `Benchmark::Amx` gate, so no new enum),
     and the bf16 FMA via a `bf16fma` slot in the BF16 phase.
+    **x86 crypto TUs**: `aes` (`-maes`, AES-NI), `vaes` (AVX-512 core +
+    `-mvaes`, the 512-bit EVEX form; menu-gated on `f.avx512f`
+    for the OS ZMM grant), `sha` (`-mssse3 -msha`, SHA-NI).  x86 SHA512
+    (leaf 7.1 EAX[0], Arrow/Lunar Lake) is detected but has NO kernel yet —
+    the row reports Unsupported on x86.  CRC32-C rides in the `sse42` TU
+    (the CRC32 instruction is part of SSE4.2).
   - ARM TUs: `generic` (NEON floor; pinned to `apple-m1` on macOS so the ungated
     floor never bakes in M4-only features), plus Linux/Android `fp16`,
     `fp16fml`, `dotprod`, `bf16`, `i8mm` TUs, a `fp8dot` TU (NEON fp8 4-way
     dot FDOT, FEAT_FP8DOT4 — first shipped by NVIDIA Vera; also built on Apple,
-    runtime-gated for future cores), and the
+    runtime-gated for future cores), the **ARM crypto TUs** — `aes`
+    (`-march=armv8-a+aes`: AESE/AESMC), `sha` (`+sha2`), `sha512`
+    (`-march=armv8.2-a+sha3`, which carries the SHA-512 instructions),
+    `crc` (`+crc`) — all fixed-width NEON/GPR types so they build on Windows
+    clang-cl too (also built on Apple; every Apple Silicon part has all four,
+    runtime-gated by the sysctl `FEAT_*` keys) — and the
     **SVE** family — `sve` (vector-length-agnostic base compute + int8 SDOT),
     `svebf16` (BFDOT + BFMMLA), `svei8mm` (SMMLA), `svefp8dot` (SVE2 FDOT).
     The SVE TUs are `NOT APPLE`
@@ -359,6 +374,53 @@ Adding a TU (four edits, one per concern):
   if it ever collapses apply the int16 accumulator-feedback fix (fp8 has FCVT
   narrowing under FEAT_FP8 for the feedback). Not yet run on FP8 silicon
   (needs NVIDIA Vera / Olympus).
+- **The fp divide/sqrt chains must dodge THREE fast-math rewrites — and the
+  pragma must wrap the OPERATION, not the caller.**  (1) `-freciprocal-math`
+  hoists `x / c` (loop-invariant divisor) into one `1/c` + multiplies — so the
+  divisor is loop-carried (`acc = (acc+c1)/(acc+c2)`, a Moebius iteration with
+  no closed form; sqrt uses `acc = sqrt(acc+c)`).  (2) x86 clang under
+  `-ffast-math` ("afn") rewrites the fp32 vector div/sqrt into
+  `rcpps`/`rsqrtps` + a Newton step (OBSERVED on AVX2/AVX-512/SSE2; fp64
+  survives only because no fp64 estimate instruction exists; AArch64 clang
+  does not substitute).  (3) The fast flags attach where the operation is
+  LEXICALLY written — `_mm256_div_ps` is an inline function inside
+  immintrin.h, compiled fast, so `#pragma float_control(precise)` around the
+  *kernel* does nothing after inlining (verified).  The fix lives in
+  `cpu_simd.h`: `f32_div`/`f64_div`/`f32_sqrt`/`f64_sqrt` are written as plain
+  vector-extension `a / b` and `__builtin_elementwise_sqrt` INSIDE a
+  `float_control(precise, on)` push/pop region (clang; GCC keeps intrinsics —
+  it only substitutes under `-mrecip`, never passed; MSVC lowers intrinsics
+  literally).  The SVE kernels call the `svdiv`/`svsqrt` builtins directly
+  (no header inline body) inside their own precise region.  Verified: 32
+  `(v)divps/pd` + `(v)sqrtps/pd` per TU on x86, `fdiv.4s/2d` + `fsqrt` on
+  NEON, `fdivr`/`fsqrt` z-regs on SVE, ZERO `rcpps/rsqrtps/frecpe/frsqrte`.
+  Re-verify on every new compiler major.  The u64 integer-divide chain
+  derives its divisor from the previous quotient (`(acc & 0xFF) | 0x101`) so
+  it can't be strength-reduced to a magic-number multiply, and keeps the
+  quotient near 2^54 so operand-dependent dividers are measured at a
+  representative width.
+- **Crypto chains: the message/block must be STATE-DERIVED, and opsPerIter is
+  BYTES.**  The crypto intrinsics are opaque (no scalar-evolution collapse),
+  but LICM is still live: a SHA message schedule computed from *constant* W
+  would be hoisted out of the loop wholesale, so both SHA kernels derive the
+  message block from the running hash state (and AES/CRC feed each
+  block/crc back as the next input).  Every chain is reduced into the
+  sink.  Stream/block counts are register-budget-tuned: AES 8 blocks x86
+  (16 XMM minus 10 round keys — clang reloads spilled keys, which is how real
+  AES runs) / 12 ARM (32 regs), SHA-256 2 streams x86 / 4 ARM, SHA-512
+  2 streams (8 W + 4 state regs each), CRC 8 chains.  The SHA-512 kernel follows ARM's
+  reference 2-round flow (vsha512h/h2 + rotating state ring) with a synthetic
+  message — dependency-faithful, not bit-exact-validated (inputs are synthetic
+  everywhere; we measure pipes, not correctness).  `opsPerIter` counts bytes
+  processed per outer iteration so the shared `emitCompute()` math lands in
+  GB/s.  Verified
+  on M1 Pro: AES ~14.6 GB/s ST, SHA-256 ~3.1, SHA-512 ~2.1,
+  CRC32-C ~25.5 GB/s ST (= exactly 1 crc32cx/cycle × 8 B × 3.2 GHz) — hot
+  loops are back-to-back `aese/aesmc` (480/432), `sha256h/h2/su0/su1`
+  (256/256/192/192), `sha512h/h2/su0/su1` (320/320/256/256),
+  `crc32cx`; x86 TUs codegen-verified via `-arch x86_64` cross-compile
+  (aesenc/sha256rnds2+msg1/msg2/vaesenc-zmm/crc32q counts match).
+  x86 SHA-NI / VAES / AVX-512 crypto numbers are NOT yet validated on silicon.
 - **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
   CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
   `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from
@@ -405,7 +467,12 @@ Compute / cache-bandwidth tests emit an `ST` (single-thread,
 one pinned core) and an `MT` (all logical cores) variant — `ST`/`MT` rather than
 literal thread counts so results are comparable across machines with different
 core counts. Memory-latency is `ST` only (pointer-chase); DRAM bandwidth emits
-`read`/`copy`/`triad`.
+`read`/`copy`/`triad`.  The crypto tests (`Category::Crypto`, `--crypto`) are
+`ST`/`MT` in GB/s — unit `gbps` with the category set explicitly in the
+`TestSpec`, since `categoryFromUnit("gbps")` would classify them as Bandwidth.
+The fp divide/sqrt rows are GFLOPS counting one divide/sqrt per lane (far below
+the FMA rows by design); the u64 integer divide is a single GOPS test with no
+per-ISA suffix.
 
 ## Reaching peak (investigation notes)
 

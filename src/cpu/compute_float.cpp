@@ -48,6 +48,22 @@ int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
   return 0;
 }
 
+int CpuPeak::runComputeDivSqrt(benchmark_config_t &cfg)
+{
+  // Divider/sqrt-unit throughput -- ops are divides (or sqrts) per second, so
+  // the numbers are far below the FMA rows by design (the units are narrow,
+  // partially pipelined, and this is where CPU generations differ 5-10x).
+  emitVariants(*this, {"single_precision_divide", "Single-precision divide", "gflops"},
+               "fdiv", kernelMenu().div32, "no SIMD fp32 divide path for this CPU", cfg);
+  emitVariants(*this, {"double_precision_divide", "Double-precision divide", "gflops"},
+               "fdiv", kernelMenu().div64, "no SIMD fp64 divide path for this CPU", cfg);
+  emitVariants(*this, {"single_precision_sqrt", "Single-precision sqrt", "gflops"},
+               "fsqrt", kernelMenu().sqrt32, "no SIMD fp32 sqrt path for this CPU", cfg);
+  emitVariants(*this, {"double_precision_sqrt", "Double-precision sqrt", "gflops"},
+               "fsqrt", kernelMenu().sqrt64, "no SIMD fp64 sqrt path for this CPU", cfg);
+  return 0;
+}
+
 int CpuPeak::runComputeMP(benchmark_config_t &cfg)
 {
   emitVariants(*this, {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "gflops"},

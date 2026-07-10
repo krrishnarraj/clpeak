@@ -42,6 +42,7 @@ add_library(peak_cpu STATIC
     compute_float.cpp
     compute_int.cpp
     cpu_matrix.cpp
+    crypto.cpp
     bandwidth.cpp
     latency.cpp
 )
@@ -272,6 +273,18 @@ if(_clpeak_x86)
         if(_clpeak_f_avx2)
             clpeak_add_isa_tu(avx2 ${_avx2})
         endif()
+        # Crypto TUs.  SHA-NI needs SSSE3 for the message-schedule alignr.
+        # Both are SSE-class: no OS XSTATE dependency.
+        set(_aes ${_clpeak_gnuflag}-maes)
+        check_cxx_compiler_flag("${_aes}" _clpeak_f_aes)
+        if(_clpeak_f_aes)
+            clpeak_add_isa_tu(aes ${_aes})
+        endif()
+        set(_sha ${_clpeak_gnuflag}-mssse3 ${_clpeak_gnuflag}-msha)
+        check_cxx_compiler_flag("${_sha}" _clpeak_f_sha)
+        if(_clpeak_f_sha)
+            clpeak_add_isa_tu(sha ${_sha})
+        endif()
         # 256-bit AVX-VNNI: int8 dot for the huge installed base of client
         # x86 without AVX-512 (Alder Lake -> Arrow Lake, Sierra Forest, Zen 5).
         # Implies AVX2; the TU's int8dp comes in via the __AVXVNNI__ path.
@@ -305,6 +318,12 @@ if(_clpeak_x86)
         check_cxx_compiler_flag("${_avx512_core}" _clpeak_f_avx512)
         if(_clpeak_f_avx512)
             clpeak_add_isa_tu(avx512 ${_avx512_core})
+        endif()
+        # 512-bit EVEX crypto (Ice Lake+): VAES on the AVX-512 core.
+        set(_vaes ${_avx512_core} ${_clpeak_gnuflag}-mvaes)
+        check_cxx_compiler_flag("${_vaes}" _clpeak_f_vaes)
+        if(_clpeak_f_vaes)
+            clpeak_add_isa_tu(vaes ${_vaes})
         endif()
         check_cxx_compiler_flag("${_avx512_core} ${_clpeak_gnuflag}-mavx512vnni" _clpeak_f_vnni)
         if(_clpeak_f_vnni)
@@ -387,6 +406,25 @@ elseif(_clpeak_arm64 AND NOT APPLE)
         if(_clpeak_f_a_i8mm)
             clpeak_add_isa_tu(i8mm ${_clpeak_gnuflag}-march=armv8.6-a+i8mm)
         endif()
+        # Crypto TUs: +aes = the AES instructions, +sha2 = SHA-256, +sha3 = the
+        # SHA-512 (and SHA-3) instructions, +crc = CRC32/CRC32C.  All fixed-
+        # width NEON/GPR types, so they build on Windows clang-cl too.
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+aes"       _clpeak_f_a_aes)
+        if(_clpeak_f_a_aes)
+            clpeak_add_isa_tu(aes ${_clpeak_gnuflag}-march=armv8-a+aes)
+        endif()
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+sha2"      _clpeak_f_a_sha2)
+        if(_clpeak_f_a_sha2)
+            clpeak_add_isa_tu(sha ${_clpeak_gnuflag}-march=armv8-a+sha2)
+        endif()
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+sha3"    _clpeak_f_a_sha3)
+        if(_clpeak_f_a_sha3)
+            clpeak_add_isa_tu(sha512 ${_clpeak_gnuflag}-march=armv8.2-a+sha3)
+        endif()
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+crc"       _clpeak_f_a_crc)
+        if(_clpeak_f_a_crc)
+            clpeak_add_isa_tu(crc ${_clpeak_gnuflag}-march=armv8-a+crc)
+        endif()
         # NEON fp8 4-way dot (FEAT_FP8DOT4; NVIDIA Vera first).  mfloat8x16_t /
         # fpm_t are fixed-width types (no sizeless-mangling issue), so this TU
         # is fine on Windows clang-cl too -- though Windows detection leaves
@@ -459,6 +497,24 @@ elseif(_clpeak_arm64 AND APPLE)
     check_cxx_compiler_flag("-march=armv8.6-a+i8mm" _clpeak_f_apple_i8mm)
     if(_clpeak_f_apple_i8mm)
         clpeak_add_isa_tu(i8mm -march=armv8.6-a+i8mm)
+    endif()
+    # Crypto TUs (every Apple Silicon part has AES/SHA256/SHA512/CRC32;
+    # runtime-gated by the sysctl FEAT_* keys anyway).  Same flags as Linux.
+    check_cxx_compiler_flag("-march=armv8-a+aes" _clpeak_f_apple_aes)
+    if(_clpeak_f_apple_aes)
+        clpeak_add_isa_tu(aes -march=armv8-a+aes)
+    endif()
+    check_cxx_compiler_flag("-march=armv8-a+sha2" _clpeak_f_apple_sha2)
+    if(_clpeak_f_apple_sha2)
+        clpeak_add_isa_tu(sha -march=armv8-a+sha2)
+    endif()
+    check_cxx_compiler_flag("-march=armv8.2-a+sha3" _clpeak_f_apple_sha3)
+    if(_clpeak_f_apple_sha3)
+        clpeak_add_isa_tu(sha512 -march=armv8.2-a+sha3)
+    endif()
+    check_cxx_compiler_flag("-march=armv8-a+crc" _clpeak_f_apple_crc)
+    if(_clpeak_f_apple_crc)
+        clpeak_add_isa_tu(crc -march=armv8-a+crc)
     endif()
     # SME (M4+; SVL=512b, replaced Apple's private AMX).  Apple Silicon has NO
     # non-streaming SVE, so SME's streaming mode is its only scalable-vector

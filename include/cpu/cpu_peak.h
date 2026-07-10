@@ -124,10 +124,16 @@ public:
   int runComputeBF16(benchmark_config_t &cfg);
   int runComputeMP(benchmark_config_t &cfg);
   int runComputeFP8DP(benchmark_config_t &cfg);
+  int runComputeDivSqrt(benchmark_config_t &cfg);
   int runComputeInt32(benchmark_config_t &cfg);
   int runComputeInt8DP(benchmark_config_t &cfg);
   int runComputeInt16DP(benchmark_config_t &cfg);
+  int runComputeIntDiv(benchmark_config_t &cfg);
   int runCpuMatrix(benchmark_config_t &cfg, Category category);
+  int runCryptoAes(benchmark_config_t &cfg);
+  int runCryptoSha256(benchmark_config_t &cfg);
+  int runCryptoSha512(benchmark_config_t &cfg);
+  int runCryptoCrc32c(benchmark_config_t &cfg);
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);
   int runMemoryLatency(benchmark_config_t &cfg);

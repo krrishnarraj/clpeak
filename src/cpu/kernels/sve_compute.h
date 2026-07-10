@@ -36,10 +36,12 @@ namespace {
 // Expand X(i) for i in [0, N).  32 architectural Z registers give headroom for
 // 24 fp accumulators + the 2 coefficient regs (same latency-hiding rationale as
 // the NEON NACC=24; revisit with a sweep when validating on real SVE silicon).
-#define SVE_REP16(X) X(0)X(1)X(2)X(3)X(4)X(5)X(6)X(7)X(8)X(9)X(10)X(11)X(12)X(13)X(14)X(15)
+#define SVE_REP8(X)  X(0)X(1)X(2)X(3)X(4)X(5)X(6)X(7)
+#define SVE_REP16(X) SVE_REP8(X) X(8)X(9)X(10)X(11)X(12)X(13)X(14)X(15)
 #define SVE_REP24(X) SVE_REP16(X) X(16)X(17)X(18)X(19)X(20)X(21)X(22)X(23)
 static constexpr int SVE_NACC_FP  = 24;   // fp32/fp64/int32 MAD chains
 static constexpr int SVE_NACC_DOT = 16;   // SDOT / BFDOT / *MMLA (wider per-instr)
+static constexpr int SVE_NACC_DIV = 8;    // divide/sqrt (few, partially pipelined units)
 
 // acc = acc*b + c  (svmad: MAD Zdn = Zdn*Zm + Za, destructive on the accumulator)
 static double runSveFp32Chain(uint64_t outer)
@@ -110,6 +112,110 @@ static double runSveInt32Chain(uint64_t outer)
 #undef RED
   return (double)svaddv_s32(pg, s);
 }
+
+// FP divide / sqrt (same Moebius / sqrt-fixed-point chains as base_compute.h:
+// divisor is loop-carried so -freciprocal-math can't hoist a reciprocal, and
+// the recurrences have no closed form).  One divide or sqrt per lane per step.
+// Precise-FP region for the same reason as base_compute.h: fast-math "afn"
+// may substitute estimate+Newton (SVE has frecpe/frsqrte) for the fp32 forms.
+// CLPEAK_PRECISE_FP comes from base_compute.h (always included before this).
+#if defined(__clang__)
+#pragma float_control(precise, on, push)
+#endif
+static CLPEAK_PRECISE_FP double runSveFp32DivChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  volatile float vc1 = 1.5f, vc2 = 0.5f;
+  const svfloat32_t c1 = svdup_f32(vc1), c2 = svdup_f32(vc2);
+#define DECL(i) svfloat32_t a##i = svdup_f32(0.5f * (float)((i) + 1));
+  SVE_REP8(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svdiv_f32_x(pg, svadd_f32_x(pg, a##i, c1), svadd_f32_x(pg, a##i, c2));
+      SVE_REP8(STEP)
+#undef STEP
+    }
+  svfloat32_t s = svdup_f32(0.0f);
+#define RED(i) s = svadd_f32_x(pg, s, a##i);
+  SVE_REP8(RED)
+#undef RED
+  return (double)svaddv_f32(pg, s);
+}
+
+static CLPEAK_PRECISE_FP double runSveFp64DivChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b64();
+  volatile double vc1 = 1.5, vc2 = 0.5;
+  const svfloat64_t c1 = svdup_f64(vc1), c2 = svdup_f64(vc2);
+#define DECL(i) svfloat64_t a##i = svdup_f64(0.5 * (double)((i) + 1));
+  SVE_REP8(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svdiv_f64_x(pg, svadd_f64_x(pg, a##i, c1), svadd_f64_x(pg, a##i, c2));
+      SVE_REP8(STEP)
+#undef STEP
+    }
+  svfloat64_t s = svdup_f64(0.0);
+#define RED(i) s = svadd_f64_x(pg, s, a##i);
+  SVE_REP8(RED)
+#undef RED
+  return (double)svaddv_f64(pg, s);
+}
+
+static CLPEAK_PRECISE_FP double runSveFp32SqrtChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  volatile float vc = 0.75f;
+  const svfloat32_t c = svdup_f32(vc);
+#define DECL(i) svfloat32_t a##i = svdup_f32(0.5f + 0.25f * (float)(i));
+  SVE_REP8(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svsqrt_f32_x(pg, svadd_f32_x(pg, a##i, c));
+      SVE_REP8(STEP)
+#undef STEP
+    }
+  svfloat32_t s = svdup_f32(0.0f);
+#define RED(i) s = svadd_f32_x(pg, s, a##i);
+  SVE_REP8(RED)
+#undef RED
+  return (double)svaddv_f32(pg, s);
+}
+
+static CLPEAK_PRECISE_FP double runSveFp64SqrtChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b64();
+  volatile double vc = 0.75;
+  const svfloat64_t c = svdup_f64(vc);
+#define DECL(i) svfloat64_t a##i = svdup_f64(0.5 + 0.25 * (double)(i));
+  SVE_REP8(DECL)
+#undef DECL
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+#define STEP(i) a##i = svsqrt_f64_x(pg, svadd_f64_x(pg, a##i, c));
+      SVE_REP8(STEP)
+#undef STEP
+    }
+  svfloat64_t s = svdup_f64(0.0);
+#define RED(i) s = svadd_f64_x(pg, s, a##i);
+  SVE_REP8(RED)
+#undef RED
+  return (double)svaddv_f64(pg, s);
+}
+#if defined(__clang__)
+#pragma float_control(pop)
+#endif
 
 // int8 4-way dot product into int32 lanes (SDOT: base SVE, no SVE2 needed).
 static double runSveInt8DpChain(uint64_t outer)

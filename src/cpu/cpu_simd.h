@@ -11,6 +11,7 @@
 // file so the independent chains don't spill.
 
 #include <cstdint>
+#include <cmath>   // scalar-fallback sqrt for the divide/sqrt chains
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
@@ -237,6 +238,54 @@ static inline i32v i32_madd(i32v a, i32v b, i32v c)
 { return (int)((unsigned)a * (unsigned)b + (unsigned)c); }
 static inline i32v i32_add(i32v a, i32v b)     { return (int)((unsigned)a + (unsigned)b); }
 static inline int   i32_hsum(i32v a)           { return a; }
+#endif
+
+// ===========================================================================
+// divide / sqrt (for the divider-throughput chains in base_compute.h)
+//
+// These must NOT inherit fast-math: x86 clang under -ffast-math rewrites the
+// fp32 _mm*_div_ps / _mm*_sqrt_ps HEADER inlines into rcpps/rsqrtps + a
+// Newton step (verified -- the fast flags attach where the operation is
+// LEXICALLY written, i.e. inside immintrin.h, so a pragma around the caller
+// alone does not help).  Fix: write the operations here, inside a
+// float_control(precise) region -- plain vector-extension `a / b` and
+// __builtin_elementwise_sqrt lower to real divps/sqrtps for every f32v/f64v
+// (x86 vectors, NEON vectors, scalars).  GCC and MSVC keep the intrinsics:
+// GCC only substitutes estimates under -mrecip (never passed) and MSVC
+// lowers intrinsics literally.  objdump-verify on new compiler majors.
+// ===========================================================================
+#if defined(__clang__)
+#pragma float_control(precise, on, push)
+static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
+static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
+static inline f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
+static inline f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
+#pragma float_control(pop)
+#elif defined(__AVX512F__)
+static inline f32v f32_div(f32v a, f32v b)     { return _mm512_div_ps(a, b); }
+static inline f64v f64_div(f64v a, f64v b)     { return _mm512_div_pd(a, b); }
+static inline f32v f32_sqrt(f32v a)            { return _mm512_sqrt_ps(a); }
+static inline f64v f64_sqrt(f64v a)            { return _mm512_sqrt_pd(a); }
+#elif defined(__AVX2__) && (defined(__FMA__) || defined(_MSC_VER))
+static inline f32v f32_div(f32v a, f32v b)     { return _mm256_div_ps(a, b); }
+static inline f64v f64_div(f64v a, f64v b)     { return _mm256_div_pd(a, b); }
+static inline f32v f32_sqrt(f32v a)            { return _mm256_sqrt_ps(a); }
+static inline f64v f64_sqrt(f64v a)            { return _mm256_sqrt_pd(a); }
+#elif defined(__SSE2__) || defined(_M_X64)
+static inline f32v f32_div(f32v a, f32v b)     { return _mm_div_ps(a, b); }
+static inline f64v f64_div(f64v a, f64v b)     { return _mm_div_pd(a, b); }
+static inline f32v f32_sqrt(f32v a)            { return _mm_sqrt_ps(a); }
+static inline f64v f64_sqrt(f64v a)            { return _mm_sqrt_pd(a); }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+static inline f32v f32_div(f32v a, f32v b)     { return vdivq_f32(a, b); }
+static inline f64v f64_div(f64v a, f64v b)     { return vdivq_f64(a, b); }
+static inline f32v f32_sqrt(f32v a)            { return vsqrtq_f32(a); }
+static inline f64v f64_sqrt(f64v a)            { return vsqrtq_f64(a); }
+#else
+static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
+static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
+static inline f32v f32_sqrt(f32v a)            { return sqrtf(a); }
+static inline f64v f64_sqrt(f64v a)            { return sqrt(a); }
 #endif
 
 } // namespace cpu_simd

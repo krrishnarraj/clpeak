@@ -11,6 +11,7 @@
 //   kernels/lowp_compute.h    fp16 / bf16-dot / mixed-precision / int8-dot / int16-dot
 //                             / fp8-dot (NEON) / bf16-FMA
 //   kernels/matrix_compute.h  AMX (int8/bf16/fp16/tf32/fp8) + NEON SMMLA/BFMMLA
+//   kernels/crypto_compute.h  AES / SHA-256 / SHA-512 / CRC32-C
 //   kernels/sve_compute.h     ARM SVE compute + SVE bf16/i8mm matrix + SVE fp8 dot
 //   kernels/sme_compute.h     ARM SME ZA outer products + streaming-SVE vectors
 //
@@ -29,6 +30,7 @@
 #include "kernels/base_compute.h"
 #include "kernels/lowp_compute.h"
 #include "kernels/matrix_compute.h"
+#include "kernels/crypto_compute.h"
 #include "kernels/sve_compute.h"
 #include "kernels/sme_compute.h"
 
@@ -49,6 +51,13 @@ static const CpuKernelTable *tuTable()
     t.fp32  = {runFp32Chain,  (double)INNER * F32_NACC * F32_LANES * 2.0};
     t.fp64  = {runFp64Chain,  (double)INNER * F64_NACC * F64_LANES * 2.0};
     t.int32 = {runInt32Chain, (double)INNER * I32_NACC * I32_LANES * 2.0};
+    // Divide/sqrt: ops = one divide (or sqrt) per lane per step; the chain's
+    // adds are uncounted filler.  intdiv is scalar (1 divide per step).
+    t.div32  = {runFp32DivChain,  (double)INNER * DIV_NACC * F32_LANES};
+    t.div64  = {runFp64DivChain,  (double)INNER * DIV_NACC * F64_LANES};
+    t.sqrt32 = {runFp32SqrtChain, (double)INNER * DIV_NACC * F32_LANES};
+    t.sqrt64 = {runFp64SqrtChain, (double)INNER * DIV_NACC * F64_LANES};
+    t.intdiv = {runIntDivChain,   (double)INNER * IDIV_NACC};
     t.readsum = readBufferChecksum;
 #ifdef CPU_HAS_FP16_KERNEL
     t.fp16 = {runFp16Chain, (double)INNER * FP16_NACC * FP16_LANES * 2.0};
@@ -86,6 +95,22 @@ static const CpuKernelTable *tuTable()
 #ifdef CPU_HAS_BF16FMA_KERNEL
     t.bf16fma = {runBf16FmaChain, (double)INNER * BF16FMA_NACC * BF16FMA_LANES * 2.0};
 #endif
+    // Crypto/hash kernels: opsPerIter is BYTES per outer iteration (-> GB/s).
+#ifdef CPU_HAS_AES_KERNEL
+    t.aes = {runAesChain, (double)INNER * AES_NACC * AES_BLOCK_BYTES};
+#endif
+#ifdef CPU_HAS_VAES_KERNEL
+    t.aes = {runVaesChain, (double)INNER * VAES_NACC * VAES_BLOCK_BYTES};
+#endif
+#ifdef CPU_HAS_SHA256_KERNEL
+    t.sha256 = {runSha256Chain, (double)INNER * SHA256_NSTR * SHA256_BLOCK_BYTES};
+#endif
+#ifdef CPU_HAS_SHA512_KERNEL
+    t.sha512 = {runSha512Chain, (double)INNER * SHA512_NSTR * SHA512_BLOCK_BYTES};
+#endif
+#ifdef CPU_HAS_CRC32C_KERNEL
+    t.crc32c = {runCrc32cChain, (double)INNER * CRC_NACC * CRC_OP_BYTES};
+#endif
     // SVE overrides (vector-length-agnostic; ops derived from the runtime VL).
     // These win over the NEON base/advanced kernels the SVE TUs also compile:
     // a +sve TU still carries the NEON f32v path, but we want the SVE variant.
@@ -101,6 +126,10 @@ static const CpuKernelTable *tuTable()
       t.fp64   = {runSveFp64Chain,   (double)INNER * SVE_NACC_FP  * d * 2.0};
       t.int32  = {runSveInt32Chain,  (double)INNER * SVE_NACC_FP  * w * 2.0};
       t.int8dp = {runSveInt8DpChain, (double)INNER * SVE_NACC_DOT * w * 8.0};
+      t.div32  = {runSveFp32DivChain,  (double)INNER * SVE_NACC_DIV * w};
+      t.div64  = {runSveFp64DivChain,  (double)INNER * SVE_NACC_DIV * d};
+      t.sqrt32 = {runSveFp32SqrtChain, (double)INNER * SVE_NACC_DIV * w};
+      t.sqrt64 = {runSveFp64SqrtChain, (double)INNER * SVE_NACC_DIV * d};
 #ifdef CPU_HAS_SVE_BF16_KERNEL
       t.bf16   = {runSveBf16Chain,    (double)INNER * SVE_NACC_DOT * w * 4.0};
       t.mat_fp = {runSveMatBf16Chain, (double)INNER * SVE_NACC_DOT * bcnt * 2.0};

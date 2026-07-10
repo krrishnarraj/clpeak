@@ -147,6 +147,145 @@ static double runInt32Chain(uint64_t outer)
   return (double)i32_hsum(s);
 }
 
+// ---- FP divide / sqrt throughput -------------------------------------------
+// The divider/sqrt unit is where CPUs differ 5-10x, and none of the FMA chains
+// touch it.  Two traps make these chains different from the FMA ones:
+//   1. -ffast-math rewrites `x / c` (loop-invariant divisor) into `x * (1/c)`
+//      computed once (-freciprocal-math) -- so the DIVISOR must be loop-carried.
+//      The Moebius iteration acc = (acc+c1)/(acc+c2) keeps both operands
+//      dependent on the accumulator; it converges to the positive fixed point
+//      of x^2+(c2-1)x-c1 = 0 (~1.5 for c1=1.5,c2=0.5) and stays normal.
+//   2. Reciprocal-estimate substitution: x86 clang under -ffast-math ("afn")
+//      rewrites the fp32 vector divide/sqrt intrinsics into rcpps/rsqrtps +
+//      a Newton step (OBSERVED -- fp64 survives only because x86 has no fp64
+//      estimate instruction; AArch64 clang keeps fdiv/fsqrt).  These kernels
+//      exist to measure the real divider, so they are compiled with precise
+//      FP via the float_control pragma / GCC optimize attribute below.
+//      Still objdump-verify divps/sqrtps (no rcpps/rsqrtps) on new compilers.
+// The sqrt chain acc = sqrt(acc + c) converges to the fixed point x^2 = x+c
+// (x=1.5 for c=0.75): nonlinear, no closed form, values stay normal.
+// opsPerIter counts one divide (or sqrt) per lane per step -- the adds are
+// pipeline filler on other ports and are not counted.  DIV_NACC=8: dividers
+// are one/two per core with partial pipelining, so a few chains saturate.
+static constexpr int DIV_NACC = 8;
+// Precise FP for the divide/sqrt kernels only: clang via a float_control
+// push/pop region (ends after runFp64SqrtChain), GCC via a per-function
+// attribute.  cl.exe takes neither path but doesn't substitute intrinsics.
+#if defined(__clang__)
+#pragma float_control(precise, on, push)
+#define CLPEAK_PRECISE_FP
+#elif defined(__GNUC__)
+#define CLPEAK_PRECISE_FP __attribute__((optimize("no-fast-math")))
+#else
+#define CLPEAK_PRECISE_FP
+#endif
+static CLPEAK_PRECISE_FP double runFp32DivChain(uint64_t outer)
+{
+  f32v acc[DIV_NACC];
+  volatile float vc1 = 1.5f, vc2 = 0.5f;
+  const f32v c1 = f32_set(vc1), c2 = f32_set(vc2);
+  for (int j = 0; j < DIV_NACC; j++) acc[j] = f32_set(0.5f * (float)(j + 1));
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < DIV_NACC; j++)
+        acc[j] = f32_div(f32_add(acc[j], c1), f32_add(acc[j], c2));
+    }
+  f32v s = acc[0];
+  for (int j = 1; j < DIV_NACC; j++) s = f32_add(s, acc[j]);
+  return (double)f32_hsum(s);
+}
+
+static CLPEAK_PRECISE_FP double runFp64DivChain(uint64_t outer)
+{
+  f64v acc[DIV_NACC];
+  volatile double vc1 = 1.5, vc2 = 0.5;
+  const f64v c1 = f64_set(vc1), c2 = f64_set(vc2);
+  for (int j = 0; j < DIV_NACC; j++) acc[j] = f64_set(0.5 * (double)(j + 1));
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < DIV_NACC; j++)
+        acc[j] = f64_div(f64_add(acc[j], c1), f64_add(acc[j], c2));
+    }
+  f64v s = acc[0];
+  for (int j = 1; j < DIV_NACC; j++) s = f64_add(s, acc[j]);
+  return (double)f64_hsum(s);
+}
+
+static CLPEAK_PRECISE_FP double runFp32SqrtChain(uint64_t outer)
+{
+  f32v acc[DIV_NACC];
+  volatile float vc = 0.75f;
+  const f32v c = f32_set(vc);
+  for (int j = 0; j < DIV_NACC; j++) acc[j] = f32_set(0.5f + 0.25f * (float)j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < DIV_NACC; j++)
+        acc[j] = f32_sqrt(f32_add(acc[j], c));
+    }
+  f32v s = acc[0];
+  for (int j = 1; j < DIV_NACC; j++) s = f32_add(s, acc[j]);
+  return (double)f32_hsum(s);
+}
+
+static CLPEAK_PRECISE_FP double runFp64SqrtChain(uint64_t outer)
+{
+  f64v acc[DIV_NACC];
+  volatile double vc = 0.75;
+  const f64v c = f64_set(vc);
+  for (int j = 0; j < DIV_NACC; j++) acc[j] = f64_set(0.5 + 0.25 * (double)j);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < DIV_NACC; j++)
+        acc[j] = f64_sqrt(f64_add(acc[j], c));
+    }
+  f64v s = acc[0];
+  for (int j = 1; j < DIV_NACC; j++) s = f64_add(s, acc[j]);
+  return (double)f64_hsum(s);
+}
+#if defined(__clang__)
+#pragma float_control(pop)
+#endif
+
+// ---- Scalar u64 integer divide ----------------------------------------------
+// No SIMD integer divide exists on x86/NEON, so this is the scalar DIV unit
+// (hashing, modulo, bucket math).  The divisor is derived from the previous
+// quotient (low bits, forced into [257,511]) so it can't be strength-reduced
+// to a magic-number multiply, and the numerator keeps the quotient magnitude
+// (~2^54) stable so cores with operand-dependent divide latency are measured
+// at a representative width.  Identical scalar code in every TU; only the
+// generic TU's copy is ever used (via kernels().intdiv, no per-ISA menu).
+static constexpr int IDIV_NACC = 4;
+static double runIntDivChain(uint64_t outer)
+{
+  uint64_t acc[IDIV_NACC];
+  volatile uint64_t vnum = 0x9E3779B97F4A7C15ull;
+  const uint64_t num = vnum;
+  for (int j = 0; j < IDIV_NACC; j++) acc[j] = num >> (j + 1);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+    {
+      CPU_UNROLL_FULL
+      for (int j = 0; j < IDIV_NACC; j++)
+        acc[j] = (num + acc[j]) / ((acc[j] & 0xFFu) | 0x101u);
+    }
+  uint64_t s = 0;
+  for (int j = 0; j < IDIV_NACC; j++) s ^= acc[j];
+  return (double)s;
+}
+
 // ---- Streaming read (integer XOR checksum) --------------------------------
 static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
 {

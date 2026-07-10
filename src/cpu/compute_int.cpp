@@ -6,6 +6,7 @@
 #include "compute_common.h"
 
 using clpeak_cpu::kernelMenu;
+using clpeak_cpu::kernels;
 
 int CpuPeak::runComputeInt32(benchmark_config_t &cfg)
 {
@@ -32,6 +33,22 @@ int CpuPeak::runComputeInt16DP(benchmark_config_t &cfg)
 #else
   (void)cfg;
 #endif
+  return 0;
+}
+
+int CpuPeak::runComputeIntDiv(benchmark_config_t &cfg)
+{
+  // Scalar u64 divide: there is no SIMD integer divide on x86 or NEON, so this
+  // is a single test with no per-ISA variants -- the kernel is identical in
+  // every TU and read straight from kernels().intdiv (always present via the
+  // generic floor).  The number is the scalar DIV unit's throughput in Gops.
+  const auto &v = kernels().intdiv;
+  logger::TestSpec spec{"integer_divide_compute", "Integer divide compute u64", "gops"};
+  auto test = currentDeviceScope->beginTest(spec);
+  if (v.fn)
+    emitCompute(*this, test, "u64", v.opsPerIter, v.fn, cfg);
+  else
+    test.skip("u64 ST", ResultStatus::Unsupported, "no integer divide kernel");
   return 0;
 }
 

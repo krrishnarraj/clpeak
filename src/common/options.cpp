@@ -102,6 +102,9 @@ static const char *helpStr =
     "\n TEST CATEGORY SELECTION (default: run every category):"
     "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
     "\n  --int-compute / --no-int-compute     integer compute (gops / tops)"
+#ifdef ENABLE_CPU
+    "\n  --crypto      / --no-crypto          crypto/hash silicon (gbps)     [CPU]"
+#endif
     "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (gbps)"
     "\n  --latency     / --no-latency         kernel-launch latency (us)"
     "\n  Any positive --<category> flag switches to allow-list mode."
@@ -124,6 +127,8 @@ static const char *helpStr =
 #ifdef ENABLE_CPU
     "\n  --int16-dot-product-compute       | --no-int16-dot-product-compute [CPU: x86 VNNI]"
     "\n  --fp8-dot-product-compute         | --no-fp8-dot-product-compute   [CPU: ARM FP8]"
+    "\n  --divide-sqrt-compute             | --no-divide-sqrt-compute       [CPU]"
+    "\n  --integer-divide-compute          | --no-integer-divide-compute    [CPU]"
 #endif
 #ifdef ENABLE_CUDA
     "\n  --wmma                            | --no-wmma                      [CUDA]"
@@ -147,6 +152,10 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CPU
     "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM/SME]"
+    "\n  --aes                             | --no-aes                       [CPU: AES-NI/VAES/ARM AES]"
+    "\n  --sha256                          | --no-sha256                    [CPU: SHA-NI/ARM SHA2]"
+    "\n  --sha512                          | --no-sha512                    [CPU: ARM SHA512]"
+    "\n  --crc32c                          | --no-crc32c                    [CPU]"
 #endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
@@ -188,6 +197,8 @@ static const TestFlag testFlags[] = {
 #ifdef ENABLE_CPU
   {"int16-dot-product-compute", Benchmark::ComputeInt16DP},
   {"fp8-dot-product-compute",   Benchmark::ComputeFP8DP},
+  {"divide-sqrt-compute",       Benchmark::ComputeDivSqrt},
+  {"integer-divide-compute",    Benchmark::ComputeIntDiv},
 #endif
 #ifdef ENABLE_CUDA
   {"wmma",                      Benchmark::Wmma},
@@ -215,6 +226,10 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_CPU
   {"amx",                       Benchmark::Amx},
+  {"aes",                       Benchmark::CryptoAes},
+  {"sha256",                    Benchmark::CryptoSha256},
+  {"sha512",                    Benchmark::CryptoSha512},
+  {"crc32c",                    Benchmark::CryptoCrc32c},
   {"cache-bandwidth",           Benchmark::CacheBandwidth},
   {"memory-latency",            Benchmark::MemoryLatency},
 #endif
@@ -234,6 +249,7 @@ struct CategoryFlag {
 static const CategoryFlag categoryFlags[] = {
   {"fp-compute",  Category::FpCompute},
   {"int-compute", Category::IntCompute},
+  {"crypto",      Category::Crypto},
   {"bandwidth",   Category::Bandwidth},
   {"latency",     Category::Latency},
 };

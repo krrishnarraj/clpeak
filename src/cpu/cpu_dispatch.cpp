@@ -70,6 +70,10 @@ static CpuFeatures detect()
   bool avxcpu  = (r[2] >> 28) & 1;
   f.sse42 = (r[2] >> 20) & 1;
   bool fma = (r[2] >> 12) & 1;
+  // Crypto (SSE-class, no OS XSTATE dependency): leaf 1 ECX bit 25 = AES-NI.
+  // The CRC32 instruction is part of SSE4.2.
+  f.aes   = (r[2] >> 25) & 1;
+  f.crc32 = f.sse42;
 
   // OS must have enabled SSE+AVX (XCR0 bits 1,2) and AVX-512 (bits 5,6,7).
   bool osAvx = false, osAvx512 = false;
@@ -87,6 +91,11 @@ static CpuFeatures detect()
     bool avx2 = (ebx >> 5) & 1;
     f.avx2 = avx2 && osAvx && avxcpu;
     f.fma  = fma && osAvx && avxcpu;
+    // Crypto: leaf 7 sub-leaf 0 EBX[29] = SHA-NI; ECX[9] = VAES (the 512-bit
+    // form additionally needs the AVX-512 OS grant -- checked via f.avx512f
+    // at the menu push, so gate it on osAvx512 here).
+    f.sha256 = (ebx >> 29) & 1;
+    f.vaes   = ((ecx >> 9) & 1) && osAvx512;
     // AMX-FP8 is enumerated in leaf 7 sub-leaf 0 ECX bit 3 (unlike the other new
     // AMX dtypes, which are in sub-leaf 1); execution is additionally gated by
     // amx_tile + the XTILEDATA XSTATE grant, so a stray bit can't SIGILL.
@@ -105,6 +114,10 @@ static CpuFeatures detect()
       f.amx_fp16    = (eax1 >> 21) & 1;
       f.amx_tf32    = (edx1 >> 7) & 1;
       f.avx10       = (edx1 >> 19) & 1;
+      // Leaf 7 sub-leaf 1 EAX[0] = SHA512 (EVEX; Arrow/Lunar Lake).  Detection
+      // only today: no x86 SHA-512 kernel yet, so nothing consumes it -- wired
+      // so the future kernel only needs the TU + menu push.
+      f.sha512      = ((eax1 >> 0) & 1) && osAvx && avxcpu;
       if (osAvx512) f.avx512bf16 = (eax1 >> 5) & 1;
       // AVX10.2 512-bit: leaf 0x24 EBX low byte = version (>=2), bit 18 = 512-bit
       // support.  512-bit AVX10 uses ZMM state, so require the AVX-512 OS grant.
@@ -154,6 +167,11 @@ static CpuFeatures detect()
   f.smeF64F64 = hw2 & (1UL << 25); // HWCAP2_SME_F64F64
   f.sme2      = hw2 & (1UL << 37); // HWCAP2_SME2
   f.fp8dot4   = hw2 & (1UL << 53); // HWCAP2_F8DP4
+  // Crypto extensions (all in the base HWCAP word)
+  f.aes    = hw & (1UL << 3);    // HWCAP_AES
+  f.sha256 = hw & (1UL << 6);    // HWCAP_SHA2
+  f.crc32  = hw & (1UL << 7);    // HWCAP_CRC32
+  f.sha512 = hw & (1UL << 21);   // HWCAP_SHA512
 #elif defined(__APPLE__)
   auto sc = [](const char *n) {
     int v = 0; size_t s = sizeof(v);
@@ -170,6 +188,11 @@ static CpuFeatures detect()
   f.sme2      = sc("hw.optional.arm.FEAT_SME2");
   f.smeF64F64 = sc("hw.optional.arm.FEAT_SME_F64F64");
   f.fp8dot4   = sc("hw.optional.arm.FEAT_FP8DOT4");  // none ship it yet; future-proof
+  // Crypto extensions (present on every Apple Silicon part; keys verified on M1)
+  f.aes    = sc("hw.optional.arm.FEAT_AES");
+  f.sha256 = sc("hw.optional.arm.FEAT_SHA256");
+  f.sha512 = sc("hw.optional.arm.FEAT_SHA512");
+  f.crc32  = sc("hw.optional.arm.FEAT_CRC32");
 #elif defined(_WIN32)
   // Windows has no IsProcessorFeaturePresent() constant for most of these,
   // but the kernel exports the (sanitised) AArch64 ID registers as REG_QWORD
@@ -193,6 +216,12 @@ static CpuFeatures detect()
   f.fp16fml = ((isar0 >> 48) & 0xF) >= 1;  // ISAR0.FHM  (FEAT_FHM)
   f.bf16    = ((isar1 >> 44) & 0xF) >= 1;  // ISAR1.BF16 (FEAT_BF16)
   f.i8mm    = ((isar1 >> 52) & 0xF) >= 1;  // ISAR1.I8MM (FEAT_I8MM)
+  // Crypto: ISAR0.AES (>=1), ISAR0.SHA2 (1 = SHA-256, 2 = +SHA-512),
+  // ISAR0.CRC32.
+  f.aes     = ((isar0 >> 4) & 0xF) >= 1;
+  f.sha256  = ((isar0 >> 12) & 0xF) >= 1;
+  f.sha512  = ((isar0 >> 12) & 0xF) >= 2;
+  f.crc32   = ((isar0 >> 16) & 0xF) >= 1;
   // No SVE/SME on Windows: clang's MSVC C++ ABI can't mangle the SVE/SME
   // sizeless types, so <arm_sve.h>/<arm_sme.h> won't compile and no SVE/SME TU
   // is built (see CMakeLists.txt).  Detecting them here would only make the
@@ -264,6 +293,15 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
   if (s->mat_fp64.fn) d.mat_fp64 = s->mat_fp64;
   if (s->ssve_fp32.fn) d.ssve_fp32 = s->ssve_fp32;
   if (s->ssve_fp64.fn) d.ssve_fp64 = s->ssve_fp64;
+  if (s->aes.fn)      d.aes = s->aes;
+  if (s->sha256.fn)   d.sha256 = s->sha256;
+  if (s->sha512.fn)   d.sha512 = s->sha512;
+  if (s->crc32c.fn)   d.crc32c = s->crc32c;
+  if (s->div32.fn)    d.div32 = s->div32;
+  if (s->div64.fn)    d.div64 = s->div64;
+  if (s->sqrt32.fn)   d.sqrt32 = s->sqrt32;
+  if (s->sqrt64.fn)   d.sqrt64 = s->sqrt64;
+  if (s->intdiv.fn)   d.intdiv = s->intdiv;
   if (s->readsum)     d.readsum = s->readsum;
   if (s->sveVLBytes)  d.sveVLBytes = s->sveVLBytes;
   if (s->smeSVLBytes) d.smeSVLBytes = s->smeSVLBytes;
@@ -428,6 +466,15 @@ const CpuKernelMenu &kernelMenu()
       add(m.fp64, t->fp64, isa);
       add(m.int32, t->int32, isa);
     };
+    // Divide/sqrt ride with the same tier TUs (they go through cpu_simd.h /
+    // the SVE kernels).  Not part of addBase: the sse42 TU pushes int32 only,
+    // and its div/sqrt codegen is identical to the SSE2 floor's.
+    auto addDivSqrt = [&](const CpuKernelTable *t, const char *isa) {
+      add(m.div32, t->div32, isa);
+      add(m.div64, t->div64, isa);
+      add(m.sqrt32, t->sqrt32, isa);
+      add(m.sqrt64, t->sqrt64, isa);
+    };
 
     // ---- x86 tier TUs (base dtypes) ----
 #if CLPEAK_TU_generic
@@ -442,6 +489,7 @@ const CpuKernelMenu &kernelMenu()
     {
       const CpuKernelTable *t = clpeak_table_generic();
       addBase(t, genIsa);
+      addDivSqrt(t, genIsa);
       // On Apple the generic (apple-m1) floor also carries the advanced NEON
       // dtypes; push whatever it actually provides, labeled by feature.
       if (f.fp16)    add(m.fp16, t->fp16, "NEON FP16");
@@ -450,14 +498,27 @@ const CpuKernelMenu &kernelMenu()
     }
 #endif
 #if CLPEAK_TU_sse42
-    if (f.sse42) add(m.int32, clpeak_table_sse42()->int32, "SSE4.2");  // fp32/fp64 == SSE2
+    if (f.sse42)
+    {
+      add(m.int32, clpeak_table_sse42()->int32, "SSE4.2");  // fp32/fp64 == SSE2
+      // The CRC32 instruction is part of SSE4.2, so the CRC32-C kernel rides
+      // in this TU rather than a dedicated one (the ARM analogue is the crc TU).
+      if (f.crc32) add(m.crc32c, clpeak_table_sse42()->crc32c, "SSE4.2");
+    }
 #endif
 #if CLPEAK_TU_avx2
-    if (f.avx2 && f.fma) addBase(clpeak_table_avx2(), "AVX2+FMA");
+    if (f.avx2 && f.fma)
+    {
+      addBase(clpeak_table_avx2(), "AVX2+FMA");
+      addDivSqrt(clpeak_table_avx2(), "AVX2");   // no FMA in a div/sqrt chain
+    }
 #endif
 #if CLPEAK_TU_avx512
     if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq)
+    {
       addBase(clpeak_table_avx512(), "AVX-512");
+      addDivSqrt(clpeak_table_avx512(), "AVX-512");
+    }
 #endif
     // ---- x86 feature TUs (advanced dtypes only) ----
 #if CLPEAK_TU_avxvnni
@@ -522,6 +583,33 @@ const CpuKernelMenu &kernelMenu()
     if (f.avx10_2_512)
       add(m.bf16fma, clpeak_table_avx10bf16()->bf16fma, "AVX10.2");
 #endif
+    // ---- Crypto TUs (x86: AES-NI, VAES-512, SHA-NI;
+    //      ARM: FEAT_AES, FEAT_SHA256, FEAT_SHA512, FEAT_CRC32) ----
+#if CLPEAK_TU_aes
+#if defined(CLPEAK_X86)
+    if (f.aes) add(m.aes, clpeak_table_aes()->aes, "AES-NI");
+#else
+    if (f.aes) add(m.aes, clpeak_table_aes()->aes, "NEON AES");
+#endif
+#endif
+#if CLPEAK_TU_vaes
+    // The 512-bit EVEX form needs the AVX-512 OS grant (f.avx512f includes it).
+    if (f.vaes && f.avx512f)
+      add(m.aes, clpeak_table_vaes()->aes, "VAES-512");
+#endif
+#if CLPEAK_TU_sha
+#if defined(CLPEAK_X86)
+    if (f.sha256) add(m.sha256, clpeak_table_sha()->sha256, "SHA-NI");
+#else
+    if (f.sha256) add(m.sha256, clpeak_table_sha()->sha256, "NEON SHA2");
+#endif
+#endif
+#if CLPEAK_TU_sha512
+    if (f.sha512) add(m.sha512, clpeak_table_sha512()->sha512, "NEON SHA512");
+#endif
+#if CLPEAK_TU_crc
+    if (f.crc32) add(m.crc32c, clpeak_table_crc()->crc32c, "ARMv8 CRC32");
+#endif
     // ---- ARM feature TUs (advanced dtypes only; base == generic NEON) ----
 #if CLPEAK_TU_fp16
     if (f.fp16) add(m.fp16, clpeak_table_fp16()->fp16, "NEON FP16");
@@ -562,6 +650,7 @@ const CpuKernelMenu &kernelMenu()
       add(m.fp64, t->fp64, sveLbl);
       add(m.int32, t->int32, sveLbl);
       add(m.int8dp, t->int8dp, sveLbl);
+      addDivSqrt(t, sveLbl);
     }
 #endif
 #if CLPEAK_TU_svebf16

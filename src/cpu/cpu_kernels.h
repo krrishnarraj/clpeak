@@ -46,6 +46,13 @@ struct CpuFeatures {
   // ARM FP8 (2023 dpISA): FEAT_FP8DOT4 = native fp8 4-way dot -> fp32 in NEON
   // (and, with SVE2, in SVE).  First shipped by NVIDIA Vera (Olympus cores).
   bool fp8dot4 = false;
+  // Crypto/hash silicon, unified across ISAs: `aes` = AES-NI (x86) / FEAT_AES
+  // (ARM); `sha256` = SHA-NI / FEAT_SHA256; `sha512` = FEAT_SHA512 (x86 SHA512
+  // is detection-only today -- no kernel yet); `crc32` = SSE4.2 CRC32 /
+  // FEAT_CRC32.  `vaes` is the x86 512-bit EVEX form (Ice Lake+; needs the
+  // AVX-512 OS grant, checked via avx512f at the menu push).
+  bool aes = false, sha256 = false, sha512 = false, crc32 = false;
+  bool vaes = false;
 };
 
 const CpuFeatures &cpuFeatures();   // cached runtime probe
@@ -76,6 +83,11 @@ struct CpuKernelTable {
   // which has SME but no non-streaming SVE).  The SME TU also fills mat_fp /
   // mat_fp16 / mat_int8 with its BFMOPA / FMOPA-f16 / SMOPA kernels.
   ChainVariant mat_fp32, mat_fp64, ssve_fp32, ssve_fp64;
+  // Crypto/hash kernels (opsPerIter counts BYTES processed per outer iteration,
+  // so emitCompute's giga() yields GB/s) and the fp divide/sqrt + scalar u64
+  // integer-divide chains (opsPerIter counts divides/sqrts per outer iteration).
+  ChainVariant aes, sha256, sha512, crc32c;
+  ChainVariant div32, div64, sqrt32, sqrt64, intdiv;
   ReadFn       readsum = nullptr;
   const char  *isaName = "";
   // SVE vector length in bytes (svcntb()), set only by an SVE TU's table so the
@@ -106,8 +118,12 @@ struct CpuKernelMenu {
   std::vector<IsaVariant> fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
   std::vector<IsaVariant> mat_fp16, mat_tf32, mat_fp8, bf16fma;
   std::vector<IsaVariant> int16dp, fp8dp, mat_fp32, mat_fp64;
+  std::vector<IsaVariant> aes, sha256, sha512, crc32c;
+  std::vector<IsaVariant> div32, div64, sqrt32, sqrt64;
   // (the SME streaming-SVE fp32/fp64 chains ride in the fp32/fp64 menus above,
-  //  labeled "SSVE" -- they are just another ISA variant of those tests)
+  //  labeled "SSVE" -- they are just another ISA variant of those tests.
+  //  The scalar u64 intdiv has no per-ISA variants: it is read directly from
+  //  kernels().intdiv, identical in every TU.)
 };
 
 // Assembled once on first call.
