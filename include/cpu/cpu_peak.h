@@ -137,6 +137,8 @@ public:
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);
   int runMemoryLatency(benchmark_config_t &cfg);
+  int runAtomics(benchmark_config_t &cfg);
+  int runBranchPenalty(benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
   cpu_device_info_t    info;

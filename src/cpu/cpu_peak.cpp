@@ -177,6 +177,8 @@ int CpuPeak::runAll()
 
   // ---- Latency ----
   if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
+  if (isAllowed(Benchmark::Atomics))       runAtomics(cfg);
+  if (isAllowed(Benchmark::BranchPenalty)) runBranchPenalty(cfg);
 
   currentDeviceScope = nullptr;
   return 0;

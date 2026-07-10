@@ -164,6 +164,8 @@ static const char *helpStr =
 #ifdef ENABLE_CPU
     "\n  --cache-bandwidth                 | --no-cache-bandwidth           [CPU]"
     "\n  --memory-latency                  | --no-memory-latency            [CPU]"
+    "\n  --atomics                         | --no-atomics                   [CPU]"
+    "\n  --branch-penalty                  | --no-branch-penalty            [CPU]"
 #endif
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
     "\n"
@@ -232,6 +234,8 @@ static const TestFlag testFlags[] = {
   {"crc32c",                    Benchmark::CryptoCrc32c},
   {"cache-bandwidth",           Benchmark::CacheBandwidth},
   {"memory-latency",            Benchmark::MemoryLatency},
+  {"atomics",                   Benchmark::Atomics},
+  {"branch-penalty",            Benchmark::BranchPenalty},
 #endif
   {"global-memory-bandwidth",   Benchmark::GlobalBW},
   {"local-memory-bandwidth",    Benchmark::LocalBW},

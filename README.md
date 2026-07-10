@@ -182,6 +182,7 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ./clpeak --amx                        # CPU matrix-engine tests (AMX / SMMLA / BFMMLA)
 ./clpeak --crypto                     # CPU crypto/hash silicon in GB/s (AES, SHA-256/512, CRC32-C)
 ./clpeak --divide-sqrt-compute        # CPU divider/sqrt-unit throughput (fp32/fp64)
+./clpeak --atomics --branch-penalty   # CPU sync + branch-mispredict cost probes (ns)
 ./clpeak --coopmat                    # Vulkan tensor-core tests
 ./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
 ./clpeak --compare baseline.json      # diff this run against a saved baseline JSON

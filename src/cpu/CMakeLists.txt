@@ -45,6 +45,7 @@ add_library(peak_cpu STATIC
     crypto.cpp
     bandwidth.cpp
     latency.cpp
+    microarch.cpp
 )
 
 target_link_libraries(peak_cpu PUBLIC peak_common)

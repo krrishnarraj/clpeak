@@ -49,7 +49,9 @@ enum class Benchmark : unsigned int {
     CryptoCrc32c,       // CRC32-C throughput (SSE4.2 CRC32 / ARM FEAT_CRC32)
     TransferBW,
     CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
-    MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM)
+    MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM + MLP + TLB)
+    Atomics,            // CPU atomic fetch-add: uncontended / contended (ns)
+    BranchPenalty,      // CPU branch mispredict penalty (ns)
     KernelLatency,
     COUNT
 };
@@ -115,6 +117,8 @@ inline Category categoryOf(Benchmark b)
 
     case Benchmark::KernelLatency:
     case Benchmark::MemoryLatency:
+    case Benchmark::Atomics:
+    case Benchmark::BranchPenalty:
         return Category::Latency;
 
     case Benchmark::COUNT:

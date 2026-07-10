@@ -24,7 +24,8 @@ local memory, DRAM ↔ global memory.
 - CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
 - Crypto throughput (AES / SHA-256 / SHA-512 / CRC32-C)? → `crypto.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
-- Memory (pointer-chase) latency? → `latency.cpp`
+- Memory (pointer-chase) latency / MLP / TLB page-walk? → `latency.cpp`
+- Atomics / branch-mispredict penalty? → `microarch.cpp`
 - **Kernel bodies** (fp32/fp64/int32/read/div/sqrt/intdiv; fp16/bf16/mp/int8/
   int16/fp8/bf16fma; AMX/NEON matrix; AES/SHA/CRC; SVE; SME)? → the
   `kernels/` sub-headers (see below)
@@ -55,7 +56,8 @@ local memory, DRAM ↔ global memory.
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` tests in GB/s (unit `gbps` with the category passed EXPLICITLY in the `TestSpec`, since `categoryFromUnit("gbps")` would file them under Bandwidth). Own `--crypto` category flag + per-test `--aes/--sha256/--sha512/--crc32c` flags |
 | `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_* ...)` (AMX / SMMLA / BFMMLA / SME); `Benchmark::Amx`, run in both fp and int phases. fp16 row on x86+arm64 (AMX-FP16 / SME); tf32/fp8 rows x86-only (AMX); fp32/fp64 rows arm64-only (SME) |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
-| `latency.cpp` | `runMemoryLatency` (random pointer-chase per cache level, ns) |
+| `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level (ns), plus the **MLP rows** (`DRAM x8`/`DRAM x32`: K staggered cursors on one Sattolo cycle; DRAM ÷ x32 = the memory-level-parallelism factor, ~27 on M1 Pro) and the **TLB-miss row** (one node per page across 16384 pages — beyond any L2 TLB — with the ~1 MB of node lines cache-resident, isolating "cache hit + page walk" from the DRAM row's "DRAM + page walk"; runtime page size, 16 KB on Apple) |
+| `microarch.cpp` | `runAtomics` (`Benchmark::Atomics`, `--atomics`): relaxed `fetch_add` in ns/op — `uncontended ST` (line in own L1) and `contended MT` (all cores on ONE line; system-wide wall/op).  `runBranchPenalty` (`Benchmark::BranchPenalty`, `--branch-penalty`, ST): sorted-vs-shuffled data-dependent branch; emits `predicted`/`random` ns/branch + derived `penalty` = delta ÷ 0.5 mispredicts/branch.  **The taken arm writes through `volatile`** so the branch can't be if-converted to csel/cmov (verified: hot loop is `tbnz` + conditional store; the store cost cancels between runs since both take the same elements) |
 
 ## Build
 
@@ -472,7 +474,12 @@ core counts. Memory-latency is `ST` only (pointer-chase); DRAM bandwidth emits
 `TestSpec`, since `categoryFromUnit("gbps")` would classify them as Bandwidth.
 The fp divide/sqrt rows are GFLOPS counting one divide/sqrt per lane (far below
 the FMA rows by design); the u64 integer divide is a single GOPS test with no
-per-ISA suffix.
+per-ISA suffix.  The atomics and branch-mispredict tests report ns per
+op/branch (they are cost probes, not throughput peaks); memory-latency's
+`DRAM x8`/`x32` rows are effective ns/access at that load depth, and `TLB miss`
+is cache-hit + page-walk ns.  A core-to-core latency test was considered and
+DROPPED (macOS has no hard pinning, so pair attribution is unreliable there);
+the contended-atomics row covers the fabric-serialization story instead.
 
 ## Reaching peak (investigation notes)
 
