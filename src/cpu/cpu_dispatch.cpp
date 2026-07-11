@@ -297,6 +297,9 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
   if (s->sha256.fn)   d.sha256 = s->sha256;
   if (s->sha512.fn)   d.sha512 = s->sha512;
   if (s->crc32c.fn)   d.crc32c = s->crc32c;
+  if (s->strscan.fn)       d.strscan = s->strscan;
+  if (s->strscan_istri.fn) d.strscan_istri = s->strscan_istri;
+  if (s->utf8.fn)          d.utf8 = s->utf8;
   if (s->div32.fn)    d.div32 = s->div32;
   if (s->div64.fn)    d.div64 = s->div64;
   if (s->sqrt32.fn)   d.sqrt32 = s->sqrt32;
@@ -495,15 +498,33 @@ const CpuKernelMenu &kernelMenu()
       if (f.fp16)    add(m.fp16, t->fp16, "NEON FP16");
       if (f.dotprod) add(m.int8dp, t->int8dp, "NEON DotProd");
       if (f.fp16fml) add(m.mp, t->mp, "NEON FP16FML");
+      // String kernels: the floor's byte scan (SSE2 cmpeq+movemask on x86,
+      // NEON cmeq+umaxv on arm64; no scalar kernel exists) and, on ARM only,
+      // the TBL-based utf8 validator.  The x86 utf8 baseline row is the sse42
+      // TU's SSSE3 kernel instead: a Linux/Windows generic TU has no SSSE3 at
+      // all, and the Apple-Intel generic TU (penryn floor) does compile the
+      // SSSE3 kernel -- pushing it from here would emit a duplicate row with
+      // a wrong "SSE2" label.
+      add(m.strscan, t->strscan, genIsa);
+#if defined(CLPEAK_ARM)
+      add(m.utf8, t->utf8, genIsa);
+#endif
     }
 #endif
 #if CLPEAK_TU_sse42
     if (f.sse42)
     {
-      add(m.int32, clpeak_table_sse42()->int32, "SSE4.2");  // fp32/fp64 == SSE2
+      const CpuKernelTable *t = clpeak_table_sse42();
+      add(m.int32, t->int32, "SSE4.2");  // fp32/fp64 == SSE2
       // The CRC32 instruction is part of SSE4.2, so the CRC32-C kernel rides
       // in this TU rather than a dedicated one (the ARM analogue is the crc TU).
-      if (f.crc32) add(m.crc32c, clpeak_table_sse42()->crc32c, "SSE4.2");
+      if (f.crc32) add(m.crc32c, t->crc32c, "SSE4.2");
+      // The PCMPISTRI scan is the sse42 TU's only strscan contribution (its
+      // generic cmpeq+movemask scan is codegen-identical to the SSE2 floor's);
+      // the utf8 validator needs PSHUFB, so its baseline x86 row rides here
+      // too (SSSE3 is implied by -msse4.2; f.sse42 covers the runtime gate).
+      add(m.strscan, t->strscan_istri, "SSE4.2 PCMPISTRI");
+      add(m.utf8, t->utf8, "SSSE3");
     }
 #endif
 #if CLPEAK_TU_avx2
@@ -511,6 +532,8 @@ const CpuKernelMenu &kernelMenu()
     {
       addBase(clpeak_table_avx2(), "AVX2+FMA");
       addDivSqrt(clpeak_table_avx2(), "AVX2");   // no FMA in a div/sqrt chain
+      add(m.strscan, clpeak_table_avx2()->strscan, "AVX2");
+      add(m.utf8, clpeak_table_avx2()->utf8, "AVX2");
     }
 #endif
 #if CLPEAK_TU_avx512
@@ -518,6 +541,8 @@ const CpuKernelMenu &kernelMenu()
     {
       addBase(clpeak_table_avx512(), "AVX-512");
       addDivSqrt(clpeak_table_avx512(), "AVX-512");
+      add(m.strscan, clpeak_table_avx512()->strscan, "AVX-512");   // VPCMPB+KOR
+      add(m.utf8, clpeak_table_avx512()->utf8, "AVX-512");         // 512-bit VPSHUFB
     }
 #endif
     // ---- x86 feature TUs (advanced dtypes only) ----
@@ -651,6 +676,7 @@ const CpuKernelMenu &kernelMenu()
       add(m.int32, t->int32, sveLbl);
       add(m.int8dp, t->int8dp, sveLbl);
       addDivSqrt(t, sveLbl);
+      add(m.strscan, t->strscan, sveLbl);   // predicate-OR scan (see sve_compute.h)
     }
 #endif
 #if CLPEAK_TU_svebf16

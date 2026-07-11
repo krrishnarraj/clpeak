@@ -87,6 +87,11 @@ struct CpuKernelTable {
   // so emitCompute's giga() yields GB/s) and the fp divide/sqrt + scalar u64
   // integer-divide chains (opsPerIter counts divides/sqrts per outer iteration).
   ChainVariant aes, sha256, sha512, crc32c;
+  // String kernels (opsPerIter counts BYTES per pass over the thread-local
+  // L1-resident buffer -> GB/s): memchr-style byte scan (plus the historical
+  // SSE4.2 PCMPISTRI form as its own variant) and UTF-8 lookup-shuffle
+  // validation (PSHUFB / TBL).
+  ChainVariant strscan, strscan_istri, utf8;
   ChainVariant div32, div64, sqrt32, sqrt64, intdiv;
   ReadFn       readsum = nullptr;
   const char  *isaName = "";
@@ -119,6 +124,9 @@ struct CpuKernelMenu {
   std::vector<IsaVariant> mat_fp16, mat_tf32, mat_fp8, bf16fma;
   std::vector<IsaVariant> int16dp, fp8dp, mat_fp32, mat_fp64;
   std::vector<IsaVariant> aes, sha256, sha512, crc32c;
+  // String tests: the PCMPISTRI kernel rides in the strscan menu as its own
+  // ISA row ("SSE4.2 PCMPISTRI"), next to the compare+movemask variants.
+  std::vector<IsaVariant> strscan, utf8;
   std::vector<IsaVariant> div32, div64, sqrt32, sqrt64;
   // (the SME streaming-SVE fp32/fp64 chains ride in the fp32/fp64 menus above,
   //  labeled "SSVE" -- they are just another ISA variant of those tests.

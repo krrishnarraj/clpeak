@@ -346,6 +346,50 @@ static double runSveFp8DpChain(uint64_t outer)
 }
 #endif // __ARM_FEATURE_FP8DOT4 && __ARM_FEATURE_SVE2
 
+// SVE strscan: the SVE variant of the memchr-style byte scan (buffer helpers
+// + CPU_STR_BARRIER come from string_compute.h, included before this header by
+// cpu_kernels_impl.h).  4 full vectors per step, predicate-OR tree, one
+// svptest per step; a whilelt tail covers non-power-of-two VLs.  (SVE also has
+// first-faulting loads -- the strlen facility -- but the length is known here,
+// so plain loads measure the compare machinery.)  opsPerIter is SCAN_BYTES,
+// VL-independent.
+#define CPU_HAS_SVE_STRSCAN 1
+static double runSveStrScanChain(uint64_t outer)
+{
+  const uint8_t *buf = scanBuf();
+  volatile uint8_t vneedle = SCAN_NEEDLE;
+  const uint8_t nb = vneedle;
+  const svbool_t pg = svptrue_b8();
+  const uint64_t vl = svcntb();
+  uint64_t found = 0;
+  for (uint64_t o = 0; o < outer; o++)
+  {
+    CPU_STR_BARRIER();
+    uint64_t i = 0;
+    for (; i + 4 * vl <= (uint64_t)SCAN_BYTES; i += 4 * vl)
+    {
+      svuint8_t v0 = svld1_u8(pg, buf + i);
+      svuint8_t v1 = svld1_u8(pg, buf + i + vl);
+      svuint8_t v2 = svld1_u8(pg, buf + i + 2 * vl);
+      svuint8_t v3 = svld1_u8(pg, buf + i + 3 * vl);
+      svbool_t m01 = svorr_b_z(pg, svcmpeq_n_u8(pg, v0, nb),
+                                   svcmpeq_n_u8(pg, v1, nb));
+      svbool_t m23 = svorr_b_z(pg, svcmpeq_n_u8(pg, v2, nb),
+                                   svcmpeq_n_u8(pg, v3, nb));
+      if (svptest_any(pg, svorr_b_z(pg, m01, m23)))              // never taken
+        found += i;
+    }
+    for (; i < (uint64_t)SCAN_BYTES; i += vl)
+    {
+      svbool_t lp = svwhilelt_b8(i, (uint64_t)SCAN_BYTES);
+      svuint8_t v = svld1_u8(lp, buf + i);
+      if (svptest_any(lp, svcmpeq_n_u8(lp, v, nb)))              // never taken
+        found += i;
+    }
+  }
+  return (double)found;
+}
+
 } // anonymous namespace
 } // namespace clpeak_cpu
 

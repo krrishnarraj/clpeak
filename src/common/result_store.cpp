@@ -16,6 +16,7 @@ const char *categoryString(Category c)
     case Category::FpCompute:  return "fp_compute";
     case Category::IntCompute: return "int_compute";
     case Category::Crypto:     return "crypto";
+    case Category::String:     return "string";
     case Category::Bandwidth:  return "bandwidth";
     case Category::Latency:    return "latency";
     case Category::Unknown:    return "";
@@ -40,6 +41,7 @@ Category categoryFromString(const std::string &s)
     if (s == "fp_compute")  return Category::FpCompute;
     if (s == "int_compute") return Category::IntCompute;
     if (s == "crypto")      return Category::Crypto;
+    if (s == "string")      return Category::String;
     if (s == "bandwidth")   return Category::Bandwidth;
     if (s == "latency")     return Category::Latency;
     return Category::Unknown;

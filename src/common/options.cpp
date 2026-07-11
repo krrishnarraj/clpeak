@@ -104,6 +104,7 @@ static const char *helpStr =
     "\n  --int-compute / --no-int-compute     integer compute (gops / tops)"
 #ifdef ENABLE_CPU
     "\n  --crypto      / --no-crypto          crypto/hash silicon (gbps)     [CPU]"
+    "\n  --string      / --no-string          string/text processing (gbps)  [CPU]"
 #endif
     "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (gbps)"
     "\n  --latency     / --no-latency         kernel-launch latency (us)"
@@ -156,6 +157,8 @@ static const char *helpStr =
     "\n  --sha256                          | --no-sha256                    [CPU: SHA-NI/ARM SHA2]"
     "\n  --sha512                          | --no-sha512                    [CPU: ARM SHA512]"
     "\n  --crc32c                          | --no-crc32c                    [CPU]"
+    "\n  --string-scan                     | --no-string-scan               [CPU: memchr-style]"
+    "\n  --utf8-validate                   | --no-utf8-validate             [CPU: PSHUFB/TBL]"
 #endif
     "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
     "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
@@ -232,6 +235,8 @@ static const TestFlag testFlags[] = {
   {"sha256",                    Benchmark::CryptoSha256},
   {"sha512",                    Benchmark::CryptoSha512},
   {"crc32c",                    Benchmark::CryptoCrc32c},
+  {"string-scan",               Benchmark::StringScan},
+  {"utf8-validate",             Benchmark::Utf8Validate},
   {"cache-bandwidth",           Benchmark::CacheBandwidth},
   {"memory-latency",            Benchmark::MemoryLatency},
   {"atomics",                   Benchmark::Atomics},
@@ -254,6 +259,7 @@ static const CategoryFlag categoryFlags[] = {
   {"fp-compute",  Category::FpCompute},
   {"int-compute", Category::IntCompute},
   {"crypto",      Category::Crypto},
+  {"string",      Category::String},
   {"bandwidth",   Category::Bandwidth},
   {"latency",     Category::Latency},
 };

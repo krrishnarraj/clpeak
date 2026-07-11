@@ -47,6 +47,8 @@ enum class Benchmark : unsigned int {
     CryptoSha256,       // SHA-256 compression throughput (SHA-NI / ARM FEAT_SHA256)
     CryptoSha512,       // SHA-512 compression throughput (ARM FEAT_SHA512)
     CryptoCrc32c,       // CRC32-C throughput (SSE4.2 CRC32 / ARM FEAT_CRC32)
+    StringScan,         // memchr-style SIMD byte scan, L1-resident (CPU; GB/s)
+    Utf8Validate,       // UTF-8 validation via lookup-shuffle PSHUFB/TBL (CPU; GB/s)
     TransferBW,
     CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
     MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM + MLP + TLB)
@@ -61,6 +63,7 @@ enum class Category {
     FpCompute,
     IntCompute,
     Crypto,       // fixed-function crypto/hash silicon (CPU: AES/SHA/CRC)
+    String,       // string/text processing (CPU: byte scan, UTF-8 validation)
     Bandwidth,
     Latency,
     Unknown
@@ -114,6 +117,10 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::CryptoSha512:
     case Benchmark::CryptoCrc32c:
         return Category::Crypto;
+
+    case Benchmark::StringScan:
+    case Benchmark::Utf8Validate:
+        return Category::String;
 
     case Benchmark::KernelLatency:
     case Benchmark::MemoryLatency:

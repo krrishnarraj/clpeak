@@ -12,7 +12,9 @@
 //                             / fp8-dot (NEON) / bf16-FMA
 //   kernels/matrix_compute.h  AMX (int8/bf16/fp16/tf32/fp8) + NEON SMMLA/BFMMLA
 //   kernels/crypto_compute.h  AES / SHA-256 / SHA-512 / CRC32-C
+//   kernels/string_compute.h  memchr-style byte scan + UTF-8 validation
 //   kernels/sve_compute.h     ARM SVE compute + SVE bf16/i8mm matrix + SVE fp8 dot
+//                             + SVE strscan (uses string_compute.h's buffers)
 //   kernels/sme_compute.h     ARM SME ZA outer products + streaming-SVE vectors
 //
 // cpu_simd.h selects the base SIMD path from the TU's flags, and each advanced
@@ -31,6 +33,7 @@
 #include "kernels/lowp_compute.h"
 #include "kernels/matrix_compute.h"
 #include "kernels/crypto_compute.h"
+#include "kernels/string_compute.h"   // must precede sve_compute.h (shared buffers)
 #include "kernels/sve_compute.h"
 #include "kernels/sme_compute.h"
 
@@ -111,6 +114,17 @@ static const CpuKernelTable *tuTable()
 #ifdef CPU_HAS_CRC32C_KERNEL
     t.crc32c = {runCrc32cChain, (double)INNER * CRC_NACC * CRC_OP_BYTES};
 #endif
+    // String kernels: opsPerIter is BYTES scanned/validated per outer iteration
+    // (one full pass over the thread-local L1-resident buffer -> GB/s).
+#ifdef CPU_HAS_STRSCAN_KERNEL
+    t.strscan = {runStrScanChain, (double)SCAN_BYTES};
+#endif
+#ifdef CPU_HAS_STRSCAN_ISTRI_KERNEL
+    t.strscan_istri = {runStrScanIstriChain, (double)SCAN_BYTES};
+#endif
+#ifdef CPU_HAS_UTF8_KERNEL
+    t.utf8 = {runUtf8Chain, (double)UTF8_BYTES};
+#endif
     // SVE overrides (vector-length-agnostic; ops derived from the runtime VL).
     // These win over the NEON base/advanced kernels the SVE TUs also compile:
     // a +sve TU still carries the NEON f32v path, but we want the SVE variant.
@@ -139,6 +153,9 @@ static const CpuKernelTable *tuTable()
 #endif
 #ifdef CPU_HAS_SVE_FP8DP_KERNEL
       t.fp8dp = {runSveFp8DpChain, (double)INNER * SVE_NACC_DOT * w * 8.0};
+#endif
+#ifdef CPU_HAS_SVE_STRSCAN
+      t.strscan = {runSveStrScanChain, (double)SCAN_BYTES};
 #endif
     }
 #endif

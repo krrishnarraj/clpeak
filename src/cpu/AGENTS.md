@@ -23,12 +23,13 @@ local memory, DRAM ↔ global memory.
 - INT compute (int32, int8 dot, int16 dot, u64 divide)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
 - Crypto throughput (AES / SHA-256 / SHA-512 / CRC32-C)? → `crypto.cpp`
+- String throughput (memchr-style scan / UTF-8 validate)? → `string.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
 - Memory (pointer-chase) latency / MLP / TLB page-walk? → `latency.cpp`
 - Atomics / branch-mispredict penalty? → `microarch.cpp`
 - **Kernel bodies** (fp32/fp64/int32/read/div/sqrt/intdiv; fp16/bf16/mp/int8/
-  int16/fp8/bf16fma; AMX/NEON matrix; AES/SHA/CRC; SVE; SME)? → the
-  `kernels/` sub-headers (see below)
+  int16/fp8/bf16fma; AMX/NEON matrix; AES/SHA/CRC; string scan/UTF-8; SVE;
+  SME)? → the `kernels/` sub-headers (see below)
 - **The list of feature TUs** (single source of truth)? → `cpu_tu_registry.h`
 
 ## Key Files
@@ -45,7 +46,8 @@ local memory, DRAM ↔ global memory.
 | **`kernels/crypto_compute.h`** | Crypto/hash throughput chains: AES-128 (AES-NI / VAES-512 / NEON AESE+AESMC), SHA-256 full compression (SHA-NI / NEON), SHA-512 full compression (NEON FEAT_SHA512 only -- no x86 kernel yet), CRC32-C (SSE4.2 / FEAT_CRC32). `opsPerIter` counts BYTES per outer iteration so `emitCompute()` lands in GB/s. A carry-less-multiply (PMULL/PCLMUL) test existed briefly and was REMOVED: its "GB/s of multiplied operands" was a made-up convention that dwarfed the DRAM-bandwidth rows (1.1 TB/s MT on M1 Pro) and read as misleading -- if the primitive returns, frame it as real GHASH GB/s or Gops. `CLPEAK_CORE_ONLY`-excluded |
 | **`kernels/lowp_compute.h`** | Low/mixed-precision compute: fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, int16 dot (x86 VPDPWSSD/WSUD), NEON fp8 dot (FEAT_FP8DOT4), AVX10.2 bf16 vector FMA. `#if`-gated per feature; whole file excluded under `CLPEAK_CORE_ONLY` |
 | **`kernels/matrix_compute.h`** | CPU matrix engines: x86 AMX (int8/bf16/fp16/tf32/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA. `CLPEAK_CORE_ONLY`-excluded |
-| **`kernels/sve_compute.h`** | ARM SVE (vector-length-agnostic) compute + SVE bf16/i8mm matrix + SVE2 fp8 dot. Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME` (an SME TU must never pick up non-streaming SVE — Apple has none), `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sve.h>` |
+| **`kernels/string_compute.h`** | String throughput (`Category::String`, GB/s over 16 KB thread-local L1-resident buffers): `strscan` = memchr-style byte scan (SSE2 / AVX2 / AVX-512BW cmpeq+movemask/KOR, NEON CMEQ+UMAXV, plus the historical SSE4.2 PCMPISTRI as its own `strscan_istri` slot) and `utf8` = Keiser-Lemire lookup-shuffle UTF-8 validation (SSSE3 / AVX2 / AVX-512BW PSHUFB, NEON TBL; tables validated against 32 valid/invalid edge cases incl. surrogates and overlongs).  `opsPerIter` counts BYTES per buffer pass.  `CLPEAK_CORE_ONLY`-excluded.  The kernels need a per-pass compiler memory barrier -- see the gotcha below |
+| **`kernels/sve_compute.h`** | ARM SVE (vector-length-agnostic) compute + SVE bf16/i8mm matrix + SVE2 fp8 dot + the SVE `strscan` variant (predicate-OR tree + one `svptest_any` per 4 vectors, `whilelt` tail for non-power-of-two VLs; reuses `string_compute.h`'s buffer helpers, so that header is included first). Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME` (an SME TU must never pick up non-streaming SVE — Apple has none), `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sve.h>` |
 | **`kernels/sme_compute.h`** | ARM SME (streaming matrix engine; Apple M4+, Oryon Gen 3): ZA outer products (fp32/fp64/bf16/fp16-widening/int8 — FMOPA/BFMOPA/SMOPA, 4 tiles like AMX; fp64 uses all 8 za.d tiles) + streaming-SVE fp32/fp64 vector chains. Gated on `__ARM_FEATURE_SME`, `CLPEAK_CORE_ONLY`-excluded; owns the one `#include <arm_sme.h>` |
 | **`cpu_tu_registry.h`** | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of every feature-TU tag. Drives the unconditional `clpeak_table_<tag>()` forward declarations in `cpu_dispatch.cpp` |
 | **`cpu_kernels_tu.cpp`** | Thin TU: `#include cpu_kernels_impl.h` + exports `clpeak_table_<tag>()`. CMake compiles it once per ISA (`generic`, `sse42`, `avx2`, `avxvnni`, `avxvnniint8`, `avxvnniint16`, `avx512[vnni\|bf16\|fp16]`, `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; crypto: `aes`, `vaes`, `sha`, `sha512`, `crc` — the `aes`/`sha`/`sha512` tags are shared between the x86 and ARM branches, only one arch builds each; `fp16`, `fp16fml`, `dotprod`, `bf16`, `i8mm`, `fp8dot`, `sve`, `svebf16`, `svei8mm`, `svefp8dot`, `sme`, `smef64`) with that ISA's flags |
@@ -54,6 +56,7 @@ local memory, DRAM ↔ global memory.
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` — `emitVariants(..., kernelMenu().fpXX, ...)` (one test per supported ISA). The fp8-dot row is arm64-only (`Benchmark::ComputeFP8DP`); `runComputeDivSqrt` emits four rows (fp32/fp64 divide + sqrt, `Benchmark::ComputeDivSqrt`). Kernel bodies live in the `kernels/` sub-headers |
 | `compute_int.cpp` | `runComputeInt32`/`runComputeInt8DP`/`runComputeInt16DP` (via `emitVariants` + `kernelMenu()`; the int16-dot row is x86-only, `Benchmark::ComputeInt16DP`) + `runComputeIntDiv` (scalar u64 DIV; single un-suffixed test read from `kernels().intdiv`, `Benchmark::ComputeIntDiv`) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` tests in GB/s (unit `gbps` with the category passed EXPLICITLY in the `TestSpec`, since `categoryFromUnit("gbps")` would file them under Bandwidth). Own `--crypto` category flag + per-test `--aes/--sha256/--sha512/--crc32c` flags |
+| `string.cpp` | `runStringScan/Utf8Validate` — `Category::String` tests in GB/s (same explicit-category convention as crypto). Own `--string` category flag + per-test `--string-scan/--utf8-validate` flags. Kernel bodies in `kernels/string_compute.h` (SVE scan in `kernels/sve_compute.h`) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_* ...)` (AMX / SMMLA / BFMMLA / SME); `Benchmark::Amx`, run in both fp and int phases. fp16 row on x86+arm64 (AMX-FP16 / SME); tf32/fp8 rows x86-only (AMX); fp32/fp64 rows arm64-only (SME) |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level (ns), plus the **MLP rows** (`DRAM x8`/`DRAM x32`: K staggered cursors on one Sattolo cycle; DRAM ÷ x32 = the memory-level-parallelism factor, ~27 on M1 Pro) and the **TLB-miss row** (one node per page across 16384 pages — beyond any L2 TLB — with the ~1 MB of node lines cache-resident, isolating "cache hit + page walk" from the DRAM row's "DRAM + page walk"; runtime page size, 16 KB on Apple) |
@@ -110,6 +113,10 @@ the safe baseline, so the binary never SIGILLs on an older CPU.
     The new matrix dtypes emit their own tests via extra `mat_fp16`/`mat_tf32`/
     `mat_fp8` menu slots (all under the same `Benchmark::Amx` gate, so no new enum),
     and the bf16 FMA via a `bf16fma` slot in the BF16 phase.
+    **x86 string rows**: the `generic` TU carries the SSE2 cmpeq+movemask scan;
+    the `sse42` TU contributes the PCMPISTRI scan variant and the SSSE3
+    (PSHUFB) utf8 kernel (its generic scan is codegen-identical to SSE2 and
+    not pushed); `avx2`/`avx512` push their own scan+utf8 rows.
     **x86 crypto TUs**: `aes` (`-maes`, AES-NI), `vaes` (AVX-512 core +
     `-mvaes`, the 512-bit EVEX form; menu-gated on `f.avx512f`
     for the OS ZMM grant), `sha` (`-mssse3 -msha`, SHA-NI).  x86 SHA512
@@ -423,6 +430,33 @@ Adding a TU (four edits, one per concern):
   `crc32cx`; x86 TUs codegen-verified via `-arch x86_64` cross-compile
   (aesenc/sha256rnds2+msg1/msg2/vaesenc-zmm/crc32q counts match).
   x86 SHA-NI / VAES / AVX-512 crypto numbers are NOT yet validated on silicon.
+- **String kernels: a loop-carried sink is NOT enough -- they need the per-pass
+  memory barrier, and their buffers must stay L1-resident.**  Unlike the
+  compute chains, a scan/validate pass is a pure function of a read-only
+  buffer: nothing stops LICM from hoisting the whole pass out of the outer
+  loop and multiplying (same collapse class as the linear FMLAL chain, but via
+  memory reuse instead of scalar evolution).  `CPU_STR_BARRIER()`
+  (`asm volatile("" ::: "memory")`) at the top of every pass makes the buffer
+  contents opaque, forcing a real re-scan; the found/error arms additionally
+  consume the compare results (clang if-converts the never-taken found-branch
+  to a `csel` -- fine, the compare is still consumed every step).  Buffers are
+  16 KB thread-local (each MT worker scans its own copy): big enough that the
+  outer-loop overhead vanishes, small enough to sit in every L1 -- these tests
+  measure the compare/shuffle machinery, NOT memory bandwidth.  Two data
+  constraints: haystack bytes are 1..254 because 0x00 is both the cmpeq needle
+  and PCMPISTRI's implicit terminator (PCMPISTRI cannot search for 0), and
+  0xFF is the PCMPISTRI needle; the utf8 buffer must be VALID UTF-8 ending on
+  a complete sequence (the reduced error sink doubles as a self-check -- 0 on
+  every run).  Menu trap: the utf8 push from the `generic` TU is ARM-only --
+  the Apple-Intel generic floor is `penryn` (has SSSE3), so pushing its utf8
+  slot would emit a duplicate row mislabeled "SSE2" next to the sse42 TU's
+  "SSSE3" row.  Verified on M1 Pro: scan 85 GB/s ST (26.6 B/cycle,
+  ~83% of the 4-vector-pipe bound), utf8 12 GB/s ST (~94% of the 16-vector-
+  ops-per-16B bound), both ~8x MT; hot loops are 4x(cmeq/orr)+umaxv and
+  3xTBL+3xEXT+2xUQSUB per block.  x86 (SSE2/PCMPISTRI/AVX2/AVX-512) and SVE
+  are codegen-verified only (pcmpeqb/pmovmskb, pcmpistri, vpcmpeqb, vpcmpeqb+
+  korq+kortestq, vpshufb/vpalignr/vpsubusb; SVE ld1b+cmpeq+orrs p+csel with a
+  whilelo tail) -- validate on x86/SVE silicon.
 - **DRAM bandwidth must beat the AGGREGATE LLC, not one L3 slice.** On multi-CCX/
   CCD AMD, `cpu0`'s L3 is one instance (e.g. 16 MB) but the chip total is
   `instances × that` (e.g. 64 MB). `detectCpuInfo` derives `l3TotalBytes` from
@@ -472,6 +506,9 @@ core counts. Memory-latency is `ST` only (pointer-chase); DRAM bandwidth emits
 `read`/`copy`/`triad`.  The crypto tests (`Category::Crypto`, `--crypto`) are
 `ST`/`MT` in GB/s — unit `gbps` with the category set explicitly in the
 `TestSpec`, since `categoryFromUnit("gbps")` would classify them as Bandwidth.
+The string tests (`Category::String`, `--string`: memchr-style scan + UTF-8
+validate) follow the same GB/s + explicit-category convention, measured over
+L1-resident buffers (see the string-kernel gotcha).
 The fp divide/sqrt rows are GFLOPS counting one divide/sqrt per lane (far below
 the FMA rows by design); the u64 integer divide is a single GOPS test with no
 per-ISA suffix.  The atomics and branch-mispredict tests report ns per

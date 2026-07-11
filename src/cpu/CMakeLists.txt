@@ -43,6 +43,7 @@ add_library(peak_cpu STATIC
     compute_int.cpp
     cpu_matrix.cpp
     crypto.cpp
+    string.cpp
     bandwidth.cpp
     latency.cpp
     microarch.cpp

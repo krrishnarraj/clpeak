@@ -169,6 +169,10 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::CryptoSha512)) runCryptoSha512(cfg);
   if (isAllowed(Benchmark::CryptoCrc32c)) runCryptoCrc32c(cfg);
 
+  // ---- String (SIMD text processing; GB/s over L1-resident buffers) ----
+  if (isAllowed(Benchmark::StringScan))   runStringScan(cfg);
+  if (isAllowed(Benchmark::Utf8Validate)) runUtf8Validate(cfg);
+
   // ---- Bandwidth ----
   // No TransferBW: on a CPU there is no host<->device bus, so a libc memcpy
   // measures the same DRAM path as the STREAM copy above (redundant).

@@ -134,6 +134,8 @@ public:
   int runCryptoSha256(benchmark_config_t &cfg);
   int runCryptoSha512(benchmark_config_t &cfg);
   int runCryptoCrc32c(benchmark_config_t &cfg);
+  int runStringScan(benchmark_config_t &cfg);
+  int runUtf8Validate(benchmark_config_t &cfg);
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);
   int runMemoryLatency(benchmark_config_t &cfg);
