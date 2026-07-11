@@ -1,6 +1,7 @@
 #ifdef ENABLE_CPU
 
 #include "cpu_kernels.h"
+#include "cpu_tu_registry.h"
 
 #include <cstdint>
 
@@ -69,6 +70,10 @@ static CpuFeatures detect()
   bool avxcpu  = (r[2] >> 28) & 1;
   f.sse42 = (r[2] >> 20) & 1;
   bool fma = (r[2] >> 12) & 1;
+  // Crypto (SSE-class, no OS XSTATE dependency): leaf 1 ECX bit 25 = AES-NI.
+  // The CRC32 instruction is part of SSE4.2.
+  f.aes   = (r[2] >> 25) & 1;
+  f.crc32 = f.sse42;
 
   // OS must have enabled SSE+AVX (XCR0 bits 1,2) and AVX-512 (bits 5,6,7).
   bool osAvx = false, osAvx512 = false;
@@ -86,6 +91,44 @@ static CpuFeatures detect()
     bool avx2 = (ebx >> 5) & 1;
     f.avx2 = avx2 && osAvx && avxcpu;
     f.fma  = fma && osAvx && avxcpu;
+    // Crypto: leaf 7 sub-leaf 0 EBX[29] = SHA-NI; ECX[9] = VAES (the 512-bit
+    // form additionally needs the AVX-512 OS grant -- checked via f.avx512f
+    // at the menu push, so gate it on osAvx512 here).
+    f.sha256 = (ebx >> 29) & 1;
+    f.vaes   = ((ecx >> 9) & 1) && osAvx512;
+    // AMX-FP8 is enumerated in leaf 7 sub-leaf 0 ECX bit 3 (unlike the other new
+    // AMX dtypes, which are in sub-leaf 1); execution is additionally gated by
+    // amx_tile + the XTILEDATA XSTATE grant, so a stray bit can't SIGILL.
+    f.amx_fp8 = (ecx >> 3) & 1;
+    // Leaf 7 sub-leaf 1 (bit positions per Intel ISA ref / klauspost-cpuid):
+    //   EAX[4]=AVX-VNNI, EAX[5]=AVX512-BF16, EAX[21]=AMX-FP16;
+    //   EDX[4]=AVX-VNNI-INT8, EDX[7]=AMX-TF32, EDX[19]=AVX10.
+    // AVX-VNNI / AVX-VNNI-INT8 are 256-bit VEX (OS AVX state only, no AVX-512).
+    {
+      uint32_t r1[4];
+      cpuidex(7, 1, r1);
+      uint32_t eax1 = r1[0], edx1 = r1[3];
+      f.avxvnni      = ((eax1 >> 4) & 1) && osAvx && avxcpu;
+      f.avxvnniint8  = ((edx1 >> 4) & 1) && osAvx && avxcpu;
+      f.avxvnniint16 = ((edx1 >> 10) & 1) && osAvx && avxcpu;  // EDX[10] (Intel ISA ref / klauspost-cpuid)
+      f.amx_fp16    = (eax1 >> 21) & 1;
+      f.amx_tf32    = (edx1 >> 7) & 1;
+      f.avx10       = (edx1 >> 19) & 1;
+      // Leaf 7 sub-leaf 1 EAX[0] = SHA512 (EVEX; Arrow/Lunar Lake).  Detection
+      // only today: no x86 SHA-512 kernel yet, so nothing consumes it -- wired
+      // so the future kernel only needs the TU + menu push.
+      f.sha512      = ((eax1 >> 0) & 1) && osAvx && avxcpu;
+      if (osAvx512) f.avx512bf16 = (eax1 >> 5) & 1;
+      // AVX10.2 512-bit: leaf 0x24 EBX low byte = version (>=2), bit 18 = 512-bit
+      // support.  512-bit AVX10 uses ZMM state, so require the AVX-512 OS grant.
+      if (f.avx10 && maxLeaf >= 0x24 && osAvx512)
+      {
+        uint32_t r24[4];
+        cpuidex(0x24, 0, r24);
+        uint32_t ver = r24[1] & 0xFF;
+        f.avx10_2_512 = (ver >= 2) && ((r24[1] >> 18) & 1);
+      }
+    }
     if (osAvx512)
     {
       f.avx512f  = (ebx >> 16) & 1;
@@ -97,8 +140,6 @@ static CpuFeatures detect()
       f.amx_bf16 = (edx >> 22) & 1;
       f.amx_tile = (edx >> 24) & 1;
       f.amx_int8 = (edx >> 25) & 1;
-      cpuidex(7, 1, r);
-      f.avx512bf16 = (r[0] >> 5) & 1;
     }
   }
 #elif defined(CLPEAK_ARM)
@@ -116,6 +157,21 @@ static CpuFeatures detect()
   f.fp16fml = hw & (1UL << 23);  // ASIMDFHM
   f.bf16    = hw2 & (1UL << 14); // BF16
   f.i8mm    = hw2 & (1UL << 13); // I8MM
+  f.sve     = hw & (1UL << 22);  // HWCAP_SVE
+  f.sve2    = hw2 & (1UL << 1);  // HWCAP2_SVE2
+  f.svei8mm = hw2 & (1UL << 9);  // HWCAP2_SVEI8MM
+  f.svebf16 = hw2 & (1UL << 12); // HWCAP2_SVEBF16
+  // SME: the kernel only sets these once it supports the ZA/streaming state,
+  // so a set bit implies both the hardware and the OS context handling.
+  f.sme       = hw2 & (1UL << 23); // HWCAP2_SME
+  f.smeF64F64 = hw2 & (1UL << 25); // HWCAP2_SME_F64F64
+  f.sme2      = hw2 & (1UL << 37); // HWCAP2_SME2
+  f.fp8dot4   = hw2 & (1UL << 53); // HWCAP2_F8DP4
+  // Crypto extensions (all in the base HWCAP word)
+  f.aes    = hw & (1UL << 3);    // HWCAP_AES
+  f.sha256 = hw & (1UL << 6);    // HWCAP_SHA2
+  f.crc32  = hw & (1UL << 7);    // HWCAP_CRC32
+  f.sha512 = hw & (1UL << 21);   // HWCAP_SHA512
 #elif defined(__APPLE__)
   auto sc = [](const char *n) {
     int v = 0; size_t s = sizeof(v);
@@ -126,6 +182,17 @@ static CpuFeatures detect()
   f.fp16fml = sc("hw.optional.arm.FEAT_FHM");
   f.bf16    = sc("hw.optional.arm.FEAT_BF16");
   f.i8mm    = sc("hw.optional.arm.FEAT_I8MM");
+  // SME (M4+; replaced Apple's private AMX).  No non-streaming SVE exists on
+  // Apple Silicon, so f.sve/sve2 stay false and only the SME paths light up.
+  f.sme       = sc("hw.optional.arm.FEAT_SME");
+  f.sme2      = sc("hw.optional.arm.FEAT_SME2");
+  f.smeF64F64 = sc("hw.optional.arm.FEAT_SME_F64F64");
+  f.fp8dot4   = sc("hw.optional.arm.FEAT_FP8DOT4");  // none ship it yet; future-proof
+  // Crypto extensions (present on every Apple Silicon part; keys verified on M1)
+  f.aes    = sc("hw.optional.arm.FEAT_AES");
+  f.sha256 = sc("hw.optional.arm.FEAT_SHA256");
+  f.sha512 = sc("hw.optional.arm.FEAT_SHA512");
+  f.crc32  = sc("hw.optional.arm.FEAT_CRC32");
 #elif defined(_WIN32)
   // Windows has no IsProcessorFeaturePresent() constant for most of these,
   // but the kernel exports the (sanitised) AArch64 ID registers as REG_QWORD
@@ -149,6 +216,18 @@ static CpuFeatures detect()
   f.fp16fml = ((isar0 >> 48) & 0xF) >= 1;  // ISAR0.FHM  (FEAT_FHM)
   f.bf16    = ((isar1 >> 44) & 0xF) >= 1;  // ISAR1.BF16 (FEAT_BF16)
   f.i8mm    = ((isar1 >> 52) & 0xF) >= 1;  // ISAR1.I8MM (FEAT_I8MM)
+  // Crypto: ISAR0.AES (>=1), ISAR0.SHA2 (1 = SHA-256, 2 = +SHA-512),
+  // ISAR0.CRC32.
+  f.aes     = ((isar0 >> 4) & 0xF) >= 1;
+  f.sha256  = ((isar0 >> 12) & 0xF) >= 1;
+  f.sha512  = ((isar0 >> 12) & 0xF) >= 2;
+  f.crc32   = ((isar0 >> 16) & 0xF) >= 1;
+  // No SVE/SME on Windows: clang's MSVC C++ ABI can't mangle the SVE/SME
+  // sizeless types, so <arm_sve.h>/<arm_sme.h> won't compile and no SVE/SME TU
+  // is built (see CMakeLists.txt).  Detecting them here would only make the
+  // device header claim features with no test rows, so leave f.sve/sve2/sme
+  // false until that toolchain gap closes (then read ID_AA64ZFR0/SMFR0 from
+  // the registry, "CP 4024"/"CP 4045", to match).
 #endif
 #endif // __aarch64__ || _M_ARM64
 #endif
@@ -204,59 +283,42 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
   if (s->int8dp.fn)   d.int8dp = s->int8dp;
   if (s->mat_int8.fn) d.mat_int8 = s->mat_int8;
   if (s->mat_fp.fn)   d.mat_fp = s->mat_fp;
+  if (s->mat_fp16.fn) d.mat_fp16 = s->mat_fp16;
+  if (s->mat_tf32.fn) d.mat_tf32 = s->mat_tf32;
+  if (s->mat_fp8.fn)  d.mat_fp8 = s->mat_fp8;
+  if (s->bf16fma.fn)  d.bf16fma = s->bf16fma;
+  if (s->int16dp.fn)  d.int16dp = s->int16dp;
+  if (s->fp8dp.fn)    d.fp8dp = s->fp8dp;
+  if (s->mat_fp32.fn) d.mat_fp32 = s->mat_fp32;
+  if (s->mat_fp64.fn) d.mat_fp64 = s->mat_fp64;
+  if (s->ssve_fp32.fn) d.ssve_fp32 = s->ssve_fp32;
+  if (s->ssve_fp64.fn) d.ssve_fp64 = s->ssve_fp64;
+  if (s->aes.fn)      d.aes = s->aes;
+  if (s->sha256.fn)   d.sha256 = s->sha256;
+  if (s->sha512.fn)   d.sha512 = s->sha512;
+  if (s->crc32c.fn)   d.crc32c = s->crc32c;
+  if (s->strscan.fn)       d.strscan = s->strscan;
+  if (s->strscan_istri.fn) d.strscan_istri = s->strscan_istri;
+  if (s->utf8.fn)          d.utf8 = s->utf8;
+  if (s->div32.fn)    d.div32 = s->div32;
+  if (s->div64.fn)    d.div64 = s->div64;
+  if (s->sqrt32.fn)   d.sqrt32 = s->sqrt32;
+  if (s->sqrt64.fn)   d.sqrt64 = s->sqrt64;
+  if (s->intdiv.fn)   d.intdiv = s->intdiv;
   if (s->readsum)     d.readsum = s->readsum;
+  if (s->sveVLBytes)  d.sveVLBytes = s->sveVLBytes;
+  if (s->smeSVLBytes) d.smeSVLBytes = s->smeSVLBytes;
 }
 
 } // anonymous namespace
 
 // ---- TU accessors (defined in each compiled cpu_kernels_tu.cpp) ------------
+// Declared unconditionally from the TU registry: a declaration for a TU CMake
+// didn't build is harmless (the symbol is never referenced -- every call site in
+// kernels()/kernelMenu() is guarded by #if CLPEAK_TU_<tag>).
 #define DECL_TU(tag) extern "C" const CpuKernelTable *clpeak_table_##tag();
-#if CLPEAK_NATIVE_BUILD
-DECL_TU(native)
-#else
-#if CLPEAK_TU_generic
-DECL_TU(generic)
-#endif
-#if CLPEAK_TU_sse42
-DECL_TU(sse42)
-#endif
-#if CLPEAK_TU_avx2
-DECL_TU(avx2)
-#endif
-#if CLPEAK_TU_avx512
-DECL_TU(avx512)
-#endif
-#if CLPEAK_TU_avx512vnni
-DECL_TU(avx512vnni)
-#endif
-#if CLPEAK_TU_avx512bf16
-DECL_TU(avx512bf16)
-#endif
-#if CLPEAK_TU_avx512fp16
-DECL_TU(avx512fp16)
-#endif
-#if CLPEAK_TU_amx
-DECL_TU(amx)
-#endif
-#if CLPEAK_TU_neon
-DECL_TU(neon)
-#endif
-#if CLPEAK_TU_fp16
-DECL_TU(fp16)
-#endif
-#if CLPEAK_TU_fp16fml
-DECL_TU(fp16fml)
-#endif
-#if CLPEAK_TU_dotprod
-DECL_TU(dotprod)
-#endif
-#if CLPEAK_TU_bf16
-DECL_TU(bf16)
-#endif
-#if CLPEAK_TU_i8mm
-DECL_TU(i8mm)
-#endif
-#endif // CLPEAK_NATIVE_BUILD
+CLPEAK_TU_REGISTRY(DECL_TU)
+#undef DECL_TU
 
 const CpuFeatures &cpuFeatures()
 {
@@ -270,6 +332,8 @@ const char *isaName()
   if (f.avx512f) return "AVX-512";
   if (f.avx2)    return "AVX2+FMA";
   if (f.sse42)   return "SSE4.2";
+  if (f.sve2)    return "SVE2";
+  if (f.sve)     return "SVE";
   if (f.neon)    return "NEON";
   return "scalar";
 }
@@ -280,9 +344,6 @@ const CpuKernelTable &kernels()
     CpuKernelTable t{};
     const CpuFeatures &f = cpuFeatures();
     (void)f;
-#if CLPEAK_NATIVE_BUILD
-    merge(t, clpeak_table_native());   // native build: trust build==run host
-#else
     // Merge supported TUs from baseline up, so the widest variant wins per kernel.
 #if CLPEAK_TU_generic
     merge(t, clpeak_table_generic());     // ungated floor (SSE2 x86 / NEON arm / scalar)
@@ -290,11 +351,19 @@ const CpuKernelTable &kernels()
 #if CLPEAK_TU_sse42
     if (f.sse42) merge(t, clpeak_table_sse42());
 #endif
-#if CLPEAK_TU_neon
-    if (f.neon) merge(t, clpeak_table_neon());
-#endif
 #if CLPEAK_TU_avx2
     if (f.avx2 && f.fma) merge(t, clpeak_table_avx2());
+#endif
+#if CLPEAK_TU_avxvnni
+    // Before avx512 so a wider AVX-512 base kernel still wins per-slot; the
+    // avxvnni TU's real contribution is its 256-bit int8dp (Alder Lake+ etc.).
+    if (f.avxvnni && f.avx2 && f.fma) merge(t, clpeak_table_avxvnni());
+#endif
+#if CLPEAK_TU_avxvnniint8
+    if (f.avxvnniint8 && f.avx2 && f.fma) merge(t, clpeak_table_avxvnniint8());
+#endif
+#if CLPEAK_TU_avxvnniint16
+    if (f.avxvnniint16 && f.avx2 && f.fma) merge(t, clpeak_table_avxvnniint16());
 #endif
 #if CLPEAK_TU_avx512
     if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq) merge(t, clpeak_table_avx512());
@@ -311,6 +380,18 @@ const CpuKernelTable &kernels()
 #if CLPEAK_TU_amx
     if (f.amx_tile && f.amx_int8 && f.amx_bf16 && amxPermOk()) merge(t, clpeak_table_amx());
 #endif
+#if CLPEAK_TU_amxfp16
+    if (f.amx_tile && f.amx_fp16 && amxPermOk()) merge(t, clpeak_table_amxfp16());
+#endif
+#if CLPEAK_TU_amxtf32
+    if (f.amx_tile && f.amx_tf32 && amxPermOk()) merge(t, clpeak_table_amxtf32());
+#endif
+#if CLPEAK_TU_amxfp8
+    if (f.amx_tile && f.amx_fp8 && amxPermOk()) merge(t, clpeak_table_amxfp8());
+#endif
+#if CLPEAK_TU_avx10bf16
+    if (f.avx10_2_512) merge(t, clpeak_table_avx10bf16());
+#endif
 #if CLPEAK_TU_fp16
     if (f.fp16) merge(t, clpeak_table_fp16());
 #endif
@@ -326,11 +407,44 @@ const CpuKernelTable &kernels()
 #if CLPEAK_TU_i8mm
     if (f.i8mm) merge(t, clpeak_table_i8mm());
 #endif
-#endif // CLPEAK_NATIVE_BUILD
+#if CLPEAK_TU_sve
+    if (f.sve) merge(t, clpeak_table_sve());
+#endif
+#if CLPEAK_TU_svebf16
+    if (f.sve && f.svebf16) merge(t, clpeak_table_svebf16());
+#endif
+#if CLPEAK_TU_svei8mm
+    if (f.sve && f.svei8mm) merge(t, clpeak_table_svei8mm());
+#endif
+    // The fp8dot/svefp8dot and SME TUs are deliberately NOT merged here.
+    // kernels() only feeds the bandwidth path (readsum) and those TUs add
+    // nothing there -- and their -march exceeds the platform floor, so their
+    // base-kernel codegen must never be selectable via a narrower feature gate
+    // (e.g. the SME TU on Apple must not contribute anything non-streaming).
+    // They are menu-push-only: kernelMenu() reads their specific slots.
     t.isaName = isaName();
     return t;
   }();
   return sel;
+}
+
+// Active SVE vector length in bytes (svcntb() captured by the SVE TU's table),
+// 0 when the running host has no SVE.  Used for the "SVE2 (VL=256b)" header.
+int sveVLBytes()
+{
+  return kernels().sveVLBytes;
+}
+
+// Active SME streaming vector length in bytes (svcntsb() captured by the SME
+// TU's table).  Read directly from that TU -- the SME TUs are never merged
+// into kernels() (see above).  0 when the host has no SME or no SME TU built.
+int smeSVLBytes()
+{
+#if CLPEAK_TU_sme
+  if (cpuFeatures().sme)
+    return clpeak_table_sme()->smeSVLBytes;
+#endif
+  return 0;
 }
 
 // ---- Run-all menu: every supported variant, baseline-first -----------------
@@ -355,19 +469,16 @@ const CpuKernelMenu &kernelMenu()
       add(m.fp64, t->fp64, isa);
       add(m.int32, t->int32, isa);
     };
+    // Divide/sqrt ride with the same tier TUs (they go through cpu_simd.h /
+    // the SVE kernels).  Not part of addBase: the sse42 TU pushes int32 only,
+    // and its div/sqrt codegen is identical to the SSE2 floor's.
+    auto addDivSqrt = [&](const CpuKernelTable *t, const char *isa) {
+      add(m.div32, t->div32, isa);
+      add(m.div64, t->div64, isa);
+      add(m.sqrt32, t->sqrt32, isa);
+      add(m.sqrt64, t->sqrt64, isa);
+    };
 
-#if CLPEAK_NATIVE_BUILD
-    // Single native TU: trust build==run host, label everything the runtime ISA.
-    const CpuKernelTable *t = clpeak_table_native();
-    const char *isa = isaName();
-    addBase(t, isa);
-    add(m.fp16, t->fp16, isa);
-    add(m.bf16, t->bf16, isa);
-    add(m.mp, t->mp, isa);
-    add(m.int8dp, t->int8dp, isa);
-    add(m.mat_int8, t->mat_int8, isa);
-    add(m.mat_fp, t->mat_fp, isa);
-#else
     // ---- x86 tier TUs (base dtypes) ----
 #if CLPEAK_TU_generic
     // The ungated floor: SSE2 on x86, NEON on aarch64, scalar elsewhere.
@@ -381,27 +492,89 @@ const CpuKernelMenu &kernelMenu()
     {
       const CpuKernelTable *t = clpeak_table_generic();
       addBase(t, genIsa);
+      addDivSqrt(t, genIsa);
       // On Apple the generic (apple-m1) floor also carries the advanced NEON
       // dtypes; push whatever it actually provides, labeled by feature.
       if (f.fp16)    add(m.fp16, t->fp16, "NEON FP16");
       if (f.dotprod) add(m.int8dp, t->int8dp, "NEON DotProd");
       if (f.fp16fml) add(m.mp, t->mp, "NEON FP16FML");
+      // String kernels: the floor's byte scan (SSE2 cmpeq+movemask on x86,
+      // NEON cmeq+umaxv on arm64; no scalar kernel exists) and, on ARM only,
+      // the TBL-based utf8 validator.  The x86 utf8 baseline row is the sse42
+      // TU's SSSE3 kernel instead: a Linux/Windows generic TU has no SSSE3 at
+      // all, and the Apple-Intel generic TU (penryn floor) does compile the
+      // SSSE3 kernel -- pushing it from here would emit a duplicate row with
+      // a wrong "SSE2" label.
+      add(m.strscan, t->strscan, genIsa);
+#if defined(CLPEAK_ARM)
+      add(m.utf8, t->utf8, genIsa);
+#endif
     }
 #endif
 #if CLPEAK_TU_sse42
-    if (f.sse42) add(m.int32, clpeak_table_sse42()->int32, "SSE4.2");  // fp32/fp64 == SSE2
+    if (f.sse42)
+    {
+      const CpuKernelTable *t = clpeak_table_sse42();
+      add(m.int32, t->int32, "SSE4.2");  // fp32/fp64 == SSE2
+      // The CRC32 instruction is part of SSE4.2, so the CRC32-C kernel rides
+      // in this TU rather than a dedicated one (the ARM analogue is the crc TU).
+      if (f.crc32) add(m.crc32c, t->crc32c, "SSE4.2");
+      // The PCMPISTRI scan is the sse42 TU's only strscan contribution (its
+      // generic cmpeq+movemask scan is codegen-identical to the SSE2 floor's);
+      // the utf8 validator needs PSHUFB, so its baseline x86 row rides here
+      // too (SSSE3 is implied by -msse4.2; f.sse42 covers the runtime gate).
+      add(m.strscan, t->strscan_istri, "SSE4.2 PCMPISTRI");
+      add(m.utf8, t->utf8, "SSSE3");
+    }
 #endif
 #if CLPEAK_TU_avx2
-    if (f.avx2 && f.fma) addBase(clpeak_table_avx2(), "AVX2+FMA");
+    if (f.avx2 && f.fma)
+    {
+      addBase(clpeak_table_avx2(), "AVX2+FMA");
+      addDivSqrt(clpeak_table_avx2(), "AVX2");   // no FMA in a div/sqrt chain
+      add(m.strscan, clpeak_table_avx2()->strscan, "AVX2");
+      add(m.utf8, clpeak_table_avx2()->utf8, "AVX2");
+    }
 #endif
 #if CLPEAK_TU_avx512
     if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq)
+    {
       addBase(clpeak_table_avx512(), "AVX-512");
+      addDivSqrt(clpeak_table_avx512(), "AVX-512");
+      add(m.strscan, clpeak_table_avx512()->strscan, "AVX-512");   // VPCMPB+KOR
+      add(m.utf8, clpeak_table_avx512()->utf8, "AVX-512");         // 512-bit VPSHUFB
+    }
 #endif
     // ---- x86 feature TUs (advanced dtypes only) ----
+#if CLPEAK_TU_avxvnni
+    // 256-bit AVX-VNNI int8 dot -- the client-x86 int8 path (Alder Lake+, Zen 5,
+    // Sierra Forest have no AVX-512).  Baseline-first: pushed before the 512-bit
+    // VNNI variant below.  The VNNI TUs also carry the int16 dot (VPDPWSSD has
+    // shipped with VNNI from the start).
+    if (f.avxvnni && f.avx2 && f.fma)
+    {
+      const CpuKernelTable *t = clpeak_table_avxvnni();
+      add(m.int8dp, t->int8dp, "AVX-VNNI");
+      add(m.int16dp, t->int16dp, "AVX-VNNI");
+    }
+#endif
+#if CLPEAK_TU_avxvnniint8
+    if (f.avxvnniint8 && f.avx2 && f.fma)
+      add(m.int8dp, clpeak_table_avxvnniint8()->int8dp, "AVX-VNNI-INT8");
+#endif
+#if CLPEAK_TU_avxvnniint16
+    // AVX-VNNI-INT16 (Diamond Rapids, Nova Lake): the mixed-sign int16 dot
+    // (VPDPWSUD) as its own ISA row next to the classic VNNI VPDPWSSD.
+    if (f.avxvnniint16 && f.avx2 && f.fma)
+      add(m.int16dp, clpeak_table_avxvnniint16()->int16dp, "AVX-VNNI-INT16");
+#endif
 #if CLPEAK_TU_avx512vnni
     if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512vnni)
-      add(m.int8dp, clpeak_table_avx512vnni()->int8dp, "AVX-512 VNNI");
+    {
+      const CpuKernelTable *t = clpeak_table_avx512vnni();
+      add(m.int8dp, t->int8dp, "AVX-512 VNNI");
+      add(m.int16dp, t->int16dp, "AVX-512 VNNI");
+    }
 #endif
 #if CLPEAK_TU_avx512bf16
     if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512bf16)
@@ -418,6 +591,49 @@ const CpuKernelMenu &kernelMenu()
       add(m.mat_int8, t->mat_int8, "AMX");
       add(m.mat_fp, t->mat_fp, "AMX");
     }
+#endif
+#if CLPEAK_TU_amxfp16
+    if (f.amx_tile && f.amx_fp16 && amxPermOk())
+      add(m.mat_fp16, clpeak_table_amxfp16()->mat_fp16, "AMX FP16");
+#endif
+#if CLPEAK_TU_amxtf32
+    if (f.amx_tile && f.amx_tf32 && amxPermOk())
+      add(m.mat_tf32, clpeak_table_amxtf32()->mat_tf32, "AMX TF32");
+#endif
+#if CLPEAK_TU_amxfp8
+    if (f.amx_tile && f.amx_fp8 && amxPermOk())
+      add(m.mat_fp8, clpeak_table_amxfp8()->mat_fp8, "AMX FP8");
+#endif
+#if CLPEAK_TU_avx10bf16
+    if (f.avx10_2_512)
+      add(m.bf16fma, clpeak_table_avx10bf16()->bf16fma, "AVX10.2");
+#endif
+    // ---- Crypto TUs (x86: AES-NI, VAES-512, SHA-NI;
+    //      ARM: FEAT_AES, FEAT_SHA256, FEAT_SHA512, FEAT_CRC32) ----
+#if CLPEAK_TU_aes
+#if defined(CLPEAK_X86)
+    if (f.aes) add(m.aes, clpeak_table_aes()->aes, "AES-NI");
+#else
+    if (f.aes) add(m.aes, clpeak_table_aes()->aes, "NEON AES");
+#endif
+#endif
+#if CLPEAK_TU_vaes
+    // The 512-bit EVEX form needs the AVX-512 OS grant (f.avx512f includes it).
+    if (f.vaes && f.avx512f)
+      add(m.aes, clpeak_table_vaes()->aes, "VAES-512");
+#endif
+#if CLPEAK_TU_sha
+#if defined(CLPEAK_X86)
+    if (f.sha256) add(m.sha256, clpeak_table_sha()->sha256, "SHA-NI");
+#else
+    if (f.sha256) add(m.sha256, clpeak_table_sha()->sha256, "NEON SHA2");
+#endif
+#endif
+#if CLPEAK_TU_sha512
+    if (f.sha512) add(m.sha512, clpeak_table_sha512()->sha512, "NEON SHA512");
+#endif
+#if CLPEAK_TU_crc
+    if (f.crc32) add(m.crc32c, clpeak_table_crc()->crc32c, "ARMv8 CRC32");
 #endif
     // ---- ARM feature TUs (advanced dtypes only; base == generic NEON) ----
 #if CLPEAK_TU_fp16
@@ -442,7 +658,65 @@ const CpuKernelMenu &kernelMenu()
 #if CLPEAK_TU_i8mm
     if (f.i8mm) add(m.mat_int8, clpeak_table_i8mm()->mat_int8, "SMMLA");  // FEAT_I8MM matrix instr
 #endif
-#endif // CLPEAK_NATIVE_BUILD
+#if CLPEAK_TU_fp8dot
+    // Native fp8 4-way dot -> fp32 (FEAT_FP8DOT4; NVIDIA Vera first).
+    if (f.fp8dot4) add(m.fp8dp, clpeak_table_fp8dot()->fp8dp, "NEON FP8");
+#endif
+    // ---- ARM SVE (vector-length-agnostic; own base compute + advanced dtypes) ----
+    // Base compute labeled SVE2 vs SVE by the runtime feature; the matrix/dot
+    // feature TUs are tagged by their instruction (parallel to NEON BFMMLA/SMMLA)
+    // with an "SVE " prefix so their rows stay distinct from the NEON variants.
+#if CLPEAK_TU_sve
+    if (f.sve)
+    {
+      const char *sveLbl = f.sve2 ? "SVE2" : "SVE";
+      const CpuKernelTable *t = clpeak_table_sve();
+      add(m.fp32, t->fp32, sveLbl);
+      add(m.fp64, t->fp64, sveLbl);
+      add(m.int32, t->int32, sveLbl);
+      add(m.int8dp, t->int8dp, sveLbl);
+      addDivSqrt(t, sveLbl);
+      add(m.strscan, t->strscan, sveLbl);   // predicate-OR scan (see sve_compute.h)
+    }
+#endif
+#if CLPEAK_TU_svebf16
+    if (f.sve && f.svebf16)
+    {
+      const CpuKernelTable *t = clpeak_table_svebf16();
+      add(m.bf16, t->bf16, "SVE BF16");
+      add(m.mat_fp, t->mat_fp, "SVE BFMMLA");
+    }
+#endif
+#if CLPEAK_TU_svei8mm
+    if (f.sve && f.svei8mm)
+      add(m.mat_int8, clpeak_table_svei8mm()->mat_int8, "SVE SMMLA");
+#endif
+#if CLPEAK_TU_svefp8dot
+    if (f.sve && f.sve2 && f.fp8dot4)
+      add(m.fp8dp, clpeak_table_svefp8dot()->fp8dp, "SVE2 FP8");
+#endif
+    // ---- ARM SME (streaming; Apple M4+, Snapdragon X2 / 8 Elite Gen 5) ----
+    // ZA outer products go to the matrix slots (SME is the ARM analogue of AMX,
+    // labeled by the instruction like BFMMLA/SMMLA are), and the streaming-SVE
+    // vector chains ride the base fp32/fp64 menus as an "SSVE" ISA variant.
+    // Note the SME unit is shared per cluster on all current cores, so the MT
+    // rows scale with cluster count, not core count.
+#if CLPEAK_TU_sme
+    if (f.sme)
+    {
+      const CpuKernelTable *t = clpeak_table_sme();
+      add(m.fp32, t->ssve_fp32, "SSVE");
+      add(m.fp64, t->ssve_fp64, "SSVE");
+      add(m.mat_fp32, t->mat_fp32, "SME FMOPA");
+      add(m.mat_fp, t->mat_fp, "SME BFMOPA");
+      add(m.mat_fp16, t->mat_fp16, "SME FMOPA-FP16");
+      add(m.mat_int8, t->mat_int8, "SME SMOPA");
+    }
+#endif
+#if CLPEAK_TU_smef64
+    if (f.sme && f.smeF64F64)
+      add(m.mat_fp64, clpeak_table_smef64()->mat_fp64, "SME FMOPA-FP64");
+#endif
     return m;
   }();
   return menu;

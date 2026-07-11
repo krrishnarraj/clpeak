@@ -27,7 +27,11 @@ enum class Benchmark : unsigned int {
     ComputeChar,
     ComputeShort,
     ComputeInt8DP,
+    ComputeInt16DP,     // int16 dot product (x86 VPDPWSSD / AVX-VNNI-INT16)
     ComputeBF16,
+    ComputeFP8DP,       // fp8 dot product (ARM FEAT_FP8DOT4)
+    ComputeDivSqrt,     // fp divide + sqrt throughput (CPU)
+    ComputeIntDiv,      // scalar u64 integer divide throughput (CPU)
     CoopMatrix,
     Wmma,
     SimdgroupMatrix,
@@ -39,9 +43,17 @@ enum class Benchmark : unsigned int {
     JointMatrix,
     Onemkl,
     Amx,                // CPU matrix engine (Intel AMX / ARM I8MM)
+    CryptoAes,          // AES-128 encrypt throughput (AES-NI / VAES-512 / ARM FEAT_AES)
+    CryptoSha256,       // SHA-256 compression throughput (SHA-NI / ARM FEAT_SHA256)
+    CryptoSha512,       // SHA-512 compression throughput (ARM FEAT_SHA512)
+    CryptoCrc32c,       // CRC32-C throughput (SSE4.2 CRC32 / ARM FEAT_CRC32)
+    StringScan,         // memchr-style SIMD byte scan, L1-resident (CPU; GB/s)
+    Utf8Validate,       // UTF-8 validation via lookup-shuffle PSHUFB/TBL (CPU; GB/s)
     TransferBW,
     CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
-    MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM)
+    MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM + MLP + TLB)
+    Atomics,            // CPU atomic fetch-add: uncontended / contended (ns)
+    BranchPenalty,      // CPU branch mispredict penalty (ns)
     KernelLatency,
     COUNT
 };
@@ -50,6 +62,8 @@ enum class Benchmark : unsigned int {
 enum class Category {
     FpCompute,
     IntCompute,
+    Crypto,       // fixed-function crypto/hash silicon (CPU: AES/SHA/CRC)
+    String,       // string/text processing (CPU: byte scan, UTF-8 validation)
     Bandwidth,
     Latency,
     Unknown
@@ -74,6 +88,8 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeDP:
     case Benchmark::ComputeMP:
     case Benchmark::ComputeBF16:
+    case Benchmark::ComputeFP8DP:
+    case Benchmark::ComputeDivSqrt:
     case Benchmark::Wmma:
     case Benchmark::CoopMatrix:
     case Benchmark::SimdgroupMatrix:
@@ -92,10 +108,24 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeChar:
     case Benchmark::ComputeShort:
     case Benchmark::ComputeInt8DP:
+    case Benchmark::ComputeInt16DP:
+    case Benchmark::ComputeIntDiv:
         return Category::IntCompute;
+
+    case Benchmark::CryptoAes:
+    case Benchmark::CryptoSha256:
+    case Benchmark::CryptoSha512:
+    case Benchmark::CryptoCrc32c:
+        return Category::Crypto;
+
+    case Benchmark::StringScan:
+    case Benchmark::Utf8Validate:
+        return Category::String;
 
     case Benchmark::KernelLatency:
     case Benchmark::MemoryLatency:
+    case Benchmark::Atomics:
+    case Benchmark::BranchPenalty:
         return Category::Latency;
 
     case Benchmark::COUNT:

@@ -177,6 +177,202 @@ static std::string x86Vendor()
 #endif
 
 // ---------------------------------------------------------------------------
+// ARM MIDR_EL1 -> human-readable CPU name.  Many ARM machines expose no
+// marketing brand string (server VMs, Windows-on-ARM), but MIDR is
+// architecturally mandatory: implementer byte [31:24] + part number [15:4].
+// Decoding uses a lookup table for KNOWN cores, but degrades gracefully on
+// unknown ones — the implementer byte alone names the vendor, and an unknown
+// part renders as "<Vendor> CPU (part 0x###)", never worse than the old
+// "Unknown CPU"/"Linux CPU" fallbacks.  Heterogeneous chips list each distinct
+// core with its count, e.g. "4x Cortex-X925 + 6x Cortex-A725".
+// Linux + Windows only: macOS always has the sysctl brand string.
+// ---------------------------------------------------------------------------
+#if (defined(__aarch64__) || defined(_M_ARM64)) && (defined(__linux__) || defined(_WIN32))
+static const char *armImplementerName(unsigned imp)
+{
+  switch (imp)
+  {
+  case 0x41: return "Arm";
+  case 0x42: return "Broadcom";
+  case 0x43: return "Cavium";
+  case 0x46: return "Fujitsu";
+  case 0x48: return "HiSilicon";
+  case 0x4e: return "NVIDIA";
+  case 0x50: return "Applied Micro";
+  case 0x51: return "Qualcomm";
+  case 0x53: return "Samsung";
+  case 0x56: return "Marvell";
+  case 0x61: return "Apple";
+  case 0x69: return "Intel";
+  case 0x6d: return "Microsoft";
+  case 0xc0: return "Ampere";
+  default:   return nullptr;
+  }
+}
+
+static const char *armPartName(unsigned imp, unsigned part)
+{
+  if (imp == 0x41)  // Arm Ltd designs
+    switch (part)
+    {
+    case 0xd03: return "Cortex-A53";     case 0xd04: return "Cortex-A35";
+    case 0xd05: return "Cortex-A55";     case 0xd07: return "Cortex-A57";
+    case 0xd08: return "Cortex-A72";     case 0xd09: return "Cortex-A73";
+    case 0xd0a: return "Cortex-A75";     case 0xd0b: return "Cortex-A76";
+    case 0xd0c: return "Neoverse N1";    case 0xd0d: return "Cortex-A77";
+    case 0xd40: return "Neoverse V1";    case 0xd41: return "Cortex-A78";
+    case 0xd44: return "Cortex-X1";      case 0xd46: return "Cortex-A510";
+    case 0xd47: return "Cortex-A710";    case 0xd48: return "Cortex-X2";
+    case 0xd49: return "Neoverse N2";    case 0xd4b: return "Cortex-A78C";
+    case 0xd4d: return "Cortex-A715";    case 0xd4e: return "Cortex-X3";
+    case 0xd4f: return "Neoverse V2";    case 0xd80: return "Cortex-A520";
+    case 0xd81: return "Cortex-A720";    case 0xd82: return "Cortex-X4";
+    case 0xd84: return "Neoverse V3";    case 0xd85: return "Cortex-X925";
+    case 0xd87: return "Cortex-A725";    case 0xd88: return "Cortex-A520AE";
+    case 0xd8e: return "Neoverse N3";
+    default: return nullptr;
+    }
+  if (imp == 0x51)  // Qualcomm custom cores (Kryo parts fall through to generic)
+    switch (part)
+    {
+    case 0x001: return "Oryon";
+    default: return nullptr;
+    }
+  if (imp == 0x4e)  // NVIDIA custom cores (Grace uses Arm Neoverse V2 above)
+    switch (part)
+    {
+    case 0x003: return "Denver 2";
+    case 0x004: return "Carmel";
+    default: return nullptr;
+    }
+  if (imp == 0x6d)  // Microsoft (Azure Cobalt: Neoverse-N2-based, own implementer)
+    switch (part)
+    {
+    case 0xd49: return "Azure Cobalt 100";
+    default: return nullptr;
+    }
+  if (imp == 0xc0)  // Ampere
+    switch (part)
+    {
+    case 0xac3: case 0xac4: return "AmpereOne";
+    default: return nullptr;
+    }
+  if (imp == 0x48 && part == 0xd01) return "TaiShan V110";   // Kunpeng 920
+  if (imp == 0x46 && part == 0x001) return "A64FX";
+  return nullptr;
+}
+
+// Compose a name from the distinct MIDR values of all cores (first-seen order).
+static std::string armCpuNameFromMidrs(const std::vector<uint64_t> &midrs,
+                                       std::string &vendorOut)
+{
+  struct Kind { unsigned imp, part; int count; };
+  std::vector<Kind> kinds;
+  for (uint64_t m : midrs)
+  {
+    if (!m) continue;
+    unsigned imp = (unsigned)((m >> 24) & 0xFF), part = (unsigned)((m >> 4) & 0xFFF);
+    bool found = false;
+    for (auto &k : kinds)
+      if (k.imp == imp && k.part == part) { k.count++; found = true; break; }
+    if (!found) kinds.push_back({imp, part, 1});
+  }
+  if (kinds.empty())
+    return {};
+  if (vendorOut.empty())
+    if (const char *v = armImplementerName(kinds[0].imp)) vendorOut = v;
+  std::string name;
+  for (const auto &k : kinds)
+  {
+    if (!name.empty()) name += " + ";
+    // Only prefix per-kind core counts on heterogeneous chips; the homogeneous
+    // count is already in the "Cores" device property.
+    if (kinds.size() > 1) name += std::to_string(k.count) + "x ";
+    if (const char *p = armPartName(k.imp, k.part))
+      name += p;
+    else
+    {
+      char buf[48];
+      const char *v = armImplementerName(k.imp);
+      if (v) std::snprintf(buf, sizeof(buf), "%s CPU (part 0x%03x)", v, k.part);
+      else   std::snprintf(buf, sizeof(buf), "ARM CPU (impl 0x%02x, part 0x%03x)", k.imp, k.part);
+      name += buf;
+    }
+  }
+  return name;
+}
+
+#if defined(__linux__)
+// Per-CPU MIDR from sysfs (exposed by the arm64 kernel since 4.7); falls back
+// to the "CPU implementer" / "CPU part" pairs in /proc/cpuinfo (present per
+// processor block even when there is no "model name" on ARM).
+static std::vector<uint64_t> collectMidrs(const std::string &cpuinfo)
+{
+  std::vector<uint64_t> v;
+  for (int cpu = 0; cpu < 4096; cpu++)
+  {
+    char path[128];
+    std::snprintf(path, sizeof(path),
+                  "/sys/devices/system/cpu/cpu%d/regs/identification/midr_el1", cpu);
+    std::string s = readFile(path);
+    if (s.empty())
+      break;
+    v.push_back(std::strtoull(s.c_str(), nullptr, 16));
+  }
+  if (!v.empty())
+    return v;
+  // cpuinfo fallback: each "CPU part" line pairs with the most recent
+  // "CPU implementer" line in its processor block.
+  uint64_t imp = 0;
+  size_t pos = 0;
+  while (pos < cpuinfo.size())
+  {
+    size_t eol = cpuinfo.find('\n', pos);
+    std::string line = cpuinfo.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+    if (line.rfind("CPU implementer", 0) == 0)
+    {
+      size_t c = line.find(':');
+      if (c != std::string::npos) imp = std::strtoull(line.c_str() + c + 1, nullptr, 16);
+    }
+    else if (line.rfind("CPU part", 0) == 0)
+    {
+      size_t c = line.find(':');
+      if (c != std::string::npos)
+      {
+        uint64_t part = std::strtoull(line.c_str() + c + 1, nullptr, 16);
+        v.push_back((imp << 24) | ((part & 0xFFF) << 4));
+      }
+    }
+    if (eol == std::string::npos) break;
+    pos = eol + 1;
+  }
+  return v;
+}
+#elif defined(_WIN32)
+// Windows exports each core's (sanitised) MIDR_EL1 as the REG_QWORD "CP 4000"
+// under CentralProcessor\<n> — same mechanism as the ID-register feature probe
+// in cpu_dispatch.cpp.
+static std::vector<uint64_t> collectMidrs()
+{
+  std::vector<uint64_t> v;
+  for (int cpu = 0; cpu < 4096; cpu++)
+  {
+    char key[80];
+    std::snprintf(key, sizeof(key),
+                  "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\%d", cpu);
+    uint64_t midr = 0;
+    DWORD sz = sizeof(midr);
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, key, "CP 4000", RRF_RT_REG_QWORD,
+                     nullptr, &midr, &sz) != ERROR_SUCCESS)
+      break;
+    v.push_back(midr);
+  }
+  return v;
+}
+#endif
+#endif // (aarch64 || ARM64) && (linux || windows)
+
+// ---------------------------------------------------------------------------
 // ISA capability + name, from the RUNTIME feature probe (cpu_dispatch.cpp), so
 // these reflect the host the binary is actually running on — not the build host.
 // ---------------------------------------------------------------------------
@@ -189,10 +385,26 @@ static void detectIsa(cpu_device_info_t &info)
   info.hasNEON    = f.neon;
   info.hasFP16    = f.fp16 || f.avx512fp16;
   info.hasFP16FML = f.fp16fml;
-  info.hasBF16    = f.bf16 || f.avx512bf16;
-  info.hasInt8DP  = f.dotprod || f.avx512vnni;
-  info.hasAMX     = f.amx_int8 || f.amx_bf16;
+  info.hasBF16    = f.bf16 || f.avx512bf16 || f.svebf16 || f.avx10_2_512;
+  info.hasInt8DP  = f.dotprod || f.avx512vnni || f.avxvnni || f.avxvnniint8 || f.sve;
+  info.hasAVXVNNI = f.avxvnni || f.avxvnniint8;
+  info.hasAMX     = f.amx_int8 || f.amx_bf16 || f.amx_fp16 || f.amx_tf32 || f.amx_fp8;
+  info.hasSVE     = f.sve;
+  info.hasSVE2    = f.sve2;
+  info.sveVLBytes = clpeak_cpu::sveVLBytes();
+  info.hasSME     = f.sme;
+  info.hasSME2    = f.sme2;
+  info.smeSVLBytes = clpeak_cpu::smeSVLBytes();
   info.isaName    = clpeak_cpu::isaName();
+  // Report the active SVE vector length alongside the ISA name, e.g.
+  // "SVE2 (VL=256b)" -- it's the defining knob for SVE peak throughput.
+  if (info.sveVLBytes > 0)
+    info.isaName += " (VL=" + std::to_string(info.sveVLBytes * 8) + "b)";
+  // SME rides alongside the vector ISA (it's a separate streaming engine, not
+  // the "widest" vector ISA), with its streaming VL: "NEON + SME2 (SVL=512b)".
+  if (info.smeSVLBytes > 0)
+    info.isaName += std::string(" + ") + (info.hasSME2 ? "SME2" : "SME") +
+                    " (SVL=" + std::to_string(info.smeSVLBytes * 8) + "b)";
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +453,17 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.name = x86Brand();
   if (info.vendor.empty())
     info.vendor = x86Vendor();
+#endif
+#if defined(__aarch64__)
+  // ARM machines usually have no "model name"; decode MIDR instead.  The
+  // decode also fills the vendor from the implementer byte when cpuinfo had
+  // no vendor_id (always the case on ARM), even if the name came from
+  // elsewhere.
+  {
+    std::string midrName = armCpuNameFromMidrs(collectMidrs(cpuinfo), info.vendor);
+    if (info.name.empty())
+      info.name = midrName;
+  }
 #endif
   if (info.name.empty())
     info.name = "Linux CPU";
@@ -323,6 +546,10 @@ void detectCpuInfo(cpu_device_info_t &info)
   }
 
 #elif defined(_WIN32)
+  // The struct default is "Unknown CPU" (non-empty), which used to make every
+  // name.empty() fallback below dead code on ARM64 -- clear it so the registry
+  // and MIDR paths actually run.
+  info.name.clear();
 #if defined(CLPEAK_CPU_X86)
   info.name = x86Brand();
   info.vendor = x86Vendor();
@@ -347,6 +574,17 @@ void detectCpuInfo(cpu_device_info_t &info)
       RegCloseKey(key);
     }
   }
+#if defined(_M_ARM64) || defined(__aarch64__)
+  // Decode the per-core MIDRs the kernel exports as "CP 4000": the name is a
+  // fallback for when the registry has no marketing string, but the vendor
+  // comes from the implementer byte either way (Windows-on-ARM registry
+  // entries carry a name like "Cobalt 100" yet no vendor).
+  {
+    std::string midrName = armCpuNameFromMidrs(collectMidrs(), info.vendor);
+    if (info.name.empty())
+      info.name = midrName;
+  }
+#endif
   if (info.name.empty())
     info.name = "Windows CPU";
   MEMORYSTATUSEX ms;

@@ -81,11 +81,9 @@ option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
 option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
 option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
 option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
-# OFF (default): build a portable binary (SSE4.2 / armv8-a baseline) that runtime-
-# dispatches to higher ISA — safe to distribute across machines.  ON: tune the
-# whole CPU backend for the BUILD host (-march/-mcpu=native); fastest for a local
-# build, but the resulting binary may use illegal instructions on an older CPU.
-option(CLPEAK_CPU_NATIVE_ARCH "Tune the CPU backend for the build host (non-portable binary)" OFF)
+# The CPU backend always builds a portable binary: a safe baseline (SSE4.2 /
+# armv8-a) plus per-ISA feature TUs that cpu_dispatch.cpp picks between at runtime
+# (see src/cpu/CMakeLists.txt), so one build is safe to distribute across machines.
 
 # The native CPU backend needs a threading library (always available).
 if(CLPEAK_ENABLE_CPU)
@@ -248,10 +246,8 @@ elseif(CLPEAK_ENABLE_ONEAPI)
 else()
     string(APPEND _clpeak_summary "  oneAPI : disabled (CLPEAK_ENABLE_ONEAPI=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_CPU AND CLPEAK_CPU_NATIVE_ARCH)
-    string(APPEND _clpeak_summary "  CPU    : ENABLED  (NATIVE_ARCH=ON -- tuned for build host, non-portable binary)\n")
-elseif(CLPEAK_ENABLE_CPU)
-    string(APPEND _clpeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch, -DCLPEAK_CPU_NATIVE_ARCH=ON to tune for this host)\n")
+if(CLPEAK_ENABLE_CPU)
+    string(APPEND _clpeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch)\n")
 else()
     string(APPEND _clpeak_summary "  CPU    : disabled (CLPEAK_ENABLE_CPU=OFF)\n")
 endif()

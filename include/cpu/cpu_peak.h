@@ -51,9 +51,16 @@ struct cpu_device_info_t {
   bool hasNEON   = false;
   bool hasFP16   = false;           // native fp16 arithmetic (AVX512-FP16 / ARM FEAT_FP16)
   bool hasFP16FML = false;          // widening fp16xfp16 -> fp32 FMLA (ARM FEAT_FP16FML)
-  bool hasBF16   = false;           // bf16 dot (AVX512-BF16 / ARM bfdot)
-  bool hasInt8DP = false;           // int8 dot (AVX512-VNNI / AVX-VNNI / ARM dotprod)
+  bool hasBF16   = false;           // bf16 dot (AVX512-BF16 / ARM bfdot / SVE bfdot)
+  bool hasInt8DP = false;           // int8 dot (AVX512-VNNI / AVX-VNNI / ARM dotprod / SVE sdot)
+  bool hasAVXVNNI = false;          // 256-bit AVX-VNNI int8 dot (no AVX-512 needed)
   bool hasAMX    = false;           // x86 AMX tile matmul (int8 + bf16)
+  bool hasSVE    = false;           // ARM SVE (vector-length-agnostic)
+  bool hasSVE2   = false;           // ARM SVE2
+  int  sveVLBytes = 0;              // active SVE vector length in bytes (0 if no SVE)
+  bool hasSME    = false;           // ARM SME (streaming matrix engine; Apple M4+, Oryon Gen 3)
+  bool hasSME2   = false;           // ARM SME2
+  int  smeSVLBytes = 0;             // active SME streaming vector length in bytes (0 if no SME)
 };
 
 // Populate `info` from the host (cpu_device.cpp).
@@ -116,12 +123,24 @@ public:
   int runComputeHP(benchmark_config_t &cfg);
   int runComputeBF16(benchmark_config_t &cfg);
   int runComputeMP(benchmark_config_t &cfg);
+  int runComputeFP8DP(benchmark_config_t &cfg);
+  int runComputeDivSqrt(benchmark_config_t &cfg);
   int runComputeInt32(benchmark_config_t &cfg);
   int runComputeInt8DP(benchmark_config_t &cfg);
+  int runComputeInt16DP(benchmark_config_t &cfg);
+  int runComputeIntDiv(benchmark_config_t &cfg);
   int runCpuMatrix(benchmark_config_t &cfg, Category category);
+  int runCryptoAes(benchmark_config_t &cfg);
+  int runCryptoSha256(benchmark_config_t &cfg);
+  int runCryptoSha512(benchmark_config_t &cfg);
+  int runCryptoCrc32c(benchmark_config_t &cfg);
+  int runStringScan(benchmark_config_t &cfg);
+  int runUtf8Validate(benchmark_config_t &cfg);
   int runDramBandwidth(benchmark_config_t &cfg);
   int runCacheBandwidth(benchmark_config_t &cfg);
   int runMemoryLatency(benchmark_config_t &cfg);
+  int runAtomics(benchmark_config_t &cfg);
+  int runBranchPenalty(benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
   cpu_device_info_t    info;

@@ -150,14 +150,28 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeDP))   runComputeDP(cfg);
   if (isAllowed(Benchmark::ComputeMP))   runComputeMP(cfg);
   if (isAllowed(Benchmark::ComputeBF16)) runComputeBF16(cfg);
+  if (isAllowed(Benchmark::ComputeFP8DP)) runComputeFP8DP(cfg);
+  if (isAllowed(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::FpCompute))
     runCpuMatrix(cfg, Category::FpCompute);
 
   // ---- INT compute ----
-  if (isAllowed(Benchmark::ComputeInt))    runComputeInt32(cfg);
-  if (isAllowed(Benchmark::ComputeInt8DP)) runComputeInt8DP(cfg);
+  if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
+  if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
+  if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
+  if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::IntCompute))
     runCpuMatrix(cfg, Category::IntCompute);
+
+  // ---- Crypto (dedicated AES/SHA/CRC silicon; GB/s) ----
+  if (isAllowed(Benchmark::CryptoAes))    runCryptoAes(cfg);
+  if (isAllowed(Benchmark::CryptoSha256)) runCryptoSha256(cfg);
+  if (isAllowed(Benchmark::CryptoSha512)) runCryptoSha512(cfg);
+  if (isAllowed(Benchmark::CryptoCrc32c)) runCryptoCrc32c(cfg);
+
+  // ---- String (SIMD text processing; GB/s over L1-resident buffers) ----
+  if (isAllowed(Benchmark::StringScan))   runStringScan(cfg);
+  if (isAllowed(Benchmark::Utf8Validate)) runUtf8Validate(cfg);
 
   // ---- Bandwidth ----
   // No TransferBW: on a CPU there is no host<->device bus, so a libc memcpy
@@ -167,6 +181,8 @@ int CpuPeak::runAll()
 
   // ---- Latency ----
   if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
+  if (isAllowed(Benchmark::Atomics))       runAtomics(cfg);
+  if (isAllowed(Benchmark::BranchPenalty)) runBranchPenalty(cfg);
 
   currentDeviceScope = nullptr;
   return 0;

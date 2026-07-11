@@ -2,8 +2,9 @@
 
 // One feature TU.  CMake compiles this file once per ISA variant (different
 // -m/-arch flags + a unique CLPEAK_ISA_TAG), producing a uniquely-named
-// table accessor that cpu_dispatch.cpp wires up at runtime.  All the kernel
-// bodies (and the per-TU table) live in cpu_kernels_impl.h.
+// table accessor that cpu_dispatch.cpp wires up at runtime.  The per-TU table
+// builder is in cpu_kernels_impl.h; the kernel bodies it references live in the
+// kernels/ sub-headers that header pulls in.
 
 #include "cpu_kernels_impl.h"
 
