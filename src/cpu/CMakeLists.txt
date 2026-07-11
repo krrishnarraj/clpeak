@@ -57,6 +57,9 @@ target_include_directories(peak_cpu PUBLIC  ${CMAKE_CURRENT_LIST_DIR}/../../incl
 target_include_directories(peak_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_definitions(peak_cpu    PRIVATE ENABLE_CPU)
 target_compile_definitions(peak_common PRIVATE ENABLE_CPU)
+if(WIN32)
+  target_compile_definitions(peak_cpu PRIVATE NOMINMAX)
+endif()
 
 # Compiler classification.  clang-cl reports MSVC=TRUE (it drives the MSVC ABI
 # and flag style) but is a real clang: CMAKE_CXX_COMPILER_ID is "Clang" with
