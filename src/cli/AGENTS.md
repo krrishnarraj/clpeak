@@ -19,5 +19,5 @@ runs benchmarks, and handles centralized file output.
 ## When You Change This Directory
 
 - If you add a CLI flag → update `include/common/options.h` + `../common/options.cpp`.
-- If you change how backends are invoked → update `main.cpp`.
-- If you change the text output format → update `../common/logger_text.cpp` (shared by CLI + Android).
+- If you change how backends are invoked → update `main.cpp` (and mirror it in `../ffi/clpeak_ffi.cpp`, which ports this loop for the GUI).
+- If you change the text output format → update `../common/logger_text.cpp`.

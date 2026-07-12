@@ -21,10 +21,10 @@ No backend-specific includes live here.
 | `peak.h` | `Peak` abstract base class + gating — every backend implements this |
 | `benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums, `categoryOf()` |
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration |
-| `options.h` | `CliOptions` struct + `parseCliOptions()` declaration |
-| `result_store.h` | `ResultEntry`/`ResultStore` + JSON/CSV/XML serialization |
-| `logger.h` | `logger` abstract base — result-scope API, hooks, accumulated `results` |
-| `logger_text.h` | `LoggerText` — indented/aligned text formatting to an injectable `std::ostream` + baseline deltas; shared by CLI + Android |
+| `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
+| `result_store.h` | `ResultEntry`/`ResultStore` + JSON/CSV/XML serialization + `resultsToJson()` |
+| `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, single `onEvent()` hook, accumulated `results` |
+| `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` |
 
 ## When You Change This Directory

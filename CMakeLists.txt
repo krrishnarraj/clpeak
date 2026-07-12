@@ -272,7 +272,7 @@ else()
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")
-message(STATUS "clpeak backend summary")
+message(STATUS "clpeak components summary")
 message(STATUS "")
 # Print the multi-line block.  CMake `message(STATUS "...")` re-prefixes
 # every newline so we split manually.

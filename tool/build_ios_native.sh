@@ -45,9 +45,11 @@ configure_and_build "$BUILD/simulator" iphonesimulator
 echo "==> Creating xcframework"
 rm -rf "$OUT/clpeak_ffi.xcframework" "$OUT/embed-device"
 mkdir -p "$OUT"
+# clpeak_ffi's LIBRARY_OUTPUT_DIRECTORY places frameworks at
+# <build>/<config>/ regardless of platform.
 xcodebuild -create-xcframework \
-    -framework "$BUILD/device/ffi/Release-iphoneos/clpeak_ffi.framework" \
-    -framework "$BUILD/simulator/ffi/Release-iphonesimulator/clpeak_ffi.framework" \
+    -framework "$BUILD/device/Release/clpeak_ffi.framework" \
+    -framework "$BUILD/simulator/Release/clpeak_ffi.framework" \
     -output "$OUT/clpeak_ffi.xcframework"
 
 # ---- Optional Vulkan runtime pieces (device only) ---------------------------

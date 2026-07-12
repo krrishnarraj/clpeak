@@ -1,17 +1,12 @@
-# clpeak
+# clpeak GUI
 
-A new Flutter project.
+One Flutter app for Android, iOS, macOS, Linux, and Windows, driving the
+clpeak benchmark backends through the `src/ffi` C-ABI bridge (Dart FFI).
 
-## Getting Started
+Features: system/device dashboard, Quick/Full/Custom runs (device, category,
+and time-budget selection), live streaming results with cancellation, and an
+auto-saved run history (canonical clpeak XML) with rename/export/delete.
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+See [AGENTS.md](AGENTS.md) for per-platform build instructions, the
+dev-loop `CLPEAK_FFI_PATH` override, and the list of hand-edited generated
+files.

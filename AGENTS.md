@@ -19,7 +19,8 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
 own `CMakeLists.txt` that builds a static library (`peak_opencl`, etc.).
-The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
+The CLI entry point is `src/cli/main.cpp`. The Flutter GUI (`app/`) drives the
+same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 
 ## Directory Map
 
@@ -42,9 +43,11 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 | `src/oneapi/` | oneAPI/SYCL backend: `OneapiPeak` class + SYCL kernels (inline lambdas, AOT/JIT via DPC++) |
 | `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (one feature TU per ISA, runtime-dispatched); cache/DRAM bandwidth + memory latency |
 | `src/cli/` | Desktop CLI: `main.cpp` |
+| `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
+| `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
+| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
-| `android/` | Android app (Vulkan, OpenCL, CPU) with JNI native module, its own `logger_android.cpp` |
-| `ios/` | iOS SwiftUI app with Vulkan-over-MoltenVK, Metal, and CPU backends |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 | `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
@@ -53,6 +56,9 @@ The CLI entry point is `src/cli/main.cpp` with its own `logger.cpp`.
 
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
+- GUI: built automatically as `clpeak-gui` when the Flutter SDK is detected
+  (disable with `-DCLPEAK_ENABLE_GUI=OFF`); bundle lands in
+  `build/clpeak-gui/`. Mobile builds: see `app/AGENTS.md`.
 
 ## Quick Lookups
 

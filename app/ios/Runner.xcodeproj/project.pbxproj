@@ -158,6 +158,7 @@
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
+				C1B0FF1E00000000000000A1 /* Embed clpeak native frameworks */,
 			);
 			buildRules = (
 			);
@@ -250,6 +251,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
+		};
+		C1B0FF1E00000000000000A1 /* Embed clpeak native frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed clpeak native frameworks";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Embeds the clpeak_ffi framework (and, when staged, the Vulkan loader +\n# MoltenVK + ICD resources) built by tool/build_ios_native.sh.\n# See src/ffi/ios/CMakeLists.txt.\nset -e\nNATIVE_DIR=\"${SRCROOT}/clpeak_native\"\nif [ ! -d \"$NATIVE_DIR/clpeak_ffi.xcframework\" ]; then\n  echo \"error: $NATIVE_DIR/clpeak_ffi.xcframework not found — run tool/build_ios_native.sh first.\"\n  exit 1\nfi\ncase \"${PLATFORM_NAME}\" in\n  *simulator*) SLICE=\"ios-arm64-simulator\" ;;\n  *)           SLICE=\"ios-arm64\" ;;\nesac\nDEST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nmkdir -p \"$DEST\"\nembed_framework() {\n  [ -d \"$1\" ] || return 0\n  name=\"$(basename \"$1\")\"\n  rm -rf \"$DEST/$name\"\n  cp -R \"$1\" \"$DEST/\"\n  if [ \"${CODE_SIGNING_ALLOWED:-YES}\" != \"NO\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n    codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --preserve-metadata=identifier,entitlements \"$DEST/$name\"\n  fi\n}\nembed_framework \"$NATIVE_DIR/clpeak_ffi.xcframework/$SLICE/clpeak_ffi.framework\"\nif [ \"$SLICE\" = \"ios-arm64\" ]; then\n  embed_framework \"$NATIVE_DIR/embed-device/vulkan.framework\"\n  embed_framework \"$NATIVE_DIR/embed-device/MoltenVK.framework\"\n  if [ -d \"$NATIVE_DIR/embed-device/vulkan\" ]; then\n    RES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n    rm -rf \"$RES/vulkan\"\n    cp -R \"$NATIVE_DIR/embed-device/vulkan\" \"$RES/vulkan\"\n  fi\nfi\n";
 		};
 		9740EEB61CF901F6004384FC /* Run Script */ = {
 			isa = PBXShellScriptBuildPhase;
