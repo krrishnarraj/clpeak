@@ -7,12 +7,17 @@
 #include <common/result_store.h>
 #include "common.h"
 
-// ── Abstract logger base class ─────────────────────────────────────────────
+// ── Structured log-event stream ────────────────────────────────────────────
 //
-// Owns structured result accumulation (ResultEntry rows) and defines hooks
-// for derived output channels (CLI → stdout, Android → JNI, iOS → Swift).
+// Every observable moment of a benchmark run is one LogEvent.  The logger
+// base class owns result accumulation and scope bookkeeping; derived output
+// channels implement a single hook — onEvent() — and render or forward the
+// stream:
 //
-// Backends feed data through RAII context handles:
+//   LoggerText (src/common/logger_text.cpp)  → indented CLI text
+//   LoggerFfi  (src/ffi/logger_ffi.cpp)      → JSON over a C callback (GUI)
+//
+// Backends never see LogEvent; they feed data through RAII context handles:
 //
 //   auto backend = log->beginBackend("OpenCL");
 //   auto device  = backend.beginDevice({"M1 Pro", "Apple", "1.2.3",
@@ -22,19 +27,68 @@
 //   test.emit("float",  123.45f);
 //   test.emit("float2", 456.78f);
 //
-// Handles auto-close on destruction.  The logger formats all output and
-// accumulates ResultEntry rows — backends never touch TAB / NEWLINE or
-// call print() for structured data.
+// Handles auto-close on destruction.  The logger accumulates ResultEntry
+// rows — backends never touch TAB / NEWLINE or call print() for structured
+// data.
+
+struct LogProp {
+  std::string key;
+  std::string value;
+};
+
+struct LogEvent {
+  enum class Kind {
+    BackendBegin,    // backend
+    DeviceBegin,     // + platform/device/driver, props, indices
+    TestBegin,       // + testTag/testDisplay/unit/category
+    Metric,          // + entry (Ok or non-Ok), subMetric
+    TestSkippedAll,  // whole test unavailable: + metricNames, status, reason
+    TestEnd,
+    DeviceEnd,
+    BackendEnd,
+    Note,            // + message (may fire at any scope depth)
+  };
+
+  Kind kind = Kind::Note;
+
+  // Scope context — filled from the current scope state for every event
+  // (empty strings when the corresponding scope is not open).
+  std::string backend;
+  std::string platform;
+  std::string device;
+  std::string driver;
+  std::string testTag;
+  std::string testDisplay;
+  std::string unit;
+  Category    category = Category::Unknown;
+
+  // DeviceBegin
+  std::vector<LogProp> props;
+  int  platformIndex    = -1;
+  int  deviceIndex      = -1;
+  bool showPlatformLine = false;
+
+  // Metric — the ResultEntry just recorded.  entry.status distinguishes Ok
+  // (entry.value valid) from unsupported/skipped/error (entry.reason valid).
+  ResultEntry entry;
+  bool subMetric = false;
+
+  // TestSkippedAll — one row per metric name was recorded in `results`
+  // with the given status/reason.
+  std::vector<std::string> metricNames;
+  ResultStatus status = ResultStatus::Ok;
+  std::string  reason;
+
+  // Note
+  std::string message;
+};
 
 class logger
 {
 public:
   // ── Types ──────────────────────────────────────────────────────────────
 
-  struct Prop {
-    std::string key;
-    std::string value;
-  };
+  using Prop = LogProp;
 
   struct DeviceSpec {
     std::string name;
@@ -68,7 +122,7 @@ public:
   BackendScope beginBackend(const std::string &name);
 
   /// Unstructured ad-hoc message (warnings, notes, errors outside tests).
-  virtual void note(const std::string &msg) = 0;
+  void note(const std::string &msg);
 
   // ── Baseline compare ────────────────────────────────────────────────────
 
@@ -83,28 +137,10 @@ public:
   virtual ~logger() = default;
 
 protected:
-  // ── Hooks — derived classes implement for their output channel ─────────
+  // ── The single output hook ──────────────────────────────────────────────
+  // Derived channels render or forward the event stream from here.
 
-  virtual void onBackendBegin(const std::string &name) = 0;
-  virtual void onDeviceBegin(const std::string &name,
-                             const std::string &platform,
-                             const std::string &driverVersion,
-                             const std::vector<Prop> &props,
-                             bool showPlatformLine,
-                             int platformIndex,
-                             int deviceIndex) = 0;
-  virtual void onTestBegin(const std::string &tag,
-                           const std::string &display,
-                           const std::string &unit) = 0;
-  virtual void onMetricEmitted(const ResultEntry &e,
-                               float value,
-                               bool subMetric) = 0;
-  virtual void onMetricSkipped(const ResultEntry &e) = 0;
-  virtual void onTestSkippedAll(ResultStatus status,
-                                const std::string &reason) = 0;
-  virtual void onTestEnd() = 0;
-  virtual void onDeviceEnd() = 0;
-  virtual void onBackendEnd() = 0;
+  virtual void onEvent(const LogEvent &e) = 0;
 
   // ── Context state ──────────────────────────────────────────────────────
 
@@ -113,11 +149,19 @@ protected:
   std::string curDevice;
   std::string curDriver;
   std::string curTest;
+  std::string curTestDisplay;
   std::string curUnit;
   Category    curCategory = Category::Unknown;
   int         contextDepth = 0;   // 0=none, 1=backend, 2=device, 3=test
 
 private:
+  /// New event pre-filled with the current scope context.
+  LogEvent makeEvent(LogEvent::Kind kind) const;
+
+  /// Build a ResultEntry from the current scope context.
+  ResultEntry makeEntry(const std::string &metric, ResultStatus status,
+                        float value, const std::string &reason) const;
+
   // Scope handles are friends so they can manipulate context state directly.
   friend class BackendScope;
   friend class DeviceScope;
@@ -175,14 +219,14 @@ public:
   TestScope(TestScope &&other) noexcept;
   TestScope &operator=(TestScope &&) = delete;
 
-  /// Emit a successful measurement.  Prints formatted metric line + records row.
+  /// Emit a successful measurement.  Records row + dispatches Metric event.
   void emit(std::string metric, float value, EmitOptions opts = {});
 
   /// Emit a skipped / unsupported / errored metric.
   void skip(std::string metric, ResultStatus status, std::string reason);
 
-  /// Entire test unavailable — emits one skip row per named metric and prints
-  /// a single skip message under the test header.
+  /// Entire test unavailable — records one skip row per named metric and
+  /// dispatches a single TestSkippedAll event.
   void skipAll(std::initializer_list<std::string> metrics,
                ResultStatus status, std::string reason);
 

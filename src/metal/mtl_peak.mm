@@ -41,6 +41,8 @@ int MetalPeak::runAll()
 
     for (NSUInteger d = 0; d < impl->allDevices.count; d++)
     {
+        if (clpeak::cancelRequested())
+            break;
         if (!deviceIndices.empty() &&
             std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
             continue;

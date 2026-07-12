@@ -1,10 +1,16 @@
 #include <common/common.h>
+#include <atomic>
 #include <cstring>
 
 namespace clpeak {
 static bool g_verbose = false;
 bool verboseEnabled()   { return g_verbose; }
 void setVerbose(bool on) { g_verbose = on; }
+
+static std::atomic<bool> g_cancelRequested{false};
+void requestCancel()   { g_cancelRequested.store(true, std::memory_order_relaxed); }
+bool cancelRequested() { return g_cancelRequested.load(std::memory_order_relaxed); }
+void resetCancel()     { g_cancelRequested.store(false, std::memory_order_relaxed); }
 }
 
 benchmark_config_t benchmark_config_t::forDevice(DeviceType type)

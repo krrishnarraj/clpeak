@@ -2,4 +2,7 @@ build/
 .vscode/
 .claude/
 .opencode/
-TODO
+TODObuild-gui/
+build-ios/
+# iOS native artifacts staged by tool/build_ios_native.sh
+app/ios/clpeak_native/

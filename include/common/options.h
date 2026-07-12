@@ -81,4 +81,11 @@ struct CliOptions {
 // exit() directly (matching the previous behavior).  Returns 0 on success.
 int parseCliOptions(int argc, char **argv, CliOptions &out);
 
+// Embedding-safe variant: never calls exit().  Returns true on success;
+// on failure (parse error, or --help/--version which have no meaning when
+// embedded) returns false with a human-readable message in errorMsg.
+// Used by clpeak_ffi so a bad argv can't kill the host GUI process.
+bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
+                           std::string &errorMsg);
+
 #endif // CLPEAK_OPTIONS_H

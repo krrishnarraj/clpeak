@@ -191,6 +191,20 @@ bool verboseEnabled();
 void setVerbose(bool on);
 }
 
+// ---------------------------------------------------------------------------
+// Cooperative run cancellation.  A process-global atomic flag observed at
+// test boundaries: Peak::isAllowed() returns false once cancellation is
+// requested, so every remaining test silently no-ops and runAll() unwinds
+// quickly.  Backends additionally break out of their device loops.  Used by
+// the GUI (via clpeak_ffi) — the CLI never sets it.  Reset at the start of
+// each embedded launch.
+// ---------------------------------------------------------------------------
+namespace clpeak {
+void requestCancel();
+bool cancelRequested();
+void resetCancel();
+}
+
 // Gated stderr diagnostic — no-op unless --verbose was passed.
 #define CLPEAK_VLOG(...) \
     do { if (::clpeak::verboseEnabled()) fprintf(stderr, __VA_ARGS__); } while (0)

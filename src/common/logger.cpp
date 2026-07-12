@@ -1,6 +1,5 @@
 #include <common/logger.h>
 #include <cassert>
-#include <sstream>
 
 // ── Constructor ────────────────────────────────────────────────────────────
 
@@ -11,11 +10,53 @@ logger::logger(std::string compareFileName)
         baseline = buildBaselineMap(loadResultFile(compareFileName));
 }
 
+// ── Event / entry construction ─────────────────────────────────────────────
+
+LogEvent logger::makeEvent(LogEvent::Kind kind) const
+{
+    LogEvent e;
+    e.kind        = kind;
+    e.backend     = curBackend;
+    e.platform    = curPlatform;
+    e.device      = curDevice;
+    e.driver      = curDriver;
+    e.testTag     = curTest;
+    e.testDisplay = curTestDisplay;
+    e.unit        = curUnit;
+    e.category    = curCategory;
+    return e;
+}
+
+ResultEntry logger::makeEntry(const std::string &metric, ResultStatus status,
+                              float value, const std::string &reason) const
+{
+    ResultEntry e;
+    e.backend  = curBackend;
+    e.platform = curPlatform;
+    e.device   = curDevice;
+    e.driver   = curDriver;
+    e.category = categoryString(curCategory);
+    e.test     = curTest;
+    e.metric   = metric;
+    e.unit     = curUnit;
+    e.status   = status;
+    e.value    = value;
+    e.reason   = reason;
+    return e;
+}
+
 // ── Top-level entry ────────────────────────────────────────────────────────
 
 logger::BackendScope logger::beginBackend(const std::string &name)
 {
     return BackendScope(this, name);
+}
+
+void logger::note(const std::string &msg)
+{
+    LogEvent e = makeEvent(LogEvent::Kind::Note);
+    e.message = msg;
+    onEvent(e);
 }
 
 // ── BackendScope ───────────────────────────────────────────────────────────
@@ -29,7 +70,7 @@ logger::BackendScope::BackendScope(logger *log, const std::string &name)
     log->curDevice.clear();
     log->curDriver.clear();
     log->contextDepth = 1;
-    log->onBackendBegin(name);
+    log->onEvent(log->makeEvent(LogEvent::Kind::BackendBegin));
 }
 
 logger::BackendScope::~BackendScope()
@@ -50,7 +91,7 @@ void logger::BackendScope::end()
     if (closed) return;
     closed = true;
     assert(log->contextDepth == 1);
-    log->onBackendEnd();
+    log->onEvent(log->makeEvent(LogEvent::Kind::BackendEnd));
     log->curBackend.clear();
     log->contextDepth = 0;
 }
@@ -74,12 +115,12 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
     log->curDriver   = spec.driver_version;
     log->contextDepth = 2;
 
-    bool showPlatformLine = (log->curPlatform != log->curBackend);
-
-    log->onDeviceBegin(spec.name, log->curPlatform,
-                       spec.driver_version, spec.props,
-                       showPlatformLine,
-                       spec.platform_index, spec.device_index);
+    LogEvent e = log->makeEvent(LogEvent::Kind::DeviceBegin);
+    e.props            = spec.props;
+    e.platformIndex    = spec.platform_index;
+    e.deviceIndex      = spec.device_index;
+    e.showPlatformLine = (log->curPlatform != log->curBackend);
+    log->onEvent(e);
 }
 
 logger::DeviceScope::~DeviceScope()
@@ -100,7 +141,7 @@ void logger::DeviceScope::end()
     if (closed) return;
     closed = true;
     assert(log->contextDepth == 2);
-    log->onDeviceEnd();
+    log->onEvent(log->makeEvent(LogEvent::Kind::DeviceEnd));
     log->curDevice.clear();
     log->curDriver.clear();
     log->curPlatform.clear();
@@ -121,14 +162,15 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
 {
     assert(log->contextDepth == 2);
 
-    log->curTest     = spec.tag;
-    log->curUnit     = spec.unit;
-    log->curCategory = (spec.category != Category::Unknown)
-                           ? spec.category
-                           : categoryFromUnit(spec.unit);
+    log->curTest        = spec.tag;
+    log->curTestDisplay = spec.display;
+    log->curUnit        = spec.unit;
+    log->curCategory    = (spec.category != Category::Unknown)
+                              ? spec.category
+                              : categoryFromUnit(spec.unit);
     log->contextDepth = 3;
 
-    log->onTestBegin(spec.tag, spec.display, spec.unit);
+    log->onEvent(log->makeEvent(LogEvent::Kind::TestBegin));
 }
 
 logger::TestScope::~TestScope()
@@ -149,21 +191,12 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     assert(!closed);
     assert(log->contextDepth == 3);
 
-    // Build ResultEntry and push
-    ResultEntry e;
-    e.backend  = log->curBackend;
-    e.platform = log->curPlatform;
-    e.device   = log->curDevice;
-    e.driver   = log->curDriver;
-    e.category = categoryString(log->curCategory);
-    e.test     = log->curTest;
-    e.metric   = metric;
-    e.unit     = log->curUnit;
-    e.status   = ResultStatus::Ok;
-    e.value    = value;
-    log->results.push_back(e);
+    LogEvent e  = log->makeEvent(LogEvent::Kind::Metric);
+    e.entry     = log->makeEntry(metric, ResultStatus::Ok, value, "");
+    e.subMetric = opts.subMetric;
+    log->results.push_back(e.entry);
 
-    log->onMetricEmitted(e, value, opts.subMetric);
+    log->onEvent(e);
 }
 
 void logger::TestScope::skip(std::string metric, ResultStatus status,
@@ -172,22 +205,11 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
     assert(!closed);
     assert(log->contextDepth == 3);
 
-    // Build ResultEntry and push
-    ResultEntry e;
-    e.backend  = log->curBackend;
-    e.platform = log->curPlatform;
-    e.device   = log->curDevice;
-    e.driver   = log->curDriver;
-    e.category = categoryString(log->curCategory);
-    e.test     = log->curTest;
-    e.metric   = metric;
-    e.unit     = log->curUnit;
-    e.status   = status;
-    e.value    = 0.0f;
-    e.reason   = reason;
-    log->results.push_back(e);
+    LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
+    e.entry    = log->makeEntry(metric, status, 0.0f, reason);
+    log->results.push_back(e.entry);
 
-    log->onMetricSkipped(e);
+    log->onEvent(e);
 }
 
 void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,
@@ -196,24 +218,17 @@ void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,
     assert(!closed);
     assert(log->contextDepth == 3);
 
-    log->onTestSkippedAll(status, reason);
+    LogEvent e = log->makeEvent(LogEvent::Kind::TestSkippedAll);
+    e.status   = status;
+    e.reason   = reason;
 
     for (const auto &metric : metrics)
     {
-        ResultEntry e;
-        e.backend  = log->curBackend;
-        e.platform = log->curPlatform;
-        e.device   = log->curDevice;
-        e.driver   = log->curDriver;
-        e.category = categoryString(log->curCategory);
-        e.test     = log->curTest;
-        e.metric   = metric;
-        e.unit     = log->curUnit;
-        e.status   = status;
-        e.value    = 0.0f;
-        e.reason   = reason;
-        log->results.push_back(e);
+        log->results.push_back(log->makeEntry(metric, status, 0.0f, reason));
+        e.metricNames.push_back(metric);
     }
+
+    log->onEvent(e);
 }
 
 void logger::TestScope::end()
@@ -221,8 +236,9 @@ void logger::TestScope::end()
     if (closed) return;
     closed = true;
     assert(log->contextDepth == 3);
-    log->onTestEnd();
+    log->onEvent(log->makeEvent(LogEvent::Kind::TestEnd));
     log->curTest.clear();
+    log->curTestDisplay.clear();
     log->curUnit.clear();
     log->curCategory = Category::Unknown;
     log->contextDepth = 2;

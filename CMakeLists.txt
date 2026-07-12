@@ -81,6 +81,7 @@ option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
 option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
 option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
 option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
+option(CLPEAK_ENABLE_GUI    "Build the Flutter GUI app (clpeak-gui target) and its native bridge" ON)
 # The CPU backend always builds a portable binary: a safe baseline (SSE4.2 /
 # armv8-a) plus per-ISA feature TUs that cpu_dispatch.cpp picks between at runtime
 # (see src/cpu/CMakeLists.txt), so one build is safe to distribute across machines.
@@ -156,6 +157,14 @@ if(CLPEAK_ENABLE_ONEAPI)
     endif()
 endif()
 
+# Find the Flutter SDK (needed by src/ffi/CMakeLists.txt for clpeak-gui).
+# Like the backend dependencies above: GUI is skipped (not an error) when the
+# SDK isn't detectable.
+if(CLPEAK_ENABLE_GUI)
+    find_program(FLUTTER_EXECUTABLE flutter
+        HINTS $ENV{FLUTTER_HOME}/bin $ENV{FLUTTER_ROOT}/bin $ENV{HOME}/flutter/bin)
+endif()
+
 # Always build common
 add_subdirectory(src/common)
 
@@ -170,6 +179,9 @@ add_subdirectory(src/cpu)
 
 # CLI executable
 add_subdirectory(src/cli)
+
+# GUI native bridge (clpeak_ffi) + clpeak-gui Flutter build target
+add_subdirectory(src/ffi)
 
 # ---- Backend status summary ------------------------------------------------
 # Print a single block at the end of configure so the user can see at a
@@ -250,6 +262,13 @@ if(CLPEAK_ENABLE_CPU)
     string(APPEND _clpeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch)\n")
 else()
     string(APPEND _clpeak_summary "  CPU    : disabled (CLPEAK_ENABLE_CPU=OFF)\n")
+endif()
+if(CLPEAK_ENABLE_GUI AND FLUTTER_EXECUTABLE)
+    string(APPEND _clpeak_summary "  GUI    : ENABLED  (${FLUTTER_EXECUTABLE})\n")
+elseif(CLPEAK_ENABLE_GUI)
+    string(APPEND _clpeak_summary "  GUI    : disabled (Flutter SDK not found - install flutter or set FLUTTER_HOME)\n")
+else()
+    string(APPEND _clpeak_summary "  GUI    : disabled (CLPEAK_ENABLE_GUI=OFF)\n")
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")

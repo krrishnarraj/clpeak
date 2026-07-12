@@ -136,6 +136,8 @@ int RocmPeak::runAll()
 
   for (int idx : devIndices)
   {
+    if (clpeak::cancelRequested())
+      break;
     if (!deviceIndices.empty() &&
         std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
       continue;

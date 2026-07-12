@@ -121,14 +121,8 @@ static std::string fmtValue(float v)
 //   {"format_version":2,"clpeak_version":"...","os":"...","entries":[ … ]}
 // Each entry on its own line for easy line-by-line parsing.
 
-bool saveJson(const ResultStore &store, const std::string &filename)
+static void writeJson(const ResultStore &store, std::ostream &f)
 {
-    std::ofstream f(filename);
-    if (!f.is_open())
-    {
-        std::cerr << "clpeak: cannot open JSON output file: " << filename << "\n";
-        return false;
-    }
     f << "{\"format_version\":" << RESULT_FORMAT_VERSION
       << ",\"clpeak_version\":\"" << jsonEscape(CLPEAK_VERSION_STR) << "\""
       << ",\"os\":\"" << jsonEscape(OS_NAME) << "\""
@@ -161,7 +155,25 @@ bool saveJson(const ResultStore &store, const std::string &filename)
         f << "\n";
     }
     f << "]}\n";
+}
+
+bool saveJson(const ResultStore &store, const std::string &filename)
+{
+    std::ofstream f(filename);
+    if (!f.is_open())
+    {
+        std::cerr << "clpeak: cannot open JSON output file: " << filename << "\n";
+        return false;
+    }
+    writeJson(store, f);
     return f.good();
+}
+
+std::string resultsToJson(const ResultStore &store)
+{
+    std::ostringstream ss;
+    writeJson(store, ss);
+    return ss.str();
 }
 
 // ---- CSV save -------------------------------------------------------------

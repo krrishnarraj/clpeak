@@ -75,6 +75,10 @@ bool saveJson(const ResultStore &store, const std::string &filename);
 bool saveCsv (const ResultStore &store, const std::string &filename);
 bool saveXml (const ResultStore &store, const std::string &filename);
 
+// In-memory variant of saveJson — same document, returned as a string.
+// Used by clpeak_ffi to hand loaded result files to the GUI.
+std::string resultsToJson(const ResultStore &store);
+
 // Parse a previously-written file.  Rejects v1 (or unversioned) files with
 // a stderr message and returns an empty store.  loadResultFile dispatches
 // on extension (.csv/.xml/anything else -> JSON).

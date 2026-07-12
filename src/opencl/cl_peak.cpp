@@ -37,6 +37,8 @@ int clPeak::runAll()
 
     for (size_t p = 0; p < platforms.size(); p++)
     {
+      if (clpeak::cancelRequested())
+        break;
       if (!platformIndices.empty() &&
           std::find(platformIndices.begin(), platformIndices.end(),
                     static_cast<unsigned long>(p)) == platformIndices.end())
@@ -65,6 +67,8 @@ int clPeak::runAll()
 
       for (size_t d = 0; d < devices.size(); d++)
       {
+        if (clpeak::cancelRequested())
+          break;
         if (!deviceIndices.empty() &&
             std::find(deviceIndices.begin(), deviceIndices.end(),
                       static_cast<unsigned long>(d)) == deviceIndices.end())
