@@ -253,14 +253,34 @@ static inline int   i32_hsum(i32v a)           { return a; }
 // (x86 vectors, NEON vectors, scalars).  GCC and MSVC keep the intrinsics:
 // GCC only substitutes estimates under -mrecip (never passed) and MSVC
 // lowers intrinsics literally.  objdump-verify on new compiler majors.
+//
+// `#pragma float_control` is only implemented by clang for X86 and AArch64
+// targets; on 32-bit ARM (armeabi-v7a, the scalar-fallback `else` branch
+// below) it is silently ignored with a `-Wignored-pragmas` warning.  The
+// scalar `a / b` / sqrtf() this file falls back to on armv7 has no known
+// fast-math substitution risk (no rcpps/frecpe-class estimate instruction
+// exists for plain VFP scalar ops, unlike x86 SSE/AVX or AArch64 NEON), so
+// this is a documented gap, not an unguarded bug -- CLPEAK_HAS_FLOAT_CONTROL
+// gates the pragma to the targets where it both applies and is needed.
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86) || \
+    defined(__aarch64__) || defined(_M_ARM64)
+#define CLPEAK_HAS_FLOAT_CONTROL 1
+#endif
 // ===========================================================================
-#if defined(__clang__)
+#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(precise, on, push)
 static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
 static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
 static inline f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
 static inline f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
 #pragma float_control(pop)
+#elif defined(__clang__)
+// armv7 (or any other clang target without float_control): plain scalar
+// lowering, no pragma -- see the comment above.
+static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
+static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
+static inline f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
+static inline f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
 #elif defined(__AVX512F__)
 static inline f32v f32_div(f32v a, f32v b)     { return _mm512_div_ps(a, b); }
 static inline f64v f64_div(f64v a, f64v b)     { return _mm512_div_pd(a, b); }

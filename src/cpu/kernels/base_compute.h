@@ -171,8 +171,19 @@ static constexpr int DIV_NACC = 8;
 // Precise FP for the divide/sqrt kernels only: clang via a float_control
 // push/pop region (ends after runFp64SqrtChain), GCC via a per-function
 // attribute.  cl.exe takes neither path but doesn't substitute intrinsics.
-#if defined(__clang__)
+// CLPEAK_HAS_FLOAT_CONTROL (from cpu_simd.h, included above) is unset on
+// targets -- 32-bit ARM (armv7) -- where clang doesn't implement the pragma;
+// there f32_div/f32_sqrt already fall back to plain scalar ops with no known
+// substitution risk (see cpu_simd.h), so skipping the pragma is a documented
+// no-op, not an unguarded gap.  The clang branch must be checked BEFORE
+// __GNUC__: clang defines __GNUC__ too (compat macro), and its "optimize"
+// attribute below is GCC-only -- clang just ignores it with a warning, so a
+// bare `#elif defined(__GNUC__)` would silently misfire on clang-without-
+// float_control instead of falling through to the no-op case.
+#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(precise, on, push)
+#define CLPEAK_PRECISE_FP
+#elif defined(__clang__)
 #define CLPEAK_PRECISE_FP
 #elif defined(__GNUC__)
 #define CLPEAK_PRECISE_FP __attribute__((optimize("no-fast-math")))
@@ -254,7 +265,7 @@ static CLPEAK_PRECISE_FP double runFp64SqrtChain(uint64_t outer)
   for (int j = 1; j < DIV_NACC; j++) s = f64_add(s, acc[j]);
   return (double)f64_hsum(s);
 }
-#if defined(__clang__)
+#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(pop)
 #endif
 
