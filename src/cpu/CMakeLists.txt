@@ -414,17 +414,38 @@ elseif(_clpeak_arm64 AND NOT APPLE)
         # Crypto TUs: +aes = the AES instructions, +sha2 = SHA-256, +sha3 = the
         # SHA-512 (and SHA-3) instructions, +crc = CRC32/CRC32C.  All fixed-
         # width NEON/GPR types, so they build on Windows clang-cl too.
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+aes"       _clpeak_f_a_aes)
+        #
+        # GCC's <arm_neon.h> declares every AES/SHA-256 intrinsic under one
+        # `+crypto` target attribute (aes AND sha2 together, on the v8.0 crypto
+        # base), and its always_inline rule needs the intrinsic's feature set to
+        # be a SUBSET of the caller's.  A TU built with only the granular +aes
+        # (missing sha2) or only +sha2 (missing aes) therefore can't inline the
+        # intrinsic -> "target specific option mismatch" hard error; the sha512
+        # TU hits it too, on the SHA-256 kernel it also carries (+sha3 implies
+        # sha2 but not aes).  Give GCC the umbrella +crypto so the caller is
+        # always a superset.  Clang declares each intrinsic with its own granular
+        # feature, so keep the split flags there -- +crypto is deprecated on
+        # clang and would only warn.
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            set(_aes_ext  "+crypto")
+            set(_sha2_ext "+crypto")
+            set(_sha3_ext "+crypto+sha3")
+        else()
+            set(_aes_ext  "+aes")
+            set(_sha2_ext "+sha2")
+            set(_sha3_ext "+sha3")
+        endif()
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a${_aes_ext}"    _clpeak_f_a_aes)
         if(_clpeak_f_a_aes)
-            clpeak_add_isa_tu(aes ${_clpeak_gnuflag}-march=armv8-a+aes)
+            clpeak_add_isa_tu(aes ${_clpeak_gnuflag}-march=armv8-a${_aes_ext})
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+sha2"      _clpeak_f_a_sha2)
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a${_sha2_ext}"   _clpeak_f_a_sha2)
         if(_clpeak_f_a_sha2)
-            clpeak_add_isa_tu(sha ${_clpeak_gnuflag}-march=armv8-a+sha2)
+            clpeak_add_isa_tu(sha ${_clpeak_gnuflag}-march=armv8-a${_sha2_ext})
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+sha3"    _clpeak_f_a_sha3)
+        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a${_sha3_ext}" _clpeak_f_a_sha3)
         if(_clpeak_f_a_sha3)
-            clpeak_add_isa_tu(sha512 ${_clpeak_gnuflag}-march=armv8.2-a+sha3)
+            clpeak_add_isa_tu(sha512 ${_clpeak_gnuflag}-march=armv8.2-a${_sha3_ext})
         endif()
         check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+crc"       _clpeak_f_a_crc)
         if(_clpeak_f_a_crc)
