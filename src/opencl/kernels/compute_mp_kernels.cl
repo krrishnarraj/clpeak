@@ -4,12 +4,15 @@ MSTRINGIFY(
 // Dominant arithmetic path in LLM training/prefill -- distinct from
 // compute_hp (fp16 accumulator).
 //
-// Each MAD_4 issues 4 mixed-precision fma's:
-//   a = fma(convert_floatN(x), convert_floatN(y), a);
+// Each MAD_4 issues 4 mixed-precision multiply-accumulates:
+//   a = convert_floatN(x) * convert_floatN(y) + a;
 // and writes a back into x (resp. y) via an fp16 downcast, so the
 // compiler can't CSE (float)x*(float)y across iterations. The downcast
 // is ~1 cycle on every vendor we care about and does not distort the
 // FMA measurement meaningfully.
+//
+// The MAC is a plain contracted expression rather than fma() for the same
+// reason compute_sp_kernels.cl avoids mad() -- see the comment there.
 
 \n#if defined(cl_khr_fp16)
 \n  #pragma OPENCL EXTENSION cl_khr_fp16 : enable
@@ -20,10 +23,10 @@ MSTRINGIFY(
 \n#undef MAD_16
 \n
 \n#define MAD_4(HT, FT, x, y, a) \
-    a = fma(convert_##FT(x), convert_##FT(y), a); x = convert_##HT(a); \
-    a = fma(convert_##FT(y), convert_##FT(x), a); y = convert_##HT(a); \
-    a = fma(convert_##FT(x), convert_##FT(y), a); x = convert_##HT(a); \
-    a = fma(convert_##FT(y), convert_##FT(x), a); y = convert_##HT(a);
+    a = convert_##FT(x) * convert_##FT(y) + a; x = convert_##HT(a); \
+    a = convert_##FT(y) * convert_##FT(x) + a; y = convert_##HT(a); \
+    a = convert_##FT(x) * convert_##FT(y) + a; x = convert_##HT(a); \
+    a = convert_##FT(y) * convert_##FT(x) + a; y = convert_##HT(a);
 \n#define MAD_16(HT, FT, x, y, a)  MAD_4(HT,FT,x,y,a); MAD_4(HT,FT,x,y,a); MAD_4(HT,FT,x,y,a); MAD_4(HT,FT,x,y,a);
 \n
 
