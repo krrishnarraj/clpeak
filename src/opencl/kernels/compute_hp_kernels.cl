@@ -7,11 +7,13 @@ MSTRINGIFY(
 \n  #define HALF_AVAILABLE
 \n#endif
 
+// Plain contracted expression instead of mad() -- see compute_sp_kernels.cl
+
 \n#undef MAD_4
 \n#undef MAD_16
 \n#undef MAD_64
 \n
-\n#define MAD_4(x, y)     x = mad(y, x, y);   y = mad(x, y, x);   x = mad(y, x, y);   y = mad(x, y, x);
+\n#define MAD_4(x, y)     x = (y*x) + y;      y = (x*y) + x;      x = (y*x) + y;      y = (x*y) + x;
 \n#define MAD_16(x, y)    MAD_4(x, y);        MAD_4(x, y);        MAD_4(x, y);        MAD_4(x, y);
 \n#define MAD_64(x, y)    MAD_16(x, y);       MAD_16(x, y);       MAD_16(x, y);       MAD_16(x, y);
 \n

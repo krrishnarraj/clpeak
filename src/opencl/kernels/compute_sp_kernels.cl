@@ -2,11 +2,20 @@ MSTRINGIFY(
 
 // Avoiding auto-vectorize by using vector-width locked dependent code
 
+// The MAD is written as a plain contracted expression rather than the mad()
+// builtin.  Both request the same thing under the -cl-mad-enable we always
+// build with (mad() carries no accuracy guarantee either -- the spec permits
+// it to be a multiply followed by an add), but some frontends treat the
+// builtin as a slow precise path and never lower it to the hardware FMA:
+// Apple's deprecated CL-on-Metal compiler halves peak fp32 that way.  This
+// also matches the integer/char/short kernels here and the explicit fma
+// intrinsics every other clpeak backend uses.  Do not "restore" mad().
+
 \n#undef MAD_4
 \n#undef MAD_16
 \n#undef MAD_64
 \n
-\n#define MAD_4(x, y)     x = mad(y, x, y);   y = mad(x, y, x);   x = mad(y, x, y);   y = mad(x, y, x);
+\n#define MAD_4(x, y)     x = (y*x) + y;      y = (x*y) + x;      x = (y*x) + y;      y = (x*y) + x;
 \n#define MAD_16(x, y)    MAD_4(x, y);        MAD_4(x, y);        MAD_4(x, y);        MAD_4(x, y);
 \n#define MAD_64(x, y)    MAD_16(x, y);       MAD_16(x, y);       MAD_16(x, y);       MAD_16(x, y);
 \n
