@@ -110,9 +110,13 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                            "gbps", Category::Bandwidth};
     auto wtest = currentDeviceScope->beginTest(wspec);
 
-    // Write set = half the L1 (like the read row); copy splits it into
-    // src+dst halves of that set so the combined resident footprint matches.
-    size_t wFloats = (size_t)(std::max<uint64_t>(info.l1dCacheBytes / 2, 4096) / sizeof(float));
+    // A QUARTER of the L1, not half like the read row: on a hybrid chip
+    // l1dCacheBytes is the big core's (Apple reports hw.perflevel0), so half
+    // of it is the *entire* L1 of the small cores -- 64 KB vs the E-core's
+    // 64 KB on M1 Pro -- and the MT row would measure L2 write drain on those
+    // threads.  A quarter is resident on both core types.  Reads tolerate the
+    // overflow (they scale ~7.7x either way); stores do not.
+    size_t wFloats = (size_t)(std::max<uint64_t>(info.l1dCacheBytes / 4, 4096) / sizeof(float));
     if (wFloats > allocFloats) wFloats = allocFloats;
     size_t cFloats = wFloats / 2;      // src [cFloats, 2*cFloats) + dst [0, cFloats)
 
