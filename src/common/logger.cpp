@@ -148,10 +148,37 @@ void logger::DeviceScope::end()
     log->contextDepth = 1;
 }
 
+void logger::closeOpenTest()
+{
+    if (contextDepth != 3) return;
+    onEvent(makeEvent(LogEvent::Kind::TestEnd));
+    curTest.clear();
+    curTestDisplay.clear();
+    curUnit.clear();
+    curCategory  = Category::Unknown;
+    contextDepth = 2;
+    curTestSeq   = 0;          // any live TestScope for it is now stale
+}
+
 logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
 {
     assert(!closed);
     assert(log->contextDepth == 2);
+    // Overlapping TestScopes are a caller bug: the previous test's rows are
+    // still pending in buffering channels (LoggerText renders a whole test at
+    // TestEnd).  Rather than let them be dropped -- which is silent, because
+    // the ResultStore keeps them and only the text output loses rows -- close
+    // the open test first so its output is complete and correctly attributed,
+    // and say so.  The assert above catches this in debug builds; the note and
+    // the implicit close are what make release builds behave sanely.
+    if (log->contextDepth == 3)
+    {
+        std::string prev = log->curTest;
+        log->closeOpenTest();
+        log->note("logger: test '" + spec.tag + "' opened while '" + prev +
+                  "' was still open; closed it first (call end() on the "
+                  "previous TestScope before starting a sibling test)");
+    }
     return TestScope(log, spec);
 }
 
@@ -169,6 +196,8 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
                               ? spec.category
                               : categoryFromUnit(spec.unit);
     log->contextDepth = 3;
+    seq = ++log->testSeqCounter;
+    log->curTestSeq = seq;
 
     log->onEvent(log->makeEvent(LogEvent::Kind::TestBegin));
 }
@@ -180,7 +209,7 @@ logger::TestScope::~TestScope()
 }
 
 logger::TestScope::TestScope(TestScope &&other) noexcept
-    : log(other.log), closed(other.closed)
+    : log(other.log), closed(other.closed), seq(other.seq)
 {
     other.log    = nullptr;
     other.closed = true;
@@ -235,11 +264,10 @@ void logger::TestScope::end()
 {
     if (closed) return;
     closed = true;
+    // Already implicitly closed by a sibling beginTest (see closeOpenTest):
+    // its TestEnd has been emitted, so emitting another here would leave the
+    // stream with two TestEnds for one TestBegin.
+    if (log->curTestSeq != seq) return;
     assert(log->contextDepth == 3);
-    log->onEvent(log->makeEvent(LogEvent::Kind::TestEnd));
-    log->curTest.clear();
-    log->curTestDisplay.clear();
-    log->curUnit.clear();
-    log->curCategory = Category::Unknown;
-    log->contextDepth = 2;
+    log->closeOpenTest();
 }

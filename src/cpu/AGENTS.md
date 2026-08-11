@@ -228,11 +228,12 @@ Adding a TU (four edits, one per concern):
   legally collapses back-to-back identical fill/copy passes into one (same
   collapse class as the string-kernel LICM trap).  The DRAM STREAM copy keeps
   libc memcpy on purpose (non-temporal is fine — desirable, even — there).
-- **Never overlap two `TestScope`s.**  LoggerText buffers metric rows and
-  flushes them at TestEnd; a nested `beginTest` CLEARS the pending buffer, so
-  the first test's rows silently vanish from the text output (they survive in
-  the ResultStore, making the bug easy to miss in JSON).  Call `test.end()`
-  before beginning a sibling test in the same function.
+- **Close a `TestScope` before opening a sibling** (`runCacheBandwidth` calls
+  `test.end()` before the write/copy test).  Overlapping scopes used to drop
+  the first test's rows from the text output while leaving them in the JSON —
+  the logger now closes the open test itself and prints a note instead of
+  losing rows (see the scope invariant in `src/common/AGENTS.md`), but the
+  explicit `end()` is still the form to write.
 - **Compute kernels must carry a real loop-carried dependency** or `-O3
   -ffast-math` deletes the work and reports a fabricated peak. The FMA chains
   use `acc = acc*b + c` with `b<1` (converges to a finite fixed point, no

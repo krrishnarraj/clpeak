@@ -96,6 +96,12 @@ void LoggerText::renderDeviceBegin(const LogEvent &e)
 
 void LoggerText::renderTestBegin(const LogEvent &e)
 {
+    // Defence in depth: rows are buffered until TestEnd, so anything still
+    // pending here belongs to a test that was not closed.  The scope layer
+    // now closes it for us (logger::closeOpenTest), but flush rather than
+    // clear so no measured row can ever be discarded silently.
+    flushMetrics();
+
     out << "\n";
 
     metricIndent = propIndent + 1;   // metrics indented one more than props

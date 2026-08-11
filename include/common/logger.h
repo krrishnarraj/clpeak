@@ -154,6 +154,15 @@ protected:
   Category    curCategory = Category::Unknown;
   int         contextDepth = 0;   // 0=none, 1=backend, 2=device, 3=test
 
+  // Identity of the currently-open test.  A TestScope only emits its TestEnd
+  // when it is still the open one, so a scope that was implicitly closed (see
+  // closeOpenTest) cannot emit a second TestEnd from its destructor.
+  unsigned long long testSeqCounter = 0;
+  unsigned long long curTestSeq     = 0;
+
+  /// Emit TestEnd for the open test (if any) and drop back to device scope.
+  void closeOpenTest();
+
 private:
   /// New event pre-filled with the current scope context.
   LogEvent makeEvent(LogEvent::Kind kind) const;
@@ -233,8 +242,9 @@ public:
   void end();
 
 private:
-  logger *log;
-  bool    closed = false;
+  logger             *log;
+  bool                closed = false;
+  unsigned long long  seq    = 0;   // matches logger::curTestSeq while open
 };
 
 #endif  // LOGGER_HPP

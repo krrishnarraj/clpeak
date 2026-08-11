@@ -31,6 +31,28 @@ used by the Flutter GUI on every platform).
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`) |
 | `common.cpp` (also) | `clpeak::requestCancel()/cancelRequested()` — cooperative run cancellation observed in `Peak::isAllowed()` + backend device loops |
 
+## Scope invariant: one open test at a time
+
+A `TestScope` must be closed before a sibling one opens. `LoggerText` buffers a
+test's metric rows until `TestEnd` (it needs them all to align the column), so
+an overlapping `beginTest` used to *discard* the pending rows — silently, since
+the `ResultStore` kept them and only the text output lost rows (JSON/CSV looked
+complete). Two guards now make that impossible:
+
+- `DeviceScope::beginTest()` detects an already-open test, calls
+  `logger::closeOpenTest()` so the previous test ends cleanly, and emits a
+  `Note` naming both tags. The pre-existing `assert` still fails fast in debug
+  builds; the note + implicit close are what keep release builds correct.
+- `TestScope::end()` only emits `TestEnd` when it is still the open scope
+  (matched by `curTestSeq`), so the implicitly-closed scope's destructor cannot
+  emit a second `TestEnd` — every `TestBegin` has exactly one `TestEnd` in the
+  stream, which the FFI/GUI channel depends on.
+- `LoggerText::renderTestBegin()` flushes rather than clears, as defence in
+  depth: no measured row can be dropped even if the scope layer is bypassed.
+
+Prefer still calling `end()` explicitly (see `runCacheBandwidth`) — it is the
+intent-revealing form and avoids the note.
+
 ## When You Change This Directory
 
 - If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.
