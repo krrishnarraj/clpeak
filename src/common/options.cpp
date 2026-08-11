@@ -155,6 +155,7 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CPU
     "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM/SME]"
+    "\n  --accelerate                      | --no-accelerate                [CPU: Apple Accelerate/BNNS GEMM]"
     "\n  --aes                             | --no-aes                       [CPU: AES-NI/VAES/ARM AES]"
     "\n  --sha256                          | --no-sha256                    [CPU: SHA-NI/ARM SHA2]"
     "\n  --sha512                          | --no-sha512                    [CPU: ARM SHA512]"
@@ -171,6 +172,8 @@ static const char *helpStr =
     "\n  --memory-latency                  | --no-memory-latency            [CPU]"
     "\n  --atomics                         | --no-atomics                   [CPU]"
     "\n  --branch-penalty                  | --no-branch-penalty            [CPU]"
+    "\n  --store-forward                   | --no-store-forward             [CPU]"
+    "\n  --smt-scaling                     | --no-smt-scaling               [CPU: Linux/Windows SMT]"
 #endif
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
     "\n"
@@ -235,6 +238,10 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_CPU
   {"amx",                       Benchmark::Amx},
+  // Apple-only test, but the flag parses everywhere under ENABLE_CPU (like
+  // every other arch-specific CPU flag) so a cross-platform script can pass
+  // --no-accelerate without tripping "unknown option" on Linux/Windows.
+  {"accelerate",                Benchmark::AppleBlas},
   {"aes",                       Benchmark::CryptoAes},
   {"sha256",                    Benchmark::CryptoSha256},
   {"sha512",                    Benchmark::CryptoSha512},
@@ -245,6 +252,8 @@ static const TestFlag testFlags[] = {
   {"memory-latency",            Benchmark::MemoryLatency},
   {"atomics",                   Benchmark::Atomics},
   {"branch-penalty",            Benchmark::BranchPenalty},
+  {"store-forward",             Benchmark::StoreForward},
+  {"smt-scaling",               Benchmark::SmtScaling},
 #endif
   {"global-memory-bandwidth",   Benchmark::GlobalBW},
   {"local-memory-bandwidth",    Benchmark::LocalBW},

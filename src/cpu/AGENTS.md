@@ -22,11 +22,12 @@ local memory, DRAM ↔ global memory.
 - FP compute (fp32/fp64/fp16/bf16/mixed/fp8 dot, divide/sqrt)? → `compute_float.cpp`
 - INT compute (int32, int8 dot, int16 dot, u64 divide)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
+- Apple Accelerate GEMM / BNNS matmul (AMX/SME via library)? → `apple_blas.cpp`
 - Crypto throughput (AES / SHA-256 / SHA-512 / CRC32-C)? → `crypto.cpp`
 - String throughput (memchr-style scan / UTF-8 validate)? → `string.cpp`
 - DRAM / cache bandwidth? → `bandwidth.cpp`
 - Memory (pointer-chase) latency / MLP / TLB page-walk? → `latency.cpp`
-- Atomics / branch-mispredict penalty? → `microarch.cpp`
+- Atomics / branch-mispredict / store-to-load forwarding / SMT scaling? → `microarch.cpp`
 - **Kernel bodies** (fp32/fp64/int32/read/div/sqrt/intdiv; fp16/bf16/mp/int8/
   int16/fp8/bf16fma; AMX/NEON matrix; AES/SHA/CRC; string scan/UTF-8; SVE;
   SME)? → the `kernels/` sub-headers (see below)
@@ -58,9 +59,10 @@ local memory, DRAM ↔ global memory.
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` tests in GB/s (unit `gbps` with the category passed EXPLICITLY in the `TestSpec`, since `categoryFromUnit("gbps")` would file them under Bandwidth). Own `--crypto` category flag + per-test `--aes/--sha256/--sha512/--crc32c` flags |
 | `string.cpp` | `runStringScan/Utf8Validate` — `Category::String` tests in GB/s (same explicit-category convention as crypto). Own `--string` category flag + per-test `--string-scan/--utf8-validate` flags. Kernel bodies in `kernels/string_compute.h` (SVE scan in `kernels/sve_compute.h`) |
 | `cpu_matrix.cpp` | `runCpuMatrix` — `emitVariants(..., kernelMenu().mat_* ...)` (AMX / SMMLA / BFMMLA / SME); `Benchmark::Amx`, run in both fp and int phases. fp16 row on x86+arm64 (AMX-FP16 / SME); tf32/fp8 rows x86-only (AMX); fp32/fp64 rows arm64-only (SME) |
-| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads). The read kernel is `kernels().readsum`; DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
-| `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level (ns), plus the **MLP rows** (`DRAM x8`/`DRAM x32`: K staggered cursors on one Sattolo cycle; DRAM ÷ x32 = the memory-level-parallelism factor, ~27 on M1 Pro) and the **TLB-miss row** (one node per page across 16384 pages — beyond any L2 TLB — with the ~1 MB of node lines cache-resident, isolating "cache hit + page walk" from the DRAM row's "DRAM + page walk"; runtime page size, 16 KB on Apple) |
-| `microarch.cpp` | `runAtomics` (`Benchmark::Atomics`, `--atomics`): relaxed `fetch_add` in ns/op — `uncontended ST` (line in own L1) and `contended MT` (all cores on ONE line; system-wide wall/op).  `runBranchPenalty` (`Benchmark::BranchPenalty`, `--branch-penalty`, ST): sorted-vs-shuffled data-dependent branch; emits `predicted`/`random` ns/branch + derived `penalty` = delta ÷ 0.5 mispredicts/branch.  **The taken arm writes through `volatile`** so the branch can't be if-converted to csel/cmov (verified: hot loop is `tbnz` + conditional store; the store cost cancels between runs since both take the same elements) |
+| `apple_blas.cpp` | `runAppleBlas` (`Benchmark::AppleBlas`, `--accelerate`, Apple-only — links the Accelerate framework): **library-call** GEMM tests, NOT feature TUs.  `Accelerate GEMM` = `cblas_sgemm`/`dgemm` over a size sweep (peak-of-sweep row + `sgemm 8k` sustained row — the AMX/SME coprocessor has a real size cliff: fp64 peaks near N=512, fp32 near N=1024-2048); `BNNS matmul` = fp16/bf16 via the deprecated-but-functional `BNNSMatMul` (BNNSGraph needs compiled model artifacts — unusable in a self-contained bench), int8 = permanent Unsupported row (BNNS has no int8 GEMM).  Single rows, no ST/MT split: Accelerate threads internally.  This is the only sanctioned route to Apple's AMX on M1-M3 (where the `matrix_*` ISA rows are correctly Unsupported); on M4+ the same calls ride SME.  M1 Pro reference: sgemm peak **1.8-2.5 TFLOPS** (library call on a fanless-ish laptop — run-to-run turbo/scheduler variance is wide, don't chase a single number; peak N=1024-2048, 8k sustained ~1.7), dgemm ~0.6 (peaks at N=512), BNNS fp16 ~2.0-2.1; bf16 on M1 is library-EMULATED (lands below NEON fp32 — honest, keep it).  Per-size sweep results under `CLPEAK_VLOG` |
+| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad), `runCacheBandwidth` (per-level L1/L2/L3, ST+MT, shared-cache MT sets split across threads; **plus the `L1 bandwidth (write / copy)` test** — same `Benchmark::CacheBandwidth` gate — exposing the store-port width and load:store split, e.g. Olympus/Vera's 4-load/2-store pipes; M1 Pro write ST ~85 GB/s ≈ 78% of the 2x16B store bound). The read kernel is `kernels().readsum`, write/copy are `kernels().writefill`/`copybuf` (per-TU vector stores in `base_compute.h` — see the libc gotcha below); DRAM arrays sized off the **aggregate** L3 (`pickStreamFloats`) + parallel first-touch for NUMA-local placement. No `TransferBW`/memcpy test — on a CPU it just re-measures the STREAM copy path |
+| `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level (ns), plus the **`DRAM linear` row** (same dependent-load walk, nodes laid out sequentially so the address stream is a plain 64 B stride: DRAM ÷ linear = the UPPER BOUND on what prefetching hides, ~88x on M1 Pro. It does **not** isolate an irregular-pointer/graph prefetcher — that needs a chase predictable only through the data; don't relabel it as one), the **MLP rows** (`DRAM x8`/`DRAM x32`: K staggered cursors on one Sattolo cycle; DRAM ÷ x32 = the memory-level-parallelism factor, ~27 on M1 Pro) and the **TLB-miss row** (one node per page across 16384 pages — beyond any L2 TLB — with the ~1 MB of node lines cache-resident, isolating "cache hit + page walk" from the DRAM row's "DRAM + page walk"; runtime page size, 16 KB on Apple) |
+| `microarch.cpp` | `runAtomics` (`Benchmark::Atomics`, `--atomics`): relaxed `fetch_add` in ns/op — `uncontended ST` (line in own L1) and `contended MT` (all cores on ONE line; system-wide wall/op).  `runBranchPenalty` (`Benchmark::BranchPenalty`, `--branch-penalty`, ST): sorted-vs-shuffled data-dependent branch; emits `predicted`/`random` ns/branch + derived `penalty` = delta ÷ 0.5 mispredicts/branch.  **The taken arm writes through `volatile`** so the branch can't be if-converted to csel/cmov (verified: hot loop is `tbnz` + conditional store; the store cost cancels between runs since both take the same elements).  `runStoreForward` (`Benchmark::StoreForward`, `--store-forward`, ST): dependent store->same-address-load->+1 chain through a volatile slot, ns/roundtrip — cores with hardware memory renaming collapse it to ~1 cycle (M1 Pro: 0.32 ns; Olympus/Vera claims the same), classic forwarding is ~4-6 cycles.  `runSmtScaling` (`Benchmark::SmtScaling`, `--smt-scaling`, fp phase, gflops): the widest non-SSVE fp32 chain at 1 thread/physical core (dedicated `CpuThreadPool` pinned to primary siblings — sysfs core_id on Linux, GLPI RelationProcessorCore on Windows, group 0 only) vs all logical threads; ratio ~1.0 = statically partitioned SMT (Vera spatial MT), ~1.1-1.3 = conventional SMT.  Unsupported on no-SMT CPUs and macOS (no hard affinity).  A taken-branch-throughput test (2 taken/cycle on Olympus) was considered and DROPPED: it needs a JIT'd jump chain to measure honestly — portable C++ only measures loop overhead |
 
 ## Build
 
@@ -217,6 +219,20 @@ Adding a TU (four edits, one per concern):
 
 ## Gotchas
 
+- **Never use libc memset/memcpy for cache-resident bandwidth.** Apple's (and
+  glibc's) memset/memcpy switch to non-temporal stores above a size threshold,
+  bypassing the cache under test — the first "L1 write" implementation landed
+  exactly at DRAM bandwidth (125 GB/s MT ≈ the STREAM copy number).  The
+  write/copy rows use per-TU plain vector stores (`writefill`/`copybuf` in
+  `base_compute.h`) with a per-pass compiler memory barrier — without it clang
+  legally collapses back-to-back identical fill/copy passes into one (same
+  collapse class as the string-kernel LICM trap).  The DRAM STREAM copy keeps
+  libc memcpy on purpose (non-temporal is fine — desirable, even — there).
+- **Never overlap two `TestScope`s.**  LoggerText buffers metric rows and
+  flushes them at TestEnd; a nested `beginTest` CLEARS the pending buffer, so
+  the first test's rows silently vanish from the text output (they survive in
+  the ResultStore, making the bug easy to miss in JSON).  Call `test.end()`
+  before beginning a sibling test in the same function.
 - **Compute kernels must carry a real loop-carried dependency** or `-O3
   -ffast-math` deletes the work and reports a fabricated peak. The FMA chains
   use `acc = acc*b + c` with `b<1` (converges to a finite fixed point, no

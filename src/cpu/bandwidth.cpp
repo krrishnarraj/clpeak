@@ -92,6 +92,56 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   volatile uint64_t keep = 0;
   for (uint64_t s : sink) keep ^= s;
   (void)keep;
+
+  // Close the read test BEFORE opening the write/copy one: LoggerText buffers
+  // metric rows until TestEnd, and a nested TestBegin clears that buffer --
+  // overlapping TestScopes silently drop the first test's rows.
+  test.end();
+
+  // ---- L1 write / copy: the store-port side of the story ------------------
+  // The read rows above measure the load ports; write and copy expose the
+  // store-port width and the load:store split (e.g. NVIDIA Olympus is 4 load
+  // + 2 store pipes x 128-bit, so write lands near half of read).  The
+  // kernels are the ISA-dispatched vector stores from base_compute.h, NOT
+  // libc memset/memcpy: those switch to non-temporal stores above a size
+  // threshold and would bypass the very cache under test.
+  {
+    logger::TestSpec wspec{"l1_write_bandwidth", "L1 bandwidth (write / copy)",
+                           "gbps", Category::Bandwidth};
+    auto wtest = currentDeviceScope->beginTest(wspec);
+
+    // Write set = half the L1 (like the read row); copy splits it into
+    // src+dst halves of that set so the combined resident footprint matches.
+    size_t wFloats = (size_t)(std::max<uint64_t>(info.l1dCacheBytes / 2, 4096) / sizeof(float));
+    if (wFloats > allocFloats) wFloats = allocFloats;
+    size_t cFloats = wFloats / 2;      // src [cFloats, 2*cFloats) + dst [0, cFloats)
+
+    Workload writeBody = [&](int tid, uint64_t iters) {
+      clpeak_cpu::kernels().writefill(bufs[(size_t)tid].data(), wFloats, iters);
+    };
+    Workload copyBody = [&](int tid, uint64_t iters) {
+      float *p = bufs[(size_t)tid].data();
+      clpeak_cpu::kernels().copybuf(p, p + cFloats, cFloats, iters);
+    };
+
+    auto gbps = [](double bytes, double meanUs) -> float {
+      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+    };
+
+    double us1 = runWorkload(1,    writeBody, cfg.targetTimeUs, forced);
+    double usN = runWorkload(maxT, writeBody, cfg.targetTimeUs, forced);
+    if (us1 > 0) wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1));
+    else         wtest.skip("write ST", ResultStatus::Error, "write failed");
+    if (usN > 0) wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN));
+    else         wtest.skip("write MT", ResultStatus::Error, "write failed");
+
+    us1 = runWorkload(1,    copyBody, cfg.targetTimeUs, forced);
+    usN = runWorkload(maxT, copyBody, cfg.targetTimeUs, forced);
+    if (us1 > 0) wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1));
+    else         wtest.skip("copy ST", ResultStatus::Error, "copy failed");
+    if (usN > 0) wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN));
+    else         wtest.skip("copy MT", ResultStatus::Error, "copy failed");
+  }
   return 0;
 }
 

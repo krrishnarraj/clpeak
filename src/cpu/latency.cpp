@@ -28,22 +28,32 @@
 #define CPU_UNROLL_FULL_LAT
 #endif
 
-// Pointer-chase latency over a random cycle of cache-line-spaced nodes.  Each
-// node occupies one 64-byte line (16 uint32) and stores the index of the next
-// node, so each hop is a dependent load that defeats stride prefetchers.
+// Pointer-chase latency over a cycle of cache-line-spaced nodes.  Each node
+// occupies one 64-byte line (16 uint32) and stores the index of the next
+// node, so each hop is a dependent load.  With `randomOrder` the cycle is a
+// Sattolo shuffle that defeats stride prefetchers (the latency rows); with a
+// sequential layout (node i -> i+1) the address stream is a plain 64-byte
+// stride, so the stream prefetcher runs ahead of the dependent chain and the
+// walk collapses toward L1 latency.  The random-to-linear ratio is how much
+// DRAM latency prefetching hides on the EASY case -- it bounds the prefetch
+// win; it does not isolate an irregular-pointer (graph) prefetcher, which
+// would need a chase whose addresses are predictable only through the data.
 // Working set = nLines * 64 bytes, sized per cache level.
-static double chaseLatencyNs(uint64_t levelBytes)
+static double chaseLatencyNs(uint64_t levelBytes, bool randomOrder = true)
 {
   size_t nLines = (size_t)std::max<uint64_t>(levelBytes / 64, 64);
   std::vector<uint32_t> buf(nLines * 16, 0);
 
   std::vector<uint32_t> order(nLines);
   std::iota(order.begin(), order.end(), 0u);
-  std::mt19937 rng(0xC0FFEE);
-  for (size_t i = nLines - 1; i > 0; i--)              // Sattolo: single cycle
+  if (randomOrder)
   {
-    size_t j = rng() % i;
-    std::swap(order[i], order[j]);
+    std::mt19937 rng(0xC0FFEE);
+    for (size_t i = nLines - 1; i > 0; i--)            // Sattolo: single cycle
+    {
+      size_t j = rng() % i;
+      std::swap(order[i], order[j]);
+    }
   }
   for (size_t i = 0; i < nLines; i++)
     buf[(size_t)order[i] * 16] = order[(i + 1) % nLines] * 16;
@@ -236,6 +246,18 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
       test.emit(levels[i].name, (float)ns[(size_t)i]);
     else
       test.skip(levels[i].name, ResultStatus::Error, "latency walk failed");
+  }
+
+  // Prefetch-assisted chase: the same DRAM-sized dependent-load walk with the
+  // nodes laid out sequentially.  DRAM / (DRAM linear) is the upper bound on
+  // what prefetching hides -- the best case for the hardware, against the
+  // random row's worst case.
+  {
+    double nsLin = -1.0;
+    const uint64_t dramB = levels[3].bytes;
+    pool->run(1, [&](int) { nsLin = chaseLatencyNs(dramB, /*randomOrder=*/false); });
+    if (nsLin > 0) test.emit("DRAM linear", (float)nsLin);
+    else           test.skip("DRAM linear", ResultStatus::Error, "latency walk failed");
   }
 
   // Memory-level parallelism: effective ns/access over the DRAM working set

@@ -419,6 +419,136 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
 #endif
 }
 
+// ---- Streaming write (fill) + copy -----------------------------------------
+// Cache-resident store-bandwidth kernels (the L1 write/copy rows).  libc
+// memset/memcpy CANNOT be used here: they switch to non-temporal stores above
+// a size threshold (verified on Apple: "L1" writes landed at DRAM bandwidth),
+// which bypasses the cache being measured.  Plain vector stores stay cached.
+// The per-pass barrier keeps clang from dead-store-eliminating all but the
+// last pass (stores of identical data to the same location are legally
+// collapsible); MSVC cl.exe gets _ReadWriteBarrier.
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#define CPU_BASE_MEMBAR() _ReadWriteBarrier()
+#else
+#define CPU_BASE_MEMBAR() asm volatile("" ::: "memory")
+#endif
+
+static void writeBufferFill(float *p, size_t M, uint64_t iters)
+{
+  for (uint64_t it = 0; it < iters; it++)
+  {
+    CPU_BASE_MEMBAR();
+    const float fv = 1.0f + (float)(it & 7);
+#if defined(__AVX512F__)
+    constexpr size_t W = 16;
+    const __m512 v = _mm512_set1_ps(fv);
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      _mm512_storeu_ps(p + i + 0 * W, v);
+      _mm512_storeu_ps(p + i + 1 * W, v);
+      _mm512_storeu_ps(p + i + 2 * W, v);
+      _mm512_storeu_ps(p + i + 3 * W, v);
+    }
+    for (; i < M; i++) p[i] = fv;
+#elif defined(__AVX2__)
+    constexpr size_t W = 8;
+    const __m256 v = _mm256_set1_ps(fv);
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      _mm256_storeu_ps(p + i + 0 * W, v);
+      _mm256_storeu_ps(p + i + 1 * W, v);
+      _mm256_storeu_ps(p + i + 2 * W, v);
+      _mm256_storeu_ps(p + i + 3 * W, v);
+    }
+    for (; i < M; i++) p[i] = fv;
+#elif defined(__SSE2__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
+    constexpr size_t W = 4;
+    const __m128 v = _mm_set1_ps(fv);
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      _mm_storeu_ps(p + i + 0 * W, v);
+      _mm_storeu_ps(p + i + 1 * W, v);
+      _mm_storeu_ps(p + i + 2 * W, v);
+      _mm_storeu_ps(p + i + 3 * W, v);
+    }
+    for (; i < M; i++) p[i] = fv;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr size_t W = 4;
+    const float32x4_t v = vdupq_n_f32(fv);
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      vst1q_f32(p + i + 0 * W, v);
+      vst1q_f32(p + i + 1 * W, v);
+      vst1q_f32(p + i + 2 * W, v);
+      vst1q_f32(p + i + 3 * W, v);
+    }
+    for (; i < M; i++) p[i] = fv;
+#else
+    for (size_t i = 0; i < M; i++) p[i] = fv;
+#endif
+  }
+}
+
+static void copyBufferVec(float *dst, const float *src, size_t M, uint64_t iters)
+{
+  for (uint64_t it = 0; it < iters; it++)
+  {
+    CPU_BASE_MEMBAR();
+#if defined(__AVX512F__)
+    constexpr size_t W = 16;
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      _mm512_storeu_ps(dst + i + 0 * W, _mm512_loadu_ps(src + i + 0 * W));
+      _mm512_storeu_ps(dst + i + 1 * W, _mm512_loadu_ps(src + i + 1 * W));
+      _mm512_storeu_ps(dst + i + 2 * W, _mm512_loadu_ps(src + i + 2 * W));
+      _mm512_storeu_ps(dst + i + 3 * W, _mm512_loadu_ps(src + i + 3 * W));
+    }
+    for (; i < M; i++) dst[i] = src[i];
+#elif defined(__AVX2__)
+    constexpr size_t W = 8;
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      _mm256_storeu_ps(dst + i + 0 * W, _mm256_loadu_ps(src + i + 0 * W));
+      _mm256_storeu_ps(dst + i + 1 * W, _mm256_loadu_ps(src + i + 1 * W));
+      _mm256_storeu_ps(dst + i + 2 * W, _mm256_loadu_ps(src + i + 2 * W));
+      _mm256_storeu_ps(dst + i + 3 * W, _mm256_loadu_ps(src + i + 3 * W));
+    }
+    for (; i < M; i++) dst[i] = src[i];
+#elif defined(__SSE2__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
+    constexpr size_t W = 4;
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      _mm_storeu_ps(dst + i + 0 * W, _mm_loadu_ps(src + i + 0 * W));
+      _mm_storeu_ps(dst + i + 1 * W, _mm_loadu_ps(src + i + 1 * W));
+      _mm_storeu_ps(dst + i + 2 * W, _mm_loadu_ps(src + i + 2 * W));
+      _mm_storeu_ps(dst + i + 3 * W, _mm_loadu_ps(src + i + 3 * W));
+    }
+    for (; i < M; i++) dst[i] = src[i];
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr size_t W = 4;
+    size_t i = 0;
+    for (; i + 4 * W <= M; i += 4 * W)
+    {
+      vst1q_f32(dst + i + 0 * W, vld1q_f32(src + i + 0 * W));
+      vst1q_f32(dst + i + 1 * W, vld1q_f32(src + i + 1 * W));
+      vst1q_f32(dst + i + 2 * W, vld1q_f32(src + i + 2 * W));
+      vst1q_f32(dst + i + 3 * W, vld1q_f32(src + i + 3 * W));
+    }
+    for (; i < M; i++) dst[i] = src[i];
+#else
+    for (size_t i = 0; i < M; i++) dst[i] = src[i];
+#endif
+  }
+}
+
 } // anonymous namespace
 } // namespace clpeak_cpu
 

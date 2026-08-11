@@ -74,7 +74,10 @@ void detectCpuInfo(cpu_device_info_t &info);
 // ---------------------------------------------------------------------------
 class CpuThreadPool {
 public:
-  explicit CpuThreadPool(int maxThreads);
+  // `cpuIds` optionally pins worker i to logical CPU cpuIds[i] instead of the
+  // default core i -- used by the SMT-scaling test to place one worker per
+  // physical core.  Must have >= maxThreads entries when non-empty.
+  explicit CpuThreadPool(int maxThreads, std::vector<int> cpuIds = {});
   ~CpuThreadPool();
 
   int maxThreads() const { return nMax; }
@@ -86,6 +89,7 @@ private:
   void workerLoop(int tid);
 
   int                       nMax = 0;
+  std::vector<int>          pinIds;      // empty -> worker i pins to core i
   std::vector<std::thread>  workers;
   std::mutex                mtx;
   std::condition_variable   cvStart;
@@ -130,6 +134,9 @@ public:
   int runComputeInt16DP(benchmark_config_t &cfg);
   int runComputeIntDiv(benchmark_config_t &cfg);
   int runCpuMatrix(benchmark_config_t &cfg, Category category);
+#ifdef __APPLE__
+  int runAppleBlas(benchmark_config_t &cfg);   // Accelerate GEMM + BNNS matmul
+#endif
   int runCryptoAes(benchmark_config_t &cfg);
   int runCryptoSha256(benchmark_config_t &cfg);
   int runCryptoSha512(benchmark_config_t &cfg);
@@ -141,6 +148,8 @@ public:
   int runMemoryLatency(benchmark_config_t &cfg);
   int runAtomics(benchmark_config_t &cfg);
   int runBranchPenalty(benchmark_config_t &cfg);
+  int runStoreForward(benchmark_config_t &cfg);
+  int runSmtScaling(benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
   cpu_device_info_t    info;

@@ -61,7 +61,9 @@ static const CpuKernelTable *tuTable()
     t.sqrt32 = {runFp32SqrtChain, (double)INNER * DIV_NACC * F32_LANES};
     t.sqrt64 = {runFp64SqrtChain, (double)INNER * DIV_NACC * F64_LANES};
     t.intdiv = {runIntDivChain,   (double)INNER * IDIV_NACC};
-    t.readsum = readBufferChecksum;
+    t.readsum   = readBufferChecksum;
+    t.writefill = writeBufferFill;
+    t.copybuf   = copyBufferVec;
 #ifdef CPU_HAS_FP16_KERNEL
     t.fp16 = {runFp16Chain, (double)INNER * FP16_NACC * FP16_LANES * 2.0};
 #endif

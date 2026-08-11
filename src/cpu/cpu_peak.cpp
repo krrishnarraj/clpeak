@@ -154,6 +154,10 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::FpCompute))
     runCpuMatrix(cfg, Category::FpCompute);
+#ifdef __APPLE__
+  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
+#endif
+  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
 
   // ---- INT compute ----
   if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
@@ -183,6 +187,7 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
   if (isAllowed(Benchmark::Atomics))       runAtomics(cfg);
   if (isAllowed(Benchmark::BranchPenalty)) runBranchPenalty(cfg);
+  if (isAllowed(Benchmark::StoreForward))  runStoreForward(cfg);
 
   currentDeviceScope = nullptr;
   return 0;

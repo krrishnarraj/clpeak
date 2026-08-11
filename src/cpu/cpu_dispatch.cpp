@@ -305,7 +305,9 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
   if (s->sqrt32.fn)   d.sqrt32 = s->sqrt32;
   if (s->sqrt64.fn)   d.sqrt64 = s->sqrt64;
   if (s->intdiv.fn)   d.intdiv = s->intdiv;
-  if (s->readsum)     d.readsum = s->readsum;
+  if (s->readsum)     d.readsum   = s->readsum;
+  if (s->writefill)   d.writefill = s->writefill;
+  if (s->copybuf)     d.copybuf   = s->copybuf;
   if (s->sveVLBytes)  d.sveVLBytes = s->sveVLBytes;
   if (s->smeSVLBytes) d.smeSVLBytes = s->smeSVLBytes;
 }

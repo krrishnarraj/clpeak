@@ -49,6 +49,13 @@ add_library(peak_cpu STATIC
     microarch.cpp
 )
 
+if(APPLE)
+    # Accelerate GEMM / BNNS matmul tests (apple_blas.cpp): the sanctioned
+    # route to the AMX / SME matrix units.  macOS + iOS.
+    target_sources(peak_cpu PRIVATE apple_blas.cpp)
+    target_link_libraries(peak_cpu PUBLIC "-framework Accelerate")
+endif()
+
 target_link_libraries(peak_cpu PUBLIC peak_common)
 if(TARGET Threads::Threads)
     target_link_libraries(peak_cpu PUBLIC Threads::Threads)

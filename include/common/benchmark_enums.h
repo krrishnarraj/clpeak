@@ -44,6 +44,7 @@ enum class Benchmark : unsigned int {
     JointMatrix,
     Onemkl,
     Amx,                // CPU matrix engine (Intel AMX / ARM I8MM)
+    AppleBlas,          // Apple Accelerate GEMM + BNNS matmul (AMX/SME via library)
     CryptoAes,          // AES-128 encrypt throughput (AES-NI / VAES-512 / ARM FEAT_AES)
     CryptoSha256,       // SHA-256 compression throughput (SHA-NI / ARM FEAT_SHA256)
     CryptoSha512,       // SHA-512 compression throughput (ARM FEAT_SHA512)
@@ -56,6 +57,8 @@ enum class Benchmark : unsigned int {
     MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM + MLP + TLB)
     Atomics,            // CPU atomic fetch-add: uncontended / contended (ns)
     BranchPenalty,      // CPU branch mispredict penalty (ns)
+    StoreForward,       // CPU store-to-load forwarding roundtrip (ns)
+    SmtScaling,         // CPU fp32 FMA at 1 thread/core vs all SMT threads (GFLOPS)
     KernelLatency,
     COUNT
 };
@@ -105,6 +108,8 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::JointMatrix:
     case Benchmark::Onemkl:
     case Benchmark::Amx:
+    case Benchmark::AppleBlas:
+    case Benchmark::SmtScaling:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:
@@ -130,6 +135,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::MemoryLatency:
     case Benchmark::Atomics:
     case Benchmark::BranchPenalty:
+    case Benchmark::StoreForward:
         return Category::Latency;
 
     case Benchmark::COUNT:
