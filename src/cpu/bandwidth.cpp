@@ -8,7 +8,39 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <vector>
+
+// Cache-line-aligned float buffer.  std::vector / malloc only promise 16-byte
+// alignment on x86-64, and glibc serves large allocations from mmap as
+// page + 16 (the chunk header) -- the worst possible case: with a 16-mod-64
+// start, HALF of all 32-byte AVX2 loads straddle a 64-byte cache line, and on
+// Zen 2 a line-split load costs two accesses.  That alone caps an L1 read row
+// near ~60% of the load-port bound.  64-byte alignment removes the splits for
+// every vector width we issue (16/32/64 B).
+struct AlignedFloats {
+  float *p = nullptr;
+  size_t n = 0;
+  AlignedFloats() = default;
+  explicit AlignedFloats(size_t count) { alloc(count); }
+  AlignedFloats(const AlignedFloats &) = delete;
+  AlignedFloats &operator=(const AlignedFloats &) = delete;
+  ~AlignedFloats() { free(); }
+
+  void alloc(size_t count)
+  {
+    free();
+    n = count;
+    p = static_cast<float *>(::operator new(count * sizeof(float),
+                                            std::align_val_t(64)));
+  }
+  void free()
+  {
+    if (p) ::operator delete(p, std::align_val_t(64));
+    p = nullptr; n = 0;
+  }
+  float *data() const { return p; }
+};
 
 // The streaming-read kernel is ISA-dispatched (compiled per-ISA in
 // cpu_kernels_tu.cpp).  Forward to the selected variant.
@@ -40,8 +72,8 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   size_t allocFloats = (size_t)(allocBytes / sizeof(float));
   if (allocFloats < 1024) allocFloats = 1024;
 
-  std::vector<std::vector<float>> bufs((size_t)maxT);
-  for (auto &b : bufs) { b.resize(allocFloats); populate(b.data(), allocFloats); }
+  std::vector<AlignedFloats> bufs((size_t)maxT);
+  for (auto &b : bufs) { b.alloc(allocFloats); populate(b.data(), allocFloats); }
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
 
@@ -190,9 +222,13 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 
   // `new float[N]` leaves the pages untouched (floats are not value-initialized),
   // so the parallel populate below is the first touch.
-  float *A = new float[N];
-  float *B = new float[N];
-  float *C = new float[N];
+  // Aligned like the cache buffers (see AlignedFloats): operator new with an
+  // alignment leaves the pages untouched, so the parallel first-touch below is
+  // still what places them NUMA-locally.
+  AlignedFloats Abuf(N), Bbuf(N), Cbuf(N);
+  float *A = Abuf.data();
+  float *B = Bbuf.data();
+  float *C = Cbuf.data();
   pool->run(maxT, [&](int tid) {
     size_t lo, hi; chunk(tid, lo, hi);
     populate(A + lo, hi - lo);
@@ -238,7 +274,6 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   volatile uint64_t keep = 0;
   for (uint64_t v : sink) keep ^= v;
   (void)keep;
-  delete[] A; delete[] B; delete[] C;
   return 0;
 }
 
