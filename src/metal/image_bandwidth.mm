@@ -129,5 +129,130 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Texture sample rate (bilinear GTexels/s) -- TMU throughput, not bandwidth.
+// A small cache-resident texture is sampled with forced-fractional bilinear
+// coordinates, so the filter units are the limiter rather than DRAM (that is
+// what image_bandwidth measures).  Apple's TBDR parts sustain very high
+// filtered-fetch rates from the SLC; this row makes that visible.
+// ---------------------------------------------------------------------------
+
+int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    auto test = currentDeviceScope->beginTest(
+        {"texture_sample_rate", "Texture sample rate (bilinear)", "gtexels",
+         Category::Bandwidth});
+
+    const unsigned int SAMPLES_PER_WI = 64;   // must match texture_sample.metal
+    const NSUInteger imgW = 1024, imgH = 1024;  // 4 MB rgba8 -- SLC-resident
+    const uint32_t tgSize = 256;
+    uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
+    uint32_t numGroups = (uint32_t)(globalThreads / tgSize);
+    if (numGroups == 0) numGroups = 1;
+    globalThreads = (uint64_t)numGroups * tgSize;
+
+    id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
+                                                         options:MTLResourceStorageModeShared];
+    if (!outBuf)
+    {
+        test.skipAll({"rgba8", "rgba16f"}, ResultStatus::Error, "Output buffer alloc failed");
+        return -1;
+    }
+
+    MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
+    MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
+
+    struct V {
+        const char     *label;
+        const char     *kname;
+        MTLPixelFormat  fmt;
+        uint32_t        bytesPerPixel;
+    };
+    const V vs[] = {
+        { "rgba8",   "texture_sample_rgba8",   MTLPixelFormatRGBA8Unorm,  4 },
+        { "rgba16f", "texture_sample_rgba16f", MTLPixelFormatRGBA16Float, 8 },
+    };
+
+    for (const auto &v : vs)
+    {
+        MTLTextureDescriptor *td = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:v.fmt
+                                         width:imgW height:imgH mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead;
+        td.storageMode = MTLStorageModeShared;
+        id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
+        if (!tex)
+        {
+            test.skip(v.label, ResultStatus::Error, "Texture alloc failed");
+            continue;
+        }
+        {
+            // Pseudo-random fill so hardware lossless compression can't dodge
+            // the actual texel reads.
+            NSUInteger numBytes = imgW * imgH * v.bytesPerPixel;
+            float *staging = new float[numBytes / sizeof(float)];
+            populate(staging, numBytes / sizeof(float));
+            [tex replaceRegion:MTLRegionMake2D(0, 0, imgW, imgH)
+                   mipmapLevel:0
+                     withBytes:staging
+                   bytesPerRow:imgW * v.bytesPerPixel];
+            delete[] staging;
+        }
+
+        id<MTLComputePipelineState> pso = mtlGetPipeline(dev,
+            mtl_kernels::texture_sample_src,
+            mtl_kernels::texture_sample_name, v.kname);
+        if (!pso) {
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
+            continue;
+        }
+
+        auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
+            id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
+            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+            [enc setComputePipelineState:pso];
+            [enc setTexture:tex atIndex:0];
+            [enc setBuffer:outBuf offset:0 atIndex:0];
+            for (unsigned int i = 0; i < n; i++)
+                [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSizeM];
+            [enc endEncoding];
+            [cb commit];
+            return cb;
+        };
+        for (unsigned int i = 0; i < warmupCount; i++)
+        {
+            id<MTLCommandBuffer> w = enqueue(1);
+            [w waitUntilCompleted];
+        }
+        unsigned int probeIters = 1;
+        double probeT0 = [NSProcessInfo processInfo].systemUptime;
+        id<MTLCommandBuffer> p = enqueue(probeIters);
+        [p waitUntilCompleted];
+        double probeT1 = [NSProcessInfo processInfo].systemUptime;
+        CFTimeInterval gpuProbeSec = p.GPUEndTime - p.GPUStartTime;
+        CFTimeInterval wallProbeSec = probeT1 - probeT0;
+        double gpuProbeUs = gpuProbeSec * 1e6;
+        if (gpuProbeSec <= 0.0 || gpuProbeSec < wallProbeSec * 0.01)
+            gpuProbeUs = wallProbeSec * 1e6;
+        double per_iter_us = gpuProbeUs / (double)probeIters;
+        unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs,
+                                       forceIters ? specifiedIters : 0);
+        double t0 = [NSProcessInfo processInfo].systemUptime;
+        id<MTLCommandBuffer> t = enqueue(iters);
+        [t waitUntilCompleted];
+        double t1 = [NSProcessInfo processInfo].systemUptime;
+        CFTimeInterval gpuTimedSec = t.GPUEndTime - t.GPUStartTime;
+        CFTimeInterval wallTimedSec = t1 - t0;
+        double gpuTimedUs = gpuTimedSec * 1e6;
+        if (gpuTimedSec <= 0.0 || gpuTimedSec < wallTimedSec * 0.01)
+            gpuTimedUs = wallTimedSec * 1e6;
+        float us = (float)(gpuTimedUs / iters);
+        uint64_t samples = (uint64_t)SAMPLES_PER_WI * globalThreads;
+        float gtexels = (float)samples / us / 1e3f;   // samples/us -> Gsamples/s
+        test.emit(v.label, gtexels);
+    }
+
+    return 0;
+}
 
 #endif // ENABLE_METAL

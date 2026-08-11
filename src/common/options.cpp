@@ -146,6 +146,8 @@ static const char *helpStr =
 #ifdef ENABLE_METAL
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
+    "\n  --mps-attention                   | --no-mps-attention             [Metal: SDPA fp16]"
+    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear GTexels/s]"
 #endif
 #ifdef ENABLE_ONEAPI
     "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"
@@ -224,6 +226,8 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_METAL
   {"mps-gemm",                  Benchmark::MpsGemm},
+  {"mps-attention",             Benchmark::MpsAttention},
+  {"texture-sample",            Benchmark::TextureSample},
 #endif
 #ifdef ENABLE_ONEAPI
   {"joint-matrix",              Benchmark::JointMatrix},

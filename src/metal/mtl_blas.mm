@@ -36,6 +36,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 
 // MetalDevice's impl is opaque in the public header; the full struct is
@@ -301,6 +302,127 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 #endif
     }
 
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// MPSGraph scaled-dot-product-attention peak (transformer-shaped composite:
+// softmax(scale * QK^T) V).  This is the op Apple tunes for LLM inference
+// (WWDC24); it complements the raw GEMM rows the way coopmat complements the
+// FMA chains.  fp16 only -- the dtype every shipping attention path uses.
+// FLOPs counted as the two matmuls (2*H*N^2*F each); softmax is ignored by
+// the usual convention, so the row reads slightly below raw GEMM peak.
+// ---------------------------------------------------------------------------
+
+int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
+{
+    (void)cfg;
+    // B=1, H=16 heads, seq N=4096, head dim F=128 -- llama-class shape.
+    const uint32_t H = 16, N = 4096, F = 128;
+
+    auto test = currentDeviceScope->beginTest(
+        {"mps-attention", "MPS attention SDPA (H16 S4096 D128)", "tflops"});
+
+    if (!dev.info.isAppleSilicon)
+    {
+        test.skip("fp16", ResultStatus::Unsupported, "MPS attention requires Apple silicon");
+        return 0;
+    }
+
+    // The shape is FIXED (not scaled to the device like pickGemmDim) so the
+    // number is comparable across Macs and iPhones -- but that means a small
+    // device must be able to hold it.  If MPSGraph lowers to an unfused
+    // attention it materializes the [1,H,N,N] fp16 score matrix, so budget for
+    // that worst case (H*N*N*2 = 512 MB here) plus the Q/K/V/O buffers; skip
+    // rather than risk an allocation failure mid-encode on a phone.
+    {
+        const uint64_t scoreBytes = (uint64_t)H * N * N * 2;
+        const uint64_t needBytes  = scoreBytes + 4ULL * H * N * F * 2;
+        const uint64_t budget     = dev.info.recommendedMaxWorkingSetSize;
+        if (budget && needBytes > budget / 2)
+        {
+            test.skip("fp16", ResultStatus::Unsupported,
+                      "device working set too small for the fixed H16/S4096/D128 shape");
+            return 0;
+        }
+    }
+
+#if TARGET_OS_IPHONE
+    if (@available(iOS 18.0, *))
+#else
+    if (@available(macOS 15.0, *))
+#endif
+    {
+        @autoreleasepool {
+            id<MTLDevice>       mtlDev = dev.impl->device;
+            id<MTLCommandQueue> queue  = dev.impl->queue;
+
+            const uint64_t elems = (uint64_t)H * N * F;
+            id<MTLBuffer> bufQ = makePrivateBuffer(mtlDev, elems * 2);
+            id<MTLBuffer> bufK = makePrivateBuffer(mtlDev, elems * 2);
+            id<MTLBuffer> bufV = makePrivateBuffer(mtlDev, elems * 2);
+            id<MTLBuffer> bufO = makePrivateBuffer(mtlDev, elems * 2);
+            if (!bufQ || !bufK || !bufV || !bufO)
+            {
+                test.skip("fp16", ResultStatus::Error, "Failed to allocate Q/K/V buffers");
+                return -1;
+            }
+            {
+                // 0x3c3c is a benign ~1.06 in fp16; softmax renormalizes, so
+                // the numbers stay bounded regardless of content.
+                id<MTLCommandBuffer> cb = [queue commandBuffer];
+                id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+                for (id<MTLBuffer> b in @[bufQ, bufK, bufV])
+                    [blit fillBuffer:b range:NSMakeRange(0, b.length) value:0x3c];
+                [blit endEncoding];
+                [cb commit];
+                [cb waitUntilCompleted];
+            }
+
+            NSArray<NSNumber *> *shape = @[@1, @(H), @(N), @(F)];
+            MPSGraph *g = [MPSGraph new];
+            MPSGraphTensor *Q = [g placeholderWithShape:shape dataType:MPSDataTypeFloat16 name:@"Q"];
+            MPSGraphTensor *K = [g placeholderWithShape:shape dataType:MPSDataTypeFloat16 name:@"K"];
+            MPSGraphTensor *V = [g placeholderWithShape:shape dataType:MPSDataTypeFloat16 name:@"V"];
+            MPSGraphTensor *O = [g scaledDotProductAttentionWithQueryTensor:Q
+                                                                  keyTensor:K
+                                                                valueTensor:V
+                                                                      scale:1.0f / std::sqrt((float)F)
+                                                                       name:@"O"];
+
+            auto tdata = [&](id<MTLBuffer> b) {
+                return [[MPSGraphTensorData alloc] initWithMTLBuffer:b
+                                                               shape:shape
+                                                            dataType:MPSDataTypeFloat16];
+            };
+            NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds =
+                @{ Q: tdata(bufQ), K: tdata(bufK), V: tdata(bufV) };
+            NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results =
+                @{ O: tdata(bufO) };
+
+            unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
+            double per_iter_us = timeMPSGraph(queue, g, feeds, results, warmup);
+            if (per_iter_us <= 0.0)
+            {
+                test.skip("fp16", ResultStatus::Error, "timing probe failed");
+                return -1;
+            }
+            unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
+            double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
+
+            // QK^T and PV: 2 * (2*H*N*N*F) flops.
+            double flops = 4.0 * (double)H * (double)N * (double)N * (double)F;
+            test.emit("fp16", (float)(flops * 1.0e6 / mean_us / 1.0e12));
+        }
+    }
+    else
+    {
+#if TARGET_OS_IPHONE
+        test.skip("fp16", ResultStatus::Unsupported, "SDPA op requires iOS 18");
+#else
+        test.skip("fp16", ResultStatus::Unsupported, "SDPA op requires macOS 15");
+#endif
+    }
     return 0;
 }
 

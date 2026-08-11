@@ -36,6 +36,7 @@ enum class Benchmark : unsigned int {
     Wmma,
     SimdgroupMatrix,
     MpsGemm,
+    MpsAttention,       // MPSGraph scaled-dot-product-attention peak (Metal)
     Cublas,
     Rocwmma,
     Mfma,
@@ -49,6 +50,7 @@ enum class Benchmark : unsigned int {
     CryptoCrc32c,       // CRC32-C throughput (SSE4.2 CRC32 / ARM FEAT_CRC32)
     StringScan,         // memchr-style SIMD byte scan, L1-resident (CPU; GB/s)
     Utf8Validate,       // UTF-8 validation via lookup-shuffle PSHUFB/TBL (CPU; GB/s)
+    TextureSample,      // bilinear texture sample rate (Metal; GTexels/s)
     TransferBW,
     CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
     MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM + MLP + TLB)
@@ -81,6 +83,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ImageBW:
     case Benchmark::TransferBW:
     case Benchmark::CacheBandwidth:
+    case Benchmark::TextureSample:
         return Category::Bandwidth;
 
     case Benchmark::ComputeSP:
@@ -95,6 +98,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::SimdgroupMatrix:
     case Benchmark::Cublas:
     case Benchmark::MpsGemm:
+    case Benchmark::MpsAttention:
     case Benchmark::Rocwmma:
     case Benchmark::Mfma:
     case Benchmark::Rocblas:

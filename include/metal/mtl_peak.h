@@ -113,8 +113,10 @@ public:
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
   int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
   int runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg);
+  int runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
+  int runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
@@ -149,6 +151,8 @@ namespace mtl_kernels {
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
   extern const char *image_bandwidth_name;
+  extern const char *texture_sample_src;
+  extern const char *texture_sample_name;
 
 }
 
