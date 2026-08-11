@@ -454,51 +454,55 @@ static void writeBufferFill(float *p, size_t M, uint64_t iters)
 #if defined(__AVX512F__)
     constexpr size_t W = 16;
     const __m512 v = _mm512_set1_ps(fv);
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
     {
-      _mm512_storeu_ps(p + i + 0 * W, v);
-      _mm512_storeu_ps(p + i + 1 * W, v);
-      _mm512_storeu_ps(p + i + 2 * W, v);
-      _mm512_storeu_ps(p + i + 3 * W, v);
+      _mm512_storeu_ps(q + 0 * W, v);
+      _mm512_storeu_ps(q + 1 * W, v);
+      _mm512_storeu_ps(q + 2 * W, v);
+      _mm512_storeu_ps(q + 3 * W, v);
     }
-    for (; i < M; i++) p[i] = fv;
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
 #elif defined(__AVX2__)
     constexpr size_t W = 8;
     const __m256 v = _mm256_set1_ps(fv);
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
     {
-      _mm256_storeu_ps(p + i + 0 * W, v);
-      _mm256_storeu_ps(p + i + 1 * W, v);
-      _mm256_storeu_ps(p + i + 2 * W, v);
-      _mm256_storeu_ps(p + i + 3 * W, v);
+      _mm256_storeu_ps(q + 0 * W, v);
+      _mm256_storeu_ps(q + 1 * W, v);
+      _mm256_storeu_ps(q + 2 * W, v);
+      _mm256_storeu_ps(q + 3 * W, v);
     }
-    for (; i < M; i++) p[i] = fv;
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
 #elif defined(__SSE2__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
     constexpr size_t W = 4;
     const __m128 v = _mm_set1_ps(fv);
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
     {
-      _mm_storeu_ps(p + i + 0 * W, v);
-      _mm_storeu_ps(p + i + 1 * W, v);
-      _mm_storeu_ps(p + i + 2 * W, v);
-      _mm_storeu_ps(p + i + 3 * W, v);
+      _mm_storeu_ps(q + 0 * W, v);
+      _mm_storeu_ps(q + 1 * W, v);
+      _mm_storeu_ps(q + 2 * W, v);
+      _mm_storeu_ps(q + 3 * W, v);
     }
-    for (; i < M; i++) p[i] = fv;
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
 #elif defined(__aarch64__) || defined(_M_ARM64)
     constexpr size_t W = 4;
     const float32x4_t v = vdupq_n_f32(fv);
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
     {
-      vst1q_f32(p + i + 0 * W, v);
-      vst1q_f32(p + i + 1 * W, v);
-      vst1q_f32(p + i + 2 * W, v);
-      vst1q_f32(p + i + 3 * W, v);
+      vst1q_f32(q + 0 * W, v);
+      vst1q_f32(q + 1 * W, v);
+      vst1q_f32(q + 2 * W, v);
+      vst1q_f32(q + 3 * W, v);
     }
-    for (; i < M; i++) p[i] = fv;
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
 #else
     for (size_t i = 0; i < M; i++) p[i] = fv;
 #endif
@@ -512,48 +516,52 @@ static void copyBufferVec(float *dst, const float *src, size_t M, uint64_t iters
     CPU_BASE_MEMBAR();
 #if defined(__AVX512F__)
     constexpr size_t W = 16;
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
     {
-      _mm512_storeu_ps(dst + i + 0 * W, _mm512_loadu_ps(src + i + 0 * W));
-      _mm512_storeu_ps(dst + i + 1 * W, _mm512_loadu_ps(src + i + 1 * W));
-      _mm512_storeu_ps(dst + i + 2 * W, _mm512_loadu_ps(src + i + 2 * W));
-      _mm512_storeu_ps(dst + i + 3 * W, _mm512_loadu_ps(src + i + 3 * W));
+      _mm512_storeu_ps(d + 0 * W, _mm512_loadu_ps(s2 + 0 * W));
+      _mm512_storeu_ps(d + 1 * W, _mm512_loadu_ps(s2 + 1 * W));
+      _mm512_storeu_ps(d + 2 * W, _mm512_loadu_ps(s2 + 2 * W));
+      _mm512_storeu_ps(d + 3 * W, _mm512_loadu_ps(s2 + 3 * W));
     }
-    for (; i < M; i++) dst[i] = src[i];
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
 #elif defined(__AVX2__)
     constexpr size_t W = 8;
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
     {
-      _mm256_storeu_ps(dst + i + 0 * W, _mm256_loadu_ps(src + i + 0 * W));
-      _mm256_storeu_ps(dst + i + 1 * W, _mm256_loadu_ps(src + i + 1 * W));
-      _mm256_storeu_ps(dst + i + 2 * W, _mm256_loadu_ps(src + i + 2 * W));
-      _mm256_storeu_ps(dst + i + 3 * W, _mm256_loadu_ps(src + i + 3 * W));
+      _mm256_storeu_ps(d + 0 * W, _mm256_loadu_ps(s2 + 0 * W));
+      _mm256_storeu_ps(d + 1 * W, _mm256_loadu_ps(s2 + 1 * W));
+      _mm256_storeu_ps(d + 2 * W, _mm256_loadu_ps(s2 + 2 * W));
+      _mm256_storeu_ps(d + 3 * W, _mm256_loadu_ps(s2 + 3 * W));
     }
-    for (; i < M; i++) dst[i] = src[i];
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
 #elif defined(__SSE2__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
     constexpr size_t W = 4;
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
     {
-      _mm_storeu_ps(dst + i + 0 * W, _mm_loadu_ps(src + i + 0 * W));
-      _mm_storeu_ps(dst + i + 1 * W, _mm_loadu_ps(src + i + 1 * W));
-      _mm_storeu_ps(dst + i + 2 * W, _mm_loadu_ps(src + i + 2 * W));
-      _mm_storeu_ps(dst + i + 3 * W, _mm_loadu_ps(src + i + 3 * W));
+      _mm_storeu_ps(d + 0 * W, _mm_loadu_ps(s2 + 0 * W));
+      _mm_storeu_ps(d + 1 * W, _mm_loadu_ps(s2 + 1 * W));
+      _mm_storeu_ps(d + 2 * W, _mm_loadu_ps(s2 + 2 * W));
+      _mm_storeu_ps(d + 3 * W, _mm_loadu_ps(s2 + 3 * W));
     }
-    for (; i < M; i++) dst[i] = src[i];
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
 #elif defined(__aarch64__) || defined(_M_ARM64)
     constexpr size_t W = 4;
-    size_t i = 0;
-    for (; i + 4 * W <= M; i += 4 * W)
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
     {
-      vst1q_f32(dst + i + 0 * W, vld1q_f32(src + i + 0 * W));
-      vst1q_f32(dst + i + 1 * W, vld1q_f32(src + i + 1 * W));
-      vst1q_f32(dst + i + 2 * W, vld1q_f32(src + i + 2 * W));
-      vst1q_f32(dst + i + 3 * W, vld1q_f32(src + i + 3 * W));
+      vst1q_f32(d + 0 * W, vld1q_f32(s2 + 0 * W));
+      vst1q_f32(d + 1 * W, vld1q_f32(s2 + 1 * W));
+      vst1q_f32(d + 2 * W, vld1q_f32(s2 + 2 * W));
+      vst1q_f32(d + 3 * W, vld1q_f32(s2 + 3 * W));
     }
-    for (; i < M; i++) dst[i] = src[i];
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
 #else
     for (size_t i = 0; i < M; i++) dst[i] = src[i];
 #endif

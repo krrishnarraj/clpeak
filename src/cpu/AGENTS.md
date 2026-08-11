@@ -234,7 +234,13 @@ Adding a TU (four edits, one per concern):
   microbenchmark that passes a *compile-time* size — the compiler then drops
   the tail entirely and the same source runs at full speed, which is why this
   sat unnoticed.  Benchmark kernels reached via fn-pointer must be timed with
-  a runtime size.
+  a runtime size.  **All three kernels use the `nblk` + pointer form now**
+  (`readBufferChecksum`, `writeBufferFill`, `copyBufferVec`) — keep it that
+  way when adding another.  The write/copy restructuring bought +18% on M1
+  copy ST (131 → 154) and +25% on write MT, while write ST stayed at ~96
+  (already at the store-port ceiling, so no headroom there — that is the
+  expected shape of the win: it shows up wherever the loop was issue-bound
+  rather than port-bound).
 - **Never use libc memset/memcpy for cache-resident bandwidth.** Apple's (and
   glibc's) memset/memcpy switch to non-temporal stores above a size threshold,
   bypassing the cache under test — the first "L1 write" implementation landed
