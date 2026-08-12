@@ -58,10 +58,8 @@ class AboutScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'A synthetic benchmark that measures peak compute '
-                    '(fp16/fp32/fp64/integer), memory bandwidth, transfer '
-                    'bandwidth, and kernel latency across OpenCL, Vulkan, '
-                    'CUDA, ROCm, Metal, oneAPI and native CPU backends.',
+                    'A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs and GPUs. '
+                    'It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ],
