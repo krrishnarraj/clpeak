@@ -155,12 +155,19 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
 
 // ---------------------------------------------------------------------------
 // Store-to-load forwarding: a dependent store -> same-address load -> +1
-// chain through one hot cache line.  Classic cores pay the full forwarding
-// latency (~4-6 cycles) on every roundtrip; cores with memory renaming
-// (NVIDIA Olympus/Vera, recent Apple/Intel) short-circuit the load to the
-// pending store's register and the roundtrip collapses toward the 1-cycle
-// add.  Reported as ns per store->load roundtrip (includes the one dependent
-// add).
+// chain through one hot cache line, reported as ns per roundtrip (it includes
+// the one dependent add).  A core with no fast forwarding path pays its store
+// -forward latency every iteration; a core that resolves the dependency
+// internally approaches the ~1-cycle cost of the add alone.
+//
+// Do NOT read a ~1-cycle result as proof of any particular mechanism.  With
+// the codegen verified on both, M1 Pro measures 1.01 cyc and Zen 2 1.10 --
+// but an address-rotation control separates them completely: alternating the
+// chain between two slots costs M1 Pro 4.05 cyc/roundtrip and Zen 2 only
+// 1.29.  Two cores reach the same headline number by visibly different means,
+// so this row is a cost probe, not a feature detector.  It also means the
+// vendor-manual "~7 cycle" forwarding figures describe imperfect matches,
+// not the exact-address/exact-width case this loop exercises.
 //
 // `volatile` alone is NOT enough to keep the load and store separate.  GCC
 // folds the whole body into a single memory-destination RMW -- verified on
