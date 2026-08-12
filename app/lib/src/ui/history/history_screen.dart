@@ -19,6 +19,10 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   late Future<List<RunSummary>> _runs;
 
+  /// Id of the finished run the current list was built for; the tab lives in
+  /// an IndexedStack, so initState alone would leave it stale forever.
+  String? _seenRunId;
+
   @override
   void initState() {
     super.initState();
@@ -33,8 +37,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Refresh the list whenever a run finishes.
-    context.select<BenchmarkService, RunSummary?>((s) => s.lastSummary);
+    // Re-read the index whenever a run finishes (the summary is written to
+    // disk before lastSummary is published, so the new row is always there).
+    final lastRunId =
+        context.select<BenchmarkService, String?>((s) => s.lastSummary?.id);
+    if (lastRunId != _seenRunId) {
+      _seenRunId = lastRunId;
+      _runs = context.read<RunHistoryStore>().list();
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('History')),

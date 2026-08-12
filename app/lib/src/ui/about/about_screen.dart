@@ -77,11 +77,11 @@ class AboutScreen extends StatelessWidget {
                     showSelectedIcon: false,
                     segments: const [
                       ButtonSegment(
-                          value: ThemeMode.dark, label: Text('Dark')),
+                          value: ThemeMode.system, label: Text('Auto')),
                       ButtonSegment(
                           value: ThemeMode.light, label: Text('Light')),
                       ButtonSegment(
-                          value: ThemeMode.system, label: Text('Auto')),
+                          value: ThemeMode.dark, label: Text('Dark')),
                     ],
                     selected: {settings.themeMode},
                     onSelectionChanged: (s) =>

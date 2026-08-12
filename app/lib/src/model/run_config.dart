@@ -2,7 +2,7 @@ import 'catalog.dart';
 import 'result_entry.dart';
 
 /// Time-budget presets.  Custom keeps whatever the user configured.
-enum RunPreset { quick, full, custom }
+enum RunPreset { full, custom }
 
 /// Per-backend CLI flag vocabulary (mirrors src/common/options.cpp).
 /// Only backend/device/category/time flags are ever emitted — never
@@ -34,8 +34,6 @@ typedef DeviceRef = ({int platformIndex, int deviceIndex});
 
 const int kDefaultMaxTimeMs = 500;
 const int kDefaultMaxTimeCpuMs = 2000;
-const int kQuickMaxTimeMs = 200;
-const int kQuickMaxTimeCpuMs = 500;
 
 /// User-selected run configuration → CLI argv.
 class RunConfig {
@@ -78,11 +76,7 @@ class RunConfig {
   }
 
   factory RunConfig.preset(RunPreset preset, BackendCatalog catalog) =>
-      switch (preset) {
-        RunPreset.quick => RunConfig.allDevices(catalog,
-            maxTimeMs: kQuickMaxTimeMs, maxTimeCpuMs: kQuickMaxTimeCpuMs),
-        _ => RunConfig.allDevices(catalog),
-      };
+      RunConfig.allDevices(catalog);
 
   bool get hasSelection => selectedDevices.values.any((s) => s.isNotEmpty);
 

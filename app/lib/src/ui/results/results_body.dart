@@ -99,21 +99,23 @@ class _RunSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (final run in runs) ...[
-            ChoiceChip(
-              avatar: Icon(ClpeakTheme.backendIcon(run.backend), size: 18),
-              label: Text('${run.backend} · ${run.device}'),
-              selected: run.key == selectedKey,
-              onSelected: (_) => onSelected(run.key),
+    // Wrap, not a horizontal scroller: with many devices the trailing chips
+    // used to sit off-screen with no way (mouse wheel included) to reach them.
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final run in runs)
+          ChoiceChip(
+            avatar: Icon(ClpeakTheme.backendIcon(run.backend), size: 18),
+            label: Text(
+              '${run.backend} · ${run.device}',
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(width: 8),
-          ],
-        ],
-      ),
+            selected: run.key == selectedKey,
+            onSelected: (_) => onSelected(run.key),
+          ),
+      ],
     );
   }
 }

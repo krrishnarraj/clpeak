@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// App settings — currently just the theme mode (dark-first default).
+/// App settings — currently just the theme mode (follows the system by
+/// default).
 class SettingsService extends ChangeNotifier {
   SettingsService() {
     _load();
@@ -9,7 +10,7 @@ class SettingsService extends ChangeNotifier {
 
   static const _themeKey = 'themeMode';
 
-  ThemeMode _themeMode = ThemeMode.dark;
+  ThemeMode _themeMode = ThemeMode.system;
   ThemeMode get themeMode => _themeMode;
 
   Future<void> _load() async {
@@ -17,7 +18,7 @@ class SettingsService extends ChangeNotifier {
     final v = prefs.getString(_themeKey);
     if (v != null) {
       _themeMode = ThemeMode.values.firstWhere((m) => m.name == v,
-          orElse: () => ThemeMode.dark);
+          orElse: () => ThemeMode.system);
       notifyListeners();
     }
   }

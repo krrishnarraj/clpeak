@@ -3,7 +3,7 @@
 One Flutter app for Android, iOS, macOS, Linux, and Windows, driving the
 clpeak benchmark backends through the `src/ffi` C-ABI bridge (Dart FFI).
 
-Features: system/device dashboard, Quick/Full/Custom runs (device, category,
+Features: system/device dashboard, standard and Custom runs (device, category,
 and time-budget selection), live streaming results with cancellation, and an
 auto-saved run history (canonical clpeak XML) with rename/export/delete.
 

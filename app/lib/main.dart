@@ -21,13 +21,12 @@ void main() {
   // results before the process exits.
   AppLifecycleListener(onExitRequested: service.onExitRequested);
 
-  // Dev hook: CLPEAK_AUTORUN=quick|full starts a run at launch (used by
-  // automated UI verification; harmless otherwise).
+  // Dev hook: CLPEAK_AUTORUN=1 starts a run at launch (used by automated UI
+  // verification; harmless otherwise).
   final autorun = Platform.environment['CLPEAK_AUTORUN'];
-  if (autorun == 'quick' || autorun == 'full') {
+  if (autorun != null && autorun.isNotEmpty && autorun != '0') {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      service.start(
-          preset: autorun == 'quick' ? RunPreset.quick : RunPreset.full);
+      service.start(preset: RunPreset.full);
     });
   }
 

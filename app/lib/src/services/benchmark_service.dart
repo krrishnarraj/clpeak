@@ -168,8 +168,10 @@ class BenchmarkService extends ChangeNotifier {
         durationMs: DateTime.now().difference(startedAt).inMilliseconds,
         cancelled: cancelled,
       );
-      _lastSummary = summary;
+      // Index first: listeners (History) re-read the store as soon as
+      // lastSummary changes, so the row must already be on disk.
       await _history.add(summary);
+      _lastSummary = summary;
     }
     _run = null;
     _state = BenchmarkState.finished;

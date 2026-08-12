@@ -89,8 +89,8 @@ void main() {
 
     test('non-default budgets emit time flags', () {
       final catalog = _catalog();
-      final config = RunConfig.allDevices(catalog,
-          maxTimeMs: kQuickMaxTimeMs, maxTimeCpuMs: kQuickMaxTimeCpuMs);
+      final config =
+          RunConfig.allDevices(catalog, maxTimeMs: 200, maxTimeCpuMs: 500);
       final args = config.toArgs(catalog);
       expect(args, containsAllInOrder(['--max-time', '200']));
       expect(args, containsAllInOrder(['--max-time-cpu', '500']));

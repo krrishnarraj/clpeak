@@ -107,6 +107,11 @@ class _RunLauncher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final devices = service.catalog.usable
+        .fold<int>(0, (n, b) => n + b.deviceCount);
+    final deviceLabel = devices == 1
+        ? 'the detected device'
+        : 'all $devices detected devices';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -123,8 +128,9 @@ class _RunLauncher extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Full uses the standard time budgets; Quick trims them for a '
-              'fast overview. Custom picks devices, categories and budgets.',
+              'Measures peak compute, bandwidth and latency on $deviceLabel. '
+              'Results stream in live and are saved to History. '
+              'Custom… narrows the devices, test categories and time budgets.',
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
@@ -138,12 +144,7 @@ class _RunLauncher extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: () => service.start(preset: RunPreset.full),
                   icon: const Icon(Icons.play_arrow),
-                  label: const Text('Full run'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: () => service.start(preset: RunPreset.quick),
-                  icon: const Icon(Icons.fast_forward),
-                  label: const Text('Quick run'),
+                  label: const Text('Run'),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => Navigator.of(context).push(

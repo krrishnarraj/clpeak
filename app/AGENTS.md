@@ -46,6 +46,9 @@ the platform dirs:
 
 - `macos/Runner/{DebugProfile,Release}.entitlements` — App Sandbox disabled
   (device probing, dlopen, real ~/Documents)
+- `macos/Runner/MainFlutterWindow.swift`, `linux/runner/my_application.cc`,
+  `windows/runner/main.cpp` — 1280x860 default window size (macOS also sets a
+  900x640 content minimum and centers)
 - `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.clpeak.ios` +
   "Embed clpeak native frameworks" script phase (consumes
   `ios/clpeak_native/`, staged by `tool/build_ios_native.sh`)
