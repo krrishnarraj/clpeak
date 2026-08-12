@@ -159,12 +159,29 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
 // latency (~4-6 cycles) on every roundtrip; cores with memory renaming
 // (NVIDIA Olympus/Vera, recent Apple/Intel) short-circuit the load to the
 // pending store's register and the roundtrip collapses toward the 1-cycle
-// add.  Both instructions are forced through a volatile slot so the compiler
-// cannot keep the value in a register -- renaming, if any, must happen in
-// HARDWARE to show up here.  Reported as ns per store->load roundtrip
-// (includes the one dependent add).
+// add.  Reported as ns per store->load roundtrip (includes the one dependent
+// add).
+//
+// `volatile` alone is NOT enough to keep the load and store separate.  GCC
+// folds the whole body into a single memory-destination RMW -- verified on
+// x86-64 GCC 13 at -O3, where the hot loop is one `addq $0x1,-0x40(%rsp)` --
+// so the row measured read-modify-write throughput there while measuring a
+// real roundtrip on ARM/clang (`ldr`/`add`/`str`).  Same row, two different
+// quantities, and the x86 number looked like renaming (1.1 cycles on Zen 2)
+// when it was nothing of the sort.  Passing the loaded value through an empty
+// asm constraint forces it into a general-purpose register between the two
+// accesses, which no compiler can fuse back together.
 // ---------------------------------------------------------------------------
 namespace {
+
+// Force `x` to materialise in a GPR, without emitting an instruction.
+#if defined(__GNUC__) || defined(__clang__)
+#define CPU_KEEP_IN_REG(x) __asm__ volatile("" : "+r"(x))
+#else
+// Real MSVC has no GNU inline asm; it also does not fold volatile RMW today.
+// If that ever changes, this row needs an equivalent barrier on cl.exe.
+#define CPU_KEEP_IN_REG(x) do { } while (0)
+#endif
 
 static double storeForwardNs()
 {
@@ -175,6 +192,7 @@ static double storeForwardNs()
     for (uint64_t i = 0; i < n; i++)
     {
       uint64_t v = slot;    // load (forwarded from the store below)
+      CPU_KEEP_IN_REG(v);   // ... and it must land in a register, not fuse
       slot = v + 1;         // dependent store back to the same address
     }
   };
