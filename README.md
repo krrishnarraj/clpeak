@@ -180,6 +180,8 @@ so `bin/clpeak-gui` works from anywhere as long as `gui/` travels with it. On ma
 
 > **Linux:** the GUI needs GTK 3 (`libgtk-3-0`) on the target system. The CLI has no such dependency.
 
+> **arm64 Linux and Windows packages are CLI-only.** Flutter's desktop SDK for those hosts is x64-only, so the release archives for `linux-arm64` and `windows-arm64` ship `bin/clpeak` without a `gui/` directory. Building the GUI there needs a self-built Flutter engine. macOS arm64 is unaffected — Flutter supports Apple silicon natively.
+
 ## CLI
 
 `./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, or CPU is doing the work.

@@ -73,6 +73,17 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The backends are static libs linked into BOTH the clpeak executable and the
+# clpeak_ffi shared library (the GUI bridge).  ELF refuses to link non-PIC
+# objects into a .so, so they must all be position-independent -- peak_common
+# already forced -fPIC for that reason; this covers the rest.
+#
+# Benchmark fidelity is unaffected: the kernels' globals are all file-static
+# (RIP-relative either way, no GOT indirection), and the thread_locals whose
+# access model does change (AMX tile config/output, string scan buffers) are
+# touched once per kernel invocation, never inside a timed loop.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Backend options
 option(CLPEAK_ENABLE_OPENCL "Build OpenCL backend" ON)
 option(CLPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)

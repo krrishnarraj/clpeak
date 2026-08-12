@@ -31,6 +31,7 @@ jobs:
           - name: Linux x64
             runner: ubuntu-latest
             artifact: clpeak-linux-x86_64
+            gui: true
             binary: build/clpeak
             suffix: ""
             cuda: false
@@ -38,6 +39,7 @@ jobs:
           - name: Linux arm64
             runner: ubuntu-24.04-arm
             artifact: clpeak-linux-arm64
+            gui: false
             binary: build/clpeak
             suffix: ""
             cuda: false
@@ -45,6 +47,7 @@ jobs:
           - name: Windows x64
             runner: windows-latest
             artifact: clpeak-windows-x86_64
+            gui: true
             binary: build/Release/clpeak.exe
             suffix: ""
             cuda: false
@@ -52,6 +55,7 @@ jobs:
           - name: Windows arm64
             runner: windows-11-arm
             artifact: clpeak-windows-arm64
+            gui: false
             binary: build/Release/clpeak.exe
             suffix: ""
             cuda: false
@@ -59,6 +63,7 @@ jobs:
           - name: macOS arm64
             runner: macos-latest
             artifact: clpeak-macos-arm64
+            gui: true
             binary: build/clpeak
             suffix: ""
             cuda: false
@@ -66,6 +71,7 @@ jobs:
           - name: Linux x64 CUDA
             runner: ubuntu-latest
             artifact: clpeak-linux-x86_64-cuda
+            gui: true
             binary: build/clpeak
             suffix: cuda
             cuda: true
@@ -73,6 +79,7 @@ jobs:
           - name: Linux arm64 CUDA
             runner: ubuntu-24.04-arm
             artifact: clpeak-linux-arm64-cuda
+            gui: false
             binary: build/clpeak
             suffix: cuda
             cuda: true
@@ -80,6 +87,7 @@ jobs:
           - name: Windows x64 CUDA
             runner: windows-latest
             artifact: clpeak-windows-x86_64-cuda
+            gui: true
             binary: build/Release/clpeak.exe
             suffix: cuda
             cuda: true
@@ -87,6 +95,7 @@ jobs:
           - name: Linux x64 ROCm
             runner: ubuntu-24.04
             artifact: clpeak-linux-x86_64-rocm
+            gui: true
             binary: build/clpeak
             suffix: rocm
             cuda: false
@@ -95,6 +104,7 @@ jobs:
           - name: Linux x64 oneAPI
             runner: ubuntu-latest
             artifact: clpeak-linux-x86_64-oneapi
+            gui: true
             binary: build/clpeak
             suffix: oneapi
             cuda: false
@@ -115,16 +125,24 @@ jobs:
           sudo apt-get update
           # clang: the root CMake prefers it over GCC on Linux for the CPU backend
           # (GCC<=14 serialises the FMA accumulator chains, ~halving fp32/fp64).
-          # ninja/gtk/lzma: `flutter build linux` toolchain for the clpeak-gui bundle.
+          sudo apt-get install -y --no-install-recommends build-essential clang
+
+      # `flutter build linux` toolchain, GUI jobs only.
+      - name: Install GUI dependencies (Linux)
+        if: runner.os == 'Linux' && matrix.gui
+        run: |
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang \
             ninja-build pkg-config libgtk-3-dev liblzma-dev
 
-      # Every desktop artifact ships the GUI (bin/clpeak-gui + gui/ bundle, or
-      # clpeak-gui.app on macOS), so the SDK is needed in every matrix job --
-      # not just the mobile ones.  Configure uses -DCLPEAK_REQUIRE_GUI=ON so a
-      # broken SDK setup fails here instead of quietly shipping a GUI-less zip.
+      # Desktop artifacts ship the GUI (bin/clpeak-gui + gui/ bundle, or
+      # clpeak-gui.app on macOS), so the SDK is needed here, not just in the
+      # mobile jobs.  Skipped on the arm64 Linux/Windows runners: Flutter's
+      # desktop SDK for those hosts is x64-only, so those two zips are CLI-only
+      # (matrix.gui == false).  Where the GUI is expected, configure passes
+      # -DCLPEAK_REQUIRE_GUI=ON so a broken SDK setup fails the job instead of
+      # quietly shipping a GUI-less zip.
       - name: Set up Flutter
+        if: matrix.gui
         uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -169,8 +187,7 @@ jobs:
       - name: Configure CMake & Build
         if: ${{ !matrix.oneapi }}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} \
-            -DCLPEAK_REQUIRE_GUI=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} ${{ matrix.gui && '-DCLPEAK_REQUIRE_GUI=ON' || '-DCLPEAK_ENABLE_GUI=OFF' }}
           cmake --build build --config Release -j4
 
       # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
@@ -180,8 +197,7 @@ jobs:
         shell: bash
         run: |
           source /opt/intel/oneapi/setvars.sh
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} \
-            -DCLPEAK_REQUIRE_GUI=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} ${{ matrix.gui && '-DCLPEAK_REQUIRE_GUI=ON' || '-DCLPEAK_ENABLE_GUI=OFF' }}
           cmake --build build --config Release -j4
 
       - name: Run
@@ -236,7 +252,7 @@ jobs:
       # is ad-hoc signed, so first launch still needs right-click -> Open until
       # a Developer ID identity is wired in here.
       - name: Package DMG (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && matrix.gui
         run: cmake --build build --target clpeak-gui-dmg
 
       - name: Upload artifact
