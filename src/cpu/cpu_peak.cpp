@@ -4,6 +4,7 @@
 #include <common/common.h>
 #include <common/options.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <ostream>
@@ -63,7 +64,13 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
   // case), so this costs nothing on the ST rows.
   if (nThreads > 1)
   {
-    const double settleUs = 100000.0;   // 100 ms; bounded by the doubling below
+    // Scale with the measurement budget: AMD's boost limits move on moving
+    // averages measured in hundreds of ms, so a fixed 100 ms was far too
+    // short (it recovered only ~1.4% of an 11% error on a 3955WX).  A quarter
+    // of the budget, capped at 500 ms, keeps the cost proportional (~10% of
+    // total run time) and scales down when the user lowers --max-time-cpu.
+    const double settleUs =
+        std::min(std::max((double)targetTimeUsLocal / 4.0, 100000.0), 500000.0);
     auto w0 = clock::now();
     uint64_t wIters = 1;
     while (usSince(w0, clock::now()) < settleUs)
