@@ -19,7 +19,7 @@ enum ResultStatus {
 /// The six canonical categories (stable vocabulary; tests within them churn).
 enum BenchCategory {
   fpCompute('fp_compute', 'FP Compute'),
-  intCompute('int_compute', 'Integer'),
+  intCompute('int_compute', 'Integer Compute'),
   crypto('crypto', 'Crypto'),
   string('string', 'String'),
   bandwidth('bandwidth', 'Bandwidth'),
