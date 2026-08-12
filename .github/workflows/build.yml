@@ -169,14 +169,6 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
-      # TEMPORARY -- see tool/ci_codegen_probe.sh for what it answers and when
-      # to delete it.  Runs after the build so we get instruction counts even if
-      # the benchmark itself misbehaves; never fails the job.
-      - name: TEMP codegen probe
-        shell: bash
-        continue-on-error: true
-        run: bash tool/ci_codegen_probe.sh || true
-
       - name: Run
         if: ${{ !matrix.cuda && !matrix.oneapi }}
         shell: bash
@@ -272,15 +264,6 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
           cmake --build build --config Release -j4
-
-      # TEMPORARY -- see tool/ci_codegen_probe.sh.  This is the job that matters
-      # most for the divider question: GCC reads ~22% of the hardware rate here
-      # where clang hits it exactly.
-      - name: TEMP codegen probe
-        continue-on-error: true
-        env:
-          CXX: g++
-        run: bash tool/ci_codegen_probe.sh || true
 
       - name: Run
         run: ./build/clpeak
