@@ -156,6 +156,29 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (no SDK; otherwise always available) |
+| `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped automatically when no Flutter SDK is found) |
+| `CLPEAK_REQUIRE_GUI` | `OFF` | n/a — set it `ON` to turn a missing Flutter SDK into a configure error instead of a silent skip (release CI uses this) |
+
+## GUI
+
+`clpeak-gui` is the desktop app — the same backends and tests as the CLI, driven from a window. It builds alongside the CLI whenever the [Flutter SDK](https://docs.flutter.dev/get-started/install) is on `PATH` (or `FLUTTER_HOME`/`FLUTTER_ROOT` is set), landing in `build/clpeak-gui/`.
+
+A Flutter desktop app is a bundle, not a lone executable: the runner needs its sibling `data/` and `lib/` to start. The release archives lay that out as
+
+```
+clpeak-<version>-<os>-<arch>[-backend]/
+├── bin/
+│   ├── clpeak          # CLI
+│   └── clpeak-gui      # launcher for ../gui/clpeak-gui
+├── gui/                # the Flutter bundle (do not split it up)
+└── share/clpeak/LICENSE
+```
+
+so `bin/clpeak-gui` works from anywhere as long as `gui/` travels with it. On macOS the equivalent is `clpeak-gui.app` at the archive root, plus a separate `.dmg` release asset that installs it by drag-and-drop.
+
+> **macOS first launch:** the app is ad-hoc signed, not notarized, so Gatekeeper blocks a downloaded copy. Right-click → **Open** once, or run `xattr -dr com.apple.quarantine /Applications/clpeak-gui.app`.
+
+> **Linux:** the GUI needs GTK 3 (`libgtk-3-0`) on the target system. The CLI has no such dependency.
 
 ## CLI
 

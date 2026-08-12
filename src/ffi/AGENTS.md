@@ -16,6 +16,11 @@ shared library / Apple framework.
 - Desktop build + `clpeak-gui` target? → `CMakeLists.txt` (gated on
   `CLPEAK_ENABLE_GUI` + detected Flutter SDK; assembles the final bundle at
   `<build>/clpeak-gui/` so Flutter-generated runner projects stay untouched)
+- Release layout of the GUI? → the `install()` block at the end of
+  `CMakeLists.txt`: bundle → `gui/`, generated launcher → `bin/clpeak-gui`;
+  macOS ditto's `clpeak-gui.app` to the package root (keeps framework symlinks
+  + ad-hoc signature). Windows staging dir is resolved at build time by
+  `cmake/stage_windows_bundle.cmake` (arm64/x64 arch dir)
 - Android build? → `android/CMakeLists.txt` (standalone superproject used by
   `app/android/app/build.gradle.kts` externalNativeBuild; OpenCL stub +
   Vulkan headers from `third_party/`)
@@ -30,7 +35,8 @@ shared library / Apple framework.
 | `clpeak_ffi.h` | `extern "C"` surface + event schema + `CLPEAK_RUN_*` codes |
 | `clpeak_ffi.cpp` | launch loop, catalog, cancel, `clpeak_load_result_file_json` |
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
-| `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target |
+| `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
+| `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |
 | `android/CMakeLists.txt` | Android superproject (OpenCL stub + NDK Vulkan + CPU) |
 | `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + optional MoltenVK Vulkan) |
 

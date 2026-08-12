@@ -46,7 +46,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build) |
-| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
@@ -57,8 +57,14 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
 - GUI: built automatically as `clpeak-gui` when the Flutter SDK is detected
-  (disable with `-DCLPEAK_ENABLE_GUI=OFF`); bundle lands in
-  `build/clpeak-gui/`. Mobile builds: see `app/AGENTS.md`.
+  (disable with `-DCLPEAK_ENABLE_GUI=OFF`, require it with
+  `-DCLPEAK_REQUIRE_GUI=ON`); bundle lands in `build/clpeak-gui/`.
+  Mobile builds: see `app/AGENTS.md`.
+- Packaging: `cpack -G ZIP` ships CLI + GUI in one archive — `bin/clpeak`,
+  `bin/clpeak-gui` (wrapper) and the Flutter bundle under `gui/`; macOS puts
+  `clpeak-gui.app` at the archive root instead. macOS also has
+  `--target clpeak-gui-dmg` (`tool/make_dmg.sh`) for the drag-to-Applications
+  disk image shipped next to the zip.
 
 ## Quick Lookups
 

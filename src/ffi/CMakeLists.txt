@@ -101,42 +101,50 @@ if(NOT CLPEAK_FFI_STANDALONE)
     set(CLPEAK_APP_DIR "${CLPEAK_ROOT}/app")
     set(CLPEAK_GUI_OUT "${CMAKE_BINARY_DIR}/clpeak-gui")
 
+    # Flutter lays its desktop output out under an arch directory on Linux and
+    # Windows (build/<os>/<arch>/...).  Derive the tag it uses from the host.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+        set(_clpeak_flutter_arch "arm64")
+    else()
+        set(_clpeak_flutter_arch "x64")
+    endif()
+
     if(APPLE)
         # ditto preserves the framework's symlink structure; codesign the
         # embedded framework first, then re-seal the app bundle.
         add_custom_target(clpeak-gui ALL
             DEPENDS clpeak_ffi
             COMMAND ${FLUTTER_EXECUTABLE} build macos --release
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLPEAK_GUI_OUT}/clpeak.app"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLPEAK_GUI_OUT}/clpeak-gui.app"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CLPEAK_GUI_OUT}"
-            COMMAND ditto "${CLPEAK_APP_DIR}/build/macos/Build/Products/Release/clpeak.app" "${CLPEAK_GUI_OUT}/clpeak.app"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CLPEAK_GUI_OUT}/clpeak.app/Contents/Frameworks"
-            COMMAND ditto "$<TARGET_BUNDLE_DIR:clpeak_ffi>" "${CLPEAK_GUI_OUT}/clpeak.app/Contents/Frameworks/clpeak_ffi.framework"
-            COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak.app/Contents/Frameworks/clpeak_ffi.framework"
-            COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak.app"
+            COMMAND ditto "${CLPEAK_APP_DIR}/build/macos/Build/Products/Release/clpeak-gui.app" "${CLPEAK_GUI_OUT}/clpeak-gui.app"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/Frameworks"
+            COMMAND ditto "$<TARGET_BUNDLE_DIR:clpeak_ffi>" "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/Frameworks/clpeak_ffi.framework"
+            COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/Frameworks/clpeak_ffi.framework"
+            COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak-gui.app"
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
             COMMENT "clpeak-gui: flutter build macos + bundle assembly"
             VERBATIM)
     elseif(WIN32)
         # Flutter's Windows bundle is a flat directory; the DLL sits next to
-        # the runner executable.
+        # the runner executable.  The arch dir it lands in is resolved at build
+        # time (see stage_windows_bundle.cmake) so an arm64 host works whichever
+        # tag the SDK picks.
         add_custom_target(clpeak-gui ALL
             DEPENDS clpeak_ffi
             COMMAND ${FLUTTER_EXECUTABLE} build windows --release
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLPEAK_GUI_OUT}"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CLPEAK_APP_DIR}/build/windows/x64/runner/Release" "${CLPEAK_GUI_OUT}"
+            COMMAND ${CMAKE_COMMAND}
+                    -DAPP_DIR=${CLPEAK_APP_DIR}
+                    -DOUT_DIR=${CLPEAK_GUI_OUT}
+                    -DARCH=${_clpeak_flutter_arch}
+                    -P "${CMAKE_CURRENT_LIST_DIR}/cmake/stage_windows_bundle.cmake"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak_ffi>" "${CLPEAK_GUI_OUT}/"
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
             COMMENT "clpeak-gui: flutter build windows + bundle assembly"
             VERBATIM)
     else()
-        # Linux bundle layout: bundle/{clpeak, data/, lib/*.so}; the Dart
+        # Linux bundle layout: bundle/{clpeak-gui, data/, lib/*.so}; the Dart
         # resolver loads <exeDir>/lib/libclpeak_ffi.so.
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-            set(_clpeak_flutter_arch "arm64")
-        else()
-            set(_clpeak_flutter_arch "x64")
-        endif()
         add_custom_target(clpeak-gui ALL
             DEPENDS clpeak_ffi
             COMMAND ${FLUTTER_EXECUTABLE} build linux --release
@@ -146,5 +154,56 @@ if(NOT CLPEAK_FFI_STANDALONE)
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
             COMMENT "clpeak-gui: flutter build linux + bundle assembly"
             VERBATIM)
+    endif()
+
+    # ---- Install rules (feed the CPack zip) --------------------------------
+    # A Flutter desktop app is a bundle, not a lone executable: the runner only
+    # starts if its sibling data/ (icudtl + assets) and lib/ (engine, AOT app,
+    # clpeak_ffi) travel with it.  So the bundle ships whole under gui/ and
+    # bin/clpeak-gui is a wrapper that exec's it -- giving the release layout
+    #
+    #   bin/clpeak, bin/clpeak-gui  ->  gui/{clpeak-gui, data/, lib/}
+    #
+    # On macOS the equivalent is a relocatable .app, which goes to the package
+    # root (a .app under bin/ would be neither clickable nor tidy).
+    include(GNUInstallDirs)
+    if(APPLE)
+        # ditto, not install(DIRECTORY): the .app holds framework version
+        # symlinks and an ad-hoc code signature, and file(INSTALL) is not
+        # guaranteed to keep the seal intact.
+        install(CODE "
+            set(_src \"${CLPEAK_GUI_OUT}/clpeak-gui.app\")
+            set(_dst \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/clpeak-gui.app\")
+            message(STATUS \"Installing: \${_dst}\")
+            file(REMOVE_RECURSE \"\${_dst}\")
+            execute_process(COMMAND ditto \"\${_src}\" \"\${_dst}\"
+                            RESULT_VARIABLE _clpeak_ditto_rc)
+            if(NOT _clpeak_ditto_rc EQUAL 0)
+                message(FATAL_ERROR \"ditto of clpeak-gui.app failed (\${_clpeak_ditto_rc}) -- build the clpeak-gui target first\")
+            endif()
+        ")
+    else()
+        if(WIN32)
+            # `start` so a console invocation isn't blocked by the GUI process.
+            set(_clpeak_gui_wrapper "${CMAKE_BINARY_DIR}/gui-wrapper/clpeak-gui.cmd")
+            file(WRITE "${_clpeak_gui_wrapper}"
+"@echo off\r\n\
+rem clpeak GUI launcher -- the Flutter bundle in ..\\gui needs its sibling\r\n\
+rem data\\ and DLLs, so it stays there and this wrapper starts it.\r\n\
+start \"\" \"%~dp0..\\gui\\clpeak-gui.exe\" %*\r\n")
+        else()
+            set(_clpeak_gui_wrapper "${CMAKE_BINARY_DIR}/gui-wrapper/clpeak-gui")
+            file(WRITE "${_clpeak_gui_wrapper}"
+"#!/bin/sh
+# clpeak GUI launcher -- the Flutter bundle in ../gui needs its sibling data/
+# and lib/, so it stays there and this wrapper exec's it.
+here=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)
+exec \"$here/../gui/clpeak-gui\" \"$@\"
+")
+        endif()
+        install(DIRECTORY "${CLPEAK_GUI_OUT}/" DESTINATION "gui"
+                USE_SOURCE_PERMISSIONS)
+        install(PROGRAMS "${_clpeak_gui_wrapper}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
 endif()

@@ -6,11 +6,17 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 ## Building / running
 
 - Desktop (canonical): `cmake -B build && cmake --build build --target clpeak-gui`
-  → complete bundle at `build/clpeak-gui/` (macOS: `.app` with
+  → complete bundle at `build/clpeak-gui/` (macOS: `clpeak-gui.app` with
   `clpeak_ffi.framework` embedded + re-signed; Linux: bundle with
   `lib/libclpeak_ffi.so`; Windows: flat dir with `clpeak_ffi.dll`).
   GUI is skipped when the Flutter SDK isn't detectable or
-  `-DCLPEAK_ENABLE_GUI=OFF`.
+  `-DCLPEAK_ENABLE_GUI=OFF`; `-DCLPEAK_REQUIRE_GUI=ON` makes a missing SDK a
+  configure error (release CI).
+- The runner executable/bundle is named **clpeak-gui**, never `clpeak` — the
+  release zip puts it next to the CLI binary of that name. macOS keeps the
+  user-visible name "clpeak" via `CFBundleName`/`CFBundleDisplayName`.
+- macOS disk image: `cmake --build build --target clpeak-gui-dmg`
+  (`tool/make_dmg.sh`; ad-hoc signed, so a downloaded copy is quarantined).
 - Desktop dev loop: build `clpeak_ffi` once, then
   `CLPEAK_FFI_PATH=<build>/clpeak_ffi.framework/clpeak_ffi flutter run -d macos`
   (a plain `flutter build macos` does NOT embed the framework — the
@@ -44,6 +50,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 `flutter create` regeneration can clobber these — re-apply if you recreate
 the platform dirs:
 
+- `linux/CMakeLists.txt`, `windows/CMakeLists.txt` — `BINARY_NAME clpeak-gui`
+  (+ `windows/runner/Runner.rc` InternalName/OriginalFilename);
+  `macos/Runner/Configs/AppInfo.xcconfig` — `PRODUCT_NAME = clpeak-gui`;
+  `macos/Runner/Info.plist` — `CFBundleName`/`CFBundleDisplayName` pinned to the
+  literal "clpeak" (not `$(PRODUCT_NAME)`), so the app is `clpeak-gui.app` on
+  disk but still reads "clpeak" in the menu bar and Dock
 - `macos/Runner/{DebugProfile,Release}.entitlements` — App Sandbox disabled
   (device probing, dlopen, real ~/Documents)
 - `macos/Runner/MainFlutterWindow.swift`, `linux/runner/my_application.cc`,

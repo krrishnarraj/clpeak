@@ -115,7 +115,20 @@ jobs:
           sudo apt-get update
           # clang: the root CMake prefers it over GCC on Linux for the CPU backend
           # (GCC<=14 serialises the FMA accumulator chains, ~halving fp32/fp64).
-          sudo apt-get install -y --no-install-recommends build-essential clang
+          # ninja/gtk/lzma: `flutter build linux` toolchain for the clpeak-gui bundle.
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang \
+            ninja-build pkg-config libgtk-3-dev liblzma-dev
+
+      # Every desktop artifact ships the GUI (bin/clpeak-gui + gui/ bundle, or
+      # clpeak-gui.app on macOS), so the SDK is needed in every matrix job --
+      # not just the mobile ones.  Configure uses -DCLPEAK_REQUIRE_GUI=ON so a
+      # broken SDK setup fails here instead of quietly shipping a GUI-less zip.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
       - name: Install Vulkan SDK
         if: runner.os != 'macOS'
@@ -156,7 +169,8 @@ jobs:
       - name: Configure CMake & Build
         if: ${{ !matrix.oneapi }}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} \
+            -DCLPEAK_REQUIRE_GUI=ON
           cmake --build build --config Release -j4
 
       # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
@@ -166,7 +180,8 @@ jobs:
         shell: bash
         run: |
           source /opt/intel/oneapi/setvars.sh
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} \
+            -DCLPEAK_REQUIRE_GUI=ON
           cmake --build build --config Release -j4
 
       - name: Run
@@ -216,11 +231,21 @@ jobs:
         shell: bash
         run: cd build && cpack -G ZIP -C Release
 
+      # macOS additionally ships a drag-to-Applications disk image: the zip is
+      # for CLI users, the .dmg is how the GUI actually gets installed.  The app
+      # is ad-hoc signed, so first launch still needs right-click -> Open until
+      # a Developer ID identity is wired in here.
+      - name: Package DMG (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --build build --target clpeak-gui-dmg
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: build/clpeak-*.zip
+          path: |
+            build/clpeak-*.zip
+            build/clpeak-*.dmg
 
   # ---------------------------------------------------------------------------
   # Linux x64 GCC — build-error smoke test only.
@@ -261,7 +286,8 @@ jobs:
 
       - name: Configure CMake & Build (GCC)
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          # GUI off: this job is a compiler smoke test, not a packaging job.
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_ENABLE_GUI=OFF \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
           cmake --build build --config Release -j4
 
@@ -379,8 +405,10 @@ jobs:
       - name: Collect release assets
         run: |
           mkdir -p release
-          # Each desktop job already produced a CPack zip; just gather them.
+          # Each desktop job already produced a CPack zip (macOS also a .dmg
+          # holding clpeak-gui.app); just gather them.
           find artifacts -name 'clpeak-*.zip' -exec cp {} release/ \;
+          find artifacts -name 'clpeak-*.dmg' -exec cp {} release/ \;
           ls -l release
 
       - name: Create GitHub Release
