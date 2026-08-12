@@ -49,6 +49,20 @@ dis() {
   esac
 }
 
+
+# fn_dis <obj> <symbol-substring> -- disassembly of just that function
+fn_dis() {
+  dis "$1" 2>/dev/null | awk -v pat="$2" '
+    index($0, pat) && /^[0-9a-f]+ </ { on=1 }
+    on { print }
+    on && /^$/ { exit }'
+}
+fn_count() {   # fn_count <obj> <symbol> <label> <regex>
+  local n
+  n=$(fn_dis "$1" "$2" | grep -cE "$4")
+  printf "  %-34s %s\n" "$3" "$n"
+}
+
 # count <obj> <label> <extended-regex>
 count() {
   local n
@@ -88,7 +102,8 @@ done
 # ---- bandwidth.cpp: did the STREAM triad loop vectorise? --------------------
 # triad is the one plain-C loop (A[i] = B[i] + s*C[i]) rather than a per-ISA
 # kernel, so it is the most likely place for a toolchain to differ.
-obj=$(find_obj "bandwidth.cpp")
+obj=$(find_obj "peak_cpu.dir/bandwidth.cpp")
+[ -z "$obj" ] && obj=$(find_obj "peak_cpu.dir/Release/bandwidth.cpp")
 if [ -n "$obj" ]; then
   echo "::group::bandwidth.cpp  ($obj)"
   count "$obj" "x86 packed mul/add (vector)" '\bv?(mul|add)p[sd]\b'
@@ -96,7 +111,23 @@ if [ -n "$obj" ]; then
   count "$obj" "x86 FMA (vfmadd*ps)"         'vfmadd[0-9]*p[sd]'
   count "$obj" "arm fmla/fmul vector"        '\bfm(la|ul)[[:space:]]+v'
   count "$obj" "arm fmla/fmul SCALAR"        '\bfm(la|ul)[[:space:]]+[sd]'
+  echo "  NOTE: TU-wide on purpose -- the triad body is a std::function lambda,"
+  echo "  so it is type-erased out of runDramBandwidth and cannot be scoped."
+  echo "  0 packed / all scalar => the triad loop did NOT vectorise."
   echo "::endgroup::"
 fi
+
+# ---- scoped: the streaming-read loop shape (TU-wide counts are too noisy) ---
+for tag in avx2 avx512 generic; do
+  obj=$(find_obj "peak_cpu_tu_${tag}.dir")
+  [ -z "$obj" ] && continue
+  fn_dis "$obj" readBufferChecksum | grep -q . || continue
+  echo "::group::readBufferChecksum in TU ${tag}"
+  fn_count "$obj" readBufferChecksum "x86 vmovups ymm/zmm" 'vmovup[sd][[:space:]]+.*%[yz]mm'
+  fn_count "$obj" readBufferChecksum "x86 vpxor"           'vpxor'
+  fn_count "$obj" readBufferChecksum "arm ldr q (separate)" '\bldr[[:space:]]+q'
+  fn_count "$obj" readBufferChecksum "arm ldp q (FUSED)"    '\bldp[[:space:]]+q'
+  echo "::endgroup::"
+done
 
 exit 0

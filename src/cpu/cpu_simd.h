@@ -267,45 +267,57 @@ static inline int   i32_hsum(i32v a)           { return a; }
 #define CLPEAK_HAS_FLOAT_CONTROL 1
 #endif
 // ===========================================================================
+// These one-line wrappers exist ONLY to be inlined, and the divider rows are
+// meaningless if they are not.  GCC does not reliably do it: a CI codegen probe
+// on the Linux GCC job found `f64_div` emitted OUT OF LINE with a `ret`, so
+// every divide in the chain became a call -- 1 divide instruction in the whole
+// TU against clang's 64, and the div/sqrt rows read ~22% of the hardware rate
+// where clang hit it exactly (2.67 floats/cy on Zen 3).  Force the inline.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define CPU_SIMD_ALWAYS_INLINE static __forceinline
+#else
+#define CPU_SIMD_ALWAYS_INLINE static inline __attribute__((always_inline))
+#endif
+
 #if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(precise, on, push)
-static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
-static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
-static inline f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
-static inline f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return a / b; }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return a / b; }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
 #pragma float_control(pop)
 #elif defined(__clang__)
 // armv7 (or any other clang target without float_control): plain scalar
 // lowering, no pragma -- see the comment above.
-static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
-static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
-static inline f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
-static inline f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return a / b; }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return a / b; }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return __builtin_elementwise_sqrt(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return __builtin_elementwise_sqrt(a); }
 #elif defined(__AVX512F__)
-static inline f32v f32_div(f32v a, f32v b)     { return _mm512_div_ps(a, b); }
-static inline f64v f64_div(f64v a, f64v b)     { return _mm512_div_pd(a, b); }
-static inline f32v f32_sqrt(f32v a)            { return _mm512_sqrt_ps(a); }
-static inline f64v f64_sqrt(f64v a)            { return _mm512_sqrt_pd(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return _mm512_div_ps(a, b); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return _mm512_div_pd(a, b); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return _mm512_sqrt_ps(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return _mm512_sqrt_pd(a); }
 #elif defined(__AVX2__) && (defined(__FMA__) || defined(_MSC_VER))
-static inline f32v f32_div(f32v a, f32v b)     { return _mm256_div_ps(a, b); }
-static inline f64v f64_div(f64v a, f64v b)     { return _mm256_div_pd(a, b); }
-static inline f32v f32_sqrt(f32v a)            { return _mm256_sqrt_ps(a); }
-static inline f64v f64_sqrt(f64v a)            { return _mm256_sqrt_pd(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return _mm256_div_ps(a, b); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return _mm256_div_pd(a, b); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return _mm256_sqrt_ps(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return _mm256_sqrt_pd(a); }
 #elif defined(__SSE2__) || defined(_M_X64)
-static inline f32v f32_div(f32v a, f32v b)     { return _mm_div_ps(a, b); }
-static inline f64v f64_div(f64v a, f64v b)     { return _mm_div_pd(a, b); }
-static inline f32v f32_sqrt(f32v a)            { return _mm_sqrt_ps(a); }
-static inline f64v f64_sqrt(f64v a)            { return _mm_sqrt_pd(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return _mm_div_ps(a, b); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return _mm_div_pd(a, b); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return _mm_sqrt_ps(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return _mm_sqrt_pd(a); }
 #elif defined(__aarch64__) || defined(_M_ARM64)
-static inline f32v f32_div(f32v a, f32v b)     { return vdivq_f32(a, b); }
-static inline f64v f64_div(f64v a, f64v b)     { return vdivq_f64(a, b); }
-static inline f32v f32_sqrt(f32v a)            { return vsqrtq_f32(a); }
-static inline f64v f64_sqrt(f64v a)            { return vsqrtq_f64(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return vdivq_f32(a, b); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return vdivq_f64(a, b); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return vsqrtq_f32(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return vsqrtq_f64(a); }
 #else
-static inline f32v f32_div(f32v a, f32v b)     { return a / b; }
-static inline f64v f64_div(f64v a, f64v b)     { return a / b; }
-static inline f32v f32_sqrt(f32v a)            { return sqrtf(a); }
-static inline f64v f64_sqrt(f64v a)            { return sqrt(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return a / b; }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return a / b; }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return sqrtf(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return sqrt(a); }
 #endif
 
 } // namespace cpu_simd

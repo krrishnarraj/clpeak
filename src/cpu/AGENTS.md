@@ -224,9 +224,12 @@ Adding a TU (four edits, one per concern):
   with the scalar tail continuing on the same `i`.  With `M` a runtime value
   (it always is — the kernel is reached through a function pointer) clang
   emits several induction variables plus a multi-versioned tail check per
-  pass, and fuses the 8 separate `ldr q` into 4 `ldp q` — which is *slower*
-  on Firestorm (measured standalone: 140 GB/s for `ldp`-style vs 153 for
-  separate loads).  Computing `nblk = M / step` once and walking a single
+  pass, and multi-versions the loop.
+  (An earlier note here blamed `ldr q` -> `ldp q` fusion.  That was wrong:
+  the CI codegen probe shows the fixed, full-speed kernel still emits 15
+  `ldp q` and still reaches 47.6 B/cycle.  The 140-vs-153 measurement that
+  suggested it was for `vld1q_f32_x2`, which lowers to `ld1 {v,v}` — a
+  different instruction.  The win came from the loop shape alone.)  Computing `nblk = M / step` once and walking a single
   pointer `q` took **L1 read from 112 to 153 GB/s (34.7 → 47.6 B/cycle, 99%
   of the 3x16B load-port ceiling) and L1 MT from 834 to ~1160**.  L2/L3/DRAM
   rows barely moved, which is the signature to look for: those are limited by
