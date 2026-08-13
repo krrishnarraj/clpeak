@@ -5,7 +5,9 @@ import '../../model/catalog.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../theme/clpeak_theme.dart';
+import '../app.dart';
 import '../common/format.dart';
+import '../common/kit.dart';
 import '../run_config/run_config_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -16,50 +18,37 @@ class DashboardScreen extends StatelessWidget {
     final service = context.watch<BenchmarkService>();
     final catalog = service.catalog;
     final usable = catalog.usable;
+    final devices = usable.fold<int>(0, (n, b) => n + b.deviceCount);
 
     return Scaffold(
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 40),
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text('clpeak',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineMedium
-                        ?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(width: 10),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text('v${service.version}',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                              color:
-                                  Theme.of(context).colorScheme.outline)),
-                ),
-              ],
-            ),
-            Text('Cross-API compute benchmark',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: Theme.of(context).colorScheme.outline)),
-            const SizedBox(height: 20),
+            _Masthead(version: service.version),
+            const SizedBox(height: 26),
             if (usable.isEmpty)
-              const _EmptyState()
+              CPanel(
+                child: const CEmpty(
+                  icon: Icons.search_off,
+                  title: 'No compute devices found',
+                  detail:
+                      'No backend could enumerate a device on this system.',
+                ),
+              )
             else ...[
-              _RunLauncher(service: service),
-              const SizedBox(height: 24),
-              Text('This system',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
+              const CSection(label: 'RUN BENCHMARK'),
+              const SizedBox(height: 10),
+              _RunLauncher(service: service, deviceCount: devices),
+              const SizedBox(height: 26),
+              CSection(
+                label: 'THIS SYSTEM',
+                trailing: '${usable.length} backends · $devices devices',
+              ),
+              const SizedBox(height: 10),
               for (final backend in usable) ...[
-                _BackendCard(backend: backend),
-                const SizedBox(height: 12),
+                _BackendPanel(backend: backend),
+                const SizedBox(height: 10),
               ],
             ],
           ],
@@ -69,193 +58,160 @@ class DashboardScreen extends StatelessWidget {
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+/// Wordmark block — only shown on phones, where there's no sidebar to carry it.
+class _Masthead extends StatelessWidget {
+  const _Masthead({required this.version});
+
+  final String version;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          children: [
-            Icon(Icons.search_off,
-                size: 48, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 12),
-            const Text('No compute devices found'),
-            const SizedBox(height: 4),
-            Text(
-              'No backend could enumerate a device on this system.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Theme.of(context).colorScheme.outline),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    final t = CP.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+
+    if (wide) {
+      // The sidebar already carries the mark; here just name the view.
+      return Text('Benchmark', style: t.wordmark.copyWith(fontSize: 22));
+    }
+
+    return Row(
+      children: [
+        const CAppMark(size: 30),
+        const SizedBox(width: 12),
+        Expanded(child: Text('clpeak', style: t.wordmark)),
+        Text('v$version', style: t.micro.copyWith(letterSpacing: 0.6)),
+      ],
     );
   }
 }
 
 class _RunLauncher extends StatelessWidget {
-  const _RunLauncher({required this.service});
+  const _RunLauncher({required this.service, required this.deviceCount});
 
   final BenchmarkService service;
+  final int deviceCount;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final devices = service.catalog.usable
-        .fold<int>(0, (n, b) => n + b.deviceCount);
-    final deviceLabel = devices == 1
+    final t = CP.of(context);
+    final deviceLabel = deviceCount == 1
         ? 'the detected device'
-        : 'all $devices detected devices';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.bolt, color: scheme.primary),
-                const SizedBox(width: 8),
-                Text('Run benchmark',
-                    style: Theme.of(context).textTheme.titleMedium),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Measures peak compute, bandwidth and latency on $deviceLabel. '
-              'Results stream in live and are saved to History. '
-              'Custom… narrows the devices, test categories and time budgets.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: scheme.outline),
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: () => service.start(preset: RunPreset.full),
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Run'),
+        : 'all $deviceCount detected devices';
+
+    return CPanel(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Measures peak compute, bandwidth and latency on $deviceLabel. '
+            'Results stream in live and are saved to History. '
+            'Custom… narrows the devices, test categories and time budgets.',
+            style: t.body,
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              CButton(
+                label: 'Run',
+                icon: Icons.play_arrow,
+                kind: CButtonKind.primary,
+                onPressed: () => service.start(preset: RunPreset.full),
+              ),
+              CButton(
+                label: 'Custom…',
+                icon: Icons.tune,
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RunConfigScreen()),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const RunConfigScreen()),
-                  ),
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Custom…'),
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _BackendCard extends StatelessWidget {
-  const _BackendCard({required this.backend});
+/// One backend, presented as a titled table of its devices.
+class _BackendPanel extends StatelessWidget {
+  const _BackendPanel({required this.backend});
 
   final CatalogBackend backend;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(ClpeakTheme.backendIcon(backend.name),
-                    size: 20, color: scheme.primary),
-                const SizedBox(width: 8),
-                Text(backend.name,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const Spacer(),
-                Text(
-                  backend.deviceCount == 1
-                      ? '1 device'
-                      : '${backend.deviceCount} devices',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: scheme.outline),
-                ),
-              ],
+    final t = CP.of(context);
+    final devices = <CatalogDevice>[
+      for (final platform in backend.platforms) ...platform.devices,
+    ];
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CPanelHead(
+            title: backend.name,
+            icon: ClpeakTheme.backendIcon(backend.name),
+            trailing: Text(
+              backend.deviceCount == 1
+                  ? '1 DEVICE'
+                  : '${backend.deviceCount} DEVICES',
+              style: t.micro,
             ),
-            for (final platform in backend.platforms)
-              for (final device in platform.devices)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: _DeviceRow(device: device),
-                ),
-          ],
-        ),
+          ),
+          for (var i = 0; i < devices.length; i++)
+            CRow(
+              rule: i != devices.length - 1,
+              child: _DeviceLine(device: devices[i]),
+            ),
+        ],
       ),
     );
   }
 }
 
-class _DeviceRow extends StatelessWidget {
-  const _DeviceRow({required this.device});
+class _DeviceLine extends StatelessWidget {
+  const _DeviceLine({required this.device});
 
   final CatalogDevice device;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final details = <String>[
+    final t = CP.of(context);
+    final specs = <String>[
       if (device.type.isNotEmpty) device.type,
-      if (device.computeUnits > 0) '${device.computeUnits} CUs',
+      if (device.computeUnits > 0) '${device.computeUnits} CU',
       if (device.clockMHz > 0) '${device.clockMHz} MHz',
       if (device.globalMemBytes > 0) formatBytes(device.globalMemBytes),
+    ];
+    final caps = <String>[
       if (device.fp16) 'fp16',
       if (device.fp64) 'fp64',
     ];
-    return Row(
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          margin: const EdgeInsets.only(top: 6),
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: scheme.primary,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(device.name,
-                  style: Theme.of(context).textTheme.bodyMedium),
-              if (details.isNotEmpty)
-                Text(details.join(' · '),
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: scheme.outline)),
+        Row(
+          children: [
+            Expanded(
+              child: Text(device.name,
+                  style: t.mono, maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            for (final cap in caps) ...[
+              const SizedBox(width: 6),
+              CTag(text: cap),
             ],
-          ),
+          ],
         ),
+        if (specs.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(specs.join('  ·  '), style: t.monoSmallDim),
+        ],
       ],
     );
   }

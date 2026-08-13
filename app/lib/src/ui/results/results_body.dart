@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import '../../model/result_entry.dart';
 import '../../model/run_document.dart';
 import '../../theme/clpeak_theme.dart';
+import '../common/kit.dart';
 
 /// Renders one RunDocument: run-selector chips (when a session covered
-/// multiple backends/devices), device header, hero score tiles, category
-/// sections with expandable test cards, and a de-emphasized unsupported
-/// section.  Used by the live run view, the just-finished view, and the
-/// history viewer.
+/// multiple backends/devices), a device header, then each category as a
+/// hairline table of tests with expandable metric detail, and a de-emphasized
+/// unsupported section.  Used by the live run view, the just-finished view,
+/// and the history viewer.
 class ResultsBody extends StatefulWidget {
   const ResultsBody({
     super.key,
@@ -19,7 +20,7 @@ class ResultsBody extends StatefulWidget {
 
   final RunDocument document;
 
-  /// Compact mode (live run): no hero tiles, collapsed props.
+  /// Compact mode (live run): collapsed props.
   final bool compact;
 
   /// Optional slivers-above widget (e.g. the live-run banner).
@@ -41,25 +42,23 @@ class _ResultsBodyState extends State<ResultsBody> {
         children: [
           if (widget.header != null) widget.header!,
           const SizedBox(height: 40),
-          Center(
-            child: Text('Waiting for results…',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: Theme.of(context).colorScheme.outline)),
-          ),
+          const CEmpty(title: 'Waiting for results…'),
         ],
       );
     }
 
     final selected = runs.firstWhere((r) => r.key == _selectedRunKey,
         orElse: () => runs.last);
+    final brightness = Theme.of(context).brightness;
 
     // Flattened one level: category sections used to be non-lazy Columns
     // holding every test card, so all of them were built, laid out and
     // painted on each frame even when off-screen.  As sibling rows of the
     // sliver list only the visible ones cost anything — which matters during
     // a live run, where each frame is GPU work competing with the benchmark.
+    //
+    // The table look is drawn per row (each carries its own rules) rather than
+    // by wrapping a category in one container, which would undo the laziness.
     final rows = <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
       if (runs.length > 1)
@@ -71,14 +70,20 @@ class _ResultsBodyState extends State<ResultsBody> {
           ),
           padBottom: 16,
         ),
-      _WidgetRow(_DeviceHeaderCard(run: selected, compact: widget.compact)),
+      _WidgetRow(_DeviceHeader(run: selected, compact: widget.compact)),
       for (final group in selected.categories)
         if (group.supported.isNotEmpty) ...[
-          _SectionRow(group),
-          for (final test in group.supported) _TestRow(group, test),
+          _SectionRow(group, brightness),
+          for (var i = 0; i < group.supported.length; i++)
+            _TestRow(
+              group,
+              group.supported[i],
+              brightness,
+              last: i == group.supported.length - 1,
+            ),
         ],
       if (selected.categories.any((g) => g.unsupported.isNotEmpty))
-        _WidgetRow(_UnsupportedSection(run: selected), padTop: 20),
+        _WidgetRow(_UnsupportedSection(run: selected), padTop: 22),
     ];
 
     return ListView.builder(
@@ -113,37 +118,46 @@ class _WidgetRow extends _Row {
 }
 
 class _SectionRow extends _Row {
-  const _SectionRow(this.group);
+  const _SectionRow(this.group, this.brightness);
 
   final CategoryGroup group;
+  final Brightness brightness;
 
   @override
   Widget build() => Padding(
-        padding: const EdgeInsets.only(top: 20, bottom: 10),
-        child: _CategoryHeader(group: group),
-      );
-}
-
-class _TestRow extends _Row {
-  const _TestRow(this.group, this.test);
-
-  final CategoryGroup group;
-  final TestResult test;
-
-  @override
-  Widget build() => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        // Keyed by test tag: rows are inserted as results stream in during a
-        // live run, and without a key a card's expansion state would follow
-        // the index and land on the wrong test.
-        child: _TestCard(
-          key: ValueKey(test.test),
-          test: test,
-          color: ClpeakTheme.categoryColor(group.category),
+        padding: const EdgeInsets.only(top: 22, bottom: 9),
+        child: CSection(
+          label: group.category.label,
+          color: ClpeakTheme.categoryColor(group.category,
+              brightness: brightness),
+          trailing: '${group.supported.length} tests',
         ),
       );
 }
 
+class _TestRow extends _Row {
+  const _TestRow(this.group, this.test, this.brightness, {required this.last});
+
+  final CategoryGroup group;
+  final TestResult test;
+  final Brightness brightness;
+  final bool last;
+
+  @override
+  Widget build() => _TestLine(
+        // Keyed by test tag: rows are inserted as results stream in during a
+        // live run, and without a key a row's expansion state would follow
+        // the index and land on the wrong test.
+        key: ValueKey(test.test),
+        test: test,
+        color: ClpeakTheme.categoryColor(group.category,
+            brightness: brightness),
+        first: identical(test, group.supported.first),
+        last: last,
+      );
+}
+
+/// Which backend/device the readings below belong to.
 class _RunSelector extends StatelessWidget {
   const _RunSelector({
     required this.runs,
@@ -157,209 +171,182 @@ class _RunSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Wrap, not a horizontal scroller: with many devices the trailing chips
-    // used to sit off-screen with no way (mouse wheel included) to reach them.
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    final t = CP.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final run in runs)
-          ChoiceChip(
-            avatar: Icon(ClpeakTheme.backendIcon(run.backend), size: 18),
-            label: Text(
-              '${run.backend} · ${run.device}',
-              overflow: TextOverflow.ellipsis,
-            ),
-            selected: run.key == selectedKey,
-            onSelected: (_) => onSelected(run.key),
-          ),
+        Text('DEVICE', style: t.micro),
+        const SizedBox(height: 8),
+        // Wrap, not a horizontal scroller: with many devices the trailing
+        // chips used to sit off-screen with no way (mouse wheel included) to
+        // reach them.
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final run in runs)
+              CChip(
+                label: '${run.backend} · ${run.device}',
+                selected: run.key == selectedKey,
+                onTap: () => onSelected(run.key),
+              ),
+          ],
+        ),
       ],
     );
   }
 }
 
-class _DeviceHeaderCard extends StatelessWidget {
-  const _DeviceHeaderCard({required this.run, required this.compact});
+class _DeviceHeader extends StatelessWidget {
+  const _DeviceHeader({required this.run, required this.compact});
 
   final DeviceRun run;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final t = CP.of(context);
     final showPlatform =
         run.platform.isNotEmpty && run.platform != run.backend;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(ClpeakTheme.backendIcon(run.backend),
-                    color: scheme.primary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(run.device,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w600)),
-                      Text(
-                        [
-                          run.backend,
-                          if (showPlatform) run.platform,
-                          if (run.driver.isNotEmpty) run.driver,
-                        ].join(' · '),
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: scheme.outline),
-                      ),
-                    ],
+    final trail = [
+      if (showPlatform) run.platform,
+      if (run.driver.isNotEmpty) run.driver,
+    ];
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CPanelHead(
+            title: run.device,
+            tag: run.backend,
+            trailing: trail.isEmpty
+                ? null
+                : ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 260),
+                    child: Text(trail.join('  ·  '),
+                        style: t.monoSmallDim,
+                        maxLines: 1,
+                        textAlign: TextAlign.right,
+                        overflow: TextOverflow.ellipsis),
                   ),
-                ),
-              ],
-            ),
-            if (!compact && run.props.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 16,
-                runSpacing: 6,
+          ),
+          if (!compact && run.props.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+              child: Wrap(
+                spacing: 22,
+                runSpacing: 7,
                 children: [
                   for (final prop in run.props)
-                    Text.rich(
-                      TextSpan(children: [
-                        TextSpan(
-                          text: '${prop.key}  ',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: scheme.outline),
-                        ),
-                        TextSpan(
-                          text: prop.value,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ]),
-                    ),
+                    Text.rich(TextSpan(children: [
+                      TextSpan(
+                          text: '${prop.key.toUpperCase()}  ', style: t.micro),
+                      TextSpan(text: prop.value, style: t.monoSmall),
+                    ])),
                 ],
               ),
-            ],
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 }
 
-class _CategoryHeader extends StatelessWidget {
-  const _CategoryHeader({required this.group});
-
-  final CategoryGroup group;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(ClpeakTheme.categoryIcon(group.category),
-            size: 18, color: ClpeakTheme.categoryColor(group.category)),
-        const SizedBox(width: 8),
-        Text(group.category.label,
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w600)),
-      ],
-    );
-  }
-}
-
-class _TestCard extends StatefulWidget {
-  const _TestCard({super.key, required this.test, required this.color});
+/// One test: name, peak reading, and — when opened — a metric breakdown.
+///
+/// Draws its own top/bottom rules and side borders so a run of these reads as
+/// a single bordered table even though each is an independent list row.
+class _TestLine extends StatefulWidget {
+  const _TestLine({
+    super.key,
+    required this.test,
+    required this.color,
+    required this.first,
+    required this.last,
+  });
 
   final TestResult test;
   final Color color;
+  final bool first;
+  final bool last;
 
   @override
-  State<_TestCard> createState() => _TestCardState();
+  State<_TestLine> createState() => _TestLineState();
 }
 
-class _TestCardState extends State<_TestCard> {
+class _TestLineState extends State<_TestLine> {
   bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
+    final t = CP.of(context);
     final test = widget.test;
-    final scheme = Theme.of(context).colorScheme;
     final peak = formatMetric(test.peakValue, test.unit);
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: t.panel,
+        border: Border(
+          top: BorderSide(color: t.line),
+          left: BorderSide(color: t.line),
+          right: BorderSide(color: t.line),
+          bottom: widget.last ? BorderSide(color: t.line) : BorderSide.none,
+        ),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(widget.first ? CP.rPanel : 0),
+          bottom: Radius.circular(widget.last ? CP.rPanel : 0),
+        ),
+      ),
       clipBehavior: Clip.antiAlias,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
+          CTap(
             onTap: () => setState(() => _expanded = !_expanded),
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            builder: (context, hovered, pressed) => Container(
+              color: hovered || pressed ? t.hover : Colors.transparent,
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
               child: Row(
                 children: [
+                  Container(width: 3, height: 15, color: widget.color),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(test.display,
-                        style: Theme.of(context).textTheme.bodyMedium),
+                        style: t.mono,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                   ),
                   const SizedBox(width: 12),
-                  Text.rich(
-                    TextSpan(children: [
-                      TextSpan(
-                        text: peak.value,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: widget.color,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures()
-                              ],
-                            ),
-                      ),
-                      TextSpan(
-                        text: ' ${peak.unit}',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: scheme.outline),
-                      ),
-                    ]),
-                  ),
-                  const SizedBox(width: 4),
+                  CValue(
+                      value: peak.value,
+                      unit: peak.unit,
+                      color: widget.color),
+                  const SizedBox(width: 6),
                   Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 20,
-                    color: scheme.outline,
+                    _expanded ? Icons.remove : Icons.add,
+                    size: 13,
+                    color: t.faint,
                   ),
                 ],
               ),
             ),
           ),
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 180),
-            crossFadeState: _expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            firstChild: const SizedBox(width: double.infinity),
-            secondChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          // Instant, not a cross-fade: expansion happens mid-run, and an
+          // animated one would cost the benchmark a burst of frames.
+          if (_expanded)
+            Container(
+              decoration: BoxDecoration(
+                color: t.isDark
+                    ? t.bg.withValues(alpha: 0.45)
+                    : t.hover.withValues(alpha: 0.5),
+                border: Border(top: BorderSide(color: t.line)),
+              ),
+              padding: const EdgeInsets.fromLTRB(25, 9, 12, 10),
               child: Column(
                 children: [
                   for (final metric in test.metrics)
-                    _MetricRow(
+                    _MetricLine(
                       entry: metric,
                       maxValue: test.maxValue,
                       color: widget.color,
@@ -367,15 +354,14 @@ class _TestCardState extends State<_TestCard> {
                 ],
               ),
             ),
-          ),
         ],
       ),
     );
   }
 }
 
-class _MetricRow extends StatelessWidget {
-  const _MetricRow({
+class _MetricLine extends StatelessWidget {
+  const _MetricLine({
     required this.entry,
     required this.maxValue,
     required this.color,
@@ -387,59 +373,42 @@ class _MetricRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final t = CP.of(context);
     final ok = entry.status == ResultStatus.ok;
     final fraction =
         ok && maxValue > 0 ? (entry.value / maxValue).clamp(0.0, 1.0) : 0.0;
+    final f = ok ? formatMetric(entry.value, entry.unit) : null;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 3.5),
       child: Row(
         children: [
           SizedBox(
-            width: 110,
-            child: Text(
-              entry.metric,
-              style: Theme.of(context).textTheme.bodySmall,
-              overflow: TextOverflow.ellipsis,
-            ),
+            width: 104,
+            child: Text(entry.metric,
+                style: t.monoSmallDim,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: ok
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value: fraction,
-                      minHeight: 6,
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      valueColor: AlwaysStoppedAnimation(
-                          color.withValues(alpha: 0.85)),
-                    ),
-                  )
+                ? CMeter(fraction: fraction, color: color)
                 : Text(
                     '${entry.status.name} — ${entry.reason}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: scheme.outline),
+                    style: t.monoSmall.copyWith(color: t.faint),
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
           ),
-          if (ok) ...[
-            const SizedBox(width: 10),
+          if (f != null) ...[
+            const SizedBox(width: 12),
             SizedBox(
-              width: 90,
-              child: Builder(builder: (context) {
-                final f = formatMetric(entry.value, entry.unit);
-                return Text(
-                  '${f.value} ${f.unit}',
-                  textAlign: TextAlign.right,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                );
-              }),
+              width: 94,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: CValue(value: f.value, unit: f.unit, small: true),
+              ),
             ),
           ],
         ],
@@ -455,39 +424,58 @@ class _UnsupportedSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final t = CP.of(context);
     final items = <TestResult>[
       for (final g in run.categories) ...g.unsupported,
     ];
     if (items.isEmpty) return const SizedBox.shrink();
 
-    return Card(
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          leading: Icon(Icons.block, size: 18, color: scheme.outline),
-          title: Text(
-            'Not supported on this device (${items.length})',
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: scheme.outline),
-          ),
-          children: [
-            for (final test in items)
-              ListTile(
-                dense: true,
-                title: Text(test.display,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: scheme.outline)),
-                subtitle: test.skipReason.isEmpty
-                    ? null
-                    : Text(test.skipReason,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.outline.withValues(alpha: 0.7))),
+    return CPanel(
+      child: CExpander(
+        header: (context, open) => Container(
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+          child: Row(
+            children: [
+              Icon(Icons.block, size: 13, color: t.faint),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'NOT SUPPORTED ON THIS DEVICE (${items.length})',
+                  style: t.micro,
+                ),
               ),
+              Icon(open ? Icons.remove : Icons.add, size: 13, color: t.faint),
+            ],
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(height: 1, color: t.line),
+            for (final test in items)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Text(test.display,
+                          style: t.monoSmall.copyWith(color: t.dim)),
+                    ),
+                    if (test.skipReason.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 5,
+                        child: Text(test.skipReason,
+                            style: t.monoSmall.copyWith(color: t.faint),
+                            textAlign: TextAlign.right),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            const SizedBox(height: 4),
           ],
         ),
       ),

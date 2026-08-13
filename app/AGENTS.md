@@ -44,6 +44,24 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
+- Colours / type / geometry? → `lib/src/theme/clpeak_theme.dart` (`CP.of(context)`
+  tokens + category tints; the `ThemeData` there is glue only)
+- Buttons, panels, chips, switches, table rows? → `lib/src/ui/common/kit.dart`
+
+## Design language
+
+The GUI is an *instrument console*, not a stock Material app: monochrome
+chrome with the category tints as the only colour, monospace for anything
+technical, hairline tables instead of cards, square-ish corners, zero
+elevation, and inverted (solid block) primary actions.  `ColorScheme.fromSeed`
+is deliberately not used — both palettes are fixed in `CP`.
+
+Build screens from `ui/common/kit.dart` (`CPanel`, `CSection`, `CRow`,
+`CButton`, `CChip`, `CSwitch`, `CCheckbox`, `CTag`, `CValue`, `CMeter`,
+`CHeader`, `CDialog`, …), not from `Card` / `Chip` / `Switch` / `AppBar` /
+`NavigationRail` / `ListTile`.  The kit is built on raw `GestureDetector` +
+`MouseRegion`, so nothing splashes — which is also why the theme sets
+`NoSplash.splashFactory` (see the animation trap below).
 
 ## Traps
 

@@ -7,6 +7,7 @@ import '../../services/export_service.dart';
 import '../../services/run_history_store.dart';
 import '../../theme/clpeak_theme.dart';
 import '../common/format.dart';
+import '../common/kit.dart';
 import '../results/results_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -47,46 +48,47 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
-      body: FutureBuilder<List<RunSummary>>(
-        // Recreate the future on every finished run / manual refresh.
-        future: _runs,
-        builder: (context, snapshot) {
-          final runs = snapshot.data;
-          if (runs == null) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (runs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.history,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.outline),
-                  const SizedBox(height: 12),
-                  const Text('No saved runs yet'),
-                  const SizedBox(height: 4),
-                  Text('Every benchmark run is saved here automatically.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline)),
-                ],
-              ),
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () async => _refresh(),
-            child: ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: runs.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _RunTile(
-                summary: runs[i],
-                onChanged: _refresh,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const CHeader(title: 'History', subtitle: 'saved runs'),
+            Expanded(
+              child: FutureBuilder<List<RunSummary>>(
+                // Recreate the future on every finished run / manual refresh.
+                future: _runs,
+                builder: (context, snapshot) {
+                  final runs = snapshot.data;
+                  if (runs == null) {
+                    // Static text, not a spinner — nothing in this app spins.
+                    return const CEmpty(title: 'Reading index…');
+                  }
+                  if (runs.isEmpty) {
+                    return const CEmpty(
+                      icon: Icons.history,
+                      title: 'No saved runs yet',
+                      detail:
+                          'Every benchmark run is saved here automatically.',
+                    );
+                  }
+                  return RefreshIndicator(
+                    onRefresh: () async => _refresh(),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+                      itemCount: runs.length,
+                      itemBuilder: (context, i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _RunTile(
+                          summary: runs[i],
+                          onChanged: _refresh,
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -113,29 +115,58 @@ class _RunTile extends StatelessWidget {
   }
 
   Future<void> _rename(BuildContext context) async {
+    final t = CP.of(context);
     final history = context.read<RunHistoryStore>();
     final controller = TextEditingController(text: summary.name);
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename run'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: summary.devices.join(', '),
-            helperText: 'Leave empty to use the device name',
-          ),
-          onSubmitted: (v) => Navigator.pop(context, v),
-        ),
+      builder: (context) => CDialog(
+        title: 'Rename run',
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Save')),
+          CButton(
+              label: 'Cancel',
+              kind: CButtonKind.quiet,
+              onPressed: () => Navigator.pop(context)),
+          CButton(
+              label: 'Save',
+              kind: CButtonKind.primary,
+              onPressed: () => Navigator.pop(context, controller.text)),
         ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              style: t.mono,
+              cursorWidth: 1.5,
+              cursorRadius: Radius.zero,
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                hintText: summary.id,
+                hintStyle: t.mono.copyWith(color: t.faint),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(CP.rControl),
+                  borderSide: BorderSide(color: t.line),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(CP.rControl),
+                  borderSide: BorderSide(color: t.line),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(CP.rControl),
+                  borderSide: BorderSide(color: t.text, width: 1.5),
+                ),
+              ),
+              onSubmitted: (v) => Navigator.pop(context, v),
+            ),
+            const SizedBox(height: 10),
+            Text('Leave empty to use the run timestamp', style: t.micro),
+          ],
+        ),
       ),
     );
     if (name != null) {
@@ -145,22 +176,27 @@ class _RunTile extends StatelessWidget {
   }
 
   Future<void> _delete(BuildContext context) async {
+    final t = CP.of(context);
     final history = context.read<RunHistoryStore>();
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete run?'),
-        content: Text(
-            'This permanently removes the saved results from '
-            '${formatDate(summary.startedAt)}.'),
+      builder: (context) => CDialog(
+        title: 'Delete run?',
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete')),
+          CButton(
+              label: 'Cancel',
+              kind: CButtonKind.quiet,
+              onPressed: () => Navigator.pop(context, false)),
+          CButton(
+              label: 'Delete',
+              danger: true,
+              onPressed: () => Navigator.pop(context, true)),
         ],
+        child: Text(
+          'This permanently removes the saved results from '
+          '${formatDate(summary.startedAt)}.',
+          style: t.body,
+        ),
       ),
     );
     if (confirmed == true) {
@@ -183,13 +219,13 @@ class _RunTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
+    final t = CP.of(context);
+    return CPanel(
+      child: CTap(
         onTap: () => _open(context),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+        builder: (context, hovered, pressed) => Container(
+          color: hovered || pressed ? t.hover : Colors.transparent,
+          padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -198,57 +234,60 @@ class _RunTile extends StatelessWidget {
                   Expanded(
                     child: Text(
                       summary.displayTitle,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                      style: t.title,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert,
-                        size: 20, color: scheme.outline),
-                    onSelected: (action) => switch (action) {
-                      'rename' => _rename(context),
-                      'export' => _export(context),
-                      'delete' => _delete(context),
-                      _ => null,
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'rename', child: Text('Rename')),
-                      PopupMenuItem(
-                          value: 'export', child: Text('Export XML')),
-                      PopupMenuItem(value: 'delete', child: Text('Delete')),
-                    ],
+                  if (summary.cancelled) ...[
+                    CTag(text: 'cancelled', color: t.danger),
+                    const SizedBox(width: 6),
+                  ],
+                  _Menu(
+                    onRename: () => _rename(context),
+                    onExport: () => _export(context),
+                    onDelete: () => _delete(context),
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(
-                [
-                  // The title is a name or a timestamp id, so the devices
-                  // always belong here.
-                  if (summary.devices.isNotEmpty) summary.devices.join(', '),
-                  formatDate(summary.startedAt),
-                  if (summary.durationMs > 0)
-                    formatDuration(Duration(milliseconds: summary.durationMs)),
-                  if (summary.cancelled) 'cancelled',
-                ].join(' · '),
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: scheme.outline),
+              const SizedBox(height: 7),
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(
+                  [
+                    // The title is a name or a timestamp id, so the devices
+                    // always belong here.
+                    if (summary.devices.isNotEmpty) summary.devices.join(', '),
+                  ].join(),
+                  style: t.monoSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
+              const SizedBox(height: 9),
+              Row(
                 children: [
-                  for (final backend in summary.backends)
-                    _MiniChip(
-                      icon: ClpeakTheme.backendIcon(backend),
-                      text: backend,
+                  Expanded(
+                    child: Wrap(
+                      spacing: 5,
+                      runSpacing: 5,
+                      children: [
+                        for (final backend in summary.backends)
+                          CTag(text: backend, upper: false),
+                      ],
                     ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    [
+                      formatDate(summary.startedAt),
+                      if (summary.durationMs > 0)
+                        formatDuration(
+                            Duration(milliseconds: summary.durationMs)),
+                    ].join('  ·  '),
+                    style: t.micro,
+                  ),
+                  const SizedBox(width: 4),
                 ],
               ),
             ],
@@ -259,31 +298,47 @@ class _RunTile extends StatelessWidget {
   }
 }
 
-class _MiniChip extends StatelessWidget {
-  const _MiniChip({this.icon, required this.text});
+class _Menu extends StatelessWidget {
+  const _Menu({
+    required this.onRename,
+    required this.onExport,
+    required this.onDelete,
+  });
 
-  final IconData? icon;
-  final String text;
+  final VoidCallback onRename;
+  final VoidCallback onExport;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: scheme.outline),
-            const SizedBox(width: 4),
-          ],
-          Text(text, style: Theme.of(context).textTheme.labelSmall),
-        ],
-      ),
+    final t = CP.of(context);
+    return PopupMenuButton<String>(
+      tooltip: 'Run actions',
+      icon: Icon(Icons.more_horiz, size: 17, color: t.dim),
+      iconSize: 17,
+      splashRadius: 1,
+      position: PopupMenuPosition.under,
+      onSelected: (action) => switch (action) {
+        'rename' => onRename(),
+        'export' => onExport(),
+        'delete' => onDelete(),
+        _ => null,
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(
+            value: 'rename',
+            height: 38,
+            child: Text('Rename', style: t.monoSmall)),
+        PopupMenuItem(
+            value: 'export',
+            height: 38,
+            child: Text('Export XML', style: t.monoSmall)),
+        PopupMenuItem(
+            value: 'delete',
+            height: 38,
+            child: Text('Delete',
+                style: t.monoSmall.copyWith(color: t.danger))),
+      ],
     );
   }
 }

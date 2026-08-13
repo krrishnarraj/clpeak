@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/benchmark_service.dart';
+import '../../theme/clpeak_theme.dart';
 import '../common/format.dart';
+import '../common/kit.dart';
 import '../results/results_body.dart';
 
-/// The in-flight run: current-test banner, elapsed / completed counters,
+/// The in-flight run: current-test readout, elapsed / completed counters,
 /// live results ticking in below, and Cancel.
 ///
 /// This screen is deliberately animation-free.  Every frame it presents is
@@ -21,57 +23,53 @@ class LiveRunScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = CP.of(context);
     final service = context.watch<BenchmarkService>();
     final cancelling = service.state == BenchmarkState.cancelling;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Benchmarking…'),
-        automaticallyImplyLeading: false,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: OutlinedButton.icon(
-                onPressed: cancelling ? null : service.cancel,
-                icon: const Icon(Icons.stop, size: 18),
-                label: Text(cancelling ? 'Cancelling…' : 'Cancel'),
+      body: SafeArea(
+        child: Column(
+          children: [
+            CHeader(
+              title: cancelling ? 'Cancelling' : 'Benchmarking',
+              subtitle: 'run in progress',
+              actions: [
+                CButton(
+                  label: cancelling ? 'Cancelling…' : 'Cancel',
+                  icon: Icons.stop,
+                  danger: !cancelling,
+                  onPressed: cancelling ? null : service.cancel,
+                ),
+              ],
+            ),
+            // A static rule, not an indeterminate LinearProgressIndicator: the
+            // latter animates for the whole run and steals GPU time from it.
+            Container(height: 2, color: cancelling ? t.dim : t.text),
+            Expanded(
+              child: ResultsBody(
+                document: service.document,
+                compact: true,
+                header: _StatusPanel(
+                    service: service, cancelling: cancelling),
               ),
             ),
-          ),
-        ],
-        // A static rule, not an indeterminate LinearProgressIndicator: the
-        // latter animates for the whole run and steals GPU time from it.
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(3),
-          child: Container(
-            height: 3,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+          ],
         ),
-      ),
-      body: ResultsBody(
-        document: service.document,
-        compact: true,
-        header: _StatusBanner(service: service, cancelling: cancelling),
       ),
     );
   }
 }
 
-class _StatusBanner extends StatelessWidget {
-  const _StatusBanner({required this.service, required this.cancelling});
+class _StatusPanel extends StatelessWidget {
+  const _StatusPanel({required this.service, required this.cancelling});
 
   final BenchmarkService service;
   final bool cancelling;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final subtle = Theme.of(context)
-        .textTheme
-        .bodySmall
-        ?.copyWith(color: scheme.outline);
+    final t = CP.of(context);
     final statusText = cancelling
         ? 'Cancelling — finishing the current test…'
         : service.currentTest.isNotEmpty
@@ -80,54 +78,80 @@ class _StatusBanner extends StatelessWidget {
                 ? 'Preparing ${service.currentBackend}…'
                 : 'Starting…';
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Static icon rather than a spinner, for the same reason the
-            // app-bar rule is static.
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: Icon(
-                cancelling ? Icons.stop_circle_outlined : Icons.speed,
-                size: 22,
-                color: cancelling ? scheme.outline : scheme.primary,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(statusText,
-                      style: Theme.of(context).textTheme.bodyMedium,
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            child: Row(
+              children: [
+                // Static block rather than a spinner, for the same reason the
+                // rule under the header is static.
+                Container(
+                  width: 3,
+                  height: 15,
+                  color: cancelling ? t.dim : t.text,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(statusText,
+                      style: t.mono,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 2),
-                  // The clock is its own widget so its once-a-second tick
-                  // repaints a single Text instead of the whole screen
-                  // (which would drag the live results list along with it).
-                  Row(
-                    children: [
-                      Text(
-                        [
-                          if (service.currentBackend.isNotEmpty)
-                            service.currentBackend,
-                          '${service.completedTests} tests done',
-                          '',
-                        ].join(' · '),
-                        style: subtle,
-                      ),
-                      _ElapsedClock(style: subtle),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          Container(height: 1, color: t.line),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+            child: Row(
+              children: [
+                _Stat(
+                  label: 'Backend',
+                  value: service.currentBackend.isEmpty
+                      ? '—'
+                      : service.currentBackend,
+                ),
+                _Stat(label: 'Tests done', value: '${service.completedTests}'),
+                // The clock is its own widget so its once-a-second tick
+                // repaints a single Text instead of the whole screen (which
+                // would drag the live results list along with it).
+                const _Stat(label: 'Elapsed', value: null),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({required this.label, required this.value});
+
+  final String label;
+
+  /// `null` renders the self-ticking elapsed clock instead of a static value.
+  final String? value;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label.toUpperCase(), style: t.micro),
+          const SizedBox(height: 4),
+          value == null
+              ? _ElapsedClock(style: t.mono)
+              : Text(value!,
+                  style: t.mono,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+        ],
       ),
     );
   }

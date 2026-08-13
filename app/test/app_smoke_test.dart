@@ -44,8 +44,8 @@ void main() {
     await tester.pump();
 
     // Dashboard: launcher + real system summary from the native catalog.
-    expect(find.text('Run benchmark'), findsOneWidget);
-    expect(find.text('This system'), findsOneWidget);
+    expect(find.text('RUN BENCHMARK'), findsOneWidget);
+    expect(find.text('THIS SYSTEM'), findsOneWidget);
     expect(service.catalog.usable, isNotEmpty);
     expect(service.version, isNotEmpty);
 
