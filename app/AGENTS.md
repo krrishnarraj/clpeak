@@ -45,6 +45,22 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
 
+## Traps
+
+- **The live-run screen must not animate, and must not rebuild per event.**
+  The GUI process holds a graphics context on the same GPU it benchmarks
+  (`C+G` in nvidia-smi), so every presented frame is GPU work competing with
+  the running kernel. An indeterminate `LinearProgressIndicator`/
+  `CircularProgressIndicator` pins the app at 60 fps for the whole run and
+  costs 10-15% of the GPU score on a CUDA/Linux desktop — measured against
+  the same `libclpeak_ffi.so` driven from a plain non-Flutter host, which
+  reproduces CLI numbers exactly. Hence: static indicators only,
+  `BenchmarkService` coalesces run events onto a 250 ms tick instead of
+  notifying per event, the elapsed clock is its own 1 Hz leaf widget, and
+  `ResultsBody` builds rows lazily (a non-lazy `Column` per category laid out
+  every off-screen test card on each frame). Cutting frame rate, not CPU
+  work, is what recovers the score.
+
 ## Hand-edited generated files
 
 `flutter create` regeneration can clobber these — re-apply if you recreate

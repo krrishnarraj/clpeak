@@ -55,35 +55,93 @@ class _ResultsBodyState extends State<ResultsBody> {
     final selected = runs.firstWhere((r) => r.key == _selectedRunKey,
         orElse: () => runs.last);
 
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        if (widget.header != null) ...[
-          widget.header!,
-          const SizedBox(height: 16),
-        ],
-        if (runs.length > 1) ...[
+    // Flattened one level: category sections used to be non-lazy Columns
+    // holding every test card, so all of them were built, laid out and
+    // painted on each frame even when off-screen.  As sibling rows of the
+    // sliver list only the visible ones cost anything — which matters during
+    // a live run, where each frame is GPU work competing with the benchmark.
+    final rows = <_Row>[
+      if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
+      if (runs.length > 1)
+        _WidgetRow(
           _RunSelector(
             runs: runs,
             selectedKey: selected.key,
             onSelected: (key) => setState(() => _selectedRunKey = key),
           ),
-          const SizedBox(height: 16),
+          padBottom: 16,
+        ),
+      _WidgetRow(_DeviceHeaderCard(run: selected, compact: widget.compact)),
+      for (final group in selected.categories)
+        if (group.supported.isNotEmpty) ...[
+          _SectionRow(group),
+          for (final test in group.supported) _TestRow(group, test),
         ],
-        _DeviceHeaderCard(run: selected, compact: widget.compact),
-        for (final group in selected.categories)
-          if (group.supported.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            _CategorySection(group: group),
-          ],
-        if (selected.categories.any((g) => g.unsupported.isNotEmpty)) ...[
-          const SizedBox(height: 20),
-          _UnsupportedSection(run: selected),
-        ],
-        const SizedBox(height: 32),
-      ],
+      if (selected.categories.any((g) => g.unsupported.isNotEmpty))
+        _WidgetRow(_UnsupportedSection(run: selected), padTop: 20),
+    ];
+
+    return ListView.builder(
+      // Bottom pad carries the old trailing SizedBox(32).
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 52),
+      itemCount: rows.length,
+      itemBuilder: (context, i) => RepaintBoundary(child: rows[i].build()),
     );
   }
+}
+
+/// One row of the lazily-built results list.  Descriptors, not widgets: the
+/// subtree is only inflated for rows the viewport actually reaches.
+sealed class _Row {
+  const _Row();
+
+  Widget build();
+}
+
+class _WidgetRow extends _Row {
+  const _WidgetRow(this.child, {this.padTop = 0, this.padBottom = 0});
+
+  final Widget child;
+  final double padTop;
+  final double padBottom;
+
+  @override
+  Widget build() => Padding(
+        padding: EdgeInsets.only(top: padTop, bottom: padBottom),
+        child: child,
+      );
+}
+
+class _SectionRow extends _Row {
+  const _SectionRow(this.group);
+
+  final CategoryGroup group;
+
+  @override
+  Widget build() => Padding(
+        padding: const EdgeInsets.only(top: 20, bottom: 10),
+        child: _CategoryHeader(group: group),
+      );
+}
+
+class _TestRow extends _Row {
+  const _TestRow(this.group, this.test);
+
+  final CategoryGroup group;
+  final TestResult test;
+
+  @override
+  Widget build() => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        // Keyed by test tag: rows are inserted as results stream in during a
+        // live run, and without a key a card's expansion state would follow
+        // the index and land on the wrong test.
+        child: _TestCard(
+          key: ValueKey(test.test),
+          test: test,
+          color: ClpeakTheme.categoryColor(group.category),
+        ),
+      );
 }
 
 class _RunSelector extends StatelessWidget {
@@ -199,41 +257,30 @@ class _DeviceHeaderCard extends StatelessWidget {
   }
 }
 
-class _CategorySection extends StatelessWidget {
-  const _CategorySection({required this.group});
+class _CategoryHeader extends StatelessWidget {
+  const _CategoryHeader({required this.group});
 
   final CategoryGroup group;
 
   @override
   Widget build(BuildContext context) {
-    final color = ClpeakTheme.categoryColor(group.category);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          children: [
-            Icon(ClpeakTheme.categoryIcon(group.category),
-                size: 18, color: color),
-            const SizedBox(width: 8),
-            Text(group.category.label,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w600)),
-          ],
-        ),
-        const SizedBox(height: 10),
-        for (final test in group.supported) ...[
-          _TestCard(test: test, color: color),
-          const SizedBox(height: 8),
-        ],
+        Icon(ClpeakTheme.categoryIcon(group.category),
+            size: 18, color: ClpeakTheme.categoryColor(group.category)),
+        const SizedBox(width: 8),
+        Text(group.category.label,
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w600)),
       ],
     );
   }
 }
 
 class _TestCard extends StatefulWidget {
-  const _TestCard({required this.test, required this.color});
+  const _TestCard({super.key, required this.test, required this.color});
 
   final TestResult test;
   final Color color;

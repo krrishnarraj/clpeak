@@ -59,6 +59,46 @@ class BenchmarkService extends ChangeNotifier {
   ClpeakRun? _run;
   String? _runId;
 
+  // ── Live-update throttle ─────────────────────────────────────────────────
+  //
+  // Every rebuild this notifier triggers ends in a presented frame, which is
+  // GPU work on the device currently being benchmarked.  Native events arrive
+  // in bursts (one per metric, several per test), so during a run they are
+  // coalesced onto a fixed low-rate tick instead of notifying per event.
+  // Everything outside a run notifies immediately.
+  static const _liveTick = Duration(milliseconds: 250);
+  Timer? _liveTimer;
+  bool _liveDirty = false;
+
+  void _notifyLive() {
+    if (_liveTimer == null) {
+      notifyListeners(); // not throttled outside a run
+      return;
+    }
+    _liveDirty = true;
+  }
+
+  void _startLiveTicker() {
+    _liveTimer?.cancel();
+    _liveTimer = Timer.periodic(_liveTick, (_) {
+      if (!_liveDirty) return;
+      _liveDirty = false;
+      notifyListeners();
+    });
+  }
+
+  void _stopLiveTicker() {
+    _liveTimer?.cancel();
+    _liveTimer = null;
+    _liveDirty = false;
+  }
+
+  @override
+  void dispose() {
+    _stopLiveTicker();
+    super.dispose();
+  }
+
   /// Elapsed time of the in-flight (or just-finished) run.
   Duration get elapsed => _startedAt == null
       ? Duration.zero
@@ -90,6 +130,7 @@ class BenchmarkService extends ChangeNotifier {
     _runId = _makeRunId(_startedAt!);
     _state = BenchmarkState.running;
     notifyListeners();
+    _startLiveTicker();
 
     final xmlPath = await _history.xmlPathFor(_runId!);
     final args = [..._config.toArgs(_catalog), '--xml-file', xmlPath];
@@ -154,10 +195,11 @@ class BenchmarkService extends ChangeNotifier {
       case BackendEndEvent():
         break;
     }
-    notifyListeners();
+    _notifyLive();
   }
 
   Future<void> _finalize() async {
+    _stopLiveTicker(); // back to immediate notifications
     final startedAt = _startedAt ?? DateTime.now();
     if (!_document.isEmpty) {
       final summary = RunSummary.fromDocument(
