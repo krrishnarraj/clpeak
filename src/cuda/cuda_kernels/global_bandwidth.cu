@@ -4,10 +4,15 @@
 // measure VRAM rather than L2.  CUDA's widest native load is LDG.128
 // (float4), so float8/float16 would lower to multiple float4 loads with
 // no new HW path -- we stop at float4.
+//
+// `in`/`out` are __restrict__ so nvcc can prove they do not alias and issue
+// the fetches as read-only ld.global.nc; without it the trailing store forces
+// the conservative coherent load path.
 
 #define FETCH_PER_WI 16
 
-extern "C" __global__ void global_bandwidth_v1(const float *in, float *out)
+extern "C" __global__ void global_bandwidth_v1(const float * __restrict__ in,
+                                               float * __restrict__ out)
 {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int lid = threadIdx.x;
@@ -25,7 +30,8 @@ extern "C" __global__ void global_bandwidth_v1(const float *in, float *out)
     out[gid] = sum;
 }
 
-extern "C" __global__ void global_bandwidth_v2(const float2 *in, float *out)
+extern "C" __global__ void global_bandwidth_v2(const float2 * __restrict__ in,
+                                               float * __restrict__ out)
 {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int lid = threadIdx.x;
@@ -44,7 +50,8 @@ extern "C" __global__ void global_bandwidth_v2(const float2 *in, float *out)
     out[gid] = sum.x + sum.y;
 }
 
-extern "C" __global__ void global_bandwidth_v4(const float4 *in, float *out)
+extern "C" __global__ void global_bandwidth_v4(const float4 * __restrict__ in,
+                                               float * __restrict__ out)
 {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int lid = threadIdx.x;
