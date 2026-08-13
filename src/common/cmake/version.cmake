@@ -16,27 +16,11 @@ if(NOT DEFINED CLPEAK_GIT_ROOT)
 endif()
 
 find_package(Git QUIET)
+include("${_CLPEAK_VERSION_CMAKE_DIR}/GitVersion.cmake")
 
 # --- Configure-time: seed an initial version.h so the tree always has one ---
-if(GIT_FOUND AND EXISTS "${CLPEAK_GIT_ROOT}/.git")
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-    WORKING_DIRECTORY ${CLPEAK_GIT_ROOT}
-    OUTPUT_VARIABLE _git_version
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-    RESULT_VARIABLE _git_result
-  )
-  if(_git_result EQUAL 0)
-    # Strip optional leading 'v' (tags mix v1.0 and 1.1.7)
-    string(REGEX REPLACE "^v" "" _git_version "${_git_version}")
-    set(CLPEAK_VERSION_STR "${_git_version}")
-  else()
-    set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_FALLBACK}")
-  endif()
-else()
-  set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_FALLBACK}")
-endif()
+clpeak_git_describe(CLPEAK_VERSION_STR
+    "${GIT_EXECUTABLE}" "${CLPEAK_GIT_ROOT}" "${CLPEAK_VERSION_FALLBACK}")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(
