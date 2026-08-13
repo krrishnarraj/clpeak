@@ -178,7 +178,7 @@ so `bin/clpeak-gui` works from anywhere as long as `gui/` travels with it. On ma
 
 > **macOS first launch:** the app is ad-hoc signed, not notarized, so Gatekeeper blocks a downloaded copy. Right-click → **Open** once, or run `xattr -dr com.apple.quarantine /Applications/clpeak-gui.app`.
 
-> **Linux:** the GUI needs GTK 3 (`libgtk-3-0`) on the target system. The CLI has no such dependency.
+> **Linux:** the GUI needs GTK 3 (`libgtk-3-0`) on the target system. The CLI has no such dependency. The window icon shows under X11; on Wayland the desktop matches icons to an installed `.desktop` entry by application ID, so a portable extracted bundle shows the generic one there.
 
 > **arm64 Linux and Windows packages are CLI-only.** Flutter's desktop SDK for those hosts is x64-only, so the release archives for `linux-arm64` and `windows-arm64` ship `bin/clpeak` without a `gui/` directory. Building the GUI there needs a self-built Flutter engine. macOS arm64 is unaffected — Flutter supports Apple silicon natively.
 

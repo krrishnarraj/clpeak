@@ -159,7 +159,9 @@ if(NOT CLPEAK_FFI_STANDALONE)
         add_dependencies(clpeak-gui clpeak-gui-flutter)
     else()
         # Linux bundle layout: bundle/{clpeak-gui, data/, lib/*.so}; the Dart
-        # resolver loads <exeDir>/lib/libclpeak_ffi.so.
+        # resolver loads <exeDir>/lib/libclpeak_ffi.so, and the runner loads
+        # data/clpeak_icon.png as its window icon (GTK has no .rc-style
+        # resource embedding, see linux/runner/my_application.cc).
         add_custom_target(clpeak-gui ALL
             DEPENDS clpeak_ffi
             COMMAND ${FLUTTER_EXECUTABLE} build linux --release

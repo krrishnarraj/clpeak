@@ -19,6 +19,31 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+// Set the window icon from the bundle.
+//
+// GTK has no equivalent of the Windows runner's .rc resource, and the release
+// bundle is relocatable (extracted anywhere from the zip), so an installed
+// hicolor theme entry can't be relied on either: resolve the PNG that the
+// clpeak-gui CMake target staged next to the executable.  X11 shows this in
+// the taskbar and alt-tab; Wayland ignores window icons entirely and matches
+// on the application ID instead, which needs an installed .desktop file.
+static void set_window_icon(GtkWindow* window) {
+  g_autoptr(GError) error = nullptr;
+  g_autofree gchar* exe = g_file_read_link("/proc/self/exe", &error);
+  if (exe == nullptr) {
+    g_warning("Failed to resolve executable path for window icon: %s",
+              error->message);
+    return;
+  }
+
+  g_autofree gchar* dir = g_path_get_dirname(exe);
+  g_autofree gchar* icon =
+      g_build_filename(dir, "data", "clpeak_icon.png", nullptr);
+  if (!gtk_window_set_icon_from_file(window, icon, &error)) {
+    g_warning("Failed to load window icon %s: %s", icon, error->message);
+  }
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -53,6 +78,7 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 1280, 860);
+  set_window_icon(window);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

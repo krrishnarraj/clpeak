@@ -259,9 +259,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            build/clpeak-*.zip
-            build/clpeak-*.dmg
+          path: build/clpeak-*.zip
+
+      # Its own artifact rather than a second file in the one above: the
+      # Actions UI always serves an artifact as a zip, so bundling the .dmg
+      # with the .zip buries both a level deep.  One file per artifact means
+      # each download unpacks straight to the thing you wanted.  (Release
+      # assets are unaffected -- the release job attaches the raw files.)
+      - name: Upload DMG artifact
+        if: runner.os == 'macOS' && matrix.gui
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-dmg
+          path: build/clpeak-*.dmg
 
   # ---------------------------------------------------------------------------
   # Linux x64 GCC — build-error smoke test only.

@@ -97,6 +97,12 @@ install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
+# Window icon, loaded at runtime by runner/my_application.cc (GTK has no
+# .rc-style resource embedding like the Windows runner).  Installed with the
+# bundle so `flutter run` gets it too, not just the packaged build.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/clpeak_icon.png"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 

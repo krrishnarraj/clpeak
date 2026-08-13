@@ -61,6 +61,11 @@ the platform dirs:
 - `macos/Runner/MainFlutterWindow.swift`, `linux/runner/my_application.cc`,
   `windows/runner/main.cpp` — 1280x860 default window size (macOS also sets a
   900x640 content minimum and centers)
+- `linux/runner/my_application.cc` + `linux/CMakeLists.txt` — window icon:
+  GTK has no `.rc`-style resource embedding, so the runner loads
+  `data/clpeak_icon.png` from the (relocatable) bundle at startup and the
+  runner CMake installs it there. X11 only — Wayland ignores window icons and
+  matches an installed `.desktop` file by application ID instead.
 - `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.clpeak.ios` +
   "Embed clpeak native frameworks" script phase (consumes
   `ios/clpeak_native/`, staged by `tool/build_ios_native.sh`)

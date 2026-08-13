@@ -12,6 +12,7 @@ the wordmark as an alpha mask and re-composes it per platform:
   Android  adaptive foreground/monochrome inside the 66/108dp safe circle,
            plus legacy mipmap PNGs and a 512px Play Store icon
   Windows  multi-resolution .ico
+  Linux    single 256px PNG, loaded as the GTK window icon at runtime
 
 Usage:  python3 tool/icons/generate_icons.py      (needs Pillow)
 """
@@ -295,6 +296,18 @@ def build_windows() -> None:
     print(f"  {out.relative_to(APP)}  {', '.join(str(s) for s in sizes)}")
 
 
+# ------------------------------------------------------------------------- Linux
+
+
+def build_linux() -> None:
+    # GTK has no resource-embedding step like Windows' .rc, so the runner loads
+    # this PNG from the bundle at startup (linux/runner/my_application.cc).  One
+    # 256px master is enough -- GTK downscales for the titlebar and taskbar.
+    out = APP / "linux/runner/resources/clpeak_icon.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write(render(256, tile=0.94, radius=0.94 * 0.18), out)
+
+
 def main() -> None:
     global WORDMARK
     print("extracting wordmark from", SOURCE.name)
@@ -306,6 +319,7 @@ def main() -> None:
         ("macOS", build_macos),
         ("Android", build_android),
         ("Windows", build_windows),
+        ("Linux", build_linux),
     ):
         print(name)
         build()
