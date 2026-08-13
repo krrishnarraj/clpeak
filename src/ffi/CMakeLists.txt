@@ -130,9 +130,23 @@ if(NOT CLPEAK_FFI_STANDALONE)
         # the runner executable.  The arch dir it lands in is resolved at build
         # time (see stage_windows_bundle.cmake) so an arm64 host works whichever
         # tag the SDK picks.
-        add_custom_target(clpeak-gui ALL
-            DEPENDS clpeak_ffi
+        #
+        # The flutter call gets a target to itself, and that is load-bearing:
+        # FLUTTER_EXECUTABLE is flutter.BAT here, and both the VS and Ninja
+        # generators put every COMMAND of a custom target into ONE batch
+        # script.  cmd.exe transfers control permanently when a .bat invokes
+        # another .bat without `call`, so any command sequenced after flutter
+        # is silently skipped -- the build still goes green and the bundle is
+        # simply never staged (CI hit this as a CPack "cannot find
+        # build/clpeak-gui").  Nothing may follow flutter in its script.
+        add_custom_target(clpeak-gui-flutter
             COMMAND ${FLUTTER_EXECUTABLE} build windows --release
+            WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
+            COMMENT "clpeak-gui: flutter build windows"
+            VERBATIM)
+        add_dependencies(clpeak-gui-flutter clpeak_ffi)
+
+        add_custom_target(clpeak-gui ALL
             COMMAND ${CMAKE_COMMAND}
                     -DAPP_DIR=${CLPEAK_APP_DIR}
                     -DOUT_DIR=${CLPEAK_GUI_OUT}
@@ -140,8 +154,9 @@ if(NOT CLPEAK_FFI_STANDALONE)
                     -P "${CMAKE_CURRENT_LIST_DIR}/cmake/stage_windows_bundle.cmake"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak_ffi>" "${CLPEAK_GUI_OUT}/"
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
-            COMMENT "clpeak-gui: flutter build windows + bundle assembly"
+            COMMENT "clpeak-gui: bundle assembly"
             VERBATIM)
+        add_dependencies(clpeak-gui clpeak-gui-flutter)
     else()
         # Linux bundle layout: bundle/{clpeak-gui, data/, lib/*.so}; the Dart
         # resolver loads <exeDir>/lib/libclpeak_ffi.so.
@@ -201,6 +216,17 @@ here=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)
 exec \"$here/../gui/clpeak-gui\" \"$@\"
 ")
         endif()
+        # Say plainly when the bundle was never staged: file(INSTALL)'s own
+        # message for a missing source directory is "cannot find <dir>: File
+        # exists", which reads like a collision and sent a real CI failure
+        # down the wrong path.
+        install(CODE "
+            if(NOT IS_DIRECTORY \"${CLPEAK_GUI_OUT}\")
+                message(FATAL_ERROR
+                    \"clpeak-gui bundle missing at ${CLPEAK_GUI_OUT} -- \"
+                    \"build the clpeak-gui target before packaging.\")
+            endif()
+        ")
         install(DIRECTORY "${CLPEAK_GUI_OUT}/" DESTINATION "gui"
                 USE_SOURCE_PERMISSIONS)
         install(PROGRAMS "${_clpeak_gui_wrapper}"

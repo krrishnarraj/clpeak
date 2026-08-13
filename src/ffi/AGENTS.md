@@ -37,6 +37,19 @@ shared library / Apple framework.
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
 | `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |
+
+## Traps
+
+- **Windows: never sequence a command after `flutter` in one custom target.**
+  `FLUTTER_EXECUTABLE` is `flutter.bat`, and the VS/Ninja generators pack every
+  `COMMAND` of a target into a single batch script; cmd.exe transfers control
+  permanently when a `.bat` calls a `.bat` without `call`, so later commands are
+  skipped *with the build still green*. The flutter call therefore lives in its
+  own `clpeak-gui-flutter` target.
+- The backends are static libs that also link into `clpeak_ffi` (a `.so`), so
+  everything they contain must be PIC — including the vendored OpenCL ICD
+  loader (`src/opencl/cmake/BuildSdk.cmake` passes
+  `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` into that nested build).
 | `android/CMakeLists.txt` | Android superproject (OpenCL stub + NDK Vulkan + CPU) |
 | `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + optional MoltenVK Vulkan) |
 
