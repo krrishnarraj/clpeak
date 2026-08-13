@@ -226,8 +226,9 @@ class _RunTile extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 [
-                  // Keep the device list visible when a custom name hides it.
-                  if (summary.name.isNotEmpty) summary.devices.join(', '),
+                  // The title is a name or a timestamp id, so the devices
+                  // always belong here.
+                  if (summary.devices.isNotEmpty) summary.devices.join(', '),
                   formatDate(summary.startedAt),
                   if (summary.durationMs > 0)
                     formatDuration(Duration(milliseconds: summary.durationMs)),

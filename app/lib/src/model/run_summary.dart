@@ -25,8 +25,10 @@ class RunSummary {
   final String name;
 
   /// Title shown in lists/headers: the user's name when set, otherwise the
-  /// device list.
-  String get displayTitle => name.isNotEmpty ? name : devices.join(', ');
+  /// run's timestamp id (`20260813_130317`) — the device list is identical
+  /// across every run on one machine, so it can't tell two runs apart.
+  String get displayTitle =>
+      name.isNotEmpty ? name : (id.isNotEmpty ? id : devices.join(', '));
 
   RunSummary withName(String newName) => RunSummary(
         id: id,

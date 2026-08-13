@@ -74,7 +74,10 @@ class SavedResultsScreen extends StatelessWidget {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(summary.name.isNotEmpty ? summary.name : 'Results',
+            Text(
+                summary.displayTitle.isNotEmpty
+                    ? summary.displayTitle
+                    : 'Results',
                 overflow: TextOverflow.ellipsis),
             Text(
               formatDate(summary.startedAt),

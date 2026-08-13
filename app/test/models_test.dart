@@ -290,21 +290,22 @@ void main() {
           reason: '',
         ));
       final summary = RunSummary.fromDocument(
-        id: 'x',
-        fileName: 'x.xml',
+        id: '20260712_094501',
+        fileName: '20260712_094501.xml',
         doc: doc,
-        startedAt: DateTime(2026, 7, 12),
+        startedAt: DateTime(2026, 7, 12, 9, 45, 1),
         durationMs: 100,
         cancelled: false,
       );
-      expect(summary.displayTitle, 'M1');
+      // Unnamed runs are titled by their timestamp id, not by the device.
+      expect(summary.displayTitle, '20260712_094501');
       final named = summary.withName('after undervolt');
       expect(named.displayTitle, 'after undervolt');
       final roundTripped = RunSummary.fromJson(named.toJson());
       expect(roundTripped.name, 'after undervolt');
       expect(roundTripped.devices, ['M1']);
-      // Clearing the name falls back to the device title.
-      expect(named.withName('').displayTitle, 'M1');
+      // Clearing the name falls back to the timestamp id.
+      expect(named.withName('').displayTitle, '20260712_094501');
     });
   });
 
