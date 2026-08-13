@@ -42,6 +42,7 @@ ResultEntry logger::makeEntry(const std::string &metric, ResultStatus status,
     e.status   = status;
     e.value    = value;
     e.reason   = reason;
+    e.display  = curTestDisplay;
     return e;
 }
 

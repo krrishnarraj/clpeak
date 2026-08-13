@@ -52,6 +52,14 @@ struct ResultEntry {
     float        value  = 0.0f;
     std::string  reason;    // populated only when status != Ok
 
+    // Human-readable test name ("Single-precision compute (NEON)").  Metadata
+    // only, like `driver`, so it stays out of key().  Persisted because it
+    // cannot be recovered from `test`: CPU tags are built by slugging a
+    // runtime-detected ISA onto a base tag (compute_common.h), and the slug
+    // is lossy -- "NEON + SME2 (SVL=512b)" and "AMX/SME" both collapse to
+    // underscores with no way back.
+    std::string  display;
+
     std::string key() const
     {
         return backend + "/" + platform + "/" + device + "/" +

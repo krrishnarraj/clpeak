@@ -170,6 +170,9 @@ static void writeJson(const ResultStore &store, std::ostream &f,
           << "\"metric\":\""   << jsonEscape(e.metric)   << "\","
           << "\"unit\":\""     << jsonEscape(e.unit)     << "\"";
 
+        if (!e.display.empty())
+            f << ",\"display\":\"" << jsonEscape(e.display) << "\"";
+
         if (e.status == ResultStatus::Ok)
         {
             f << ",\"value\":" << fmtValue(e.value);
@@ -210,11 +213,12 @@ std::string resultsToJson(const ResultStore &store,
 
 // ---- CSV save -------------------------------------------------------------
 // Header:
-//   format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason
+//   format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display
 // `format_version` repeats per row to keep CSV self-describing without a
 // preamble (some tools strip the first row).  Ok rows leave `reason` empty
 // and populate `value`; non-Ok rows leave `value` empty and populate
-// `reason`.
+// `reason`.  `display` is appended last so files written before it existed
+// still parse on their 12 columns.
 
 bool saveCsv(const ResultStore &store, const std::string &filename)
 {
@@ -224,7 +228,7 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
         std::cerr << "clpeak: cannot open CSV output file: " << filename << "\n";
         return false;
     }
-    f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason\n";
+    f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display\n";
     for (const ResultEntry &e : store)
     {
         f << RESULT_FORMAT_VERSION   << ","
@@ -239,7 +243,8 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
           << csvField(statusString(e.status)) << ",";
         if (e.status == ResultStatus::Ok)
             f << fmtValue(e.value);
-        f << "," << csvField(e.reason) << "\n";
+        f << "," << csvField(e.reason)
+          << "," << csvField(e.display) << "\n";
     }
     return f.good();
 }
@@ -250,7 +255,8 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
 //     <run backend="..." platform="..." device="..." driver="...">
 //       <prop name="Compute units" value="16"/>
 //       <category name="fp_compute">
-//         <test name="single_precision_compute" unit="gflops">
+//         <test name="single_precision_compute"
+//               display="Single-precision compute" unit="gflops">
 //           <metric name="float">12500.5</metric>
 //           <metric name="double" status="unsupported" reason="..."/>
 //         </test>
@@ -370,8 +376,12 @@ bool saveXml(const ResultStore &store, const std::string &filename,
         if (!p.inTest || p.test != e.test || p.unit != e.unit)
         {
             closeTest(f, p);
-            f << "      <test name=\"" << xmlEscape(e.test) << "\""
-              << " unit=\"" << xmlEscape(e.unit) << "\">\n";
+            // display lives on <test>, so it is stored once per test rather
+            // than repeated on every <metric> under it.
+            f << "      <test name=\"" << xmlEscape(e.test) << "\"";
+            if (!e.display.empty())
+                f << " display=\"" << xmlEscape(e.display) << "\"";
+            f << " unit=\"" << xmlEscape(e.unit) << "\">\n";
             p.inTest = true;
             p.test   = e.test;
             p.unit   = e.unit;
@@ -575,6 +585,7 @@ ResultStore loadJson(const std::string &filename, DeviceInfoStore *devices)
         e.test     = jsonExtractStr(obj, "test");
         e.metric   = jsonExtractStr(obj, "metric");
         e.unit     = jsonExtractStr(obj, "unit");
+        e.display  = jsonExtractStr(obj, "display");
 
         if (jsonHasKey(obj, "status"))
         {
@@ -706,6 +717,8 @@ ResultStore loadCsv(const std::string &filename)
             catch (...) { continue; }
         }
         e.reason = fields[11];
+        if (fields.size() >= 13)
+            e.display = fields[12];
 
         if (!e.backend.empty() && !e.test.empty() && !e.metric.empty())
             store.push_back(e);
@@ -764,7 +777,7 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
         return store;
     }
 
-    std::string backend, platform, device, driver, category, test, unit;
+    std::string backend, platform, device, driver, category, test, unit, display;
     std::string line;
     bool versionChecked = false;
     DeviceInfo curDevice;   // accumulates <prop> for the open <run>
@@ -800,7 +813,7 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
             platform = xmlAttr(t, "platform");
             device   = xmlAttr(t, "device");
             driver   = xmlAttr(t, "driver");
-            category.clear(); test.clear(); unit.clear();
+            category.clear(); test.clear(); unit.clear(); display.clear();
 
             curDevice = DeviceInfo();
             curDevice.backend  = backend;
@@ -823,14 +836,15 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
         if (t.rfind("<category", 0) == 0)
         {
             category = xmlAttr(t, "name");
-            test.clear(); unit.clear();
+            test.clear(); unit.clear(); display.clear();
             continue;
         }
 
         if (t.rfind("<test", 0) == 0)
         {
-            test = xmlAttr(t, "name");
-            unit = xmlAttr(t, "unit");
+            test    = xmlAttr(t, "name");
+            unit    = xmlAttr(t, "unit");
+            display = xmlAttr(t, "display");
             continue;
         }
 
@@ -845,6 +859,7 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
             e.test     = test;
             e.metric   = xmlAttr(t, "name");
             e.unit     = unit;
+            e.display  = display;
 
             // Self-closing form is unsupported/error/skipped:
             //   <metric name="x" status="..." reason="..."/>

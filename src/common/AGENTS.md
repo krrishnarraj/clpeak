@@ -25,6 +25,7 @@ used by the Flutter GUI on every platform).
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (including gating) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration |
 | `result_store.cpp` | `ResultEntry`/`ResultStore` + `DeviceInfo` serialization: JSON, CSV, XML |
+| — | Test tags are *not* reversible to display names: `emitVariants` (`src/cpu/compute_common.h`) slugs a runtime ISA onto the base tag, so `ResultEntry::display` must be persisted, never re-derived |
 | `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook |
 | `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text + baseline deltas (desktop CLI) |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |

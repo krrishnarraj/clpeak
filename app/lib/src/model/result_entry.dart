@@ -72,8 +72,9 @@ class ResultEntry {
   final double value; // meaningful only when status == ok
   final String reason; // populated only when status != ok
 
-  /// Human-readable test name. Present on live-run entries (from the event
-  /// stream); empty for entries loaded from a saved file.
+  /// Human-readable test name — from the event stream on a live run, from the
+  /// file's `display` field on a saved one.  Empty only for files written
+  /// before it was persisted; `TestResult` falls back to the tag then.
   final String display;
 
   BenchCategory get benchCategory => BenchCategory.fromTag(category);
@@ -96,5 +97,6 @@ class ResultEntry {
             : ResultStatus.fromString(m['status'] as String? ?? 'error'),
         value: (m['value'] as num?)?.toDouble() ?? 0,
         reason: m['reason'] as String? ?? '',
+        display: m['display'] as String? ?? '',
       );
 }

@@ -248,6 +248,7 @@ void main() {
             'driver': '',
             'category': 'fp_compute',
             'test': 'single_precision_compute',
+            'display': 'Single-precision compute (NEON)',
             'metric': 'float ST',
             'unit': 'gflops',
             'value': 251.0,
@@ -270,6 +271,11 @@ void main() {
       final group = run.categories.single;
       expect(group.supported, hasLength(1));
       expect(group.unsupported, hasLength(1));
+      // Saved files carry the human-readable name; the tag is only a fallback
+      // (it cannot be un-slugged back into "… (NEON)").
+      expect(group.supported.single.display, 'Single-precision compute (NEON)');
+      // The row without one still renders as something.
+      expect(group.unsupported.single.display, 'amx');
     });
 
     test('attaches device props from a loaded document', () {
