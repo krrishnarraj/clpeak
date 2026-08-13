@@ -115,6 +115,26 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
     log->curDriver   = spec.driver_version;
     log->contextDepth = 2;
 
+    DeviceInfo info;
+    info.backend  = log->curBackend;
+    info.platform = log->curPlatform;
+    info.device   = log->curDevice;
+    info.driver   = log->curDriver;
+    info.props    = spec.props;
+
+    // Re-opening the same device (a backend that enumerates it twice) must not
+    // duplicate the row the dump formats key off.
+    bool known = false;
+    for (DeviceInfo &d : log->devices)
+    {
+        if (d.key() != info.key()) continue;
+        d.props = info.props;
+        known   = true;
+        break;
+    }
+    if (!known)
+        log->devices.push_back(info);
+
     LogEvent e = log->makeEvent(LogEvent::Kind::DeviceBegin);
     e.props            = spec.props;
     e.platformIndex    = spec.platform_index;

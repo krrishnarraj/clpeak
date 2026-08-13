@@ -154,10 +154,11 @@ char *clpeak_load_result_file_json(const char *path)
 {
     if (!path)
         return nullptr;
-    ResultStore store = loadResultFile(path);
+    DeviceInfoStore devices;
+    ResultStore store = loadResultFile(path, &devices);
     if (store.empty())
         return nullptr;
-    return copyString(resultsToJson(store));
+    return copyString(resultsToJson(store, devices));
 }
 
 int clpeak_launch(int argc, const char **argv,
@@ -186,7 +187,8 @@ int clpeak_launch(int argc, const char **argv,
 
     clpeak::setVerbose(opts.verbose);
 
-    ResultStore combined;
+    ResultStore     combined;
+    DeviceInfoStore combinedDevices;
     int status = 0;
 
     for (const auto &be : buildBackends())
@@ -200,15 +202,18 @@ int clpeak_launch(int argc, const char **argv,
         status |= peak->runAll();
         combined.insert(combined.end(),
                         peak->log->results.begin(), peak->log->results.end());
+        combinedDevices.insert(combinedDevices.end(),
+                               peak->log->devices.begin(),
+                               peak->log->devices.end());
     }
 
     // Centralized file dump, exactly like the CLI — also runs after a
     // cancellation so partial results get persisted.
-    if (opts.enableJson && !saveJson(combined, opts.jsonFile))
+    if (opts.enableJson && !saveJson(combined, opts.jsonFile, combinedDevices))
         status |= 1;
     if (opts.enableCsv && !saveCsv(combined, opts.csvFile))
         status |= 1;
-    if (opts.enableXml && !saveXml(combined, opts.xmlFile))
+    if (opts.enableXml && !saveXml(combined, opts.xmlFile, combinedDevices))
         status |= 1;
 
     bool cancelled = clpeak::cancelRequested();

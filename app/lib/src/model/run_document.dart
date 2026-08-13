@@ -94,7 +94,8 @@ class DeviceRun {
   final String device;
   final String driver;
 
-  /// Device props from the live event stream (empty for loaded files).
+  /// Device props — from the live event stream during a run, and from the
+  /// file's `devices` block when a saved run is reopened.
   List<({String key, String value})> props = [];
 
   final List<CategoryGroup> categories = [];
@@ -158,6 +159,29 @@ class RunDocument {
     final out = RunDocument();
     for (final e in (doc['entries'] as List? ?? const [])) {
       out.addEntry(ResultEntry.fromJson(e as Map<String, dynamic>));
+    }
+    // Applied after the entries so run order follows the measurements, and so
+    // a device block with no rows doesn't create an empty run.  Absent for
+    // CSV and for files saved before device metadata was persisted.
+    for (final d in (doc['devices'] as List? ?? const [])) {
+      final m = d as Map<String, dynamic>;
+      final key = [
+        m['backend'] ?? '',
+        m['platform'] ?? '',
+        m['device'] ?? '',
+        m['driver'] ?? '',
+      ].join('|');
+      for (final run in out.runs) {
+        if (run.key != key) continue;
+        run.props = [
+          for (final p in (m['props'] as List? ?? const []))
+            (
+              key: (p as Map<String, dynamic>)['k'] as String? ?? '',
+              value: p['v'] as String? ?? '',
+            ),
+        ];
+        break;
+      }
     }
     return out;
   }

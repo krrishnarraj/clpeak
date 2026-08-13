@@ -62,6 +62,34 @@ struct ResultEntry {
 typedef std::vector<ResultEntry>      ResultStore;
 typedef std::map<std::string, float>  BaselineMap;
 
+// ---- Device metadata ------------------------------------------------------
+// Free-form per-device facts (compute units, VRAM, clocks, driver internals)
+// captured once when a device is opened.  Deliberately not fields of
+// ResultEntry: they describe the device, not a measurement, and repeating
+// them on every row would bloat all three dump formats.
+
+struct DeviceProp {
+    std::string key;
+    std::string value;
+};
+
+struct DeviceInfo {
+    std::string backend;
+    std::string platform;
+    std::string device;
+    std::string driver;
+    std::vector<DeviceProp> props;
+
+    // Matches the (backend, platform, device, driver) tuple that groups
+    // ResultEntry rows into one <run>.
+    std::string key() const
+    {
+        return backend + "/" + platform + "/" + device + "/" + driver;
+    }
+};
+
+typedef std::vector<DeviceInfo> DeviceInfoStore;
+
 // Build a fast lookup map from a ResultStore.  Only Ok rows participate in
 // baselines; skipped/unsupported/error rows are filtered out.
 BaselineMap buildBaselineMap(const ResultStore &store);
@@ -71,20 +99,34 @@ BaselineMap buildBaselineMap(const ResultStore &store);
 // pass at program exit so all three formats agree on row count + ordering.
 // Returns false (after a stderr message) when the file cannot be opened or
 // the stream fails while writing.
-bool saveJson(const ResultStore &store, const std::string &filename);
+//
+// `devices` is optional metadata, matched to rows by DeviceInfo::key().  JSON
+// and XML round-trip it; CSV does not — it is a flat one-row-per-measurement
+// table with no place to hang per-device facts.  Adding it needed no
+// format_version bump: both loaders ignore elements/keys they don't know, so
+// new files still load in older builds (without the extra detail) and files
+// written before this existed still load here.
+bool saveJson(const ResultStore &store, const std::string &filename,
+              const DeviceInfoStore &devices = {});
 bool saveCsv (const ResultStore &store, const std::string &filename);
-bool saveXml (const ResultStore &store, const std::string &filename);
+bool saveXml (const ResultStore &store, const std::string &filename,
+              const DeviceInfoStore &devices = {});
 
 // In-memory variant of saveJson — same document, returned as a string.
 // Used by clpeak_ffi to hand loaded result files to the GUI.
-std::string resultsToJson(const ResultStore &store);
+std::string resultsToJson(const ResultStore &store,
+                          const DeviceInfoStore &devices = {});
 
 // Parse a previously-written file.  Rejects v1 (or unversioned) files with
 // a stderr message and returns an empty store.  loadResultFile dispatches
-// on extension (.csv/.xml/anything else -> JSON).
-ResultStore loadJson(const std::string &filename);
+// on extension (.csv/.xml/anything else -> JSON).  Pass `devices` to also
+// recover the per-device metadata (left untouched by the CSV loader).
+ResultStore loadJson(const std::string &filename,
+                     DeviceInfoStore *devices = nullptr);
 ResultStore loadCsv (const std::string &filename);
-ResultStore loadXml (const std::string &filename);
-ResultStore loadResultFile(const std::string &filename);
+ResultStore loadXml (const std::string &filename,
+                     DeviceInfoStore *devices = nullptr);
+ResultStore loadResultFile(const std::string &filename,
+                           DeviceInfoStore *devices = nullptr);
 
 #endif // RESULT_STORE_H

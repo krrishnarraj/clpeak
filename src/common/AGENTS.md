@@ -24,7 +24,7 @@ used by the Flutter GUI on every platform).
 |------|---------|
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (including gating) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration |
-| `result_store.cpp` | `ResultEntry`/`ResultStore` serialization: JSON, CSV, XML |
+| `result_store.cpp` | `ResultEntry`/`ResultStore` + `DeviceInfo` serialization: JSON, CSV, XML |
 | `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook |
 | `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text + baseline deltas (desktop CLI) |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
@@ -57,6 +57,10 @@ intent-revealing form and avoids the note.
 
 - If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.
 - If you add a utility function → update this file's Key Files table.
-- If you change the result format → update `include/common/result_store.h` and bump `RESULT_FORMAT_VERSION`.
+- If you change the result format → update `include/common/result_store.h`, and
+  bump `RESULT_FORMAT_VERSION` only for a *breaking* change. Both loaders skip
+  elements/keys they don't recognise, so purely additive fields (device `<prop>`
+  was one) round-trip without a bump — and a bump would make every file a user
+  has already saved unreadable, including the GUI's whole run history.
 - If you change `LogEvent` or the event kinds → update `src/ffi/logger_ffi.cpp` (JSON mirror) and the Dart decoder `app/lib/src/ffi/clpeak_events.dart`.
 - If you add/remove a file → update `src/common/CMakeLists.txt` and this file.

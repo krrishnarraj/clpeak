@@ -31,10 +31,9 @@
 // rows — backends never touch TAB / NEWLINE or call print() for structured
 // data.
 
-struct LogProp {
-  std::string key;
-  std::string value;
-};
+// Same shape the dump formats persist (result_store.h), so device metadata
+// reaches the file without a conversion step.
+using LogProp = DeviceProp;
 
 struct LogEvent {
   enum class Kind {
@@ -132,6 +131,12 @@ public:
   // ── Accumulated metrics ─────────────────────────────────────────────────
 
   ResultStore results;
+
+  // Per-device metadata, in device-open order.  Kept alongside `results` so
+  // the dump formats can persist it: it is the same information the GUI shows
+  // live from DeviceBegin, and without it a reloaded file has no device
+  // detail at all.
+  DeviceInfoStore devices;
 
   explicit logger(std::string compareFileName = "");
   virtual ~logger() = default;

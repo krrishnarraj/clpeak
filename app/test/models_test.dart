@@ -271,6 +271,71 @@ void main() {
       expect(group.supported, hasLength(1));
       expect(group.unsupported, hasLength(1));
     });
+
+    test('attaches device props from a loaded document', () {
+      Map<String, dynamic> entry(String device) => {
+            'backend': 'CPU',
+            'platform': 'CPU',
+            'device': device,
+            'driver': '',
+            'category': 'fp_compute',
+            'test': 't',
+            'metric': 'm',
+            'unit': 'gflops',
+            'value': 1.0,
+          };
+      final doc = RunDocument.fromEntriesJson({
+        'format_version': 2,
+        'devices': [
+          {
+            'backend': 'CPU',
+            'platform': 'CPU',
+            'device': 'X',
+            'driver': '',
+            'props': [
+              {'k': 'Cores', 'v': '10'},
+              {'k': 'RAM', 'v': '32.0 GB'},
+            ],
+          },
+          // No matching run: must not invent an empty one.
+          {
+            'backend': 'CUDA',
+            'platform': 'CUDA',
+            'device': 'Absent',
+            'driver': '',
+            'props': [
+              {'k': 'SMs', 'v': '84'},
+            ],
+          },
+        ],
+        'entries': [entry('X'), entry('Y')],
+      });
+      expect(doc.runs, hasLength(2));
+      expect(doc.runs.first.props.map((p) => p.key), ['Cores', 'RAM']);
+      expect(doc.runs.first.props.last.value, '32.0 GB');
+      // Runs the devices block doesn't mention keep empty props.
+      expect(doc.runs.last.props, isEmpty);
+    });
+
+    test('a document without a devices block still loads', () {
+      final doc = RunDocument.fromEntriesJson({
+        'format_version': 2,
+        'entries': [
+          {
+            'backend': 'CPU',
+            'platform': 'CPU',
+            'device': 'X',
+            'driver': '',
+            'category': 'fp_compute',
+            'test': 't',
+            'metric': 'm',
+            'unit': 'gflops',
+            'value': 1.0,
+          },
+        ],
+      });
+      expect(doc.runs.single.props, isEmpty);
+    });
   });
 
   group('RunSummary', () {

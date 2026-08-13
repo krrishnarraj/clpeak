@@ -89,7 +89,12 @@ CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
 
 // Load a previously-saved result file (XML / JSON / CSV, format_version 2)
 // and return it re-serialized as the saveJson document:
-//   {"format_version":2,"clpeak_version":...,"os":...,"entries":[...]}
+//   {"format_version":2,"clpeak_version":...,"os":...,
+//    "devices":[{backend, platform, device, driver, props:[{k,v}...]}],
+//    "entries":[...]}
+// "devices" carries the same per-device detail as the live `device` event, so
+// a reloaded run shows what a live one does.  It is absent for CSV (which
+// cannot store it) and for files written before it existed.
 // Returns NULL when the file is unreadable, rejected, or empty.
 CLPEAK_FFI_EXPORT char *clpeak_load_result_file_json(const char *path);
 

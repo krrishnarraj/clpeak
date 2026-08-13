@@ -49,7 +49,6 @@ class LiveRunScreen extends StatelessWidget {
             Expanded(
               child: ResultsBody(
                 document: service.document,
-                compact: true,
                 header: _StatusPanel(
                     service: service, cancelling: cancelling),
               ),

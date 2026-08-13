@@ -14,14 +14,10 @@ class ResultsBody extends StatefulWidget {
   const ResultsBody({
     super.key,
     required this.document,
-    this.compact = false,
     this.header,
   });
 
   final RunDocument document;
-
-  /// Compact mode (live run): collapsed props.
-  final bool compact;
 
   /// Optional slivers-above widget (e.g. the live-run banner).
   final Widget? header;
@@ -70,7 +66,7 @@ class _ResultsBodyState extends State<ResultsBody> {
           ),
           padBottom: 16,
         ),
-      _WidgetRow(_DeviceHeader(run: selected, compact: widget.compact)),
+      _WidgetRow(_DeviceHeader(run: selected)),
       for (final group in selected.categories)
         if (group.supported.isNotEmpty) ...[
           _SectionRow(group, brightness),
@@ -197,11 +193,13 @@ class _RunSelector extends StatelessWidget {
   }
 }
 
+/// Device identity and its properties.  Props are shown from the moment the
+/// device opens — they arrive with the very first event of a device's run, so
+/// there is nothing to wait for — and are static thereafter.
 class _DeviceHeader extends StatelessWidget {
-  const _DeviceHeader({required this.run, required this.compact});
+  const _DeviceHeader({required this.run});
 
   final DeviceRun run;
-  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +229,7 @@ class _DeviceHeader extends StatelessWidget {
                         overflow: TextOverflow.ellipsis),
                   ),
           ),
-          if (!compact && run.props.isNotEmpty)
+          if (run.props.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
               child: Wrap(

@@ -40,7 +40,9 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - History persistence? → `lib/src/services/run_history_store.dart`
   (`<documents>/clpeak/runs/<id>.xml` written natively via `--xml-file`,
-  `index.json` sidecar; viewing goes XML → native loader → JSON)
+  `index.json` sidecar; viewing goes XML → native loader → JSON).  Device
+  properties reach a reopened run through the file's `devices` block, not the
+  event stream — see `RunDocument.fromEntriesJson`.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
