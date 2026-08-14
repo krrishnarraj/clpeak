@@ -22,7 +22,6 @@ ROCm headers. Built as `peak_rocm` static library.
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
 - Looking for hipBLASLt FP8 GEMM benchmarks? → `hipblaslt_gemm.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .hip kernel sources? → `rocm_kernels/*.hip`
 - Looking for AOT compile + embedding logic? → `cmake/EmbedRocmKernels.cmake` (+ `cmake/EmbedBin.cmake`)
@@ -46,7 +45,6 @@ ROCm headers. Built as `peak_rocm` static library.
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` via HIP texture object |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `rocm_kernels/` | HIP kernel sources (`.hip`), AOT-compiled to code objects and embedded as byte arrays |
 | `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed |

@@ -39,17 +39,13 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   core needs no app changes)
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - "What does this test measure?" → an info glyph beside the name, at both
-  levels: on a test's title for what the test measures, and on each reading's
-  label inside the expanded breakdown for what that reading means.  Both are
-  `_InfoGlyph` → `_showInfoDialog()` in `lib/src/ui/results/results_body.dart`,
-  one explanation per dialog — nothing is pooled into a combined panel, matching
-  how the strings are authored (`include/common/AGENTS.md`).  Text comes off the
-  result rows (`ResultEntry.description` / `.metricDescription`), *not* off the
-  `test_begin` event, which would mean creating a `TestResult` before its first
-  measurement — `CategoryGroup` reads that as fully-skipped and files it under
-  "not supported".  A test reserves the breakdown's glyph column for all its
-  rows when any one of them is documented (`TestResult.hasMetricNotes`), so the
-  meters stay in one column; undocumented names show no glyph at all.
+  levels (test title and each reading's label in the expanded breakdown), one
+  explanation per dialog: `_InfoGlyph` → `_showInfoDialog()` in
+  `lib/src/ui/results/results_body.dart`.  Text comes off the result rows
+  (`ResultEntry.description` / `.metricDescription`), **not** off the
+  `test_begin` event — that would create a `TestResult` before its first
+  measurement, which `CategoryGroup` reads as fully-skipped and files under
+  "not supported".
 - History persistence? → `lib/src/services/run_history_store.dart`
   (`<documents>/clpeak/runs/<id>.xml` written natively via `--xml-file`,
   `index.json` sidecar; viewing goes XML → native loader → JSON).  Device
@@ -82,16 +78,13 @@ Build screens from `ui/common/kit.dart` (`CPanel`, `CSection`, `CRow`,
 - **The live-run screen must not animate, and must not rebuild per event.**
   The GUI process holds a graphics context on the same GPU it benchmarks
   (`C+G` in nvidia-smi), so every presented frame is GPU work competing with
-  the running kernel. An indeterminate `LinearProgressIndicator`/
-  `CircularProgressIndicator` pins the app at 60 fps for the whole run and
-  costs 10-15% of the GPU score on a CUDA/Linux desktop — measured against
-  the same `libclpeak_ffi.so` driven from a plain non-Flutter host, which
-  reproduces CLI numbers exactly. Hence: static indicators only,
-  `BenchmarkService` coalesces run events onto a 250 ms tick instead of
-  notifying per event, the elapsed clock is its own 1 Hz leaf widget, and
-  `ResultsBody` builds rows lazily (a non-lazy `Column` per category laid out
-  every off-screen test card on each frame). Cutting frame rate, not CPU
-  work, is what recovers the score.
+  the running kernel — an indeterminate progress indicator pins the app at
+  60 fps for the whole run and costs **10-15% of the GPU score**. Hence:
+  static indicators only, `BenchmarkService` coalesces events onto a slow
+  tick, the elapsed clock is its own 1 Hz leaf widget, and `ResultsBody`
+  builds rows lazily. Cutting frame rate, not CPU work, is what recovers the
+  score. Rationale is at each site (`live_run_screen.dart`,
+  `benchmark_service.dart`).
 
 ## Hand-edited generated files
 

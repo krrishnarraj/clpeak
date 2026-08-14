@@ -23,37 +23,27 @@ used by the Flutter GUI on every platform).
 | File | Purpose |
 |------|---------|
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (including gating) |
-| `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration |
-| `result_store.cpp` | `ResultEntry`/`ResultStore` + `DeviceInfo` serialization: JSON, CSV, XML |
-| — | Test tags are *not* reversible to display names: `emitVariants` (`src/cpu/compute_common.h`) slugs a runtime ISA onto the base tag, so `ResultEntry::display` must be persisted, never re-derived |
-| `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook |
-| — | Documentation (`TestSpec::description`, `EmitOptions::description`) is whitespace-collapsed to one line here and stamped onto the rows, since all three dump formats are line-oriented — see `include/common/AGENTS.md` |
+| `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
+| `result_store.cpp` | `ResultEntry`/`ResultStore` + `DeviceInfo` serialization: JSON, CSV, XML. Test tags are **not** reversible to display names (`emitVariants` slugs a runtime ISA onto the base tag), so `ResultEntry::display` must be persisted, never re-derived |
+| `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook. Also whitespace-collapses the documentation strings to one line, since all three dump formats are line-oriented |
 | `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text + baseline deltas, and under `--describe` the wrapped test/reading documentation (desktop CLI) |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`) |
-| `common.cpp` (also) | `clpeak::requestCancel()/cancelRequested()` — cooperative run cancellation observed in `Peak::isAllowed()` + backend device loops |
+| `dynlib.cpp` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS) so the shipped binary needs only the driver |
 
 ## Scope invariant: one open test at a time
 
 A `TestScope` must be closed before a sibling one opens. `LoggerText` buffers a
 test's metric rows until `TestEnd` (it needs them all to align the column), so
-an overlapping `beginTest` used to *discard* the pending rows — silently, since
-the `ResultStore` kept them and only the text output lost rows (JSON/CSV looked
-complete). Two guards now make that impossible:
+an overlapping `beginTest` silently drops the pending rows from the text output
+while `ResultStore` keeps them — JSON/CSV look complete, the table doesn't.
 
-- `DeviceScope::beginTest()` detects an already-open test, calls
-  `logger::closeOpenTest()` so the previous test ends cleanly, and emits a
-  `Note` naming both tags. The pre-existing `assert` still fails fast in debug
-  builds; the note + implicit close are what keep release builds correct.
-- `TestScope::end()` only emits `TestEnd` when it is still the open scope
-  (matched by `curTestSeq`), so the implicitly-closed scope's destructor cannot
-  emit a second `TestEnd` — every `TestBegin` has exactly one `TestEnd` in the
-  stream, which the FFI/GUI channel depends on.
-- `LoggerText::renderTestBegin()` flushes rather than clears, as defence in
-  depth: no measured row can be dropped even if the scope layer is bypassed.
-
-Prefer still calling `end()` explicitly (see `runCacheBandwidth`) — it is the
-intent-revealing form and avoids the note.
+Three guards make that impossible now: `beginTest()` implicitly closes an open
+test and emits a `Note` naming both tags; `TestScope::end()` only emits
+`TestEnd` while it is still the open scope, so every `TestBegin` has exactly one
+`TestEnd` (which the FFI/GUI channel depends on); and `renderTestBegin()`
+flushes rather than clears. Still prefer calling `end()` explicitly (see
+`runCacheBandwidth`) — it is the intent-revealing form and avoids the note.
 
 ## When You Change This Directory
 

@@ -18,7 +18,6 @@ Built as `peak_cuda` static library.
 - Looking for WMMA/MMA benchmarks? → `wmma.cpp`
 - Looking for cuBLAS benchmarks? → `cuda_blas.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .cu kernel sources? → `cuda_kernels/*.cu`
 - Looking for AOT compile + embedding logic? → `cmake/EmbedCudaKernels.cmake` (+ `cmake/EmbedBin.cmake`)
@@ -38,7 +37,6 @@ Built as `peak_cuda` static library.
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `cuda_kernels/` | CUDA kernel sources (`.cu`), AOT-compiled to fatbins and embedded as byte arrays |
 | `cmake/EmbedCudaKernels.cmake` | `embed_cuda_kernels()` — nvcc `-fatbin` per arch group + byte embed |

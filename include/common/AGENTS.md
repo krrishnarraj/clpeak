@@ -84,6 +84,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, single `onEvent()` hook, accumulated `results` |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` |
+| `dynlib.h` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver |
 
 ## When You Change This Directory
 

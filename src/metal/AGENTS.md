@@ -30,10 +30,10 @@ static library.  Source files are Objective-C++ (`.mm`).
 | `mtl_internal.h` | Internal header: ObjC imports, pimpl definitions, helper declarations — included by all `.mm` files |
 | `compute_float.mm` | `runComputeSP`, `runComputeHP`, `runComputeMP` |
 | `simdgroup.mm` | `runSimdgroupMatrix` |
-| `mtl_blas.mm` | `runMpsGemm` — MPS/MPSGraph matrix multiply; `runMpsAttention` — MPSGraph scaled-dot-product-attention peak (`Benchmark::MpsAttention`, `--mps-attention`, fp16, llama-shaped H16/S4096/D128, needs macOS 15 / iOS 18; FLOPs = the two matmuls only, so it reads below raw GEMM peak — M1 Pro ~2.9 TFLOPS vs 3.96 MPS GEMM fp16). int8 GEMM stays impossible on Metal: even MPSCNN's UInt8-weight convolutions dequantize to float before compute (storage quantization only, per MPSCNNConvolution.h) |
+| `mtl_blas.mm` | `runMpsGemm` — MPS/MPSGraph matrix multiply; `runMpsAttention` — MPSGraph scaled-dot-product-attention peak (`--mps-attention`, fp16, fixed llama-class shape, needs macOS 15 / iOS 18). Its FLOPs count the two matmuls only, so it reads below raw GEMM peak by design. **int8 GEMM is impossible on Metal** — MPSGraph matmul is float-only and MPSCNN's UInt8 weights are storage quantization, dequantized before compute |
 | `global_bandwidth.mm` | `runGlobalBandwidth` |
 | `local_bandwidth.mm` | `runLocalBandwidth` |
-| `image_bandwidth.mm` | `runImageBandwidth`; `runTextureSampleRate` (`Benchmark::TextureSample`, `--texture-sample`, unit `gtexels` with Category::Bandwidth passed explicitly) — bilinear filtered-fetch rate from a cache-resident 1024x1024 texture, rgba8 + rgba16f rows.  TMU test, not bandwidth: coords are forced-fractional so every sample is a real 4-texel blend, and the per-sample address math MUST stay mask/shift (power-of-two dims) — an integer %/÷ throttles below TMU rate (31 → 113 GTexels/s on M1 Pro when fixed), and each iteration takes 4 samples off one computed coord to amortize even the mask/shift form (that lifted rgba16f 81 → 92; rgba8 was already at its ceiling).  M1 Pro reference: rgba8 ~115, rgba16f ~92 GTexels/s, dead steady (±0.05% run to run).  Sanity: 115 G bilinear samples/s x 4 texels x 4 B ≈ 1.8 TB/s of texel fetch — far above the 180 GB/s DRAM, so it is genuinely measuring cached filtering, and far below the ALU rate, so it is not an ALU test |
+| `image_bandwidth.mm` | `runImageBandwidth`; `runTextureSampleRate` (`--texture-sample`, unit `gtexels` with `Category::Bandwidth` passed explicitly) — bilinear filtered-fetch rate from a cache-resident texture, rgba8 + rgba16f. A TMU test, not a bandwidth one; the addressing constraints that keep it at TMU rate are in `mtl_kernels/texture_sample.metal`. M1 Pro reference: rgba8 ~115, rgba16f ~92 GTexels/s |
 | `kernel_latency.mm` | `runKernelLatency` |
 | `mtl_kernels/` | Metal Shading Language kernels (`.metal`) embedded as C++ string literals |
 | `cmake/EmbedMetalKernels.cmake` | `embed_metal_kernels()` — .metal → C++ raw-string arrays |
@@ -59,7 +59,8 @@ with only forward declarations — it can be included from non-ObjC TUs.
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
-- If you add a new `.metal` kernel → add to `CLPEAK_MTL_KERNELS` in `CMakeLists.txt`.
+- If you add a new `.metal` kernel → add to `CLPEAK_MTL_KERNELS` in `CMakeLists.txt`
+  and declare its externs in the `mtl_kernels` namespace (`include/metal/mtl_peak.h`).
 - If you change `MetalPeak` interface → update `include/metal/mtl_peak.h`.
 - If you add a new helper → declare in `mtl_internal.h`, define in the appropriate `.mm` file (`mtl_device.mm`, `mtl_utils.mm`, `compute_kernel.mm`, or a new file).
 - If you add Objective-C code → remember ARC is enabled (`-fobjc-arc`).

@@ -21,6 +21,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `cl_kernels.cpp` | Kernel source strings (stringified .cl includes) + accessor functions |
 | `compute_test.cpp` | `runComputeTest()` — shared compute-peak driver for float/int/char/short/etc. |
 | `cl_common.cpp` | `device_info_t` struct, device capability queries |
+| `cl_utils.cpp` | OpenCL-only helpers (`roundToMultipleOf`, `trimString`) — `include/opencl/cl_utils.h` |
 | `global_bandwidth.cpp` | `runGlobalBandwidthTest()` — global memory bandwidth |
 | `local_bandwidth.cpp` | `runLocalBandwidthTest()` — local memory bandwidth |
 | `image_bandwidth.cpp` | `runImageBandwidthTest()` — image object bandwidth |

@@ -16,7 +16,6 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 - Looking for int compute benchmarks? → `compute_int.cpp`
 - Looking for cooperative matrix benchmarks? → `coopmat.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-
 - Looking for kernel latency? → `kernel_latency.cpp`
 
 ## Key Files
@@ -33,7 +32,6 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
@@ -56,7 +54,8 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.
-- If you add a new `.comp` shader → add to `CLPEAK_VK_SHADERS` in `CMakeLists.txt`.
+- If you add a new `.comp` shader → add to `CLPEAK_VK_SHADERS` in `CMakeLists.txt`
+  and declare its extern in the `vk_shaders` namespace (`include/vulkan/vk_peak.h`).
 - If you change `vkPeak` interface → update `include/vulkan/vk_peak.h`.
 - If you change `VulkanDevice` → update `vulkan_device.cpp` + `include/vulkan/vk_peak.h`.
 - If you change `CompileShaders.cmake` → test that `glslc` is found or gracefully skipped.

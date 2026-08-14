@@ -306,13 +306,15 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   __m512i x0 = _mm512_setzero_si512(), x1 = x0, x2 = x0, x3 = x0;
   __m512i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
   uint64_t tail = 0;
-  // Block count and remainder are computed ONCE: writing the hot loop as
-  // `for (; i + step <= M; i += step)` with the tail sharing `i` makes clang
-  // emit several induction variables plus a multi-versioned tail check per
-  // pass, and fuse the loads into `ldp q` -- which is SLOWER than separate
-  // `ldr q` on Firestorm.  Measured on M1 Pro: 112 -> 154 GB/s (34.7 -> 47.6
-  // B/cycle, i.e. 99% of the 3x16B load-port ceiling) from this restructuring
-  // alone.  Keep the single pointer induction variable `q`.
+  // Block count and remainder are computed ONCE, and the hot loop walks a
+  // single pointer `q`.  Writing it as `for (; i + step <= M; i += step)` with
+  // the tail sharing `i` makes clang emit several induction variables plus a
+  // multi-versioned tail check per pass, and that loop shape alone cost 112 vs
+  // 154 GB/s on M1 Pro (34.7 vs 47.6 B/cycle, i.e. 99% of the 3x16B load-port
+  // ceiling).  The instruction mix is not the issue: the fast kernel still
+  // emits `ldp q`.  Keep this form in every bandwidth kernel reached through a
+  // function pointer -- with a *runtime* size the compiler cannot drop the
+  // tail, which is why a fixed-size microbenchmark never reproduces it.
   const size_t nblk = M / step, rem = M - nblk * step;
   for (uint64_t it = 0; it < iters; it++)
   {
