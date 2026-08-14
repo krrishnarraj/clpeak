@@ -63,10 +63,16 @@ gets one helper per backend (`mtlWidthNote()` / `vkWidthNote()` /
 things in different backends, which is exactly what Vulkan's `int8_dp2` (a
 second *chain*, not a wider vector) demonstrates.
 
-**`src/cuda/` is documented but codegen-verified only** — no NVIDIA hardware
-was available, so its `--describe` output has never been rendered; the strings
-were checked by compiling every file against stub `cuda.h`/`cublasLt.h` headers
-(see `src/cuda/AGENTS.md`).  ROCm and oneAPI are still undocumented.
+**`src/cuda/` and `src/rocm/` are documented but codegen-verified only** — no
+NVIDIA or AMD hardware was available, so their `--describe` output has never
+been rendered; the strings were checked by compiling every file against stub
+vendor headers (see those directories' `AGENTS.md` for the technique, which
+also covers the optional-library `#ifdef` branches).  oneAPI is still
+undocumented.
+
+A backend whose tests come off a table (ROCm's `WmmaEntry`/`MfmaEntry`) puts
+the description on the table row, beside the name it explains — the same rule
+as `src/cpu/latency.cpp`'s `Level` struct, one level up.
 
 Where a test reports a value by a non-obvious convention, the description is
 the place to say so — `transfer_bandwidth`'s zero-copy rows read `0.00` on

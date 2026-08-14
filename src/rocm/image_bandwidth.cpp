@@ -6,7 +6,17 @@
 int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
+    {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU reads through its texture units, "
+     "which take a different path to memory than plain buffer reads.  Each "
+     "pixel of the image is read exactly once, so caching cannot flatter the "
+     "number."});
+
+  // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
+  // hence the metric name.
+  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
+                          "colour values, 16 bytes.";
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
@@ -24,7 +34,7 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     // device capability gap, not a benchmark error. (The OpenCL backend
     // reports the same device as "Device has no image support".)
     test.skip("float4", ResultStatus::Unsupported,
-              "Device has no image/texture support");
+               "Device has no image/texture support", fetchNote);
     return 0;
   }
 
@@ -40,7 +50,8 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     if (copyStatus != hipSuccess)
     {
       (void)hipFreeArray(arr);
-      test.skip("float4", ResultStatus::Error, "Image upload failed");
+      test.skip("float4", ResultStatus::Error,
+               "Image upload failed", fetchNote);
       return -1;
     }
   }
@@ -60,7 +71,8 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   if (hipCreateTextureObject(&tex, &rd, &td, nullptr) != hipSuccess)
   {
     (void)hipFreeArray(arr);
-    test.skip("float4", ResultStatus::Error, "Texture object create failed");
+    test.skip("float4", ResultStatus::Error,
+               "Texture object create failed", fetchNote);
     return -1;
   }
 
@@ -69,7 +81,8 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   {
     (void)hipDestroyTextureObject(tex);
     (void)hipFreeArray(arr);
-    test.skip("float4", ResultStatus::Error, "Output buffer alloc failed");
+    test.skip("float4", ResultStatus::Error,
+               "Output buffer alloc failed", fetchNote);
     return -1;
   }
 
@@ -80,7 +93,8 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     (void)hipFree(outBuf);
     (void)hipDestroyTextureObject(tex);
     (void)hipFreeArray(arr);
-    test.skip("float4", ResultStatus::Error, "Kernel compile failed");
+    test.skip("float4", ResultStatus::Error,
+               "Kernel compile failed", fetchNote);
     return -1;
   }
 
@@ -90,12 +104,13 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (us <= 0.0f)
   {
-    test.skip("float4", ResultStatus::Error, "kernel launch failed");
+    test.skip("float4", ResultStatus::Error,
+               "kernel launch failed", fetchNote);
   }
   else
   {
     uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    test.emit("float4", (float)bytes / us / 1e3f);
+    test.emit("float4", (float)bytes / us / 1e3f, fetchNote);
   }
 
   (void)hipFree(outBuf);

@@ -123,21 +123,43 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
 {
   const bool fpPhase = (category != Category::IntCompute);
 
+  // One note per dtype row, shared by every emit and skip path below.
+  const char *fp32Note = "Full 32-bit precision, on the ordinary shader cores "
+                         "rather than the matrix cores.";
+  const char *fp64Note = "Full 64-bit precision, for scientific computing.  "
+                         "Gaming cards run this far slower than the compute cards.";
+  const char *fp16Note = "16-bit inputs with 32-bit totals -- the everyday "
+                         "precision of AI inference, and usually the fastest row "
+                         "here.";
+  const char *bf16Note = "bfloat16 inputs with 32-bit totals -- 16 bits arranged "
+                         "for AI work, trading digits of accuracy for the number "
+                         "range of a full float.";
+  const char *int8Note = "8-bit whole numbers with 32-bit totals -- the format "
+                         "quantized neural networks use.";
+
   auto test = fpPhase
-    ? currentDeviceScope->beginTest({"rocblas-fp", "rocBLAS GEMM peak", "tflops"})
-    : currentDeviceScope->beginTest({"rocblas-int", "rocBLAS GEMM peak", "tops"});
+    ? currentDeviceScope->beginTest(
+        {"rocblas-fp", "rocBLAS GEMM peak", "tflops", Category::Unknown,
+         "Matrix-multiply speed through AMD's own tuned library, on a large "
+         "square problem.  Where the matrix-core rows show what the hardware "
+         "can do in principle, this shows what shipping code reaches on the "
+         "operation most AI work is built from."})
+    : currentDeviceScope->beginTest(
+        {"rocblas-int", "rocBLAS GEMM peak", "tops", Category::Unknown,
+         "The same tuned-library matrix multiply on whole-number formats, "
+         "which is how a quantized (compressed) model actually runs."});
 
 #ifndef CLPEAK_ROCM_HAS_ROCBLAS
   if (fpPhase)
   {
-    test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time");
-    test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time");
-    test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time");
-    test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+    test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time", fp32Note);
+    test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time", fp64Note);
+    test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time", fp16Note);
+    test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time", bf16Note);
   }
   else
   {
-    test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time");
+    test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time", int8Note);
   }
   return 0;
 #else
@@ -156,14 +178,14 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
   auto skipPhase = [&](ResultStatus status, const char *msg) {
     if (fpPhase)
     {
-      test.skip("fp32", status, msg);
-      test.skip("fp64", status, msg);
-      test.skip("fp16", status, msg);
-      test.skip("bf16", status, msg);
+      test.skip("fp32", status, msg, fp32Note);
+      test.skip("fp64", status, msg, fp64Note);
+      test.skip("fp16", status, msg, fp16Note);
+      test.skip("bf16", status, msg, bf16Note);
     }
     else
     {
-      test.skip("int8", status, msg);
+      test.skip("int8", status, msg, int8Note);
     }
   };
 
@@ -199,12 +221,12 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
   }
   (void)rocblas_set_stream(handle, dev.stream);
 
-  auto runTimed = [&](const char *label, auto gemmFn) {
+  auto runTimed = [&](const char *label, const char *note, auto gemmFn) {
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
     double probeUs = timeRocblas(dev.stream, gemmFn, warm);
     if (probeUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "timing probe failed");
+      test.skip(label, ResultStatus::Error, "timing probe failed", note);
       return;
     }
     unsigned int iters = pickIters(probeUs, 5000000u,
@@ -212,16 +234,16 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     double meanUs = timeRocblas(dev.stream, gemmFn, iters);
     if (meanUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed");
+      test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", note);
       return;
     }
-    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12));
+    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), {false, note});
   };
 
   if (fpPhase)
   {
     const float alpha32 = 1.0f, beta32 = 0.0f;
-    runTimed("fp32", [&]() {
+    runTimed("fp32", fp32Note, [&]() {
       return rocblas_sgemm(handle, rocblas_operation_none, rocblas_operation_none,
                            M, N, K, &alpha32,
                            (const float *)dA, M,
@@ -231,7 +253,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     });
 
     const double alpha64 = 1.0, beta64 = 0.0;
-    runTimed("fp64", [&]() {
+    runTimed("fp64", fp64Note, [&]() {
       return rocblas_dgemm(handle, rocblas_operation_none, rocblas_operation_none,
                            M, N, K, &alpha64,
                            (const double *)dA, M,
@@ -246,7 +268,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     const float alphaf = 1.0f, betaf = 0.0f;
     if (dev.info.fp16Supported)
     {
-      runTimed("fp16", [&]() {
+      runTimed("fp16", fp16Note, [&]() {
         return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
                                M, N, K, &alphaf,
                                dA, rocblas_datatype_f16_r, M,
@@ -260,12 +282,12 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     }
     else
     {
-      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device");
+      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device", fp16Note);
     }
 
     if (dev.info.bf16Supported)
     {
-      runTimed("bf16", [&]() {
+      runTimed("bf16", bf16Note, [&]() {
         return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
                                M, N, K, &alphaf,
                                dA, rocblas_datatype_bf16_r, M,
@@ -279,7 +301,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     }
     else
     {
-      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device");
+      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device", bf16Note);
     }
   }
   else
@@ -305,9 +327,10 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     // here -- report it as Unsupported rather than Error.
     if (int8Gemm() != rocblas_status_success)
       test.skip("int8", ResultStatus::Unsupported,
-                std::string("int8 GEMM not supported on ") + dev.info.archName);
+                std::string("int8 GEMM not supported on ") + dev.info.archName,
+                int8Note);
     else
-      runTimed("int8", int8Gemm);
+      runTimed("int8", int8Note, int8Gemm);
   }
 
   (void)rocblas_destroy_handle(handle);

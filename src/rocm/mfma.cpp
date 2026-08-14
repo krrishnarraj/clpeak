@@ -36,6 +36,7 @@ struct MfmaEntry
   const char *kernelName;
   uint32_t M, N, K;
   bool isInt;           // output buffer element type
+  const char *description;  // plain-language explanation, next to the name
 };
 
 // Strip the gcnArchName feature suffix (e.g. "gfx942:sramecc+:xnack-").
@@ -61,21 +62,35 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
   static const MfmaEntry fpEntries[] = {
     {"mfma_fp16", "MFMA fp16xfp16+fp32 16x16x16", "tflops",
      &rocm_kernels::mfma_fp16, "mfma_fp16",
-     16, 16, 16, false},
+     16, 16, 16, false,
+     "Peak speed of the matrix cores on AMD's compute cards -- dedicated units "
+     "that multiply whole blocks of numbers in one step -- on 16-bit inputs "
+     "with a 32-bit running total, the everyday precision of AI work."},
     {"mfma_bf16", "MFMA bf16xbf16+fp32 16x16x16", "tflops",
      &rocm_kernels::mfma_bf16, "mfma_bf16",
-     16, 16, 16, false},
+     16, 16, 16, false,
+     "Matrix cores on bfloat16 -- 16 bits arranged for AI work, trading digits "
+     "of accuracy for the number range of a full float, which makes training "
+     "far more forgiving."},
     {"mfma_fp8", "MFMA fp8xfp8+fp32 16x16x32", "tflops",
      &rocm_kernels::mfma_fp8, "mfma_fp8",
-     16, 16, 32, false},
+     16, 16, 32, false,
+     "Matrix cores on 8-bit numbers -- half the data of 16-bit per value, so "
+     "they run at roughly twice the rate."},
     {"mfma_mxfp4", "MFMA mxfp4(e2m1)+fp32 16x16x128", "tflops",
      &rocm_kernels::mfma_mxfp4, "mfma_mxfp4",
-     16, 16, 128, false},
+     16, 16, 128, false,
+     "Matrix cores on 4-bit numbers with a shared scale factor per block, the "
+     "open MX format.  The scale is what makes 4 bits usable for real models "
+     "rather than a curiosity."},
   };
   static const MfmaEntry intEntries[] = {
     {"mfma_int8", "MFMA int8xint8+int32 16x16x32", "tops",
      &rocm_kernels::mfma_int8, "mfma_int8",
-     16, 16, 32, true},
+     16, 16, 32, true,
+     "Matrix cores on 8-bit whole numbers with a 32-bit running total -- the "
+     "format quantized neural networks use when they are squeezed down to run "
+     "fast on cheaper hardware."},
   };
 
   const MfmaEntry *entries = isInt ? intEntries : fpEntries;
@@ -92,7 +107,8 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
   for (size_t e = 0; e < numEntries; e++)
   {
     const MfmaEntry &me = entries[e];
-    auto test = currentDeviceScope->beginTest({me.metric, me.title, me.unit});
+    auto test = currentDeviceScope->beginTest(
+      {me.metric, me.title, me.unit, Category::Unknown, me.description});
 
     if (!cdna)
     {

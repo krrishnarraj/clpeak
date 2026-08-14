@@ -31,6 +31,7 @@ struct SparseEntry
   const char *kernelName;
   uint32_t M, N, Kdense; // dense-equivalent K for op accounting
   bool isInt;
+  const char *description;  // plain-language explanation, next to the name
 };
 
 std::string archBaseOf(const std::string &a)
@@ -55,18 +56,27 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
   static const SparseEntry fpEntries[] = {
     {"smfmac_fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "tflops",
      &rocm_kernels::smfmac_fp16, "smfmac_fp16",
-     16, 16, 32, false},
+     16, 16, 32, false,
+     "The matrix cores on 16-bit inputs with structured sparsity: half the "
+     "values in each group of four are known to be zero and are skipped, so "
+     "the hardware does twice the useful work per step."},
     {"smfmac_bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "tflops",
      &rocm_kernels::smfmac_bf16, "smfmac_bf16",
-     16, 16, 32, false},
+     16, 16, 32, false,
+     "The same skip-the-zeros trick on bfloat16, the AI-oriented 16-bit "
+     "format."},
     {"smfmac_fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "tflops",
      &rocm_kernels::smfmac_fp8, "smfmac_fp8",
-     16, 16, 64, false},
+     16, 16, 64, false,
+     "The same skip-the-zeros trick on 8-bit numbers -- the fastest "
+     "arrangement these matrix cores offer for fractional values."},
   };
   static const SparseEntry intEntries[] = {
     {"smfmac_int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "tops",
      &rocm_kernels::smfmac_int8, "smfmac_int8",
-     16, 16, 64, true},
+     16, 16, 64, true,
+     "The same skip-the-zeros trick on 8-bit whole numbers, the format "
+     "quantized neural networks use."},
   };
 
   const SparseEntry *entries = isInt ? intEntries : fpEntries;
@@ -83,7 +93,8 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
   for (size_t e = 0; e < numEntries; e++)
   {
     const SparseEntry &se = entries[e];
-    auto test = currentDeviceScope->beginTest({se.metric, se.title, se.unit});
+    auto test = currentDeviceScope->beginTest(
+      {se.metric, se.title, se.unit, Category::Unknown, se.description});
 
     if (!cdna)
     {
