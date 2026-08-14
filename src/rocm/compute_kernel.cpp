@@ -24,8 +24,8 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
                           d.variants[i].blob, d.variants[i].description});
   else
-    // Single-variant tests have one reading whose name restates the title, so
-    // the test description covers it.
+    // Single-variant tests: the metric name restates the title, so the
+    // test-level description covers it.
     variants.push_back({d.metricLabel, d.kernelName, d.blob, nullptr});
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };

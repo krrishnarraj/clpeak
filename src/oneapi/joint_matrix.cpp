@@ -229,9 +229,9 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
              "value at a time -- across the reduced-precision formats AI work "
              "runs on."});
 
-  // int8 is the only row the no-header path documents individually (the FP
-  // rows go through skipAll there, which carries no per-reading notes), so it
-  // is declared out here and the FP notes live inside the #else.
+  // int8 is the only row the no-header path below documents individually (the
+  // FP rows go through skipAll, which carries no per-reading notes), so the FP
+  // notes live inside the #else -- declaring them here warns unused.
   const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
                          "quantized neural networks use.";
 

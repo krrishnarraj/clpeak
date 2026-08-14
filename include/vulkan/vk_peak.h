@@ -94,11 +94,8 @@ static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
   return targetGlobalThreads(0);
 }
 
-// Reader-facing note for one reading of a vector-width sweep (float / float2 /
-// float4 and friends).  The compute and bandwidth tests all sweep the same
-// widths and the meaning never changes, so the wording lives here rather than
-// being re-invented at each call site.  NOT for the int8-dot rows: those
-// variants are independent chains, not wider vectors -- see compute_int.cpp.
+// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
+// rows: those variants are independent chains -- see compute_int.cpp.
 static inline const char *vkWidthNote(uint32_t width)
 {
   switch (width)

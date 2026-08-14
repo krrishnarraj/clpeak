@@ -78,8 +78,6 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
-  // W is a template parameter, so the width note comes for free at every
-  // instantiation -- no per-call-site plumbing.
   const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
   if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);

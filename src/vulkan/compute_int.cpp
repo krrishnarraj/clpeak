@@ -47,8 +47,6 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   //       instruction issue queue to pipeline).
   // v4 = four parallel chains (enough to saturate dp4a issue rate on
   //       NVIDIA Turing+ / AMD RDNA2+ / Intel Xe+).
-  // Unlike every other sweep here, these variants are independent chains, not
-  // wider vectors -- so they get their own notes rather than vkWidthNote().
   static const vk_compute_variant_t variants[] = {
     { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
       "One chain of dot products, each waiting on the one before it." },

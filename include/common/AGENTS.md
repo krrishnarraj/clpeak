@@ -45,39 +45,20 @@ Two consumers render them: the GUI behind an info glyph, and the CLI under
 tests and readings carry empty strings and neither shows anything for them, so
 documenting is purely additive.
 
-Coverage is per backend, one backend at a time.  **`src/cpu/` is fully
-documented and is the reference** — every `TestSpec` there carries a
-`description`, and it shows all three authoring shapes: the plain literal
-(`microarch.cpp`), a note table walked by a loop (`latency.cpp`,
-`bandwidth.cpp`), and one note shared by a family of tests written once at the
-runner (`compute_common.h`'s `ST`/`MT` notes, which serve ~25 tests).
-**`src/metal/`, `src/vulkan/` and `src/opencl/` are done too**, and show the
-fourth shape: a backend whose tests run through a shared runner carries the
-strings alongside the rest of the per-test data — on a descriptor struct
-(`mtl_compute_desc_t::description`, `vk_compute_variant_t::description`) or as
-a parameter (`clPeak::runComputeTest`'s `description`) — so the runner forwards
-them.  That is the move the CUDA / ROCm / oneAPI backends will need, since they
-are built the same way and are still undocumented.  A shared per-reading phrase
-gets one helper per backend (`mtlWidthNote()` / `vkWidthNote()` /
-`clWidthNote()`), never a cross-backend table: the same label means different
-things in different backends, which is exactly what Vulkan's `int8_dp2` (a
-second *chain*, not a wider vector) demonstrates.
-
-**`src/cuda/`, `src/rocm/` and `src/oneapi/` are documented but
-codegen-verified only** — no NVIDIA, AMD or Intel hardware was available, so
-their `--describe` output has never been rendered; the strings were checked by
-compiling every file against stub vendor headers (see those directories'
-`AGENTS.md` for the technique, which also covers the optional-library `#ifdef`
-branches).  **Every backend is now documented.**
-
-A backend whose tests come off a table (ROCm's `WmmaEntry`/`MfmaEntry`) puts
-the description on the table row, beside the name it explains — the same rule
-as `src/cpu/latency.cpp`'s `Level` struct, one level up.
+Where a backend runs its tests through a shared runner, the strings ride
+alongside the rest of the per-test data — a field on the descriptor struct
+(`mtl_compute_desc_t::description`), on the entry table (ROCm's `WmmaEntry`),
+or a parameter (`clPeak::runComputeTest`) — so the runner forwards them on
+every path, skips included.  A phrase shared by several readings gets one
+helper per backend (`mtlWidthNote()`, `vkWidthNote()`, …), never a
+cross-backend table: the same label means different things in different
+backends.  Vulkan's `int8_dp2` is a second *chain*, not a wider vector.
 
 Where a test reports a value by a non-obvious convention, the description is
 the place to say so — `transfer_bandwidth`'s zero-copy rows read `0.00` on
-unified-memory devices, and OpenCL's test description now explains that rather
-than leaving it to be rediscovered.
+unified-memory devices, and OpenCL's test description explains that.
+
+`src/cpu/latency.cpp` (`memory_latency`) is the worked example of both levels.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the

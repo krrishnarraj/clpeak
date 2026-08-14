@@ -12,11 +12,8 @@
 #include <string>
 #include <vector>
 
-// Reader-facing note for one reading of a vector-width sweep (float / float2 /
-// ... / float16).  Every compute and bandwidth test here sweeps the same
-// widths and the meaning never changes, so the wording lives in one place.
-// NOT for the int8-dot rows: those variants are independent chains -- see
-// oneapiChainNote().
+// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
+// rows: those are independent chains -- see oneapiChainNote().
 static inline const char *oneapiWidthNote(int width)
 {
   switch (width)
@@ -30,9 +27,8 @@ static inline const char *oneapiWidthNote(int width)
   }
 }
 
-// Reader-facing note for one reading of the int8 dot-product sweep.  These
-// variants are independent chains, not wider vectors: the work per item is
-// identical and only the amount the hardware can overlap changes.
+// Shared note for one reading of the int8 dot-product sweep: these variants
+// are independent chains, not wider vectors.  Work per item is identical.
 static inline const char *oneapiChainNote(int chains)
 {
   switch (chains)

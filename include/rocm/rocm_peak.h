@@ -65,10 +65,8 @@ private:
   std::unordered_map<const void *, hipModule_t> moduleCache;
 };
 
-// Reader-facing note for one reading of a vector-width sweep (float / float2 /
-// float4, half / half2).  Used by the compute and bandwidth tests whose
-// variants really are widths.  NOT for the int8-dot rows: those variants are
-// independent chains, documented where they are declared.
+// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
+// rows: those are independent chains, documented where they are declared.
 static inline const char *rocmWidthNote(uint32_t width)
 {
   switch (width)

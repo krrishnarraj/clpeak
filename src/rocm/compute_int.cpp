@@ -35,7 +35,6 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   // INT8 MFMA peak (runMfma). All four variants do 8192 ops/thread, so the
   // numbers are directly comparable; they differ only in ILP (chain count).
   static const rocm_compute_variant_t variants[] = {
-      // Independent chains, not wider vectors -- hence their own notes.
       {"int8_dp", "compute_int8_dp", &rocm_kernels::compute_int8_dp,
        "One chain of dot products, each waiting on the one before it."},
       {"int8_dp2", "compute_int8_dp2", &rocm_kernels::compute_int8_dp,

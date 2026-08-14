@@ -93,11 +93,9 @@ private:
   std::unordered_map<const void *, CUmodule> moduleCache;
 };
 
-// Reader-facing note for one reading of a vector-width sweep (float / float2 /
-// float4, half / half2).  Used by the bandwidth tests and the fp16 compute
-// test, whose variants really are widths.  NOT for the int8-dot or WMMA rows:
-// those variants are independent chains and distinct instructions, documented
-// where they are declared.
+// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
+// or WMMA rows: those are independent chains and distinct instructions,
+// documented where they are declared.
 static inline const char *cudaWidthNote(uint32_t width)
 {
   switch (width)

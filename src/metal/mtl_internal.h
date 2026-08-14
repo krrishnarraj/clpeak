@@ -71,9 +71,7 @@ float mtlRunDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
                        unsigned int warmup,
                        unsigned int targetTimeUs, unsigned int forcedIters);
 
-// Reader-facing note for one reading of a vector-width sweep.  The compute and
-// bandwidth tests all sweep the same widths and the meaning never changes, so
-// the wording lives here instead of being repeated at five call sites.
+// Shared note for one reading of a vector-width sweep.
 static inline const char *mtlWidthNote(uint32_t width)
 {
     switch (width)

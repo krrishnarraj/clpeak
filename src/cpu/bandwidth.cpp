@@ -81,8 +81,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
 
-  // The notes ride the level table (rather than the emit sites below) so a
-  // level's name and its explanation stay adjacent.
+  // Notes ride the table so a level's name and explanation stay adjacent.
   struct Level { const char *name; uint64_t bytes; bool sharedForMt;
                  const char *stNote; const char *mtNote; };
   const Level levels[] = {

@@ -642,9 +642,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         // fp4GemmSupported (all Blackwell) rather than fp4MmaSupported (the
         // consumer-only raw-mma microbench): the library FP4 path runs on
         // datacenter sm_100/103 as well, and self-skips where it can't.
-        //
-        // Declared outside the #if so both the supported and the two
-        // unsupported paths below document the row identically.
+        // Declared outside the #if: both branches below use them.
         const char *mxf4Note = "4-bit inputs with a shared scale factor per block "
                                "of 32, the open MX format.  The scale is what "
                                "makes 4 bits usable for real models.";

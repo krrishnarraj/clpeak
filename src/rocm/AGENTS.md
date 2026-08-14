@@ -54,36 +54,20 @@ ROCm headers. Built as `peak_rocm` static library.
 
 ## Test documentation
 
-Every test here carries a plain-language `description` for non-expert readers
-(rendered by the GUI's info glyph and the CLI's `--describe`; see
-`include/common/AGENTS.md` § Test documentation for the two levels and the
-style rules).  ROCm-specific plumbing:
+See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
 
-- `rocm_compute_desc_t::description` → the test-level text, and
-  `rocm_compute_variant_t::description` → the note for that one reading.
-  `runComputeKernel()` forwards both on every path, skips included.
-- The matrix-core runners (`wmma.cpp`, `mfma.cpp`, `sparse_mfma.cpp`) drive
-  themselves off `WmmaEntry` / `MfmaEntry` / `SparseEntry` tables, so the
-  description is **a field on the entry** — name, title and explanation stay on
-  one row.  Add a description whenever you add an entry.
-- `rocmWidthNote()` (`rocm_peak.h`) covers the readings that really are vector
-  widths: `float`/`float2`/`float4`, `half`/`half2`, `int`/`int2`/`int4`.
-  **The `int8_dp`/`dp2`/`dp4`/`dp8` rows are NOT widths** — they are one, two,
-  four and eight *independent chains*, so they carry their own notes.  Same
-  trap as the Vulkan and CUDA int8-dot rows.
+- `rocm_compute_desc_t::description` (test) and
+  `rocm_compute_variant_t::description` (one reading); `runComputeKernel()`
+  forwards both on every path, skips included.
+- The matrix-core runners (`wmma.cpp`, `mfma.cpp`, `sparse_mfma.cpp`) walk
+  `WmmaEntry` / `MfmaEntry` / `SparseEntry` tables, so the description is a
+  field on the entry.  Add one whenever you add an entry.
+- `rocmWidthNote()` (`rocm_peak.h`) covers `float`/`float2`/`float4`,
+  `half`/`half2` and `int`/`int2`/`int4`.
+- **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
+  *independent chains*.  They carry their own notes.
 - `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
-  through `runTimed` / `runVariant`, so each dtype's explanation reaches every
-  skip path as well as the emit.
-
-**Syntax-checking without ROCm.** Stub `hip/hip_runtime.h`, `rocblas/rocblas.h`
-and `hipblaslt/hipblaslt.h` headers (a few dozen typedefs, enums and
-prototypes each) are enough to run
-`clang++ -fsyntax-only -std=c++17 -DENABLE_ROCM -I<stubs> -Iinclude
-src/rocm/*.cpp` on a machine with no AMD anything — the same technique
-`src/cuda/AGENTS.md` describes.  Check all three optional-library
-configurations, since the `#ifndef CLPEAK_ROCM_HAS_*` branches have their own
-call sites: none defined, all defined, and all defined plus
-`CLPEAK_HIPBLASLT_HAS_FP4`.  It does NOT substitute for a run on real hardware.
+  through `runTimed` / `runVariant`.
 
 ## When You Change This Directory
 

@@ -40,21 +40,15 @@ static library.  Source files are Objective-C++ (`.mm`).
 
 ## Test documentation
 
-Every test here carries a plain-language `description` for non-expert readers
-(rendered by the GUI's info glyph and the CLI's `--describe`; see
-`include/common/AGENTS.md` § Test documentation for the two levels and the
-style rules).  Metal-specific plumbing:
+See `include/common/AGENTS.md` § Test documentation.  Metal specifics:
 
-- `mtl_compute_desc_t::description` → the test-level text, and
-  `mtl_compute_variant_t::description` → the note for that one reading.
-  `runComputeKernel()` forwards both, including on every skip path, so an
-  Unsupported row still explains what it would have measured.
+- `mtl_compute_desc_t::description` (test) and
+  `mtl_compute_variant_t::description` (one reading); `runComputeKernel()`
+  forwards both on every path, skips included.
 - `mtlWidthNote()` (`mtl_internal.h`) is the shared wording for the
-  `float`/`float2`/`float4`/… vector-width readings — the same sweep appears in
-  the compute and both bandwidth tests, so never re-word it per call site.
+  `float`/`float2`/`float4`/… readings.
 - The `V` tables in `global_bandwidth.mm` / `local_bandwidth.mm` /
-  `image_bandwidth.mm` carry their notes as a struct field, so the label and
-  its explanation stay adjacent.
+  `image_bandwidth.mm` carry their notes as a struct field.
 
 ## Architecture Note
 

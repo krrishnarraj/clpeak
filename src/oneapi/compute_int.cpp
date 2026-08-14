@@ -58,8 +58,6 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
-  // W is a template parameter, so the width note comes for free at every
-  // instantiation -- no per-call-site plumbing.
   const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
   if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
@@ -170,8 +168,6 @@ static void runInt8DpVariant(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
-  // NCH is the chain count, not a vector width -- every variant does the same
-  // work per item and only the overlap changes.
   const char *note = oneapiChainNote(NCH);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
   if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);

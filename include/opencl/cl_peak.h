@@ -13,10 +13,7 @@ struct CliOptions;
 
 #define BUILD_OPTIONS " -cl-mad-enable "
 
-// Reader-facing note for one reading of a vector-width sweep (float / float2 /
-// float4 …).  Every compute and bandwidth test here sweeps the same widths and
-// the meaning never changes, so the wording lives in one place rather than
-// being re-invented at each call site.
+// Shared note for one reading of a vector-width sweep.
 static inline const char *clWidthNote(int width)
 {
   switch (width)

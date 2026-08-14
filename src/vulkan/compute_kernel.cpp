@@ -40,8 +40,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   }
   else
   {
-    // Single-variant tests (coopmat) have exactly one reading whose name
-    // restates the test title, so the test-level description covers it.
+    // Single-variant tests (coopmat): the metric name restates the title, so
+    // the test-level description covers it.
     variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr});
   }
 

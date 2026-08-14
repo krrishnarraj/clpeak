@@ -121,8 +121,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
      "two share one pool of memory a route can move nothing at all, and those "
      "readings are reported as zero rather than as an impossible speed."});
 
-  // One note per reading, in emit order.  Shared with the two bulk-skip paths
-  // below so a failed run still explains what each row would have measured.
+  // One note per reading, in emit order; shared with the bulk-skip paths below.
   const char *wbNote  = "Copying host memory into the device buffer, with the "
                         "host waiting for it to finish.";
   const char *rbNote  = "Copying the device buffer back into host memory, with "

@@ -32,8 +32,6 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
 
 int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  // These variants are independent chains, not wider vectors -- so they carry
-  // their own notes rather than cudaWidthNote().
   static const cuda_compute_variant_t variants[] = {
       {"int8_dp", "compute_int8_dp", &cuda_kernels::compute_int8_dp,
        "One chain of dot products, each waiting on the one before it."},

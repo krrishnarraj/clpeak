@@ -44,8 +44,8 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
     return (float)(opsPerIter * (double)n / (meanUs * 1e3));
   };
 
-  // ST/MT mean the same thing in every test that goes through this runner, so
-  // the reader-facing notes live here instead of at each of the ~25 call sites.
+  // ST/MT mean the same thing in every test routed through this runner, so the
+  // notes live here rather than at each call site.
   static const char *stNote = "One thread, running on a single core.";
   static const char *mtNote = "Every hardware thread at once -- the whole chip.";
 

@@ -42,7 +42,6 @@ build time and the SYCL runtime JITs it on first launch.
 
 | `kernel_latency.cpp` | `runKernelLatency` (empty kernel submit + `queue.wait_and_throw()`) |
 
-
 ## Build
 
 - oneAPI requires the Intel oneAPI Base Toolkit (sources `setvars.sh` before invoking cmake).
@@ -78,40 +77,22 @@ build time and the SYCL runtime JITs it on first launch.
 
 ## Test documentation
 
-Every test here carries a plain-language `description` for non-expert readers
-(rendered by the GUI's info glyph and the CLI's `--describe`; see
-`include/common/AGENTS.md` § Test documentation for the two levels and the
-style rules).  oneAPI-specific plumbing:
+See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
 
-- There is no descriptor struct here — tests call `beginTest()` directly, so
-  the description is the 5th field of the braced `TestSpec` at each call site.
-- **The width and chain notes come off the template parameter**, not off a
-  call site: `runFpWidth<…,W>` / `runIntWidth<…,W>` call `oneapiWidthNote(W)`
-  and `runInt8DpVariant<NCH>` calls `oneapiChainNote(NCH)`, both once inside
-  the function.  Adding a width or chain instantiation therefore documents
-  itself.  Both helpers live in `oneapi_peak.h`.
-- `int8_dp`/`dp2`/`dp4`/`dp8` are chains, not widths — hence the separate
-  `oneapiChainNote()`.  Same trap as the Vulkan / CUDA / ROCm int8-dot rows.
-- `joint_matrix.cpp`: `emitJm()` takes the note next to the metric, and
-  `int8Note` is declared *outside* the `#ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX`
-  block while the FP notes are declared *inside* the `#else` — the no-header
-  path documents only int8 individually (the FP rows go through `skipAll`,
-  which carries no per-reading notes), so declaring all four outside warns
-  unused in that configuration.
+- No descriptor struct: the description is the 5th field of the braced
+  `TestSpec` at each `beginTest()` call site.
+- The width and chain notes come off the **template parameter**, not a call
+  site: `runFpWidth<…,W>` / `runIntWidth<…,W>` call `oneapiWidthNote(W)` and
+  `runInt8DpVariant<NCH>` calls `oneapiChainNote(NCH)`, each once inside the
+  function.  Both helpers live in `oneapi_peak.h`.
+- **`int8_dp`/`dp2`/`dp4`/`dp8` are chains, not widths** — hence the separate
+  `oneapiChainNote()`.
+- `joint_matrix.cpp`: `emitJm()` takes the note next to the metric.  `int8Note`
+  is declared outside the `#ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX` block and
+  the FP notes inside the `#else` — the no-header path documents only int8
+  individually (the FP rows go through `skipAll`, which carries no per-reading
+  notes), so declaring all four outside warns unused there.
 - `onemkl.cpp` threads a `note` next to `label` through `measure()`.
-
-**Syntax-checking without a SYCL toolchain.** A stub `sycl/sycl.hpp` (~200
-lines: `queue`, `device`, `handler`, `vec<T,N>` with `.x()`-style accessors,
-`nd_range`/`nd_item`, `half`, `local_accessor`, `image`, USM alloc) plus stubs
-for `sycl/ext/oneapi/matrix/matrix.hpp` and `oneapi/mkl.hpp` is enough to run
-`clang++ -fsyntax-only -std=c++17 -DENABLE_ONEAPI -I<stubs> -Iinclude
-src/oneapi/*.cpp`.  It does not need to be semantically faithful — a
-`parallel_for` that never invokes the lambda still type-checks the host code
-around it, which is where edits to this directory usually go wrong.  Check all
-four gate combinations (`CLPEAK_ONEAPI_HAS_JOINT_MATRIX`,
-`CLPEAK_ONEAPI_HAS_ONEMKL`), since each `#ifdef` branch has its own call
-sites.  It does NOT substitute for a build with `icpx` or a run on Intel
-hardware.
 
 ## When You Change This Directory
 
