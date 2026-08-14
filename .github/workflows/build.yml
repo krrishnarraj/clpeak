@@ -243,13 +243,6 @@ jobs:
       # clpeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and
       # any bundled runtime libs.  -C Release picks the Release artifacts on
       # multi-config generators (Windows); harmless on single-config.
-      # The GUI build rewrites tracked files the Flutter SDK owns (pubspec.lock,
-      # analysis_options.yaml, the generated plugin registrants).  Harmless --
-      # the version is derived before any of it -- but worth seeing in the log.
-      - name: Report working-tree state
-        shell: bash
-        run: git status --porcelain --untracked-files=no
-
       - name: Package
         shell: bash
         run: cd build && cpack -G ZIP -C Release
