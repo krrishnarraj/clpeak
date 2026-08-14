@@ -44,6 +44,39 @@ Built as `peak_cuda` static library.
 | `cmake/EmbedCudaKernels.cmake` | `embed_cuda_kernels()` — nvcc `-fatbin` per arch group + byte embed |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
 
+## Test documentation
+
+Every test here carries a plain-language `description` for non-expert readers
+(rendered by the GUI's info glyph and the CLI's `--describe`; see
+`include/common/AGENTS.md` § Test documentation for the two levels and the
+style rules).  CUDA-specific plumbing:
+
+- `cuda_compute_desc_t::description` → the test-level text, and
+  `cuda_compute_variant_t::description` → the note for that one reading.
+  `runComputeKernel()` forwards both on every path, skips included, so the many
+  Unsupported rows (every dtype above the device's compute capability) still
+  explain what they would have measured.
+- `cudaWidthNote()` (`cuda_peak.h`) covers the readings that really are vector
+  widths: `half`/`half2` and the `float`/`float2`/`float4` bandwidth sweeps.
+  **The `int8_dp`/`dp2`/`dp4`/`dp8` rows are NOT widths** — they are one, two,
+  four and eight *independent chains* (see `compute_int8_dp.cu`), so they carry
+  their own notes.  Same trap as Vulkan's int8-dot rows.
+- The WMMA rows are one reading each, named after the test, so they document
+  the test only.
+- `cuda_blas.cpp` threads a `note` parameter through `runVariantAB` /
+  `runVariant` / `runVariantFp4` next to `label`, so each dtype's explanation
+  reaches all six skip paths and the emit.
+
+**Syntax-checking without a CUDA toolkit.** The driver/cuBLASLt surface this
+backend touches is small and almost entirely opaque handles, so a stub
+`cuda.h` + `cublasLt.h` (a few dozen typedefs, enums and prototypes) is enough
+to run `clang++ -fsyntax-only -std=c++17 -DENABLE_CUDA -I<stubs> -Iinclude
+src/cuda/*.cpp` on a machine with no NVIDIA anything.  That catches the whole
+class of errors an edit to these files usually introduces — wrong struct field,
+wrong argument count, a brace-init missing a field.  Check the FP4 path both
+ways (`-DCLPEAK_CUBLASLT_HAS_FP4=1` and without); the `#else` branch has its own
+call sites.  It does NOT substitute for a run on real hardware.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.

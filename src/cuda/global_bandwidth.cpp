@@ -17,15 +17,22 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     numBlocks = 1;
 
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
+    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU can stream out of its own memory, "
+     "reading a buffer far too large to cache.  Each reading fetches a "
+     "different number of values per instruction, since wider fetches usually "
+     "pull more through before the memory system saturates."});
 
   CUdeviceptr inBuf = 0, outBuf = 0;
   if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||
       cuMemAlloc(&outBuf, numItems * sizeof(float)) != CUDA_SUCCESS)
   {
     const char *labels[] = {"float", "float2", "float4"};
+    const uint32_t widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
-      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
+      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers",
+                cudaWidthNote(widths[i]));
     if (inBuf)
       cuMemFree(inBuf);
     return -1;
@@ -61,7 +68,8 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     if (!dev.getKernel(cuda_kernels::global_bandwidth,
                        v.kernelName, fn))
     {
-      test.skip(key, ResultStatus::Error, "Kernel compile failed");
+      test.skip(key, ResultStatus::Error, "Kernel compile failed",
+                cudaWidthNote(v.width));
       continue;
     }
 
@@ -75,7 +83,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float gbps = (float)(bytes / us / 1e3);
-    test.emit(key, gbps);
+    test.emit(key, gbps, cudaWidthNote(v.width));
   }
 
   cuMemFree(inBuf);

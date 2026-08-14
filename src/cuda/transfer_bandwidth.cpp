@@ -10,21 +10,29 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps"});
+    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+     "How fast data crosses between the computer's own memory and the card's, "
+     "over the PCIe link.  That link is far narrower than either side's own "
+     "memory, which is what makes moving data to the GPU worth avoiding.  Both "
+     "readings use pinned host memory, the fast path."});
+
+  const char *h2dNote = "Host to device: sending data up to the card.";
+  const char *d2hNote = "Device to host: reading results back down.  Often a "
+                        "little slower than the other direction.";
 
   CUdeviceptr dBuf = 0;
   if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)
   {
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer");
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer");
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer", h2dNote);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer", d2hNote);
     return -1;
   }
   void *hPinned = nullptr;
   if (cuMemAllocHost(&hPinned, bytes) != CUDA_SUCCESS)
   {
     cuMemFree(dBuf);
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer");
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", h2dNote);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", d2hNote);
     return -1;
   }
 
@@ -80,11 +88,11 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   float usH2D = timeXfer(true);
   float gbpsH2D = (float)bytes / usH2D / 1e3f;
-  test.emit("h2d_pinned", gbpsH2D);
+  test.emit("h2d_pinned", gbpsH2D, h2dNote);
 
   float usD2H = timeXfer(false);
   float gbpsD2H = (float)bytes / usD2H / 1e3f;
-  test.emit("d2h_pinned", gbpsD2H);
+  test.emit("d2h_pinned", gbpsD2H, d2hNote);
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);

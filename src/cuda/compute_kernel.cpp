@@ -1,6 +1,7 @@
 #ifdef ENABLE_CUDA
 
 #include <cuda/cuda_peak.h>
+#include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -12,37 +13,36 @@
 int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
                                const cuda_compute_desc_t &d)
 {
-  auto test = currentDeviceScope->beginTest({d.resultTag, d.title, d.unit});
-
-  if (d.skip)
-  {
-    if (d.variants && d.numVariants > 0)
-    {
-      for (uint32_t i = 0; i < d.numVariants; i++)
-        test.skip(d.variants[i].label, ResultStatus::Unsupported,
-                  d.skipMsg ? d.skipMsg : "Skipped");
-    }
-    else
-    {
-      test.skip(d.metricLabel, ResultStatus::Unsupported,
-                d.skipMsg ? d.skipMsg : "Skipped");
-    }
-    return 0;
-  }
+  auto test = currentDeviceScope->beginTest(
+    {d.resultTag, d.title, d.unit, Category::Unknown,
+     d.description ? d.description : ""});
 
   struct Variant
   {
     const char *label;
     const char *kernelName;
     const cuda_kernels::Blob *blob;
+    const char *description;
   };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
-                          d.variants[i].blob});
+                          d.variants[i].blob, d.variants[i].description});
   else
-    variants.push_back({d.metricLabel, d.kernelName, d.blob});
+    // Single-variant tests (WMMA, and the fp32/fp64 compute rows) have one
+    // reading whose name restates the title, so the test description covers it.
+    variants.push_back({d.metricLabel, d.kernelName, d.blob, nullptr});
+
+  auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+
+  if (d.skip)
+  {
+    for (const auto &v : variants)
+      test.skip(v.label, ResultStatus::Unsupported,
+                d.skipMsg ? d.skipMsg : "Skipped", note(v.description));
+    return 0;
+  }
 
   // Scale to numSMs so high-SM parts (H100, B200, …) don't get under-saturated;
   // floor at 32M preserves behavior on small dev cards.  Clamp by VRAM below.
@@ -60,7 +60,8 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   if (cuMemAlloc(&outputBuf, bufferBytes) != CUDA_SUCCESS)
   {
     for (const auto &v : variants)
-      test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer");
+      test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer",
+                note(v.description));
     return -1;
   }
 
@@ -69,7 +70,8 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     CUfunction fn;
     if (!dev.getKernel(*v.blob, v.kernelName, fn))
     {
-      test.skip(v.label, ResultStatus::Error, "compile/load failed");
+      test.skip(v.label, ResultStatus::Error, "compile/load failed",
+                note(v.description));
       continue;
     }
 
@@ -83,7 +85,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
 
-    test.emit(v.label, value);
+    test.emit(v.label, value, {false, note(v.description)});
   }
 
   cuMemFree(outputBuf);

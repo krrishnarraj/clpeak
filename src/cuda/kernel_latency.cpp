@@ -9,14 +9,25 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "us"});
+    {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+     "The overhead of asking the GPU to do anything at all, measured with a "
+     "kernel that does no work.  It is what small, frequent GPU jobs pay "
+     "before any of their own work begins."});
+
+  const char *dispatchNote = "One way only: from the moment the host submits the "
+                             "work to the moment the GPU starts running it.  CUDA "
+                             "exposes no clock the host and GPU share, so this is "
+                             "reported on the other backends but not here.";
+  const char *roundtripNote = "The full round trip -- submit, run, and hear back "
+                              "that it finished.  This is what the host waits for "
+                              "if it has nothing else to get on with.";
 
   CUfunction fn;
   if (!dev.getKernel(cuda_kernels::kernel_latency,
                      "kernel_latency_noop", fn))
   {
-    test.skip("dispatch", ResultStatus::Error, "Kernel compile failed");
-    test.skip("roundtrip", ResultStatus::Error, "Kernel compile failed");
+    test.skip("dispatch", ResultStatus::Error, "Kernel compile failed", dispatchNote);
+    test.skip("roundtrip", ResultStatus::Error, "Kernel compile failed", roundtripNote);
     return -1;
   }
 
@@ -53,16 +64,16 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   }
 
   test.skip("dispatch", ResultStatus::Unsupported,
-            "Not measurable via CUDA driver API");
+            "Not measurable via CUDA driver API", dispatchNote);
   if (submitFailed)
   {
     test.skip("roundtrip", ResultStatus::Error,
-              "cuLaunchKernel/cuStreamSynchronize failed");
+              "cuLaunchKernel/cuStreamSynchronize failed", roundtripNote);
   }
   else
   {
     float roundtripUs = (float)(totalRoundtripUs / iters);
-    test.emit("roundtrip", roundtripUs);
+    test.emit("roundtrip", roundtripUs, roundtripNote);
   }
 
   return 0;

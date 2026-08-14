@@ -63,6 +63,11 @@ gets one helper per backend (`mtlWidthNote()` / `vkWidthNote()` /
 things in different backends, which is exactly what Vulkan's `int8_dp2` (a
 second *chain*, not a wider vector) demonstrates.
 
+**`src/cuda/` is documented but codegen-verified only** — no NVIDIA hardware
+was available, so its `--describe` output has never been rendered; the strings
+were checked by compiling every file against stub `cuda.h`/`cublasLt.h` headers
+(see `src/cuda/AGENTS.md`).  ROCm and oneAPI are still undocumented.
+
 Where a test reports a value by a non-obvious convention, the description is
 the place to say so — `transfer_bandwidth`'s zero-copy rows read `0.00` on
 unified-memory devices, and OpenCL's test description now explains that rather
