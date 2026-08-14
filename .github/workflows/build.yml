@@ -243,11 +243,10 @@ jobs:
       # clpeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and
       # any bundled runtime libs.  -C Release picks the Release artifacts on
       # multi-config generators (Windows); harmless on single-config.
-      # The GUI build regenerates files the Flutter SDK owns, and CPack's
-      # preinstall pass then rebuilds against whatever it finds -- which is how
-      # release binaries once picked up a -dirty version stamp from a pristine
-      # tag checkout.  GitVersion.cmake ignores those specific files now; print
-      # anything else the build touched so a repeat is diagnosable from the log.
+      # The GUI build rewrites tracked files the Flutter SDK owns (pubspec.lock,
+      # analysis_options.yaml, the generated plugin registrants).  That no longer
+      # reaches the version stamp -- it is derived once at configure time, before
+      # any of this runs -- but the churn is worth seeing, so print it.
       - name: Report working-tree state
         shell: bash
         run: git status --porcelain --untracked-files=no

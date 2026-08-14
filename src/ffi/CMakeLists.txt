@@ -84,11 +84,7 @@ endif()
 
 target_include_directories(clpeak_ffi PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
 include(${CMAKE_CURRENT_LIST_DIR}/../common/cmake/version.cmake)
-if(DEFINED CLPEAK_GIT_ROOT)
-    clpeak_setup_version(clpeak_ffi GIT_ROOT "${CLPEAK_GIT_ROOT}")
-else()
-    clpeak_setup_version(clpeak_ffi)
-endif()
+clpeak_setup_version(clpeak_ffi)
 
 # ---- clpeak-gui: the Flutter desktop app -----------------------------------
 # Builds the Flutter app in <root>/app and assembles a complete bundle at

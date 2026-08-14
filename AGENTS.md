@@ -47,7 +47,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build) |
 | `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image) |
-| `src/common/cmake/` | Version handling (`version.cmake`, `GenVersion.cmake`, `version.h.in`) |
+| `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 | `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
