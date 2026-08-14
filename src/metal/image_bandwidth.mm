@@ -7,7 +7,13 @@
 
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
+    auto test = currentDeviceScope->beginTest(
+        {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+         Category::Unknown,
+         "How many bytes per second the GPU reads through its texture units, "
+         "which take a different path to memory than plain buffer reads.  Each "
+         "reading uses a different pixel format, so they differ in how many "
+         "bytes one pixel costs."});
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
@@ -34,12 +40,19 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         const char     *kname;
         MTLPixelFormat  fmt;
         uint32_t        bytesPerPixel;
+        const char     *note;
     };
     const V vs[] = {
-        { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16 },
-        { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8  },
-        { "rgba8",   "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4  },
-        { "r32f",    "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4  },
+        { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16,
+          "Four colour channels at full 32-bit precision: 16 bytes a pixel, the "
+          "heaviest format here." },
+        { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8,
+          "Four channels at half precision: 8 bytes a pixel." },
+        { "rgba8",   "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4,
+          "Four 8-bit channels: 4 bytes a pixel, the format ordinary images use." },
+        { "r32f",    "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4,
+          "A single 32-bit channel: also 4 bytes a pixel, but one value instead "
+          "of four." },
     };
 
     for (const auto &v : vs)
@@ -52,7 +65,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
         if (!tex)
         {
-            test.skip(v.label, ResultStatus::Error, "Texture alloc failed");
+            test.skip(v.label, ResultStatus::Error, "Texture alloc failed", v.note);
             continue;
         }
 
@@ -74,7 +87,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::image_bandwidth_src,
             mtl_kernels::image_bandwidth_name, v.kname);
         if (!pso) {
-            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed", v.note);
             continue;
         }
 
@@ -123,7 +136,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         float us = (float)(gpuTimedUs / iters);
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
         float gbps = (float)bytes / us / 1e3f;
-        test.emit(v.label, gbps);
+        test.emit(v.label, gbps, v.note);
     }
 
     return 0;
@@ -141,7 +154,12 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
         {"texture_sample_rate", "Texture sample rate (bilinear)", "gtexels",
-         Category::Bandwidth});
+         Category::Bandwidth,
+         "How many filtered texture lookups per second the GPU's sampling "
+         "hardware performs.  Every lookup falls between pixels, so the hardware "
+         "must blend four of them -- the basic operation of drawing any textured "
+         "surface.  The texture is small enough to stay cached, so this measures "
+         "the sampling units rather than memory."});
 
     const unsigned int SAMPLES_PER_WI = 64;   // must match texture_sample.metal
     const NSUInteger imgW = 1024, imgH = 1024;  // 4 MB rgba8 -- SLC-resident
@@ -167,10 +185,14 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
         const char     *kname;
         MTLPixelFormat  fmt;
         uint32_t        bytesPerPixel;
+        const char     *note;
     };
     const V vs[] = {
-        { "rgba8",   "texture_sample_rgba8",   MTLPixelFormatRGBA8Unorm,  4 },
-        { "rgba16f", "texture_sample_rgba16f", MTLPixelFormatRGBA16Float, 8 },
+        { "rgba8",   "texture_sample_rgba8",   MTLPixelFormatRGBA8Unorm,  4,
+          "Blending four 8-bit-per-channel pixels, the common case in games and UI." },
+        { "rgba16f", "texture_sample_rgba16f", MTLPixelFormatRGBA16Float, 8,
+          "Blending four half-precision pixels -- twice the data per lookup, so "
+          "the rate typically drops." },
     };
 
     for (const auto &v : vs)
@@ -183,7 +205,7 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
         if (!tex)
         {
-            test.skip(v.label, ResultStatus::Error, "Texture alloc failed");
+            test.skip(v.label, ResultStatus::Error, "Texture alloc failed", v.note);
             continue;
         }
         {
@@ -203,7 +225,7 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::texture_sample_src,
             mtl_kernels::texture_sample_name, v.kname);
         if (!pso) {
-            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed", v.note);
             continue;
         }
 
@@ -249,7 +271,7 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
         float us = (float)(gpuTimedUs / iters);
         uint64_t samples = (uint64_t)SAMPLES_PER_WI * globalThreads;
         float gtexels = (float)samples / us / 1e3f;   // samples/us -> Gsamples/s
-        test.emit(v.label, gtexels);
+        test.emit(v.label, gtexels, v.note);
     }
 
     return 0;

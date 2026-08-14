@@ -13,6 +13,9 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.title            = "simdgroup_matrix fp16xfp16+fp32 8x8x8";
         d.resultTag           = "simdgroup_matrix_fp16";
         d.unit             = "tflops";
+        d.description      = "Peak speed of Apple's matrix instruction, which multiplies "
+                             "whole 8x8 blocks of 16-bit numbers in one step instead of "
+                             "one value at a time -- the GPU's answer to a tensor core.";
         d.unitDivider      = 1e12;
         d.metricLabel      = "simdgroup_fp16";
         d.kernelName       = "simdgroup_matrix_fp16";
@@ -34,6 +37,9 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         d.title            = "simdgroup_matrix bf16xbf16+fp32 8x8x8";
         d.resultTag           = "simdgroup_matrix_bf16";
         d.unit             = "tflops";
+        d.description      = "The same 8x8 block matrix instruction on bfloat16, the "
+                             "AI-oriented 16-bit format that trades digits of accuracy "
+                             "for a wider number range.  Needs an M3 or newer GPU.";
         d.unitDivider      = 1e12;
         d.metricLabel      = "simdgroup_bf16";
         d.kernelName       = "simdgroup_matrix_bf16";

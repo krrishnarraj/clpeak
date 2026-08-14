@@ -50,8 +50,13 @@ documented and is the reference** — every `TestSpec` there carries a
 `description`, and it shows all three authoring shapes: the plain literal
 (`microarch.cpp`), a note table walked by a loop (`latency.cpp`,
 `bandwidth.cpp`), and one note shared by a family of tests written once at the
-runner (`compute_common.h`'s `ST`/`MT` notes, which serve ~25 tests).  The GPU
-backends are not documented yet.
+runner (`compute_common.h`'s `ST`/`MT` notes, which serve ~25 tests).
+**`src/metal/` is done too**, and shows the fourth shape: a backend whose tests
+run through a descriptor struct carries the strings on that struct
+(`mtl_compute_desc_t::description`, `mtl_compute_variant_t::description`) so
+the shared runner forwards them — the same move the OpenCL / Vulkan / CUDA /
+ROCm / oneAPI backends will need, since they are built the same way and are
+still undocumented.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the

@@ -132,7 +132,12 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
 
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest({"mps-gemm-fp", "MPS GEMM peak", "tflops"});
+    auto test = currentDeviceScope->beginTest(
+        {"mps-gemm-fp", "MPS GEMM peak", "tflops", Category::Unknown,
+         "Matrix-multiply speed through Apple's own tuned GPU library, on a "
+         "large square problem.  Where the compute rows show what the hardware "
+         "can do in principle, this shows what Apple's shipping code actually "
+         "reaches on the operation most graphics and AI work is built from."});
 
     if (!dev.info.isAppleSilicon)
     {
@@ -145,6 +150,14 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t M = D, N = D, K = D;
     const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
+    // One note per dtype row, threaded through every emit / skip site below.
+    const char *fp32Note = "Full 32-bit precision, the accurate but slowest option.";
+    const char *fp16Note = "16-bit inputs, which the GPU's matrix hardware runs at "
+                           "several times the 32-bit rate.";
+    const char *bf16Note = "bfloat16 inputs -- 16 bits arranged for AI work, trading "
+                           "digits of accuracy for a wider number range.  Needs an M3 "
+                           "or newer GPU.";
+
     id<MTLDevice>       mtlDev = dev.impl->device;
     id<MTLCommandQueue> queue  = dev.impl->queue;
 
@@ -155,9 +168,9 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     id<MTLBuffer> bufB = makePrivateBuffer(mtlDev, (uint64_t)K * N * 4);
     if (!bufA || !bufB)
     {
-        test.skip("fp32", ResultStatus::Error, "Failed to allocate input buffers");
-        test.skip("fp16", ResultStatus::Error, "Failed to allocate input buffers");
-        test.skip("bf16", ResultStatus::Error, "Failed to allocate input buffers");
+        test.skip("fp32", ResultStatus::Error, "Failed to allocate input buffers", fp32Note);
+        test.skip("fp16", ResultStatus::Error, "Failed to allocate input buffers", fp16Note);
+        test.skip("bf16", ResultStatus::Error, "Failed to allocate input buffers", bf16Note);
         return -1;
     }
     {
@@ -170,14 +183,15 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
         [cb waitUntilCompleted];
     }
 
-    auto runMatMul = [&](const char *label, MPSDataType dt, uint32_t elemSize)
+    auto runMatMul = [&](const char *label, const char *note, MPSDataType dt,
+                         uint32_t elemSize)
     {
         @autoreleasepool {
             const uint64_t outBytes = (uint64_t)M * N * elemSize;
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufC)
             {
-                test.skip(label, ResultStatus::Error, "output alloc failed");
+                test.skip(label, ResultStatus::Error, "output alloc failed", note);
                 return;
             }
 
@@ -212,7 +226,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double per_iter_us = timeMPSMatMul(queue, mm, matA, matB, matC, warmup);
             if (per_iter_us <= 0.0)
             {
-                test.skip(label, ResultStatus::Error, "timing probe failed");
+                test.skip(label, ResultStatus::Error, "timing probe failed", note);
                 return;
             }
 
@@ -220,18 +234,19 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double mean_us = timeMPSMatMul(queue, mm, matA, matB, matC, iters);
             double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
 
-            test.emit(label, (float)tops);
+            test.emit(label, (float)tops, note);
         }
     };
 
-    auto runGraphMatMul = [&](const char *label, MPSDataType dt, uint32_t elemSize)
+    auto runGraphMatMul = [&](const char *label, const char *note, MPSDataType dt,
+                              uint32_t elemSize)
     {
         @autoreleasepool {
             const uint64_t outBytes = (uint64_t)M * N * elemSize;
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufC)
             {
-                test.skip(label, ResultStatus::Error, "output alloc failed");
+                test.skip(label, ResultStatus::Error, "output alloc failed", note);
                 return;
             }
 
@@ -258,7 +273,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double per_iter_us = timeMPSGraph(queue, g, feeds, results, warmup);
             if (per_iter_us <= 0.0)
             {
-                test.skip(label, ResultStatus::Error, "timing probe failed");
+                test.skip(label, ResultStatus::Error, "timing probe failed", note);
                 return;
             }
 
@@ -266,19 +281,19 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
             double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
 
-            test.emit(label, (float)tops);
+            test.emit(label, (float)tops, note);
         }
     };
 
-    auto reportUnsupported = [&](const char *label, const char *msg)
+    auto reportUnsupported = [&](const char *label, const char *note, const char *msg)
     {
-        test.skip(label, ResultStatus::Unsupported, msg);
+        test.skip(label, ResultStatus::Unsupported, msg, note);
     };
 
     // ---- Run the dtype matrix --------------------------------------------
 
-    runMatMul("fp32", MPSDataTypeFloat32, 4);
-    runMatMul("fp16", MPSDataTypeFloat16, 2);
+    runMatMul("fp32", fp32Note, MPSDataTypeFloat32, 4);
+    runMatMul("fp16", fp16Note, MPSDataTypeFloat16, 2);
 
     // bf16: only via MPSGraph, and only on Apple9+ / OS support where the
     // path actually lowers to bf16 simdgroup_matrix.
@@ -289,16 +304,17 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 #endif
     {
         if (dev.info.mpsGraphBF16Supported)
-            runGraphMatMul("bf16", MPSDataTypeBFloat16, 2);
+            runGraphMatMul("bf16", bf16Note, MPSDataTypeBFloat16, 2);
         else
-            reportUnsupported("bf16", "bf16 requires Apple9 (M3) -- unsupported on this device");
+            reportUnsupported("bf16", bf16Note,
+                              "bf16 requires Apple9 (M3) -- unsupported on this device");
     }
     else
     {
 #if TARGET_OS_IPHONE
-        reportUnsupported("bf16", "bf16 requires iOS 17 -- unsupported on this device");
+        reportUnsupported("bf16", bf16Note, "bf16 requires iOS 17 -- unsupported on this device");
 #else
-        reportUnsupported("bf16", "bf16 requires macOS 14 -- unsupported on this device");
+        reportUnsupported("bf16", bf16Note, "bf16 requires macOS 14 -- unsupported on this device");
 #endif
     }
 
@@ -321,7 +337,12 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t H = 16, N = 4096, F = 128;
 
     auto test = currentDeviceScope->beginTest(
-        {"mps-attention", "MPS attention SDPA (H16 S4096 D128)", "tflops"});
+        {"mps-attention", "MPS attention SDPA (H16 S4096 D128)", "tflops",
+         Category::Unknown,
+         "Speed of the attention step -- the operation a language model spends "
+         "most of its time in, deciding which earlier words each word should "
+         "look at.  Apple's library runs it as one fused unit; the shape is "
+         "fixed at a small-LLM size so the number compares across devices."});
 
     if (!dev.info.isAppleSilicon)
     {

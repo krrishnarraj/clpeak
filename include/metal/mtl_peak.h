@@ -60,6 +60,7 @@ struct mtl_compute_variant_t
   const char *kernelName;          // function name inside the .metal source
   const char *src;                 // .metal source text (may be shared by sibling variants)
   const char *srcName;
+  const char *description;         // what this one reading means (nullptr = undocumented)
 };
 
 struct mtl_compute_desc_t
@@ -68,6 +69,10 @@ struct mtl_compute_desc_t
   const char *resultTag;
   const char *unit;                // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;         // 1e9 = G* (default when 0), 1e12 = T*
+
+  // One or two plain-language sentences on what the test measures; travels to
+  // logger::TestSpec::description (nullptr = undocumented).
+  const char *description;
 
   // Single-variant fallback.
   const char *metricLabel;

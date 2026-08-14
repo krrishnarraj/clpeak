@@ -9,7 +9,13 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     const uint32_t tgSize = 256;
 
-    auto test = currentDeviceScope->beginTest({"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
+    auto test = currentDeviceScope->beginTest(
+        {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+         Category::Unknown,
+         "How many bytes per second the GPU can stream out of main memory, "
+         "reading a buffer far too large to cache.  Each reading fetches a "
+         "different number of values per instruction, since wider fetches "
+         "usually pull more through before the memory system saturates."});
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).
@@ -52,7 +58,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::global_bandwidth_name,
             v.kname);
         if (!pso) {
-            test.skip(v.label, ResultStatus::Error, "Kernel compile failed");
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed",
+                      mtlWidthNote(v.width));
             continue;
         }
 
@@ -68,7 +75,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
         float gbps = (float)bytesRead / us / 1e3f;
-        test.emit(v.label, gbps);
+        test.emit(v.label, gbps, mtlWidthNote(v.width));
     }
 
     return 0;
