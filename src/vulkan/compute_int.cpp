@@ -13,12 +13,12 @@
 int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size },
+    { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size, vkWidthNote(1) },
 #ifdef VK_HAS_COMPUTE_INT32_V2
-    { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size },
+    { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size, vkWidthNote(2) },
 #endif
 #ifdef VK_HAS_COMPUTE_INT32_V4
-    { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size },
+    { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size, vkWidthNote(4) },
 #endif
   };
   int32_t A = 4;
@@ -26,6 +26,9 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Integer compute int32";
   d.resultTag   = "integer_compute";
   d.unit        = "gops";
+  d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
+                  "indexing, addressing and bit manipulation, which shaders do "
+                  "alongside their fractional maths.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT_WORK_PER_WI;
@@ -44,13 +47,20 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   //       instruction issue queue to pipeline).
   // v4 = four parallel chains (enough to saturate dp4a issue rate on
   //       NVIDIA Turing+ / AMD RDNA2+ / Intel Xe+).
+  // Unlike every other sweep here, these variants are independent chains, not
+  // wider vectors -- so they get their own notes rather than vkWidthNote().
   static const vk_compute_variant_t variants[] = {
-    { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size },
+    { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
+      "One chain of dot products, each waiting on the one before it." },
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
-    { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size },
+    { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size,
+      "Two independent chains, so the GPU has a second dot product to get on "
+      "with while the first is still finishing." },
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
-    { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size },
+    { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size,
+      "Four independent chains -- usually enough to keep the dot-product "
+      "hardware busy with no waiting at all." },
 #endif
   };
   int32_t A = 4;
@@ -58,6 +68,9 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "INT8 dot-product compute";
   d.resultTag   = "integer_compute_int8_dp";
   d.unit        = "gops";
+  d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
+                  "four pairs of small whole numbers and sums them in one step -- the "
+                  "workhorse of quantized (compressed) neural networks.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;

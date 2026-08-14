@@ -25,6 +25,11 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.tag = "global_memory_bandwidth";
   testSpec.display = "Global memory bandwidth";
   testSpec.unit = "gbps";
+  testSpec.description =
+      "How many bytes per second the GPU can stream out of its main memory, "
+      "reading a buffer far too large to cache.  Each reading fetches a "
+      "different number of values per instruction, since wider fetches usually "
+      "pull more through before the memory system saturates.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   // Create input + output buffers
@@ -185,7 +190,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     {
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ') key.pop_back();
-      test.skip(key, ResultStatus::Error, "Pipeline creation failed");
+      test.skip(key, ResultStatus::Error, "Pipeline creation failed",
+                vkWidthNote(v.width));
       continue;
     }
     // Match OpenCL: reduce work-group count by vector width so total bytes
@@ -198,12 +204,13 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ') key.pop_back();
     if (timed <= 0.0f)
     {
-      test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+                vkWidthNote(v.width));
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
     float gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
-    test.emit(key, gbps);
+    test.emit(key, gbps, vkWidthNote(v.width));
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

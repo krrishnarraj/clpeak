@@ -23,36 +23,36 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   testSpec.tag = d.resultTag;
   testSpec.display = d.title;
   testSpec.unit = d.unit;
+  if (d.description) testSpec.description = d.description;
   auto test = currentDeviceScope->beginTest(testSpec);
-
-  if (d.skip)
-  {
-    const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
-    if (d.variants && d.numVariants > 0)
-    {
-      for (uint32_t i = 0; i < d.numVariants; i++)
-        test.skip(d.variants[i].label, ResultStatus::Unsupported, msg);
-    }
-    else
-    {
-      test.skip(d.metricLabel, ResultStatus::Unsupported, msg);
-    }
-    return 0;
-  }
 
   // Collect variants.  Multi-variant path (e.g. fp16 v1/v2/v4) shares one
   // buffer + descriptor set and swaps only the pipeline between dispatches;
   // single-variant benchmarks materialize a one-entry list.
-  struct Variant { const char *label; const uint32_t *spirv; size_t spirvSize; };
+  struct Variant { const char *label; const uint32_t *spirv; size_t spirvSize;
+                   const char *description; };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
   {
     for (uint32_t i = 0; i < d.numVariants; i++)
-      variants.push_back({d.variants[i].label, d.variants[i].spirv, d.variants[i].spirvSize});
+      variants.push_back({d.variants[i].label, d.variants[i].spirv,
+                          d.variants[i].spirvSize, d.variants[i].description});
   }
   else
   {
-    variants.push_back({d.metricLabel, d.spirv, d.spirvSize});
+    // Single-variant tests (coopmat) have exactly one reading whose name
+    // restates the test title, so the test-level description covers it.
+    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr});
+  }
+
+  auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+
+  if (d.skip)
+  {
+    const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
+    for (const auto &v : variants)
+      test.skip(v.label, ResultStatus::Unsupported, msg, note(v.description));
+    return 0;
   }
 
   // Size the dispatch to saturate the device and amortize submit overhead.
@@ -161,7 +161,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     VkPipeline pipeline;
     if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline, d.specInfo))
     {
-      test.skip(v.label, ResultStatus::Error, "Pipeline creation failed");
+      test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
+                note(v.description));
       continue;
     }
 
@@ -170,14 +171,15 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                             d.pushData, d.pushSize);
     if (timed <= 0.0f)
     {
-      test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+                note(v.description));
       vkDestroyPipeline(dev.device, pipeline, nullptr);
       continue;
     }
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
 
-    test.emit(v.label, value);
+    test.emit(v.label, value, {false, note(v.description)});
 
     vkDestroyPipeline(dev.device, pipeline, nullptr);
   }

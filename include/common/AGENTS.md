@@ -51,12 +51,15 @@ documented and is the reference** — every `TestSpec` there carries a
 (`microarch.cpp`), a note table walked by a loop (`latency.cpp`,
 `bandwidth.cpp`), and one note shared by a family of tests written once at the
 runner (`compute_common.h`'s `ST`/`MT` notes, which serve ~25 tests).
-**`src/metal/` is done too**, and shows the fourth shape: a backend whose tests
-run through a descriptor struct carries the strings on that struct
-(`mtl_compute_desc_t::description`, `mtl_compute_variant_t::description`) so
-the shared runner forwards them — the same move the OpenCL / Vulkan / CUDA /
-ROCm / oneAPI backends will need, since they are built the same way and are
-still undocumented.
+**`src/metal/` and `src/vulkan/` are done too**, and show the fourth shape: a
+backend whose tests run through a descriptor struct carries the strings on that
+struct (`mtl_compute_desc_t::description`, `vk_compute_variant_t::description`,
+…) so the shared runner forwards them — the same move the OpenCL / CUDA / ROCm
+/ oneAPI backends will need, since they are built the same way and are still
+undocumented.  A shared per-reading phrase gets one helper per backend
+(`mtlWidthNote()` / `vkWidthNote()`), never a cross-backend table: the same
+label means different things in different backends, which is exactly what
+Vulkan's `int8_dp2` (a second *chain*, not a wider vector) demonstrates.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the

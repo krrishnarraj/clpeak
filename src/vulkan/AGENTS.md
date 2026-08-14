@@ -38,6 +38,28 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
 
+## Test documentation
+
+Every test here carries a plain-language `description` for non-expert readers
+(rendered by the GUI's info glyph and the CLI's `--describe`; see
+`include/common/AGENTS.md` § Test documentation for the two levels and the
+style rules).  Vulkan-specific plumbing:
+
+- `vk_compute_desc_t::description` → the test-level text, and
+  `vk_compute_variant_t::description` → the note for that one reading.
+  `runComputeKernel()` forwards both on every path, skips included, so an
+  Unsupported row still explains what it would have measured.
+- `vkWidthNote()` (`vk_peak.h`, next to `targetVulkanGlobalThreads`) is the
+  shared wording for the `float`/`float2`/`float4` vector-width readings, used
+  by the compute tests and the two bandwidth sweeps (whose local variant
+  structs already carry a `width`).
+- **`int8_dp`/`int8_dp2`/`int8_dp4` are NOT a width sweep** — they are one,
+  two and four *independent dot-product chains* (see the comment there), so
+  they carry their own notes.  Do not "unify" them onto `vkWidthNote()`.
+- The coopmat tests are single-reading and their metric name restates the
+  title, so they document the test only; `runComputeKernel()` passes `nullptr`
+  for the reading note on the single-variant path.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.

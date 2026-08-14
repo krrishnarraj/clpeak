@@ -33,7 +33,17 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.tag = "kernel_launch_latency";
   testSpec.display = "Kernel launch latency";
   testSpec.unit = "us";
+  testSpec.description =
+      "The overhead of asking the GPU to do anything at all, measured with a "
+      "shader that does no work.  It is what small, frequent GPU jobs pay "
+      "before any of their own work begins.";
   auto test = currentDeviceScope->beginTest(testSpec);
+
+  const char *dispatchNote = "One way only: from the moment the CPU submits the "
+                             "work to the moment the GPU starts running it.";
+  const char *roundtripNote = "The full round trip -- submit, run, and hear back "
+                              "that it finished.  This is what the CPU waits for "
+                              "if it has nothing else to get on with.";
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};
@@ -267,26 +277,28 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
 
   if (submitFailed)
   {
-    test.skip("dispatch", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    test.skip("dispatch", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+              dispatchNote);
   }
   else if (dispatchSamples > 0)
   {
     float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
-    test.emit("dispatch", dispatchUs);
+    test.emit("dispatch", dispatchUs, dispatchNote);
   }
   else
   {
     test.skip("dispatch", ResultStatus::Unsupported,
-               "Needs VK_EXT_calibrated_timestamps");
+               "Needs VK_EXT_calibrated_timestamps", dispatchNote);
   }
   if (submitFailed)
   {
-    test.skip("roundtrip", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+    test.skip("roundtrip", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+              roundtripNote);
   }
   else
   {
     double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
-    test.emit("roundtrip", (float)avgRoundtripUs);
+    test.emit("roundtrip", (float)avgRoundtripUs, roundtripNote);
   }
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);

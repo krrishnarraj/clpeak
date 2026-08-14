@@ -94,6 +94,23 @@ static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
   return targetGlobalThreads(0);
 }
 
+// Reader-facing note for one reading of a vector-width sweep (float / float2 /
+// float4 and friends).  The compute and bandwidth tests all sweep the same
+// widths and the meaning never changes, so the wording lives here rather than
+// being re-invented at each call site.  NOT for the int8-dot rows: those
+// variants are independent chains, not wider vectors -- see compute_int.cpp.
+static inline const char *vkWidthNote(uint32_t width)
+{
+  switch (width)
+  {
+  case 1: return "One value per thread at a time -- the plain, unvectorised case.";
+  case 2: return "Two values per thread at a time, as one 2-wide vector.";
+  case 4: return "Four values per thread at a time, as one 4-wide vector.";
+  case 8: return "Eight values per thread at a time, as one 8-wide vector.";
+  default: return "";
+  }
+}
+
 // Manages a single Vulkan device for benchmarking
 class VulkanDevice
 {
@@ -153,6 +170,7 @@ struct vk_compute_variant_t
   const char *label;         // column + result metric, e.g. "mp", "mp2", "mp4"
   const uint32_t *spirv;
   size_t spirvSize;
+  const char *description;   // what this one reading means (nullptr = undocumented)
 };
 
 struct vk_compute_desc_t
@@ -163,6 +181,10 @@ struct vk_compute_desc_t
   const char *metricLabel;   // used when variants==nullptr
   const char *unit;          // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;   // 1e9 = G* (default when 0), 1e12 = T*
+
+  // One or two plain-language sentences on what the test measures; travels to
+  // logger::TestSpec::description (nullptr = undocumented).
+  const char *description;
 
   // Single-variant shader (used when variants == nullptr)
   const uint32_t *spirv;

@@ -87,6 +87,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.resultTag   = "coopmat_fp32";
       d.metricLabel = "coopmat_fp32";
       d.unit        = "tflops";
+      d.description = "Peak speed of the GPU's matrix engine (its tensor cores) on "
+                      "full 32-bit numbers.  These units multiply whole small blocks "
+                      "of numbers in one step instead of one value at a time.";
       d.unitDivider = 1e12;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
@@ -111,6 +114,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.resultTag   = "coopmat_fp16";
       d.metricLabel = "coopmat_fp16";
       d.unit        = "tflops";
+      d.description = "The matrix engine on 16-bit inputs with a 32-bit running "
+                      "total -- the everyday precision of AI inference, and usually "
+                      "the fastest widely-supported row here.";
       d.unitDivider = 1e12;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
@@ -135,6 +141,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.resultTag   = "coopmat_bf16";
       d.metricLabel = "coopmat_bf16";
       d.unit        = "tflops";
+      d.description = "The matrix engine on bfloat16 -- 16 bits arranged for AI work, "
+                      "trading digits of accuracy for the number range of a full "
+                      "float, which makes training far more forgiving.";
       d.unitDivider = 1e12;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
@@ -159,6 +168,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.resultTag   = "coopmat_fp8_e4m3";
       d.metricLabel = "coopmat_fp8_e4m3";
       d.unit        = "tflops";
+      d.description = "The matrix engine on 8-bit numbers, in the variant that spends "
+                      "its bits on accuracy rather than range.  Half the data of fp16 "
+                      "per value, so the newest GPUs run it at roughly twice the rate.";
       d.unitDivider = 1e12;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
@@ -185,6 +197,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.resultTag   = "coopmat_fp8_e5m2";
       d.metricLabel = "coopmat_fp8_e5m2";
       d.unit        = "tflops";
+      d.description = "The same 8-bit matrix path in the other variant, which spends "
+                      "its bits on range rather than accuracy -- the one that copes "
+                      "with very large and very small values.";
       d.unitDivider = 1e12;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
@@ -211,6 +226,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     d.resultTag   = "coopmat_int8";
     d.metricLabel = "coopmat_int8";
     d.unit        = "tops";
+    d.description = "The matrix engine on 8-bit whole numbers with a 32-bit running "
+                    "total -- the format quantized neural networks use when they are "
+                    "squeezed down to run fast on cheaper hardware.";
     d.unitDivider = 1e12;
     d.elemSize    = sizeof(int32_t);
     d.pushData    = &A;
