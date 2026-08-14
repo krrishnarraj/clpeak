@@ -209,12 +209,34 @@ so `bin/clpeak-gui` works from anywhere as long as `gui/` travels with it. On ma
 ./clpeak --divide-sqrt-compute        # CPU divider/sqrt-unit throughput (fp32/fp64)
 ./clpeak --atomics --branch-penalty   # CPU sync + branch-mispredict cost probes (ns)
 ./clpeak --coopmat                    # Vulkan tensor-core tests
+./clpeak --describe                   # explain what each test and reading measures
 ./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
 ./clpeak --compare baseline.json      # diff this run against a saved baseline JSON
 ./clpeak --list-devices               # enumerate devices for every backend, no benchmarks
 ```
 
 `--compare baseline.json` re-runs the selected tests and prints each result next to the value saved earlier with `--json-file`, so regressions or driver/SDK upgrades show up as a per-test delta.
+
+`--describe` adds a plain-language line or two under each test header, and a note under each reading whose name doesn't speak for itself:
+
+```console
+$ clpeak --cpu --memory-latency --describe
+
+    Memory latency (pointer-chase) (NS)
+      How long the core waits for one memory read when it has nothing else to do
+      -- each read's address comes from the previous read, so the hardware
+      cannot start the next one early.
+
+      L1          : 1.25
+                    Reading from the small cache inside the core.
+      DRAM        : 121.37
+                    Reading from main memory at random -- the worst case.
+      DRAM x8     : 15.85
+                    Eight independent chases at once: the reads overlap instead
+                    of waiting in turn, so each costs less.
+```
+
+The same text sits behind the ⓘ glyphs in the GUI. Tests documented so far show it; the rest print as before.
 
 ### Selecting a specific device
 

@@ -185,7 +185,8 @@ int main(int argc, char **argv)
             continue;
 
         auto peak = be.create();
-        peak->log.reset(new LoggerText(std::cout, opts.compareFile));
+        peak->log.reset(
+            new LoggerText(std::cout, opts.compareFile, opts.describe));
         peak->applyOptions(opts);
         int status = peak->runAll();
         mergeResults(combined, peak->log->results);

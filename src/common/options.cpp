@@ -26,6 +26,7 @@ static const char *helpStr =
 #endif
     "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
     "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
+    "\n  --describe                  explain what each test and each reading measures"
     "\n  --list-devices              list available devices for every backend and exit"
     "\n  --xml-file file             save results to an XML file"
     "\n  --json-file file            save results to a JSON file"
@@ -459,6 +460,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     else if (!strcmp(a, "--verbose"))
     {
       out.verbose = true;
+    }
+    else if (!strcmp(a, "--describe"))
+    {
+      out.describe = true;
     }
     // ---- backend selection ----------------------------------------------
 #ifdef ENABLE_OPENCL

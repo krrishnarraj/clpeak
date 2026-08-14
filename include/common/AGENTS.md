@@ -40,9 +40,11 @@ reopened file explains itself.  Whitespace is collapsed to single spaces on
 the way in, so the line-oriented CSV/XML/JSON writers stay safe no matter how
 the literal is wrapped in source.
 
-Undocumented tests and readings carry empty strings and the GUI shows no info
-affordance for them, so documenting is purely additive.  `src/cpu/latency.cpp`
-(`memory_latency`) is the worked example of both levels.
+Two consumers render them: the GUI behind an info glyph, and the CLI under
+`--describe` (off by default — the plain output stays a table).  Undocumented
+tests and readings carry empty strings and neither shows anything for them, so
+documenting is purely additive.  `src/cpu/latency.cpp` (`memory_latency`) is
+the worked example of both levels.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the
@@ -53,8 +55,8 @@ std::string parameter makes existing braced calls (`emit(m, v, {true})`)
 ambiguous, since a braced bool also matches std::string's `initializer_list`
 constructor. Pass `.c_str()` for a composed description, or use `EmitOptions`.
 
-See also: `app/AGENTS.md` (the GUI affordance) and `src/ffi/AGENTS.md` (the
-`desc` / `minfo` event fields).
+See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
+`desc` / `minfo` event fields) and `logger_text.h` (`--describe` rendering).
 
 ## Key Files
 

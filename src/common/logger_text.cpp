@@ -7,6 +7,15 @@
 
 static const int MIN_METRIC_PAD = 8;   // minimum column width for metric names
 
+// --describe wraps prose to this width.  Fixed rather than read off the
+// terminal: output is routinely piped, redirected and diffed, and a width that
+// changes with the window would make those results differ run to run.
+static const int DESCRIBE_WIDTH = 80;
+
+// Narrowest prose column worth wrapping to; below it, deep indentation would
+// leave a ragged one-word-per-line column, so let the text overrun instead.
+static const int MIN_DESCRIBE_COLUMN = 32;
+
 static std::string statusTag(ResultStatus status)
 {
     switch (status)
@@ -118,6 +127,15 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     }
 
     writeLine(header);
+
+    // What the test measures, under its own header and one step in from it,
+    // then a blank line so the readings below still read as a block.
+    if (describe && !e.testDescription.empty())
+    {
+        writeWrapped(metricIndent * 2, e.testDescription);
+        out << "\n";
+    }
+
     metricLines.clear();
     out.flush();
 }
@@ -127,7 +145,8 @@ void LoggerText::renderTestBegin(const LogEvent &e)
 void LoggerText::renderMetric(const LogEvent &e)
 {
     metricLines.push_back({e.entry.metric, e.entry.value, e.entry.status,
-                           e.entry.reason, e.subMetric, e.entry.key()});
+                           e.entry.reason, e.subMetric, e.entry.key(),
+                           e.entry.metricDescription});
 }
 
 // ── TestSkippedAll ─────────────────────────────────────────────────────────
@@ -215,6 +234,12 @@ void LoggerText::flushMetrics()
             out << indentStr(lineIndent) << padded << " : ["
                 << statusTag(ml.status) << "] " << ml.reason << "\n";
         }
+
+        // The reading's own note on the line below it, left-aligned with the
+        // value column: one straight edge for every note in the test, and
+        // clearly subordinate to the row it belongs to.
+        if (describe && !ml.description.empty())
+            writeWrapped(lineIndent * 2 + padTarget + 3, ml.description);
     }
 
     metricLines.clear();
@@ -238,6 +263,37 @@ void LoggerText::writeLine(int level, const std::string &text)
 void LoggerText::writeLine(const std::string &text)
 {
     writeLine(indentLevel, text);
+}
+
+void LoggerText::writeWrapped(int column, const std::string &text)
+{
+    if (column < 0)
+        column = 0;
+    const std::string pad(static_cast<size_t>(column), ' ');
+
+    int width = DESCRIBE_WIDTH - column;
+    if (width < MIN_DESCRIBE_COLUMN)
+        width = MIN_DESCRIBE_COLUMN;
+
+    // Descriptions arrive whitespace-collapsed (logger.cpp), so splitting on
+    // single spaces is enough to recover the words.
+    std::string line;
+    std::istringstream words(text);
+    std::string word;
+    while (words >> word)
+    {
+        if (!line.empty() &&
+            static_cast<int>(line.size() + 1 + word.size()) > width)
+        {
+            out << pad << line << "\n";
+            line.clear();
+        }
+        if (!line.empty())
+            line += ' ';
+        line += word;           // a word longer than the column overruns it
+    }
+    if (!line.empty())
+        out << pad << line << "\n";
 }
 
 void LoggerText::printBaselineDelta(const std::string &key, float value)

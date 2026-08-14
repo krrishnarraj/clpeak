@@ -69,6 +69,11 @@ struct CliOptions {
   // launch errors, library exceptions) that are suppressed by default.
   bool verbose = false;
 
+  // Print, alongside the readings, what each test and each reading measures
+  // (the descriptions authored at the beginTest()/emit() call sites).  Off by
+  // default: the plain output is a table for people who already know it.
+  bool describe = false;
+
   CliOptions()
   {
     enabledTests.set();

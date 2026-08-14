@@ -28,7 +28,7 @@ used by the Flutter GUI on every platform).
 | — | Test tags are *not* reversible to display names: `emitVariants` (`src/cpu/compute_common.h`) slugs a runtime ISA onto the base tag, so `ResultEntry::display` must be persisted, never re-derived |
 | `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook |
 | — | Documentation (`TestSpec::description`, `EmitOptions::description`) is whitespace-collapsed to one line here and stamped onto the rows, since all three dump formats are line-oriented — see `include/common/AGENTS.md` |
-| `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text + baseline deltas (desktop CLI) |
+| `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text + baseline deltas, and under `--describe` the wrapped test/reading documentation (desktop CLI) |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`) |
 | `common.cpp` (also) | `clpeak::requestCancel()/cancelRequested()` — cooperative run cancellation observed in `Peak::isAllowed()` + backend device loops |
