@@ -37,6 +37,8 @@ shared library / Apple framework.
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
 | `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |
+| `android/CMakeLists.txt` | Android superproject (OpenCL stub + NDK Vulkan + CPU) |
+| `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + optional MoltenVK Vulkan) |
 
 ## Traps
 
@@ -50,8 +52,6 @@ shared library / Apple framework.
   everything they contain must be PIC — including the vendored OpenCL ICD
   loader (`src/opencl/cmake/BuildSdk.cmake` passes
   `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` into that nested build).
-| `android/CMakeLists.txt` | Android superproject (OpenCL stub + NDK Vulkan + CPU) |
-| `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + optional MoltenVK Vulkan) |
 
 ## Contracts
 

@@ -298,9 +298,7 @@ message(STATUS "")
 message(STATUS "===============================================================")
 message(STATUS "clpeak components summary")
 message(STATUS "")
-# The version is derived once, here at configure time (src/common/cmake/
-# version.cmake explains why), so print it: re-running cmake is what refreshes
-# it after a commit.
+# Derived at configure time, so re-running cmake is what refreshes it.
 message(STATUS "  Version: ${CLPEAK_VERSION_STR}")
 message(STATUS "")
 # Print the multi-line block.  CMake `message(STATUS "...")` re-prefixes

@@ -17,17 +17,11 @@ Git-describe version derivation and the generated `version.h.in` template.
 
 ## Rules
 
-- **Derive the version once, at configure time.** There used to be a build-time
-  regeneration step (`GenVersion.cmake` + a `clpeak_version_gen` target) so the
-  string tracked new commits without reconfiguring. It tied the version to the
-  tree's state *during* the build, and the GUI build dirties the tree — the
-  Flutter SDK rewrites `pubspec.lock`, `analysis_options.yaml` and the generated
-  plugin registrants whenever its version differs from the one that produced the
-  committed copies. CPack's `preinstall` pass then rebuilt against that and
-  relinked release binaries as `-dirty` from a pristine tag checkout. An
-  exclude-list of those files was tried first and was already incomplete on its
-  first CI run; deriving once, before anything has run, is what actually closes
-  it. Do not reintroduce build-time derivation.
+- **Derive the version once, at configure time — never during the build.** The
+  GUI build rewrites tracked files (the Flutter SDK owns `pubspec.lock`,
+  `analysis_options.yaml`, the generated plugin registrants), so anything
+  re-deriving mid-build stamps release binaries `-dirty` from a clean checkout.
+  Excluding those files is not a fix — the SDK decides that set, not us.
 - The trade-off is that the string is fixed until the next configure: after
   committing, re-run `cmake -B build` to refresh it. The configure summary
   prints the version so it is visible.

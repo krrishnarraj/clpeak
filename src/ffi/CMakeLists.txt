@@ -128,13 +128,10 @@ if(NOT CLPEAK_FFI_STANDALONE)
         # tag the SDK picks.
         #
         # The flutter call gets a target to itself, and that is load-bearing:
-        # FLUTTER_EXECUTABLE is flutter.BAT here, and both the VS and Ninja
-        # generators put every COMMAND of a custom target into ONE batch
-        # script.  cmd.exe transfers control permanently when a .bat invokes
-        # another .bat without `call`, so any command sequenced after flutter
-        # is silently skipped -- the build still goes green and the bundle is
-        # simply never staged (CI hit this as a CPack "cannot find
-        # build/clpeak-gui").  Nothing may follow flutter in its script.
+        # FLUTTER_EXECUTABLE is flutter.BAT, the generators put every COMMAND of
+        # a target into ONE batch script, and cmd.exe transfers control
+        # permanently when a .bat invokes a .bat without `call` -- anything
+        # sequenced after flutter is silently skipped, build still green.
         add_custom_target(clpeak-gui-flutter
             COMMAND ${FLUTTER_EXECUTABLE} build windows --release
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
@@ -216,8 +213,7 @@ exec \"$here/../gui/clpeak-gui\" \"$@\"
         endif()
         # Say plainly when the bundle was never staged: file(INSTALL)'s own
         # message for a missing source directory is "cannot find <dir>: File
-        # exists", which reads like a collision and sent a real CI failure
-        # down the wrong path.
+        # exists", which reads like a collision.
         install(CODE "
             if(NOT IS_DIRECTORY \"${CLPEAK_GUI_OUT}\")
                 message(FATAL_ERROR

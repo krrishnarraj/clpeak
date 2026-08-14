@@ -1,23 +1,12 @@
 # cmake/version.cmake
-# Derives CLPEAK_VERSION_STR from git-describe ONCE, at configure time, and
-# generates version.h from it.  Falls back to a hardcoded version when building
-# from a tarball (no .git).
+# Derives CLPEAK_VERSION_STR from git-describe and generates version.h from it.
+# Falls back to a hardcoded version when building from a tarball (no .git).
 #
-# Deliberately not re-derived during the build.  It used to be: a custom target
-# re-ran git-describe on every build so the string picked up new commits without
-# reconfiguring.  That tied the version to the state of the tree *while the build
-# was running* -- and the GUI build modifies tracked files, because the Flutter
-# SDK rewrites pubspec.lock, analysis_options.yaml and the generated plugin
-# registrants whenever its version differs from the one that produced the
-# committed copies (routine in CI, which tracks Flutter stable).  CPack's
-# preinstall pass then rebuilt against that dirtied tree and relinked the
-# binaries as "-dirty" -- from a pristine tag checkout.  Excluding the
-# offending files one by one was whack-a-mole: the list was incomplete the
-# first time CI ran it.  Deriving once, before anything else has run, closes
-# the whole class of problem instead of the instances of it.
-#
-# Consequence: the string is fixed at configure time, so after committing,
-# re-run `cmake -B build` to refresh it.  The configure summary prints it.
+# Derived once, at configure time, never during the build: the GUI build rewrites
+# tracked files (Flutter owns pubspec.lock, analysis_options.yaml and the
+# generated plugin registrants), which anything re-deriving later reads as
+# "-dirty".  Re-run `cmake -B build` after committing to refresh the string (the
+# configure summary prints it).
 #
 # Callers may set CLPEAK_GIT_ROOT before including this file to override the
 # git working directory; it otherwise resolves to the repo root relative to

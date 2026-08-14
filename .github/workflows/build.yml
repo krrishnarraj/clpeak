@@ -244,9 +244,8 @@ jobs:
       # any bundled runtime libs.  -C Release picks the Release artifacts on
       # multi-config generators (Windows); harmless on single-config.
       # The GUI build rewrites tracked files the Flutter SDK owns (pubspec.lock,
-      # analysis_options.yaml, the generated plugin registrants).  That no longer
-      # reaches the version stamp -- it is derived once at configure time, before
-      # any of this runs -- but the churn is worth seeing, so print it.
+      # analysis_options.yaml, the generated plugin registrants).  Harmless --
+      # the version is derived before any of it -- but worth seeing in the log.
       - name: Report working-tree state
         shell: bash
         run: git status --porcelain --untracked-files=no
@@ -367,11 +366,9 @@ jobs:
           flutter analyze
           flutter test
 
-      # Unlike every other job, this one runs Flutter before the native build
-      # configures -- and `flutter pub get` rewrites tracked files the SDK owns
-      # (pubspec.lock, analysis_options.yaml).  Left in place, that churn is
-      # what git-describe sees, so the APK's native lib gets stamped -dirty from
-      # a pristine checkout.  Nothing here is a real edit: drop it.
+      # This job runs Flutter before the native build configures, so `flutter pub
+      # get`'s rewrites of SDK-owned files would be what git-describe sees --
+      # stamping the APK's native lib -dirty.  None of it is a real edit.
       - name: Discard Flutter-owned file churn
         run: |
           git status --porcelain --untracked-files=no
