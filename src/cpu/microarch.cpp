@@ -38,7 +38,11 @@
 int CpuPeak::runAtomics(benchmark_config_t &cfg)
 {
   logger::TestSpec spec{"atomics", "Atomic fetch-add latency", "ns",
-                        Category::Latency};
+                        Category::Latency,
+                        "How long one all-or-nothing counter update takes.  This is "
+                        "the operation behind locks, reference counts and every "
+                        "shared data structure, so it sets the cost of coordinating "
+                        "between threads."};
   auto test = currentDeviceScope->beginTest(spec);
 
   struct alignas(64) PaddedAtomic { std::atomic<uint64_t> v{0}; };
@@ -54,12 +58,17 @@ int CpuPeak::runAtomics(benchmark_config_t &cfg)
   double us1 = runWorkload(1,    body, cfg.targetTimeUs, forced);
   double usN = runWorkload(maxT, body, cfg.targetTimeUs, forced);
 
-  if (us1 > 0) test.emit("uncontended ST", (float)(us1 * 1e3));
-  else         test.skip("uncontended ST", ResultStatus::Error, "workload failed");
+  const char *unNote = "One thread updating a counter nobody else touches, so it "
+                       "stays in that core's own cache.";
+  const char *coNote = "Every core fighting over the same counter, which has to be "
+                       "handed from core to core -- the time between completed "
+                       "updates anywhere on the chip.";
+  if (us1 > 0) test.emit("uncontended ST", (float)(us1 * 1e3), unNote);
+  else         test.skip("uncontended ST", ResultStatus::Error, "workload failed", unNote);
   // Each of the maxT threads completes one op per mean iteration, so the
   // system-wide time between completions is wall / maxT.
-  if (usN > 0) test.emit("contended MT", (float)(usN * 1e3 / (double)maxT));
-  else         test.skip("contended MT", ResultStatus::Error, "workload failed");
+  if (usN > 0) test.emit("contended MT", (float)(usN * 1e3 / (double)maxT), coNote);
+  else         test.skip("contended MT", ResultStatus::Error, "workload failed", coNote);
   return 0;
 }
 
@@ -133,22 +142,32 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
 {
   (void)cfg;
   logger::TestSpec spec{"branch_mispredict", "Branch mispredict penalty", "ns",
-                        Category::Latency};
+                        Category::Latency,
+                        "What it costs when the CPU guesses the wrong way at an "
+                        "if-statement.  The same loop runs over sorted data (easy to "
+                        "guess) and shuffled data (a coin flip), and the difference "
+                        "is the price of a wrong guess."};
   auto test = currentDeviceScope->beginTest(spec);
 
   // Pinned single-thread, like the pointer-chase.
   double pred = -1.0, rnd = -1.0, pen = -1.0;
   pool->run(1, [&](int) { branchPenalty(pred, rnd, pen); });
 
+  const char *penNote = "The extra time one wrong guess costs, worked out from the "
+                        "gap between the other two readings.";
   if (pred > 0 && rnd > 0)
   {
-    test.emit("predicted", (float)pred);      // ns/branch, sorted input
-    test.emit("random", (float)rnd);          // ns/branch, 50/50 input
-    test.emit("penalty", (float)std::max(pen, 0.0));  // ns per mispredict
+    test.emit("predicted", (float)pred,       // ns/branch, sorted input
+              "Time per if-statement on sorted data, where the CPU guesses right "
+              "every time.");
+    test.emit("random", (float)rnd,           // ns/branch, 50/50 input
+              "Time per if-statement on shuffled data, where the CPU is wrong "
+              "about half the time.");
+    test.emit("penalty", (float)std::max(pen, 0.0), penNote);  // ns per mispredict
   }
   else
   {
-    test.skip("penalty", ResultStatus::Error, "branch benchmark failed");
+    test.skip("penalty", ResultStatus::Error, "branch benchmark failed", penNote);
   }
   return 0;
 }
@@ -318,7 +337,12 @@ static std::vector<int> primaryCpusPerCore(int logicalCores)
 
 int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
 {
-  logger::TestSpec spec{"smt_scaling", "SMT scaling (fp32 FMA)", "gflops"};
+  logger::TestSpec spec{"smt_scaling", "SMT scaling (fp32 FMA)", "gflops",
+                        Category::Unknown,
+                        "Whether the CPU's extra hardware threads (SMT, or Intel's "
+                        "Hyper-Threading) actually add throughput: the same maths "
+                        "kernel run once with one thread per physical core, then "
+                        "again on every thread the chip offers."};
   auto test = currentDeviceScope->beginTest(spec);
 
   if (info.logicalCores <= info.physicalCores || info.physicalCores < 1)
@@ -375,10 +399,14 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   auto giga = [&](int n, double us) {
     return (float)(chain->v.opsPerIter * (double)n / (us * 1e3));
   };
-  if (usPhys > 0) test.emit("1T/core", giga(nPhys, usPhys));
-  else            test.skip("1T/core", ResultStatus::Error, "workload failed");
-  if (usAll > 0)  test.emit("SMT MT", giga(nAll, usAll));
-  else            test.skip("SMT MT", ResultStatus::Error, "workload failed");
+  const char *physNote = "One thread per physical core, with the extra hardware "
+                         "threads left idle.";
+  const char *smtNote  = "Every hardware thread busy, including the second thread "
+                         "sharing each core.";
+  if (usPhys > 0) test.emit("1T/core", giga(nPhys, usPhys), physNote);
+  else            test.skip("1T/core", ResultStatus::Error, "workload failed", physNote);
+  if (usAll > 0)  test.emit("SMT MT", giga(nAll, usAll), smtNote);
+  else            test.skip("SMT MT", ResultStatus::Error, "workload failed", smtNote);
   return 0;
 }
 

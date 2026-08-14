@@ -119,7 +119,12 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
   // ---- Accelerate BLAS GEMM: fp32 + fp64 ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"accelerate_gemm", std::string("Accelerate GEMM") + engine, "gflops"});
+        {"accelerate_gemm", std::string("Accelerate GEMM") + engine, "gflops",
+         Category::Unknown,
+         "Matrix-multiply speed through Apple's Accelerate library, the only way "
+         "to reach the matrix coprocessor Apple ships but does not expose as "
+         "instructions.  The library uses every core itself, so there is no "
+         "single-thread row."});
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -153,19 +158,33 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
     CLPEAK_VLOG("  [accelerate] peak sizes: sgemm N=%llu, dgemm N=%llu\n",
                 (unsigned long long)sp.peakN, (unsigned long long)dp.peakN);
 
-    if (sp.peakGflops > 0.0) test.emit("sgemm", (float)sp.peakGflops);
-    else                     test.skip("sgemm", ResultStatus::Error, "sgemm sweep failed");
+    const char *spNote = "Best 32-bit result over a sweep of matrix sizes; the "
+                         "coprocessor is fastest at one particular size.";
+    const char *dpNote = "Best 64-bit result over the same size sweep.";
+    if (sp.peakGflops > 0.0) test.emit("sgemm", (float)sp.peakGflops, spNote);
+    else                     test.skip("sgemm", ResultStatus::Error, "sgemm sweep failed", spNote);
     // Large-N sustained row only when the 8k size actually ran (RAM-gated).
     if (sp.largestN >= 8192)
-      test.emit("sgemm 8k", (float)sp.largestGflops);
-    if (dp.peakGflops > 0.0) test.emit("dgemm", (float)dp.peakGflops);
-    else                     test.skip("dgemm", ResultStatus::Error, "dgemm sweep failed");
+      test.emit("sgemm 8k", (float)sp.largestGflops,
+                "The 32-bit rate on 8192x8192 matrices -- what large, realistic "
+                "problems actually sustain.");
+    if (dp.peakGflops > 0.0) test.emit("dgemm", (float)dp.peakGflops, dpNote);
+    else                     test.skip("dgemm", ResultStatus::Error, "dgemm sweep failed", dpNote);
   }
 
   // ---- BNNS matmul: fp16 / bf16 (+ int8 unsupported row) ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"bnns_matmul", std::string("BNNS matmul") + engine, "gflops"});
+        {"bnns_matmul", std::string("BNNS matmul") + engine, "gflops",
+         Category::Unknown,
+         "Matrix-multiply speed through Apple's BNNS library, the only public "
+         "route to reduced-precision (16-bit) matrix maths on Apple Silicon."});
+
+    const char *fp16Note = "16-bit float inputs.";
+    const char *bf16Note = "bfloat16 inputs, the AI-oriented 16-bit format.  On "
+                           "chips with no bf16 hardware the library emulates it, "
+                           "and the rate falls accordingly.";
+    const char *int8Note = "8-bit whole-number inputs.";
 
     if (__builtin_available(macOS 13.0, iOS 16.0, *))
     {
@@ -203,26 +222,27 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
       };
 
       double fp16 = runBnns(BNNSDataTypeFloat16, 2, "bnns fp16");
-      if (fp16 > 0.0) test.emit("fp16", (float)fp16);
+      if (fp16 > 0.0) test.emit("fp16", (float)fp16, fp16Note);
       else            test.skip("fp16", ResultStatus::Unsupported,
-                                "BNNSMatMul rejected fp16 operands");
+                                "BNNSMatMul rejected fp16 operands", fp16Note);
 
       double bf16 = runBnns(BNNSDataTypeBFloat16, 2, "bnns bf16");
-      if (bf16 > 0.0) test.emit("bf16", (float)bf16);
+      if (bf16 > 0.0) test.emit("bf16", (float)bf16, bf16Note);
       else            test.skip("bf16", ResultStatus::Unsupported,
-                                "BNNSMatMul rejected bf16 operands");
+                                "BNNSMatMul rejected bf16 operands", bf16Note);
 #pragma clang diagnostic pop
     }
     else
     {
       test.skip("fp16", ResultStatus::Unsupported,
-                "BNNSMatMul needs macOS 13 / iOS 16");
+                "BNNSMatMul needs macOS 13 / iOS 16", fp16Note);
       test.skip("bf16", ResultStatus::Unsupported,
-                "BNNSMatMul needs macOS 13 / iOS 16");
+                "BNNSMatMul needs macOS 13 / iOS 16", bf16Note);
     }
 
     test.skip("int8", ResultStatus::Unsupported,
-              "BNNS exposes no int8 GEMM (quantized inference layers only)");
+              "BNNS exposes no int8 GEMM (quantized inference layers only)",
+              int8Note);
   }
 
   return 0;

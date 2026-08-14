@@ -44,11 +44,16 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
     return (float)(opsPerIter * (double)n / (meanUs * 1e3));
   };
 
-  if (us1 > 0.0) test.emit(label + " ST", giga(opsPerIterPerThread, 1, us1));
-  else           test.skip(label + " ST", ResultStatus::Error, "workload failed");
+  // ST/MT mean the same thing in every test that goes through this runner, so
+  // the reader-facing notes live here instead of at each of the ~25 call sites.
+  static const char *stNote = "One thread, running on a single core.";
+  static const char *mtNote = "Every hardware thread at once -- the whole chip.";
 
-  if (usN > 0.0) test.emit(label + " MT", giga(opsPerIterPerThread, maxT, usN));
-  else           test.skip(label + " MT", ResultStatus::Error, "workload failed");
+  if (us1 > 0.0) test.emit(label + " ST", giga(opsPerIterPerThread, 1, us1), stNote);
+  else           test.skip(label + " ST", ResultStatus::Error, "workload failed", stNote);
+
+  if (usN > 0.0) test.emit(label + " MT", giga(opsPerIterPerThread, maxT, usN), mtNote);
+  else           test.skip(label + " MT", ResultStatus::Error, "workload failed", mtNote);
 }
 
 // Canonical ISA label -> tag suffix, e.g. "AVX-512" -> "avx_512",

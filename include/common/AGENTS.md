@@ -43,8 +43,15 @@ the literal is wrapped in source.
 Two consumers render them: the GUI behind an info glyph, and the CLI under
 `--describe` (off by default — the plain output stays a table).  Undocumented
 tests and readings carry empty strings and neither shows anything for them, so
-documenting is purely additive.  `src/cpu/latency.cpp` (`memory_latency`) is
-the worked example of both levels.
+documenting is purely additive.
+
+Coverage is per backend, one backend at a time.  **`src/cpu/` is fully
+documented and is the reference** — every `TestSpec` there carries a
+`description`, and it shows all three authoring shapes: the plain literal
+(`microarch.cpp`), a note table walked by a loop (`latency.cpp`,
+`bandwidth.cpp`), and one note shared by a family of tests written once at the
+runner (`compute_common.h`'s `ST`/`MT` notes, which serve ~25 tests).  The GPU
+backends are not documented yet.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the

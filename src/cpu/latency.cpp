@@ -280,8 +280,9 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   pool->run(1, [&](int) { ns32 = chaseParallelNs<32>(dramBytes); });
   const char *note8 = "Eight independent chases at once: the reads overlap "
                       "instead of waiting in turn, so each costs less.";
-  const char *note32 = "Thirty-two chases at once -- how many memory reads "
-                       "this core keeps in flight before it stops gaining.";
+  const char *note32 = "Thirty-two chases at once -- deep enough that the core "
+                       "runs out of room for further overlap, so the cost per "
+                       "read stops falling.";
   if (ns8 > 0)  test.emit("DRAM x8",  (float)ns8, note8);
   else          test.skip("DRAM x8",  ResultStatus::Error, "latency walk failed", note8);
   if (ns32 > 0) test.emit("DRAM x32", (float)ns32, note32);

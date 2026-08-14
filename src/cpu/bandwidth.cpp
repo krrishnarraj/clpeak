@@ -57,7 +57,11 @@ static inline uint64_t readBufferChecksum(const float *p, size_t M, uint64_t ite
 int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 {
   logger::TestSpec spec{"cache_bandwidth", "Cache bandwidth (read)", "gbps",
-                        Category::Bandwidth};
+                        Category::Bandwidth,
+                        "How many bytes per second the CPU can read out of each "
+                        "cache, from the tiny fast one next to the core to the big "
+                        "slow one shared by all of them.  Each reading uses a working "
+                        "set sized to stay inside the cache it names."};
   auto test = currentDeviceScope->beginTest(spec);
 
   const int maxT = pool->maxThreads();
@@ -77,11 +81,22 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
 
-  struct Level { const char *name; uint64_t bytes; bool sharedForMt; };
+  // The notes ride the level table (rather than the emit sites below) so a
+  // level's name and its explanation stay adjacent.
+  struct Level { const char *name; uint64_t bytes; bool sharedForMt;
+                 const char *stNote; const char *mtNote; };
   const Level levels[] = {
-    {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false},
-    {"L2", std::max<uint64_t>(info.l2CacheBytes  / 2, 16384), appleCpu},
-    {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true},
+    {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false,
+     "One thread reading from the small cache inside its own core.",
+     "Every core reading from its own L1 at the same time."},
+    {"L2", std::max<uint64_t>(info.l2CacheBytes  / 2, 16384), appleCpu,
+     "One thread reading from the mid-level cache, the next step out.",
+     "Every core reading from L2 at once; where L2 is shared, the data is "
+     "split between them so it still fits."},
+    {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true,
+     "One thread reading from the large cache shared by all cores.",
+     "Every core reading from that shared cache at once, each taking a slice "
+     "of it."},
   };
 
   unsigned int forced = forceIters ? specifiedIters : 0;
@@ -115,10 +130,10 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
     };
 
-    if (us1 > 0) test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1));
-    else         test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed");
-    if (usN > 0) test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN));
-    else         test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed");
+    if (us1 > 0) test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1), lvl.stNote);
+    else         test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote);
+    if (usN > 0) test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN), lvl.mtNote);
+    else         test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote);
   }
 
   volatile uint64_t keep = 0;
@@ -139,7 +154,11 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   // threshold and would bypass the very cache under test.
   {
     logger::TestSpec wspec{"l1_write_bandwidth", "L1 bandwidth (write / copy)",
-                           "gbps", Category::Bandwidth};
+                           "gbps", Category::Bandwidth,
+                           "How many bytes per second a core can write into its "
+                           "nearest cache, and copy within it.  Cores have fewer "
+                           "paths out to memory than in, so writing usually lands "
+                           "below the matching read row."};
     auto wtest = currentDeviceScope->beginTest(wspec);
 
     // A QUARTER of the L1, not half like the read row: on a hybrid chip
@@ -164,19 +183,25 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
     };
 
+    const char *wStNote = "One thread storing new values into its own L1.";
+    const char *wMtNote = "Every core storing into its own L1 at the same time.";
+    const char *cStNote = "One thread copying inside L1 -- one read plus one write "
+                          "for every byte moved.";
+    const char *cMtNote = "Every core copying inside its own L1 at the same time.";
+
     double us1 = runWorkload(1,    writeBody, cfg.targetTimeUs, forced);
     double usN = runWorkload(maxT, writeBody, cfg.targetTimeUs, forced);
-    if (us1 > 0) wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1));
-    else         wtest.skip("write ST", ResultStatus::Error, "write failed");
-    if (usN > 0) wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN));
-    else         wtest.skip("write MT", ResultStatus::Error, "write failed");
+    if (us1 > 0) wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1), wStNote);
+    else         wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote);
+    if (usN > 0) wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
+    else         wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote);
 
     us1 = runWorkload(1,    copyBody, cfg.targetTimeUs, forced);
     usN = runWorkload(maxT, copyBody, cfg.targetTimeUs, forced);
-    if (us1 > 0) wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1));
-    else         wtest.skip("copy ST", ResultStatus::Error, "copy failed");
-    if (usN > 0) wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN));
-    else         wtest.skip("copy MT", ResultStatus::Error, "copy failed");
+    if (us1 > 0) wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1), cStNote);
+    else         wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote);
+    if (usN > 0) wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
+    else         wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote);
   }
   return 0;
 }
@@ -209,7 +234,10 @@ static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "DRAM bandwidth", "gbps"});
+    {"global_memory_bandwidth", "DRAM bandwidth", "gbps", Category::Unknown,
+     "How many bytes per second all cores together can move to and from main "
+     "memory.  The arrays are far too big for any cache, so every access goes "
+     "out to RAM; these are the three classic STREAM access patterns."});
 
   const int maxT = pool->maxThreads();
   const size_t N = pickStreamFloats(info, maxT);
@@ -248,7 +276,8 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
       sink[(size_t)tid] ^= readBufferChecksum(A + lo, hi - lo, iters);
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("read", gbps((double)N * sizeof(float), us));
+    test.emit("read", gbps((double)N * sizeof(float), us),
+              "Reading one large array straight through, start to end.");
   }
   {
     Workload body = [&](int tid, uint64_t iters) {
@@ -257,7 +286,9 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
         std::memcpy(A + lo, C + lo, (hi - lo) * sizeof(float));
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("copy", gbps(2.0 * N * sizeof(float), us));
+    test.emit("copy", gbps(2.0 * N * sizeof(float), us),
+              "Copying one large array into another -- a read and a write for "
+              "every element.");
   }
   {
     const float s = 1.5f;
@@ -268,7 +299,9 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
           A[i] = B[i] + s * C[i];
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("triad", gbps(3.0 * N * sizeof(float), us));
+    test.emit("triad", gbps(3.0 * N * sizeof(float), us),
+              "Scaling one array, adding a second and storing to a third: two "
+              "reads and a write per element, the hardest of the three.");
   }
 
   volatile uint64_t keep = 0;
