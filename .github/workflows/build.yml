@@ -367,6 +367,16 @@ jobs:
           flutter analyze
           flutter test
 
+      # Unlike every other job, this one runs Flutter before the native build
+      # configures -- and `flutter pub get` rewrites tracked files the SDK owns
+      # (pubspec.lock, analysis_options.yaml).  Left in place, that churn is
+      # what git-describe sees, so the APK's native lib gets stamped -dirty from
+      # a pristine checkout.  Nothing here is a real edit: drop it.
+      - name: Discard Flutter-owned file churn
+        run: |
+          git status --porcelain --untracked-files=no
+          git checkout -- app/
+
       - name: Build release APK
         working-directory: app
         run: flutter build apk --release
