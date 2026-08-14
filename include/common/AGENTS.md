@@ -13,6 +13,48 @@ No backend-specific includes live here.
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
 - Looking for device inventory structs? → `inventory.h`
 - Looking for gating? → `peak.h` (gating is part of Peak)
+- Documenting a test for non-expert readers? → see *Test documentation* below
+
+## Test documentation
+
+Two levels, each authored where its own code lives — never collected into a
+table somewhere else:
+
+- **The test**: `logger::TestSpec::description`, one or two sentences on what
+  the test measures, at the `beginTest()` call site.
+- **One reading**: `logger::EmitOptions::description`, at the `emit()` /
+  `skip()` call that produces it. The three-argument sugar is the usual form:
+  `test.emit("DRAM x8", ns, "Eight reads in flight at once.")`, and
+  `skip(metric, status, reason, description)` documents a reading that didn't
+  happen. For a loop over variants, hang the note on the table the loop walks
+  (see the `Level` struct in `src/cpu/latency.cpp`) so name and note stay
+  adjacent.
+
+Authoring natively, next to the measurement, is what makes this work at all:
+CPU tags are ISA-slugged at runtime, so no static table keyed by tag could
+cover them, and the same tag means different things across backends.
+
+The strings travel on the result rows (`ResultEntry::description`,
+`::metricDescription`), so all three dump formats round-trip them and a
+reopened file explains itself.  Whitespace is collapsed to single spaces on
+the way in, so the line-oriented CSV/XML/JSON writers stay safe no matter how
+the literal is wrapped in source.
+
+Undocumented tests and readings carry empty strings and the GUI shows no info
+affordance for them, so documenting is purely additive.  `src/cpu/latency.cpp`
+(`memory_latency`) is the worked example of both levels.
+
+Style: plain language for someone who doesn't know the term in the metric
+name; no "lower/higher is better" (the GUI already orders and scales the
+readings).
+
+Trap: the sugar overload takes `const char *`, not `std::string` — a
+std::string parameter makes existing braced calls (`emit(m, v, {true})`)
+ambiguous, since a braced bool also matches std::string's `initializer_list`
+constructor. Pass `.c_str()` for a composed description, or use `EmitOptions`.
+
+See also: `app/AGENTS.md` (the GUI affordance) and `src/ffi/AGENTS.md` (the
+`desc` / `minfo` event fields).
 
 ## Key Files
 
@@ -32,4 +74,7 @@ No backend-specific includes live here.
 - If you change the `Peak` interface → update all backend `AGENTS.md` files.
 - If you add/remove a header → update this file's Key Files table.
 - If you change result format → bump `RESULT_FORMAT_VERSION` in `result_store.h`.
+  Purely additive fields don't need it: every loader ignores keys/attributes/
+  trailing CSV columns it doesn't know, which is how `display`, the `devices`
+  block and the documentation fields all landed on v2.
 - If you change benchmark enums → make sure all backends handle the new enum values.

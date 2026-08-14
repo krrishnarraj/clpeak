@@ -73,6 +73,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 ## Quick Lookups
 
 - **Adding a new benchmark?** → See the backend's `AGENTS.md` + `include/common/benchmark_enums.h`
+- **Explaining what a test measures?** → `include/common/AGENTS.md` § Test documentation
 - **Adding a new backend?** → See `src/common/AGENTS.md` for the `Peak` interface
 - **Fixing a Metal test?** → See `src/metal/AGENTS.md`
 - **Understanding result output?** → See `include/common/result_store.h` + `src/common/AGENTS.md`

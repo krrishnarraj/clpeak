@@ -1,6 +1,37 @@
 #include <common/logger.h>
 #include <cassert>
 
+namespace {
+
+// Descriptions are prose, and all three dump formats (CSV, XML, JSON) are
+// line-oriented -- one row, one line -- so a literal newline in one would cut
+// a record in half for the loaders.  Authors write them as C++ string
+// literals wrapped across source lines, which is exactly where stray newlines
+// and tabs creep in, so collapse every whitespace run to one space once,
+// here, instead of trusting every call site to do it.
+std::string oneLine(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size());
+    bool pendingSpace = false;
+    for (char c : s)
+    {
+        const bool ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+                         c == '\f' || c == '\v');
+        if (ws)
+        {
+            pendingSpace = !out.empty();
+            continue;
+        }
+        if (pendingSpace) out += ' ';
+        pendingSpace = false;
+        out += c;
+    }
+    return out;
+}
+
+} // namespace
+
 // ── Constructor ────────────────────────────────────────────────────────────
 
 logger::logger(std::string compareFileName)
@@ -24,11 +55,13 @@ LogEvent logger::makeEvent(LogEvent::Kind kind) const
     e.testDisplay = curTestDisplay;
     e.unit        = curUnit;
     e.category    = curCategory;
+    e.testDescription = curTestDescription;
     return e;
 }
 
 ResultEntry logger::makeEntry(const std::string &metric, ResultStatus status,
-                              float value, const std::string &reason) const
+                              float value, const std::string &reason,
+                              const std::string &metricDescription) const
 {
     ResultEntry e;
     e.backend  = curBackend;
@@ -43,6 +76,8 @@ ResultEntry logger::makeEntry(const std::string &metric, ResultStatus status,
     e.value    = value;
     e.reason   = reason;
     e.display  = curTestDisplay;
+    e.description       = curTestDescription;
+    e.metricDescription = oneLine(metricDescription);
     return e;
 }
 
@@ -175,6 +210,7 @@ void logger::closeOpenTest()
     onEvent(makeEvent(LogEvent::Kind::TestEnd));
     curTest.clear();
     curTestDisplay.clear();
+    curTestDescription.clear();
     curUnit.clear();
     curCategory  = Category::Unknown;
     contextDepth = 2;
@@ -212,6 +248,7 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
 
     log->curTest        = spec.tag;
     log->curTestDisplay = spec.display;
+    log->curTestDescription = oneLine(spec.description);
     log->curUnit        = spec.unit;
     log->curCategory    = (spec.category != Category::Unknown)
                               ? spec.category
@@ -242,21 +279,30 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     assert(log->contextDepth == 3);
 
     LogEvent e  = log->makeEvent(LogEvent::Kind::Metric);
-    e.entry     = log->makeEntry(metric, ResultStatus::Ok, value, "");
+    e.entry     = log->makeEntry(metric, ResultStatus::Ok, value, "",
+                                 opts.description);
     e.subMetric = opts.subMetric;
     log->results.push_back(e.entry);
 
     log->onEvent(e);
 }
 
+void logger::TestScope::emit(std::string metric, float value,
+                             const char *description)
+{
+    EmitOptions opts;
+    if (description) opts.description = description;
+    emit(std::move(metric), value, std::move(opts));
+}
+
 void logger::TestScope::skip(std::string metric, ResultStatus status,
-                             std::string reason)
+                             std::string reason, std::string description)
 {
     assert(!closed);
     assert(log->contextDepth == 3);
 
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
-    e.entry    = log->makeEntry(metric, status, 0.0f, reason);
+    e.entry    = log->makeEntry(metric, status, 0.0f, reason, description);
     log->results.push_back(e.entry);
 
     log->onEvent(e);

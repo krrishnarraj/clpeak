@@ -231,8 +231,11 @@ static double storeForwardNs()
 int CpuPeak::runStoreForward(benchmark_config_t &cfg)
 {
   (void)cfg;
-  logger::TestSpec spec{"store_forward", "Store-to-load forwarding", "ns",
-                        Category::Latency};
+  logger::TestSpec spec{
+      "store_forward", "Store-to-load forwarding", "ns",
+      Category::Latency,
+      "How fast the core can read back a value it just wrote, without the "
+      "write having reached the cache yet."};
   auto test = currentDeviceScope->beginTest(spec);
 
   double ns = -1.0;

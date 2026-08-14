@@ -172,6 +172,11 @@ static void writeJson(const ResultStore &store, std::ostream &f,
 
         if (!e.display.empty())
             f << ",\"display\":\"" << jsonEscape(e.display) << "\"";
+        if (!e.description.empty())
+            f << ",\"description\":\"" << jsonEscape(e.description) << "\"";
+        if (!e.metricDescription.empty())
+            f << ",\"metric_description\":\""
+              << jsonEscape(e.metricDescription) << "\"";
 
         if (e.status == ResultStatus::Ok)
         {
@@ -213,12 +218,13 @@ std::string resultsToJson(const ResultStore &store,
 
 // ---- CSV save -------------------------------------------------------------
 // Header:
-//   format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display
+//   format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display,description,metric_description
 // `format_version` repeats per row to keep CSV self-describing without a
 // preamble (some tools strip the first row).  Ok rows leave `reason` empty
 // and populate `value`; non-Ok rows leave `value` empty and populate
-// `reason`.  `display` is appended last so files written before it existed
-// still parse on their 12 columns.
+// `reason`.  The documentation columns are appended after `display`, which
+// was itself appended after the original 12, so every older file still parses
+// on the column count it was written with.
 
 bool saveCsv(const ResultStore &store, const std::string &filename)
 {
@@ -228,7 +234,7 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
         std::cerr << "clpeak: cannot open CSV output file: " << filename << "\n";
         return false;
     }
-    f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display\n";
+    f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display,description,metric_description\n";
     for (const ResultEntry &e : store)
     {
         f << RESULT_FORMAT_VERSION   << ","
@@ -244,7 +250,9 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
         if (e.status == ResultStatus::Ok)
             f << fmtValue(e.value);
         f << "," << csvField(e.reason)
-          << "," << csvField(e.display) << "\n";
+          << "," << csvField(e.display)
+          << "," << csvField(e.description)
+          << "," << csvField(e.metricDescription) << "\n";
     }
     return f.good();
 }
@@ -256,8 +264,9 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
 //       <prop name="Compute units" value="16"/>
 //       <category name="fp_compute">
 //         <test name="single_precision_compute"
-//               display="Single-precision compute" unit="gflops">
-//           <metric name="float">12500.5</metric>
+//               display="Single-precision compute" unit="gflops"
+//               description="What this test measures, in plain language.">
+//           <metric name="float" info="Note about this variant">12500.5</metric>
 //           <metric name="double" status="unsupported" reason="..."/>
 //         </test>
 //       </category>
@@ -376,18 +385,23 @@ bool saveXml(const ResultStore &store, const std::string &filename,
         if (!p.inTest || p.test != e.test || p.unit != e.unit)
         {
             closeTest(f, p);
-            // display lives on <test>, so it is stored once per test rather
-            // than repeated on every <metric> under it.
+            // display and description live on <test>, so they are stored once
+            // per test rather than repeated on every <metric> under it.
             f << "      <test name=\"" << xmlEscape(e.test) << "\"";
             if (!e.display.empty())
                 f << " display=\"" << xmlEscape(e.display) << "\"";
-            f << " unit=\"" << xmlEscape(e.unit) << "\">\n";
+            f << " unit=\"" << xmlEscape(e.unit) << "\"";
+            if (!e.description.empty())
+                f << " description=\"" << xmlEscape(e.description) << "\"";
+            f << ">\n";
             p.inTest = true;
             p.test   = e.test;
             p.unit   = e.unit;
         }
 
         f << "        <metric name=\"" << xmlEscape(e.metric) << "\"";
+        if (!e.metricDescription.empty())
+            f << " info=\"" << xmlEscape(e.metricDescription) << "\"";
         if (e.status == ResultStatus::Ok)
         {
             f << ">" << fmtValue(e.value) << "</metric>\n";
@@ -586,6 +600,10 @@ ResultStore loadJson(const std::string &filename, DeviceInfoStore *devices)
         e.metric   = jsonExtractStr(obj, "metric");
         e.unit     = jsonExtractStr(obj, "unit");
         e.display  = jsonExtractStr(obj, "display");
+        // The needle carries the opening quote, so "description" cannot match
+        // inside "metric_description".
+        e.description        = jsonExtractStr(obj, "description");
+        e.metricDescription  = jsonExtractStr(obj, "metric_description");
 
         if (jsonHasKey(obj, "status"))
         {
@@ -719,6 +737,10 @@ ResultStore loadCsv(const std::string &filename)
         e.reason = fields[11];
         if (fields.size() >= 13)
             e.display = fields[12];
+        if (fields.size() >= 14)
+            e.description = fields[13];
+        if (fields.size() >= 15)
+            e.metricDescription = fields[14];
 
         if (!e.backend.empty() && !e.test.empty() && !e.metric.empty())
             store.push_back(e);
@@ -778,6 +800,7 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
     }
 
     std::string backend, platform, device, driver, category, test, unit, display;
+    std::string description;   // <test description="…">, applied to its rows
     std::string line;
     bool versionChecked = false;
     DeviceInfo curDevice;   // accumulates <prop> for the open <run>
@@ -814,6 +837,7 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
             device   = xmlAttr(t, "device");
             driver   = xmlAttr(t, "driver");
             category.clear(); test.clear(); unit.clear(); display.clear();
+            description.clear();
 
             curDevice = DeviceInfo();
             curDevice.backend  = backend;
@@ -837,14 +861,16 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
         {
             category = xmlAttr(t, "name");
             test.clear(); unit.clear(); display.clear();
+            description.clear();
             continue;
         }
 
         if (t.rfind("<test", 0) == 0)
         {
-            test    = xmlAttr(t, "name");
-            unit    = xmlAttr(t, "unit");
-            display = xmlAttr(t, "display");
+            test        = xmlAttr(t, "name");
+            unit        = xmlAttr(t, "unit");
+            display     = xmlAttr(t, "display");
+            description = xmlAttr(t, "description");
             continue;
         }
 
@@ -860,6 +886,8 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
             e.metric   = xmlAttr(t, "name");
             e.unit     = unit;
             e.display  = display;
+            e.description       = description;
+            e.metricDescription = xmlAttr(t, "info");
 
             // Self-closing form is unsupported/error/skipped:
             //   <metric name="x" status="..." reason="..."/>

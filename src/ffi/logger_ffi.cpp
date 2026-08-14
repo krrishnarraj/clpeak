@@ -73,6 +73,7 @@ std::string ffiEventToJson(const LogEvent &e)
         appendStr(ss, "display",  e.testDisplay);
         appendStr(ss, "unit",     e.unit);
         appendStr(ss, "category", categoryString(e.category));
+        appendStr(ss, "desc",     e.testDescription);
         break;
 
     case LogEvent::Kind::Metric:
@@ -85,6 +86,8 @@ std::string ffiEventToJson(const LogEvent &e)
         appendStr(ss, "status", statusString(e.entry.status));
         appendStr(ss, "reason", e.entry.reason);
         ss << ",\"sub\":" << (e.subMetric ? "true" : "false");
+        appendStr(ss, "desc",  e.entry.description);
+        appendStr(ss, "minfo", e.entry.metricDescription);
         break;
 
     case LogEvent::Kind::TestSkippedAll:
@@ -92,6 +95,7 @@ std::string ffiEventToJson(const LogEvent &e)
         appendStr(ss, "display",  e.testDisplay);
         appendStr(ss, "unit",     e.unit);
         appendStr(ss, "category", categoryString(e.category));
+        appendStr(ss, "desc",     e.testDescription);
         ss << ",\"metrics\":[";
         for (size_t i = 0; i < e.metricNames.size(); i++)
         {

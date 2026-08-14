@@ -58,6 +58,8 @@ class ResultEntry {
     required this.value,
     required this.reason,
     this.display = '',
+    this.description = '',
+    this.metricDescription = '',
   });
 
   final String backend;
@@ -76,6 +78,14 @@ class ResultEntry {
   /// file's `display` field on a saved one.  Empty only for files written
   /// before it was persisted; `TestResult` falls back to the tag then.
   final String display;
+
+  /// What the test measures, and what this one reading means.  Both are
+  /// authored natively where the code lives — the test's on its
+  /// `beginTest()` spec, the reading's at its own `emit()`/`skip()` call — so
+  /// an undocumented one carries empty strings and the UI shows no info
+  /// affordance for it.
+  final String description;
+  final String metricDescription;
 
   BenchCategory get benchCategory => BenchCategory.fromTag(category);
 
@@ -98,5 +108,7 @@ class ResultEntry {
         value: (m['value'] as num?)?.toDouble() ?? 0,
         reason: m['reason'] as String? ?? '',
         display: m['display'] as String? ?? '',
+        description: m['description'] as String? ?? '',
+        metricDescription: m['metric_description'] as String? ?? '',
       );
 }

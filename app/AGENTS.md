@@ -38,6 +38,18 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   (never emits per-test flags — the UI is data-driven so test churn in the
   core needs no app changes)
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
+- "What does this test measure?" → an info glyph beside the name, at both
+  levels: on a test's title for what the test measures, and on each reading's
+  label inside the expanded breakdown for what that reading means.  Both are
+  `_InfoGlyph` → `_showInfoDialog()` in `lib/src/ui/results/results_body.dart`,
+  one explanation per dialog — nothing is pooled into a combined panel, matching
+  how the strings are authored (`include/common/AGENTS.md`).  Text comes off the
+  result rows (`ResultEntry.description` / `.metricDescription`), *not* off the
+  `test_begin` event, which would mean creating a `TestResult` before its first
+  measurement — `CategoryGroup` reads that as fully-skipped and files it under
+  "not supported".  A test reserves the breakdown's glyph column for all its
+  rows when any one of them is documented (`TestResult.hasMetricNotes`), so the
+  meters stay in one column; undocumented names show no glyph at all.
 - History persistence? → `lib/src/services/run_history_store.dart`
   (`<documents>/clpeak/runs/<id>.xml` written natively via `--xml-file`,
   `index.json` sidecar; viewing goes XML → native loader → JSON).  Device

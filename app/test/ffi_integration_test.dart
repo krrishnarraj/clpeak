@@ -53,10 +53,34 @@ void main() {
           isTrue);
       expect(xml.existsSync(), isTrue);
 
+      // What the test measures reaches the GUI live, on the test_begin event…
+      final latency = events
+          .whereType<TestBeginEvent>()
+          .firstWhere((e) => e.test == 'memory_latency');
+      expect(latency.description, isNotEmpty);
+
+      // …and the readings' own notes ride the rows, which is also all a
+      // reopened file has to go on.
+      final documented = metrics
+          .where((m) => m.entry.test == 'memory_latency')
+          .toList();
+      expect(documented.every((m) => m.entry.description.isNotEmpty), isTrue);
+      expect(
+          documented.any((m) =>
+              m.entry.metric == 'DRAM x8' &&
+              m.entry.metricDescription.isNotEmpty),
+          isTrue);
+
       // Round-trip the saved file through the native loader.
       final doc = bindings.loadResultFile(xml.path);
       expect(doc, isNotNull);
       expect((doc!['entries'] as List).length, metrics.length);
+      final reloaded = (doc['entries'] as List)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((e) =>
+              e['test'] == 'memory_latency' && e['metric'] == 'DRAM x8');
+      expect(reloaded['description'], latency.description);
+      expect(reloaded['metric_description'], isNotEmpty);
       xml.deleteSync();
     });
 

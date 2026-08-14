@@ -11,6 +11,10 @@ shared library / Apple framework.
 - Event JSON schema? → documented in `clpeak_ffi.h`; produced in
   `logger_ffi.cpp` (1:1 mirror of `LogEvent` in `include/common/logger.h`);
   decoded in `app/lib/src/ffi/clpeak_events.dart`
+- Test documentation (`desc` / `minfo`)? → authored natively, the test's at its
+  `beginTest()` and each reading's at its own `emit()`
+  (`include/common/AGENTS.md`); the GUI reads both off the metric rows, since a
+  reopened file has no event stream
 - Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: same order,
   result merge, centralized `--xml-file` save)
 - Desktop build + `clpeak-gui` target? → `CMakeLists.txt` (gated on

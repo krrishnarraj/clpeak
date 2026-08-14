@@ -31,6 +31,7 @@ sealed class ClpeakEvent {
           display: s('display'),
           unit: s('unit'),
           category: BenchCategory.fromTag(s('category')),
+          description: s('desc'),
         );
       case 'metric':
         return MetricEvent(ResultEntry(
@@ -46,6 +47,8 @@ sealed class ClpeakEvent {
           status: ResultStatus.fromString(s('status')),
           value: (m['value'] as num?)?.toDouble() ?? 0,
           reason: s('reason'),
+          description: s('desc'),
+          metricDescription: s('minfo'),
         ));
       case 'test_skipped':
         return TestSkippedEvent(
@@ -59,6 +62,7 @@ sealed class ClpeakEvent {
           category: s('category'),
           status: ResultStatus.fromString(s('status')),
           reason: s('reason'),
+          description: s('desc'),
         );
       case 'test_end':
         return const TestEndEvent();
@@ -112,6 +116,7 @@ class TestBeginEvent extends ClpeakEvent {
     required this.display,
     required this.unit,
     required this.category,
+    this.description = '',
   });
 
   final String backend;
@@ -120,6 +125,11 @@ class TestBeginEvent extends ClpeakEvent {
   final String display;
   final String unit;
   final BenchCategory category;
+
+  /// What the test measures, delivered when it opens.  Empty for tests with
+  /// no description authored yet.  Notes for individual readings are not here
+  /// — they arrive with the readings, on [ResultEntry.metricDescription].
+  final String description;
 }
 
 class MetricEvent extends ClpeakEvent {
@@ -139,6 +149,7 @@ class TestSkippedEvent extends ClpeakEvent {
     required this.category,
     required this.status,
     required this.reason,
+    this.description = '',
   });
 
   final String backend;
@@ -151,6 +162,7 @@ class TestSkippedEvent extends ClpeakEvent {
   final String category;
   final ResultStatus status;
   final String reason;
+  final String description;
 
   /// As an unsupported ResultEntry (one representative row).
   ResultEntry toEntry() => ResultEntry(
@@ -166,6 +178,7 @@ class TestSkippedEvent extends ClpeakEvent {
         status: status,
         reason: reason,
         value: 0,
+        description: description,
       );
 }
 

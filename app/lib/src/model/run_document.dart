@@ -41,6 +41,20 @@ class TestResult {
   final String unit;
   final List<ResultEntry> metrics = [];
 
+  /// What the test measures, shown behind the info affordance on its row.
+  /// Every row of the test repeats it; empty for tests with none authored.
+  /// A reading's own note is not here — it stays on its
+  /// [ResultEntry.metricDescription], where the breakdown row reads it.
+  String description = '';
+
+  bool get hasInfo => description.isNotEmpty;
+
+  /// Whether any reading is documented — the breakdown reserves its glyph
+  /// column per test, so the meters of undocumented rows stay aligned with
+  /// the documented ones.
+  bool get hasMetricNotes =>
+      metrics.any((m) => m.metricDescription.isNotEmpty);
+
   /// Rows that produced a measurement.
   List<ResultEntry> get okMetrics =>
       metrics.where((m) => m.status == ResultStatus.ok).toList();
@@ -126,7 +140,16 @@ class DeviceRun {
   }
 
   void addEntry(ResultEntry e) {
-    _test(e.benchCategory, e.test, e.display, e.unit).metrics.add(e);
+    final t = _test(e.benchCategory, e.test, e.display, e.unit);
+    t.metrics.add(e);
+    // The test description rides the rows, not the `test_begin` event: rows
+    // are the only source a reopened file has, and taking it off the event
+    // would mean materializing a TestResult before its first measurement,
+    // which `CategoryGroup` reads as fully-skipped and lists under "not
+    // supported" until a row lands.  First non-empty wins, like `display`.
+    if (t.description.isEmpty && e.description.isNotEmpty) {
+      t.description = e.description;
+    }
   }
 }
 

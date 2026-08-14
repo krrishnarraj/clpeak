@@ -61,6 +61,13 @@ struct LogEvent {
   std::string unit;
   Category    category = Category::Unknown;
 
+  // TestBegin / TestSkippedAll — what the open test measures (empty until a
+  // TestSpec supplies it).  Carried on the events as well as on the result
+  // rows so a live consumer can show it the moment a test opens.  Per-metric
+  // notes are not here: they belong to individual readings and arrive with
+  // them, on `entry.metricDescription`.
+  std::string testDescription;
+
   // DeviceBegin
   std::vector<LogProp> props;
   int  platformIndex    = -1;
@@ -103,10 +110,21 @@ public:
     std::string display;          // human-readable, e.g. "Global memory bandwidth"
     std::string unit;             // "gflops" | "gbps" | "us" | …
     Category    category = Category::Unknown;  // auto-derived from unit if omitted
+
+    // One or two sentences on what this test measures, for readers who don't
+    // already know.  Optional: an undocumented test simply shows no info
+    // affordance in the GUI.  Individual readings are documented where they
+    // are emitted instead — see EmitOptions::description.
+    std::string description;
   };
 
   struct EmitOptions {
     bool subMetric = false;       // extra indent for nested sub-variants
+
+    // What this one reading means, for readers who don't already know the
+    // metric name ("DRAM x8", "float MT").  Authored where the reading is
+    // emitted, so a variant's note sits with the code that measures it.
+    std::string description;
   };
 
   // ── RAII context handles (defined below, implemented in logger.cpp) ────
@@ -155,6 +173,7 @@ protected:
   std::string curDriver;
   std::string curTest;
   std::string curTestDisplay;
+  std::string curTestDescription;
   std::string curUnit;
   Category    curCategory = Category::Unknown;
   int         contextDepth = 0;   // 0=none, 1=backend, 2=device, 3=test
@@ -172,9 +191,11 @@ private:
   /// New event pre-filled with the current scope context.
   LogEvent makeEvent(LogEvent::Kind kind) const;
 
-  /// Build a ResultEntry from the current scope context.
+  /// Build a ResultEntry from the current scope context.  `metricDescription`
+  /// is the note authored at the emit/skip site (empty for most readings).
   ResultEntry makeEntry(const std::string &metric, ResultStatus status,
-                        float value, const std::string &reason) const;
+                        float value, const std::string &reason,
+                        const std::string &metricDescription = "") const;
 
   // Scope handles are friends so they can manipulate context state directly.
   friend class BackendScope;
@@ -236,8 +257,19 @@ public:
   /// Emit a successful measurement.  Records row + dispatches Metric event.
   void emit(std::string metric, float value, EmitOptions opts = {});
 
-  /// Emit a skipped / unsupported / errored metric.
-  void skip(std::string metric, ResultStatus status, std::string reason);
+  /// Same, documenting the reading in place:
+  ///   test.emit("DRAM x8", ns, "Eight reads in flight at once.");
+  /// Sugar for the EmitOptions form, which C++17 cannot initialize by field
+  /// name.  `const char *` and not std::string on purpose: the latter makes
+  /// braced calls (`emit(m, v, {true})`) ambiguous, since a braced bool also
+  /// matches std::string's initializer_list constructor.  Pass `.c_str()` for
+  /// a composed description, or use EmitOptions.
+  void emit(std::string metric, float value, const char *description);
+
+  /// Emit a skipped / unsupported / errored metric.  `description` documents
+  /// the reading that would have been, exactly as in emit().
+  void skip(std::string metric, ResultStatus status, std::string reason,
+            std::string description = "");
 
   /// Entire test unavailable — records one skip row per named metric and
   /// dispatches a single TestSkippedAll event.

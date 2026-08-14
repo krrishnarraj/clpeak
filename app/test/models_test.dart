@@ -130,6 +130,58 @@ void main() {
       expect(m.key, 'CPU/CPU/M1/fp_compute/single_precision_compute/float MT');
     });
 
+    test('test_begin carries what the test measures', () {
+      final e = ClpeakEvent.fromJson({
+        't': 'test_begin',
+        'backend': 'CPU',
+        'device': 'M1',
+        'test': 'memory_latency',
+        'display': 'Memory latency (pointer-chase)',
+        'unit': 'ns',
+        'category': 'latency',
+        'desc': 'How long the core waits for one memory read.',
+      });
+      final b = e as TestBeginEvent;
+      expect(b.description, 'How long the core waits for one memory read.');
+    });
+
+    test('an undocumented test decodes with empty documentation', () {
+      final e = ClpeakEvent.fromJson({
+        't': 'test_begin',
+        'backend': 'CPU',
+        'device': 'M1',
+        'test': 'atomics',
+        'display': 'Atomic fetch-add latency',
+        'unit': 'ns',
+        'category': 'latency',
+      });
+      expect((e as TestBeginEvent).description, isEmpty);
+    });
+
+    test('metric event carries the test and reading notes', () {
+      final e = ClpeakEvent.fromJson({
+        't': 'metric',
+        'backend': 'CPU',
+        'platform': 'CPU',
+        'device': 'M1',
+        'driver': '',
+        'category': 'latency',
+        'test': 'memory_latency',
+        'display': 'Memory latency (pointer-chase)',
+        'metric': 'DRAM x8',
+        'unit': 'ns',
+        'value': 16.15,
+        'status': 'ok',
+        'reason': '',
+        'sub': false,
+        'desc': 'How long the core waits for one memory read.',
+        'minfo': 'Eight independent chases at once.',
+      });
+      final m = (e as MetricEvent).entry;
+      expect(m.description, 'How long the core waits for one memory read.');
+      expect(m.metricDescription, 'Eight independent chases at once.');
+    });
+
     test('done event', () {
       final e = ClpeakEvent.fromJson(
           {'t': 'done', 'status': -2, 'cancelled': true});
@@ -168,6 +220,8 @@ void main() {
       String unit = 'gflops',
       double value = 100,
       ResultStatus status = ResultStatus.ok,
+      String description = '',
+      String metricDescription = '',
     }) =>
         ResultEntry(
           backend: backend,
@@ -182,6 +236,8 @@ void main() {
           status: status,
           value: value,
           reason: status == ResultStatus.ok ? '' : 'nope',
+          description: description,
+          metricDescription: metricDescription,
         );
 
     test('groups by run, category, test', () {
@@ -203,6 +259,64 @@ void main() {
       expect(fp.category, BenchCategory.fpCompute);
       expect(fp.tests.single.metrics, hasLength(2));
       expect(fp.tests.single.peakValue, 120);
+    });
+
+    test('documentation is gathered off the rows', () {
+      final doc = RunDocument();
+      doc.addEntry(entry(
+          category: 'latency',
+          test: 'memory_latency',
+          unit: 'ns',
+          metric: 'L1',
+          value: 1.26,
+          description: 'What the wait for one memory read costs.',
+          metricDescription: 'The small cache inside the core.'));
+      // A later row repeats the test description and brings its own note.
+      doc.addEntry(entry(
+          category: 'latency',
+          test: 'memory_latency',
+          unit: 'ns',
+          metric: 'DRAM x8',
+          value: 16.15,
+          description: 'What the wait for one memory read costs.',
+          metricDescription: 'Eight independent chases at once.'));
+      // Undocumented variants contribute nothing.
+      doc.addEntry(entry(
+          category: 'latency',
+          test: 'memory_latency',
+          unit: 'ns',
+          metric: 'TLB miss',
+          value: 16.28,
+          description: 'What the wait for one memory read costs.'));
+
+      final t = doc.runs.single.categories.single.tests.single;
+      expect(t.hasInfo, isTrue);
+      expect(t.description, 'What the wait for one memory read costs.');
+      // Each reading keeps its own note, on its own row.
+      expect(t.hasMetricNotes, isTrue);
+      expect(
+          t.metrics
+              .where((m) => m.metricDescription.isNotEmpty)
+              .map((m) => m.metric),
+          ['L1', 'DRAM x8']);
+    });
+
+    test('an undocumented test offers no info', () {
+      final doc = RunDocument();
+      doc.addEntry(entry());
+      final t = doc.runs.single.categories.single.tests.single;
+      expect(t.hasInfo, isFalse);
+      expect(t.description, isEmpty);
+      expect(t.hasMetricNotes, isFalse);
+    });
+
+    test('a test can document its readings but not itself', () {
+      final doc = RunDocument();
+      doc.addEntry(entry(metric: 'float ST', metricDescription: 'One core.'));
+      final t = doc.runs.single.categories.single.tests.single;
+      // No test-level glyph, but the reading still has its own.
+      expect(t.hasInfo, isFalse);
+      expect(t.hasMetricNotes, isTrue);
     });
 
     test('latency picks minimum as peak', () {
@@ -276,6 +390,32 @@ void main() {
       expect(group.supported.single.display, 'Single-precision compute (NEON)');
       // The row without one still renders as something.
       expect(group.unsupported.single.display, 'amx');
+    });
+
+    test('recovers documentation from a loaded document', () {
+      final doc = RunDocument.fromEntriesJson({
+        'format_version': 2,
+        'entries': [
+          {
+            'backend': 'CPU',
+            'platform': 'CPU',
+            'device': 'X',
+            'driver': '',
+            'category': 'latency',
+            'test': 'memory_latency',
+            'display': 'Memory latency (pointer-chase)',
+            'metric': 'DRAM x8',
+            'unit': 'ns',
+            'value': 16.15,
+            'description': 'What the wait for one memory read costs.',
+            'metric_description': 'Eight independent chases at once.',
+          },
+        ]
+      });
+      final t = doc.runs.single.categories.single.tests.single;
+      expect(t.description, 'What the wait for one memory read costs.');
+      expect(t.metrics.single.metricDescription,
+          'Eight independent chases at once.');
     });
 
     test('attaches device props from a loaded document', () {

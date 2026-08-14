@@ -309,11 +309,24 @@ class _TestLineState extends State<_TestLine> {
                 children: [
                   Container(width: 3, height: 15, color: widget.color),
                   const SizedBox(width: 10),
+                  // Title and glyph share one Expanded so a long title
+                  // ellipsizes against the glyph, not against the value.
                   Expanded(
-                    child: Text(test.display,
-                        style: t.mono,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(test.display,
+                              style: t.mono,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        if (test.hasInfo)
+                          _InfoGlyph(
+                            title: test.display,
+                            description: test.description,
+                          ),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 12),
                   CValue(
@@ -348,6 +361,7 @@ class _TestLineState extends State<_TestLine> {
                       entry: metric,
                       maxValue: test.maxValue,
                       color: widget.color,
+                      glyphColumn: test.hasMetricNotes,
                     ),
                 ],
               ),
@@ -358,16 +372,105 @@ class _TestLineState extends State<_TestLine> {
   }
 }
 
+/// The info affordance: a faint glyph beside a name, present only when that
+/// name has an explanation.  Its own tap target, so it opens the description
+/// instead of expanding the row it sits in.
+///
+/// Used at both levels — beside a test's title for what the test measures, and
+/// beside a reading's label for what that one reading means, each opening its
+/// own text.
+class _InfoGlyph extends StatelessWidget {
+  const _InfoGlyph({
+    required this.title,
+    required this.description,
+    this.small = false,
+  });
+
+  final String title;
+  final String description;
+
+  /// Sized for the breakdown's smaller type.
+  final bool small;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return CTap(
+      onTap: () => _showInfoDialog(context, title, description),
+      builder: (context, hovered, pressed) => Padding(
+        padding: EdgeInsets.only(left: small ? 5 : 7, right: 2),
+        child: Icon(
+          Icons.info_outline,
+          size: small ? 12 : 13,
+          color: hovered || pressed ? t.text : t.faint,
+        ),
+      ),
+    );
+  }
+}
+
+/// One explanation, in plain language.
+///
+/// Opened without a transition: a description can be asked for mid-run, and
+/// the GUI holds a graphics context on the device being benchmarked, so an
+/// animated route would cost the running kernel a burst of frames (see the
+/// live-run note in app/AGENTS.md).
+Future<void> _showInfoDialog(
+    BuildContext context, String title, String description) {
+  return showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Colors.black.withValues(alpha: 0.55),
+    transitionDuration: Duration.zero,
+    pageBuilder: (context, _, _) => _InfoDialog(
+      title: title,
+      description: description,
+    ),
+  );
+}
+
+class _InfoDialog extends StatelessWidget {
+  const _InfoDialog({required this.title, required this.description});
+
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return CDialog(
+      title: title,
+      actions: [
+        CButton(label: 'Close', onPressed: () => Navigator.pop(context)),
+      ],
+      // Long prose on a short phone screen.
+      child: ConstrainedBox(
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.6),
+        child: SingleChildScrollView(
+          child: Text(description, style: t.body),
+        ),
+      ),
+    );
+  }
+}
+
 class _MetricLine extends StatelessWidget {
   const _MetricLine({
     required this.entry,
     required this.maxValue,
     required this.color,
+    required this.glyphColumn,
   });
 
   final ResultEntry entry;
   final double maxValue;
   final Color color;
+
+  /// Some reading of this test is documented, so every row of it leaves room
+  /// for the glyph and the meters stay in one column.
+  final bool glyphColumn;
 
   @override
   Widget build(BuildContext context) {
@@ -376,17 +479,30 @@ class _MetricLine extends StatelessWidget {
     final fraction =
         ok && maxValue > 0 ? (entry.value / maxValue).clamp(0.0, 1.0) : 0.0;
     final f = ok ? formatMetric(entry.value, entry.unit) : null;
+    final documented = entry.metricDescription.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3.5),
       child: Row(
         children: [
           SizedBox(
-            width: 104,
-            child: Text(entry.metric,
-                style: t.monoSmallDim,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+            width: glyphColumn ? 121 : 104,
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(entry.metric,
+                      style: t.monoSmallDim,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+                if (documented)
+                  _InfoGlyph(
+                    title: entry.metric,
+                    description: entry.metricDescription,
+                    small: true,
+                  ),
+              ],
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -458,8 +574,21 @@ class _UnsupportedSection extends StatelessWidget {
                   children: [
                     Expanded(
                       flex: 4,
-                      child: Text(test.display,
-                          style: t.monoSmall.copyWith(color: t.dim)),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Flexible(
+                            child: Text(test.display,
+                                style: t.monoSmall.copyWith(color: t.dim)),
+                          ),
+                          if (test.hasInfo)
+                            _InfoGlyph(
+                              title: test.display,
+                              description: test.description,
+                              small: true,
+                            ),
+                        ],
+                      ),
                     ),
                     if (test.skipReason.isNotEmpty) ...[
                       const SizedBox(width: 12),

@@ -60,6 +60,17 @@ struct ResultEntry {
     // underscores with no way back.
     std::string  display;
 
+    // Plain-language explanation of what the test measures, and of what this
+    // one reading means ("DRAM x8" -> "eight reads in flight at once").  Each
+    // is authored where its own code lives -- the test's on its TestSpec, the
+    // reading's at its emit()/skip() call (logger.h) -- and shown by the GUI
+    // behind an info affordance.  Both are metadata like `display`: out of
+    // key(), written only when non-empty, and travelling with the rows so a
+    // reopened file explains itself without the app carrying a copy of every
+    // backend's test list.
+    std::string  description;
+    std::string  metricDescription;
+
     std::string key() const
     {
         return backend + "/" + platform + "/" + device + "/" +

@@ -47,10 +47,16 @@ CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 //   backend_begin {backend}
 //   device        {backend, platform, device, driver, platform_index,
 //                  device_index, props:[{k,v}...]}
-//   test_begin    {backend,..., test, display, unit, category}
+//   test_begin    {backend,..., test, display, unit, category, desc}
 //   metric        {backend, platform, device, driver, category, test,
-//                  display, metric, unit, value, status, reason, sub}
-//   test_skipped  {..., metrics:[...], status, reason}
+//                  display, metric, unit, value, status, reason, sub, desc,
+//                  minfo}
+//   test_skipped  {..., metrics:[...], status, reason, desc}
+//
+// `desc` explains what the test measures and `minfo` what one reading means;
+// both are empty for tests and readings that carry no documentation.  A
+// reading's note travels with the reading, never up-front, because that is
+// where it is authored (logger::EmitOptions::description).
 //   test_end      {}          device_end {}          backend_end {}
 //   note          {message}
 //   done          {status, cancelled}   // ALWAYS the last event of a launch
