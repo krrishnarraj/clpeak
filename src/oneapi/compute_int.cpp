@@ -58,9 +58,13 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  // W is a template parameter, so the width note comes for free at every
+  // instantiation -- no per-call-site plumbing.
+  const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9));
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9),
+                            {false, note});
 }
 
 // --------------------------------------------------------------------------
@@ -69,7 +73,10 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"integer_compute", "Integer compute (32-bit IMAD)", "gops"});
+    {"integer_compute", "Integer compute (32-bit IMAD)", "gops", Category::Unknown,
+     "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, "
+     "addressing and bit manipulation, which kernels do alongside their "
+     "fractional maths."});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));
@@ -163,15 +170,23 @@ static void runInt8DpVariant(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  // NCH is the chain count, not a vector width -- every variant does the same
+  // work per item and only the overlap changes.
+  const char *note = oneapiChainNote(NCH);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT8_DP_WORK_PER_WI, us, 1e9));
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT8_DP_WORK_PER_WI, us, 1e9),
+                            {false, note});
 }
 
 int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"integer_compute_int8_dp", "INT8 dot-product compute (DP4a)", "gops"});
+    {"integer_compute_int8_dp", "INT8 dot-product compute (DP4a)", "gops",
+     Category::Unknown,
+     "Peak speed of the 8-bit dot product, which multiplies four pairs of small "
+     "whole numbers and sums them in one step -- the general-compute path for "
+     "quantized (compressed) neural networks."});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));

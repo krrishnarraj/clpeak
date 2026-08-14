@@ -78,9 +78,13 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  // W is a template parameter, so the width note comes for free at every
+  // instantiation -- no per-call-site plumbing.
+  const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9));
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9),
+                            {false, note});
 }
 
 // Drive the {1,2,4,8,16} sweep for one FP family.
@@ -105,7 +109,11 @@ static void runFpSweep(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"single_precision_compute", "Single-precision compute", "gflops"});
+    {"single_precision_compute", "Single-precision compute", "gflops",
+     Category::Unknown,
+     "Peak arithmetic speed of the device's compute units on 32-bit fractional "
+     "numbers -- the ordinary float type.  Nothing touches memory, so only the "
+     "arithmetic units limit the rate."});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
@@ -133,7 +141,10 @@ int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
 int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"half_precision_compute", "Half-precision compute", "gflops"});
+    {"half_precision_compute", "Half-precision compute", "gflops",
+     Category::Unknown,
+     "Peak arithmetic speed on 16-bit fractional numbers -- half the size of a "
+     "normal float, and what graphics and on-device AI mostly run on."});
 
   if (!dev.info.fp16Supported)
   {
@@ -169,7 +180,11 @@ int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
 int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"double_precision_compute", "Double-precision compute", "gflops"});
+    {"double_precision_compute", "Double-precision compute", "gflops",
+     Category::Unknown,
+     "Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type "
+     "scientific computing relies on.  Consumer graphics parts run these far "
+     "slower than 32-bit; the datacenter parts do not."});
 
   if (!dev.info.fp64Supported)
   {
@@ -208,7 +223,11 @@ class compute_mp_kernel;
 int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "gflops"});
+    {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "gflops",
+     Category::Unknown,
+     "Peak speed when the device multiplies 16-bit numbers but keeps the running "
+     "total in 32 bits -- the accuracy-preserving pattern AI code uses.  This is "
+     "the general compute units, not the matrix engine."});
 
   if (!dev.info.fp16Supported)
   {
@@ -269,7 +288,11 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
   using bfloat16 = sycl::ext::oneapi::bfloat16;
 
   auto test = currentDeviceScope->beginTest(
-    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops"});
+    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops",
+     Category::Unknown,
+     "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of "
+     "accuracy for the number range of a full float.  Integrated graphics "
+     "without bf16 hardware emulate it, and the rate drops accordingly."});
 
   if (!dev.info.bf16Supported)
   {
@@ -322,7 +345,11 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
 int OneapiPeak::runComputeBF16(OneapiDevice &, benchmark_config_t &)
 {
   auto test = currentDeviceScope->beginTest(
-    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops"});
+    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops",
+     Category::Unknown,
+     "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of "
+     "accuracy for the number range of a full float.  Integrated graphics "
+     "without bf16 hardware emulate it, and the rate drops accordingly."});
   test.skip("bf16", ResultStatus::Unsupported,
             "SYCL bfloat16 header not available in this oneAPI toolchain");
   return 0;

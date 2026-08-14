@@ -60,7 +60,11 @@ static float runLocalVariant(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
+    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the device moves through local memory -- the "
+     "small on-chip scratchpad a group of work-items passes data through, "
+     "which never goes out to main memory."});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
@@ -69,9 +73,9 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   float *outBuf = sycl::malloc_device<float>(globalThreads, dev.stream);
   if (!outBuf)
   {
-    test.skip("float",  ResultStatus::Error, "Buffer alloc failed");
-    test.skip("float2", ResultStatus::Error, "Buffer alloc failed");
-    test.skip("float4", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float",  ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(1));
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(2));
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(4));
     return -1;
   }
 
@@ -87,11 +91,12 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
         : runLocalVariant<4>(*this, dev, outBuf, numBlocks, blockSize, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
-      test.skip(v.key, ResultStatus::Error, "kernel launch failed");
+      test.skip(v.key, ResultStatus::Error, "kernel launch failed",
+                oneapiWidthNote(v.W));
       continue;
     }
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.W * sizeof(float) * globalThreads;
-    test.emit(v.key, (float)bytes / us / 1e3f);
+    test.emit(v.key, (float)bytes / us / 1e3f, oneapiWidthNote(v.W));
   }
 
   sycl::free(outBuf, dev.stream);

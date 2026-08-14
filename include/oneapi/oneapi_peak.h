@@ -12,6 +12,41 @@
 #include <string>
 #include <vector>
 
+// Reader-facing note for one reading of a vector-width sweep (float / float2 /
+// ... / float16).  Every compute and bandwidth test here sweeps the same
+// widths and the meaning never changes, so the wording lives in one place.
+// NOT for the int8-dot rows: those variants are independent chains -- see
+// oneapiChainNote().
+static inline const char *oneapiWidthNote(int width)
+{
+  switch (width)
+  {
+  case 1:  return "One value per work-item at a time -- the plain, unvectorised case.";
+  case 2:  return "Two values per work-item at a time, as one 2-wide vector.";
+  case 4:  return "Four values per work-item at a time, as one 4-wide vector.";
+  case 8:  return "Eight values per work-item at a time, as one 8-wide vector.";
+  case 16: return "Sixteen values per work-item at a time, the widest vector SYCL offers.";
+  default: return "";
+  }
+}
+
+// Reader-facing note for one reading of the int8 dot-product sweep.  These
+// variants are independent chains, not wider vectors: the work per item is
+// identical and only the amount the hardware can overlap changes.
+static inline const char *oneapiChainNote(int chains)
+{
+  switch (chains)
+  {
+  case 1: return "One chain of dot products, each waiting on the one before it.";
+  case 2: return "Two independent chains, so the device has a second dot product "
+                 "to get on with while the first is still finishing.";
+  case 4: return "Four independent chains.";
+  case 8: return "Eight independent chains.  Where this stops improving on four, "
+                 "the hardware itself is the limit, not the waiting.";
+  default: return "";
+  }
+}
+
 struct CliOptions;
 
 struct oneapi_device_info_t {

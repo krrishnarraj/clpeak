@@ -41,21 +41,44 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
 {
   const bool fpPhase = (category != Category::IntCompute);
 
+  // One note per dtype row, shared by every emit and skip path below.
+  const char *fp32Note = "Full 32-bit precision, on the general compute units "
+                         "rather than the matrix engine.";
+  const char *fp64Note = "Full 64-bit precision, for scientific computing.  Run "
+                         "on a smaller matrix than the other rows, because a "
+                         "full-size one would take long enough to trip the "
+                         "driver's watchdog.";
+  const char *fp16Note = "16-bit inputs -- the everyday precision of AI "
+                         "inference, and usually the fastest row here.";
+  const char *bf16Note = "bfloat16 inputs -- 16 bits arranged for AI work, "
+                         "trading digits of accuracy for the number range of a "
+                         "full float.";
+  const char *int8Note = "8-bit whole numbers with 32-bit totals -- the format "
+                         "quantized neural networks use.";
+
   auto test = fpPhase
-    ? currentDeviceScope->beginTest({"onemkl-fp", "oneMKL GEMM peak", "tflops"})
-    : currentDeviceScope->beginTest({"onemkl-int", "oneMKL GEMM peak", "tops"});
+    ? currentDeviceScope->beginTest(
+        {"onemkl-fp", "oneMKL GEMM peak", "tflops", Category::Unknown,
+         "Matrix-multiply speed through Intel's own tuned library, on a large "
+         "square problem.  Where the joint_matrix rows show what the hardware "
+         "can do in principle, this shows what shipping code reaches on the "
+         "operation most AI work is built from."})
+    : currentDeviceScope->beginTest(
+        {"onemkl-int", "oneMKL GEMM peak", "tops", Category::Unknown,
+         "The same tuned-library matrix multiply on whole-number formats, "
+         "which is how a quantized (compressed) model actually runs."});
 
 #ifndef CLPEAK_ONEAPI_HAS_ONEMKL
   if (fpPhase)
   {
-    test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time");
-    test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time");
-    test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time");
-    test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time");
+    test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", fp32Note);
+    test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", fp64Note);
+    test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", fp16Note);
+    test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time", bf16Note);
   }
   else
   {
-    test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time");
+    test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time", int8Note);
   }
   return 0;
 #else
@@ -82,7 +105,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
   // the int8 bias buffer, unused by the FP paths).  `dim` lets fp64 use a
   // smaller tile than the other dtypes.  Buffers are sized at fp64 width and
   // reinterpreted per dtype.
-  auto measure = [&](const char *label, std::int64_t dim, auto gemmFn) {
+  auto measure = [&](const char *label, const char *note, std::int64_t dim, auto gemmFn) {
     const size_t cells = (size_t)dim * (size_t)dim;
     const double flops = 2.0 * (double)dim * (double)dim * (double)dim;
     sycl::queue q = [&]() -> sycl::queue {
@@ -111,7 +134,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     };
     if (!dA || !dB || !dC || !dCo)
     {
-      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers");
+      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", note);
       freeAll();
       return;
     }
@@ -142,15 +165,15 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
     double probeUs = runBatch(warm);
     if (probeUs <= 0.0)
-      test.skip(label, ResultStatus::Error, "timing probe failed");
+      test.skip(label, ResultStatus::Error, "timing probe failed", note);
     else
     {
       unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
       double meanUs = runBatch(iters);
       if (meanUs <= 0.0)
-        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed");
+        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", note);
       else
-        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12));
+        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), {false, note});
     }
     freeAll();
     // q and its private context are destroyed here.
@@ -158,7 +181,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
 
   if (fpPhase)
   {
-    measure("fp32", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+    measure("fp32", fp32Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
                            std::int64_t n) {
       mkl::blas::row_major::gemm(
         q, mkl::transpose::nontrans, mkl::transpose::nontrans,
@@ -167,7 +190,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     });
 
     if (dev.info.fp64Supported)
-      measure("fp64", fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+      measure("fp64", fp64Note, fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
                                    std::int64_t n) {
         mkl::blas::row_major::gemm(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
@@ -175,10 +198,10 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
           (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
       });
     else
-      test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device");
+      test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", fp64Note);
 
     if (dev.info.fp16Supported)
-      measure("fp16", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+      measure("fp16", fp16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
                              std::int64_t n) {
         mkl::blas::row_major::gemm(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
@@ -187,13 +210,13 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
           sycl::half(0.0f), (sycl::half *)dC, n);
       });
     else
-      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device");
+      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", fp16Note);
 
     // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
     // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
 #if defined(CLPEAK_ONEMKL_HAS_BF16)
     if (dev.info.bf16Supported)
-      measure("bf16", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+      measure("bf16", bf16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
                              std::int64_t n) {
         using bfloat16 = sycl::ext::oneapi::bfloat16;
         mkl::blas::row_major::gemm(
@@ -202,10 +225,10 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
           (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
       });
     else
-      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device");
+      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", bf16Note);
 #else
     test.skip("bf16", ResultStatus::Unsupported,
-              "SYCL bfloat16 header not available in this oneAPI toolchain");
+              "SYCL bfloat16 header not available in this oneAPI toolchain", bf16Note);
 #endif
   }
   else
@@ -217,9 +240,9 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     // measure() reports a clean skip.
     if (!dev.info.xmxSupported)
       test.skip("int8", ResultStatus::Unsupported,
-                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)");
+                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", int8Note);
     else
-      measure("int8", D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
+      measure("int8", int8Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
                              std::int64_t n) {
         // gemm_bias with offset::fix reads a single int32 bias from `co`.
         mkl::blas::row_major::gemm_bias(

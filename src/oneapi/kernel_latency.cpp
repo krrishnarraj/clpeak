@@ -17,7 +17,18 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "us"});
+    {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+     "The overhead of asking the device to do anything at all, measured with "
+     "an empty kernel.  It is what small, frequent jobs pay before any of "
+     "their own work begins."});
+
+  const char *dispatchNote = "One way only: from the moment the host submits the "
+                             "work to the moment the device starts running it.  "
+                             "SYCL exposes no clock the two share, so this is "
+                             "reported on some other backends but not here.";
+  const char *roundtripNote = "The full round trip -- submit, run, and hear back "
+                              "that it finished.  This is what the host waits for "
+                              "if it has nothing else to get on with.";
 
   bool submitFailed = false;
 
@@ -61,11 +72,11 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
   // GPUStartTime / GPUEndTime fields, so we report only the roundtrip and
   // skip the dispatch metric — consistent with how the ROCm backend reports.
   test.skip("dispatch", ResultStatus::Unsupported,
-            "Not measurable via SYCL runtime");
+            "Not measurable via SYCL runtime", dispatchNote);
   if (submitFailed)
-    test.skip("roundtrip", ResultStatus::Error, "SYCL submit/wait failed");
+    test.skip("roundtrip", ResultStatus::Error, "SYCL submit/wait failed", roundtripNote);
   else
-    test.emit("roundtrip", (float)(totalRoundtripUs / iters));
+    test.emit("roundtrip", (float)(totalRoundtripUs / iters), roundtripNote);
 
   return 0;
 }

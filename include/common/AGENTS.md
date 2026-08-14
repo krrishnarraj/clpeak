@@ -63,12 +63,12 @@ gets one helper per backend (`mtlWidthNote()` / `vkWidthNote()` /
 things in different backends, which is exactly what Vulkan's `int8_dp2` (a
 second *chain*, not a wider vector) demonstrates.
 
-**`src/cuda/` and `src/rocm/` are documented but codegen-verified only** — no
-NVIDIA or AMD hardware was available, so their `--describe` output has never
-been rendered; the strings were checked by compiling every file against stub
-vendor headers (see those directories' `AGENTS.md` for the technique, which
-also covers the optional-library `#ifdef` branches).  oneAPI is still
-undocumented.
+**`src/cuda/`, `src/rocm/` and `src/oneapi/` are documented but
+codegen-verified only** — no NVIDIA, AMD or Intel hardware was available, so
+their `--describe` output has never been rendered; the strings were checked by
+compiling every file against stub vendor headers (see those directories'
+`AGENTS.md` for the technique, which also covers the optional-library `#ifdef`
+branches).  **Every backend is now documented.**
 
 A backend whose tests come off a table (ROCm's `WmmaEntry`/`MfmaEntry`) puts
 the description on the table row, beside the name it explains — the same rule
