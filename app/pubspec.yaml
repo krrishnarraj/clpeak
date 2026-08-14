@@ -2,9 +2,8 @@ name: clpeak
 description: "clpeak — cross-API compute benchmark (OpenCL, Vulkan, CUDA, ROCm, Metal, oneAPI, CPU)."
 publish_to: 'none'
 
-# versionName / versionCode continue from the retired native Android app
-# (2.0.18+30) and the iOS app.
-version: 2.1.0+31
+# versionName / versionCode
+version: 2.0.19+31
 
 environment:
   sdk: ^3.12.2
