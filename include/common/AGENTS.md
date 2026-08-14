@@ -51,15 +51,22 @@ documented and is the reference** — every `TestSpec` there carries a
 (`microarch.cpp`), a note table walked by a loop (`latency.cpp`,
 `bandwidth.cpp`), and one note shared by a family of tests written once at the
 runner (`compute_common.h`'s `ST`/`MT` notes, which serve ~25 tests).
-**`src/metal/` and `src/vulkan/` are done too**, and show the fourth shape: a
-backend whose tests run through a descriptor struct carries the strings on that
-struct (`mtl_compute_desc_t::description`, `vk_compute_variant_t::description`,
-…) so the shared runner forwards them — the same move the OpenCL / CUDA / ROCm
-/ oneAPI backends will need, since they are built the same way and are still
-undocumented.  A shared per-reading phrase gets one helper per backend
-(`mtlWidthNote()` / `vkWidthNote()`), never a cross-backend table: the same
-label means different things in different backends, which is exactly what
-Vulkan's `int8_dp2` (a second *chain*, not a wider vector) demonstrates.
+**`src/metal/`, `src/vulkan/` and `src/opencl/` are done too**, and show the
+fourth shape: a backend whose tests run through a shared runner carries the
+strings alongside the rest of the per-test data — on a descriptor struct
+(`mtl_compute_desc_t::description`, `vk_compute_variant_t::description`) or as
+a parameter (`clPeak::runComputeTest`'s `description`) — so the runner forwards
+them.  That is the move the CUDA / ROCm / oneAPI backends will need, since they
+are built the same way and are still undocumented.  A shared per-reading phrase
+gets one helper per backend (`mtlWidthNote()` / `vkWidthNote()` /
+`clWidthNote()`), never a cross-backend table: the same label means different
+things in different backends, which is exactly what Vulkan's `int8_dp2` (a
+second *chain*, not a wider vector) demonstrates.
+
+Where a test reports a value by a non-obvious convention, the description is
+the place to say so — `transfer_bandwidth`'s zero-copy rows read `0.00` on
+unified-memory devices, and OpenCL's test description now explains that rather
+than leaving it to be rediscovered.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the

@@ -26,7 +26,15 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   unsigned int iters = forceIters ? specifiedIters : cfg.kernelLatencyIters;
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "us"});
+    {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+     "The overhead of asking the GPU to do anything at all.  It is what small, "
+     "frequent GPU jobs pay before any of their own work begins."});
+
+  const char *dispatchNote = "One way only: from the moment the host queues the "
+                             "work to the moment the GPU starts running it.";
+  const char *roundtripNote = "The full round trip -- queue it, run it, and hear "
+                              "back that it finished.  This is what the host waits "
+                              "for if it has nothing else to get on with.";
 
   try
   {
@@ -65,14 +73,14 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     float dispatchUs  = (float)(totalDispatchUs  / iters);
     float roundtripUs = (float)(totalRoundtripUs / iters);
 
-    test.emit("dispatch",  dispatchUs);
-    test.emit("roundtrip", roundtripUs);
+    test.emit("dispatch",  dispatchUs,  dispatchNote);
+    test.emit("roundtrip", roundtripUs, roundtripNote);
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    test.skip("dispatch", ResultStatus::Error, reason);
-    test.skip("roundtrip", ResultStatus::Error, reason);
+    test.skip("dispatch", ResultStatus::Error, reason, dispatchNote);
+    test.skip("roundtrip", ResultStatus::Error, reason, roundtripNote);
     return -1;
   }
 

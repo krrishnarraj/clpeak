@@ -29,6 +29,26 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `kernels/` | OpenCL C kernel sources (`.cl` files) |
 | `cmake/` | `BuildSdk.cmake` — SDK fallback finder |
 
+## Test documentation
+
+Every test here carries a plain-language `description` for non-expert readers
+(rendered by the GUI's info glyph and the CLI's `--describe`; see
+`include/common/AGENTS.md` § Test documentation for the two levels and the
+style rules).  OpenCL-specific plumbing:
+
+- `runComputeTest()` takes the test-level text as a `description` parameter
+  (after `unit`), so each call site in `cl_peak.cpp` carries its own; the
+  per-width readings are documented inside the helper.
+- `clWidthNote()` (`cl_peak.h`) is the shared wording for the
+  `float`/`float2`/…/`float16` readings, used by the compute helper and the
+  global/local bandwidth tests.  The bulk-skip paths pass it too, so an errored
+  row still says what it would have measured.
+- **`transfer_bandwidth`'s zero-copy convention is now explained to the user**:
+  the test description says a route that moves nothing reads as zero, and the
+  `enqueuemapbuffer` / `enqueueunmap` notes repeat it.  If you change
+  `ZERO_COPY_MULTIPLIER` or the reporting rule, update those strings — a bare
+  `0.00` with no explanation is what they exist to prevent.
+
 ## When You Change This Directory
 
 - If you add a new benchmark `.cpp` → update `CMakeLists.txt` + this file.

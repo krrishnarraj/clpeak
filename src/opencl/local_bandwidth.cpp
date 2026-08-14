@@ -13,7 +13,11 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
+    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU moves through local memory -- the "
+     "small on-chip scratchpad a group of work-items passes data through, "
+     "which never goes out to main memory."});
 
   try
   {
@@ -49,15 +53,16 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
       gbps = (float)bytesPerCall / timed / 1e3f;
 
-      test.emit(labels[w], gbps);
+      test.emit(labels[w], gbps, clWidthNote(widths[w]));
     }
   }
   catch (cl::Error &error)
   {
     const char *labels[] = {"float", "float2", "float4", "float8"};
+    const int widths[] = {1, 2, 4, 8};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 4; w++)
-      test.skip(labels[w], ResultStatus::Error, reason);
+      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
     return -1;
   }
 

@@ -10,12 +10,22 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
+    {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU reads through its texture units, "
+     "which take a different path to memory than plain buffer reads.  Each "
+     "pixel of the image is read exactly once, so caching cannot flatter the "
+     "number."});
+
+  // The image is RGBA float, so one fetch returns a whole pixel: four 32-bit
+  // values, hence the metric name.
+  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
+                          "colour values, 16 bytes.";
 
   if (!devInfo.imageSupported)
   {
     test.skip("float4", ResultStatus::Unsupported,
-               "Device has no image support");
+               "Device has no image support", fetchNote);
     return 0;
   }
 
@@ -75,14 +85,14 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * ndRangeTotal(globalSize);
       gbps = (float)bytesPerCall / timed / 1e3f;
 
-      test.emit("float4", gbps);
+      test.emit("float4", gbps, fetchNote);
     }
     ///////////////////////////////////////////////////////////////////////////
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    test.skip("float4", ResultStatus::Error, reason);
+    test.skip("float4", ResultStatus::Error, reason, fetchNote);
     return -1;
   }
 

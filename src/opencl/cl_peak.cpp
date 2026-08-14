@@ -166,47 +166,75 @@ int clPeak::runAll()
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "gflops",
+                       "Peak arithmetic speed of the GPU's shader cores on 32-bit "
+                       "fractional numbers -- the ordinary float type.  Nothing "
+                       "touches memory, so only the arithmetic units limit the rate.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
                        "Half-precision compute", "half_precision_compute",
                        "compute_hp", "half", "gflops",
+                       "Peak arithmetic speed on 16-bit fractional numbers -- half "
+                       "the size of a normal float, and what graphics and on-device "
+                       "AI mostly run on.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute", "double_precision_compute",
                        "compute_dp", "double", "gflops",
+                       "Peak arithmetic speed on 64-bit fractional numbers, the "
+                       "high-accuracy type scientific computing relies on.  Consumer "
+                       "GPUs deliberately run these many times slower than 32-bit.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
                        "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
                        "compute_mp", "mp", "gflops",
+                       "Peak speed when the GPU multiplies 16-bit numbers but keeps "
+                       "the running total in 32 bits -- the accuracy-preserving "
+                       "pattern AI code uses.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute", "integer_compute",
                        "compute_integer", "int", "gops",
+                       "Peak speed on 32-bit whole numbers -- the arithmetic behind "
+                       "indexing, addressing and bit manipulation, which shaders do "
+                       "alongside their fractional maths.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
                        "Integer compute Fast 24bit", "integer_compute_fast",
                        "compute_intfast", "int", "gops",
+                       "The same integer maths restricted to 24-bit values, which "
+                       "some GPUs multiply on their faster floating-point hardware "
+                       "instead.  Where this beats the plain integer row, the full "
+                       "32-bit multiply is the slower path.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
                        "Integer char (8bit) compute", "integer_compute_char",
                        "compute_char", "char", "gops",
+                       "Peak speed on 8-bit whole numbers, the smallest integer type "
+                       "-- worth knowing because image and quantized-AI work is full "
+                       "of them.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
                        "Integer short (16bit) compute", "integer_compute_short",
                        "compute_short", "short", "gops",
+                       "Peak speed on 16-bit whole numbers -- the middle size, "
+                       "between the 8-bit and 32-bit rows.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
         runComputeTest(queue, int8DpProg, devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "gops",
+                       "Peak speed of the 8-bit dot-product instruction, which "
+                       "multiplies four pairs of small whole numbers and sums them in "
+                       "one step -- the workhorse of quantized (compressed) neural "
+                       "networks.",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         // ---- Phase 3: bandwidth ----------------------------------------
@@ -220,8 +248,12 @@ int clPeak::runAll()
           runKernelLatency(queue, prog, devInfo, cfg);
         else if (isAllowed(Benchmark::KernelLatency))
         {
-          auto test = deviceScope.beginTest({"kernel_launch_latency",
-                                             "Kernel launch latency", "us"});
+          auto test = deviceScope.beginTest(
+            {"kernel_launch_latency", "Kernel launch latency", "us",
+             Category::Unknown,
+             "The overhead of asking the GPU to do anything at all, measured "
+             "with a kernel that does no work.  It is what small, frequent GPU "
+             "jobs pay before any of their own work begins."});
           test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
                        "No profiling queue support");
         }

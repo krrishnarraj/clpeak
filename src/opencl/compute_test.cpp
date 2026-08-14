@@ -10,7 +10,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            Benchmark which,
                            const std::string &displayName, const std::string &resultTag,
                            const std::string &kernelPrefix, const std::string &typeName,
-                           const std::string &unit, unsigned int workPerWI,
+                           const std::string &unit, const std::string &description,
+                           unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
   if (!isAllowed(which))
@@ -29,7 +30,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       labels[w] += std::to_string(widths[w]);
   }
 
-  auto test = currentDeviceScope->beginTest({resultTag, displayName, unit});
+  auto test = currentDeviceScope->beginTest(
+    {resultTag, displayName, unit, Category::Unknown, description});
 
   // Feature gates
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
@@ -120,12 +122,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
-        test.emit(labels[w], throughput);
+        test.emit(labels[w], throughput, {false, clWidthNote(widths[w])});
       }
       catch (cl::Error &error)
       {
         std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-        test.skip(labels[w], ResultStatus::Error, reason);
+        test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
       }
     }
   }
@@ -133,13 +135,13 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason);
+      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
     return -1;
   }
   catch (std::exception &e)
   {
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, e.what());
+      test.skip(labels[w], ResultStatus::Error, e.what(), clWidthNote(widths[w]));
     return -1;
   }
 

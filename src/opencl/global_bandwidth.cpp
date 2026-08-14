@@ -16,7 +16,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize / sizeof(float));
 
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
+    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU can stream out of its main memory, "
+     "reading a buffer far too large to cache.  Each reading fetches a "
+     "different number of values per instruction, since wider fetches usually "
+     "pull more through before the memory system saturates."});
 
   try
   {
@@ -77,7 +82,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       uint64_t movedFloats = ndRangeTotal(globalSize) * widths[w] * FETCH_PER_WI;
       gbps = ((float)movedFloats * sizeof(float)) / timed / 1e3f;
 
-      test.emit(labels[w], gbps);
+      test.emit(labels[w], gbps, clWidthNote(widths[w]));
      }
 
     delete[] arr;
@@ -85,9 +90,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   catch (cl::Error &error)
   {
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    const int widths[] = {1, 2, 4, 8, 16};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason);
+      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
 
     delete[] arr;
     return -1;
@@ -95,8 +101,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   catch (std::bad_alloc &)
   {
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+    const int widths[] = {1, 2, 4, 8, 16};
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, "Out of memory");
+      test.skip(labels[w], ResultStatus::Error, "Out of memory", clWidthNote(widths[w]));
     delete[] arr;
     return -1;
   }
