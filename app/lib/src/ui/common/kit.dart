@@ -433,11 +433,20 @@ class CChip extends StatelessWidget {
               color: selected ? c : t.faint,
             ),
             const SizedBox(width: 8),
-            Text(
-              label,
-              style: t.monoSmall.copyWith(
-                color: selected ? t.text : t.dim,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            // Flexible + wrapping, not a fixed-width ellipsis: a chip can
+            // carry whatever name a driver reports for its device
+            // ("Goldfish GFXStream (llvmpipe (LLVM 21.1.4, 128 bits))"), and
+            // an unflexed Text keeps its intrinsic width and overflows the
+            // line the Wrap gave it.  Truncating instead would hide exactly
+            // the tail that tells two otherwise identical devices apart, so a
+            // long chip grows downwards.
+            Flexible(
+              child: Text(
+                label,
+                style: t.monoSmall.copyWith(
+                  color: selected ? t.text : t.dim,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
               ),
             ),
           ],

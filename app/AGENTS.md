@@ -39,7 +39,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
   explanation per dialog: `_InfoGlyph` → `_showInfoDialog()` in
-  `lib/src/ui/results/results_body.dart`.  Text comes off the result rows
+  `lib/src/ui/results/results_body.dart`.  Names wrap rather than ellipsize
+  (a device or test name is identity — its tail is what distinguishes two of
+  them), so every name goes through `_NameWithInfo`, which gives the glyph a
+  reserved column at the name's edge: laid out beside a wrapping name it
+  would land at the column edge on wrapped rows and mid-row on unwrapped
+  ones.  Text comes off the result rows
   (`ResultEntry.description` / `.metricDescription`), **not** off the
   `test_begin` event — that would create a `TestResult` before its first
   measurement, which `CategoryGroup` reads as fully-skipped and files under

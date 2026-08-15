@@ -197,11 +197,9 @@ class _DeviceLine extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
-              child: Text(device.name,
-                  style: t.mono, maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-            ),
+            // Wraps rather than ellipsizes — driver-reported device names run
+            // long, and the tail is what distinguishes two of them.
+            Expanded(child: Text(device.name, style: t.mono)),
             for (final cap in caps) ...[
               const SizedBox(width: 6),
               CTag(text: cap),

@@ -309,23 +309,15 @@ class _TestLineState extends State<_TestLine> {
                 children: [
                   Container(width: 3, height: 15, color: widget.color),
                   const SizedBox(width: 10),
-                  // Title and glyph share one Expanded so a long title
-                  // ellipsizes against the glyph, not against the value.
+                  // The title wraps rather than ellipsizing: the row is as
+                  // tall as its name needs, which on a phone is the
+                  // difference between "Half-precision compute fp1…" and
+                  // knowing which half-precision test this is.
                   Expanded(
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(test.display,
-                              style: t.mono,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                        if (test.hasInfo)
-                          _InfoGlyph(
-                            title: test.display,
-                            description: test.description,
-                          ),
-                      ],
+                    child: _NameWithInfo(
+                      name: test.display,
+                      description: test.description,
+                      style: t.mono,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -368,6 +360,56 @@ class _TestLineState extends State<_TestLine> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// A name, plus its info glyph when it has something to explain.
+///
+/// The glyph gets a reserved slot at the edge of the name's column rather
+/// than a place beside the text, so every glyph in a table shares one x.
+/// Names wrap rather than ellipsize (their tails are what tell two of them
+/// apart), and a wrapping name fills its column — so a glyph laid out
+/// immediately after the text would sit at the column edge on wrapped rows
+/// and mid-row on unwrapped ones, which is the ragged look this avoids.  The
+/// cost is the slot's width, taken from every name including the ones with
+/// nothing to explain.
+class _NameWithInfo extends StatelessWidget {
+  const _NameWithInfo({
+    required this.name,
+    required this.description,
+    required this.style,
+    this.small = false,
+    this.reserve = true,
+  });
+
+  final String name;
+  final String description;
+  final TextStyle style;
+
+  /// Sized for the breakdown's smaller type.
+  final bool small;
+
+  /// Hold the glyph's width open even on names without one, so the glyphs of
+  /// a table line up.  Pass false where nothing in the table is documented —
+  /// the column would then be dead width.
+  final bool reserve;
+
+  @override
+  Widget build(BuildContext context) {
+    final glyph = description.isEmpty
+        ? null
+        : _InfoGlyph(title: name, description: description, small: small);
+    return Row(
+      children: [
+        Expanded(child: Text(name, style: style)),
+        if (reserve)
+          // The glyph's own padding is its column width, so an empty slot is
+          // exactly as wide as a filled one.
+          SizedBox(width: small ? 19 : 22, child: glyph)
+        else
+          ?glyph,
+      ],
     );
   }
 }
@@ -479,29 +521,21 @@ class _MetricLine extends StatelessWidget {
     final fraction =
         ok && maxValue > 0 ? (entry.value / maxValue).clamp(0.0, 1.0) : 0.0;
     final f = ok ? formatMetric(entry.value, entry.unit) : null;
-    final documented = entry.metricDescription.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3.5),
       child: Row(
         children: [
           SizedBox(
+            // Fixed width, so the meters stay in one column; a label longer
+            // than it wraps inside that width rather than being cut.
             width: glyphColumn ? 121 : 104,
-            child: Row(
-              children: [
-                Flexible(
-                  child: Text(entry.metric,
-                      style: t.monoSmallDim,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ),
-                if (documented)
-                  _InfoGlyph(
-                    title: entry.metric,
-                    description: entry.metricDescription,
-                    small: true,
-                  ),
-              ],
+            child: _NameWithInfo(
+              name: entry.metric,
+              description: entry.metricDescription,
+              style: t.monoSmallDim,
+              small: true,
+              reserve: glyphColumn,
             ),
           ),
           const SizedBox(width: 10),
@@ -574,20 +608,11 @@ class _UnsupportedSection extends StatelessWidget {
                   children: [
                     Expanded(
                       flex: 4,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Flexible(
-                            child: Text(test.display,
-                                style: t.monoSmall.copyWith(color: t.dim)),
-                          ),
-                          if (test.hasInfo)
-                            _InfoGlyph(
-                              title: test.display,
-                              description: test.description,
-                              small: true,
-                            ),
-                        ],
+                      child: _NameWithInfo(
+                        name: test.display,
+                        description: test.description,
+                        style: t.monoSmall.copyWith(color: t.dim),
+                        small: true,
                       ),
                     ),
                     if (test.skipReason.isNotEmpty) ...[

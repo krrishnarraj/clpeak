@@ -176,10 +176,9 @@ class _BackendSelector extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(refs[i].$2.name,
-                              style: t.mono,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
+                          // Wraps: you pick a device by its full name, so
+                          // nothing here is allowed to hide the tail of one.
+                          Text(refs[i].$2.name, style: t.mono),
                           if (refs[i].$2.type.isNotEmpty) ...[
                             const SizedBox(height: 3),
                             Text(refs[i].$2.type, style: t.monoSmallDim),
