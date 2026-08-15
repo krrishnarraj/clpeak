@@ -63,7 +63,10 @@ void main() {
     await tester.pump();
 
     // Two tests on screen, one glyph — collapsed, so no reading glyphs yet.
-    expect(find.text('Memory latency (pointer-chase)'), findsOneWidget);
+    // A documented name carries its glyph as an inline WidgetSpan, so its
+    // plain text is the name plus a placeholder rune: match by containment.
+    expect(find.textContaining('Memory latency (pointer-chase)'),
+        findsOneWidget);
     expect(find.text('Atomic fetch-add latency'), findsOneWidget);
     expect(find.byIcon(Icons.info_outline), findsOneWidget);
 
@@ -104,7 +107,7 @@ void main() {
 
     // Expand the breakdown: the test's glyph, plus one for the documented
     // reading and none for the other.
-    await tester.tap(find.text('Memory latency (pointer-chase)'));
+    await tester.tap(find.textContaining('Memory latency (pointer-chase)'));
     await tester.pump();
     expect(find.byIcon(Icons.info_outline), findsNWidgets(2));
 

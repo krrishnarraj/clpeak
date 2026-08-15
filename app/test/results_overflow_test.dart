@@ -1,8 +1,11 @@
 // Long names must wrap, never overflow and never get cut: a driver-reported
 // device name ("Goldfish GFXStream (llvmpipe (LLVM 21.1.4, 128 bits))") is
 // wider than a phone, and its tail is what tells two such devices apart.
-// Wrapping is also what puts the info glyphs at risk of going ragged, so the
-// glyph column is pinned here too.
+//
+// The info glyph on a documented name rides in the text flow rather than a
+// column reserved at the name's far edge — the reserved-column version put a
+// visible gap between a short name and its glyph on a wide desktop window,
+// since the column tracked the full row width, not the text.
 //
 // Pure Dart — ResultsBody takes a RunDocument, so no native bridge is needed.
 import 'package:clpeak/src/model/result_entry.dart';
@@ -21,8 +24,7 @@ ResultEntry _entry({
   String device = _longDevice,
   String test = 'compute_hp',
   String display = _longTest,
-  // Documented by default: an undocumented test has no glyph to place.
-  String description = 'How fast the device does fp16 math.',
+  String description = '',
 }) =>
     ResultEntry(
       backend: backend,
@@ -41,13 +43,6 @@ ResultEntry _entry({
       metricDescription: '',
     );
 
-/// The phone width, where names are widest relative to the screen.
-void _phone(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1125, 2436);
-  tester.view.devicePixelRatio = 3.0;
-  addTearDown(tester.view.reset);
-}
-
 Widget _host(RunDocument doc) => MaterialApp(
       theme: ClpeakTheme.dark(),
       home: Scaffold(body: ResultsBody(document: doc)),
@@ -56,7 +51,10 @@ Widget _host(RunDocument doc) => MaterialApp(
 void main() {
   testWidgets('long device and test names wrap instead of overflowing',
       (tester) async {
-    _phone(tester);
+    // A phone, where the names are widest relative to the screen.
+    tester.view.physicalSize = const Size(1125, 2436);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
 
     final doc = RunDocument();
     // Two runs, so the device selector chips are shown — the chip is the
@@ -84,38 +82,44 @@ void main() {
     }
   });
 
-  testWidgets('info glyphs share one column, wrapped rows included',
+  testWidgets(
+      'a documented name keeps its glyph tight, even in a wide window',
       (tester) async {
-    _phone(tester);
+    // A wide desktop window with plenty of room past either name — the
+    // scenario the reserved-column glyph placement got visibly wrong: a
+    // Text's *layout box* fills the row regardless of name length (that's
+    // what the outer Expanded is for), so comparing glyph position against
+    // the box edge can't tell the two placements apart. Comparing a short
+    // name's glyph against a longer one's does: inline, the glyph follows
+    // the visible text, so a longer name pushes its glyph further right; a
+    // glyph anchored to the row's edge would land in the same place either
+    // way.
+    tester.view.physicalSize = const Size(2560, 1600);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
 
     final doc = RunDocument();
-    // A title too long for the width, one that fits, and one with nothing to
-    // explain — the third holds the column open without filling it.
-    doc.addEntry(_entry());
-    doc.addEntry(_entry(test: 'compute_int', display: _shortTest));
     doc.addEntry(_entry(
-        test: 'compute_dp', display: 'Double-precision', description: ''));
+      test: 'compute_int',
+      display: _shortTest,
+      description: 'How fast the device does plain int32 math.',
+    ));
+    doc.addEntry(_entry(
+      test: 'compute_int_dp4a',
+      display: 'Integer compute int32 dot-product',
+      description: 'How fast the device does int32 dot-product math.',
+    ));
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
 
-    // The long one did wrap — otherwise this proves nothing.
-    final wrapped = tester.getRect(find.text(_longTest));
-    final plain = tester.getRect(find.text(_shortTest));
-    expect(wrapped.height, greaterThan(plain.height));
+    expect(tester.takeException(), isNull);
 
-    // Both glyphs in the same column, each on its own row.
     final glyphs = find.byIcon(Icons.info_outline);
     expect(glyphs, findsNWidgets(2));
-    final first = tester.getRect(glyphs.at(0));
-    final second = tester.getRect(glyphs.at(1));
-    expect(first.left, second.left);
-    expect(first.center.dy, inInclusiveRange(wrapped.top, wrapped.bottom));
-    expect(second.center.dy, inInclusiveRange(plain.top, plain.bottom));
+    final shortGlyph = tester.getRect(glyphs.at(0));
+    final longGlyph = tester.getRect(glyphs.at(1));
 
-    // The undocumented row keeps the column open rather than letting its
-    // title run into it.
-    expect(tester.getRect(find.text('Double-precision')).right,
-        lessThanOrEqualTo(first.left));
+    expect(shortGlyph.left, lessThan(longGlyph.left));
   });
 }

@@ -366,21 +366,18 @@ class _TestLineState extends State<_TestLine> {
 
 /// A name, plus its info glyph when it has something to explain.
 ///
-/// The glyph gets a reserved slot at the edge of the name's column rather
-/// than a place beside the text, so every glyph in a table shares one x.
-/// Names wrap rather than ellipsize (their tails are what tell two of them
-/// apart), and a wrapping name fills its column — so a glyph laid out
-/// immediately after the text would sit at the column edge on wrapped rows
-/// and mid-row on unwrapped ones, which is the ragged look this avoids.  The
-/// cost is the slot's width, taken from every name including the ones with
-/// nothing to explain.
+/// The glyph rides in the text flow, right after the last word, rather than
+/// in a slot reserved at the edge of the name's column: on a wide desktop
+/// window the name column can stretch far past a short name, and a glyph
+/// anchored to that far edge reads as unrelated to the name it explains. A
+/// column-aligned glyph is nice when it happens for free, but not at the
+/// cost of a visible gap on every short row — inline never has that gap.
 class _NameWithInfo extends StatelessWidget {
   const _NameWithInfo({
     required this.name,
     required this.description,
     required this.style,
     this.small = false,
-    this.reserve = true,
   });
 
   final String name;
@@ -390,26 +387,22 @@ class _NameWithInfo extends StatelessWidget {
   /// Sized for the breakdown's smaller type.
   final bool small;
 
-  /// Hold the glyph's width open even on names without one, so the glyphs of
-  /// a table line up.  Pass false where nothing in the table is documented —
-  /// the column would then be dead width.
-  final bool reserve;
-
   @override
   Widget build(BuildContext context) {
-    final glyph = description.isEmpty
-        ? null
-        : _InfoGlyph(title: name, description: description, small: small);
-    return Row(
-      children: [
-        Expanded(child: Text(name, style: style)),
-        if (reserve)
-          // The glyph's own padding is its column width, so an empty slot is
-          // exactly as wide as a filled one.
-          SizedBox(width: small ? 19 : 22, child: glyph)
-        else
-          ?glyph,
-      ],
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(text: name),
+        if (description.isNotEmpty)
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: _InfoGlyph(
+              title: name,
+              description: description,
+              small: small,
+            ),
+          ),
+      ]),
+      style: style,
     );
   }
 }
@@ -535,7 +528,6 @@ class _MetricLine extends StatelessWidget {
               description: entry.metricDescription,
               style: t.monoSmallDim,
               small: true,
-              reserve: glyphColumn,
             ),
           ),
           const SizedBox(width: 10),
