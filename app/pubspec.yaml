@@ -3,7 +3,7 @@ description: "clpeak — cross-API compute benchmark (OpenCL, Vulkan, CUDA, ROCm
 publish_to: 'none'
 
 # versionName / versionCode
-version: 2.1.0+31
+version: 2.1.0+32
 
 environment:
   sdk: ^3.12.2
