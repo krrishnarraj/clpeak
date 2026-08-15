@@ -8,7 +8,7 @@ import '../ffi/clpeak_bindings.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
 
-/// Persists every run under `<documents>/clpeak/runs/`:
+/// Persists every run under `<base>/runs/`:
 ///   `<id>.xml`   canonical schema-v2 XML written by the NATIVE side
 ///                (clpeak_launch --xml-file) — also the export artifact
 ///   index.json   {"runs":[RunSummary...]} for a fast history list
@@ -25,11 +25,34 @@ class RunHistoryStore {
 
   Future<Directory> runsDirectory() async {
     if (_dir != null) return _dir!;
-    final base = _override ?? await getApplicationDocumentsDirectory();
-    final dir = _override ?? Directory(p.join(base.path, 'clpeak', 'runs'));
+    final dir =
+        _override ?? Directory(p.join((await baseDirectory()).path, 'runs'));
     await dir.create(recursive: true);
     _dir = dir;
     return dir;
+  }
+
+  /// Desktop: `$HOME/.clpeak` (`%USERPROFILE%\.clpeak` on Windows). The
+  /// documents directory is deliberately not used there — on macOS the first
+  /// touch of `~/Documents` raises a TCC consent dialog, and a benchmark tool
+  /// has no business asking for the user's documents.
+  ///
+  /// Mobile keeps the per-app documents directory: it is inside the app
+  /// sandbox (no permission involved), and is the location iOS exposes to the
+  /// Files app / iTunes file sharing.
+  static Future<Directory> baseDirectory() async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      final docs = await getApplicationDocumentsDirectory();
+      return Directory(p.join(docs.path, 'clpeak'));
+    }
+    final env = Platform.environment;
+    final home = env['HOME'] ?? env['USERPROFILE'];
+    if (home != null && home.isNotEmpty) {
+      return Directory(p.join(home, '.clpeak'));
+    }
+    // No home directory (odd service/CI environments) — fall back to the
+    // platform's per-app support dir, which never needs consent either.
+    return getApplicationSupportDirectory();
   }
 
   File _indexFile(Directory dir) => File(p.join(dir.path, 'index.json'));

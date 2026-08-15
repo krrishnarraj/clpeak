@@ -47,8 +47,11 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   measurement, which `CategoryGroup` reads as fully-skipped and files under
   "not supported".
 - History persistence? → `lib/src/services/run_history_store.dart`
-  (`<documents>/clpeak/runs/<id>.xml` written natively via `--xml-file`,
-  `index.json` sidecar; viewing goes XML → native loader → JSON).  Device
+  (`<base>/runs/<id>.xml` written natively via `--xml-file`, `index.json`
+  sidecar; viewing goes XML → native loader → JSON).  `<base>` is
+  `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a macOS TCC
+  consent prompt — and `<app documents>/clpeak` on Android/iOS, where that
+  directory is inside the sandbox and is what the Files app shows.  Device
   properties reach a reopened run through the file's `devices` block, not the
   event stream — see `RunDocument.fromEntriesJson`.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
@@ -98,7 +101,7 @@ the platform dirs:
   literal "clpeak" (not `$(PRODUCT_NAME)`), so the app is `clpeak-gui.app` on
   disk but still reads "clpeak" in the menu bar and Dock
 - `macos/Runner/{DebugProfile,Release}.entitlements` — App Sandbox disabled
-  (device probing, dlopen, real ~/Documents)
+  (device probing, dlopen, real ~/.clpeak)
 - `macos/Runner/MainFlutterWindow.swift`, `linux/runner/my_application.cc`,
   `windows/runner/main.cpp` — 1280x860 default window size (macOS also sets a
   900x640 content minimum and centers)
