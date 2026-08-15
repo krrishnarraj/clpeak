@@ -18,7 +18,8 @@
 // Zen 2 a line-split load costs two accesses.  That alone caps an L1 read row
 // near ~60% of the load-port bound.  64-byte alignment removes the splits for
 // every vector width we issue (16/32/64 B).
-struct AlignedFloats {
+struct AlignedFloats
+{
   float *p = nullptr;
   size_t n = 0;
   AlignedFloats() = default;
@@ -36,8 +37,10 @@ struct AlignedFloats {
   }
   void free()
   {
-    if (p) ::operator delete(p, std::align_val_t(64));
-    p = nullptr; n = 0;
+    if (p)
+      ::operator delete(p, std::align_val_t(64));
+    p = nullptr;
+    n = 0;
   }
   float *data() const { return p; }
 };
@@ -66,7 +69,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
   const int maxT = pool->maxThreads();
   const bool appleCpu = info.vendor == "Apple" || info.name.rfind("Apple", 0) == 0;
-  const uint64_t cap = 32ull * 1024 * 1024;  // bound the per-thread allocation
+  const uint64_t cap = 32ull * 1024 * 1024; // bound the per-thread allocation
   // Per-thread buffer must hold the largest single-thread working set we stream.
   // That is usually the L3 set, but on Apple Silicon the per-cluster L2 (e.g.
   // 12 MB) can exceed the reported/last-level cache, so size to the max of the
@@ -74,28 +77,39 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   uint64_t largestLevel = std::max<uint64_t>(info.l2CacheBytes / 2, info.l3CacheBytes / 2);
   uint64_t allocBytes = std::min<uint64_t>(std::max<uint64_t>(largestLevel, 65536), cap);
   size_t allocFloats = (size_t)(allocBytes / sizeof(float));
-  if (allocFloats < 1024) allocFloats = 1024;
+  if (allocFloats < 1024)
+    allocFloats = 1024;
 
   std::vector<AlignedFloats> bufs((size_t)maxT);
-  for (auto &b : bufs) { b.alloc(allocFloats); populate(b.data(), allocFloats); }
+  for (auto &b : bufs)
+  {
+    b.alloc(allocFloats);
+    populate(b.data(), allocFloats);
+  }
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
 
   // Notes ride the table so a level's name and explanation stay adjacent.
-  struct Level { const char *name; uint64_t bytes; bool sharedForMt;
-                 const char *stNote; const char *mtNote; };
+  struct Level
+  {
+    const char *name;
+    uint64_t bytes;
+    bool sharedForMt;
+    const char *stNote;
+    const char *mtNote;
+  };
   const Level levels[] = {
-    {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false,
-     "One thread reading from the small cache inside its own core.",
-     "Every core reading from its own L1 at the same time."},
-    {"L2", std::max<uint64_t>(info.l2CacheBytes  / 2, 16384), appleCpu,
-     "One thread reading from the mid-level cache, the next step out.",
-     "Every core reading from L2 at once; where L2 is shared, the data is "
-     "split between them so it still fits."},
-    {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true,
-     "One thread reading from the large cache shared by all cores.",
-     "Every core reading from that shared cache at once, each taking a slice "
-     "of it."},
+      {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false,
+       "One thread reading from the small cache inside its own core.",
+       "Every core reading from its own L1 at the same time."},
+      {"L2", std::max<uint64_t>(info.l2CacheBytes / 2, 16384), appleCpu,
+       "One thread reading from the mid-level cache, the next step out.",
+       "Every core reading from L2 at once; where L2 is shared, the data is "
+       "split between them so it still fits."},
+      {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true,
+       "One thread reading from the large cache shared by all cores.",
+       "Every core reading from that shared cache at once, each taking a slice "
+       "of it."},
   };
 
   unsigned int forced = forceIters ? specifiedIters : 0;
@@ -103,40 +117,52 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   for (const auto &lvl : levels)
   {
     size_t M1 = (size_t)(lvl.bytes / sizeof(float));
-    if (M1 > allocFloats) M1 = allocFloats;
-    if (M1 < 64) M1 = 64;
+    if (M1 > allocFloats)
+      M1 = allocFloats;
+    if (M1 < 64)
+      M1 = 64;
 
     uint64_t mtBytes = lvl.sharedForMt
-      ? std::max<uint64_t>(lvl.bytes / (uint64_t)maxT, 4096)
-      : lvl.bytes;
+                           ? std::max<uint64_t>(lvl.bytes / (uint64_t)maxT, 4096)
+                           : lvl.bytes;
     size_t MN = (size_t)(mtBytes / sizeof(float));
-    if (MN > allocFloats) MN = allocFloats;
-    if (MN < 64) MN = 64;
+    if (MN > allocFloats)
+      MN = allocFloats;
+    if (MN < 64)
+      MN = 64;
 
-    Workload body1 = [&](int tid, uint64_t iters) {
+    Workload body1 = [&](int tid, uint64_t iters)
+    {
       sink[(size_t)tid] ^= readBufferChecksum(bufs[(size_t)tid].data(), M1, iters);
     };
-    Workload bodyN = [&](int tid, uint64_t iters) {
+    Workload bodyN = [&](int tid, uint64_t iters)
+    {
       sink[(size_t)tid] ^= readBufferChecksum(bufs[(size_t)tid].data(), MN, iters);
     };
 
-    double us1 = runWorkload(1,    body1, cfg.targetTimeUs, forced);
+    double us1 = runWorkload(1, body1, cfg.targetTimeUs, forced);
     double usN = runWorkload(maxT, bodyN, cfg.targetTimeUs, forced);
 
     double stPassBytes = (double)M1 * sizeof(float);
     double mtPassBytes = (double)MN * sizeof(float) * (double)maxT;
-    auto gbps = [](double bytes, double meanUs) -> float {
+    auto gbps = [](double bytes, double meanUs) -> float
+    {
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
     };
 
-    if (us1 > 0) test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1), lvl.stNote);
-    else         test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote);
-    if (usN > 0) test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN), lvl.mtNote);
-    else         test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote);
+    if (us1 > 0)
+      test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1), lvl.stNote);
+    else
+      test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote);
+    if (usN > 0)
+      test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN), lvl.mtNote);
+    else
+      test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote);
   }
 
   volatile uint64_t keep = 0;
-  for (uint64_t s : sink) keep ^= s;
+  for (uint64_t s : sink)
+    keep ^= s;
   (void)keep;
 
   // Close the read test BEFORE opening the write/copy one: LoggerText buffers
@@ -167,18 +193,22 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     // threads.  A quarter is resident on both core types.  Reads tolerate the
     // overflow (they scale ~7.7x either way); stores do not.
     size_t wFloats = (size_t)(std::max<uint64_t>(info.l1dCacheBytes / 4, 4096) / sizeof(float));
-    if (wFloats > allocFloats) wFloats = allocFloats;
-    size_t cFloats = wFloats / 2;      // src [cFloats, 2*cFloats) + dst [0, cFloats)
+    if (wFloats > allocFloats)
+      wFloats = allocFloats;
+    size_t cFloats = wFloats / 2; // src [cFloats, 2*cFloats) + dst [0, cFloats)
 
-    Workload writeBody = [&](int tid, uint64_t iters) {
+    Workload writeBody = [&](int tid, uint64_t iters)
+    {
       clpeak_cpu::kernels().writefill(bufs[(size_t)tid].data(), wFloats, iters);
     };
-    Workload copyBody = [&](int tid, uint64_t iters) {
+    Workload copyBody = [&](int tid, uint64_t iters)
+    {
       float *p = bufs[(size_t)tid].data();
       clpeak_cpu::kernels().copybuf(p, p + cFloats, cFloats, iters);
     };
 
-    auto gbps = [](double bytes, double meanUs) -> float {
+    auto gbps = [](double bytes, double meanUs) -> float
+    {
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
     };
 
@@ -188,19 +218,27 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                           "for every byte moved.";
     const char *cMtNote = "Every core copying inside its own L1 at the same time.";
 
-    double us1 = runWorkload(1,    writeBody, cfg.targetTimeUs, forced);
+    double us1 = runWorkload(1, writeBody, cfg.targetTimeUs, forced);
     double usN = runWorkload(maxT, writeBody, cfg.targetTimeUs, forced);
-    if (us1 > 0) wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1), wStNote);
-    else         wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote);
-    if (usN > 0) wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
-    else         wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote);
+    if (us1 > 0)
+      wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1), wStNote);
+    else
+      wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote);
+    if (usN > 0)
+      wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
+    else
+      wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote);
 
-    us1 = runWorkload(1,    copyBody, cfg.targetTimeUs, forced);
+    us1 = runWorkload(1, copyBody, cfg.targetTimeUs, forced);
     usN = runWorkload(maxT, copyBody, cfg.targetTimeUs, forced);
-    if (us1 > 0) wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1), cStNote);
-    else         wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote);
-    if (usN > 0) wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
-    else         wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote);
+    if (us1 > 0)
+      wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1), cStNote);
+    else
+      wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote);
+    if (usN > 0)
+      wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
+    else
+      wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote);
   }
   return 0;
 }
@@ -215,11 +253,13 @@ static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
   uint64_t arrayBytes = std::max<uint64_t>(llc * 4, 64ull << 20);
   uint64_t cap = info.totalMemBytes ? std::min<uint64_t>(512ull << 20, info.totalMemBytes / 16)
                                     : (512ull << 20);
-  if (cap < llc * 2) cap = llc * 2;            // always large enough to miss the LLC
+  if (cap < llc * 2)
+    cap = llc * 2; // always large enough to miss the LLC
   arrayBytes = std::min(arrayBytes, cap);
   size_t N = (size_t)(arrayBytes / sizeof(float));
   N = (N / (size_t)maxT) * (size_t)maxT;
-  if (N < (size_t)maxT) N = (size_t)maxT;
+  if (N < (size_t)maxT)
+    N = (size_t)maxT;
   return N;
 }
 
@@ -233,15 +273,16 @@ static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "DRAM bandwidth", "gbps", Category::Unknown,
-     "How many bytes per second all cores together can move to and from main "
-     "memory.  The arrays are far too big for any cache, so every access goes "
-     "out to RAM; these are the three classic STREAM access patterns."});
+      {"global_memory_bandwidth", "DRAM bandwidth", "gbps", Category::Unknown,
+       "How many bytes per second all cores together can move to and from main "
+       "memory.  The arrays are far too big for any cache, so every access goes "
+       "out to RAM."});
 
   const int maxT = pool->maxThreads();
   const size_t N = pickStreamFloats(info, maxT);
 
-  auto chunk = [&](int tid, size_t &lo, size_t &hi) {
+  auto chunk = [&](int tid, size_t &lo, size_t &hi)
+  {
     size_t per = N / (size_t)maxT;
     lo = (size_t)tid * per;
     hi = (tid == maxT - 1) ? N : lo + per;
@@ -256,22 +297,25 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   float *A = Abuf.data();
   float *B = Bbuf.data();
   float *C = Cbuf.data();
-  pool->run(maxT, [&](int tid) {
+  pool->run(maxT, [&](int tid)
+            {
     size_t lo, hi; chunk(tid, lo, hi);
     populate(A + lo, hi - lo);
     populate(B + lo, hi - lo);
-    populate(C + lo, hi - lo);
-  });
+    populate(C + lo, hi - lo); });
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
   unsigned int forced = forceIters ? specifiedIters : 0;
-  auto gbps = [](double bytes, double meanUs) -> float {
+  auto gbps = [](double bytes, double meanUs) -> float
+  {
     return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
   };
 
   {
-    Workload body = [&](int tid, uint64_t iters) {
-      size_t lo, hi; chunk(tid, lo, hi);
+    Workload body = [&](int tid, uint64_t iters)
+    {
+      size_t lo, hi;
+      chunk(tid, lo, hi);
       sink[(size_t)tid] ^= readBufferChecksum(A + lo, hi - lo, iters);
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
@@ -279,8 +323,10 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
               "Reading one large array straight through, start to end.");
   }
   {
-    Workload body = [&](int tid, uint64_t iters) {
-      size_t lo, hi; chunk(tid, lo, hi);
+    Workload body = [&](int tid, uint64_t iters)
+    {
+      size_t lo, hi;
+      chunk(tid, lo, hi);
       for (uint64_t it = 0; it < iters; it++)
         std::memcpy(A + lo, C + lo, (hi - lo) * sizeof(float));
     };
@@ -291,8 +337,10 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   }
   {
     const float s = 1.5f;
-    Workload body = [&](int tid, uint64_t iters) {
-      size_t lo, hi; chunk(tid, lo, hi);
+    Workload body = [&](int tid, uint64_t iters)
+    {
+      size_t lo, hi;
+      chunk(tid, lo, hi);
       for (uint64_t it = 0; it < iters; it++)
         for (size_t i = lo; i < hi; i++)
           A[i] = B[i] + s * C[i];
@@ -304,7 +352,8 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   }
 
   volatile uint64_t keep = 0;
-  for (uint64_t v : sink) keep ^= v;
+  for (uint64_t v : sink)
+    keep ^= v;
   (void)keep;
   return 0;
 }
