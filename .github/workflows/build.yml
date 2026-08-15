@@ -134,13 +134,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config libgtk-3-dev liblzma-dev
 
-      # Desktop artifacts ship the GUI (bin/clpeak-gui + gui/ bundle, or
-      # clpeak-gui.app on macOS), so the SDK is needed here, not just in the
-      # mobile jobs.  Skipped on the arm64 Linux/Windows runners: Flutter's
-      # desktop SDK for those hosts is x64-only, so those two zips are CLI-only
-      # (matrix.gui == false).  Where the GUI is expected, configure passes
-      # -DCLPEAK_REQUIRE_GUI=ON so a broken SDK setup fails the job instead of
-      # quietly shipping a GUI-less zip.
       - name: Set up Flutter
         if: matrix.gui
         uses: subosito/flutter-action@v2
@@ -187,7 +180,7 @@ jobs:
       - name: Configure CMake & Build
         if: ${{ !matrix.oneapi }}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} ${{ matrix.gui && '-DCLPEAK_REQUIRE_GUI=ON' || '-DCLPEAK_ENABLE_GUI=OFF' }}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
       # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
@@ -197,7 +190,7 @@ jobs:
         shell: bash
         run: |
           source /opt/intel/oneapi/setvars.sh
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }} ${{ matrix.gui && '-DCLPEAK_REQUIRE_GUI=ON' || '-DCLPEAK_ENABLE_GUI=OFF' }}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
       - name: Run

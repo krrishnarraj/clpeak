@@ -9,9 +9,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   → complete bundle at `build/clpeak-gui/` (macOS: `clpeak-gui.app` with
   `clpeak_ffi.framework` embedded + re-signed; Linux: bundle with
   `lib/libclpeak_ffi.so`; Windows: flat dir with `clpeak_ffi.dll`).
-  GUI is skipped when the Flutter SDK isn't detectable or
-  `-DCLPEAK_ENABLE_GUI=OFF`; `-DCLPEAK_REQUIRE_GUI=ON` makes a missing SDK a
-  configure error (release CI).
+  GUI is skipped when the Flutter SDK isn't detectable or `-DCLPEAK_ENABLE_GUI=OFF`.
 - The runner executable/bundle is named **clpeak-gui**, never `clpeak` — the
   release zip puts it next to the CLI binary of that name. macOS keeps the
   user-visible name "clpeak" via `CFBundleName`/`CFBundleDisplayName`.

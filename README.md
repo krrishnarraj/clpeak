@@ -157,7 +157,6 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (no SDK; otherwise always available) |
 | `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped automatically when no Flutter SDK is found) |
-| `CLPEAK_REQUIRE_GUI` | `OFF` | n/a — set it `ON` to turn a missing Flutter SDK into a configure error instead of a silent skip (release CI uses this) |
 
 ## GUI
 

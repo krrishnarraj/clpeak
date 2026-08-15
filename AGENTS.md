@@ -58,8 +58,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 - Desktop: `cmake -B build && cmake --build build`
 - Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
 - GUI: built automatically as `clpeak-gui` when the Flutter SDK is detected
-  (disable with `-DCLPEAK_ENABLE_GUI=OFF`, require it with
-  `-DCLPEAK_REQUIRE_GUI=ON`); bundle lands in `build/clpeak-gui/`.
+  (disable with `-DCLPEAK_ENABLE_GUI=OFF`); bundle lands in `build/clpeak-gui/`.
   Flutter's desktop SDK is x64-only on Linux/Windows, so those arm64 CI jobs
   build CLI-only (`gui: false` in the workflow matrix). Mobile builds: see
   `app/AGENTS.md`.

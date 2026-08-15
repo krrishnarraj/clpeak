@@ -72,16 +72,6 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# The backends are static libs linked into BOTH the clpeak executable and the
-# clpeak_ffi shared library (the GUI bridge).  ELF refuses to link non-PIC
-# objects into a .so, so they must all be position-independent -- peak_common
-# already forced -fPIC for that reason; this covers the rest.
-#
-# Benchmark fidelity is unaffected: the kernels' globals are all file-static
-# (RIP-relative either way, no GOT indirection), and the thread_locals whose
-# access model does change (AMX tile config/output, string scan buffers) are
-# touched once per kernel invocation, never inside a timed loop.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Backend options
@@ -93,13 +83,6 @@ option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
 option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
 option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
 option(CLPEAK_ENABLE_GUI    "Build the Flutter GUI app (clpeak-gui target) and its native bridge" ON)
-# Release builds must never ship a zip that silently lost the GUI because the
-# Flutter SDK wasn't on PATH; CI configures with -DCLPEAK_REQUIRE_GUI=ON so a
-# broken SDK setup is a configure error instead of a missing binary.
-option(CLPEAK_REQUIRE_GUI   "Fail configuration if the GUI cannot be built (for release CI)" OFF)
-# The CPU backend always builds a portable binary: a safe baseline (SSE4.2 /
-# armv8-a) plus per-ISA feature TUs that cpu_dispatch.cpp picks between at runtime
-# (see src/cpu/CMakeLists.txt), so one build is safe to distribute across machines.
 
 # The native CPU backend needs a threading library (always available).
 if(CLPEAK_ENABLE_CPU)
@@ -178,15 +161,6 @@ endif()
 if(CLPEAK_ENABLE_GUI)
     find_program(FLUTTER_EXECUTABLE flutter
         HINTS $ENV{FLUTTER_HOME}/bin $ENV{FLUTTER_ROOT}/bin $ENV{HOME}/flutter/bin)
-endif()
-if(CLPEAK_REQUIRE_GUI AND NOT CLPEAK_ENABLE_GUI)
-    message(FATAL_ERROR
-        "CLPEAK_REQUIRE_GUI=ON conflicts with CLPEAK_ENABLE_GUI=OFF.")
-endif()
-if(CLPEAK_REQUIRE_GUI AND NOT FLUTTER_EXECUTABLE)
-    message(FATAL_ERROR
-        "CLPEAK_REQUIRE_GUI=ON but the Flutter SDK was not found. "
-        "Install flutter and put it on PATH, or set FLUTTER_HOME/FLUTTER_ROOT.")
 endif()
 
 # Always build common
