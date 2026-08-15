@@ -158,29 +158,6 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (no SDK; otherwise always available) |
 | `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped automatically when no Flutter SDK is found) |
 
-## GUI
-
-`clpeak-gui` is the desktop app — the same backends and tests as the CLI, driven from a window. It builds alongside the CLI whenever the [Flutter SDK](https://docs.flutter.dev/get-started/install) is on `PATH` (or `FLUTTER_HOME`/`FLUTTER_ROOT` is set), landing in `build/clpeak-gui/`.
-
-A Flutter desktop app is a bundle, not a lone executable: the runner needs its sibling `data/` and `lib/` to start. The release archives lay that out as
-
-```
-clpeak-<version>-<os>-<arch>[-backend]/
-├── bin/
-│   ├── clpeak          # CLI
-│   └── clpeak-gui      # launcher for ../gui/clpeak-gui
-├── gui/                # the Flutter bundle (do not split it up)
-└── share/clpeak/LICENSE
-```
-
-so `bin/clpeak-gui` works from anywhere as long as `gui/` travels with it. On macOS the equivalent is `clpeak-gui.app` at the archive root, plus a separate `.dmg` release asset that installs it by drag-and-drop.
-
-> **macOS first launch:** the app is ad-hoc signed, not notarized, so Gatekeeper blocks a downloaded copy. Right-click → **Open** once, or run `xattr -dr com.apple.quarantine /Applications/clpeak-gui.app`.
-
-> **Linux:** the GUI needs GTK 3 (`libgtk-3-0`) on the target system. The CLI has no such dependency. The window icon shows under X11; on Wayland the desktop matches icons to an installed `.desktop` entry by application ID, so a portable extracted bundle shows the generic one there.
-
-> **arm64 Linux and Windows packages are CLI-only.** Flutter's desktop SDK for those hosts is x64-only, so the release archives for `linux-arm64` and `windows-arm64` ship `bin/clpeak` without a `gui/` directory. Building the GUI there needs a self-built Flutter engine. macOS arm64 is unaffected — Flutter supports Apple silicon natively.
-
 ## CLI
 
 `./clpeak --help` prints the full flag list. The CLI is uniform across backends: the same global, test-selection, and output flags work whether OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, or CPU is doing the work.
@@ -215,27 +192,6 @@ so `bin/clpeak-gui` works from anywhere as long as `gui/` travels with it. On ma
 ```
 
 `--compare baseline.json` re-runs the selected tests and prints each result next to the value saved earlier with `--json-file`, so regressions or driver/SDK upgrades show up as a per-test delta.
-
-`--describe` adds a plain-language line or two under each test header, and a note under each reading whose name doesn't speak for itself:
-
-```console
-$ clpeak --cpu --memory-latency --describe
-
-    Memory latency (pointer-chase) (NS)
-      How long the core waits for one memory read when it has nothing else to do
-      -- each read's address comes from the previous read, so the hardware
-      cannot start the next one early.
-
-      L1          : 1.25
-                    Reading from the small cache inside the core.
-      DRAM        : 121.37
-                    Reading from main memory at random -- the worst case.
-      DRAM x8     : 15.85
-                    Eight independent chases at once: the reads overlap instead
-                    of waiting in turn, so each costs less.
-```
-
-The same text sits behind the ⓘ glyphs in the GUI. Tests documented so far show it; the rest print as before.
 
 ### Selecting a specific device
 
