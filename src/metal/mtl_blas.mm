@@ -70,6 +70,11 @@ uint32_t pickGemmDim(const mtl_device_info_t &info)
                                                          : (uint64_t)4 << 30) / 4;
     while (D > 1024 && 3ULL * D * D * 4 > budget)
         D /= 2;
+
+    // Each matrix is one MTLBuffer, so maxBufferLength caps it independently of
+    // the working-set budget -- iOS reports a much smaller value than the Mac.
+    while (D > 1024 && info.maxBufferLength && D * D * 4 > info.maxBufferLength)
+        D /= 2;
     return (uint32_t)D;
 }
 
@@ -303,7 +308,10 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     if (@available(macOS 14.0, *))
 #endif
     {
-        if (dev.info.mpsGraphBF16Supported)
+        if (!dev.info.mpsGraphSupported)
+            reportUnsupported("bf16", bf16Note,
+                              "MPSGraph is unavailable on this device (iOS Simulator)");
+        else if (dev.info.mpsGraphBF16Supported)
             runGraphMatMul("bf16", bf16Note, MPSDataTypeBFloat16, 2);
         else
             reportUnsupported("bf16", bf16Note,
@@ -350,20 +358,32 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
         return 0;
     }
 
+    // The whole test is MPSGraph; on a device MPSGraph cannot wrap, even
+    // building the first MPSGraphTensorData throws an uncaught ObjC exception.
+    if (!dev.info.mpsGraphSupported)
+    {
+        test.skip("fp16", ResultStatus::Unsupported,
+                  "MPSGraph is unavailable on this device (iOS Simulator)");
+        return 0;
+    }
+
     // The shape is FIXED (not scaled to the device like pickGemmDim) so the
     // number is comparable across Macs and iPhones -- but that means a small
     // device must be able to hold it.  If MPSGraph lowers to an unfused
     // attention it materializes the [1,H,N,N] fp16 score matrix, so budget for
     // that worst case (H*N*N*2 = 512 MB here) plus the Q/K/V/O buffers; skip
-    // rather than risk an allocation failure mid-encode on a phone.
+    // rather than risk an allocation failure mid-encode on a phone.  The score
+    // matrix is one buffer, so maxBufferLength bounds it too -- and that is the
+    // only bound left when recommendedMaxWorkingSetSize reads 0 (unknown).
     {
         const uint64_t scoreBytes = (uint64_t)H * N * N * 2;
         const uint64_t needBytes  = scoreBytes + 4ULL * H * N * F * 2;
         const uint64_t budget     = dev.info.recommendedMaxWorkingSetSize;
-        if (budget && needBytes > budget / 2)
+        const uint64_t maxBuf     = dev.info.maxBufferLength;
+        if ((budget && needBytes > budget / 2) || (maxBuf && scoreBytes > maxBuf))
         {
             test.skip("fp16", ResultStatus::Unsupported,
-                      "device working set too small for the fixed H16/S4096/D128 shape");
+                      "device memory limits too small for the fixed H16/S4096/D128 shape");
             return 0;
         }
     }

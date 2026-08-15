@@ -33,7 +33,8 @@ struct mtl_device_info_t {
   bool fp16Supported;             // always true on Apple silicon
   bool simdgroupMatrixFP16Supported; // M1+ (Apple7)
   bool simdgroupMatrixBF16Supported; // M3+ (Apple9)
-  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: OS support + Apple9
+  bool mpsGraphSupported;         // MPSGraph can wrap this device (false on the iOS Simulator)
+  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: MPSGraph + OS support + Apple9
   uint32_t appleFamily;           // largest MTLGPUFamilyApple<N> the device supports
   uint32_t gpuCoreCount;          // GPU core count (e.g. 8 on M1 base, 32 on M1 Max). 0 = unknown.
 };
