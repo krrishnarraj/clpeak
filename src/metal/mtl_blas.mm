@@ -52,27 +52,27 @@ struct MetalDeviceImpl {
 
 namespace {
 
-// Pick a square GEMM dim D scaled to the GPU's compute budget so devices of
-// different size finish in similar wall-clock windows.  ~4096 on M1 base
-// (8 cores), ~10240 on M1 Max (32 cores), capped at 16384.  Also bounded by
-// 25% of recommendedMaxWorkingSetSize using fp32 as worst case (3 buffers,
-// 4 bytes/elem) so the same D works for every dtype variant.
-uint32_t pickGemmDim(const mtl_device_info_t &info)
-{
-    uint32_t cores = info.gpuCoreCount;
-    if (cores == 0) cores = 8;  // unknown -> assume base config
-    uint64_t D = 2048 + (uint64_t)cores * 256;
-    D = (D + 255) & ~uint64_t(255);
-    if (D < 2048)  D = 2048;
-    if (D > 16384) D = 16384;
+// Target wall-clock window for ONE full-size GEMM iteration.
+constexpr double kGemmTargetIterUs = 100000.0;   // 100 ms
 
+// Probe size: large enough that MPS dispatches the same tiled kernel the
+// full-size run uses (so the timing extrapolates), small enough to cost a few
+// ms on any Apple GPU.
+constexpr uint32_t kGemmProbeDim = 2048;
+
+// D when the probe cannot run at all (allocation or timing failure).
+constexpr uint32_t kGemmFallbackDim = 4096;
+
+// Bound D by what the device can actually hold: three square fp32 matrices
+// (the worst-case dtype, so one D works for every variant) inside 25% of the
+// working set, and any ONE of them inside maxBufferLength -- each matrix is a
+// single MTLBuffer, and iOS reports a much smaller cap than the Mac.
+uint32_t clampGemmDim(const mtl_device_info_t &info, uint64_t D)
+{
     uint64_t budget = (info.recommendedMaxWorkingSetSize ? info.recommendedMaxWorkingSetSize
                                                          : (uint64_t)4 << 30) / 4;
     while (D > 1024 && 3ULL * D * D * 4 > budget)
         D /= 2;
-
-    // Each matrix is one MTLBuffer, so maxBufferLength caps it independently of
-    // the working-set budget -- iOS reports a much smaller value than the Mac.
     while (D > 1024 && info.maxBufferLength && D * D * 4 > info.maxBufferLength)
         D /= 2;
     return (uint32_t)D;
@@ -103,6 +103,86 @@ double timeMPSMatMul(id<MTLCommandQueue> queue,
         auto t1 = std::chrono::steady_clock::now();
         double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
         return us / (double)n;
+    }
+}
+
+// Choose the square GEMM dim by timing one small GEMM and extrapolating.
+//
+// MPS matmul is O(D^3), so t(D) = t(D0) * (D/D0)^3 and the D landing on the
+// target window is D0 * cbrt(target / t0).  Measured rather than derived from
+// gpuCoreCount because that count is unavailable on iOS (IOKit is not reachable
+// from a sandboxed app, so every iPhone and iPad looked like an 8-core base
+// config) and because a core count says nothing about clock or thermal state.
+// It also actually delivers the equal-wall-clock-window goal: work grows as
+// D^3, so scaling D linearly with core count stretched the window from ~50 ms
+// on an M1 base to ~550 ms on an M1 Ultra.
+uint32_t measureGemmDim(id<MTLDevice> mtlDev, id<MTLCommandQueue> queue,
+                        const mtl_device_info_t &info)
+{
+    const uint32_t D0 = kGemmProbeDim;
+    const uint32_t fallback = clampGemmDim(info, kGemmFallbackDim);
+
+    @autoreleasepool {
+        const uint64_t bytes = (uint64_t)D0 * D0 * 4;
+        id<MTLBuffer> a = makePrivateBuffer(mtlDev, bytes);
+        id<MTLBuffer> b = makePrivateBuffer(mtlDev, bytes);
+        id<MTLBuffer> c = makePrivateBuffer(mtlDev, bytes);
+        if (!a || !b || !c)
+        {
+            CLPEAK_VLOG("mps-gemm: probe alloc failed, using D=%u\n", fallback);
+            return fallback;
+        }
+        {
+            // Same benign 0x3f fill as the measured run: timing should not be
+            // read off whatever bit patterns the allocator happened to leave.
+            id<MTLCommandBuffer> cb = [queue commandBuffer];
+            id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+            for (id<MTLBuffer> buf in @[a, b])
+                [blit fillBuffer:buf range:NSMakeRange(0, buf.length) value:0x3f];
+            [blit endEncoding];
+            [cb commit];
+            [cb waitUntilCompleted];
+        }
+
+        MPSMatrixDescriptor *desc =
+            [MPSMatrixDescriptor matrixDescriptorWithRows:D0 columns:D0
+                                                 rowBytes:(NSUInteger)D0 * 4
+                                                 dataType:MPSDataTypeFloat32];
+        MPSMatrix *mA = [[MPSMatrix alloc] initWithBuffer:a descriptor:desc];
+        MPSMatrix *mB = [[MPSMatrix alloc] initWithBuffer:b descriptor:desc];
+        MPSMatrix *mC = [[MPSMatrix alloc] initWithBuffer:c descriptor:desc];
+        MPSMatrixMultiplication *mm = [[MPSMatrixMultiplication alloc]
+            initWithDevice:mtlDev
+             transposeLeft:NO
+            transposeRight:NO
+                resultRows:D0
+             resultColumns:D0
+           interiorColumns:D0
+                     alpha:1.0
+                      beta:0.0];
+
+        timeMPSMatMul(queue, mm, mA, mB, mC, 1);       // discard: first encode compiles
+        double t0_us = timeMPSMatMul(queue, mm, mA, mB, mC, 3);
+        if (t0_us <= 0.0)
+        {
+            CLPEAK_VLOG("mps-gemm: probe timing failed, using D=%u\n", fallback);
+            return fallback;
+        }
+
+        uint64_t D = (uint64_t)((double)D0 * std::cbrt(kGemmTargetIterUs / t0_us));
+
+        // Round to 1024, not 256: cbrt() damps timing noise but does not remove
+        // it, and D sets the reported TFLOPS, so a fine step would let a device
+        // drift between neighbouring sizes run to run.  Coarse buckets keep one
+        // device on one size.
+        D = ((D + 512) / 1024) * 1024;
+        if (D < 2048)  D = 2048;
+        if (D > 16384) D = 16384;
+
+        const uint32_t chosen = clampGemmDim(info, D);
+        CLPEAK_VLOG("mps-gemm: probe D=%u took %.2f ms/iter -> D=%u\n",
+                    D0, t0_us / 1000.0, chosen);
+        return chosen;
     }
 }
 
@@ -151,7 +231,10 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
         return 0;
     }
 
-    const uint32_t D = pickGemmDim(dev.info);
+    id<MTLDevice>       mtlDev = dev.impl->device;
+    id<MTLCommandQueue> queue  = dev.impl->queue;
+
+    const uint32_t D = measureGemmDim(mtlDev, queue, dev.info);
     const uint32_t M = D, N = D, K = D;
     const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
@@ -162,9 +245,6 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     const char *bf16Note = "bfloat16 inputs -- 16 bits arranged for AI work, trading "
                            "digits of accuracy for a wider number range.  Needs an M3 "
                            "or newer GPU.";
-
-    id<MTLDevice>       mtlDev = dev.impl->device;
-    id<MTLCommandQueue> queue  = dev.impl->queue;
 
     // Pre-allocate the largest input set (fp32, 4 bytes) once; smaller dtypes
     // alias the same MTLBuffer with a different MPSMatrixDescriptor stride.

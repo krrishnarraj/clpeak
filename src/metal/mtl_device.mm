@@ -104,8 +104,10 @@ bool MetalDevice::init(int devIndex)
 #endif
 
     // Best-effort GPU core count via IORegistry (Apple silicon exposes
-    // "gpu-core-count" on the AGXAccelerator service).  Used to scale the
-    // GEMM dim so similar-class GPUs land in similar wall-clock windows.
+    // "gpu-core-count" on the AGXAccelerator service).  Reported as a device
+    // property and used to size dispatches (mtlTargetGlobalThreads).  Stays 0
+    // on iOS -- IOKit is not reachable from a sandboxed app -- which is why the
+    // MPS GEMM dim is measured rather than derived from it (mtl_blas.mm).
     info.gpuCoreCount = 0;
 #if __has_include(<IOKit/IOKitLib.h>) && !TARGET_OS_IPHONE
     {
