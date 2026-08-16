@@ -52,6 +52,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 | `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
+| `docs/` | GitHub Pages site (Jekyll, built natively by Pages from this folder — no plugins). Also holds the app screenshots the README links to, in `docs/assets/img/` |
 
 ## Build
 

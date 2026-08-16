@@ -7,6 +7,8 @@
 
 Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
 
+[![clpeak desktop app showing Metal results on an Apple M1 Pro](docs/assets/img/results-dark.png)](https://krrishnarraj.github.io/clpeak/)
+
 ## Sample output
 
 Condensed peak-revealing lines from real runs.
@@ -128,6 +130,16 @@ Backend: ROCm
       roundtrip : 8.66
 ```
 
+## Desktop app
+
+Same benchmark engine as the CLI, with device detection, live-streaming results, and a saved run history — one app for **macOS, Linux, and Windows** (built from the same Flutter codebase as the Android and iOS apps, over the `clpeak_ffi` C ABI).
+
+Easiest way to get numbers off a machine, no command line involved:
+
+1. Grab the archive for your platform from the [latest release](https://github.com/krrishnarraj/clpeak/releases/latest)
+2. Launch it and press **Run**. Every detected device on every available backend is benchmarked, and results stream in as they land.
+3. **Custom…** narrows the run to specific devices, test categories, and per-test time budgets. Each run is saved to History and exports as clpeak's XML.
+
 ## Building
 
 ```console
@@ -157,6 +169,12 @@ cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (no SDK; otherwise always available) |
 | `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped automatically when no Flutter SDK is found) |
+
+The desktop app is built along with the CLI whenever the Flutter SDK is on `PATH`, landing as a complete bundle in `build/clpeak-gui/`
+
+```console
+cmake --build build --target clpeak-gui       # app bundle
+```
 
 ## CLI
 
