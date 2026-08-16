@@ -60,6 +60,42 @@ static const unsigned int LMEM_REPS = 64;
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 
+// ---------------------------------------------------------------------------
+// The MAD chain, shared by every compute kernel in every backend
+//
+//   MAD_4(x, c):  x = x*x + c;  four times over.
+//
+// Every backend spells this in its own language, but the shape is fixed and
+// the rules below are what keep the numbers meaningful.  Change one and you
+// change what every compute row measures.
+//
+//  - One live value per lane.  c is a per-thread loop invariant, so vector
+//    width W keeps W+1 values live, not 2W.  This replaced a ping-pong form
+//    (x = c*x + c; c = x*c + x) that kept 2W live: on Apple GPUs that halved
+//    fp32 throughput at W=5..8 and fp16 at W>=9, with an identical instruction
+//    count -- the same MADs simply issued at half rate.  Fewer live values
+//    also keeps the wide variants off the spill cliff on CPU-backed OpenCL
+//    and Vulkan devices, where vector registers are architectural and scarce.
+//
+//  - One MAD per statement.  MAD_16 is 16 MADs = 32 ops, so the per-work-item
+//    totals below are the same as they were under the ping-pong form and the
+//    numbers stay comparable in units.
+//
+//  - Quadratic, never affine.  x = c*x + c is an affine recurrence: two steps
+//    compose into c*c*x + c*c + c, so a compiler is free to hoist the
+//    coefficient and halve the loop.  Squaring raises the polynomial degree,
+//    so folding steps always costs more operations than it saves.  No
+//    compiler in the toolchain set does the affine fold today, but quadratic
+//    is safe by construction rather than by luck.
+//
+//  - The kernel must store x, never c.  c is loop-invariant; storing it lets
+//    the entire chain be dead-coded away and produces an absurd number.
+//
+// Narrow integer types (char/short) drive x to a fixed point within a few
+// squarings.  That is fine -- integer multiply is fixed-latency on every
+// target here -- but it is why the terminal store matters.
+// ---------------------------------------------------------------------------
+
 // compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
 static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
 
@@ -83,11 +119,14 @@ static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 static const unsigned int COOPMAT_WORK_PER_WI = 65536;
 
 // Max work-group size cap.  Hardware may report higher (1024 on most NVIDIA
-// GPUs), but we clamp to 256 because v16 kernels hold a float16/double16
-// accumulator (~50-64 registers per thread).  At localSize=1024 this exceeds
-// the SM register file on e.g. RTX 5060 (65536 regs/SM), causing
-// clEnqueueNDRangeKernel to fail with CL_OUT_OF_RESOURCES.  256 matches
-// clpeak's historical cap and leaves broad headroom across all devices.
+// GPUs), but we clamp to 256 because the v16 kernels hold a float16/double16
+// accumulator.  Under the ping-pong chain that was ~50-64 registers per thread
+// and at localSize=1024 it exceeded the SM register file on e.g. RTX 5060
+// (65536 regs/SM), causing clEnqueueNDRangeKernel to fail with
+// CL_OUT_OF_RESOURCES.  The single-accumulator chain roughly halves that, but
+// the cap stays at 256: it matches clpeak's historical cap, leaves broad
+// headroom across all devices, and the higher setting has not been re-tested
+// on the hardware that originally failed.
 static const unsigned int MAX_WG_SIZE = 256;
 
 // Scale per-launch global thread count to the device's compute-unit count so

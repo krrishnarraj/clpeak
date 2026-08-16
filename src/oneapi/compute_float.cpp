@@ -18,18 +18,19 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
 
 // --------------------------------------------------------------------------
 // MAD macro shape matches the ROCm/CUDA/OpenCL backends: 16 fused mul-adds
-// per MAD_16.  The alternating read/write (x depends on y, then y on x)
-// builds a dependency chain the compiler cannot hoist or vectorize away.
-// One MAD_16 = 16 fma = 32 flops per lane.
+// per MAD_16, x = x*x + c, building a dependency chain the compiler cannot
+// hoist or vectorize away.  One MAD_16 = 16 fma = 32 flops per lane.
+//
+// Chain shape and why: see the MAD chain block in include/common/common.h.
 //
 // Total ops/WI is width-invariant: for vector width W we run baseIters/W
 // outer iterations, each doing 32*W flops, so total = baseIters*32 flops/WI.
 // SP/HP: baseIters=128 -> 4096 (COMPUTE_FP_WORK_PER_WI).
 // DP:    baseIters=16  -> 512  (COMPUTE_DP_WORK_PER_WI).
 // --------------------------------------------------------------------------
-#define MAD_4(x, y)  x = sycl::fma(y, x, y); y = sycl::fma(x, y, x); \
-                     x = sycl::fma(y, x, y); y = sycl::fma(x, y, x);
-#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+#define MAD_4(x, c)  x = sycl::fma(x, x, c); x = sycl::fma(x, x, c); \
+                     x = sycl::fma(x, x, c); x = sycl::fma(x, x, c);
+#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
 
 // Per-family kernel-name tags (SYCL needs a unique type per parallel_for).
 namespace { struct SpTag; struct HpTag; struct DpTag; }
@@ -56,7 +57,7 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
       h.parallel_for<compute_fp_vec_kernel<Tag, T, W>>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
-          VecT x, y;
+          VecT x, c;
           // Seeds in T arithmetic only: a double here would pull in the fp64
           // aspect and make the kernel fail to launch on devices without fp64
           // (e.g. Intel Arc). That only bit the vector widths, because the
@@ -65,11 +66,11 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
           for (int k = 0; k < W; k++)
           {
             x[k] = A + (T)k;
-            y[k] = (T)it.get_local_id(0) + (T)k;
+            c[k] = (T)it.get_local_id(0) + (T)k;
           }
           #pragma unroll 1
-          for (int i = 0; i < iters; i++) { MAD_16(x, y) }
-          VecT r = x + y;
+          for (int i = 0; i < iters; i++) { MAD_16(x, c) }
+          VecT r = x;
           T acc = (T)0;
           #pragma unroll
           for (int k = 0; k < W; k++) acc += r[k];
@@ -251,14 +252,13 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
           float x = (float)(sycl::half)A;
-          float y = (float)(sycl::half)(float)it.get_local_id(0);
+          float c = (float)(sycl::half)(float)it.get_local_id(0);
           #pragma unroll 1
           for (int i = 0; i < 128; i++) {
-            MAD_16(x, y)
+            MAD_16(x, c)
             x = (float)(sycl::half)x;
-            y = (float)(sycl::half)y;
           }
-          out[it.get_global_id(0)] = x + y;
+          out[it.get_global_id(0)] = x;
         });
     });
   };
@@ -316,16 +316,15 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
           float x = (float)bfloat16(A);
-          float y = (float)bfloat16((float)it.get_local_id(0));
+          float c = (float)bfloat16((float)it.get_local_id(0));
           #pragma unroll 1
           for (int i = 0; i < 16; i++) {
             // MAD_128 = 8 * MAD_16 = 256 ops
-            MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
-            MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
+            MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
+            MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
             x = (float)bfloat16(x);
-            y = (float)bfloat16(y);
           }
-          out[it.get_global_id(0)] = x + y;
+          out[it.get_global_id(0)] = x;
         });
     });
   };

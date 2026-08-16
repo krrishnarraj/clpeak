@@ -15,11 +15,12 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
 
 // Integer MAD macros: shape mirrors compute_int32.hip exactly.  The alternating
 // read/write builds a dependency chain so the loop can't be hoisted.
+// Chain shape and why: see the MAD chain block in include/common/common.h.
 // One IMAD_16 = 16 mul-adds = 32 int ops per lane.  Width-invariant total:
 // width W runs baseIters/W iters * 32*W ops = baseIters*32 ops/WI.
 // baseIters=128 -> 4096 (COMPUTE_FP_WORK_PER_WI, matches ROCm int32).
-#define IMAD_4(x, y)  x = y * x + y; y = x * y + x; x = y * x + y; y = x * y + x;
-#define IMAD_16(x, y) IMAD_4(x, y) IMAD_4(x, y) IMAD_4(x, y) IMAD_4(x, y)
+#define IMAD_4(x, c)  x = x * x + c; x = x * x + c; x = x * x + c; x = x * x + c;
+#define IMAD_16(x, c) IMAD_4(x, c) IMAD_4(x, c) IMAD_4(x, c) IMAD_4(x, c)
 
 namespace { struct IntTag; }
 template <typename Tag, int W> class compute_int_vec_kernel;
@@ -41,18 +42,18 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
       h.parallel_for<compute_int_vec_kernel<Tag, W>>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
-          VecT x, y;
+          VecT x, c;
           #pragma unroll
           for (int k = 0; k < W; k++)
           {
             x[k] = A + k;
-            y[k] = (int)it.get_local_id(0) + k;
+            c[k] = (int)it.get_local_id(0) + k;
           }
           #pragma unroll 1
-          for (int i = 0; i < iters; i++) { IMAD_16(x, y) }
+          for (int i = 0; i < iters; i++) { IMAD_16(x, c) }
           int acc = 0;
           #pragma unroll
-          for (int k = 0; k < W; k++) acc += y[k];
+          for (int k = 0; k < W; k++) acc += x[k];
           out[it.get_global_id(0)] = acc;
         });
     });

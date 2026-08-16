@@ -17,22 +17,22 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-#define MAD_4(x, y)   x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
-#define MAD_16(x, y)  MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
-#define MAD_64(x, y)  MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
-#define MAD_128(x, y) MAD_64(x, y) MAD_64(x, y)
+// Chain shape and why: see the MAD chain block in include/common/common.h.
+#define MAD_4(x, c)   x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
+#define MAD_16(x, c)  MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_64(x, c)  MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
+#define MAD_128(x, c) MAD_64(x, c) MAD_64(x, c)
 
 void main()
 {
     vec2 x = vec2(bf16vec2(pc.A, pc.A + 1.0));
-    vec2 y = vec2(bf16vec2(gl_LocalInvocationID.x));
+    vec2 c = vec2(bf16vec2(gl_LocalInvocationID.x));
 
     for (int i = 0; i < 8; i++)
     {
-        MAD_128(x, y)
+        MAD_128(x, c)
         x = vec2(bf16vec2(x));
-        y = vec2(bf16vec2(y));
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y + y.x + y.y;
+    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y;
 }

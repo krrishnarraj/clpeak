@@ -10,19 +10,20 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-#define MAD_4(x, y)  x = (y * x) + y; y = (x * y) + x; x = (y * x) + y; y = (x * y) + x;
-#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+// Chain shape and why: see the MAD chain block in include/common/common.h.
+#define MAD_4(x, c)  x = (x * x) + c; x = (x * x) + c; x = (x * x) + c; x = (x * x) + c;
+#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
 
 void main()
 {
     ivec4 x = ivec4(pc.A, pc.A + 1, pc.A + 2, pc.A + 3);
-    ivec4 y = ivec4(gl_LocalInvocationID.x);
+    ivec4 c = ivec4(gl_LocalInvocationID.x);
 
     // 16 iters * 16 MADs * 2 ops * 4 lanes = 2048 per WI.
     for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, y)
+        MAD_16(x, c)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = y.x + y.y + y.z + y.w;
+    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y + x.z + x.w;
 }
