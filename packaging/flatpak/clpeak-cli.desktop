@@ -1,0 +1,15 @@
+[Desktop Entry]
+# Fallback entry, installed as io.github.krrishnarraj.clpeak.desktop on arches
+# where the GUI could not be built (Flutter ships no linux-arm64 desktop SDK).
+# It keeps the MetaInfo's desktop-id launchable resolvable everywhere; see the
+# post-install block in io.github.krrishnarraj.clpeak.yaml.
+Type=Application
+Name=clpeak
+GenericName=Compute Benchmark
+Comment=Measure peak compute, bandwidth and latency of GPU and CPU devices
+Exec=clpeak
+Icon=io.github.krrishnarraj.clpeak
+Terminal=true
+StartupNotify=false
+Categories=System;Monitor;Utility;ConsoleOnly;
+Keywords=benchmark;GPU;OpenCL;Vulkan;compute;bandwidth;latency;

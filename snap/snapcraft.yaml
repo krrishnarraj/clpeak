@@ -15,17 +15,71 @@ description: |
 
   Output formats: plain text, XML, JSON, CSV
 
+  Ships two front-ends: the clpeak CLI and clpeak-gui, the Flutter desktop app
+  (`snap run clpeak.clpeak-gui`, or its launcher entry).
+
 grade: stable
 confinement: classic
 
 apps:
   clpeak:
     command: usr/local/bin/clpeak
+  # The Flutter desktop app.  usr/local/bin/clpeak-gui is a wrapper installed
+  # by CMake; the bundle it exec's stays whole under usr/local/gui/ because the
+  # runner only starts with its sibling data/ and lib/ next to it.
+  # Launcher entry + icon come from snap/gui/, copied verbatim into meta/gui/.
+  # Confinement is classic, so the GUI links the host's GTK3 stack.
+  clpeak-gui:
+    command: usr/local/bin/clpeak-gui
 
 parts:
+  # Build-time only: the Flutter SDK that src/ffi/CMakeLists.txt drives to build
+  # the clpeak-gui bundle.  Staged, never primed (`prime: [-*]`) -- the SDK is
+  # ~1 GB and none of it belongs in the snap.  Pinned to the same release and
+  # sha256 as the Flatpak manifest
+  # (packaging/flatpak/io.github.krrishnarraj.clpeak.yaml); bump both together
+  # from
+  # https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json
+  flutter-sdk:
+    plugin: nil
+    source: https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.0-stable.tar.xz
+    source-checksum: sha256/26cd99d3d94b1367e6b50535a18aeef0282c10a535bbe3ec493534dcdab75296
+    override-pull: |
+      # Flutter publishes a linux desktop SDK for x86_64 only, so every other
+      # architecture builds CLI-only -- the same outcome as the arm64 CI jobs
+      # and the Flatpak's only-arches.
+      if [ "$CRAFT_ARCH_BUILD_FOR" = "amd64" ]; then
+        craftctl default
+      else
+        echo "No Flutter linux-$CRAFT_ARCH_BUILD_FOR desktop SDK: building CLI only."
+      fi
+    override-build: |
+      # craft-parts strips a tarball's single top-level directory, so the SDK
+      # root is $CRAFT_PART_SRC itself; the fallback keeps this working if that
+      # ever changes.  Normalised to <stage>/flutter, which FLUTTER_HOME points
+      # at below.  `flutter` writes its downloaded engine artifacts into
+      # bin/cache/ inside this tree, so it has to be a copy, not the pull dir.
+      if [ -d "$CRAFT_PART_SRC/flutter" ]; then
+        src="$CRAFT_PART_SRC/flutter"
+      elif [ -d "$CRAFT_PART_SRC/bin" ]; then
+        src="$CRAFT_PART_SRC"
+      else
+        exit 0   # nothing pulled: CLI-only architecture
+      fi
+      mkdir -p "$CRAFT_PART_INSTALL/flutter"
+      cp -a "$src/." "$CRAFT_PART_INSTALL/flutter/"
+    prime:
+      - -*
+
   clpeak:
+    after:
+      - flutter-sdk
     source: .
     plugin: cmake
+    cmake-parameters:
+      # ON is the default; CMake still reports "GUI: disabled" and builds
+      # CLI-only wherever no Flutter SDK was staged.
+      - -DCLPEAK_ENABLE_GUI=ON
     build-packages:
       - build-essential
       - clang
@@ -35,7 +89,35 @@ parts:
       - glslang-tools
       - spirv-tools
       - glslc
+      # `flutter build linux` toolchain: ninja + pkg-config + GTK3 headers,
+      # plus the curl/unzip it uses to fetch its engine artifacts.
+      - ninja-build
+      - pkg-config
+      - libgtk-3-dev
+      - curl
+      - unzip
+    build-environment:
+      # The root CMakeLists resolves the SDK with
+      # find_program(flutter HINTS $ENV{FLUTTER_HOME}/bin).
+      - FLUTTER_HOME: $CRAFT_STAGE/flutter
+      # Keep what the Flutter tool downloads inside this part's build dir.
+      - PUB_CACHE: $CRAFT_PART_BUILD/.pub-cache
+      - FLUTTER_SUPPRESS_ANALYTICS: "1"
     override-pull: |
       craftctl default
       version=$(git describe --tags --abbrev=0)
       craftctl set version="$version"
+    override-build: |
+      craftctl default
+      # On a CLI-only architecture CMake installs no clpeak-gui, but the app
+      # entry above still has to resolve or `snapcraft pack` fails.  Leave a
+      # shim that says why, rather than dropping the snap on those arches.
+      gui="$CRAFT_PART_INSTALL/usr/local/bin/clpeak-gui"
+      if [ ! -e "$gui" ]; then
+        printf '%s\n' \
+          '#!/bin/sh' \
+          'echo "clpeak-gui is not available on this architecture: Flutter ships" >&2' \
+          'echo "no linux-arm64 desktop SDK.  Run the clpeak CLI instead." >&2' \
+          'exit 1' > "$gui"
+        chmod +x "$gui"
+      fi

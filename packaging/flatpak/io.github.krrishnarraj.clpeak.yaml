@@ -1,9 +1,17 @@
 # Flatpak manifest for clpeak — Flathub submission.
 #
-# Scope: only the backends that can work inside the org.freedesktop sandbox are
-# enabled — Vulkan, OpenCL, and the native CPU backend.  CUDA / ROCm / oneAPI
-# need vendor toolkits + proprietary drivers that Flathub cannot ship, and Metal
-# is macOS-only; those builds remain available via the GitHub release zips.
+# Ships both front-ends from one build:
+#   * clpeak      -> the CLI (the Flatpak's default `command`)
+#   * clpeak-gui  -> the Flutter desktop app (what the .desktop entry launches)
+#
+# Scope: only the backends that can work inside the sandbox are enabled —
+# Vulkan, OpenCL, and the native CPU backend.  CUDA / ROCm / oneAPI need vendor
+# toolkits + proprietary drivers that Flathub cannot ship, and Metal is
+# macOS-only; those builds remain available via the GitHub release zips.
+#
+# Runtime is org.gnome.* rather than org.freedesktop.*: a Flutter Linux app
+# links GTK3, which the freedesktop runtime does not carry.  GNOME 49 is built
+# on freedesktop 25.08, so the LLVM SDK extension below is still the 25.08 one.
 #
 # Build chain provided by helper modules:
 #   * shaderc        -> provides `glslc`, used at build time to compile the
@@ -12,14 +20,15 @@
 #   * OpenCL-Headers + OpenCL-ICD-Loader -> link target for find_package(OpenCL).
 #
 # Local build / test:
-#   flatpak install flathub org.freedesktop.Sdk//25.08 org.freedesktop.Platform//25.08 org.freedesktop.Sdk.Extension.llvm22/x86_64/25.08
+#   flatpak install flathub org.gnome.Sdk//49 org.gnome.Platform//49 org.freedesktop.Sdk.Extension.llvm22/x86_64/25.08
 #   flatpak run org.flatpak.Builder --force-clean --user --install \
 #       build-dir packaging/flatpak/io.github.krrishnarraj.clpeak.yaml
 #   flatpak run io.github.krrishnarraj.clpeak --list-devices
+#   flatpak run --command=clpeak-gui io.github.krrishnarraj.clpeak
 id: io.github.krrishnarraj.clpeak
-runtime: org.freedesktop.Platform
-runtime-version: '25.08'
-sdk: org.freedesktop.Sdk
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
 command: clpeak
 
 # Build-time only: clpeak's CMake auto-prefers clang over gcc for the CPU
@@ -34,6 +43,10 @@ sdk-extensions:
 finish-args:
   - --device=dri          # GPU access for Vulkan / OpenCL
   - --share=ipc           # required alongside DRI on some drivers
+  # GUI (clpeak-gui).  Saving/sharing a result and opening the project URL all
+  # go through portals, so no --filesystem or --share=network is needed.
+  - --socket=wayland
+  - --socket=fallback-x11
   # The host NVIDIA Vulkan/GL driver is auto-mounted by Flatpak as a GL
   # extension; no extra arg needed.
 
@@ -75,28 +88,73 @@ modules:
         commit: ad9184e76a66b1001c29db9b0a3e87f646c64de0
         dest: third_party/spirv-headers
 
-  # --- clpeak ------------------------------------------------------------
+  # --- clpeak (CLI + GUI) ------------------------------------------------
   - name: clpeak
     buildsystem: cmake-ninja
-    # Put the LLVM extension's clang on PATH so CMake's find_program(clang)
-    # picks it over the SDK's gcc for the CPU-backend codegen.
     build-options:
+      # Put the LLVM extension's clang on PATH so CMake's find_program(clang)
+      # picks it over the SDK's gcc for the CPU-backend codegen.
       append-path: /usr/lib/sdk/llvm22/bin
       prepend-ld-library-path: /usr/lib/sdk/llvm22/lib
+      env:
+        # The root CMakeLists resolves the Flutter SDK via find_program(...
+        # HINTS $ENV{FLUTTER_HOME}/bin); point it at the tarball unpacked into
+        # the module build dir.  HOME and PUB_CACHE keep everything the Flutter
+        # tool writes (config, downloaded engine artifacts, pub packages)
+        # inside that same throwaway dir.
+        FLUTTER_HOME: /run/build/clpeak/flutter-sdk
+        HOME: /run/build/clpeak
+        PUB_CACHE: /run/build/clpeak/.pub-cache
+        FLUTTER_SUPPRESS_ANALYTICS: '1'
       build-args:
+        # `flutter pub get` and the engine-artifact download need the network.
         - --share=network
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DCLPEAK_ENABLE_CUDA=OFF
       - -DCLPEAK_ENABLE_ROCM=OFF
       - -DCLPEAK_ENABLE_ONEAPI=OFF
+      # ON everywhere; on aarch64 no Flutter SDK is staged (see only-arches on
+      # the source below), so CMake reports "GUI: disabled" and builds CLI-only
+      # instead of failing -- the same CLI-only outcome as the arm64 CI jobs.
+      - -DCLPEAK_ENABLE_GUI=ON
     post-install:
       - install -Dm644 /app/share/clpeak/LICENSE /app/share/licenses/io.github.krrishnarraj.clpeak/LICENSE
       - rm -f /app/share/clpeak/LICENSE
       - install -Dm644 packaging/flatpak/io.github.krrishnarraj.clpeak.metainfo.xml
           /app/share/metainfo/io.github.krrishnarraj.clpeak.metainfo.xml
+      - install -Dm644 app/linux/runner/resources/clpeak_icon.png
+          /app/share/icons/hicolor/256x256/apps/io.github.krrishnarraj.clpeak.png
+      - install -Dm644 docs/assets/img/icon.png
+          /app/share/icons/hicolor/128x128/apps/io.github.krrishnarraj.clpeak.png
+      # One desktop entry, two possible bodies.  Where the GUI was built it
+      # launches clpeak-gui; on a CLI-only arch it falls back to running the
+      # CLI in a terminal, so the MetaInfo's desktop-id launchable always
+      # resolves and AppStream validation passes on every arch.
+      - >-
+        if [ -x /app/bin/clpeak-gui ]; then
+          src=packaging/flatpak/io.github.krrishnarraj.clpeak.desktop;
+        else
+          src=packaging/flatpak/clpeak-cli.desktop;
+        fi;
+        install -Dm644 "$src" /app/share/applications/io.github.krrishnarraj.clpeak.desktop
     sources:
+      # 2.1.0 is the first release carrying the Flutter GUI; the post-install
+      # steps read app/ and docs/ out of this checkout.
+      # TODO: add `commit:` with 2.1.0's sha once the tag is pushed — Flathub
+      # requires tag and commit to be pinned together.
       - type: git
         url: https://github.com/krrishnarraj/clpeak.git
-        tag: '2.0.15'
-        commit: 5d7b3da31023054c0d8aa7b354647141d85f47ee
+        tag: '2.1.0'
+      # Flutter ships a Linux desktop SDK for x86_64 only -- there is no
+      # linux-arm64 tarball -- so aarch64 gets no SDK and builds CLI-only.
+      # Bump `url` + `sha256` together from
+      # https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json
+      # (the archive's own top-level `flutter/` dir is stripped).
+      - type: archive
+        only-arches:
+          - x86_64
+        url: https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.0-stable.tar.xz
+        sha256: 26cd99d3d94b1367e6b50535a18aeef0282c10a535bbe3ec493534dcdab75296
+        strip-components: 1
+        dest: flutter-sdk
