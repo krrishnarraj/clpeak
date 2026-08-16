@@ -27,6 +27,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "WMMA fp16xfp16+fp32 16x16x16";
       d.resultTag = "wmma_fp16";
+      d.description = "Peak speed of the tensor cores -- dedicated units that "
+                      "multiply whole 16x16 blocks of numbers in one step rather "
+                      "than one value at a time -- on 16-bit inputs with a 32-bit "
+                      "running total.  This is the everyday precision of AI work.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_fp16";
@@ -50,6 +54,10 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "FP16 mma.sync m16n8k16+fp16";
       d.resultTag = "wmma_fp16_f16";
+      d.description = "The same 16-bit tensor-core maths, but keeping the running "
+                      "total in 16 bits too.  On GeForce cards the 32-bit-total "
+                      "form is deliberately capped at half rate, so this row is "
+                      "where the full tensor-core speed shows up.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp16_f16acc";
@@ -71,6 +79,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "WMMA bf16xbf16+fp32 16x16x16";
       d.resultTag = "wmma_bf16";
+      d.description = "Tensor cores on bfloat16 -- 16 bits arranged for AI work, "
+                      "trading digits of accuracy for the number range of a full "
+                      "float, which makes training far more forgiving.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_bf16";
@@ -94,6 +105,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "TF32 mma.sync m16n8k8+fp32";
       d.resultTag = "wmma_tf32";
+      d.description = "Tensor cores on tf32, NVIDIA's trimmed-down stand-in for "
+                      "32-bit float: it keeps the full number range but drops "
+                      "accuracy to fit the tensor cores.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_tf32";
@@ -115,6 +129,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "WMMA fp64xfp64+fp64 8x8x4";
       d.resultTag = "wmma_fp64";
+      d.description = "Tensor cores on full 64-bit numbers, for scientific "
+                      "computing.  Only the datacenter parts carry this hardware.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "wmma_fp64";
@@ -136,6 +152,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "FP8(E4M3) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp8_e4m3";
+      d.description = "Tensor cores on 8-bit numbers, in the variant that spends "
+                      "its bits on accuracy rather than range.  Half the data of "
+                      "16-bit per value, so it runs at roughly twice the rate.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp8_e4m3";
@@ -157,6 +176,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "FP8(E5M2) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp8_e5m2";
+      d.description = "The same 8-bit tensor-core path in the other variant, "
+                      "which spends its bits on range rather than accuracy -- the "
+                      "one that copes with very large and very small values.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp8_e5m2";
@@ -178,6 +200,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "FP4(E2M1) mma.sync m16n8k32+fp32";
       d.resultTag = "wmma_fp4_e2m1";
+      d.description = "Tensor cores on 4-bit numbers, the narrowest format the "
+                      "hardware handles.  Blackwell and newer only.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp4_e2m1";
@@ -199,6 +223,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32";
       d.resultTag = "wmma_mxf4_e2m1";
+      d.description = "4-bit numbers with a shared scale factor per block of 32, "
+                      "the open MX format.  The scale is what makes 4 bits usable "
+                      "for real models rather than a curiosity.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "mxf4_e2m1";
@@ -220,6 +247,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "NVFP4(E2M1) mma.sync m16n8k64+fp32";
       d.resultTag = "wmma_nvf4_e2m1";
+      d.description = "NVIDIA's own 4-bit block format, with a finer scale factor "
+                      "shared by every 16 values instead of every 32 -- more "
+                      "accurate than MX at the same width.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "nvf4_e2m1";
@@ -241,6 +271,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
       d.resultTag = "wmma_mxf4_sparse";
+      d.description = "The MX 4-bit path with structured sparsity: half the values "
+                      "in each group of four are known to be zero and are skipped, "
+                      "so the hardware does twice the useful work per step.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "mxf4_sparse";
@@ -262,6 +295,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       cuda_compute_desc_t d = {};
       d.title = "NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
       d.resultTag = "wmma_nvf4_sparse";
+      d.description = "NVIDIA's 4-bit block format with the same skip-the-zeros "
+                      "trick -- the fastest arrangement these tensor cores offer.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "nvf4_sparse";
@@ -295,6 +330,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     cuda_compute_desc_t d = {};
     d.title = "WMMA int8xint8+int32 16x16x16";
     d.resultTag = "wmma_int8";
+    d.description = "Tensor cores on 8-bit whole numbers with a 32-bit running "
+                    "total -- the format quantized neural networks use when they are "
+                    "squeezed down to run fast on cheaper hardware.";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "wmma_int8";
@@ -316,6 +354,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     cuda_compute_desc_t d = {};
     d.title = "INT8 mma.sync m16n8k32+int32";
     d.resultTag = "wmma_int8_k32";
+    d.description = "The same 8-bit whole-number maths on NVIDIA's own native "
+                    "tile shape rather than the portable one, which the hardware "
+                    "feeds more efficiently.";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "int8_k32";
@@ -337,6 +378,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     cuda_compute_desc_t d = {};
     d.title = "INT8 mma.sp 2:4 sparsity m16n8k32+int32";
     d.resultTag = "wmma_int8_sparse";
+    d.description = "8-bit whole numbers with structured sparsity: half the values "
+                    "in each group of four are known to be zero and are skipped, so "
+                    "the hardware does twice the useful work per step.";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "int8_sparse";
@@ -358,6 +402,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     cuda_compute_desc_t d = {};
     d.title = "INT4 mma.sync m8n8k32+int32";
     d.resultTag = "wmma_int4";
+    d.description = "Tensor cores on 4-bit whole numbers.  Turing through Ada "
+                    "only -- NVIDIA dropped the integer 4-bit path afterwards in "
+                    "favour of the 4-bit float formats above.";
     d.unit = "tops";
     d.unitDivider = 1e12;
     d.metricLabel = "int4";

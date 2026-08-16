@@ -38,6 +38,11 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.tag = "transfer_bandwidth";
   testSpec.display = "Transfer bandwidth";
   testSpec.unit = "gbps";
+  testSpec.description =
+      "How fast data crosses between the computer's own memory and the GPU's.  "
+      "On a discrete card that means the PCIe link, which is usually far "
+      "narrower than either side's own memory and is what makes moving data to "
+      "the GPU worth avoiding.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   VkBuffer hostBuf = VK_NULL_HANDLE;
@@ -180,20 +185,23 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     return totalUs / static_cast<float>(iters);
   };
 
-  auto reportCopy = [&](const char *metric, float us)
+  auto reportCopy = [&](const char *metric, const char *note, float us)
   {
     if (us <= 0.0f)
     {
       test.skip(metric, ResultStatus::Error,
-                 "vkQueueSubmit/WaitIdle failed or timer returned zero");
+                 "vkQueueSubmit/WaitIdle failed or timer returned zero", note);
       return;
     }
     float gbps = (float)bytes / us / 1e3f;
-    test.emit(metric, gbps);
+    test.emit(metric, gbps, note);
   };
 
-  reportCopy("h2d", runCopy(hostBuf, devBuf));
-  reportCopy("d2h", runCopy(devBuf, hostBuf));
+  reportCopy("h2d", "Host to device: sending data up to the GPU.",
+             runCopy(hostBuf, devBuf));
+  reportCopy("d2h", "Device to host: reading results back down.  Often slower "
+                    "than the other direction.",
+             runCopy(devBuf, hostBuf));
 
   if (queryPool != VK_NULL_HANDLE)
     vkDestroyQueryPool(dev.device, queryPool, nullptr);

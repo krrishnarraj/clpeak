@@ -37,8 +37,8 @@ static void pinToCore(int core)
 #endif
 }
 
-CpuThreadPool::CpuThreadPool(int maxThreads)
-    : nMax(maxThreads < 1 ? 1 : maxThreads)
+CpuThreadPool::CpuThreadPool(int maxThreads, std::vector<int> cpuIds)
+    : nMax(maxThreads < 1 ? 1 : maxThreads), pinIds(std::move(cpuIds))
 {
   workers.reserve(nMax);
   for (int t = 0; t < nMax; t++)
@@ -60,7 +60,7 @@ CpuThreadPool::~CpuThreadPool()
 
 void CpuThreadPool::workerLoop(int tid)
 {
-  pinToCore(tid);
+  pinToCore((size_t)tid < pinIds.size() ? pinIds[(size_t)tid] : tid);
   uint64_t myGen = 0;
 
   for (;;)

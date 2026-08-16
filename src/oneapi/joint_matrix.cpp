@@ -175,17 +175,17 @@ static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
   return peak.runKernel(dev, submit, targetTimeUs, forced);
 }
 
-static void emitJm(logger::TestScope &test, const char *metric, float us,
-                   uint32_t numBlocks, uint32_t K, uint32_t N)
+static void emitJm(logger::TestScope &test, const char *metric, const char *note,
+                   float us, uint32_t numBlocks, uint32_t K, uint32_t N)
 {
   if (us <= 0.0f)
   {
-    test.skip(metric, ResultStatus::Error, "kernel launch failed");
+    test.skip(metric, ResultStatus::Error, "kernel launch failed", note);
     return;
   }
   const double ops = (double)numBlocks * (double)JM_M * (double)N *
                      (double)K * 2.0 * (double)JM_ITERS;
-  test.emit(metric, (float)(ops * 1.0e6 / us / 1.0e12));
+  test.emit(metric, (float)(ops * 1.0e6 / us / 1.0e12), {false, note});
 }
 
 // Dispatch runJmVariant to the right compile-time N instantiation.
@@ -219,18 +219,42 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     {isInt ? "joint-matrix-int" : "joint-matrix-fp",
      isInt ? "joint_matrix int8xint8+int32 8x16x32"
            : "joint_matrix (bf16/fp16/tf32)x(bf16/fp16/tf32)+fp32 8x16x{16,16,8}",
-     isInt ? "tops" : "tflops"});
+     isInt ? "tops" : "tflops", Category::Unknown,
+     isInt ? "Peak speed of Intel's XMX matrix engine on 8-bit whole numbers -- "
+             "dedicated units that multiply whole blocks of numbers in one step "
+             "rather than one value at a time.  This is the format quantized "
+             "neural networks use."
+           : "Peak speed of Intel's XMX matrix engine -- dedicated units that "
+             "multiply whole blocks of numbers in one step rather than one "
+             "value at a time -- across the reduced-precision formats AI work "
+             "runs on."});
+
+  // int8 is the only row the no-header path below documents individually (the
+  // FP rows go through skipAll, which carries no per-reading notes), so the FP
+  // notes live inside the #else -- declaring them here warns unused.
+  const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
+                         "quantized neural networks use.";
 
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
   if (isInt)
     test.skip("joint_matrix_int8", ResultStatus::Unsupported,
-              "joint_matrix header not available in this oneAPI toolchain");
+              "joint_matrix header not available in this oneAPI toolchain", int8Note);
   else
     test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
                  ResultStatus::Unsupported,
                  "joint_matrix header not available in this oneAPI toolchain");
   return 0;
 #else
+  // One note per FP dtype row, shared by every emit and skip path below.
+  const char *bf16Note = "bfloat16 inputs with 32-bit totals -- 16 bits arranged "
+                         "for AI work, trading digits of accuracy for the number "
+                         "range of a full float.";
+  const char *fp16Note = "16-bit inputs with 32-bit totals -- the everyday "
+                         "precision of AI inference.";
+  const char *tf32Note = "tf32, a trimmed-down stand-in for 32-bit float: it keeps "
+                         "the full number range but drops accuracy to fit the "
+                         "matrix engine.  Not every Intel part has it.";
+
   namespace syclex = sycl::ext::oneapi::experimental::matrix;
 
   // Query the device's matrix-combination table ONCE and reuse it for the dump
@@ -248,7 +272,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   {
     if (isInt)
       test.skip("joint_matrix_int8", ResultStatus::Unsupported,
-                "XMX matrix engine not available on this device");
+                "XMX matrix engine not available on this device", int8Note);
     else
       test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
                    ResultStatus::Unsupported,
@@ -303,18 +327,18 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     if (jmN_int == 0)
     {
       test.skip("joint_matrix_int8", ResultStatus::Unsupported,
-                "int8 8xNx32 not in this device's matrix-engine combinations");
+                "int8 8xNx32 not in this device's matrix-engine combinations", int8Note);
       return 0;
     }
     int32_t *out = sycl::malloc_device<int32_t>(outElems, dev.stream);
     if (!out)
     {
-      test.skip("joint_matrix_int8", ResultStatus::Error, "Failed to allocate output buffer");
+      test.skip("joint_matrix_int8", ResultStatus::Error, "Failed to allocate output buffer", int8Note);
       return -1;
     }
     const float us = dispatchJm<JmInt8Tag, int8_t, int8_t, int32_t, 32>(
         *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_int);
-    emitJm(test, "joint_matrix_int8", us, numBlocks, 32, jmN_int);
+    emitJm(test, "joint_matrix_int8", int8Note, us, numBlocks, 32, jmN_int);
     sycl::free(out, dev.stream);
     return 0;
   }
@@ -339,30 +363,30 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   if (jmN_fp == 0)
   {
     test.skip("joint_matrix_bf16", ResultStatus::Unsupported,
-              "bf16 8xNx16 not in this device's matrix-engine combinations");
+              "bf16 8xNx16 not in this device's matrix-engine combinations", bf16Note);
   }
   else
   {
     using bfloat16 = sycl::ext::oneapi::bfloat16;
     const float us = dispatchJm<JmBf16Tag, bfloat16, bfloat16, float, 16>(
         *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_fp);
-    emitJm(test, "joint_matrix_bf16", us, numBlocks, 16, jmN_fp);
+    emitJm(test, "joint_matrix_bf16", bf16Note, us, numBlocks, 16, jmN_fp);
   }
 #else
   test.skip("joint_matrix_bf16", ResultStatus::Unsupported,
-            "SYCL bfloat16 header not available in this oneAPI toolchain");
+            "SYCL bfloat16 header not available in this oneAPI toolchain", bf16Note);
 #endif
 
   if (jmN_fp == 0)
   {
     test.skip("joint_matrix_fp16", ResultStatus::Unsupported,
-              "fp16 8xNx16 not in this device's matrix-engine combinations");
+              "fp16 8xNx16 not in this device's matrix-engine combinations", fp16Note);
   }
   else
   {
     const float us = dispatchJm<JmFp16Tag, sycl::half, sycl::half, float, 16>(
         *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_fp);
-    emitJm(test, "joint_matrix_fp16", us, numBlocks, 16, jmN_fp);
+    emitJm(test, "joint_matrix_fp16", fp16Note, us, numBlocks, 16, jmN_fp);
   }
 
   if (jmN_tf32 == 0)
@@ -370,14 +394,14 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     // Not every Xe part exposes tf32 XMX (older Arc/DG2 reported no tf32 combo);
     // newer parts and PVC do.  Gated purely by the device's combination table.
     test.skip("joint_matrix_tf32", ResultStatus::Unsupported,
-              "tf32 8x16x8 not in this device's matrix-engine combinations");
+              "tf32 8x16x8 not in this device's matrix-engine combinations", tf32Note);
   }
   else
   {
     // tf32: matrix element type is precision::tf32, filled with float.
     const float us = dispatchJm<JmTf32Tag, syclex::precision::tf32, float, float, 8>(
         *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_tf32);
-    emitJm(test, "joint_matrix_tf32", us, numBlocks, 8, jmN_tf32);
+    emitJm(test, "joint_matrix_tf32", tf32Note, us, numBlocks, 8, jmN_tf32);
   }
 
   sycl::free(out, dev.stream);

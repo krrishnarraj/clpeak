@@ -28,22 +28,32 @@
 #define CPU_UNROLL_FULL_LAT
 #endif
 
-// Pointer-chase latency over a random cycle of cache-line-spaced nodes.  Each
-// node occupies one 64-byte line (16 uint32) and stores the index of the next
-// node, so each hop is a dependent load that defeats stride prefetchers.
+// Pointer-chase latency over a cycle of cache-line-spaced nodes.  Each node
+// occupies one 64-byte line (16 uint32) and stores the index of the next
+// node, so each hop is a dependent load.  With `randomOrder` the cycle is a
+// Sattolo shuffle that defeats stride prefetchers (the latency rows); with a
+// sequential layout (node i -> i+1) the address stream is a plain 64-byte
+// stride, so the stream prefetcher runs ahead of the dependent chain and the
+// walk collapses toward L1 latency.  The random-to-linear ratio is how much
+// DRAM latency prefetching hides on the EASY case -- it bounds the prefetch
+// win; it does not isolate an irregular-pointer (graph) prefetcher, which
+// would need a chase whose addresses are predictable only through the data.
 // Working set = nLines * 64 bytes, sized per cache level.
-static double chaseLatencyNs(uint64_t levelBytes)
+static double chaseLatencyNs(uint64_t levelBytes, bool randomOrder = true)
 {
   size_t nLines = (size_t)std::max<uint64_t>(levelBytes / 64, 64);
   std::vector<uint32_t> buf(nLines * 16, 0);
 
   std::vector<uint32_t> order(nLines);
   std::iota(order.begin(), order.end(), 0u);
-  std::mt19937 rng(0xC0FFEE);
-  for (size_t i = nLines - 1; i > 0; i--)              // Sattolo: single cycle
+  if (randomOrder)
   {
-    size_t j = rng() % i;
-    std::swap(order[i], order[j]);
+    std::mt19937 rng(0xC0FFEE);
+    for (size_t i = nLines - 1; i > 0; i--)            // Sattolo: single cycle
+    {
+      size_t j = rng() % i;
+      std::swap(order[i], order[j]);
+    }
   }
   for (size_t i = 0; i < nLines; i++)
     buf[(size_t)order[i] * 16] = order[(i + 1) % nLines] * 16;
@@ -210,16 +220,24 @@ static double tlbChaseNs()
 int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
 {
   (void)cfg;
-  logger::TestSpec spec{"memory_latency", "Memory latency (pointer-chase)", "ns",
-                        Category::Latency};
+  logger::TestSpec spec{
+      "memory_latency", "Memory latency (pointer-chase)", "ns",
+      Category::Latency,
+      "How long the core waits for one memory read when it has nothing else "
+      "to do -- each read's address comes from the previous read, so the "
+      "hardware cannot start the next one early."};
   auto test = currentDeviceScope->beginTest(spec);
 
-  struct Level { const char *name; uint64_t bytes; };
+  struct Level { const char *name; uint64_t bytes; const char *note; };
   const Level levels[] = {
-    {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192)},
-    {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536)},
-    {"L3",   std::max<uint64_t>(info.l3CacheBytes  / 2, 1u << 20)},
-    {"DRAM", std::max<uint64_t>(info.l3CacheBytes  * 4, 256ull << 20)},
+    {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192),
+     "Reading from the small cache inside the core."},
+    {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536),
+     "Reading from the mid-level cache, after an L1 miss."},
+    {"L3",   std::max<uint64_t>(info.l3CacheBytes  / 2, 1u << 20),
+     "Reading from the last-level cache shared between cores."},
+    {"DRAM", std::max<uint64_t>(info.l3CacheBytes  * 4, 256ull << 20),
+     "Reading from main memory at random -- the worst case."},
   };
 
   // Run pinned on core 0 for a stable measurement.
@@ -233,9 +251,24 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   for (int i = 0; i < 4; i++)
   {
     if (ns[(size_t)i] > 0)
-      test.emit(levels[i].name, (float)ns[(size_t)i]);
+      test.emit(levels[i].name, (float)ns[(size_t)i], levels[i].note);
     else
-      test.skip(levels[i].name, ResultStatus::Error, "latency walk failed");
+      test.skip(levels[i].name, ResultStatus::Error, "latency walk failed",
+                levels[i].note);
+  }
+
+  // Prefetch-assisted chase: the same DRAM-sized dependent-load walk with the
+  // nodes laid out sequentially.  DRAM / (DRAM linear) is the upper bound on
+  // what prefetching hides -- the best case for the hardware, against the
+  // random row's worst case.
+  {
+    double nsLin = -1.0;
+    const uint64_t dramB = levels[3].bytes;
+    pool->run(1, [&](int) { nsLin = chaseLatencyNs(dramB, /*randomOrder=*/false); });
+    const char *note = "Main memory again, but read in address order, so the "
+                       "hardware can fetch ahead -- the best case DRAM gets.";
+    if (nsLin > 0) test.emit("DRAM linear", (float)nsLin, note);
+    else           test.skip("DRAM linear", ResultStatus::Error, "latency walk failed", note);
   }
 
   // Memory-level parallelism: effective ns/access over the DRAM working set
@@ -245,17 +278,24 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   double ns8 = -1.0, ns32 = -1.0, nsTlb = -1.0;
   pool->run(1, [&](int) { ns8 = chaseParallelNs<8>(dramBytes); });
   pool->run(1, [&](int) { ns32 = chaseParallelNs<32>(dramBytes); });
-  if (ns8 > 0)  test.emit("DRAM x8",  (float)ns8);
-  else          test.skip("DRAM x8",  ResultStatus::Error, "latency walk failed");
-  if (ns32 > 0) test.emit("DRAM x32", (float)ns32);
-  else          test.skip("DRAM x32", ResultStatus::Error, "latency walk failed");
+  const char *note8 = "Eight independent chases at once: the reads overlap "
+                      "instead of waiting in turn, so each costs less.";
+  const char *note32 = "Thirty-two chases at once -- deep enough that the core "
+                       "runs out of room for further overlap, so the cost per "
+                       "read stops falling.";
+  if (ns8 > 0)  test.emit("DRAM x8",  (float)ns8, note8);
+  else          test.skip("DRAM x8",  ResultStatus::Error, "latency walk failed", note8);
+  if (ns32 > 0) test.emit("DRAM x32", (float)ns32, note32);
+  else          test.skip("DRAM x32", ResultStatus::Error, "latency walk failed", note32);
 
   // TLB miss / page-walk: cache-resident nodes, one per page, across more
   // pages than any L2 TLB -- "cache hit + page walk" (vs the DRAM row, which
   // is "DRAM + page walk"); pointer-heavy object graphs see this cost.
   pool->run(1, [&](int) { nsTlb = tlbChaseNs(); });
-  if (nsTlb > 0) test.emit("TLB miss", (float)nsTlb);
-  else           test.skip("TLB miss", ResultStatus::Error, "latency walk failed");
+  const char *noteTlb = "The address-translation cost on its own: the data is "
+                        "cached, but every read lands on a different page.";
+  if (nsTlb > 0) test.emit("TLB miss", (float)nsTlb, noteTlb);
+  else           test.skip("TLB miss", ResultStatus::Error, "latency walk failed", noteTlb);
   return 0;
 }
 

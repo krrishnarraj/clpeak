@@ -22,7 +22,6 @@ ROCm headers. Built as `peak_rocm` static library.
 - Looking for rocBLAS GEMM benchmarks? → `rocblas.cpp`
 - Looking for hipBLASLt FP8 GEMM benchmarks? → `hipblaslt_gemm.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .hip kernel sources? → `rocm_kernels/*.hip`
 - Looking for AOT compile + embedding logic? → `cmake/EmbedRocmKernels.cmake` (+ `cmake/EmbedBin.cmake`)
@@ -46,11 +45,27 @@ ROCm headers. Built as `peak_rocm` static library.
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` via HIP texture object |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `rocm_kernels/` | HIP kernel sources (`.hip`), AOT-compiled to code objects and embedded as byte arrays |
 | `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
+
+## Test documentation
+
+See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
+
+- `rocm_compute_desc_t::description` (test) and
+  `rocm_compute_variant_t::description` (one reading); `runComputeKernel()`
+  forwards both on every path, skips included.
+- The matrix-core runners (`wmma.cpp`, `mfma.cpp`, `sparse_mfma.cpp`) walk
+  `WmmaEntry` / `MfmaEntry` / `SparseEntry` tables, so the description is a
+  field on the entry.  Add one whenever you add an entry.
+- `rocmWidthNote()` (`rocm_peak.h`) covers `float`/`float2`/`float4`,
+  `half`/`half2` and `int`/`int2`/`int4`.
+- **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
+  *independent chains*.  They carry their own notes.
+- `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
+  through `runTimed` / `runVariant`.
 
 ## When You Change This Directory
 

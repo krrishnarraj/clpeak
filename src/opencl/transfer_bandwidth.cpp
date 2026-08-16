@@ -114,7 +114,30 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   };
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps"});
+    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+     "How fast data crosses between the host's memory and the device's, by "
+     "each of the routes OpenCL offers.  On a discrete card this is the PCIe "
+     "link and is what makes moving data to the GPU worth avoiding; where the "
+     "two share one pool of memory a route can move nothing at all, and those "
+     "readings are reported as zero rather than as an impossible speed."});
+
+  // One note per reading, in emit order; shared with the bulk-skip paths below.
+  const char *wbNote  = "Copying host memory into the device buffer, with the "
+                        "host waiting for it to finish.";
+  const char *rbNote  = "Copying the device buffer back into host memory, with "
+                        "the host waiting for it to finish.";
+  const char *wbnNote = "The same upload, issued without waiting, so the driver "
+                        "is free to overlap it with other work.";
+  const char *rbnNote = "The same download, issued without waiting.";
+  const char *mapNote = "Handing the host direct access to the buffer instead of "
+                        "copying it.  Zero here means the host and device share "
+                        "the memory, so nothing had to move.";
+  const char *mcFromNote = "Once mapped, how fast the host reads that memory with "
+                           "an ordinary copy.";
+  const char *unmapNote = "Handing the buffer back to the device after writing to "
+                          "it.  Zero here again means nothing had to move.";
+  const char *mcToNote = "Once mapped, how fast the host writes into that memory "
+                         "with an ordinary copy.";
 
   // Helper: report a map/unmap result, detecting zero-copy
   auto reportMapUnmap = [&](float gbps, const std::string &resultName,
@@ -131,14 +154,14 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     arr = allocAligned(bytes);
     if (!arr)
     {
-      test.skip("enqueuewritebuffer", ResultStatus::Error, "Out of memory");
-      test.skip("enqueuereadbuffer", ResultStatus::Error, "Out of memory");
-      test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory");
-      test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory");
-      test.skip("enqueuemapbuffer", ResultStatus::Error, "Out of memory");
-      test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory");
-      test.skip("enqueueunmap", ResultStatus::Error, "Out of memory");
-      test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory");
+      test.skip("enqueuewritebuffer", ResultStatus::Error, "Out of memory", wbNote);
+      test.skip("enqueuereadbuffer", ResultStatus::Error, "Out of memory", rbNote);
+      test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory", wbnNote);
+      test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory", rbnNote);
+      test.skip("enqueuemapbuffer", ResultStatus::Error, "Out of memory", mapNote);
+      test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory", mcFromNote);
+      test.skip("enqueueunmap", ResultStatus::Error, "Out of memory", unmapNote);
+      test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory", mcToNote);
       return -1;
     }
     populate(arr, bytes / sizeof(float));
@@ -148,25 +171,25 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     float bw;
     bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuewritebuffer", bw);
+    test.emit("enqueuewritebuffer", bw, {false, wbNote});
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueReadBuffer (blocking)
     bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuereadbuffer", bw);
+    test.emit("enqueuereadbuffer", bw, {false, rbNote});
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueWriteBuffer non-blocking
     bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuewritebuffer_nonblocking", bw);
+    test.emit("enqueuewritebuffer_nonblocking", bw, {false, wbnNote});
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // enqueueReadBuffer non-blocking
     bw = runTransfer(
       [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuereadbuffer_nonblocking", bw);
+    test.emit("enqueuereadbuffer_nonblocking", bw, {false, rbnNote});
     if (bw > peakRealTransferBW) peakRealTransferBW = bw;
 
     // Helper: calibrate iter count for the open-coded map/unmap loops below.
@@ -212,7 +235,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      reportMapUnmap(gbps, "enqueuemapbuffer");
+      reportMapUnmap(gbps, "enqueuemapbuffer", {false, mapNote});
     }
 
     // memcpy from mapped ptr
@@ -244,7 +267,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      test.emit("memcpy_from_mapped_ptr", gbps, {true});
+      test.emit("memcpy_from_mapped_ptr", gbps, {true, mcFromNote});
     }
 
     // enqueueUnmap(after write)
@@ -273,7 +296,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      reportMapUnmap(gbps, "enqueueunmap");
+      reportMapUnmap(gbps, "enqueueunmap", {false, unmapNote});
     }
 
     // memcpy to mapped ptr
@@ -305,7 +328,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       timed /= static_cast<float>(iters);
 
       float gbps = (float)bytes / timed / 1e3f;
-      test.emit("memcpy_to_mapped_ptr", gbps, {true});
+      test.emit("memcpy_to_mapped_ptr", gbps, {true, mcToNote});
     }
 
     freeAligned(arr);
@@ -313,14 +336,14 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    test.skip("enqueuewritebuffer", ResultStatus::Error, reason);
-    test.skip("enqueuereadbuffer", ResultStatus::Error, reason);
-    test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason);
-    test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason);
-    test.skip("enqueuemapbuffer", ResultStatus::Error, reason);
-    test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, reason);
-    test.skip("enqueueunmap", ResultStatus::Error, reason);
-    test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, reason);
+    test.skip("enqueuewritebuffer", ResultStatus::Error, reason, wbNote);
+    test.skip("enqueuereadbuffer", ResultStatus::Error, reason, rbNote);
+    test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason, wbnNote);
+    test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason, rbnNote);
+    test.skip("enqueuemapbuffer", ResultStatus::Error, reason, mapNote);
+    test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, reason, mcFromNote);
+    test.skip("enqueueunmap", ResultStatus::Error, reason, unmapNote);
+    test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, reason, mcToNote);
 
     freeAligned(arr);
     return -1;

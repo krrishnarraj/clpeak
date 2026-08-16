@@ -58,8 +58,17 @@ static constexpr int FP16_LANES = 32, FP16_NACC = 16;
 static double runFp16Chain(uint64_t outer)
 {
   __m512h acc[FP16_NACC];
-  const __m512h b = _mm512_set1_ph((_Float16)0.9995f);
-  const __m512h c = _mm512_set1_ph((_Float16)0.001f);
+  // Volatile-seed b and c exactly like the generic fp32/fp64 chains.  As
+  // compile-time constants, -ffast-math closes the affine recurrence -- N
+  // steps of acc = acc*b + c fold to acc*b^N + const -- deleting most of the
+  // FMAs while opsPerIter still counts them.  Caught on a Granite Rapids Xeon
+  // (Windows CI): the row read 729.9 GFLOPS ST, a fp16/fp32 ratio of 3.09x
+  // against a hardware maximum of 2.00x, and above the 2x512-bit FMA ceiling
+  // at every plausible clock.  The ARM fp16 chain dodges this a different way
+  // (self-quadratic, no coefficients at all).
+  volatile float vb = 0.9995f, vc = 0.001f;
+  const __m512h b = _mm512_set1_ph((_Float16)vb);
+  const __m512h c = _mm512_set1_ph((_Float16)vc);
   for (int j = 0; j < FP16_NACC; j++) acc[j] = _mm512_set1_ph((_Float16)(0.1f * (j + 1)));
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K

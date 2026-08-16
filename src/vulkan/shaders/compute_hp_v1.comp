@@ -16,19 +16,20 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
-#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+// Chain shape and why: see the MAD chain block in include/common/common.h.
+#define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
+#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
 
 void main()
 {
     float16_t x = float16_t(pc.A);
-    float16_t y = float16_t(gl_LocalInvocationID.x);
+    float16_t c = float16_t(gl_LocalInvocationID.x);
 
     // 128 iters * 16 FMAs * 2 ops = 4096 per WI (matches COMPUTE_FP_WORK_PER_WI).
     for (int i = 0; i < 128; i++)
     {
-        MAD_16(x, y)
+        MAD_16(x, c)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = float(x + y);
+    outputBuf.data[gl_GlobalInvocationID.x] = float(x);
 }

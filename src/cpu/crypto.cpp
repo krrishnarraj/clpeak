@@ -18,14 +18,20 @@ using clpeak_cpu::kernelMenu;
 
 int CpuPeak::runCryptoAes(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"aes_encrypt", "AES-128 encrypt", "gbps", Category::Crypto},
+  emitVariants(*this, {"aes_encrypt", "AES-128 encrypt", "gbps", Category::Crypto,
+                       "How many bytes per second the CPU's dedicated AES "
+                       "instructions encrypt -- the ceiling for disk encryption and "
+                       "HTTPS traffic."},
                "aes", kernelMenu().aes, "no AES instructions on this CPU", cfg);
   return 0;
 }
 
 int CpuPeak::runCryptoSha256(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"sha256_hash", "SHA-256 hash", "gbps", Category::Crypto},
+  emitVariants(*this, {"sha256_hash", "SHA-256 hash", "gbps", Category::Crypto,
+                       "How many bytes per second the CPU hashes with SHA-256, the "
+                       "fingerprint function behind signatures, integrity checks and "
+                       "git-style content addressing."},
                "sha256", kernelMenu().sha256, "no SHA-256 instructions on this CPU", cfg);
   return 0;
 }
@@ -34,7 +40,10 @@ int CpuPeak::runCryptoSha512(benchmark_config_t &cfg)
 {
   // The x86 SHA512 EVEX extension (Arrow/Lunar Lake) is detected but has no
   // kernel yet, so x86 always reports the Unsupported row here.
-  emitVariants(*this, {"sha512_hash", "SHA-512 hash", "gbps", Category::Crypto},
+  emitVariants(*this, {"sha512_hash", "SHA-512 hash", "gbps", Category::Crypto,
+                       "How many bytes per second the CPU hashes with SHA-512, the "
+                       "wider member of the same family.  Only Arm cores have an "
+                       "instruction for it today."},
                "sha512", kernelMenu().sha512,
                "no SHA-512 instruction path on this CPU", cfg);
   return 0;
@@ -42,7 +51,10 @@ int CpuPeak::runCryptoSha512(benchmark_config_t &cfg)
 
 int CpuPeak::runCryptoCrc32c(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"crc32c", "CRC32-C checksum", "gbps", Category::Crypto},
+  emitVariants(*this, {"crc32c", "CRC32-C checksum", "gbps", Category::Crypto,
+                       "How many bytes per second the CPU checksums with CRC32-C, "
+                       "the corruption check storage and network stacks run over "
+                       "every block and packet."},
                "crc32c", kernelMenu().crc32c,
                "no hardware CRC32 instruction on this CPU", cfg);
   return 0;

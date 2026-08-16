@@ -10,7 +10,15 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
     {isInt ? "rocwmma-int" : "rocwmma-fp",
      isInt ? "rocWMMA int8xint8+int32 16x16x32"
            : "rocWMMA fp16xfp16+fp32 16x16x16",
-     isInt ? "tops" : "tflops"});
+     isInt ? "tops" : "tflops", Category::Unknown,
+     isInt ? "Matrix-core speed on 8-bit whole numbers reached through AMD's "
+             "rocWMMA library rather than the raw instructions.  Compare it "
+             "with the WMMA or MFMA row for the same format to see what the "
+             "library layer costs."
+           : "Matrix-core speed on 16-bit numbers reached through AMD's "
+             "rocWMMA library rather than the raw instructions.  Compare it "
+             "with the WMMA or MFMA row for the same format to see what the "
+             "library layer costs."});
 
   const char *metric = isInt ? "rocwmma_int8" : "rocwmma_fp16";
 

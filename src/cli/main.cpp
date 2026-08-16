@@ -170,7 +170,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    ResultStore combined;
+    ResultStore     combined;
+    DeviceInfoStore combinedDevices;
 
     // Run every enabled backend in order.  No devices is not an error
     // (normal in VM/CI environments).  Only real failures (driver init,
@@ -184,10 +185,14 @@ int main(int argc, char **argv)
             continue;
 
         auto peak = be.create();
-        peak->log.reset(new LoggerText(std::cout, opts.compareFile));
+        peak->log.reset(
+            new LoggerText(std::cout, opts.compareFile, opts.describe));
         peak->applyOptions(opts);
         int status = peak->runAll();
         mergeResults(combined, peak->log->results);
+        combinedDevices.insert(combinedDevices.end(),
+                               peak->log->devices.begin(),
+                               peak->log->devices.end());
 
         if (status != 0)
             lastError |= status;
@@ -195,11 +200,11 @@ int main(int argc, char **argv)
 
     // Centralized file dump: one file per enabled format.  A failed dump
     // surfaces in the exit code like any backend failure.
-    if (opts.enableJson && !saveJson(combined, opts.jsonFile))
+    if (opts.enableJson && !saveJson(combined, opts.jsonFile, combinedDevices))
         lastError |= 1;
     if (opts.enableCsv && !saveCsv(combined, opts.csvFile))
         lastError |= 1;
-    if (opts.enableXml && !saveXml(combined, opts.xmlFile))
+    if (opts.enableXml && !saveXml(combined, opts.xmlFile, combinedDevices))
         lastError |= 1;
 
     return lastError;

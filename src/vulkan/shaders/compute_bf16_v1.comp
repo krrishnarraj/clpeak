@@ -15,7 +15,7 @@
 // This version mirrors compute_sp_v1.comp's ping-pong MAD chain and
 // amortises the bf16<->fp32 conversions across 16 FMAs per outer iter.
 // The inner loop is pure FP32 FMA; bf16 is only the source/sink for
-// x,y between outer iters -- matching what a real bf16xbf16+fp32
+// x between outer iters -- matching what a real bf16xbf16+fp32
 // kernel's steady state looks like.  Expected ceiling: FP32 peak.
 
 layout(local_size_x = 256) in;
@@ -28,34 +28,35 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-#define MAD_4(x, y)   x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
-#define MAD_16(x, y)  MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
-#define MAD_64(x, y)  MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
-#define MAD_128(x, y) MAD_64(x, y) MAD_64(x, y)
+// Chain shape and why: see the MAD chain block in include/common/common.h.
+#define MAD_4(x, c)   x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
+#define MAD_16(x, c)  MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_64(x, c)  MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
+#define MAD_128(x, c) MAD_64(x, c) MAD_64(x, c)
 
 void main()
 {
-    // Mirror compute_sp_v1.comp exactly -- x and y loop-carried in fp32
-    // so glslang SSA-promotes them (compute_sp disassembles to 16 FMAs
-    // + 1 store; an earlier bf16 version that declared x,y inside the
-    // loop emitted 64 stores because the variables were OpVariable-
-    // backed, blocking NVIDIA's compiler from treating them as phis).
-    // Roundtrip through bf16 once per outer iter to force the bf16 type
-    // into the data path.
+    // Mirror compute_sp_v1.comp exactly -- x loop-carried in fp32 so
+    // glslang SSA-promotes it (compute_sp disassembles to 16 FMAs
+    // + 1 store; an earlier bf16 version that declared its accumulators
+    // inside the loop emitted 64 stores because the variables were
+    // OpVariable-backed, blocking NVIDIA's compiler from treating them
+    // as phis).  Roundtrip through bf16 once per outer iter to force the
+    // bf16 type into the data path; c is seeded through bf16 once.
     float x = float(bfloat16_t(pc.A));
-    float y = float(bfloat16_t(gl_LocalInvocationID.x));
+    float c = float(bfloat16_t(gl_LocalInvocationID.x));
 
-    // 16 outer iters * 128 FMAs * 2 chains * 2 ops = 8192 ops/WI.
+    // 16 outer iters * 128 FMAs * 2 ops = 4096 ops/WI (COMPUTE_FP_WORK_PER_WI,
+    // which is what the host scores this shader with).
     // Deep inner loop because bf16<->fp32 conversions are emulated on
     // NVIDIA 595 -- each cast is ~2x the cost of the fp16 cast in MP,
     // so amortising 2 casts over 128 FMAs (~0.03 casts/FMA) is what
     // closes the gap to the FP32 ceiling.
     for (int i = 0; i < 16; i++)
     {
-        MAD_128(x, y)
+        MAD_128(x, c)
         x = float(bfloat16_t(x));
-        y = float(bfloat16_t(y));
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x + y;
+    outputBuf.data[gl_GlobalInvocationID.x] = x;
 }

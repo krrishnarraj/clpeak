@@ -171,8 +171,19 @@ static constexpr int DIV_NACC = 8;
 // Precise FP for the divide/sqrt kernels only: clang via a float_control
 // push/pop region (ends after runFp64SqrtChain), GCC via a per-function
 // attribute.  cl.exe takes neither path but doesn't substitute intrinsics.
-#if defined(__clang__)
+// CLPEAK_HAS_FLOAT_CONTROL (from cpu_simd.h, included above) is unset on
+// targets -- 32-bit ARM (armv7) -- where clang doesn't implement the pragma;
+// there f32_div/f32_sqrt already fall back to plain scalar ops with no known
+// substitution risk (see cpu_simd.h), so skipping the pragma is a documented
+// no-op, not an unguarded gap.  The clang branch must be checked BEFORE
+// __GNUC__: clang defines __GNUC__ too (compat macro), and its "optimize"
+// attribute below is GCC-only -- clang just ignores it with a warning, so a
+// bare `#elif defined(__GNUC__)` would silently misfire on clang-without-
+// float_control instead of falling through to the no-op case.
+#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(precise, on, push)
+#define CLPEAK_PRECISE_FP
+#elif defined(__clang__)
 #define CLPEAK_PRECISE_FP
 #elif defined(__GNUC__)
 #define CLPEAK_PRECISE_FP __attribute__((optimize("no-fast-math")))
@@ -254,7 +265,7 @@ static CLPEAK_PRECISE_FP double runFp64SqrtChain(uint64_t outer)
   for (int j = 1; j < DIV_NACC; j++) s = f64_add(s, acc[j]);
   return (double)f64_hsum(s);
 }
-#if defined(__clang__)
+#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(pop)
 #endif
 
@@ -295,21 +306,31 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   __m512i x0 = _mm512_setzero_si512(), x1 = x0, x2 = x0, x3 = x0;
   __m512i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
   uint64_t tail = 0;
+  // Block count and remainder are computed ONCE, and the hot loop walks a
+  // single pointer `q`.  Writing it as `for (; i + step <= M; i += step)` with
+  // the tail sharing `i` makes clang emit several induction variables plus a
+  // multi-versioned tail check per pass, and that loop shape alone cost 112 vs
+  // 154 GB/s on M1 Pro (34.7 vs 47.6 B/cycle, i.e. 99% of the 3x16B load-port
+  // ceiling).  The instruction mix is not the issue: the fast kernel still
+  // emits `ldp q`.  Keep this form in every bandwidth kernel reached through a
+  // function pointer -- with a *runtime* size the compiler cannot drop the
+  // tail, which is why a fixed-size microbenchmark never reproduces it.
+  const size_t nblk = M / step, rem = M - nblk * step;
   for (uint64_t it = 0; it < iters; it++)
   {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
+    const float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += step)
     {
-      x0 = _mm512_xor_si512(x0, _mm512_castps_si512(_mm512_loadu_ps(p + i + 0 * W)));
-      x1 = _mm512_xor_si512(x1, _mm512_castps_si512(_mm512_loadu_ps(p + i + 1 * W)));
-      x2 = _mm512_xor_si512(x2, _mm512_castps_si512(_mm512_loadu_ps(p + i + 2 * W)));
-      x3 = _mm512_xor_si512(x3, _mm512_castps_si512(_mm512_loadu_ps(p + i + 3 * W)));
-      x4 = _mm512_xor_si512(x4, _mm512_castps_si512(_mm512_loadu_ps(p + i + 4 * W)));
-      x5 = _mm512_xor_si512(x5, _mm512_castps_si512(_mm512_loadu_ps(p + i + 5 * W)));
-      x6 = _mm512_xor_si512(x6, _mm512_castps_si512(_mm512_loadu_ps(p + i + 6 * W)));
-      x7 = _mm512_xor_si512(x7, _mm512_castps_si512(_mm512_loadu_ps(p + i + 7 * W)));
+      x0 = _mm512_xor_si512(x0, _mm512_castps_si512(_mm512_loadu_ps(q + 0 * W)));
+      x1 = _mm512_xor_si512(x1, _mm512_castps_si512(_mm512_loadu_ps(q + 1 * W)));
+      x2 = _mm512_xor_si512(x2, _mm512_castps_si512(_mm512_loadu_ps(q + 2 * W)));
+      x3 = _mm512_xor_si512(x3, _mm512_castps_si512(_mm512_loadu_ps(q + 3 * W)));
+      x4 = _mm512_xor_si512(x4, _mm512_castps_si512(_mm512_loadu_ps(q + 4 * W)));
+      x5 = _mm512_xor_si512(x5, _mm512_castps_si512(_mm512_loadu_ps(q + 5 * W)));
+      x6 = _mm512_xor_si512(x6, _mm512_castps_si512(_mm512_loadu_ps(q + 6 * W)));
+      x7 = _mm512_xor_si512(x7, _mm512_castps_si512(_mm512_loadu_ps(q + 7 * W)));
     }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
+    for (size_t k = 0; k < rem; k++) { uint32_t v; std::memcpy(&v, q + k, sizeof(v)); tail ^= v; }
   }
   __m512i x = _mm512_xor_si512(_mm512_xor_si512(_mm512_xor_si512(x0, x1), _mm512_xor_si512(x2, x3)),
                                _mm512_xor_si512(_mm512_xor_si512(x4, x5), _mm512_xor_si512(x6, x7)));
@@ -322,21 +343,22 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   __m256i x0 = _mm256_setzero_si256(), x1 = x0, x2 = x0, x3 = x0;
   __m256i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
   uint64_t tail = 0;
+  const size_t nblk = M / step, rem = M - nblk * step;
   for (uint64_t it = 0; it < iters; it++)
   {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
+    const float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += step)
     {
-      x0 = _mm256_xor_si256(x0, _mm256_castps_si256(_mm256_loadu_ps(p + i + 0 * W)));
-      x1 = _mm256_xor_si256(x1, _mm256_castps_si256(_mm256_loadu_ps(p + i + 1 * W)));
-      x2 = _mm256_xor_si256(x2, _mm256_castps_si256(_mm256_loadu_ps(p + i + 2 * W)));
-      x3 = _mm256_xor_si256(x3, _mm256_castps_si256(_mm256_loadu_ps(p + i + 3 * W)));
-      x4 = _mm256_xor_si256(x4, _mm256_castps_si256(_mm256_loadu_ps(p + i + 4 * W)));
-      x5 = _mm256_xor_si256(x5, _mm256_castps_si256(_mm256_loadu_ps(p + i + 5 * W)));
-      x6 = _mm256_xor_si256(x6, _mm256_castps_si256(_mm256_loadu_ps(p + i + 6 * W)));
-      x7 = _mm256_xor_si256(x7, _mm256_castps_si256(_mm256_loadu_ps(p + i + 7 * W)));
+      x0 = _mm256_xor_si256(x0, _mm256_castps_si256(_mm256_loadu_ps(q + 0 * W)));
+      x1 = _mm256_xor_si256(x1, _mm256_castps_si256(_mm256_loadu_ps(q + 1 * W)));
+      x2 = _mm256_xor_si256(x2, _mm256_castps_si256(_mm256_loadu_ps(q + 2 * W)));
+      x3 = _mm256_xor_si256(x3, _mm256_castps_si256(_mm256_loadu_ps(q + 3 * W)));
+      x4 = _mm256_xor_si256(x4, _mm256_castps_si256(_mm256_loadu_ps(q + 4 * W)));
+      x5 = _mm256_xor_si256(x5, _mm256_castps_si256(_mm256_loadu_ps(q + 5 * W)));
+      x6 = _mm256_xor_si256(x6, _mm256_castps_si256(_mm256_loadu_ps(q + 6 * W)));
+      x7 = _mm256_xor_si256(x7, _mm256_castps_si256(_mm256_loadu_ps(q + 7 * W)));
     }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
+    for (size_t k = 0; k < rem; k++) { uint32_t v; std::memcpy(&v, q + k, sizeof(v)); tail ^= v; }
   }
   __m256i x = _mm256_xor_si256(_mm256_xor_si256(_mm256_xor_si256(x0, x1), _mm256_xor_si256(x2, x3)),
                                _mm256_xor_si256(_mm256_xor_si256(x4, x5), _mm256_xor_si256(x6, x7)));
@@ -349,21 +371,22 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   __m128i x0 = _mm_setzero_si128(), x1 = x0, x2 = x0, x3 = x0;
   __m128i x4 = x0, x5 = x0, x6 = x0, x7 = x0;
   uint64_t tail = 0;
+  const size_t nblk = M / step, rem = M - nblk * step;
   for (uint64_t it = 0; it < iters; it++)
   {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
+    const float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += step)
     {
-      x0 = _mm_xor_si128(x0, _mm_castps_si128(_mm_loadu_ps(p + i + 0 * W)));
-      x1 = _mm_xor_si128(x1, _mm_castps_si128(_mm_loadu_ps(p + i + 1 * W)));
-      x2 = _mm_xor_si128(x2, _mm_castps_si128(_mm_loadu_ps(p + i + 2 * W)));
-      x3 = _mm_xor_si128(x3, _mm_castps_si128(_mm_loadu_ps(p + i + 3 * W)));
-      x4 = _mm_xor_si128(x4, _mm_castps_si128(_mm_loadu_ps(p + i + 4 * W)));
-      x5 = _mm_xor_si128(x5, _mm_castps_si128(_mm_loadu_ps(p + i + 5 * W)));
-      x6 = _mm_xor_si128(x6, _mm_castps_si128(_mm_loadu_ps(p + i + 6 * W)));
-      x7 = _mm_xor_si128(x7, _mm_castps_si128(_mm_loadu_ps(p + i + 7 * W)));
+      x0 = _mm_xor_si128(x0, _mm_castps_si128(_mm_loadu_ps(q + 0 * W)));
+      x1 = _mm_xor_si128(x1, _mm_castps_si128(_mm_loadu_ps(q + 1 * W)));
+      x2 = _mm_xor_si128(x2, _mm_castps_si128(_mm_loadu_ps(q + 2 * W)));
+      x3 = _mm_xor_si128(x3, _mm_castps_si128(_mm_loadu_ps(q + 3 * W)));
+      x4 = _mm_xor_si128(x4, _mm_castps_si128(_mm_loadu_ps(q + 4 * W)));
+      x5 = _mm_xor_si128(x5, _mm_castps_si128(_mm_loadu_ps(q + 5 * W)));
+      x6 = _mm_xor_si128(x6, _mm_castps_si128(_mm_loadu_ps(q + 6 * W)));
+      x7 = _mm_xor_si128(x7, _mm_castps_si128(_mm_loadu_ps(q + 7 * W)));
     }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
+    for (size_t k = 0; k < rem; k++) { uint32_t v; std::memcpy(&v, q + k, sizeof(v)); tail ^= v; }
   }
   __m128i x = _mm_xor_si128(_mm_xor_si128(_mm_xor_si128(x0, x1), _mm_xor_si128(x2, x3)),
                             _mm_xor_si128(_mm_xor_si128(x4, x5), _mm_xor_si128(x6, x7)));
@@ -379,21 +402,22 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
   uint32x4_t x0 = vdupq_n_u32(0), x1 = x0, x2 = x0, x3 = x0;
   uint32x4_t x4 = x0, x5 = x0, x6 = x0, x7 = x0;
   uint64_t tail = 0;
+  const size_t nblk = M / step, rem = M - nblk * step;
   for (uint64_t it = 0; it < iters; it++)
   {
-    size_t i = 0;
-    for (; i + step <= M; i += step)
+    const float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += step)
     {
-      x0 = veorq_u32(x0, vreinterpretq_u32_f32(vld1q_f32(p + i + 0 * W)));
-      x1 = veorq_u32(x1, vreinterpretq_u32_f32(vld1q_f32(p + i + 1 * W)));
-      x2 = veorq_u32(x2, vreinterpretq_u32_f32(vld1q_f32(p + i + 2 * W)));
-      x3 = veorq_u32(x3, vreinterpretq_u32_f32(vld1q_f32(p + i + 3 * W)));
-      x4 = veorq_u32(x4, vreinterpretq_u32_f32(vld1q_f32(p + i + 4 * W)));
-      x5 = veorq_u32(x5, vreinterpretq_u32_f32(vld1q_f32(p + i + 5 * W)));
-      x6 = veorq_u32(x6, vreinterpretq_u32_f32(vld1q_f32(p + i + 6 * W)));
-      x7 = veorq_u32(x7, vreinterpretq_u32_f32(vld1q_f32(p + i + 7 * W)));
+      x0 = veorq_u32(x0, vreinterpretq_u32_f32(vld1q_f32(q + 0 * W)));
+      x1 = veorq_u32(x1, vreinterpretq_u32_f32(vld1q_f32(q + 1 * W)));
+      x2 = veorq_u32(x2, vreinterpretq_u32_f32(vld1q_f32(q + 2 * W)));
+      x3 = veorq_u32(x3, vreinterpretq_u32_f32(vld1q_f32(q + 3 * W)));
+      x4 = veorq_u32(x4, vreinterpretq_u32_f32(vld1q_f32(q + 4 * W)));
+      x5 = veorq_u32(x5, vreinterpretq_u32_f32(vld1q_f32(q + 5 * W)));
+      x6 = veorq_u32(x6, vreinterpretq_u32_f32(vld1q_f32(q + 6 * W)));
+      x7 = veorq_u32(x7, vreinterpretq_u32_f32(vld1q_f32(q + 7 * W)));
     }
-    for (; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); tail ^= v; }
+    for (size_t k = 0; k < rem; k++) { uint32_t v; std::memcpy(&v, q + k, sizeof(v)); tail ^= v; }
   }
   uint32x4_t x = veorq_u32(veorq_u32(veorq_u32(x0, x1), veorq_u32(x2, x3)),
                            veorq_u32(veorq_u32(x4, x5), veorq_u32(x6, x7)));
@@ -406,6 +430,144 @@ static uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
     for (size_t i = 0; i < M; i++) { uint32_t v; std::memcpy(&v, p + i, sizeof(v)); acc ^= v; }
   return acc;
 #endif
+}
+
+// ---- Streaming write (fill) + copy -----------------------------------------
+// Cache-resident store-bandwidth kernels (the L1 write/copy rows).  libc
+// memset/memcpy CANNOT be used here: they switch to non-temporal stores above
+// a size threshold (verified on Apple: "L1" writes landed at DRAM bandwidth),
+// which bypasses the cache being measured.  Plain vector stores stay cached.
+// The per-pass barrier keeps clang from dead-store-eliminating all but the
+// last pass (stores of identical data to the same location are legally
+// collapsible); MSVC cl.exe gets _ReadWriteBarrier.
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#define CPU_BASE_MEMBAR() _ReadWriteBarrier()
+#else
+#define CPU_BASE_MEMBAR() asm volatile("" ::: "memory")
+#endif
+
+static void writeBufferFill(float *p, size_t M, uint64_t iters)
+{
+  for (uint64_t it = 0; it < iters; it++)
+  {
+    CPU_BASE_MEMBAR();
+    const float fv = 1.0f + (float)(it & 7);
+#if defined(__AVX512F__)
+    constexpr size_t W = 16;
+    const __m512 v = _mm512_set1_ps(fv);
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
+    {
+      _mm512_storeu_ps(q + 0 * W, v);
+      _mm512_storeu_ps(q + 1 * W, v);
+      _mm512_storeu_ps(q + 2 * W, v);
+      _mm512_storeu_ps(q + 3 * W, v);
+    }
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
+#elif defined(__AVX2__)
+    constexpr size_t W = 8;
+    const __m256 v = _mm256_set1_ps(fv);
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
+    {
+      _mm256_storeu_ps(q + 0 * W, v);
+      _mm256_storeu_ps(q + 1 * W, v);
+      _mm256_storeu_ps(q + 2 * W, v);
+      _mm256_storeu_ps(q + 3 * W, v);
+    }
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
+#elif defined(__SSE2__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
+    constexpr size_t W = 4;
+    const __m128 v = _mm_set1_ps(fv);
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
+    {
+      _mm_storeu_ps(q + 0 * W, v);
+      _mm_storeu_ps(q + 1 * W, v);
+      _mm_storeu_ps(q + 2 * W, v);
+      _mm_storeu_ps(q + 3 * W, v);
+    }
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr size_t W = 4;
+    const float32x4_t v = vdupq_n_f32(fv);
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *q = p;
+    for (size_t b = 0; b < nblk; b++, q += 4 * W)
+    {
+      vst1q_f32(q + 0 * W, v);
+      vst1q_f32(q + 1 * W, v);
+      vst1q_f32(q + 2 * W, v);
+      vst1q_f32(q + 3 * W, v);
+    }
+    for (size_t k = 0; k < rem; k++) q[k] = fv;
+#else
+    for (size_t i = 0; i < M; i++) p[i] = fv;
+#endif
+  }
+}
+
+static void copyBufferVec(float *dst, const float *src, size_t M, uint64_t iters)
+{
+  for (uint64_t it = 0; it < iters; it++)
+  {
+    CPU_BASE_MEMBAR();
+#if defined(__AVX512F__)
+    constexpr size_t W = 16;
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
+    {
+      _mm512_storeu_ps(d + 0 * W, _mm512_loadu_ps(s2 + 0 * W));
+      _mm512_storeu_ps(d + 1 * W, _mm512_loadu_ps(s2 + 1 * W));
+      _mm512_storeu_ps(d + 2 * W, _mm512_loadu_ps(s2 + 2 * W));
+      _mm512_storeu_ps(d + 3 * W, _mm512_loadu_ps(s2 + 3 * W));
+    }
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
+#elif defined(__AVX2__)
+    constexpr size_t W = 8;
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
+    {
+      _mm256_storeu_ps(d + 0 * W, _mm256_loadu_ps(s2 + 0 * W));
+      _mm256_storeu_ps(d + 1 * W, _mm256_loadu_ps(s2 + 1 * W));
+      _mm256_storeu_ps(d + 2 * W, _mm256_loadu_ps(s2 + 2 * W));
+      _mm256_storeu_ps(d + 3 * W, _mm256_loadu_ps(s2 + 3 * W));
+    }
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
+#elif defined(__SSE2__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
+    constexpr size_t W = 4;
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
+    {
+      _mm_storeu_ps(d + 0 * W, _mm_loadu_ps(s2 + 0 * W));
+      _mm_storeu_ps(d + 1 * W, _mm_loadu_ps(s2 + 1 * W));
+      _mm_storeu_ps(d + 2 * W, _mm_loadu_ps(s2 + 2 * W));
+      _mm_storeu_ps(d + 3 * W, _mm_loadu_ps(s2 + 3 * W));
+    }
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr size_t W = 4;
+    const size_t nblk = M / (4 * W), rem = M - nblk * (4 * W);
+    float *d = dst; const float *s2 = src;
+    for (size_t b = 0; b < nblk; b++, d += 4 * W, s2 += 4 * W)
+    {
+      vst1q_f32(d + 0 * W, vld1q_f32(s2 + 0 * W));
+      vst1q_f32(d + 1 * W, vld1q_f32(s2 + 1 * W));
+      vst1q_f32(d + 2 * W, vld1q_f32(s2 + 2 * W));
+      vst1q_f32(d + 3 * W, vld1q_f32(s2 + 3 * W));
+    }
+    for (size_t k = 0; k < rem; k++) d[k] = s2[k];
+#else
+    for (size_t i = 0; i < M; i++) dst[i] = src[i];
+#endif
+  }
 }
 
 } // anonymous namespace

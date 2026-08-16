@@ -25,23 +25,24 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-#define MAD_4(x, y)  x = fma(y, x, y); y = fma(x, y, x); x = fma(y, x, y); y = fma(x, y, x);
-#define MAD_16(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
+// Chain shape and why: see the MAD chain block in include/common/common.h.
+#define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
+#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
 
 void main()
 {
-    // Mirror compute_sp_v1.comp exactly -- loop-carried fp32 x,y so
-    // glslang SSA-promotes them to phis.  Roundtrip through fp16 once
-    // per outer iter to force the fp16 type into the data path.
+    // Mirror compute_sp_v1.comp exactly -- loop-carried fp32 x so
+    // glslang SSA-promotes it to a phi.  Roundtrip through fp16 once
+    // per outer iter to force the fp16 type into the data path; c is
+    // seeded through fp16 once and never updated.
     float x = float(float16_t(pc.A));
-    float y = float(float16_t(gl_LocalInvocationID.x));
+    float c = float(float16_t(gl_LocalInvocationID.x));
 
     for (int i = 0; i < 128; i++)
     {
-        MAD_16(x, y)
+        MAD_16(x, c)
         x = float(float16_t(x));
-        y = float(float16_t(y));
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x + y;
+    outputBuf.data[gl_GlobalInvocationID.x] = x;
 }

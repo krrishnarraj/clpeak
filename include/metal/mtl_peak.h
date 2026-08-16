@@ -33,7 +33,8 @@ struct mtl_device_info_t {
   bool fp16Supported;             // always true on Apple silicon
   bool simdgroupMatrixFP16Supported; // M1+ (Apple7)
   bool simdgroupMatrixBF16Supported; // M3+ (Apple9)
-  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: OS support + Apple9
+  bool mpsGraphSupported;         // MPSGraph can wrap this device (false on the iOS Simulator)
+  bool mpsGraphBF16Supported;     // MPSGraph bf16 matmul: MPSGraph + OS support + Apple9
   uint32_t appleFamily;           // largest MTLGPUFamilyApple<N> the device supports
   uint32_t gpuCoreCount;          // GPU core count (e.g. 8 on M1 base, 32 on M1 Max). 0 = unknown.
 };
@@ -60,6 +61,7 @@ struct mtl_compute_variant_t
   const char *kernelName;          // function name inside the .metal source
   const char *src;                 // .metal source text (may be shared by sibling variants)
   const char *srcName;
+  const char *description;         // what this one reading means (nullptr = undocumented)
 };
 
 struct mtl_compute_desc_t
@@ -68,6 +70,10 @@ struct mtl_compute_desc_t
   const char *resultTag;
   const char *unit;                // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;         // 1e9 = G* (default when 0), 1e12 = T*
+
+  // One or two plain-language sentences on what the test measures; travels to
+  // logger::TestSpec::description (nullptr = undocumented).
+  const char *description;
 
   // Single-variant fallback.
   const char *metricLabel;
@@ -113,8 +119,10 @@ public:
   int runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg);
   int runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg);
   int runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg);
+  int runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg);
+  int runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg);
 
   // Internal -- exposed only so they can be reached from mtl_peak.mm without
   // an extra friend declaration.
@@ -149,6 +157,8 @@ namespace mtl_kernels {
   extern const char *local_bandwidth_name;
   extern const char *image_bandwidth_src;
   extern const char *image_bandwidth_name;
+  extern const char *texture_sample_src;
+  extern const char *texture_sample_name;
 
 }
 

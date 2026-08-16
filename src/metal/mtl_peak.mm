@@ -41,6 +41,8 @@ int MetalPeak::runAll()
 
     for (NSUInteger d = 0; d < impl->allDevices.count; d++)
     {
+        if (clpeak::cancelRequested())
+            break;
         if (!deviceIndices.empty() &&
             std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
             continue;
@@ -92,11 +94,14 @@ int MetalPeak::runAll()
             runSimdgroupMatrix(dev, cfg);
         if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
             runMpsGemm(dev, cfg);
+        if (isAllowedAs(Benchmark::MpsAttention, Category::FpCompute))
+            runMpsAttention(dev, cfg);
 
         // ---- Phase 2: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
         if (isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
         if (isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+        if (isAllowed(Benchmark::TextureSample))     runTextureSampleRate(dev, cfg);
 
         // ---- Phase 4: latency (us) ---------------------------------------
         if (isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);

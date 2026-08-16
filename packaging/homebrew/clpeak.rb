@@ -5,9 +5,10 @@
 class Clpeak < Formula
   desc "Benchmark to measure peak compute, bandwidth, and latency of GPU/CPU devices"
   homepage "https://github.com/krrishnarraj/clpeak"
+  # TODO: add `revision:` with 2.1.0's commit sha once the tag is pushed —
+  # homebrew-core requires it alongside `tag:`.
   url "https://github.com/krrishnarraj/clpeak.git",
-      tag:      "2.0.15",
-      revision: "5d7b3da31023054c0d8aa7b354647141d85f47ee"
+      tag: "2.1.0"
   license "Apache-2.0"
   head "https://github.com/krrishnarraj/clpeak.git", branch: "master"
 

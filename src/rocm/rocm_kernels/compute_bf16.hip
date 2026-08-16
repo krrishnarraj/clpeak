@@ -10,23 +10,25 @@ using clpeak_bf16 = __hip_bfloat16;
 using clpeak_bf16 = hip_bfloat16;
 #endif
 
-#define MAD_4(x, y)   x = fmaf(y, x, y); y = fmaf(x, y, x); x = fmaf(y, x, y); y = fmaf(x, y, x);
-#define MAD_16(x, y)  MAD_4(x, y) MAD_4(x, y) MAD_4(x, y) MAD_4(x, y)
-#define MAD_64(x, y)  MAD_16(x, y) MAD_16(x, y) MAD_16(x, y) MAD_16(x, y)
-#define MAD_128(x, y) MAD_64(x, y) MAD_64(x, y)
+// Chain shape and why: see the MAD chain block in include/common/common.h.
+// c is seeded through bf16 once and never updated, so it stays
+// bf16-representable without a per-iteration round trip.
+#define MAD_4(x, c)   x = fmaf(x, x, c); x = fmaf(x, x, c); x = fmaf(x, x, c); x = fmaf(x, x, c);
+#define MAD_16(x, c)  MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_64(x, c)  MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
+#define MAD_128(x, c) MAD_64(x, c) MAD_64(x, c)
 
 extern "C" __global__ void compute_bf16(float *out, float A)
 {
     float x = (float)clpeak_bf16(A);
-    float y = (float)clpeak_bf16((float)threadIdx.x);
+    float c = (float)clpeak_bf16((float)threadIdx.x);
 
     #pragma unroll 1
     for (int i = 0; i < 16; i++)
     {
-        MAD_128(x, y)
+        MAD_128(x, c)
         x = (float)clpeak_bf16(x);
-        y = (float)clpeak_bf16(y);
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = x + y;
+    out[blockIdx.x * blockDim.x + threadIdx.x] = x;
 }

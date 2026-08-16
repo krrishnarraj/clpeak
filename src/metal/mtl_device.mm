@@ -77,20 +77,37 @@ bool MetalDevice::init(int devIndex)
     info.simdgroupMatrixFP16Supported = info.appleFamily >= 7;
     info.simdgroupMatrixBF16Supported = info.appleFamily >= 9;
 
+    // MPSGraph cannot wrap the iOS Simulator's GPU: +[MPSGraphDevice
+    // deviceWithMTLDevice:] builds an MPSGraphDeviceDescriptor from it, gets
+    // nil, and raises NSInvalidArgumentException.  It must be gated out rather
+    // than caught: the throw happens inside a block dispatch_sync'd onto an
+    // MPSGraph queue, and libdispatch's _dispatch_client_callout turns any
+    // exception crossing it into objc_terminate() -- an @try/@catch at the call
+    // site does not stop the abort (measured on iOS 26.5).
+    // (MPSMatrixMultiplication is fine there, so the fp32/fp16 GEMM rows still
+    // run.)  Every MPSGraph-based test checks this bit.
+#if TARGET_OS_SIMULATOR
+    info.mpsGraphSupported = false;
+#else
+    info.mpsGraphSupported = true;
+#endif
+
     // MPSGraph bf16 dtype was added in macOS 14 (Sonoma) and only lights up
     // on Apple9+ (M3); below that it falls back to a slow software path.
     info.mpsGraphBF16Supported = false;
 #if TARGET_OS_IPHONE
     if (@available(iOS 17.0, *))
-        info.mpsGraphBF16Supported = info.appleFamily >= 9;
+        info.mpsGraphBF16Supported = info.mpsGraphSupported && info.appleFamily >= 9;
 #else
     if (@available(macOS 14.0, *))
-        info.mpsGraphBF16Supported = info.appleFamily >= 9;
+        info.mpsGraphBF16Supported = info.mpsGraphSupported && info.appleFamily >= 9;
 #endif
 
     // Best-effort GPU core count via IORegistry (Apple silicon exposes
-    // "gpu-core-count" on the AGXAccelerator service).  Used to scale the
-    // GEMM dim so similar-class GPUs land in similar wall-clock windows.
+    // "gpu-core-count" on the AGXAccelerator service).  Reported as a device
+    // property and used to size dispatches (mtlTargetGlobalThreads).  Stays 0
+    // on iOS -- IOKit is not reachable from a sandboxed app -- which is why the
+    // MPS GEMM dim is measured rather than derived from it (mtl_blas.mm).
     info.gpuCoreCount = 0;
 #if __has_include(<IOKit/IOKitLib.h>) && !TARGET_OS_IPHONE
     {

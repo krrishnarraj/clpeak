@@ -7,63 +7,88 @@
 
 static const int MIN_METRIC_PAD = 8;   // minimum column width for metric names
 
-// ── note ───────────────────────────────────────────────────────────────────
+// --describe wraps prose to this width.  Fixed rather than read off the
+// terminal: output is routinely piped, redirected and diffed, and a width that
+// changes with the window would make those results differ run to run.
+static const int DESCRIBE_WIDTH = 80;
 
-void LoggerText::note(const std::string &msg)
+// Narrowest prose column worth wrapping to; below it, deep indentation would
+// leave a ragged one-word-per-line column, so let the text overrun instead.
+static const int MIN_DESCRIBE_COLUMN = 32;
+
+static std::string statusTag(ResultStatus status)
 {
-    out << msg;
-    out.flush();
+    switch (status)
+    {
+    case ResultStatus::Unsupported: return "unsupported";
+    case ResultStatus::Skipped:     return "skipped";
+    case ResultStatus::Error:       return "error";
+    default:                        return "unknown";
+    }
 }
 
-// ── onBackendBegin ─────────────────────────────────────────────────────────
+// ── Event dispatch ─────────────────────────────────────────────────────────
 
-void LoggerText::onBackendBegin(const std::string &name)
+void LoggerText::onEvent(const LogEvent &e)
+{
+    switch (e.kind)
+    {
+    case LogEvent::Kind::BackendBegin:   renderBackendBegin(e);   break;
+    case LogEvent::Kind::DeviceBegin:    renderDeviceBegin(e);    break;
+    case LogEvent::Kind::TestBegin:      renderTestBegin(e);      break;
+    case LogEvent::Kind::Metric:         renderMetric(e);         break;
+    case LogEvent::Kind::TestSkippedAll: renderTestSkippedAll(e); break;
+    case LogEvent::Kind::TestEnd:        renderTestEnd();         break;
+    case LogEvent::Kind::DeviceEnd:      renderDeviceEnd();       break;
+    case LogEvent::Kind::BackendEnd:     renderBackendEnd();      break;
+    case LogEvent::Kind::Note:
+        out << e.message;
+        out.flush();
+        break;
+    }
+}
+
+// ── BackendBegin ───────────────────────────────────────────────────────────
+
+void LoggerText::renderBackendBegin(const LogEvent &e)
 {
     indentLevel = 0;
-    out << "Backend: " << name << "\n";
+    out << "Backend: " << e.backend << "\n";
     out.flush();
 }
 
-// ── onDeviceBegin ──────────────────────────────────────────────────────────
+// ── DeviceBegin ────────────────────────────────────────────────────────────
 
-void LoggerText::onDeviceBegin(const std::string &name,
-                               const std::string &platform,
-                               const std::string &driverVersion,
-                               const std::vector<Prop> &props,
-                               bool _showPlatformLine,
-                               int platformIndex,
-                               int deviceIndex)
+void LoggerText::renderDeviceBegin(const LogEvent &e)
 {
-    showPlatformLine = _showPlatformLine;
-
     // Indent setup: platform line (if shown) pushes device one level deeper
-    int deviceIndent = showPlatformLine ? 2 : 1;
+    int deviceIndent = e.showPlatformLine ? 2 : 1;
     propIndent       = deviceIndent + 1;   // props indented under device
     indentLevel      = deviceIndent;
 
-    if (showPlatformLine)
+    if (e.showPlatformLine)
     {
-        std::string pline = platformIndex >= 0
-            ? "Platform " + std::to_string(platformIndex) + ": " + platform
-            : "Platform: " + platform;
+        std::string pline = e.platformIndex >= 0
+            ? "Platform " + std::to_string(e.platformIndex) + ": " + e.platform
+            : "Platform: " + e.platform;
         writeLine(1, pline);
     }
 
-    std::string dline = deviceIndex >= 0
-        ? "Device " + std::to_string(deviceIndex) + ": " + name
-        : "Device: " + name;
+    std::string dline = e.deviceIndex >= 0
+        ? "Device " + std::to_string(e.deviceIndex) + ": " + e.device
+        : "Device: " + e.device;
     writeLine(deviceIndent, dline);
 
     // Properties
-    if (!driverVersion.empty())
+    if (!e.driver.empty())
     {
         std::string dvLabel = "Driver version";
         while (dvLabel.size() < 17)
             dvLabel += ' ';
-        writeLine(propIndent, dvLabel + ": " + driverVersion);
+        writeLine(propIndent, dvLabel + ": " + e.driver);
     }
 
-    for (const auto &prop : props)
+    for (const auto &prop : e.props)
     {
         std::string line = prop.key;
         // Right-align key to match "Driver version  " width (17 chars)
@@ -76,76 +101,73 @@ void LoggerText::onDeviceBegin(const std::string &name,
     out.flush();
 }
 
-// ── onTestBegin ────────────────────────────────────────────────────────────
+// ── TestBegin ──────────────────────────────────────────────────────────────
 
-void LoggerText::onTestBegin(const std::string & /*tag*/,
-                             const std::string &display,
-                             const std::string &unit)
+void LoggerText::renderTestBegin(const LogEvent &e)
 {
+    // Defence in depth: rows are buffered until TestEnd, so anything still
+    // pending here belongs to a test that was not closed.  The scope layer
+    // now closes it for us (logger::closeOpenTest), but flush rather than
+    // clear so no measured row can ever be discarded silently.
+    flushMetrics();
+
     out << "\n";
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
     // Build header: display name + unit in caps, e.g. "Global memory bandwidth (GBPS)"
-    std::string header = display;
-    if (!unit.empty())
+    std::string header = e.testDisplay;
+    if (!e.unit.empty())
     {
-        std::string u = unit;
+        std::string u = e.unit;
         for (auto &c : u)
             c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         header += " (" + u + ")";
     }
 
     writeLine(header);
+
+    // What the test measures, under its own header and one step in from it,
+    // then a blank line so the readings below still read as a block.
+    if (describe && !e.testDescription.empty())
+    {
+        writeWrapped(metricIndent * 2, e.testDescription);
+        out << "\n";
+    }
+
     metricLines.clear();
     out.flush();
 }
 
-// ── onMetricEmitted ────────────────────────────────────────────────────────
+// ── Metric ─────────────────────────────────────────────────────────────────
 
-void LoggerText::onMetricEmitted(const ResultEntry &e, float value, bool subMetric)
+void LoggerText::renderMetric(const LogEvent &e)
 {
-    metricLines.push_back({MetricLine::Ok, e.metric, value,
-                           ResultStatus::Ok, "", subMetric});
+    metricLines.push_back({e.entry.metric, e.entry.value, e.entry.status,
+                           e.entry.reason, e.subMetric, e.entry.key(),
+                           e.entry.metricDescription});
 }
 
-// ── onMetricSkipped ────────────────────────────────────────────────────────
+// ── TestSkippedAll ─────────────────────────────────────────────────────────
 
-void LoggerText::onMetricSkipped(const ResultEntry &e)
+void LoggerText::renderTestSkippedAll(const LogEvent &e)
 {
-    metricLines.push_back({MetricLine::Skipped, e.metric, 0.0f,
-                           e.status, e.reason, false});
-}
-
-// ── onTestSkippedAll ───────────────────────────────────────────────────────
-
-void LoggerText::onTestSkippedAll(ResultStatus status, const std::string &reason)
-{
-    std::string tag;
-    switch (status)
-    {
-    case ResultStatus::Unsupported: tag = "unsupported"; break;
-    case ResultStatus::Skipped:     tag = "skipped";     break;
-    case ResultStatus::Error:       tag = "error";       break;
-    default:                        tag = "unknown";     break;
-    }
-
-    writeLine(metricIndent, "[" + tag + "] " + reason);
+    writeLine(metricIndent, "[" + statusTag(e.status) + "] " + e.reason);
     out.flush();
 }
 
-// ── onTestEnd ──────────────────────────────────────────────────────────────
+// ── TestEnd ────────────────────────────────────────────────────────────────
 
-void LoggerText::onTestEnd()
+void LoggerText::renderTestEnd()
 {
     flushMetrics();
     indentLevel = propIndent;
 }
 
-// ── onDeviceEnd ────────────────────────────────────────────────────────────
+// ── DeviceEnd ──────────────────────────────────────────────────────────────
 
-void LoggerText::onDeviceEnd()
+void LoggerText::renderDeviceEnd()
 {
     // Ensure any remaining metrics are flushed (shouldn't happen if well-formed)
     if (!metricLines.empty())
@@ -156,9 +178,9 @@ void LoggerText::onDeviceEnd()
     out.flush();
 }
 
-// ── onBackendEnd ───────────────────────────────────────────────────────────
+// ── BackendEnd ─────────────────────────────────────────────────────────────
 
-void LoggerText::onBackendEnd()
+void LoggerText::renderBackendEnd()
 {
     indentLevel = 0;
     out.flush();
@@ -192,7 +214,7 @@ void LoggerText::flushMetrics()
         while (static_cast<int>(padded.size()) < padTarget)
             padded += ' ';
 
-        if (ml.kind == MetricLine::Ok)
+        if (ml.status == ResultStatus::Ok)
         {
             // Format value
             std::stringstream ss;
@@ -203,24 +225,21 @@ void LoggerText::flushMetrics()
 
             // Baseline delta on the same line (if enabled)
             if (compareEnabled)
-                printBaselineDelta(ml.metric, ml.value);
+                printBaselineDelta(ml.baselineKey, ml.value);
 
             out << "\n";
         }
         else
         {
-            std::string tag;
-            switch (ml.status)
-            {
-            case ResultStatus::Unsupported: tag = "unsupported"; break;
-            case ResultStatus::Skipped:     tag = "skipped";     break;
-            case ResultStatus::Error:       tag = "error";       break;
-            default:                        tag = "unknown";     break;
-            }
-
             out << indentStr(lineIndent) << padded << " : ["
-                << tag << "] " << ml.reason << "\n";
+                << statusTag(ml.status) << "] " << ml.reason << "\n";
         }
+
+        // The reading's own note on the line below it, left-aligned with the
+        // value column: one straight edge for every note in the test, and
+        // clearly subordinate to the row it belongs to.
+        if (describe && !ml.description.empty())
+            writeWrapped(lineIndent * 2 + padTarget + 3, ml.description);
     }
 
     metricLines.clear();
@@ -246,13 +265,39 @@ void LoggerText::writeLine(const std::string &text)
     writeLine(indentLevel, text);
 }
 
-void LoggerText::printBaselineDelta(const std::string &metric, float value)
+void LoggerText::writeWrapped(int column, const std::string &text)
 {
-    // Build key from current context
-    std::string key = curBackend + "/" + curPlatform + "/" +
-                      curDevice + "/" + categoryString(curCategory) +
-                      "/" + curTest + "/" + metric;
+    if (column < 0)
+        column = 0;
+    const std::string pad(static_cast<size_t>(column), ' ');
 
+    int width = DESCRIBE_WIDTH - column;
+    if (width < MIN_DESCRIBE_COLUMN)
+        width = MIN_DESCRIBE_COLUMN;
+
+    // Descriptions arrive whitespace-collapsed (logger.cpp), so splitting on
+    // single spaces is enough to recover the words.
+    std::string line;
+    std::istringstream words(text);
+    std::string word;
+    while (words >> word)
+    {
+        if (!line.empty() &&
+            static_cast<int>(line.size() + 1 + word.size()) > width)
+        {
+            out << pad << line << "\n";
+            line.clear();
+        }
+        if (!line.empty())
+            line += ' ';
+        line += word;           // a word longer than the column overruns it
+    }
+    if (!line.empty())
+        out << pad << line << "\n";
+}
+
+void LoggerText::printBaselineDelta(const std::string &key, float value)
+{
     auto it = baseline.find(key);
     if (it == baseline.end())
         return;

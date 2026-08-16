@@ -93,6 +93,20 @@ private:
   std::unordered_map<const void *, CUmodule> moduleCache;
 };
 
+// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
+// or WMMA rows: those are independent chains and distinct instructions,
+// documented where they are declared.
+static inline const char *cudaWidthNote(uint32_t width)
+{
+  switch (width)
+  {
+  case 1: return "One value per thread at a time -- the plain, unvectorised case.";
+  case 2: return "Two values per thread at a time, packed into one instruction.";
+  case 4: return "Four values per thread at a time, as one 4-wide vector.";
+  default: return "";
+  }
+}
+
 // Variant of a single compute-peak kernel.  All variants of one benchmark
 // share the same output buffer + dispatch geometry; only the kernel symbol
 // (and possibly source file) differs.
@@ -102,6 +116,7 @@ struct cuda_compute_variant_t
   const char *kernelName;        // CUDA kernel symbol (extern "C")
   const cuda_kernels::Blob *blob;// embedded fatbin (may be shared by sibling
                                  // variants emitting from one file)
+  const char *description;       // what this one reading means (nullptr = undocumented)
 };
 
 struct cuda_compute_desc_t
@@ -110,6 +125,10 @@ struct cuda_compute_desc_t
   const char *resultTag;            // persisted test name
   const char *unit;              // "gflops" / "gops" / "tflops" / "tops"
   double      unitDivider;       // 1e9 = G* (default when 0), 1e12 = T*
+
+  // One or two plain-language sentences on what the test measures; travels to
+  // logger::TestSpec::description (nullptr = undocumented).
+  const char *description;
 
   // Single-variant fallback (used when variants==nullptr).
   const char *metricLabel;

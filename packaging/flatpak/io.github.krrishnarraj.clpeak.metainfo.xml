@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<component type="console-application">
+<component type="desktop-application">
   <id>io.github.krrishnarraj.clpeak</id>
   <metadata_license>FSFAP</metadata_license>
   <project_license>Apache-2.0</project_license>
@@ -13,6 +13,11 @@
       vector / MAD / MMA loops and vendor-SDK GEMM libraries to expose what the
       hardware is actually capable of, from raw ALU peaks to near-vendor-advertised
       matrix throughput.
+    </p>
+    <p>
+      It ships two front-ends over the same benchmark engine: a desktop app for
+      picking devices and tests and watching results come in, and a command-line
+      tool for scripted runs and machine-readable output.
     </p>
     <p>This Flatpak enables the backends that work inside the sandbox:</p>
     <ul>
@@ -33,11 +38,29 @@
     </p>
   </description>
 
-  <launchable type="service">io.github.krrishnarraj.clpeak</launchable>
+  <launchable type="desktop-id">io.github.krrishnarraj.clpeak.desktop</launchable>
 
+  <!-- The desktop entry launches clpeak-gui; a plain `flatpak run` with no
+       command override still lands on the CLI, the manifest's default. -->
   <provides>
     <binary>clpeak</binary>
+    <binary>clpeak-gui</binary>
   </provides>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-dark.png</image>
+      <caption>GPU benchmark results grouped by category</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-cpu-dark.png</image>
+      <caption>Native CPU results — SIMD compute, cache bandwidth and memory latency</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/custom-run-dark.png</image>
+      <caption>Choosing devices and tests for a custom run</caption>
+    </screenshot>
+  </screenshots>
 
   <categories>
     <category>Utility</category>
@@ -64,6 +87,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="2.1.0" date="2026-08-16">
+      <description>
+        <p>Adds the clpeak desktop app alongside the command-line tool.</p>
+      </description>
+    </release>
+    <release version="2.0.19" date="2026-08-15" />
+    <release version="2.0.18" date="2026-07-11" />
+    <release version="2.0.17" date="2026-07-07" />
+    <release version="2.0.16" date="2026-06-26" />
+    <release version="2.0.15" date="2026-06-25" />
     <release version="2.0.14" date="2026-06-23" />
     <release version="2.0.13" date="2026-06-10" />
     <release version="2.0.12" date="2026-06-10" />

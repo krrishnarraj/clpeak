@@ -26,6 +26,7 @@ static const char *helpStr =
 #endif
     "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
     "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
+    "\n  --describe                  explain what each test and each reading measures"
     "\n  --list-devices              list available devices for every backend and exit"
     "\n  --xml-file file             save results to an XML file"
     "\n  --json-file file            save results to a JSON file"
@@ -146,6 +147,8 @@ static const char *helpStr =
 #ifdef ENABLE_METAL
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
+    "\n  --mps-attention                   | --no-mps-attention             [Metal: SDPA fp16]"
+    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear GTexels/s]"
 #endif
 #ifdef ENABLE_ONEAPI
     "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"
@@ -153,6 +156,7 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CPU
     "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM/SME]"
+    "\n  --accelerate                      | --no-accelerate                [CPU: Apple Accelerate/BNNS GEMM]"
     "\n  --aes                             | --no-aes                       [CPU: AES-NI/VAES/ARM AES]"
     "\n  --sha256                          | --no-sha256                    [CPU: SHA-NI/ARM SHA2]"
     "\n  --sha512                          | --no-sha512                    [CPU: ARM SHA512]"
@@ -169,6 +173,8 @@ static const char *helpStr =
     "\n  --memory-latency                  | --no-memory-latency            [CPU]"
     "\n  --atomics                         | --no-atomics                   [CPU]"
     "\n  --branch-penalty                  | --no-branch-penalty            [CPU]"
+    "\n  --store-forward                   | --no-store-forward             [CPU]"
+    "\n  --smt-scaling                     | --no-smt-scaling               [CPU: Linux/Windows SMT]"
 #endif
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
     "\n"
@@ -224,6 +230,8 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_METAL
   {"mps-gemm",                  Benchmark::MpsGemm},
+  {"mps-attention",             Benchmark::MpsAttention},
+  {"texture-sample",            Benchmark::TextureSample},
 #endif
 #ifdef ENABLE_ONEAPI
   {"joint-matrix",              Benchmark::JointMatrix},
@@ -231,6 +239,10 @@ static const TestFlag testFlags[] = {
 #endif
 #ifdef ENABLE_CPU
   {"amx",                       Benchmark::Amx},
+  // Apple-only test, but the flag parses everywhere under ENABLE_CPU (like
+  // every other arch-specific CPU flag) so a cross-platform script can pass
+  // --no-accelerate without tripping "unknown option" on Linux/Windows.
+  {"accelerate",                Benchmark::AppleBlas},
   {"aes",                       Benchmark::CryptoAes},
   {"sha256",                    Benchmark::CryptoSha256},
   {"sha512",                    Benchmark::CryptoSha512},
@@ -241,6 +253,8 @@ static const TestFlag testFlags[] = {
   {"memory-latency",            Benchmark::MemoryLatency},
   {"atomics",                   Benchmark::Atomics},
   {"branch-penalty",            Benchmark::BranchPenalty},
+  {"store-forward",             Benchmark::StoreForward},
+  {"smt-scaling",               Benchmark::SmtScaling},
 #endif
   {"global-memory-bandwidth",   Benchmark::GlobalBW},
   {"local-memory-bandwidth",    Benchmark::LocalBW},
@@ -341,14 +355,35 @@ static bool parseIndexList(const char *arg, std::vector<int> &out)
   return true;
 }
 
-static const char *requireArg(int argc, char **argv, int &i, const char *flag)
+// Parse outcome of the exit-free core.  parseCliOptions maps Help/Version/
+// Error onto the historical print-and-exit behavior; parseCliOptionsNoExit
+// surfaces them as a bool + message so embedders (clpeak_ffi) never die on
+// a bad argv.
+enum class ParseResult { Ok, Help, Version, Error };
+
+static const char *nextArg(int argc, char **argv, int &i)
 {
   if (i + 1 >= argc)
-  {
-    std::cerr << "clpeak: missing argument for " << flag << "\n";
-    printHelpAndExit(-1);
-  }
+    return nullptr;
   return argv[++i];
+}
+
+static ParseResult missingArg(std::string &err, const char *flag)
+{
+  err = std::string("clpeak: missing argument for ") + flag + "\n";
+  return ParseResult::Error;
+}
+
+static ParseResult invalidValue(std::string &err, const char *flag, const char *v)
+{
+  err = std::string("clpeak: invalid value for ") + flag + ": " + v + "\n";
+  return ParseResult::Error;
+}
+
+static ParseResult invalidList(std::string &err, const char *what, const char *v)
+{
+  err = std::string("clpeak: invalid ") + what + ": " + v + "\n";
+  return ParseResult::Error;
 }
 
 // Return true if `flag` matches "--<name>" or "--no-<name>".  In the latter
@@ -398,7 +433,8 @@ static void applyCategoryFlag(CliOptions &out, Category c, bool negated, bool &f
   out.enabledCategories.set(static_cast<size_t>(c));
 }
 
-int parseCliOptions(int argc, char **argv, CliOptions &out)
+static ParseResult parseCore(int argc, char **argv, CliOptions &out,
+                             std::string &err)
 {
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
@@ -415,16 +451,19 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     // ---- help / version ---------------------------------------------------
     if (!strcmp(a, "-h") || !strcmp(a, "--help"))
     {
-      printHelpAndExit(0);
+      return ParseResult::Help;
     }
     else if (!strcmp(a, "-v") || !strcmp(a, "--version"))
     {
-      std::cout << "clpeak version: " << CLPEAK_VERSION_STR << "\n";
-      std::exit(0);
+      return ParseResult::Version;
     }
     else if (!strcmp(a, "--verbose"))
     {
       out.verbose = true;
+    }
+    else if (!strcmp(a, "--describe"))
+    {
+      out.describe = true;
     }
     // ---- backend selection ----------------------------------------------
 #ifdef ENABLE_OPENCL
@@ -459,50 +498,46 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     // ---- iters / warmup -------------------------------------------------
     else if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       unsigned int parsed;
       if (!parseUIntArg(v, parsed, /*allowZero=*/false))
-      {
-        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidValue(err, a, v);
       out.forceIters = true;
       out.iters = parsed;
     }
     else if (!strcmp(a, "-w") || !strcmp(a, "--warmup"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       unsigned int parsed;
       if (!parseUIntArg(v, parsed))
-      {
-        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidValue(err, a, v);
       out.warmupCount = parsed;
     }
     else if (!strcmp(a, "--max-time"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       unsigned int parsed;
       if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
           parsed > std::numeric_limits<unsigned int>::max() / 1000u)
-      {
-        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidValue(err, a, v);
       out.targetTimeUs = parsed * 1000u; // ms -> us
     }
 #ifdef ENABLE_CPU
     else if (!strcmp(a, "--max-time-cpu"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       unsigned int parsed;
       if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
           parsed > std::numeric_limits<unsigned int>::max() / 1000u)
-      {
-        std::cerr << "clpeak: invalid value for " << a << ": " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidValue(err, a, v);
       out.targetTimeUsCpu = parsed * 1000u; // ms -> us
     }
 #endif
@@ -511,21 +546,19 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
 #ifdef ENABLE_OPENCL
     else if (!strcmp(a, "--cl-platform"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.platformIndices))
-      {
-        std::cerr << "clpeak: invalid platform index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "platform index list", v);
     }
     else if (!strcmp(a, "--cl-device"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.deviceIndices))
-      {
-        std::cerr << "clpeak: invalid device index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "device index list", v);
     }
 #endif
 
@@ -533,56 +566,51 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
 #ifdef ENABLE_VULKAN
     else if (!strcmp(a, "--vk-device"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.vkDeviceIndices))
-      {
-        std::cerr << "clpeak: invalid Vulkan device index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "Vulkan device index list", v);
     }
 #endif
 #ifdef ENABLE_CUDA
     else if (!strcmp(a, "--cuda-device"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.cudaDeviceIndices))
-      {
-        std::cerr << "clpeak: invalid CUDA device index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "CUDA device index list", v);
     }
 #endif
 #ifdef ENABLE_ROCM
     else if (!strcmp(a, "--rocm-device"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.rocmDeviceIndices))
-      {
-        std::cerr << "clpeak: invalid ROCm device index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "ROCm device index list", v);
     }
 #endif
 #ifdef ENABLE_METAL
     else if (!strcmp(a, "--mtl-device"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.mtlDeviceIndices))
-      {
-        std::cerr << "clpeak: invalid Metal device index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "Metal device index list", v);
     }
 #endif
 #ifdef ENABLE_ONEAPI
     else if (!strcmp(a, "--oneapi-device"))
     {
-      const char *v = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
       if (!parseIndexList(v, out.oneapiDeviceIndices))
-      {
-        std::cerr << "clpeak: invalid oneAPI device index list: " << v << "\n";
-        printHelpAndExit(-1);
-      }
+        return invalidList(err, "oneAPI device index list", v);
     }
 #endif
 
@@ -603,22 +631,34 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     // ---- Output ---------------------------------------------------------
     else if (!strcmp(a, "--xml-file"))
     {
-      out.xmlFile    = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.xmlFile    = v;
       out.enableXml  = true;
     }
     else if (!strcmp(a, "--json-file"))
     {
-      out.jsonFile   = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.jsonFile   = v;
       out.enableJson = true;
     }
     else if (!strcmp(a, "--csv-file"))
     {
-      out.csvFile    = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.csvFile    = v;
       out.enableCsv  = true;
     }
     else if (!strcmp(a, "--compare"))
     {
-      out.compareFile = requireArg(argc, argv, i, a);
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.compareFile = v;
     }
 
     // ---- Category / test selection --------------------------------------
@@ -646,8 +686,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
 
       if (matched) continue;
 
-      std::cerr << "clpeak: unknown option '" << a << "'\n";
-      printHelpAndExit(-1);
+      err = std::string("clpeak: unknown option '") + a + "'\n";
+      return ParseResult::Error;
     }
   }
 
@@ -664,5 +704,46 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     if (!incCpu)    out.skipCpu    = true;
   }
 
+  return ParseResult::Ok;
+}
+
+int parseCliOptions(int argc, char **argv, CliOptions &out)
+{
+  std::string err;
+  switch (parseCore(argc, argv, out, err))
+  {
+  case ParseResult::Ok:
+    break;
+  case ParseResult::Help:
+    printHelpAndExit(0);
+    break;
+  case ParseResult::Version:
+    std::cout << "clpeak version: " << CLPEAK_VERSION_STR << "\n";
+    std::exit(0);
+    break;
+  case ParseResult::Error:
+    std::cerr << err;
+    printHelpAndExit(-1);
+    break;
+  }
   return 0;
+}
+
+bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
+                           std::string &errorMsg)
+{
+  switch (parseCore(argc, argv, out, errorMsg))
+  {
+  case ParseResult::Ok:
+    return true;
+  case ParseResult::Help:
+    errorMsg = "clpeak: --help is not available in embedded mode\n";
+    return false;
+  case ParseResult::Version:
+    errorMsg = "clpeak: --version is not available in embedded mode\n";
+    return false;
+  case ParseResult::Error:
+  default:
+    return false;
+  }
 }

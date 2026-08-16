@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=clpeak
+GenericName=Compute Benchmark
+Comment=Measure peak compute, bandwidth and latency of GPU and CPU devices
+# snapd only rewrites an Exec line that names one of the snap's commands, so
+# this is the qualified <snap>.<app> form, not a bare clpeak-gui.  The snap's
+# default command stays the CLI.
+Exec=clpeak.clpeak-gui
+Icon=${SNAP}/meta/gui/clpeak-gui.png
+Terminal=false
+# GTK3 derives the Wayland app_id / X11 WM_CLASS from argv[0], not from the
+# runner's kr.clpeak application id.
+StartupWMClass=clpeak-gui
+StartupNotify=true
+Categories=System;Monitor;Utility;
+Keywords=benchmark;GPU;OpenCL;Vulkan;compute;bandwidth;latency;

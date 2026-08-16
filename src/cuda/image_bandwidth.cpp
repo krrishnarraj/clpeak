@@ -6,7 +6,17 @@
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "gbps"});
+    {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU reads through its texture units, "
+     "which take a different path to memory than plain buffer reads.  Each "
+     "pixel of the image is read exactly once, so caching cannot flatter the "
+     "number."});
+
+  // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
+  // hence the metric name.
+  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
+                          "colour values, 16 bytes.";
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
@@ -26,7 +36,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUarray arr;
   if (cuArrayCreate(&arr, &adesc) != CUDA_SUCCESS)
   {
-    test.skip("float4", ResultStatus::Error, "Image array create failed");
+    test.skip("float4", ResultStatus::Error, "Image array create failed", fetchNote);
     return -1;
   }
 
@@ -59,7 +69,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
   {
     cuArrayDestroy(arr);
-    test.skip("float4", ResultStatus::Error, "Texture object create failed");
+    test.skip("float4", ResultStatus::Error, "Texture object create failed", fetchNote);
     return -1;
   }
 
@@ -70,7 +80,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (!dev.getKernel(cuda_kernels::image_bandwidth,
                      "image_bandwidth", fn))
   {
-    test.skip("float4", ResultStatus::Error, "Kernel compile failed");
+    test.skip("float4", ResultStatus::Error, "Kernel compile failed", fetchNote);
     cuTexObjectDestroy(tex);
     cuArrayDestroy(arr);
     cuMemFree(outBuf);
@@ -83,7 +93,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
   float gbps = (float)bytes / us / 1e3f;
-  test.emit("float4", gbps);
+  test.emit("float4", gbps, fetchNote);
 
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);

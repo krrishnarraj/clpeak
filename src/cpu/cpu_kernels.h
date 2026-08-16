@@ -64,6 +64,11 @@ int               smeSVLBytes();    // active SME streaming vector length in byt
 using ChainFn = double (*)(uint64_t outer);
 // A streaming read returns a checksum sink over `iters` passes of `M` floats.
 using ReadFn = uint64_t (*)(const float *p, size_t M, uint64_t iters);
+// Streaming write (fill) / copy over `iters` passes of `M` floats -- cached
+// vector stores, NOT libc memset/memcpy (those go non-temporal at size and
+// bypass the cache under test).
+using WriteFn = void (*)(float *p, size_t M, uint64_t iters);
+using CopyFn  = void (*)(float *dst, const float *src, size_t M, uint64_t iters);
 
 struct ChainVariant {
   ChainFn fn = nullptr;
@@ -93,7 +98,9 @@ struct CpuKernelTable {
   // validation (PSHUFB / TBL).
   ChainVariant strscan, strscan_istri, utf8;
   ChainVariant div32, div64, sqrt32, sqrt64, intdiv;
-  ReadFn       readsum = nullptr;
+  ReadFn       readsum  = nullptr;
+  WriteFn      writefill = nullptr;
+  CopyFn       copybuf   = nullptr;
   const char  *isaName = "";
   // SVE vector length in bytes (svcntb()), set only by an SVE TU's table so the
   // dispatcher can report it in the device header.  0 on non-SVE tables.

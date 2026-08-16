@@ -1,0 +1,17 @@
+// Application-level settings for the Runner target.
+//
+// This may be replaced with something auto-generated from metadata (e.g., pubspec.yaml) in the
+// future. If not, the values below would default to using the project name when this becomes a
+// 'flutter create' template.
+
+// The application's name.  This drives the on-disk bundle name (clpeak-gui.app)
+// and is deliberately NOT "clpeak": release zips ship this bundle next to the
+// CLI binary of that name.  The user-visible name stays "clpeak" via the
+// CFBundleName / CFBundleDisplayName literals in Info.plist.
+PRODUCT_NAME = clpeak-gui
+
+// The application's bundle identifier
+PRODUCT_BUNDLE_IDENTIFIER = kr.clpeak
+
+// The copyright displayed in application information
+PRODUCT_COPYRIGHT = Copyright © 2026 kr. All rights reserved.

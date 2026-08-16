@@ -12,12 +12,12 @@
 int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size },
+    { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size, vkWidthNote(1) },
 #ifdef VK_HAS_COMPUTE_SP_V2
-    { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size },
+    { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size, vkWidthNote(2) },
 #endif
 #ifdef VK_HAS_COMPUTE_SP_V4
-    { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size },
+    { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size, vkWidthNote(4) },
 #endif
   };
   float A = 1.3f;
@@ -25,6 +25,9 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Single-precision compute";
   d.resultTag   = "single_precision_compute";
   d.unit        = "gflops";
+  d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
+                  "fractional numbers -- the ordinary float type.  Nothing touches "
+                  "memory, so only the arithmetic units limit the rate.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -38,12 +41,12 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size },
+    { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size, vkWidthNote(1) },
 #ifdef VK_HAS_COMPUTE_HP_V2
-    { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size },
+    { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size, vkWidthNote(2) },
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V4
-    { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size },
+    { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size, vkWidthNote(4) },
 #endif
   };
   float A = 1.3f;
@@ -51,6 +54,9 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Half-precision compute fp16xfp16+fp16";
   d.resultTag   = "half_precision_compute";
   d.unit        = "gflops";
+  d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
+                  "size of a normal float, and what graphics and on-device AI mostly "
+                  "run on.  Both the inputs and the running total stay 16-bit here.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -67,12 +73,12 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size },
+    { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size, vkWidthNote(1) },
 #ifdef VK_HAS_COMPUTE_DP_V2
-    { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size },
+    { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size, vkWidthNote(2) },
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V4
-    { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size },
+    { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size, vkWidthNote(4) },
 #endif
   };
   double A = 1.3;
@@ -80,6 +86,9 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Double-precision compute";
   d.resultTag   = "double_precision_compute";
   d.unit        = "gflops";
+  d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
+                  "high-accuracy type scientific computing relies on.  Consumer GPUs "
+                  "deliberately run these many times slower than 32-bit.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_DP_WORK_PER_WI;
@@ -100,12 +109,12 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   // v4 = f16vec4  (wider packing; informs AMD/Intel where issue rate
   //                exceeds two lanes per slot).
   static const vk_compute_variant_t variants[] = {
-    { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size },
+    { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size, vkWidthNote(1) },
 #ifdef VK_HAS_COMPUTE_MP_V2
-    { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size },
+    { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size, vkWidthNote(2) },
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V4
-    { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size },
+    { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size, vkWidthNote(4) },
 #endif
   };
   float A = 1.3f;
@@ -113,6 +122,9 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Mixed-precision compute fp16xfp16+fp32";
   d.resultTag   = "mixed_precision_compute";
   d.unit        = "gflops";
+  d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
+                  "running total in 32 bits -- the accuracy-preserving pattern AI "
+                  "code uses.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -131,12 +143,12 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   // v1 / v2 / v4: same packing story as MP.  NVIDIA shader-core BF16
   // peaks at bf16vec2 via BMMA2-style packed multiply.
   static const vk_compute_variant_t variants[] = {
-    { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size },
+    { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size, vkWidthNote(1) },
 #ifdef VK_HAS_COMPUTE_BF16_V2
-    { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size },
+    { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size, vkWidthNote(2) },
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V4
-    { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size },
+    { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size, vkWidthNote(4) },
 #endif
   };
   float A = 1.3f;
@@ -144,6 +156,9 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "BF16 compute bf16xbf16+fp32";
   d.resultTag   = "bfloat16_compute";
   d.unit        = "gflops";
+  d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
+                  "digits of accuracy for the same number range as a full float.  "
+                  "The running total is kept in 32 bits.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;

@@ -1,172 +1,186 @@
 <?xml version="1.0" encoding="utf-8"?>
-<clpeak format_version="2" clpeak_version="2.0.16-15-g630e912" os="Macintosh">
-  <run backend="Metal" platform="Metal" device="Apple M1 Pro" driver="macOS 26.5.2">
+<clpeak format_version="2" clpeak_version="2.0.18-76-gf761581" os="Macintosh">
+  <run backend="Metal" platform="Metal" device="Apple M1 Pro" driver="macOS 26.6.1">
+    <prop name="Apple family" value="Apple7"/>
+    <prop name="Working set" value="25559 MB"/>
+    <prop name="GPU cores" value="16"/>
     <category name="fp_compute">
-      <test name="single_precision_compute" unit="gflops">
-        <metric name="float">4487.2896</metric>
-        <metric name="float2">4786.0342</metric>
-        <metric name="float4">4742.9116</metric>
-        <metric name="float8">2403.2437</metric>
+      <test name="single_precision_compute" display="Single-precision compute" unit="gflops" description="Peak arithmetic speed of the GPU&apos;s shader cores on 32-bit fractional numbers -- the ordinary float type. Nothing touches memory, so only the arithmetic units limit the rate.">
+        <metric name="float" info="One value per thread at a time -- the plain, unvectorised case.">4476.4893</metric>
+        <metric name="float2" info="Two values per thread at a time, as one 2-wide vector.">4823.0264</metric>
+        <metric name="float4" info="Four values per thread at a time, as one 4-wide vector.">5007.4521</metric>
+        <metric name="float8" info="Eight values per thread at a time, as one 8-wide vector.">5123.2461</metric>
       </test>
-      <test name="half_precision_compute" unit="gflops">
-        <metric name="half">4475.2114</metric>
-        <metric name="half2">4846.5913</metric>
-        <metric name="half4">4989.6138</metric>
-        <metric name="half8">4770.9004</metric>
+      <test name="half_precision_compute" display="Half-precision compute" unit="gflops" description="Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and what graphics and on-device AI mostly run on.">
+        <metric name="half" info="One value per thread at a time -- the plain, unvectorised case.">4474.6851</metric>
+        <metric name="half2" info="Two values per thread at a time, as one 2-wide vector.">4859.0874</metric>
+        <metric name="half4" info="Four values per thread at a time, as one 4-wide vector.">5090.7012</metric>
+        <metric name="half8" info="Eight values per thread at a time, as one 8-wide vector.">5152.7061</metric>
       </test>
-      <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">4398.2671</metric>
-        <metric name="mp2">4675.3247</metric>
-        <metric name="mp4">4777.0244</metric>
+      <test name="mixed_precision_compute" display="Mixed-precision compute fp16xfp16+fp32" unit="gflops" description="Peak speed when the GPU multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses.">
+        <metric name="mp" info="One value per thread at a time -- the plain, unvectorised case.">4474.2554</metric>
+        <metric name="mp2" info="Two values per thread at a time, as one 2-wide vector.">4953.8853</metric>
+        <metric name="mp4" info="Four values per thread at a time, as one 4-wide vector.">4952.4468</metric>
       </test>
-      <test name="simdgroup_matrix_fp16" unit="tflops">
+      <test name="simdgroup_matrix_fp16" display="simdgroup_matrix fp16xfp16+fp32 8x8x8" unit="tflops" description="Peak speed of Apple&apos;s matrix instruction, which multiplies whole 8x8 blocks of 16-bit numbers in one step instead of one value at a time -- the GPU&apos;s answer to a tensor core.">
         <metric name="simdgroup_fp16">5.1362</metric>
       </test>
-      <test name="simdgroup_matrix_bf16" unit="tflops">
+      <test name="simdgroup_matrix_bf16" display="simdgroup_matrix bf16xbf16+fp32 8x8x8" unit="tflops" description="The same 8x8 block matrix instruction on bfloat16, the AI-oriented 16-bit format that trades digits of accuracy for a wider number range. Needs an M3 or newer GPU.">
         <metric name="simdgroup_bf16" status="unsupported" reason="bf16 simdgroup_matrix requires Apple9 (M3) or newer! Skipped"/>
       </test>
-      <test name="mps-gemm-fp" unit="tflops">
-        <metric name="fp32">4.1109</metric>
-        <metric name="fp16">3.9751</metric>
-        <metric name="bf16" status="unsupported" reason="bf16 requires Apple9 (M3) -- unsupported on this device"/>
+      <test name="mps-gemm-fp" display="MPS GEMM peak" unit="tflops" description="Matrix-multiply speed through Apple&apos;s own tuned GPU library, on a large square problem. Where the compute rows show what the hardware can do in principle, this shows what Apple&apos;s shipping code actually reaches on the operation most graphics and AI work is built from.">
+        <metric name="fp32" info="Full 32-bit precision, the accurate but slowest option.">4.1084</metric>
+        <metric name="fp16" info="16-bit inputs, which the GPU&apos;s matrix hardware runs at several times the 32-bit rate.">3.9742</metric>
+        <metric name="bf16" info="bfloat16 inputs -- 16 bits arranged for AI work, trading digits of accuracy for a wider number range. Needs an M3 or newer GPU." status="unsupported" reason="bf16 requires Apple9 (M3) -- unsupported on this device"/>
+      </test>
+      <test name="mps-attention" display="MPS attention SDPA (H16 S4096 D128)" unit="tflops" description="Speed of the attention step -- the operation a language model spends most of its time in, deciding which earlier words each word should look at. Apple&apos;s library runs it as one fused unit; the shape is fixed at a small-LLM size so the number compares across devices.">
+        <metric name="fp16">2.9249</metric>
       </test>
     </category>
     <category name="bandwidth">
-      <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">181.6882</metric>
-        <metric name="float2">184.2619</metric>
-        <metric name="float4">182.6710</metric>
-        <metric name="float8">183.4395</metric>
-        <metric name="float16">182.9985</metric>
+      <test name="global_memory_bandwidth" display="Global memory bandwidth" unit="gbps" description="How many bytes per second the GPU can stream out of main memory, reading a buffer far too large to cache. Each reading fetches a different number of values per instruction, since wider fetches usually pull more through before the memory system saturates.">
+        <metric name="float" info="One value per thread at a time -- the plain, unvectorised case.">179.3186</metric>
+        <metric name="float2" info="Two values per thread at a time, as one 2-wide vector.">184.0016</metric>
+        <metric name="float4" info="Four values per thread at a time, as one 4-wide vector.">182.4562</metric>
+        <metric name="float8" info="Eight values per thread at a time, as one 8-wide vector.">183.2056</metric>
+        <metric name="float16" info="Sixteen values per thread at a time, the widest vector Metal offers.">182.4616</metric>
       </test>
-      <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">2938.6396</metric>
-        <metric name="float2">2767.1113</metric>
-        <metric name="float4">2705.7183</metric>
-        <metric name="float8">2581.0823</metric>
+      <test name="local_memory_bandwidth" display="Local memory bandwidth" unit="gbps" description="How many bytes per second the GPU moves through threadgroup memory -- the small scratchpad a group of threads shares on-chip, which never goes out to main memory.">
+        <metric name="float" info="One value per thread at a time -- the plain, unvectorised case.">2938.1179</metric>
+        <metric name="float2" info="Two values per thread at a time, as one 2-wide vector.">2767.3760</metric>
+        <metric name="float4" info="Four values per thread at a time, as one 4-wide vector.">2705.6243</metric>
+        <metric name="float8" info="Eight values per thread at a time, as one 8-wide vector.">2583.0000</metric>
       </test>
-      <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="rgba32f">162.9772</metric>
-        <metric name="rgba16f">152.7135</metric>
-        <metric name="rgba8">96.8265</metric>
-        <metric name="r32f">97.7640</metric>
+      <test name="image_memory_bandwidth" display="Image memory bandwidth" unit="gbps" description="How many bytes per second the GPU reads through its texture units, which take a different path to memory than plain buffer reads. Each reading uses a different pixel format, so they differ in how many bytes one pixel costs.">
+        <metric name="rgba32f" info="Four colour channels at full 32-bit precision: 16 bytes a pixel, the heaviest format here.">163.1478</metric>
+        <metric name="rgba16f" info="Four channels at half precision: 8 bytes a pixel.">149.5581</metric>
+        <metric name="rgba8" info="Four 8-bit channels: 4 bytes a pixel, the format ordinary images use.">96.6259</metric>
+        <metric name="r32f" info="A single 32-bit channel: also 4 bytes a pixel, but one value instead of four.">97.6403</metric>
+      </test>
+      <test name="texture_sample_rate" display="Texture sample rate (bilinear)" unit="gtexels" description="How many filtered texture lookups per second the GPU&apos;s sampling hardware performs. Every lookup falls between pixels, so the hardware must blend four of them -- the basic operation of drawing any textured surface. The texture is small enough to stay cached, so this measures the sampling units rather than memory.">
+        <metric name="rgba8" info="Blending four 8-bit-per-channel pixels, the common case in games and UI.">114.8539</metric>
+        <metric name="rgba16f" info="Blending four half-precision pixels -- twice the data per lookup, so the rate typically drops.">91.8939</metric>
       </test>
     </category>
     <category name="latency">
-      <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">5.2083</metric>
-        <metric name="roundtrip">188.0165</metric>
+      <test name="kernel_launch_latency" display="Kernel launch latency" unit="us" description="The overhead of asking the GPU to do anything at all, measured with a kernel that does no work. It is what small, frequent GPU jobs pay before any of their own work begins.">
+        <metric name="dispatch" info="One way only: from the moment the CPU submits the work to the moment the GPU starts running it.">5.4111</metric>
+        <metric name="roundtrip" info="The full round trip -- submit, run, and hear back that it finished. This is what the CPU waits for if it has nothing else to get on with.">187.0343</metric>
       </test>
     </category>
   </run>
   <run backend="Vulkan" platform="Vulkan" device="Apple M1 Pro" driver="0.2.2209">
+    <prop name="API version" value="1.1.334"/>
+    <prop name="VRAM" value="32768 MB"/>
     <category name="fp_compute">
-      <test name="single_precision_compute" unit="gflops">
-        <metric name="float">4407.6152</metric>
-        <metric name="float2">4755.8311</metric>
-        <metric name="float4">4562.2017</metric>
+      <test name="single_precision_compute" display="Single-precision compute" unit="gflops" description="Peak arithmetic speed of the GPU&apos;s shader cores on 32-bit fractional numbers -- the ordinary float type. Nothing touches memory, so only the arithmetic units limit the rate.">
+        <metric name="float" info="One value per thread at a time -- the plain, unvectorised case.">4402.0376</metric>
+        <metric name="float2" info="Two values per thread at a time, as one 2-wide vector.">4790.1929</metric>
+        <metric name="float4" info="Four values per thread at a time, as one 4-wide vector.">4977.8101</metric>
       </test>
-      <test name="half_precision_compute" unit="gflops">
-        <metric name="half">4445.3760</metric>
-        <metric name="half2">4821.5166</metric>
-        <metric name="half4">4952.2666</metric>
+      <test name="half_precision_compute" display="Half-precision compute fp16xfp16+fp16" unit="gflops" description="Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and what graphics and on-device AI mostly run on. Both the inputs and the running total stay 16-bit here.">
+        <metric name="half" info="One value per thread at a time -- the plain, unvectorised case.">4446.7598</metric>
+        <metric name="half2" info="Two values per thread at a time, as one 2-wide vector.">4830.9102</metric>
+        <metric name="half4" info="Four values per thread at a time, as one 4-wide vector.">4994.7334</metric>
       </test>
-      <test name="double_precision_compute" unit="gflops">
-        <metric name="double" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
-        <metric name="double2" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
-        <metric name="double4" status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
+      <test name="double_precision_compute" display="Double-precision compute" unit="gflops" description="Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type scientific computing relies on. Consumer GPUs deliberately run these many times slower than 32-bit.">
+        <metric name="double" info="One value per thread at a time -- the plain, unvectorised case." status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
+        <metric name="double2" info="Two values per thread at a time, as one 2-wide vector." status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
+        <metric name="double4" info="Four values per thread at a time, as one 4-wide vector." status="unsupported" reason="shaderFloat64 not supported! Skipped"/>
       </test>
-      <test name="mixed_precision_compute" unit="gflops">
-        <metric name="mp">4370.9292</metric>
-        <metric name="mp2">4648.0630</metric>
-        <metric name="mp4">4710.2046</metric>
+      <test name="mixed_precision_compute" display="Mixed-precision compute fp16xfp16+fp32" unit="gflops" description="Peak speed when the GPU multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses.">
+        <metric name="mp" info="One value per thread at a time -- the plain, unvectorised case.">4444.3569</metric>
+        <metric name="mp2" info="Two values per thread at a time, as one 2-wide vector.">4927.8950</metric>
+        <metric name="mp4" info="Four values per thread at a time, as one 4-wide vector.">5064.1694</metric>
       </test>
-      <test name="bfloat16_compute" unit="gflops">
-        <metric name="bf16" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
-        <metric name="bf16_2" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
-        <metric name="bf16_4" status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
+      <test name="bfloat16_compute" display="BF16 compute bf16xbf16+fp32" unit="gflops" description="Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of accuracy for the same number range as a full float. The running total is kept in 32 bits.">
+        <metric name="bf16" info="One value per thread at a time -- the plain, unvectorised case." status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
+        <metric name="bf16_2" info="Two values per thread at a time, as one 2-wide vector." status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
+        <metric name="bf16_4" info="Four values per thread at a time, as one 4-wide vector." status="unsupported" reason="VK_KHR_shader_bfloat16 / shaderBFloat16Type not supported! Skipped"/>
       </test>
-      <test name="coopmat_fp32" unit="tflops">
+      <test name="coopmat_fp32" display="Cooperative-matrix fp32xfp32+fp32" unit="tflops" description="Peak speed of the GPU&apos;s matrix engine (its tensor cores) on full 32-bit numbers. These units multiply whole small blocks of numbers in one step instead of one value at a time.">
         <metric name="coopmat_fp32" status="unsupported" reason="No fp32xfp32+fp32 coopmat property! Skipped"/>
       </test>
-      <test name="coopmat_fp16" unit="tflops">
+      <test name="coopmat_fp16" display="Cooperative-matrix fp16xfp16+fp32" unit="tflops" description="The matrix engine on 16-bit inputs with a 32-bit running total -- the everyday precision of AI inference, and usually the fastest widely-supported row here.">
         <metric name="coopmat_fp16" status="unsupported" reason="No fp16xfp16+fp32 coopmat property! Skipped"/>
       </test>
-      <test name="coopmat_bf16" unit="tflops">
+      <test name="coopmat_bf16" display="Cooperative-matrix bf16xbf16+fp32" unit="tflops" description="The matrix engine on bfloat16 -- 16 bits arranged for AI work, trading digits of accuracy for the number range of a full float, which makes training far more forgiving.">
         <metric name="coopmat_bf16" status="unsupported" reason="No bf16xbf16+fp32 coopmat property! Skipped"/>
       </test>
-      <test name="coopmat_fp8_e4m3" unit="tflops">
+      <test name="coopmat_fp8_e4m3" display="Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32" unit="tflops" description="The matrix engine on 8-bit numbers, in the variant that spends its bits on accuracy rather than range. Half the data of fp16 per value, so the newest GPUs run it at roughly twice the rate.">
         <metric name="coopmat_fp8_e4m3" status="unsupported" reason="No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped"/>
       </test>
-      <test name="coopmat_fp8_e5m2" unit="tflops">
+      <test name="coopmat_fp8_e5m2" display="Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32" unit="tflops" description="The same 8-bit matrix path in the other variant, which spends its bits on range rather than accuracy -- the one that copes with very large and very small values.">
         <metric name="coopmat_fp8_e5m2" status="unsupported" reason="No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped"/>
       </test>
     </category>
     <category name="int_compute">
-      <test name="integer_compute" unit="gops">
-        <metric name="int">1321.8635</metric>
-        <metric name="int2">1321.1449</metric>
-        <metric name="int4">1320.1753</metric>
+      <test name="integer_compute" display="Integer compute int32" unit="gops" description="Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, addressing and bit manipulation, which shaders do alongside their fractional maths.">
+        <metric name="int" info="One value per thread at a time -- the plain, unvectorised case.">1321.2450</metric>
+        <metric name="int2" info="Two values per thread at a time, as one 2-wide vector.">1321.0275</metric>
+        <metric name="int4" info="Four values per thread at a time, as one 4-wide vector.">1321.7776</metric>
       </test>
-      <test name="integer_compute_int8_dp" unit="gops">
-        <metric name="int8_dp">378.3612</metric>
-        <metric name="int8_dp2">378.3662</metric>
-        <metric name="int8_dp4">377.8278</metric>
+      <test name="integer_compute_int8_dp" display="INT8 dot-product compute" unit="gops" description="Peak speed of the 8-bit dot-product instruction, which multiplies four pairs of small whole numbers and sums them in one step -- the workhorse of quantized (compressed) neural networks.">
+        <metric name="int8_dp" info="One chain of dot products, each waiting on the one before it.">378.3621</metric>
+        <metric name="int8_dp2" info="Two independent chains, so the GPU has a second dot product to get on with while the first is still finishing.">378.3154</metric>
+        <metric name="int8_dp4" info="Four independent chains -- usually enough to keep the dot-product hardware busy with no waiting at all.">377.4924</metric>
       </test>
-      <test name="coopmat_int8" unit="tops">
+      <test name="coopmat_int8" display="Cooperative-matrix int8xint8+int32" unit="tops" description="The matrix engine on 8-bit whole numbers with a 32-bit running total -- the format quantized neural networks use when they are squeezed down to run fast on cheaper hardware.">
         <metric name="coopmat_int8" status="unsupported" reason="No int8xint8+int32 coopmat property! Skipped"/>
       </test>
     </category>
     <category name="bandwidth">
-      <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">181.6798</metric>
-        <metric name="float2">179.6804</metric>
-        <metric name="float4">179.1588</metric>
+      <test name="global_memory_bandwidth" display="Global memory bandwidth" unit="gbps" description="How many bytes per second the GPU can stream out of its main memory, reading a buffer far too large to cache. Each reading fetches a different number of values per instruction, since wider fetches usually pull more through before the memory system saturates.">
+        <metric name="float" info="One value per thread at a time -- the plain, unvectorised case.">181.4095</metric>
+        <metric name="float2" info="Two values per thread at a time, as one 2-wide vector.">180.4533</metric>
+        <metric name="float4" info="Four values per thread at a time, as one 4-wide vector.">180.1156</metric>
       </test>
-      <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">2853.0776</metric>
-        <metric name="float2">2725.0740</metric>
-        <metric name="float4">2673.7195</metric>
+      <test name="local_memory_bandwidth" display="Local memory bandwidth" unit="gbps" description="How many bytes per second the GPU moves through shared local memory -- the small on-chip scratchpad a group of threads passes data through, which never goes out to main memory.">
+        <metric name="float" info="One value per thread at a time -- the plain, unvectorised case.">2853.0195</metric>
+        <metric name="float2" info="Two values per thread at a time, as one 2-wide vector.">2724.5327</metric>
+        <metric name="float4" info="Four values per thread at a time, as one 4-wide vector.">2673.3667</metric>
       </test>
-      <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">159.2306</metric>
+      <test name="image_memory_bandwidth" display="Image memory bandwidth" unit="gbps" description="How many bytes per second the GPU reads through its texture units, which take a different path to memory than plain buffer reads. Each pixel of the image is read exactly once, so caching cannot flatter the number.">
+        <metric name="float4" info="Each fetch returns one whole pixel -- four 32-bit colour values, 16 bytes.">154.7348</metric>
       </test>
-      <test name="transfer_bandwidth" unit="gbps">
-        <metric name="h2d">92.6662</metric>
-        <metric name="d2h">92.7297</metric>
+      <test name="transfer_bandwidth" display="Transfer bandwidth" unit="gbps" description="How fast data crosses between the computer&apos;s own memory and the GPU&apos;s. On a discrete card that means the PCIe link, which is usually far narrower than either side&apos;s own memory and is what makes moving data to the GPU worth avoiding.">
+        <metric name="h2d" info="Host to device: sending data up to the GPU.">92.6645</metric>
+        <metric name="d2h" info="Device to host: reading results back down. Often slower than the other direction.">92.6756</metric>
       </test>
     </category>
     <category name="latency">
-      <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">150.9182</metric>
-        <metric name="roundtrip">324.1237</metric>
+      <test name="kernel_launch_latency" display="Kernel launch latency" unit="us" description="The overhead of asking the GPU to do anything at all, measured with a shader that does no work. It is what small, frequent GPU jobs pay before any of their own work begins.">
+        <metric name="dispatch" info="One way only: from the moment the CPU submits the work to the moment the GPU starts running it.">150.4707</metric>
+        <metric name="roundtrip" info="The full round trip -- submit, run, and hear back that it finished. This is what the CPU waits for if it has nothing else to get on with.">323.7100</metric>
       </test>
     </category>
   </run>
   <run backend="OpenCL" platform="Apple" device="Apple M1 Pro" driver="1.2 1.0">
+    <prop name="Compute units" value="16"/>
+    <prop name="Clock frequency" value="1000 MHz"/>
     <category name="fp_compute">
-      <test name="single_precision_compute" unit="gflops">
-        <metric name="float">2409.3201</metric>
-        <metric name="float2">2454.8962</metric>
-        <metric name="float4">2467.5066</metric>
-        <metric name="float8">2057.3376</metric>
-        <metric name="float16">2586.3831</metric>
+      <test name="single_precision_compute" display="Single-precision compute" unit="gflops" description="Peak arithmetic speed of the GPU&apos;s shader cores on 32-bit fractional numbers -- the ordinary float type. Nothing touches memory, so only the arithmetic units limit the rate.">
+        <metric name="float" info="One value per work-item at a time -- the plain, unvectorised case.">4460.6621</metric>
+        <metric name="float2" info="Two values per work-item at a time, as one 2-wide vector.">4812.0264</metric>
+        <metric name="float4" info="Four values per work-item at a time, as one 4-wide vector.">4994.8423</metric>
+        <metric name="float8" info="Eight values per work-item at a time, as one 8-wide vector.">5107.8662</metric>
+        <metric name="float16" info="Sixteen values per work-item at a time, the widest vector OpenCL offers.">5220.9082</metric>
       </test>
-      <test name="half_precision_compute" unit="gflops">
+      <test name="half_precision_compute" display="Half-precision compute" unit="gflops" description="Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and what graphics and on-device AI mostly run on.">
         <metric name="half" status="unsupported" reason="No half precision support"/>
         <metric name="half2" status="unsupported" reason="No half precision support"/>
         <metric name="half4" status="unsupported" reason="No half precision support"/>
         <metric name="half8" status="unsupported" reason="No half precision support"/>
         <metric name="half16" status="unsupported" reason="No half precision support"/>
       </test>
-      <test name="double_precision_compute" unit="gflops">
+      <test name="double_precision_compute" display="Double-precision compute" unit="gflops" description="Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type scientific computing relies on. Consumer GPUs deliberately run these many times slower than 32-bit.">
         <metric name="double" status="unsupported" reason="No double precision support"/>
         <metric name="double2" status="unsupported" reason="No double precision support"/>
         <metric name="double4" status="unsupported" reason="No double precision support"/>
         <metric name="double8" status="unsupported" reason="No double precision support"/>
         <metric name="double16" status="unsupported" reason="No double precision support"/>
       </test>
-      <test name="mixed_precision_compute" unit="gflops">
+      <test name="mixed_precision_compute" display="Mixed-precision compute fp16xfp16+fp32" unit="gflops" description="Peak speed when the GPU multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses.">
         <metric name="mp" status="unsupported" reason="No half precision support"/>
         <metric name="mp2" status="unsupported" reason="No half precision support"/>
         <metric name="mp4" status="unsupported" reason="No half precision support"/>
@@ -175,35 +189,35 @@
       </test>
     </category>
     <category name="int_compute">
-      <test name="integer_compute" unit="gops">
-        <metric name="int">1324.5824</metric>
-        <metric name="int2">1323.7988</metric>
-        <metric name="int4">1323.3278</metric>
-        <metric name="int8">1317.3954</metric>
-        <metric name="int16">1324.3424</metric>
+      <test name="integer_compute" display="Integer compute" unit="gops" description="Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, addressing and bit manipulation, which shaders do alongside their fractional maths.">
+        <metric name="int" info="One value per work-item at a time -- the plain, unvectorised case.">1324.3424</metric>
+        <metric name="int2" info="Two values per work-item at a time, as one 2-wide vector.">1323.8651</metric>
+        <metric name="int4" info="Four values per work-item at a time, as one 4-wide vector.">1324.2153</metric>
+        <metric name="int8" info="Eight values per work-item at a time, as one 8-wide vector.">1324.0719</metric>
+        <metric name="int16" info="Sixteen values per work-item at a time, the widest vector OpenCL offers.">1345.7103</metric>
       </test>
-      <test name="integer_compute_fast" unit="gops">
-        <metric name="int">616.2999</metric>
-        <metric name="int2">640.1230</metric>
-        <metric name="int4">639.5154</metric>
-        <metric name="int8">638.9472</metric>
-        <metric name="int16">634.7125</metric>
+      <test name="integer_compute_fast" display="Integer compute Fast 24bit" unit="gops" description="The same integer maths restricted to 24-bit values, which some GPUs multiply on their faster floating-point hardware instead. Where this beats the plain integer row, the full 32-bit multiply is the slower path.">
+        <metric name="int" info="One value per work-item at a time -- the plain, unvectorised case.">1243.4353</metric>
+        <metric name="int2" info="Two values per work-item at a time, as one 2-wide vector.">1246.3838</metric>
+        <metric name="int4" info="Four values per work-item at a time, as one 4-wide vector.">1246.2623</metric>
+        <metric name="int8" info="Eight values per work-item at a time, as one 8-wide vector.">1246.6034</metric>
+        <metric name="int16" info="Sixteen values per work-item at a time, the widest vector OpenCL offers.">1245.8286</metric>
       </test>
-      <test name="integer_compute_char" unit="gops">
-        <metric name="char">1324.7314</metric>
-        <metric name="char2">1324.3257</metric>
-        <metric name="char4">1324.5326</metric>
-        <metric name="char8">1323.1982</metric>
-        <metric name="char16">1324.2457</metric>
+      <test name="integer_compute_char" display="Integer char (8bit) compute" unit="gops" description="Peak speed on 8-bit whole numbers, the smallest integer type -- worth knowing because image and quantized-AI work is full of them.">
+        <metric name="char" info="One value per work-item at a time -- the plain, unvectorised case.">1321.6852</metric>
+        <metric name="char2" info="Two values per work-item at a time, as one 2-wide vector.">1324.3699</metric>
+        <metric name="char4" info="Four values per work-item at a time, as one 4-wide vector.">1324.7039</metric>
+        <metric name="char8" info="Eight values per work-item at a time, as one 8-wide vector.">1324.4139</metric>
+        <metric name="char16" info="Sixteen values per work-item at a time, the widest vector OpenCL offers.">1345.8241</metric>
       </test>
-      <test name="integer_compute_short" unit="gops">
-        <metric name="short">1324.7535</metric>
-        <metric name="short2">1324.1932</metric>
-        <metric name="short4">1324.2733</metric>
-        <metric name="short8">1324.0222</metric>
-        <metric name="short16">1325.0074</metric>
+      <test name="integer_compute_short" display="Integer short (16bit) compute" unit="gops" description="Peak speed on 16-bit whole numbers -- the middle size, between the 8-bit and 32-bit rows.">
+        <metric name="short" info="One value per work-item at a time -- the plain, unvectorised case.">1324.6155</metric>
+        <metric name="short2" info="Two values per work-item at a time, as one 2-wide vector.">1324.4912</metric>
+        <metric name="short4" info="Four values per work-item at a time, as one 4-wide vector.">1324.3754</metric>
+        <metric name="short8" info="Eight values per work-item at a time, as one 8-wide vector.">1324.3947</metric>
+        <metric name="short16" info="Sixteen values per work-item at a time, the widest vector OpenCL offers.">1345.8435</metric>
       </test>
-      <test name="integer_compute_int8_dp" unit="gops">
+      <test name="integer_compute_int8_dp" display="INT8 dot-product compute" unit="gops" description="Peak speed of the 8-bit dot-product instruction, which multiplies four pairs of small whole numbers and sums them in one step -- the workhorse of quantized (compressed) neural networks.">
         <metric name="int8_dp" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
         <metric name="int8_dp2" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
         <metric name="int8_dp4" status="unsupported" reason="cl_khr_integer_dot_product not supported"/>
@@ -212,99 +226,201 @@
       </test>
     </category>
     <category name="bandwidth">
-      <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="float">180.7819</metric>
-        <metric name="float2">181.7870</metric>
-        <metric name="float4">180.4045</metric>
-        <metric name="float8">157.7619</metric>
-        <metric name="float16">95.6876</metric>
+      <test name="global_memory_bandwidth" display="Global memory bandwidth" unit="gbps" description="How many bytes per second the GPU can stream out of its main memory, reading a buffer far too large to cache. Each reading fetches a different number of values per instruction, since wider fetches usually pull more through before the memory system saturates.">
+        <metric name="float" info="One value per work-item at a time -- the plain, unvectorised case.">180.2645</metric>
+        <metric name="float2" info="Two values per work-item at a time, as one 2-wide vector.">180.4109</metric>
+        <metric name="float4" info="Four values per work-item at a time, as one 4-wide vector.">182.0045</metric>
+        <metric name="float8" info="Eight values per work-item at a time, as one 8-wide vector.">157.5266</metric>
+        <metric name="float16" info="Sixteen values per work-item at a time, the widest vector OpenCL offers.">95.6804</metric>
       </test>
-      <test name="local_memory_bandwidth" unit="gbps">
-        <metric name="float">1491.6096</metric>
-        <metric name="float2">2151.8379</metric>
-        <metric name="float4">2338.9883</metric>
-        <metric name="float8">1664.3794</metric>
+      <test name="local_memory_bandwidth" display="Local memory bandwidth" unit="gbps" description="How many bytes per second the GPU moves through local memory -- the small on-chip scratchpad a group of work-items passes data through, which never goes out to main memory.">
+        <metric name="float" info="One value per work-item at a time -- the plain, unvectorised case.">1491.6965</metric>
+        <metric name="float2" info="Two values per work-item at a time, as one 2-wide vector.">2151.6526</metric>
+        <metric name="float4" info="Four values per work-item at a time, as one 4-wide vector.">2338.0823</metric>
+        <metric name="float8" info="Eight values per work-item at a time, as one 8-wide vector.">1663.9590</metric>
       </test>
-      <test name="image_memory_bandwidth" unit="gbps">
-        <metric name="float4">165.4660</metric>
+      <test name="image_memory_bandwidth" display="Image memory bandwidth" unit="gbps" description="How many bytes per second the GPU reads through its texture units, which take a different path to memory than plain buffer reads. Each pixel of the image is read exactly once, so caching cannot flatter the number.">
+        <metric name="float4" info="Each fetch returns one whole pixel -- four 32-bit colour values, 16 bytes.">172.1705</metric>
       </test>
-      <test name="transfer_bandwidth" unit="gbps">
-        <metric name="enqueuewritebuffer">40.8204</metric>
-        <metric name="enqueuereadbuffer">40.8106</metric>
-        <metric name="enqueuewritebuffer_nonblocking">54.1577</metric>
-        <metric name="enqueuereadbuffer_nonblocking">54.1994</metric>
-        <metric name="enqueuemapbuffer">0.0000</metric>
-        <metric name="memcpy_from_mapped_ptr">44.4076</metric>
-        <metric name="enqueueunmap">0.0000</metric>
-        <metric name="memcpy_to_mapped_ptr">44.5983</metric>
+      <test name="transfer_bandwidth" display="Transfer bandwidth" unit="gbps" description="How fast data crosses between the host&apos;s memory and the device&apos;s, by each of the routes OpenCL offers. On a discrete card this is the PCIe link and is what makes moving data to the GPU worth avoiding; where the two share one pool of memory a route can move nothing at all, and those readings are reported as zero rather than as an impossible speed.">
+        <metric name="enqueuewritebuffer" info="Copying host memory into the device buffer, with the host waiting for it to finish.">43.8982</metric>
+        <metric name="enqueuereadbuffer" info="Copying the device buffer back into host memory, with the host waiting for it to finish.">43.1065</metric>
+        <metric name="enqueuewritebuffer_nonblocking" info="The same upload, issued without waiting, so the driver is free to overlap it with other work.">54.5027</metric>
+        <metric name="enqueuereadbuffer_nonblocking" info="The same download, issued without waiting.">54.7805</metric>
+        <metric name="enqueuemapbuffer" info="Handing the host direct access to the buffer instead of copying it. Zero here means the host and device share the memory, so nothing had to move.">0.0000</metric>
+        <metric name="memcpy_from_mapped_ptr" info="Once mapped, how fast the host reads that memory with an ordinary copy.">44.1359</metric>
+        <metric name="enqueueunmap" info="Handing the buffer back to the device after writing to it. Zero here again means nothing had to move.">0.0000</metric>
+        <metric name="memcpy_to_mapped_ptr" info="Once mapped, how fast the host writes into that memory with an ordinary copy.">44.3151</metric>
       </test>
     </category>
     <category name="latency">
-      <test name="kernel_launch_latency" unit="us">
-        <metric name="dispatch">2.2074</metric>
-        <metric name="roundtrip">197.0650</metric>
+      <test name="kernel_launch_latency" display="Kernel launch latency" unit="us" description="The overhead of asking the GPU to do anything at all. It is what small, frequent GPU jobs pay before any of their own work begins.">
+        <metric name="dispatch" info="One way only: from the moment the host queues the work to the moment the GPU starts running it.">2.3907</metric>
+        <metric name="roundtrip" info="The full round trip -- queue it, run it, and hear back that it finished. This is what the host waits for if it has nothing else to get on with.">225.6085</metric>
       </test>
     </category>
   </run>
   <run backend="CPU" platform="CPU" device="Apple M1 Pro" driver="">
+    <prop name="Vendor" value="Apple"/>
+    <prop name="ISA" value="NEON"/>
+    <prop name="Cores" value="10 threads / 10 cores (8P+2E)"/>
+    <prop name="L1d" value="1 MB (128 KB x 10)"/>
+    <prop name="L2" value="12 MB"/>
+    <prop name="L3" value="8 MB"/>
+    <prop name="RAM" value="32.0 GB"/>
     <category name="fp_compute">
-      <test name="single_precision_compute_neon" unit="gflops">
-        <metric name="float ST">85.7328</metric>
-        <metric name="float MT">669.9529</metric>
+      <test name="single_precision_compute_neon" display="Single-precision compute (NEON)" unit="gflops" description="Peak arithmetic speed on 32-bit fractional numbers -- the ordinary float type most programs use. The data stays in registers, so only the CPU&apos;s vector units limit the rate.">
+        <metric name="float ST" info="One thread, running on a single core.">100.6840</metric>
+        <metric name="float MT" info="Every hardware thread at once -- the whole chip.">828.0667</metric>
       </test>
-      <test name="half_precision_compute_neon_fp16" unit="gflops">
-        <metric name="half ST">198.8999</metric>
-        <metric name="half MT">1657.0118</metric>
+      <test name="half_precision_compute_neon_fp16" display="Half-precision compute (NEON FP16)" unit="gflops" description="Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and common in graphics and AI. Needs real 16-bit instructions, not conversion to 32-bit and back.">
+        <metric name="half ST" info="One thread, running on a single core.">201.7574</metric>
+        <metric name="half MT" info="Every hardware thread at once -- the whole chip.">1645.3452</metric>
       </test>
-      <test name="double_precision_compute_neon" unit="gflops">
-        <metric name="double ST">43.1550</metric>
-        <metric name="double MT">336.7155</metric>
+      <test name="double_precision_compute_neon" display="Double-precision compute (NEON)" unit="gflops" description="Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type scientific and engineering code relies on.">
+        <metric name="double ST" info="One thread, running on a single core.">50.1572</metric>
+        <metric name="double MT" info="Every hardware thread at once -- the whole chip.">391.8518</metric>
       </test>
-      <test name="mixed_precision_compute_neon_fp16fml" unit="gflops">
-        <metric name="mp ST">47.1500</metric>
-        <metric name="mp MT">381.7129</metric>
+      <test name="mixed_precision_compute_neon_fp16fml" display="Mixed-precision compute fp16xfp16+fp32 (NEON FP16FML)" unit="gflops" description="Peak speed when the CPU multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses, done in one instruction with no conversion step.">
+        <metric name="mp ST" info="One thread, running on a single core.">46.3107</metric>
+        <metric name="mp MT" info="Every hardware thread at once -- the whole chip.">387.7893</metric>
       </test>
-      <test name="bfloat16_compute" unit="gflops">
+      <test name="bfloat16_compute" display="BF16 compute bf16xbf16+fp32" unit="gflops" description="Peak speed of the bfloat16 dot-product instruction, which multiplies pairs of 16-bit AI-format numbers and adds the results into a 32-bit running total.">
         <metric name="bf16 ST" status="unsupported" reason="no bf16 dot instruction on this CPU"/>
       </test>
-      <test name="cpu_matrix_fp" unit="gflops">
-        <metric name="matrix_bf16 ST" status="unsupported" reason="no CPU bf16 matrix engine (AMX / BFMMLA) on this CPU"/>
+      <test name="fp8_dot_product_compute" display="FP8 dot-product compute fp8xfp8+fp32" unit="gflops" description="Peak speed of the 8-bit float dot product, the narrowest number format a CPU can multiply directly. Only the newest Arm cores have the instruction.">
+        <metric name="fp8_dp ST" status="unsupported" reason="no fp8 dot instruction (FEAT_FP8DOT4) on this CPU"/>
+      </test>
+      <test name="single_precision_divide_neon" display="Single-precision divide (NEON)" unit="gflops" description="How many divisions per second the CPU sustains. Division has its own narrow unit rather than the wide multiply-add pipeline, so it lands far below the compute rows and differs hugely between CPU generations.">
+        <metric name="fdiv ST" info="One thread, running on a single core.">9.2421</metric>
+        <metric name="fdiv MT" info="Every hardware thread at once -- the whole chip.">76.3194</metric>
+      </test>
+      <test name="double_precision_divide_neon" display="Double-precision divide (NEON)" unit="gflops" description="How many divisions per second the CPU sustains. Division has its own narrow unit rather than the wide multiply-add pipeline, so it lands far below the compute rows and differs hugely between CPU generations.">
+        <metric name="fdiv ST" info="One thread, running on a single core.">3.9300</metric>
+        <metric name="fdiv MT" info="Every hardware thread at once -- the whole chip.">33.1506</metric>
+      </test>
+      <test name="single_precision_sqrt_neon" display="Single-precision sqrt (NEON)" unit="gflops" description="How many square roots per second the CPU sustains. Like divide, this runs on a narrow dedicated unit instead of the main vector pipeline.">
+        <metric name="fsqrt ST" info="One thread, running on a single core.">6.3881</metric>
+        <metric name="fsqrt MT" info="Every hardware thread at once -- the whole chip.">51.6314</metric>
+      </test>
+      <test name="double_precision_sqrt_neon" display="Double-precision sqrt (NEON)" unit="gflops" description="How many square roots per second the CPU sustains. Like divide, this runs on a narrow dedicated unit instead of the main vector pipeline.">
+        <metric name="fsqrt ST" info="One thread, running on a single core.">3.1945</metric>
+        <metric name="fsqrt MT" info="Every hardware thread at once -- the whole chip.">25.4720</metric>
+      </test>
+      <test name="cpu_matrix_fp" display="CPU matrix engine (bf16)" unit="gflops" description="Peak speed of the CPU&apos;s built-in matrix engine -- Intel AMX tiles or Arm BFMMLA/SME, a small tensor unit beside the ordinary vector units -- on bfloat16 (AI-format) inputs.">
+        <metric name="matrix_bf16 ST" status="unsupported" reason="no CPU bf16 matrix engine (AMX / BFMMLA / SME) on this CPU"/>
+      </test>
+      <test name="cpu_matrix_fp16" display="CPU matrix engine (fp16)" unit="gflops" description="The same built-in matrix engine on 16-bit float inputs (Intel AMX-FP16 or Arm SME).">
+        <metric name="matrix_fp16 ST" status="unsupported" reason="no CPU fp16 matrix engine (AMX-FP16 / SME) on this CPU"/>
+      </test>
+      <test name="cpu_matrix_fp32" display="CPU matrix engine (fp32)" unit="gflops" description="The same built-in matrix engine on ordinary 32-bit floats -- full precision, which only Arm&apos;s SME engine offers.">
+        <metric name="matrix_fp32 ST" status="unsupported" reason="no CPU fp32 matrix engine (SME) on this CPU"/>
+      </test>
+      <test name="cpu_matrix_fp64" display="CPU matrix engine (fp64)" unit="gflops" description="The same built-in matrix engine on 64-bit floats, for scientific work (Arm SME with the F64F64 extension).">
+        <metric name="matrix_fp64 ST" status="unsupported" reason="no CPU fp64 matrix engine (SME F64F64) on this CPU"/>
+      </test>
+      <test name="accelerate_gemm" display="Accelerate GEMM (AMX/SME)" unit="gflops" description="Matrix-multiply speed through Apple&apos;s Accelerate library, the only way to reach the matrix coprocessor Apple ships but does not expose as instructions. The library uses every core itself, so there is no single-thread row.">
+        <metric name="sgemm" info="Best 32-bit result over a sweep of matrix sizes; the coprocessor is fastest at one particular size.">2184.7134</metric>
+        <metric name="sgemm 8k" info="The 32-bit rate on 8192x8192 matrices -- what large, realistic problems actually sustain.">1672.0194</metric>
+        <metric name="dgemm" info="Best 64-bit result over the same size sweep.">617.2704</metric>
+      </test>
+      <test name="bnns_matmul" display="BNNS matmul (AMX/SME)" unit="gflops" description="Matrix-multiply speed through Apple&apos;s BNNS library, the only public route to reduced-precision (16-bit) matrix maths on Apple Silicon.">
+        <metric name="fp16" info="16-bit float inputs.">2139.1277</metric>
+        <metric name="bf16" info="bfloat16 inputs, the AI-oriented 16-bit format. On chips with no bf16 hardware the library emulates it, and the rate falls accordingly.">687.9492</metric>
+        <metric name="int8" info="8-bit whole-number inputs." status="unsupported" reason="BNNS exposes no int8 GEMM (quantized inference layers only)"/>
+      </test>
+      <test name="smt_scaling" display="SMT scaling (fp32 FMA)" unit="gflops" description="Whether the CPU&apos;s extra hardware threads (SMT, or Intel&apos;s Hyper-Threading) actually add throughput: the same maths kernel run once with one thread per physical core, then again on every thread the chip offers.">
+        <metric name="1T/core" status="unsupported" reason="no SMT on this CPU"/>
       </test>
     </category>
     <category name="int_compute">
-      <test name="integer_compute_neon" unit="gops">
-        <metric name="int ST">57.1419</metric>
-        <metric name="int MT">472.7869</metric>
+      <test name="integer_compute_neon" display="Integer compute (NEON)" unit="gops" description="Peak speed on 32-bit whole numbers -- the arithmetic behind array indexing, hashing, compression and address math.">
+        <metric name="int ST" info="One thread, running on a single core.">57.2093</metric>
+        <metric name="int MT" info="Every hardware thread at once -- the whole chip.">477.4481</metric>
       </test>
-      <test name="int8_dot_product_compute_neon_dotprod" unit="gops">
-        <metric name="int8_dp ST">408.3621</metric>
-        <metric name="int8_dp MT">3217.1130</metric>
+      <test name="int8_dot_product_compute_neon_dotprod" display="INT8 dot-product compute (NEON DotProd)" unit="gops" description="Peak speed of the 8-bit whole-number dot product, the workhorse instruction of quantized (compressed) neural networks running on the CPU.">
+        <metric name="int8_dp ST" info="One thread, running on a single core.">405.7890</metric>
+        <metric name="int8_dp MT" info="Every hardware thread at once -- the whole chip.">3284.9597</metric>
       </test>
-      <test name="cpu_matrix_int" unit="gops">
-        <metric name="matrix_int8 ST" status="unsupported" reason="no CPU int8 matrix engine (AMX / I8MM) on this CPU"/>
+      <test name="integer_divide_compute" display="Integer divide compute u64" unit="gops" description="How many 64-bit whole-number divisions the CPU sustains per second. No CPU has a vector integer divide, so this is one narrow scalar unit and usually the slowest instruction on the chip.">
+        <metric name="u64 ST" info="One thread, running on a single core.">1.1502</metric>
+        <metric name="u64 MT" info="Every hardware thread at once -- the whole chip.">8.4892</metric>
+      </test>
+      <test name="cpu_matrix_int" display="CPU matrix engine (int8)" unit="gops" description="Peak speed of the CPU&apos;s built-in matrix engine -- Intel AMX tiles or Arm SMMLA/SME -- on 8-bit whole numbers, the format quantized neural networks use.">
+        <metric name="matrix_int8 ST" status="unsupported" reason="no CPU int8 matrix engine (AMX / I8MM / SME) on this CPU"/>
+      </test>
+    </category>
+    <category name="crypto">
+      <test name="aes_encrypt_neon_aes" display="AES-128 encrypt (NEON AES)" unit="gbps" description="How many bytes per second the CPU&apos;s dedicated AES instructions encrypt -- the ceiling for disk encryption and HTTPS traffic.">
+        <metric name="aes ST" info="One thread, running on a single core.">12.9588</metric>
+        <metric name="aes MT" info="Every hardware thread at once -- the whole chip.">104.7759</metric>
+      </test>
+      <test name="sha256_hash_neon_sha2" display="SHA-256 hash (NEON SHA2)" unit="gbps" description="How many bytes per second the CPU hashes with SHA-256, the fingerprint function behind signatures, integrity checks and git-style content addressing.">
+        <metric name="sha256 ST" info="One thread, running on a single core.">3.1650</metric>
+        <metric name="sha256 MT" info="Every hardware thread at once -- the whole chip.">26.7203</metric>
+      </test>
+      <test name="sha512_hash_neon_sha512" display="SHA-512 hash (NEON SHA512)" unit="gbps" description="How many bytes per second the CPU hashes with SHA-512, the wider member of the same family. Only Arm cores have an instruction for it today.">
+        <metric name="sha512 ST" info="One thread, running on a single core.">2.1024</metric>
+        <metric name="sha512 MT" info="Every hardware thread at once -- the whole chip.">17.2595</metric>
+      </test>
+      <test name="crc32c_armv8_crc32" display="CRC32-C checksum (ARMv8 CRC32)" unit="gbps" description="How many bytes per second the CPU checksums with CRC32-C, the corruption check storage and network stacks run over every block and packet.">
+        <metric name="crc32c ST" info="One thread, running on a single core.">25.5359</metric>
+        <metric name="crc32c MT" info="Every hardware thread at once -- the whole chip.">223.9756</metric>
+      </test>
+    </category>
+    <category name="string">
+      <test name="string_scan_neon" display="String scan (NEON)" unit="gbps" description="How fast the CPU hunts through memory for one particular byte -- what memchr, strlen and every text search do. The data fits in L1 cache, so this is the scanning machinery, not memory speed.">
+        <metric name="byte_scan ST" info="One thread, running on a single core.">86.9468</metric>
+        <metric name="byte_scan MT" info="Every hardware thread at once -- the whole chip.">693.9703</metric>
+      </test>
+      <test name="utf8_validate_neon" display="UTF-8 validate (NEON)" unit="gbps" description="How fast the CPU checks that text is well-formed UTF-8 -- the first thing every parser, browser and web server does to incoming text. Also run on L1-resident data.">
+        <metric name="utf8 ST" info="One thread, running on a single core.">11.7983</metric>
+        <metric name="utf8 MT" info="Every hardware thread at once -- the whole chip.">94.9970</metric>
       </test>
     </category>
     <category name="bandwidth">
-      <test name="global_memory_bandwidth" unit="gbps">
-        <metric name="read">125.5112</metric>
-        <metric name="copy">173.0649</metric>
-        <metric name="triad">139.1933</metric>
+      <test name="global_memory_bandwidth" display="DRAM bandwidth" unit="gbps" description="How many bytes per second all cores together can move to and from main memory. The arrays are far too big for any cache, so every access goes out to RAM.">
+        <metric name="read" info="Reading one large array straight through, start to end.">125.4359</metric>
+        <metric name="copy" info="Copying one large array into another -- a read and a write for every element.">174.6567</metric>
+        <metric name="triad" info="Scaling one array, adding a second and storing to a third: two reads and a write per element, the hardest of the three.">141.2800</metric>
       </test>
-      <test name="cache_bandwidth" unit="gbps">
-        <metric name="L1 ST">110.0942</metric>
-        <metric name="L1 MT">874.3682</metric>
-        <metric name="L2 ST">81.4712</metric>
-        <metric name="L2 MT">699.2899</metric>
-        <metric name="L3 ST">81.2359</metric>
-        <metric name="L3 MT">687.5227</metric>
+      <test name="cache_bandwidth" display="Cache bandwidth (read)" unit="gbps" description="How many bytes per second the CPU can read out of each cache, from the tiny fast one next to the core to the big slow one shared by all of them. Each reading uses a working set sized to stay inside the cache it names.">
+        <metric name="L1 ST" info="One thread reading from the small cache inside its own core.">150.7549</metric>
+        <metric name="L1 MT" info="Every core reading from its own L1 at the same time.">1214.9259</metric>
+        <metric name="L2 ST" info="One thread reading from the mid-level cache, the next step out.">84.5295</metric>
+        <metric name="L2 MT" info="Every core reading from L2 at once; where L2 is shared, the data is split between them so it still fits.">670.7156</metric>
+        <metric name="L3 ST" info="One thread reading from the large cache shared by all cores.">84.5608</metric>
+        <metric name="L3 MT" info="Every core reading from that shared cache at once, each taking a slice of it.">688.3328</metric>
+      </test>
+      <test name="l1_write_bandwidth" display="L1 bandwidth (write / copy)" unit="gbps" description="How many bytes per second a core can write into its nearest cache, and copy within it. Cores have fewer paths out to memory than in, so writing usually lands below the matching read row.">
+        <metric name="write ST" info="One thread storing new values into its own L1.">95.8763</metric>
+        <metric name="write MT" info="Every core storing into its own L1 at the same time.">268.2046</metric>
+        <metric name="copy ST" info="One thread copying inside L1 -- one read plus one write for every byte moved.">148.6220</metric>
+        <metric name="copy MT" info="Every core copying inside its own L1 at the same time.">621.1029</metric>
       </test>
     </category>
     <category name="latency">
-      <test name="memory_latency" unit="ns">
-        <metric name="L1">1.2524</metric>
-        <metric name="L2">6.8825</metric>
-        <metric name="L3">6.3012</metric>
-        <metric name="DRAM">118.9981</metric>
+      <test name="memory_latency" display="Memory latency (pointer-chase)" unit="ns" description="How long the core waits for one memory read when it has nothing else to do -- each read&apos;s address comes from the previous read, so the hardware cannot start the next one early.">
+        <metric name="L1" info="Reading from the small cache inside the core.">1.2745</metric>
+        <metric name="L2" info="Reading from the mid-level cache, after an L1 miss.">6.7566</metric>
+        <metric name="L3" info="Reading from the last-level cache shared between cores.">6.3986</metric>
+        <metric name="DRAM" info="Reading from main memory at random -- the worst case.">119.2595</metric>
+        <metric name="DRAM linear" info="Main memory again, but read in address order, so the hardware can fetch ahead -- the best case DRAM gets.">1.4982</metric>
+        <metric name="DRAM x8" info="Eight independent chases at once: the reads overlap instead of waiting in turn, so each costs less.">15.8989</metric>
+        <metric name="DRAM x32" info="Thirty-two chases at once -- deep enough that the core runs out of room for further overlap, so the cost per read stops falling.">4.5133</metric>
+        <metric name="TLB miss" info="The address-translation cost on its own: the data is cached, but every read lands on a different page.">16.0403</metric>
+      </test>
+      <test name="atomics" display="Atomic fetch-add latency" unit="ns" description="How long one all-or-nothing counter update takes. This is the operation behind locks, reference counts and every shared data structure, so it sets the cost of coordinating between threads.">
+        <metric name="uncontended ST" info="One thread updating a counter nobody else touches, so it stays in that core&apos;s own cache.">2.1220</metric>
+        <metric name="contended MT" info="Every core fighting over the same counter, which has to be handed from core to core -- the time between completed updates anywhere on the chip.">56.1484</metric>
+      </test>
+      <test name="branch_mispredict" display="Branch mispredict penalty" unit="ns" description="What it costs when the CPU guesses the wrong way at an if-statement. The same loop runs over sorted data (easy to guess) and shuffled data (a coin flip), and the difference is the price of a wrong guess.">
+        <metric name="predicted" info="Time per if-statement on sorted data, where the CPU guesses right every time.">0.4624</metric>
+        <metric name="random" info="Time per if-statement on shuffled data, where the CPU is wrong about half the time.">3.2419</metric>
+        <metric name="penalty" info="The extra time one wrong guess costs, worked out from the gap between the other two readings.">5.5590</metric>
+      </test>
+      <test name="store_forward" display="Store-to-load forwarding" unit="ns" description="How fast the core can read back a value it just wrote, without the write having reached the cache yet.">
+        <metric name="st-&gt;ld ST">0.3181</metric>
       </test>
     </category>
   </run>

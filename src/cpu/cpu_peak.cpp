@@ -4,6 +4,7 @@
 #include <common/common.h>
 #include <common/options.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <ostream>
@@ -48,6 +49,36 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
 
   for (unsigned int w = 0; w < warmupCount; w++)
     pool->run(nThreads, [&](int tid) { body(tid, 1); });
+
+  // Settle the package into the clock/power state that belongs to THIS thread
+  // count before timing.  On parts whose boost tracks core residency this is
+  // not optional: an MT measurement taken straight after the (2 s, full-boost)
+  // single-thread phase spends part of its window still limited by the
+  // single-core boost state.  Observed on a Threadripper PRO 3955WX, where the
+  // 32-thread fp32 row read 1874 GFLOPS while the *same kernel* at 32 threads
+  // measured 2089 in the SMT test -- which runs after an all-core phase -- and
+  // 16 threads alone measured 1967.  A 32-thread result below the 16-thread
+  // one cannot be caused by SMT, so the short-warmup row was the wrong number.
+  // The `body(tid,1)` warmup above is microseconds and cannot do this job.
+  // Single-thread runs need no settling (they are already the low-residency
+  // case), so this costs nothing on the ST rows.
+  if (nThreads > 1)
+  {
+    // Scale with the measurement budget: AMD's boost limits move on moving
+    // averages measured in hundreds of ms, so a fixed 100 ms was far too
+    // short (it recovered only ~1.4% of an 11% error on a 3955WX).  A quarter
+    // of the budget, capped at 500 ms, keeps the cost proportional (~10% of
+    // total run time) and scales down when the user lowers --max-time-cpu.
+    const double settleUs =
+        std::min(std::max((double)targetTimeUsLocal / 4.0, 100000.0), 500000.0);
+    auto w0 = clock::now();
+    uint64_t wIters = 1;
+    while (usSince(w0, clock::now()) < settleUs)
+    {
+      pool->run(nThreads, [&](int tid) { body(tid, wIters); });
+      if (wIters < (1ull << 32)) wIters *= 2;   // amortize dispatch overhead
+    }
+  }
 
   // Adaptive probe: a single outer iteration of a cheap kernel is dominated by
   // the fixed pool-dispatch overhead (~tens of µs), which would inflate the
@@ -154,6 +185,10 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
   if (isAllowedAs(Benchmark::Amx, Category::FpCompute))
     runCpuMatrix(cfg, Category::FpCompute);
+#ifdef __APPLE__
+  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
+#endif
+  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
 
   // ---- INT compute ----
   if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
@@ -183,6 +218,7 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
   if (isAllowed(Benchmark::Atomics))       runAtomics(cfg);
   if (isAllowed(Benchmark::BranchPenalty)) runBranchPenalty(cfg);
+  if (isAllowed(Benchmark::StoreForward))  runStoreForward(cfg);
 
   currentDeviceScope = nullptr;
   return 0;

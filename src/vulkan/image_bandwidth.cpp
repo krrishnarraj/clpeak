@@ -16,6 +16,11 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.tag = "image_memory_bandwidth";
   testSpec.display = "Image memory bandwidth";
   testSpec.unit = "gbps";
+  testSpec.description =
+      "How many bytes per second the GPU reads through its texture units, "
+      "which take a different path to memory than plain buffer reads.  Each "
+      "pixel of the image is read exactly once, so caching cannot flatter the "
+      "number.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t imgW = 4096, imgH = 4096;
@@ -227,12 +232,17 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   ws[1].pBufferInfo = &bi;
   vkUpdateDescriptorSets(dev.device, 2, ws, 0, nullptr);
 
+  // The image is RGBA32F, so one fetch returns a whole pixel: four 32-bit
+  // values, hence the metric name.
+  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
+                          "colour values, 16 bytes.";
+
   VkPipeline pipe;
   bool ok = dev.createComputePipeline(vk_shaders::image_bandwidth_v1,
       vk_shaders::image_bandwidth_v1_size, dsLayout, pipeLayout, pipe);
   if (!ok)
   {
-    test.skip("float4", ResultStatus::Error, "Pipeline creation failed");
+    test.skip("float4", ResultStatus::Error, "Pipeline creation failed", fetchNote);
   }
   else
   {
@@ -240,13 +250,14 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
-      test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+                fetchNote);
     }
     else
     {
       uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
       float gbps = (float)bytes / us / 1e3f;
-      test.emit("float4", gbps);
+      test.emit("float4", gbps, fetchNote);
     }
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }

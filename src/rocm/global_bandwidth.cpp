@@ -17,7 +17,12 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     numBlocks = 1;
 
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
+    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU can stream out of its own memory, "
+     "reading a buffer far too large to cache.  Each reading fetches a "
+     "different number of values per instruction, since wider fetches usually "
+     "pull more through before the memory system saturates."});
 
   void *inBuf = nullptr;
   void *outBuf = nullptr;
@@ -25,8 +30,10 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       hipMalloc(&outBuf, numItems * sizeof(float)) != hipSuccess)
   {
     const char *labels[] = {"float", "float2", "float4"};
+    const uint32_t widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
-      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
+      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers",
+                rocmWidthNote(widths[i]));
     if (inBuf)
       (void)hipFree(inBuf);
     if (outBuf)
@@ -42,8 +49,10 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   if (copyStatus != hipSuccess)
   {
     const char *labels[] = {"float", "float2", "float4"};
+    const uint32_t widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
-      test.skip(labels[i], ResultStatus::Error, "Failed to upload input buffer");
+      test.skip(labels[i], ResultStatus::Error, "Failed to upload input buffer",
+                rocmWidthNote(widths[i]));
     (void)hipFree(inBuf);
     (void)hipFree(outBuf);
     return -1;
@@ -71,7 +80,8 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     if (!dev.getKernel(rocm_kernels::global_bandwidth,
                        v.kernelName, fn))
     {
-      test.skip(key, ResultStatus::Error, "Kernel compile failed");
+      test.skip(key, ResultStatus::Error, "Kernel compile failed",
+                rocmWidthNote(v.width));
       continue;
     }
 
@@ -85,12 +95,13 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
-      test.skip(key, ResultStatus::Error, "kernel launch failed");
+      test.skip(key, ResultStatus::Error, "kernel launch failed",
+                rocmWidthNote(v.width));
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float gbps = (float)(bytes / us / 1e3);
-    test.emit(key, gbps);
+    test.emit(key, gbps, rocmWidthNote(v.width));
   }
 
   (void)hipFree(inBuf);

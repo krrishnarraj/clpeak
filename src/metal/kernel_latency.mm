@@ -10,7 +10,17 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     unsigned int iters = forceIters ? specifiedIters
                                     : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
-    auto test = currentDeviceScope->beginTest({"kernel_launch_latency", "Kernel launch latency", "us"});
+    auto test = currentDeviceScope->beginTest(
+        {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+         "The overhead of asking the GPU to do anything at all, measured with a "
+         "kernel that does no work.  It is what small, frequent GPU jobs pay "
+         "before any of their own work begins."});
+
+    const char *dispatchNote = "One way only: from the moment the CPU submits the "
+                               "work to the moment the GPU starts running it.";
+    const char *roundtripNote = "The full round trip -- submit, run, and hear back "
+                                "that it finished.  This is what the CPU waits for "
+                                "if it has nothing else to get on with.";
 
     id<MTLComputePipelineState> pso = mtlGetPipeline(dev,
         mtl_kernels::kernel_latency_src,
@@ -18,8 +28,8 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         "kernel_latency_noop");
     if (!pso)
     {
-        test.skip("dispatch", ResultStatus::Error, "Pipeline create failed");
-        test.skip("roundtrip", ResultStatus::Error, "Pipeline create failed");
+        test.skip("dispatch", ResultStatus::Error, "Pipeline create failed", dispatchNote);
+        test.skip("roundtrip", ResultStatus::Error, "Pipeline create failed", roundtripNote);
         return -1;
     }
 
@@ -73,15 +83,17 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     }
     if (submitFailed)
     {
-        test.skip("dispatch",  ResultStatus::Error, "MTLCommandBuffer execution failed");
-        test.skip("roundtrip", ResultStatus::Error, "MTLCommandBuffer execution failed");
+        test.skip("dispatch",  ResultStatus::Error, "MTLCommandBuffer execution failed",
+                  dispatchNote);
+        test.skip("roundtrip", ResultStatus::Error, "MTLCommandBuffer execution failed",
+                  roundtripNote);
     }
     else
     {
         float dispatchUs = (float)(totalDispatchSec * 1e6 / iters);
-        test.emit("dispatch", dispatchUs);
+        test.emit("dispatch", dispatchUs, dispatchNote);
         float roundtripUs = (float)(totalRoundtripSec * 1e6 / iters);
-        test.emit("roundtrip", roundtripUs);
+        test.emit("roundtrip", roundtripUs, roundtripNote);
     }
 
     return 0;

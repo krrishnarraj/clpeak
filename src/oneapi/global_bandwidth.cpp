@@ -61,15 +61,22 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     numBlocks = 1;
 
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps"});
+    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the device can stream out of its main memory, "
+     "reading a buffer far too large to cache.  Each reading fetches a "
+     "different number of values per instruction, since wider fetches usually "
+     "pull more through before the memory system saturates."});
 
   float *inBuf  = sycl::malloc_device<float>(numItems, dev.stream);
   float *outBuf = sycl::malloc_device<float>(numItems, dev.stream);
   if (!inBuf || !outBuf)
   {
     const char *labels[] = {"float", "float2", "float4"};
+    const int widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
-      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers");
+      test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers",
+                oneapiWidthNote(widths[i]));
     if (inBuf)  sycl::free(inBuf,  dev.stream);
     if (outBuf) sycl::free(outBuf, dev.stream);
     return -1;
@@ -112,11 +119,12 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 
     if (us <= 0.0f)
     {
-      test.skip(v.key, ResultStatus::Error, "kernel launch failed");
+      test.skip(v.key, ResultStatus::Error, "kernel launch failed",
+                oneapiWidthNote(v.W));
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.W * sizeof(float);
-    test.emit(v.key, (float)(bytes / us / 1e3));
+    test.emit(v.key, (float)(bytes / us / 1e3), oneapiWidthNote(v.W));
   }
 
   sycl::free(inBuf,  dev.stream);

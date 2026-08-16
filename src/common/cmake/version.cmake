@@ -1,41 +1,42 @@
 # cmake/version.cmake
-# Derives CLPEAK_VERSION_STR from git-describe at build time.
+# Derives CLPEAK_VERSION_STR from git-describe and generates version.h from it.
 # Falls back to a hardcoded version when building from a tarball (no .git).
 #
+# Derived once, at configure time, never during the build: the GUI build rewrites
+# tracked files (Flutter owns pubspec.lock, analysis_options.yaml and the
+# generated plugin registrants), which anything re-deriving later reads as
+# "-dirty".  Re-run `cmake -B build` after committing to refresh the string (the
+# configure summary prints it).
+#
 # Callers may set CLPEAK_GIT_ROOT before including this file to override the
-# git working directory (e.g., Android builds where CMAKE_SOURCE_DIR
-# points deep into the NDK project tree).  When not set, defaults to
-# CMAKE_SOURCE_DIR.
+# git working directory; it otherwise resolves to the repo root relative to
+# this file, which is correct for the mobile superprojects too (their
+# CMAKE_SOURCE_DIR points deep into the NDK/Xcode project tree).
 
 set(_CLPEAK_VERSION_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(CLPEAK_VERSION_FALLBACK "2.0.16")
 
-# Allow callers to override the git root.
 if(NOT DEFINED CLPEAK_GIT_ROOT)
-    set(CLPEAK_GIT_ROOT "${CMAKE_SOURCE_DIR}")
+    get_filename_component(CLPEAK_GIT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 endif()
 
 find_package(Git QUIET)
 
-# --- Configure-time: seed an initial version.h so the tree always has one ---
+set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_FALLBACK}")
 if(GIT_FOUND AND EXISTS "${CLPEAK_GIT_ROOT}/.git")
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-    WORKING_DIRECTORY ${CLPEAK_GIT_ROOT}
-    OUTPUT_VARIABLE _git_version
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-    RESULT_VARIABLE _git_result
-  )
-  if(_git_result EQUAL 0)
-    # Strip optional leading 'v' (tags mix v1.0 and 1.1.7)
-    string(REGEX REPLACE "^v" "" _git_version "${_git_version}")
-    set(CLPEAK_VERSION_STR "${_git_version}")
-  else()
-    set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_FALLBACK}")
-  endif()
-else()
-  set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_FALLBACK}")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+        WORKING_DIRECTORY ${CLPEAK_GIT_ROOT}
+        OUTPUT_VARIABLE _git_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _git_result
+    )
+    if(_git_result EQUAL 0)
+        # Strip optional leading 'v' (tags mix v1.0 and 1.1.7)
+        string(REGEX REPLACE "^v" "" _git_version "${_git_version}")
+        set(CLPEAK_VERSION_STR "${_git_version}")
+    endif()
 endif()
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
@@ -45,36 +46,7 @@ configure_file(
   @ONLY
 )
 
-# --- Build-time: regenerate version.h on every build (write-if-different) ---
-# The GenVersion.cmake script only overwrites the file when the string changes,
-# so only options.cpp recompiles when the version actually changes.
-#
-# GIT_ROOT keyword: optional override for the git root used at build time.
-# Defaults to CMAKE_SOURCE_DIR.  Android builds pass the real repo root.
+# Give <target> access to the generated version.h.
 function(clpeak_setup_version target)
-  set(_options "")
-  set(_oneValueArgs GIT_ROOT)
-  set(_multiValueArgs "")
-  cmake_parse_arguments(_ver "" "${_oneValueArgs}" "${_multiValueArgs}" ${ARGN})
-
-  if(NOT DEFINED _ver_GIT_ROOT)
-    set(_ver_GIT_ROOT "${CMAKE_SOURCE_DIR}")
-  endif()
-
-  if(NOT TARGET clpeak_version_gen)
-    add_custom_target(clpeak_version_gen ALL
-      COMMAND ${CMAKE_COMMAND}
-        -DSOURCE_DIR=${_ver_GIT_ROOT}
-        -DBINARY_DIR=${CMAKE_BINARY_DIR}
-        -DTEMPLATE_DIR=${_CLPEAK_VERSION_CMAKE_DIR}
-        -DFALLBACK=${CLPEAK_VERSION_FALLBACK}
-        -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
-        -P ${_CLPEAK_VERSION_CMAKE_DIR}/GenVersion.cmake
-      WORKING_DIRECTORY ${_ver_GIT_ROOT}
-      COMMENT "Checking clpeak version..."
-    )
-  endif()
-
-  add_dependencies(${target} clpeak_version_gen)
   target_include_directories(${target} PRIVATE "${CMAKE_BINARY_DIR}/generated")
 endfunction()

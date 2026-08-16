@@ -36,6 +36,7 @@ enum class Benchmark : unsigned int {
     Wmma,
     SimdgroupMatrix,
     MpsGemm,
+    MpsAttention,       // MPSGraph scaled-dot-product-attention peak (Metal)
     Cublas,
     Rocwmma,
     Mfma,
@@ -43,17 +44,21 @@ enum class Benchmark : unsigned int {
     JointMatrix,
     Onemkl,
     Amx,                // CPU matrix engine (Intel AMX / ARM I8MM)
+    AppleBlas,          // Apple Accelerate GEMM + BNNS matmul (AMX/SME via library)
     CryptoAes,          // AES-128 encrypt throughput (AES-NI / VAES-512 / ARM FEAT_AES)
     CryptoSha256,       // SHA-256 compression throughput (SHA-NI / ARM FEAT_SHA256)
     CryptoSha512,       // SHA-512 compression throughput (ARM FEAT_SHA512)
     CryptoCrc32c,       // CRC32-C throughput (SSE4.2 CRC32 / ARM FEAT_CRC32)
     StringScan,         // memchr-style SIMD byte scan, L1-resident (CPU; GB/s)
     Utf8Validate,       // UTF-8 validation via lookup-shuffle PSHUFB/TBL (CPU; GB/s)
+    TextureSample,      // bilinear texture sample rate (Metal; GTexels/s)
     TransferBW,
     CacheBandwidth,     // CPU per-level cache bandwidth (L1/L2/L3/DRAM)
     MemoryLatency,      // CPU pointer-chase latency (L1/L2/L3/DRAM + MLP + TLB)
     Atomics,            // CPU atomic fetch-add: uncontended / contended (ns)
     BranchPenalty,      // CPU branch mispredict penalty (ns)
+    StoreForward,       // CPU store-to-load forwarding roundtrip (ns)
+    SmtScaling,         // CPU fp32 FMA at 1 thread/core vs all SMT threads (GFLOPS)
     KernelLatency,
     COUNT
 };
@@ -81,6 +86,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ImageBW:
     case Benchmark::TransferBW:
     case Benchmark::CacheBandwidth:
+    case Benchmark::TextureSample:
         return Category::Bandwidth;
 
     case Benchmark::ComputeSP:
@@ -95,12 +101,15 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::SimdgroupMatrix:
     case Benchmark::Cublas:
     case Benchmark::MpsGemm:
+    case Benchmark::MpsAttention:
     case Benchmark::Rocwmma:
     case Benchmark::Mfma:
     case Benchmark::Rocblas:
     case Benchmark::JointMatrix:
     case Benchmark::Onemkl:
     case Benchmark::Amx:
+    case Benchmark::AppleBlas:
+    case Benchmark::SmtScaling:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:
@@ -126,6 +135,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::MemoryLatency:
     case Benchmark::Atomics:
     case Benchmark::BranchPenalty:
+    case Benchmark::StoreForward:
         return Category::Latency;
 
     case Benchmark::COUNT:

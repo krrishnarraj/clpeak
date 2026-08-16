@@ -1,0 +1,17 @@
+# GitHub Pages site for clpeak.  Served by GitHub's native Jekyll build from
+# the /docs folder on the default branch, so this stays inside the plugin
+# allowlist: no theme gem, no plugins, just a layout and a stylesheet.
+title: clpeak
+description: >-
+  A synthetic micro-benchmark for the peak achievable compute performance of
+  CPUs and GPUs — OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL and native
+  CPU, from one binary.
+url: https://krrishnarraj.github.io
+baseurl: /clpeak
+
+repo: krrishnarraj/clpeak
+
+# Nothing here needs Jekyll's blogging machinery.
+exclude:
+  - README.md
+plugins: []

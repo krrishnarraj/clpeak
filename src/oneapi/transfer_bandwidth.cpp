@@ -15,14 +15,22 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps"});
+    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+     "How fast data crosses between the host's memory and the device's.  On a "
+     "discrete card that means the PCIe link, which is far narrower than "
+     "either side's own memory; on integrated graphics the two share one pool "
+     "and the numbers are much higher."});
+
+  const char *h2dNote = "Host to device: sending data across to the device.";
+  const char *d2hNote = "Device to host: reading results back.  Often a little "
+                        "slower than the other direction.";
 
   void *dBuf    = sycl::malloc_device(bytes, dev.stream);
   void *hPinned = sycl::malloc_host(bytes, dev.stream);
   if (!dBuf || !hPinned)
   {
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate buffers");
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate buffers");
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate buffers", h2dNote);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate buffers", d2hNote);
     if (dBuf)    sycl::free(dBuf, dev.stream);
     if (hPinned) sycl::free(hPinned, dev.stream);
     return -1;
@@ -74,12 +82,12 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   };
 
   float usH2D = timeXfer(true);
-  if (usH2D > 0.0f) test.emit("h2d_pinned", (float)bytes / usH2D / 1e3f);
-  else              test.skip("h2d_pinned", ResultStatus::Error, "transfer failed");
+  if (usH2D > 0.0f) test.emit("h2d_pinned", (float)bytes / usH2D / 1e3f, h2dNote);
+  else              test.skip("h2d_pinned", ResultStatus::Error, "transfer failed", h2dNote);
 
   float usD2H = timeXfer(false);
-  if (usD2H > 0.0f) test.emit("d2h_pinned", (float)bytes / usD2H / 1e3f);
-  else              test.skip("d2h_pinned", ResultStatus::Error, "transfer failed");
+  if (usD2H > 0.0f) test.emit("d2h_pinned", (float)bytes / usD2H / 1e3f, d2hNote);
+  else              test.skip("d2h_pinned", ResultStatus::Error, "transfer failed", d2hNote);
 
   sycl::free(hPinned, dev.stream);
   sycl::free(dBuf,    dev.stream);

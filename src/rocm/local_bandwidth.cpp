@@ -6,7 +6,11 @@
 int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps"});
+    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU moves through shared local memory -- "
+     "the small on-chip scratchpad a block of threads passes data through, "
+     "which never goes out to the card's main memory."});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
@@ -15,9 +19,9 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   void *outBuf = nullptr;
   if (hipMalloc(&outBuf, globalThreads * sizeof(float)) != hipSuccess)
   {
-    test.skip("float", ResultStatus::Error, "Buffer alloc failed");
-    test.skip("float2", ResultStatus::Error, "Buffer alloc failed");
-    test.skip("float4", ResultStatus::Error, "Buffer alloc failed");
+    test.skip("float", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(1));
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(2));
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(4));
     return -1;
   }
 
@@ -41,7 +45,8 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     hipFunction_t fn;
     if (!dev.getKernel(rocm_kernels::local_bandwidth, v.kname, fn))
     {
-      test.skip(key, ResultStatus::Error, "Kernel compile failed");
+      test.skip(key, ResultStatus::Error, "Kernel compile failed",
+                rocmWidthNote(v.width));
       continue;
     }
     void *args[1] = {&outBuf};
@@ -49,12 +54,13 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
-      test.skip(key, ResultStatus::Error, "kernel launch failed");
+      test.skip(key, ResultStatus::Error, "kernel launch failed",
+                rocmWidthNote(v.width));
       continue;
     }
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
     float gbps = (float)bytes / us / 1e3f;
-    test.emit(key, gbps);
+    test.emit(key, gbps, rocmWidthNote(v.width));
   }
 
   (void)hipFree(outBuf);

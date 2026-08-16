@@ -38,12 +38,16 @@ public:
         return enabledCategories.test(static_cast<size_t>(c));
     }
 
+    // A requested cancellation (clpeak::requestCancel) gates every remaining
+    // test off, so runAll() unwinds quickly at the next test boundary.
     bool isAllowed(Benchmark b) const {
-        return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
+        return !clpeak::cancelRequested() &&
+               isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
     }
 
     bool isAllowedAs(Benchmark b, Category c) const {
-        return isCategoryEnabled(c) && isTestEnabled(b);
+        return !clpeak::cancelRequested() &&
+               isCategoryEnabled(c) && isTestEnabled(b);
     }
     // --------------------------------------------------------------------
 

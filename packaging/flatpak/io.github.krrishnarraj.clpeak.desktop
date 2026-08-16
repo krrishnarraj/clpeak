@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=clpeak
+GenericName=Compute Benchmark
+Comment=Measure peak compute, bandwidth and latency of GPU and CPU devices
+# Exported by flatpak as `flatpak run --command=clpeak-gui io.github.krrishnarraj.clpeak`,
+# so the launcher starts the Flutter app while the Flatpak's default `command`
+# stays the CLI.
+Exec=clpeak-gui
+Icon=io.github.krrishnarraj.clpeak
+Terminal=false
+# GTK3 derives the Wayland app_id / X11 WM_CLASS from argv[0], not from the
+# runner's kr.clpeak application id.
+StartupWMClass=clpeak-gui
+StartupNotify=true
+Categories=System;Monitor;Utility;
+Keywords=benchmark;GPU;OpenCL;Vulkan;compute;bandwidth;latency;

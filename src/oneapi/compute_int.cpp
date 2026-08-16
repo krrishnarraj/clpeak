@@ -15,11 +15,12 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
 
 // Integer MAD macros: shape mirrors compute_int32.hip exactly.  The alternating
 // read/write builds a dependency chain so the loop can't be hoisted.
+// Chain shape and why: see the MAD chain block in include/common/common.h.
 // One IMAD_16 = 16 mul-adds = 32 int ops per lane.  Width-invariant total:
 // width W runs baseIters/W iters * 32*W ops = baseIters*32 ops/WI.
 // baseIters=128 -> 4096 (COMPUTE_FP_WORK_PER_WI, matches ROCm int32).
-#define IMAD_4(x, y)  x = y * x + y; y = x * y + x; x = y * x + y; y = x * y + x;
-#define IMAD_16(x, y) IMAD_4(x, y) IMAD_4(x, y) IMAD_4(x, y) IMAD_4(x, y)
+#define IMAD_4(x, c)  x = x * x + c; x = x * x + c; x = x * x + c; x = x * x + c;
+#define IMAD_16(x, c) IMAD_4(x, c) IMAD_4(x, c) IMAD_4(x, c) IMAD_4(x, c)
 
 namespace { struct IntTag; }
 template <typename Tag, int W> class compute_int_vec_kernel;
@@ -41,26 +42,28 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
       h.parallel_for<compute_int_vec_kernel<Tag, W>>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
-          VecT x, y;
+          VecT x, c;
           #pragma unroll
           for (int k = 0; k < W; k++)
           {
             x[k] = A + k;
-            y[k] = (int)it.get_local_id(0) + k;
+            c[k] = (int)it.get_local_id(0) + k;
           }
           #pragma unroll 1
-          for (int i = 0; i < iters; i++) { IMAD_16(x, y) }
+          for (int i = 0; i < iters; i++) { IMAD_16(x, c) }
           int acc = 0;
           #pragma unroll
-          for (int k = 0; k < W; k++) acc += y[k];
+          for (int k = 0; k < W; k++) acc += x[k];
           out[it.get_global_id(0)] = acc;
         });
     });
   };
 
+  const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9));
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9),
+                            {false, note});
 }
 
 // --------------------------------------------------------------------------
@@ -69,7 +72,10 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"integer_compute", "Integer compute (32-bit IMAD)", "gops"});
+    {"integer_compute", "Integer compute (32-bit IMAD)", "gops", Category::Unknown,
+     "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, "
+     "addressing and bit manipulation, which kernels do alongside their "
+     "fractional maths."});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));
@@ -163,15 +169,21 @@ static void runInt8DpVariant(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  const char *note = oneapiChainNote(NCH);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed");
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT8_DP_WORK_PER_WI, us, 1e9));
+  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, COMPUTE_INT8_DP_WORK_PER_WI, us, 1e9),
+                            {false, note});
 }
 
 int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"integer_compute_int8_dp", "INT8 dot-product compute (DP4a)", "gops"});
+    {"integer_compute_int8_dp", "INT8 dot-product compute (DP4a)", "gops",
+     Category::Unknown,
+     "Peak speed of the 8-bit dot product, which multiplies four pairs of small "
+     "whole numbers and sums them in one step -- the general-compute path for "
+     "quantized (compressed) neural networks."});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));

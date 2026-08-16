@@ -21,6 +21,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `cl_kernels.cpp` | Kernel source strings (stringified .cl includes) + accessor functions |
 | `compute_test.cpp` | `runComputeTest()` — shared compute-peak driver for float/int/char/short/etc. |
 | `cl_common.cpp` | `device_info_t` struct, device capability queries |
+| `cl_utils.cpp` | OpenCL-only helpers (`roundToMultipleOf`, `trimString`) — `include/opencl/cl_utils.h` |
 | `global_bandwidth.cpp` | `runGlobalBandwidthTest()` — global memory bandwidth |
 | `local_bandwidth.cpp` | `runLocalBandwidthTest()` — local memory bandwidth |
 | `image_bandwidth.cpp` | `runImageBandwidthTest()` — image object bandwidth |
@@ -28,6 +29,20 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `kernel_latency.cpp` | `runKernelLatency()` — single-dispatch kernel latency |
 | `kernels/` | OpenCL C kernel sources (`.cl` files) |
 | `cmake/` | `BuildSdk.cmake` — SDK fallback finder |
+
+## Test documentation
+
+See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
+
+- `runComputeTest()` takes the test-level text as a `description` parameter
+  (after `unit`); the per-width readings are documented inside the helper.
+- `clWidthNote()` (`cl_peak.h`) is the shared wording for the
+  `float`/`float2`/…/`float16` readings, used by the compute helper and the
+  global/local bandwidth tests.
+- `transfer_bandwidth`'s test description and its `enqueuemapbuffer` /
+  `enqueueunmap` notes state the zero-copy convention (a route that moves
+  nothing reads as `0.00`).  Changing `ZERO_COPY_MULTIPLIER` or the reporting
+  rule means updating those strings.
 
 ## When You Change This Directory
 

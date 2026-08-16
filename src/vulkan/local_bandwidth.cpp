@@ -17,6 +17,10 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.tag = "local_memory_bandwidth";
   testSpec.display = "Local memory bandwidth";
   testSpec.unit = "gbps";
+  testSpec.description =
+      "How many bytes per second the GPU moves through shared local memory -- "
+      "the small on-chip scratchpad a group of threads passes data through, "
+      "which never goes out to main memory.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t wgSize = 256;
@@ -85,7 +89,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     {
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ') key.pop_back();
-      test.skip(key, ResultStatus::Error, "Pipeline creation failed");
+      test.skip(key, ResultStatus::Error, "Pipeline creation failed",
+                vkWidthNote(v.width));
       continue;
     }
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
@@ -95,14 +100,15 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ') key.pop_back();
     if (us <= 0.0f)
     {
-      test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed");
+      test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+                vkWidthNote(v.width));
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
     float gbps = (float)bytes / us / 1e3f;
-    test.emit(key, gbps);
+    test.emit(key, gbps, vkWidthNote(v.width));
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

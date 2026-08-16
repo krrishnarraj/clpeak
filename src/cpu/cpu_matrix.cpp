@@ -15,7 +15,11 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
 {
   if (category == Category::FpCompute)
   {
-    emitVariants(*this, {"cpu_matrix_fp", "CPU matrix engine (bf16)", "gflops"},
+    emitVariants(*this, {"cpu_matrix_fp", "CPU matrix engine (bf16)", "gflops",
+                         Category::Unknown,
+                         "Peak speed of the CPU's built-in matrix engine -- Intel AMX "
+                         "tiles or Arm BFMMLA/SME, a small tensor unit beside the "
+                         "ordinary vector units -- on bfloat16 (AI-format) inputs."},
                  "matrix_bf16", kernelMenu().mat_fp,
                  "no CPU bf16 matrix engine (AMX / BFMMLA / SME) on this CPU", cfg);
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86) || \
@@ -23,7 +27,10 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
     // fp16 matrix exists on both architectures: AMX-FP16 (Granite Rapids) and
     // SME widening FMOPA (Apple M4+, Oryon Gen 3).  Skip the row elsewhere
     // (armv7 / unknown arch), where no fp16 tile engine can exist.
-    emitVariants(*this, {"cpu_matrix_fp16", "CPU matrix engine (fp16)", "gflops"},
+    emitVariants(*this, {"cpu_matrix_fp16", "CPU matrix engine (fp16)", "gflops",
+                         Category::Unknown,
+                         "The same built-in matrix engine on 16-bit float inputs "
+                         "(Intel AMX-FP16 or Arm SME)."},
                  "matrix_fp16", kernelMenu().mat_fp16,
                  "no CPU fp16 matrix engine (AMX-FP16 / SME) on this CPU", cfg);
 #endif
@@ -31,27 +38,44 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
     // tf32/fp8 matrix are AMX-only (Diamond Rapids) -- x86 exclusive, so only
     // emit them (incl. the Unsupported row) on an x86 build.  On ARM there is
     // no tile instruction for these dtypes today, so the rows would be noise.
-    emitVariants(*this, {"cpu_matrix_tf32", "CPU matrix engine (tf32)", "gflops"},
+    emitVariants(*this, {"cpu_matrix_tf32", "CPU matrix engine (tf32)", "gflops",
+                         Category::Unknown,
+                         "The same built-in matrix engine on tf32, a trimmed-down "
+                         "stand-in for 32-bit float that trades accuracy for speed "
+                         "(Intel AMX-TF32)."},
                  "matrix_tf32", kernelMenu().mat_tf32,
                  "no CPU tf32 matrix engine (AMX-TF32) on this CPU", cfg);
-    emitVariants(*this, {"cpu_matrix_fp8", "CPU matrix engine (fp8)", "gflops"},
+    emitVariants(*this, {"cpu_matrix_fp8", "CPU matrix engine (fp8)", "gflops",
+                         Category::Unknown,
+                         "The same built-in matrix engine on 8-bit float inputs, the "
+                         "narrowest AI format (Intel AMX-FP8)."},
                  "matrix_fp8", kernelMenu().mat_fp8,
                  "no CPU fp8 matrix engine (AMX-FP8) on this CPU", cfg);
 #elif defined(__aarch64__) || defined(_M_ARM64)
     // fp32/fp64 matrix are SME-only (fp32 FMOPA is base SME; fp64 needs
     // FEAT_SME_F64F64, which Apple M4+ has) -- ARM exclusive: no x86 engine
     // does fp32/fp64 tiles, so only emit these rows on an arm64 build.
-    emitVariants(*this, {"cpu_matrix_fp32", "CPU matrix engine (fp32)", "gflops"},
+    emitVariants(*this, {"cpu_matrix_fp32", "CPU matrix engine (fp32)", "gflops",
+                         Category::Unknown,
+                         "The same built-in matrix engine on ordinary 32-bit floats "
+                         "-- full precision, which only Arm's SME engine offers."},
                  "matrix_fp32", kernelMenu().mat_fp32,
                  "no CPU fp32 matrix engine (SME) on this CPU", cfg);
-    emitVariants(*this, {"cpu_matrix_fp64", "CPU matrix engine (fp64)", "gflops"},
+    emitVariants(*this, {"cpu_matrix_fp64", "CPU matrix engine (fp64)", "gflops",
+                         Category::Unknown,
+                         "The same built-in matrix engine on 64-bit floats, for "
+                         "scientific work (Arm SME with the F64F64 extension)."},
                  "matrix_fp64", kernelMenu().mat_fp64,
                  "no CPU fp64 matrix engine (SME F64F64) on this CPU", cfg);
 #endif
     return 0;
   }
 
-  emitVariants(*this, {"cpu_matrix_int", "CPU matrix engine (int8)", "gops"},
+  emitVariants(*this, {"cpu_matrix_int", "CPU matrix engine (int8)", "gops",
+                       Category::Unknown,
+                       "Peak speed of the CPU's built-in matrix engine -- Intel AMX "
+                       "tiles or Arm SMMLA/SME -- on 8-bit whole numbers, the format "
+                       "quantized neural networks use."},
                "matrix_int8", kernelMenu().mat_int8,
                "no CPU int8 matrix engine (AMX / I8MM / SME) on this CPU", cfg);
   return 0;

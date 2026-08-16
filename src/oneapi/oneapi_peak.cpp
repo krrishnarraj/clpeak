@@ -143,6 +143,8 @@ int OneapiPeak::runAll()
 
   for (int idx = 0; idx < (int)devices.size(); idx++)
   {
+    if (clpeak::cancelRequested())
+      break;
     if (!deviceIndices.empty() &&
         std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
       continue;

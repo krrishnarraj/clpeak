@@ -71,6 +71,20 @@ float mtlRunDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
                        unsigned int warmup,
                        unsigned int targetTimeUs, unsigned int forcedIters);
 
+// Shared note for one reading of a vector-width sweep.
+static inline const char *mtlWidthNote(uint32_t width)
+{
+    switch (width)
+    {
+    case 1:  return "One value per thread at a time -- the plain, unvectorised case.";
+    case 2:  return "Two values per thread at a time, as one 2-wide vector.";
+    case 4:  return "Four values per thread at a time, as one 4-wide vector.";
+    case 8:  return "Eight values per thread at a time, as one 8-wide vector.";
+    case 16: return "Sixteen values per thread at a time, the widest vector Metal offers.";
+    default: return "";
+    }
+}
+
 static inline uint64_t mtlTargetGlobalThreads(const mtl_device_info_t &info)
 {
 #if TARGET_OS_IPHONE

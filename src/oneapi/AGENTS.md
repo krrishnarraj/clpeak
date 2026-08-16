@@ -21,7 +21,6 @@ build time and the SYCL runtime JITs it on first launch.
 - Looking for joint_matrix (XMX) benchmarks? → `joint_matrix.cpp`
 - Looking for oneMKL GEMM benchmark? → `onemkl.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-
 - Looking for kernel latency? → `kernel_latency.cpp`
 
 ## Key Files
@@ -33,23 +32,23 @@ build time and the SYCL runtime JITs it on first launch.
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeGflops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
 | `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`), `runComputeInt8DP` (DP4a-style `int8_dp/dp2/dp4/dp8` ILP-chain variants with accumulator feedback — see note) |
-| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). FP category emits `joint_matrix_bf16`/`_fp16` (8x16x16) + `_tf32` (8x16x8); int category emits `joint_matrix_int8` (8x16x32). B operand uses `layout::ext_intel_packed` (VNNI — row_major B is rejected at launch on Xe-HPG). Each variant is gated at runtime by `jmComboSupport()` which queries the device's `matrix_combinations` table, so unsupported shapes/types (e.g. tf32 on non-PVC) record a clean `Unsupported` row instead of a launch error. Work-group = one sub-group (`JM_SG`=16) so the ops accounting (one matrix chain per block) stays correct. |
-| `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 via `gemm_bias` (tops). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its own private `sycl::context`+queue+buffers via the `measure(label, dim, gemmFn)` helper (D = `pickOnemklGemmDim`, ~`2048+128*CUs`; warmup-probe + `pickIters` calibration), so a dtype that faults the driver (e.g. fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream` — each reports its own pass/fail. fp64 uses a reduced tile (`D/4`, floor 1024) because its low per-call throughput on most GPUs would otherwise run a single GEMM past the GPU watchdog; `pickIters` adds iterations to keep the timed budget |
+| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). FP category emits `joint_matrix_bf16`/`_fp16`/`_tf32`; int category emits `joint_matrix_int8`. Every variant is gated at runtime by `jmComboSupport()` against the device's `matrix_combinations` table, so an unsupported shape/type records a clean `Unsupported` row instead of a launch error |
+| `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 via `gemm_bias` (tops). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
 | `image_bandwidth.cpp` | `runImageBandwidth` (float4 via `sycl::image<2>`) |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` (H2D / D2H via `queue.memcpy` on USM-host pinned memory) |
-
 | `kernel_latency.cpp` | `runKernelLatency` (empty kernel submit + `queue.wait_and_throw()`) |
-
 
 ## Build
 
-- oneAPI requires the Intel oneAPI Base Toolkit (sources `setvars.sh` before invoking cmake).
-- oneAPI requires -DCMAKE_CXX_COMPILER=icpx to be set in cmake step
-- Cmake step: `cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx`
+Needs the Intel oneAPI Base Toolkit; source `setvars.sh` first, then:
 
-## Build Gates
+```console
+cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
+```
+
+Gates:
 
 - `CLPEAK_ENABLE_ONEAPI` — top-level CMake option (default ON). Backend silently no-ops if `IntelSYCL` package is not found.
 - `CLPEAK_ONEAPI_HAS_ONEMKL` — defined when `MKL::MKL_SYCL` target was found. `onemkl.cpp` records skip rows otherwise.
@@ -75,6 +74,21 @@ build time and the SYCL runtime JITs it on first launch.
 - **Intel XMX needs the `joint_matrix` B operand in `layout::ext_intel_packed`**
   (VNNI). A `row_major` B is rejected at launch on Xe-HPG (Arc/DG2) as an
   unsupported combination. Prefer probing `jmComboSupport()` before launching.
+
+## Test documentation
+
+See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
+
+- No descriptor struct: the description is the 5th field of the braced
+  `TestSpec` at each `beginTest()` call site.
+- The width and chain notes come off the **template parameter**, not a call
+  site: `runFpWidth<…,W>` / `runIntWidth<…,W>` call `oneapiWidthNote(W)` and
+  `runInt8DpVariant<NCH>` calls `oneapiChainNote(NCH)`, each once inside the
+  function.  Both helpers live in `oneapi_peak.h`.
+- **`int8_dp`/`dp2`/`dp4`/`dp8` are chains, not widths** — hence the separate
+  `oneapiChainNote()`.
+- `joint_matrix.cpp`: `emitJm()` takes the note next to the metric.
+- `onemkl.cpp` threads a `note` next to `label` through `measure()`.
 
 ## When You Change This Directory
 

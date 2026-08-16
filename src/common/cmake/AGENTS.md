@@ -4,7 +4,7 @@ Git-describe version derivation and the generated `version.h.in` template.
 
 ## Quick Lookups
 
-- Looking for version derivation? → `version.cmake` (configure-time) + `GenVersion.cmake` (build-time)
+- Looking for version derivation? → `version.cmake`, configure time **only**
 - Looking for the version header template? → `version.h.in`
 - Looking for how backends are enabled/disabled? → root `CMakeLists.txt` (`CLPEAK_ENABLE_*` options)
 
@@ -12,12 +12,22 @@ Git-describe version derivation and the generated `version.h.in` template.
 
 | File | Purpose |
 |------|---------|
-| `version.cmake` | `clpeak_setup_version()` — git-describe → `CLPEAK_VERSION_STR` |
-| `GenVersion.cmake` | Build-time version regeneration (write-if-different) |
+| `version.cmake` | git-describe → `CLPEAK_VERSION_STR` → `generated/version.h`; `clpeak_setup_version(<target>)` puts that header on the target's include path |
 | `version.h.in` | Template for `generated/version.h` |
+
+## Rules
+
+- **Derive the version once, at configure time — never during the build.** The
+  GUI build rewrites tracked files (the Flutter SDK owns `pubspec.lock`,
+  `analysis_options.yaml`, the generated plugin registrants), so anything
+  re-deriving mid-build stamps release binaries `-dirty` from a clean checkout.
+  Excluding those files is not a fix — the SDK decides that set, not us.
+- The trade-off is that the string is fixed until the next configure: after
+  committing, re-run `cmake -B build` to refresh it. The configure summary
+  prints the version so it is visible.
 
 ## When You Change This Directory
 
-- If you change the version scheme → update `version.cmake`, `GenVersion.cmake`, and `version.h.in`.
+- If you change the version scheme → update `version.cmake` and `version.h.in`.
 - If you bump the fallback version → update `CLPEAK_VERSION_FALLBACK` in `version.cmake`.
 - If you add a new cmake module → update this file's Key Files table.

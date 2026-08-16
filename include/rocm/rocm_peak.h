@@ -65,11 +65,25 @@ private:
   std::unordered_map<const void *, hipModule_t> moduleCache;
 };
 
+// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
+// rows: those are independent chains, documented where they are declared.
+static inline const char *rocmWidthNote(uint32_t width)
+{
+  switch (width)
+  {
+  case 1: return "One value per thread at a time -- the plain, unvectorised case.";
+  case 2: return "Two values per thread at a time, packed into one instruction.";
+  case 4: return "Four values per thread at a time, as one 4-wide vector.";
+  default: return "";
+  }
+}
+
 struct rocm_compute_variant_t
 {
   const char *label;
   const char *kernelName;
   const rocm_kernels::Blob *blob;
+  const char *description;   // what this one reading means (nullptr = undocumented)
 };
 
 struct rocm_compute_desc_t
@@ -78,6 +92,10 @@ struct rocm_compute_desc_t
   const char *resultTag;
   const char *unit;
   double      unitDivider;
+
+  // One or two plain-language sentences on what the test measures; travels to
+  // logger::TestSpec::description (nullptr = undocumented).
+  const char *description;
 
   const char *metricLabel;
   const char *kernelName;

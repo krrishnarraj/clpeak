@@ -18,7 +18,6 @@ Built as `peak_cuda` static library.
 - Looking for WMMA/MMA benchmarks? → `wmma.cpp`
 - Looking for cuBLAS benchmarks? → `cuda_blas.cpp`
 - Looking for bandwidth benchmarks? → `global_bandwidth.cpp`, `local_bandwidth.cpp`, `image_bandwidth.cpp`, `transfer_bandwidth.cpp`
-
 - Looking for kernel latency? → `kernel_latency.cpp`
 - Looking for .cu kernel sources? → `cuda_kernels/*.cu`
 - Looking for AOT compile + embedding logic? → `cmake/EmbedCudaKernels.cmake` (+ `cmake/EmbedBin.cmake`)
@@ -38,11 +37,26 @@ Built as `peak_cuda` static library.
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
-
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `cuda_kernels/` | CUDA kernel sources (`.cu`), AOT-compiled to fatbins and embedded as byte arrays |
 | `cmake/EmbedCudaKernels.cmake` | `embed_cuda_kernels()` — nvcc `-fatbin` per arch group + byte embed |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
+
+## Test documentation
+
+See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
+
+- `cuda_compute_desc_t::description` (test) and
+  `cuda_compute_variant_t::description` (one reading); `runComputeKernel()`
+  forwards both on every path, skips included.
+- `cudaWidthNote()` (`cuda_peak.h`) covers `half`/`half2` and the
+  `float`/`float2`/`float4` bandwidth sweeps.
+- **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
+  *independent chains* (see `compute_int8_dp.cu`).  They carry their own notes.
+- WMMA rows are one reading each, named after the test, so they document the
+  test only.
+- `cuda_blas.cpp` threads a `note` next to `label` through `runVariantAB` /
+  `runVariant` / `runVariantFp4`.
 
 ## When You Change This Directory
 

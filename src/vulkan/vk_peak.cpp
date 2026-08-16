@@ -213,6 +213,8 @@ int vkPeak::runAll()
 
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
+    if (clpeak::cancelRequested())
+      break;
     if (!deviceIndices.empty() &&
         std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
       continue;

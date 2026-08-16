@@ -121,18 +121,42 @@ static std::string fmtValue(float v)
 //   {"format_version":2,"clpeak_version":"...","os":"...","entries":[ … ]}
 // Each entry on its own line for easy line-by-line parsing.
 
-bool saveJson(const ResultStore &store, const std::string &filename)
+static void writeJson(const ResultStore &store, std::ostream &f,
+                      const DeviceInfoStore &devices)
 {
-    std::ofstream f(filename);
-    if (!f.is_open())
-    {
-        std::cerr << "clpeak: cannot open JSON output file: " << filename << "\n";
-        return false;
-    }
     f << "{\"format_version\":" << RESULT_FORMAT_VERSION
       << ",\"clpeak_version\":\"" << jsonEscape(CLPEAK_VERSION_STR) << "\""
-      << ",\"os\":\"" << jsonEscape(OS_NAME) << "\""
-      << ",\"entries\":[\n";
+      << ",\"os\":\"" << jsonEscape(OS_NAME) << "\"";
+
+    // Device metadata, one object per line.  The line-oriented loader below
+    // skips these because they carry no "test"/"metric" keys.
+    if (!devices.empty())
+    {
+        f << ",\"devices\":[\n";
+        for (size_t i = 0; i < devices.size(); i++)
+        {
+            const DeviceInfo &d = devices[i];
+            f << "{"
+              << "\"backend\":\""  << jsonEscape(d.backend)  << "\","
+              << "\"platform\":\"" << jsonEscape(d.platform) << "\","
+              << "\"device\":\""   << jsonEscape(d.device)   << "\","
+              << "\"driver\":\""   << jsonEscape(d.driver)   << "\","
+              << "\"props\":[";
+            for (size_t j = 0; j < d.props.size(); j++)
+            {
+                if (j) f << ",";
+                f << "{\"k\":\"" << jsonEscape(d.props[j].key)
+                  << "\",\"v\":\"" << jsonEscape(d.props[j].value) << "\"}";
+            }
+            f << "]}";
+            if (i + 1 < devices.size())
+                f << ",";
+            f << "\n";
+        }
+        f << "]";
+    }
+
+    f << ",\"entries\":[\n";
     for (size_t i = 0; i < store.size(); i++)
     {
         const ResultEntry &e = store[i];
@@ -145,6 +169,14 @@ bool saveJson(const ResultStore &store, const std::string &filename)
           << "\"test\":\""     << jsonEscape(e.test)     << "\","
           << "\"metric\":\""   << jsonEscape(e.metric)   << "\","
           << "\"unit\":\""     << jsonEscape(e.unit)     << "\"";
+
+        if (!e.display.empty())
+            f << ",\"display\":\"" << jsonEscape(e.display) << "\"";
+        if (!e.description.empty())
+            f << ",\"description\":\"" << jsonEscape(e.description) << "\"";
+        if (!e.metricDescription.empty())
+            f << ",\"metric_description\":\""
+              << jsonEscape(e.metricDescription) << "\"";
 
         if (e.status == ResultStatus::Ok)
         {
@@ -161,16 +193,38 @@ bool saveJson(const ResultStore &store, const std::string &filename)
         f << "\n";
     }
     f << "]}\n";
+}
+
+bool saveJson(const ResultStore &store, const std::string &filename,
+              const DeviceInfoStore &devices)
+{
+    std::ofstream f(filename);
+    if (!f.is_open())
+    {
+        std::cerr << "clpeak: cannot open JSON output file: " << filename << "\n";
+        return false;
+    }
+    writeJson(store, f, devices);
     return f.good();
+}
+
+std::string resultsToJson(const ResultStore &store,
+                          const DeviceInfoStore &devices)
+{
+    std::ostringstream ss;
+    writeJson(store, ss, devices);
+    return ss.str();
 }
 
 // ---- CSV save -------------------------------------------------------------
 // Header:
-//   format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason
+//   format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display,description,metric_description
 // `format_version` repeats per row to keep CSV self-describing without a
 // preamble (some tools strip the first row).  Ok rows leave `reason` empty
 // and populate `value`; non-Ok rows leave `value` empty and populate
-// `reason`.
+// `reason`.  The documentation columns are appended after `display`, which
+// was itself appended after the original 12, so every older file still parses
+// on the column count it was written with.
 
 bool saveCsv(const ResultStore &store, const std::string &filename)
 {
@@ -180,7 +234,7 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
         std::cerr << "clpeak: cannot open CSV output file: " << filename << "\n";
         return false;
     }
-    f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason\n";
+    f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display,description,metric_description\n";
     for (const ResultEntry &e : store)
     {
         f << RESULT_FORMAT_VERSION   << ","
@@ -195,7 +249,10 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
           << csvField(statusString(e.status)) << ",";
         if (e.status == ResultStatus::Ok)
             f << fmtValue(e.value);
-        f << "," << csvField(e.reason) << "\n";
+        f << "," << csvField(e.reason)
+          << "," << csvField(e.display)
+          << "," << csvField(e.description)
+          << "," << csvField(e.metricDescription) << "\n";
     }
     return f.good();
 }
@@ -204,14 +261,21 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
 // Tree:
 //   <clpeak format_version="2" clpeak_version="..." os="...">
 //     <run backend="..." platform="..." device="..." driver="...">
+//       <prop name="Compute units" value="16"/>
 //       <category name="fp_compute">
-//         <test name="single_precision_compute" unit="gflops">
-//           <metric name="float">12500.5</metric>
+//         <test name="single_precision_compute"
+//               display="Single-precision compute" unit="gflops"
+//               description="What this test measures, in plain language.">
+//           <metric name="float" info="Note about this variant">12500.5</metric>
 //           <metric name="double" status="unsupported" reason="..."/>
 //         </test>
 //       </category>
 //     </run>
 //   </clpeak>
+//
+// <prop> elements carry the device metadata for the enclosing <run>.  They
+// are emitted only for devices that produced at least one row, since a run
+// with no rows has no <run> element to hang them off.
 //
 // Streamed in a single linear pass; relies on entries already being grouped
 // by (backend, platform, device, driver) -> category -> test order, which
@@ -263,7 +327,8 @@ void closeRun(std::ofstream &f, XmlPos &p)
 }
 } // namespace
 
-bool saveXml(const ResultStore &store, const std::string &filename)
+bool saveXml(const ResultStore &store, const std::string &filename,
+             const DeviceInfoStore &devices)
 {
     std::ofstream f(filename);
     if (!f.is_open())
@@ -271,6 +336,11 @@ bool saveXml(const ResultStore &store, const std::string &filename)
         std::cerr << "clpeak: cannot open XML output file: " << filename << "\n";
         return false;
     }
+
+    // Rows are streamed in run order; props are looked up per run.
+    std::map<std::string, const DeviceInfo *> deviceByKey;
+    for (const DeviceInfo &d : devices)
+        deviceByKey[d.key()] = &d;
 
     f << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
       << "<clpeak format_version=\"" << RESULT_FORMAT_VERSION << "\""
@@ -295,6 +365,13 @@ bool saveXml(const ResultStore &store, const std::string &filename)
             p.platform = e.platform;
             p.device   = e.device;
             p.driver   = e.driver;
+
+            auto it = deviceByKey.find(
+                e.backend + "/" + e.platform + "/" + e.device + "/" + e.driver);
+            if (it != deviceByKey.end())
+                for (const DeviceProp &prop : it->second->props)
+                    f << "    <prop name=\"" << xmlEscape(prop.key) << "\""
+                      << " value=\"" << xmlEscape(prop.value) << "\"/>\n";
         }
 
         if (!p.inCat || p.category != e.category)
@@ -308,14 +385,23 @@ bool saveXml(const ResultStore &store, const std::string &filename)
         if (!p.inTest || p.test != e.test || p.unit != e.unit)
         {
             closeTest(f, p);
-            f << "      <test name=\"" << xmlEscape(e.test) << "\""
-              << " unit=\"" << xmlEscape(e.unit) << "\">\n";
+            // display and description live on <test>, so they are stored once
+            // per test rather than repeated on every <metric> under it.
+            f << "      <test name=\"" << xmlEscape(e.test) << "\"";
+            if (!e.display.empty())
+                f << " display=\"" << xmlEscape(e.display) << "\"";
+            f << " unit=\"" << xmlEscape(e.unit) << "\"";
+            if (!e.description.empty())
+                f << " description=\"" << xmlEscape(e.description) << "\"";
+            f << ">\n";
             p.inTest = true;
             p.test   = e.test;
             p.unit   = e.unit;
         }
 
         f << "        <metric name=\"" << xmlEscape(e.metric) << "\"";
+        if (!e.metricDescription.empty())
+            f << " info=\"" << xmlEscape(e.metricDescription) << "\"";
         if (e.status == ResultStatus::Ok)
         {
             f << ">" << fmtValue(e.value) << "</metric>\n";
@@ -416,7 +502,32 @@ static int jsonExtractInt(const std::string &line, const std::string &key)
     catch (...) { return 0; }
 }
 
-ResultStore loadJson(const std::string &filename)
+// Pull the {"k":"…","v":"…"} pairs out of a `"props":[…]` array.
+static std::vector<DeviceProp> jsonExtractProps(const std::string &obj)
+{
+    std::vector<DeviceProp> out;
+    size_t pos = obj.find("\"props\":[");
+    if (pos == std::string::npos) return out;
+    const size_t end = obj.find(']', pos);
+    if (end == std::string::npos) return out;
+
+    for (pos = obj.find('{', pos); pos != std::string::npos && pos < end;
+         pos = obj.find('{', pos + 1))
+    {
+        const size_t close = obj.find('}', pos);
+        if (close == std::string::npos || close > end) break;
+        const std::string pair = obj.substr(pos, close - pos + 1);
+        DeviceProp prop;
+        prop.key   = jsonExtractStr(pair, "k");
+        prop.value = jsonExtractStr(pair, "v");
+        if (!prop.key.empty())
+            out.push_back(prop);
+        pos = close;
+    }
+    return out;
+}
+
+ResultStore loadJson(const std::string &filename, DeviceInfoStore *devices)
 {
     ResultStore store;
     std::ifstream f(filename);
@@ -461,6 +572,24 @@ ResultStore loadJson(const std::string &filename)
 
         const std::string obj = line.substr(brace);
 
+        // Device-metadata objects share the run-identity keys but carry
+        // "props" instead of a test/metric, so they land here first.
+        if (jsonHasKey(obj, "props"))
+        {
+            if (devices)
+            {
+                DeviceInfo d;
+                d.backend  = jsonExtractStr(obj, "backend");
+                d.platform = jsonExtractStr(obj, "platform");
+                d.device   = jsonExtractStr(obj, "device");
+                d.driver   = jsonExtractStr(obj, "driver");
+                d.props    = jsonExtractProps(obj);
+                if (!d.backend.empty())
+                    devices->push_back(d);
+            }
+            continue;
+        }
+
         ResultEntry e;
         e.backend  = jsonExtractStr(obj, "backend");
         e.platform = jsonExtractStr(obj, "platform");
@@ -470,6 +599,11 @@ ResultStore loadJson(const std::string &filename)
         e.test     = jsonExtractStr(obj, "test");
         e.metric   = jsonExtractStr(obj, "metric");
         e.unit     = jsonExtractStr(obj, "unit");
+        e.display  = jsonExtractStr(obj, "display");
+        // The needle carries the opening quote, so "description" cannot match
+        // inside "metric_description".
+        e.description        = jsonExtractStr(obj, "description");
+        e.metricDescription  = jsonExtractStr(obj, "metric_description");
 
         if (jsonHasKey(obj, "status"))
         {
@@ -601,6 +735,12 @@ ResultStore loadCsv(const std::string &filename)
             catch (...) { continue; }
         }
         e.reason = fields[11];
+        if (fields.size() >= 13)
+            e.display = fields[12];
+        if (fields.size() >= 14)
+            e.description = fields[13];
+        if (fields.size() >= 15)
+            e.metricDescription = fields[14];
 
         if (!e.backend.empty() && !e.test.empty() && !e.metric.empty())
             store.push_back(e);
@@ -649,7 +789,7 @@ static int xmlAttrInt(const std::string &t, const std::string &attr)
     try { return std::stoi(s); } catch (...) { return 0; }
 }
 
-ResultStore loadXml(const std::string &filename)
+ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
 {
     ResultStore store;
     std::ifstream f(filename);
@@ -659,9 +799,11 @@ ResultStore loadXml(const std::string &filename)
         return store;
     }
 
-    std::string backend, platform, device, driver, category, test, unit;
+    std::string backend, platform, device, driver, category, test, unit, display;
+    std::string description;   // <test description="…">, applied to its rows
     std::string line;
     bool versionChecked = false;
+    DeviceInfo curDevice;   // accumulates <prop> for the open <run>
 
     while (std::getline(f, line))
     {
@@ -687,25 +829,48 @@ ResultStore loadXml(const std::string &filename)
 
         if (t.rfind("<run", 0) == 0)
         {
+            if (devices && !curDevice.props.empty())
+                devices->push_back(curDevice);
+
             backend  = xmlAttr(t, "backend");
             platform = xmlAttr(t, "platform");
             device   = xmlAttr(t, "device");
             driver   = xmlAttr(t, "driver");
-            category.clear(); test.clear(); unit.clear();
+            category.clear(); test.clear(); unit.clear(); display.clear();
+            description.clear();
+
+            curDevice = DeviceInfo();
+            curDevice.backend  = backend;
+            curDevice.platform = platform;
+            curDevice.device   = device;
+            curDevice.driver   = driver;
+            continue;
+        }
+
+        if (t.rfind("<prop", 0) == 0)
+        {
+            DeviceProp prop;
+            prop.key   = xmlAttr(t, "name");
+            prop.value = xmlAttr(t, "value");
+            if (!prop.key.empty())
+                curDevice.props.push_back(prop);
             continue;
         }
 
         if (t.rfind("<category", 0) == 0)
         {
             category = xmlAttr(t, "name");
-            test.clear(); unit.clear();
+            test.clear(); unit.clear(); display.clear();
+            description.clear();
             continue;
         }
 
         if (t.rfind("<test", 0) == 0)
         {
-            test = xmlAttr(t, "name");
-            unit = xmlAttr(t, "unit");
+            test        = xmlAttr(t, "name");
+            unit        = xmlAttr(t, "unit");
+            display     = xmlAttr(t, "display");
+            description = xmlAttr(t, "description");
             continue;
         }
 
@@ -720,6 +885,9 @@ ResultStore loadXml(const std::string &filename)
             e.test     = test;
             e.metric   = xmlAttr(t, "name");
             e.unit     = unit;
+            e.display  = display;
+            e.description       = description;
+            e.metricDescription = xmlAttr(t, "info");
 
             // Self-closing form is unsupported/error/skipped:
             //   <metric name="x" status="..." reason="..."/>
@@ -750,6 +918,10 @@ ResultStore loadXml(const std::string &filename)
         }
     }
 
+    // Last <run> has no successor to flush it.
+    if (devices && !curDevice.props.empty())
+        devices->push_back(curDevice);
+
     if (store.empty())
         std::cerr << "clpeak: warning: no valid entries found in: " << filename << "\n";
     return store;
@@ -757,7 +929,7 @@ ResultStore loadXml(const std::string &filename)
 
 // ---- Dispatch -------------------------------------------------------------
 
-ResultStore loadResultFile(const std::string &filename)
+ResultStore loadResultFile(const std::string &filename, DeviceInfoStore *devices)
 {
     std::string ext;
     size_t dot = filename.rfind('.');
@@ -767,6 +939,6 @@ ResultStore loadResultFile(const std::string &filename)
         for (char &c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
     }
     if (ext == ".csv") return loadCsv(filename);
-    if (ext == ".xml") return loadXml(filename);
-    return loadJson(filename);
+    if (ext == ".xml") return loadXml(filename, devices);
+    return loadJson(filename, devices);
 }
