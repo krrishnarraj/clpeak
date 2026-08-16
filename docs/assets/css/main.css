@@ -1,0 +1,197 @@
+/* Palette lifted from the app's own theme tokens (app/lib/src/theme/
+   clpeak_theme.dart) so the site and the screenshots agree. */
+:root {
+  --bg: #f6f6f7;
+  --panel: #ffffff;
+  --hover: #f0f1f3;
+  --line: #e3e5e9;
+  --text: #111316;
+  --dim: #6b7178;
+  --faint: #a8aeb5;
+  --accent: #1f63c8;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0c0e;
+    --panel: #121417;
+    --hover: #1a1d21;
+    --line: #24272c;
+    --text: #e9ebed;
+    --dim: #8a9199;
+    --faint: #565c63;
+    --accent: #4fa8ff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.65 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+a { color: var(--accent); }
+
+/* --- masthead ----------------------------------------------------------- */
+
+.masthead {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.masthead .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding-block: 18px;
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { border-radius: 8px; }
+.brand h1 {
+  margin: 0;
+  font: 600 22px/1.2 var(--mono);
+  letter-spacing: -0.01em;
+}
+.tagline { margin: 2px 0 0; color: var(--dim); font-size: 13px; }
+
+.masthead nav { display: flex; gap: 20px; flex-wrap: wrap; font-size: 14px; }
+.masthead nav a { color: var(--dim); text-decoration: none; }
+.masthead nav a:hover { color: var(--text); }
+
+/* --- prose -------------------------------------------------------------- */
+
+main { padding-block: 40px 64px; }
+
+h2 {
+  margin: 48px 0 12px;
+  font: 600 20px/1.3 var(--mono);
+  letter-spacing: -0.01em;
+}
+h2:first-child { margin-top: 0; }
+h3 { margin: 28px 0 8px; font: 600 16px/1.3 var(--mono); }
+
+p { margin: 0 0 16px; }
+.lede { font-size: 18px; color: var(--dim); max-width: 68ch; }
+
+ul { margin: 0 0 16px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+pre {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+/* --- screenshots -------------------------------------------------------- */
+
+figure { margin: 0 0 28px; }
+
+figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+figcaption {
+  margin-top: 8px;
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+/* --- backend table ------------------------------------------------------ */
+
+.table-scroll { overflow-x: auto; margin-bottom: 16px; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+th, td {
+  text-align: left;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  font: 600 12px/1.4 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+td:first-child { font-family: var(--mono); }
+
+/* --- downloads ---------------------------------------------------------- */
+
+#release-list { display: grid; gap: 16px; }
+
+.rel-group {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 14px 16px;
+}
+.rel-group h3 { margin: 0 0 10px; font-size: 14px; }
+
+.rel-assets { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.rel-assets a {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-decoration: none;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 5px 10px;
+  background: var(--bg);
+}
+.rel-assets a:hover { border-color: var(--accent); color: var(--accent); }
+.rel-assets .size { color: var(--faint); margin-left: 6px; }
+
+.rel-note { color: var(--dim); font-size: 14px; }
+
+footer {
+  border-top: 1px solid var(--line);
+  padding-block: 24px 48px;
+  color: var(--dim);
+  font-size: 14px;
+}
