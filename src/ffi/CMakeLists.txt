@@ -157,7 +157,7 @@ if(NOT CLPEAK_FFI_STANDALONE)
         # resource embedding, see linux/runner/my_application.cc).
         add_custom_target(clpeak-gui ALL
             DEPENDS clpeak_ffi
-            COMMAND ${FLUTTER_EXECUTABLE} build linux --release
+            COMMAND ${CMAKE_COMMAND} -E env DESTDIR= ${FLUTTER_EXECUTABLE} build linux --release
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLPEAK_GUI_OUT}"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CLPEAK_APP_DIR}/build/linux/${_clpeak_flutter_arch}/release/bundle" "${CLPEAK_GUI_OUT}"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak_ffi>" "${CLPEAK_GUI_OUT}/lib/"
