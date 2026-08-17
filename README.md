@@ -1,6 +1,8 @@
 # clpeak
 
-[![Google Play](https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg)](https://play.google.com/store/apps/details?id=kr.clpeak)
+<a href="https://play.google.com/store/apps/details?id=kr.clpeak"><img alt="Get clpeak on Google Play" height="52" src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg"></a>
+<a href="https://snapcraft.io/clpeak"><img alt="Get clpeak from the Snap Store" height="52" src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg"></a>
+
 [![Build](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml)
 
 **clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs and GPUs. It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.
