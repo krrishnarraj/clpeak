@@ -6,6 +6,7 @@ on:
       - 'results/**'
       - 'snap/**'
       - 'packaging/**'
+      - 'docs/**'
       - '**/*.md'
     branches: [master, main]
     tags: ["*"]
@@ -15,6 +16,7 @@ on:
       - 'results/**'
       - 'snap/**'
       - 'packaging/**'
+      - 'docs/**'
       - '**/*.md'
     branches: [master, main]
   workflow_dispatch:
