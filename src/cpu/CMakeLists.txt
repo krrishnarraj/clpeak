@@ -96,6 +96,21 @@ else()
 endif()
 target_compile_options(peak_cpu PRIVATE ${CLPEAK_CPU_OPT})
 
+# Keep the per-ISA feature TUs out of LTO (distros put -flto in the global
+# CXXFLAGS).  Their -m/-march flags don't reach the assembler at GCC's LTRANS
+# stage -- the IR is re-compiled under the *link* line's -march, so gcc 16.2
+# rejects the AMX TU with "`tmmultf32ps' is not supported on `x86_64'" -- and
+# LTO could inline ISA code into the baseline dispatcher (SIGILL on older CPUs).
+set(CLPEAK_CPU_NO_LTO "")
+if(_clpeak_real_msvc)
+    set(CLPEAK_CPU_NO_LTO /GL-)
+else()
+    check_cxx_compiler_flag("${_clpeak_gnuflag}-fno-lto" _clpeak_f_no_lto)
+    if(_clpeak_f_no_lto)
+        set(CLPEAK_CPU_NO_LTO ${_clpeak_gnuflag}-fno-lto)
+    endif()
+endif()
+
 # Target arch.
 set(_clpeak_x86 OFF)
 set(_clpeak_arm OFF)
@@ -123,7 +138,8 @@ function(clpeak_add_isa_tu tag)
     target_include_directories(${_t} PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_LIST_DIR})
     target_compile_definitions(${_t} PRIVATE ENABLE_CPU CLPEAK_ISA_TAG=${tag} ${CLPEAK_CPU_TU_DEFS})
-    target_compile_options(${_t} PRIVATE ${CLPEAK_CPU_OPT} ${ARGN})
+    target_compile_options(${_t} PRIVATE ${CLPEAK_CPU_OPT} ${CLPEAK_CPU_NO_LTO} ${ARGN})
+    set_target_properties(${_t} PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
     target_link_libraries(peak_cpu PRIVATE ${_t})
     target_compile_definitions(peak_cpu PRIVATE CLPEAK_TU_${tag}=1)
 endfunction()

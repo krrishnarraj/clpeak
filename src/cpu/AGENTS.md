@@ -217,6 +217,16 @@ Adding a TU (four edits, one per concern):
 
 ## Gotchas
 
+- **The feature TUs must never take part in LTO** (`clpeak_add_isa_tu` appends
+  `-fno-lto` / `/GL-`). A TU's `-m`/`-march` flags don't survive to the
+  assembler at GCC's LTRANS stage — the IR is re-compiled under the *link*
+  line's `-march`, so gcc 16.2 + Arch's `-flto=auto` failed the AMX-TF32 TU at
+  link with ``Error: `tmmultf32ps' is not supported on `x86_64'`` even though
+  that TU had just assembled cleanly (SVE/SME are exposed the same way). LTO
+  could also inline ISA code into the baseline dispatcher — the SIGILL-on-an-
+  older-CPU this design prevents. Costs nothing: the TUs are self-contained
+  `-O3` intrinsic loops reached through function pointers. The GCC CI job
+  builds with `-flto=auto` to keep this covered.
 - **Compute kernels must carry a real loop-carried dependency** or `-O3
   -ffast-math` deletes the work and reports a fabricated peak. The FMA chains
   use `acc = acc*b + c` with `b<1` (converges to a finite fixed point, no
