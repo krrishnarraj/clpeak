@@ -68,6 +68,11 @@ parts:
       fi
       mkdir -p "$CRAFT_PART_INSTALL/flutter"
       cp -a "$src/." "$CRAFT_PART_INSTALL/flutter/"
+      # The tarball carries its packer's uid/gid, which cp -a preserves.  The
+      # SDK is a git checkout and `flutter build` shells out to git against it,
+      # so a foreign owner trips git's "dubious ownership" guard and the build
+      # dies with error 128.  Hand the tree to whoever runs the build.
+      chown -R "$(id -u):$(id -g)" "$CRAFT_PART_INSTALL/flutter"
     prime:
       - -*
 
