@@ -35,16 +35,9 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
                  "no CPU fp16 matrix engine (AMX-FP16 / SME) on this CPU", cfg);
 #endif
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    // tf32/fp8 matrix are AMX-only (Diamond Rapids) -- x86 exclusive, so only
-    // emit them (incl. the Unsupported row) on an x86 build.  On ARM there is
-    // no tile instruction for these dtypes today, so the rows would be noise.
-    emitVariants(*this, {"cpu_matrix_tf32", "CPU matrix engine (tf32)", "gflops",
-                         Category::Unknown,
-                         "The same built-in matrix engine on tf32, a trimmed-down "
-                         "stand-in for 32-bit float that trades accuracy for speed "
-                         "(Intel AMX-TF32)."},
-                 "matrix_tf32", kernelMenu().mat_tf32,
-                 "no CPU tf32 matrix engine (AMX-TF32) on this CPU", cfg);
+    // fp8 matrix is AMX-only (Diamond Rapids) -- x86 exclusive, so only emit it
+    // (incl. the Unsupported row) on an x86 build.  On ARM there is no tile
+    // instruction for this dtype today, so the row would be noise.
     emitVariants(*this, {"cpu_matrix_fp8", "CPU matrix engine (fp8)", "gflops",
                          Category::Unknown,
                          "The same built-in matrix engine on 8-bit float inputs, the "

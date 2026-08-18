@@ -102,7 +102,7 @@ static CpuFeatures detect()
     f.amx_fp8 = (ecx >> 3) & 1;
     // Leaf 7 sub-leaf 1 (bit positions per Intel ISA ref / klauspost-cpuid):
     //   EAX[4]=AVX-VNNI, EAX[5]=AVX512-BF16, EAX[21]=AMX-FP16;
-    //   EDX[4]=AVX-VNNI-INT8, EDX[7]=AMX-TF32, EDX[19]=AVX10.
+    //   EDX[4]=AVX-VNNI-INT8, EDX[19]=AVX10.
     // AVX-VNNI / AVX-VNNI-INT8 are 256-bit VEX (OS AVX state only, no AVX-512).
     {
       uint32_t r1[4];
@@ -112,7 +112,6 @@ static CpuFeatures detect()
       f.avxvnniint8  = ((edx1 >> 4) & 1) && osAvx && avxcpu;
       f.avxvnniint16 = ((edx1 >> 10) & 1) && osAvx && avxcpu;  // EDX[10] (Intel ISA ref / klauspost-cpuid)
       f.amx_fp16    = (eax1 >> 21) & 1;
-      f.amx_tf32    = (edx1 >> 7) & 1;
       f.avx10       = (edx1 >> 19) & 1;
       // Leaf 7 sub-leaf 1 EAX[0] = SHA512 (EVEX; Arrow/Lunar Lake).  Detection
       // only today: no x86 SHA-512 kernel yet, so nothing consumes it -- wired
@@ -284,7 +283,6 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
   if (s->mat_int8.fn) d.mat_int8 = s->mat_int8;
   if (s->mat_fp.fn)   d.mat_fp = s->mat_fp;
   if (s->mat_fp16.fn) d.mat_fp16 = s->mat_fp16;
-  if (s->mat_tf32.fn) d.mat_tf32 = s->mat_tf32;
   if (s->mat_fp8.fn)  d.mat_fp8 = s->mat_fp8;
   if (s->bf16fma.fn)  d.bf16fma = s->bf16fma;
   if (s->int16dp.fn)  d.int16dp = s->int16dp;
@@ -384,9 +382,6 @@ const CpuKernelTable &kernels()
 #endif
 #if CLPEAK_TU_amxfp16
     if (f.amx_tile && f.amx_fp16 && amxPermOk()) merge(t, clpeak_table_amxfp16());
-#endif
-#if CLPEAK_TU_amxtf32
-    if (f.amx_tile && f.amx_tf32 && amxPermOk()) merge(t, clpeak_table_amxtf32());
 #endif
 #if CLPEAK_TU_amxfp8
     if (f.amx_tile && f.amx_fp8 && amxPermOk()) merge(t, clpeak_table_amxfp8());
@@ -597,10 +592,6 @@ const CpuKernelMenu &kernelMenu()
 #if CLPEAK_TU_amxfp16
     if (f.amx_tile && f.amx_fp16 && amxPermOk())
       add(m.mat_fp16, clpeak_table_amxfp16()->mat_fp16, "AMX FP16");
-#endif
-#if CLPEAK_TU_amxtf32
-    if (f.amx_tile && f.amx_tf32 && amxPermOk())
-      add(m.mat_tf32, clpeak_table_amxtf32()->mat_tf32, "AMX TF32");
 #endif
 #if CLPEAK_TU_amxfp8
     if (f.amx_tile && f.amx_fp8 && amxPermOk())

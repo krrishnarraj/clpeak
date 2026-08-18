@@ -105,9 +105,9 @@ target_compile_options(peak_cpu PRIVATE ${CLPEAK_CPU_OPT})
 
 # Keep the per-ISA feature TUs out of LTO (distros put -flto in the global
 # CXXFLAGS).  A TU's -m/-march flags don't survive GCC's LTRANS re-compile, so
-# the assembler no longer accepts its instructions -- gcc 16.2 + binutils 2.47
-# fail the AMX TU with "`tmmultf32ps' is not supported on `x86_64'" -- and LTO
-# could inline ISA code into the baseline dispatcher (SIGILL on older CPUs).
+# the assembler stops accepting its instructions at link time even though the TU
+# assembled cleanly (#193) -- and LTO could inline ISA code into the baseline
+# dispatcher (SIGILL on older CPUs).
 set(CLPEAK_CPU_NO_LTO "")
 if(_clpeak_real_msvc)
     set(CLPEAK_CPU_NO_LTO /GL-)
@@ -153,13 +153,24 @@ endfunction()
 
 set(CLPEAK_CPU_TU_DEFS "")   # extra per-TU defs (e.g. CLPEAK_CORE_ONLY for MSVC)
 
-# A -march flag check alone doesn't prove the bleeding-edge ARM TUs can build:
-# SME additionally needs <arm_sme.h> + the ACLE streaming/ZA keyword attributes
-# (clang >= ~18), and FP8 needs the fpm_t/mfloat8 intrinsics (clang >= ~20).
-# These source checks compile the exact constructs the kernels use, so an older
-# toolchain fails them cleanly and simply skips the TU (-> Unsupported rows).
+# A -march/-m flag check alone doesn't prove a bleeding-edge TU can build: SME
+# also needs <arm_sme.h> + the ACLE streaming/ZA keywords (clang >= ~18), FP8 the
+# fpm_t/mfloat8 intrinsics (clang >= ~20), and on x86 the driver can accept an
+# -mamx-* flag whose instruction the *assembler* then refuses -- that is how
+# AMX-TF32 broke gcc + binutils 2.47 builds (#193, #195) before Intel deleted the
+# ISA.  These probes compile the exact constructs the kernels use, so such a
+# toolchain skips the TU (-> Unsupported rows) instead of failing the build.
+# Compile+link only: they never run, so no AMX XSTATE permission is involved.
+#
+# When adding one, mind what goes into CMAKE_REQUIRED_FLAGS.  It is a space-
+# separated *string*: assigning a ;-list drops everything after the first
+# element and the probe then fails on every compiler.  The helpers also append
+# CLPEAK_CPU_NO_LTO, so a distro -flto in CMAKE_CXX_FLAGS can't fail a probe for
+# the LTRANS reason in #193 that the TU's own -fno-lto build doesn't have.
 function(clpeak_check_sme outvar)
-    set(CMAKE_REQUIRED_FLAGS "${ARGN}")
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sme.h>
         __arm_locally_streaming __arm_new(\"za\")
@@ -180,7 +191,9 @@ endfunction()
 # without defining the ACLE __ARM_FEATURE_SME_F64F64 macro, so the TU is gated
 # by a CMake-passed CLPEAK_SME_F64F64 define instead -- see sme_compute.h.)
 function(clpeak_check_sme_f64 outvar)
-    set(CMAKE_REQUIRED_FLAGS "${ARGN}")
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sme.h>
         __arm_locally_streaming __arm_new(\"za\")
@@ -197,7 +210,9 @@ function(clpeak_check_sme_f64 outvar)
 endfunction()
 
 function(clpeak_check_neon_fp8 outvar)
-    set(CMAKE_REQUIRED_FLAGS "${ARGN}")
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_neon.h>
         static double f() {
@@ -213,7 +228,9 @@ function(clpeak_check_neon_fp8 outvar)
 endfunction()
 
 function(clpeak_check_sve_fp8 outvar)
-    set(CMAKE_REQUIRED_FLAGS "${ARGN}")
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sve.h>
         static double f() {
@@ -225,6 +242,28 @@ function(clpeak_check_sve_fp8 outvar)
           return (double)svaddv_f32(pg, acc);
         }
         int main() { return (int)f(); }
+    " ${outvar})
+    set(${outvar} ${${outvar}} PARENT_SCOPE)
+endfunction()
+
+# Emits the exact tile op the kernel issues.  Deliberately unguarded by any
+# __x86_64__ #if: callers are already inside the x86 + 64-bit gate, and a probe
+# that compiled vacuously elsewhere would report a false positive.
+function(clpeak_check_amx_tile_op outvar op)
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
+    check_cxx_source_compiles("
+        #include <immintrin.h>
+        alignas(64) static char buf[16 * 64];
+        int main() {
+          _tile_loadd(4, buf, 64);
+          _tile_loadd(5, buf, 64);
+          _tile_zero(0);
+          ${op}(0, 4, 5);
+          _tile_stored(0, buf, 64);
+          return 0;
+        }
     " ${outvar})
     set(${outvar} ${${outvar}} PARENT_SCOPE)
 endfunction()
@@ -366,10 +405,10 @@ if(_clpeak_x86)
             clpeak_add_isa_tu(avx512fp16 ${_avx512_core} ${_clpeak_gnuflag}-mavx512fp16)
         endif()
         # AMX is a 64-bit-only ISA: GCC/clang accept the -mamx-* flags in
-        # 32-bit mode (so check_cxx_compiler_flag passes), but <immintrin.h>
-        # only declares the _tile_* intrinsics under #ifdef __x86_64__, so an
-        # i686 build would compile the AMX TU and then fail with "_tile_loadd
-        # was not declared".  Gate on a 64-bit target.  This is in the non-
+        # 32-bit mode, but <immintrin.h> only declares the _tile_* intrinsics
+        # under #ifdef __x86_64__, so an i686 build would compile the AMX TU and
+        # then fail with "_tile_loadd was not declared".  The probes below would
+        # catch that too; the explicit gate keeps it obvious.  This is in the non-
         # real-MSVC branch, so it covers Linux clang/gcc AND Windows clang-cl
         # (the -mamx-* flags route through ${_clpeak_gnuflag}'s /clang: prefix);
         # the AMX XSTATE grant is arch_prctl on Linux / EnableProcessOptional-
@@ -378,27 +417,23 @@ if(_clpeak_x86)
         if(CMAKE_SIZEOF_VOID_P EQUAL 8)
             set(_amx ${_avx512_core} ${_clpeak_gnuflag}-mamx-tile
                      ${_clpeak_gnuflag}-mamx-int8 ${_clpeak_gnuflag}-mamx-bf16)
-            check_cxx_compiler_flag("${_amx}" _clpeak_f_amx)
-            if(_clpeak_f_amx)
+            # int8 + bf16 share one TU, so both ops have to assemble for it to
+            # build -- probe each rather than trusting the flags.
+            clpeak_check_amx_tile_op(_clpeak_f_amx_i8   _tile_dpbssd   ${_amx})
+            clpeak_check_amx_tile_op(_clpeak_f_amx_bf16 _tile_dpbf16ps ${_amx})
+            if(_clpeak_f_amx_i8 AND _clpeak_f_amx_bf16)
                 clpeak_add_isa_tu(amx ${_amx})
             endif()
             # Newer AMX dtypes as their own TUs (each is a separate CPUID
             # feature + a newer compiler; runtime-gated so an older CPU never
-            # issues them).  amx-tile is the common base; the -mamx-fp16 /
-            # -mamx-tf32 / -mamx-fp8 flags need clang>=~18/20 (older toolchains
-            # fail the check and simply skip the TU -> Unsupported row).
+            # issues them).  amx-tile is the common base.
             set(_amxfp16 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp16)
-            check_cxx_compiler_flag("${_amxfp16}" _clpeak_f_amxfp16)
+            clpeak_check_amx_tile_op(_clpeak_f_amxfp16 _tile_dpfp16ps ${_amxfp16})
             if(_clpeak_f_amxfp16)
                 clpeak_add_isa_tu(amxfp16 ${_amxfp16})
             endif()
-            set(_amxtf32 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-tf32)
-            check_cxx_compiler_flag("${_amxtf32}" _clpeak_f_amxtf32)
-            if(_clpeak_f_amxtf32)
-                clpeak_add_isa_tu(amxtf32 ${_amxtf32})
-            endif()
             set(_amxfp8 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp8)
-            check_cxx_compiler_flag("${_amxfp8}" _clpeak_f_amxfp8)
+            clpeak_check_amx_tile_op(_clpeak_f_amxfp8 _tile_dphf8ps ${_amxfp8})
             if(_clpeak_f_amxfp8)
                 clpeak_add_isa_tu(amxfp8 ${_amxfp8})
             endif()

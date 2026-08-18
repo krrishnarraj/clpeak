@@ -10,7 +10,7 @@
 //   kernels/base_compute.h    fp32 / fp64 / int32 chains + streaming read (all TUs)
 //   kernels/lowp_compute.h    fp16 / bf16-dot / mixed-precision / int8-dot / int16-dot
 //                             / fp8-dot (NEON) / bf16-FMA
-//   kernels/matrix_compute.h  AMX (int8/bf16/fp16/tf32/fp8) + NEON SMMLA/BFMMLA
+//   kernels/matrix_compute.h  AMX (int8/bf16/fp16/fp8) + NEON SMMLA/BFMMLA
 //   kernels/crypto_compute.h  AES / SHA-256 / SHA-512 / CRC32-C
 //   kernels/string_compute.h  memchr-style byte scan + UTF-8 validation
 //   kernels/sve_compute.h     ARM SVE compute + SVE bf16/i8mm matrix + SVE fp8 dot
@@ -90,9 +90,6 @@ static const CpuKernelTable *tuTable()
 #endif
 #ifdef CPU_MAT_FP16_KERNEL
     t.mat_fp16 = {runMatFp16Chain, (double)INNER * MAT_FP16_OPS_PER_K};
-#endif
-#ifdef CPU_MAT_TF32_KERNEL
-    t.mat_tf32 = {runMatTf32Chain, (double)INNER * MAT_TF32_OPS_PER_K};
 #endif
 #ifdef CPU_MAT_FP8_KERNEL
     t.mat_fp8 = {runMatFp8Chain, (double)INNER * MAT_FP8_OPS_PER_K};
