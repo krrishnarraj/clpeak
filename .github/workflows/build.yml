@@ -6,6 +6,7 @@ on:
       - 'results/**'
       - 'snap/**'
       - 'packaging/**'
+      - 'docs/**'
       - '**/*.md'
     branches: [master, main]
     tags: ["*"]
@@ -15,6 +16,7 @@ on:
       - 'results/**'
       - 'snap/**'
       - 'packaging/**'
+      - 'docs/**'
       - '**/*.md'
     branches: [master, main]
   workflow_dispatch:
@@ -277,6 +279,8 @@ jobs:
   # (release depends on build-desktop only): no packaging, no artifact upload.
   # clang is purged so the run genuinely mirrors a GCC-only toolchain, and g++ is
   # also pinned via -DCMAKE_*_COMPILER so the build can't silently fall back.
+  # It also builds with -flto=auto, like the distro packages that first hit
+  # GCC's LTRANS-drops-the-TU-ISA-flags failure (see src/cpu/CMakeLists.txt).
   # ---------------------------------------------------------------------------
   build-linux-gcc:
     name: Linux x64 GCC
@@ -303,11 +307,13 @@ jobs:
           install_runtime: true
           cache: true
 
-      - name: Configure CMake & Build (GCC)
+      - name: Configure CMake & Build (GCC, LTO)
         run: |
           # GUI off: this job is a compiler smoke test, not a packaging job.
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_ENABLE_GUI=OFF \
-            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_FLAGS=-flto=auto -DCMAKE_CXX_FLAGS=-flto=auto \
+            -DCMAKE_EXE_LINKER_FLAGS=-flto=auto
           cmake --build build --config Release -j4
 
       - name: Run

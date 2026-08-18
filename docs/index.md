@@ -98,8 +98,6 @@ is listed, it is the desktop app — drag it to Applications.
 <p class="rel-note">
   Older versions are on the
   <a href="https://github.com/{{ site.repo }}/releases">releases page</a>.
-  clpeak is also packaged for
-  <a href="https://snapcraft.io/clpeak">Snap</a>, Flathub and Homebrew.
 </p>
 
 macOS builds are ad-hoc signed, so a downloaded copy starts out quarantined —
@@ -107,6 +105,34 @@ right-click the app and choose *Open* the first time, or clear the attribute:
 
 ```console
 xattr -dr com.apple.quarantine /Applications/clpeak-gui.app
+```
+
+### From a store
+
+<div class="store-links">
+  <a href="https://snapcraft.io/clpeak">
+    <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22">
+      <path d="M12 2.6 21 7v10l-9 4.4L3 17V7z"/>
+      <path d="M3 7l9 4.4L21 7M12 11.4v10"/>
+    </svg>
+    <span class="store-name">Snap Store</span>
+    <span class="store-sub">Linux</span>
+  </a>
+  <a href="https://play.google.com/store/apps/details?id=kr.clpeak">
+    <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22">
+      <rect x="6" y="2.5" width="12" height="19" rx="2.5"/>
+      <path d="M10.5 18.5h3"/>
+    </svg>
+    <span class="store-name">Google Play</span>
+    <span class="store-sub">Android</span>
+  </a>
+</div>
+
+On Linux the snap uses classic confinement, so it can reach the GPU drivers and
+device nodes the benchmarks need:
+
+```console
+sudo snap install clpeak --classic
 ```
 
 ## <a id="build"></a>Build from source

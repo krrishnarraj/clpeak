@@ -189,6 +189,48 @@ td:first-child { font-family: var(--mono); }
 
 .rel-note { color: var(--dim); font-size: 14px; }
 
+/* Store links: the project's own wording and neutral glyphs rather than the
+   vendors' badge artwork, so the page stays self-contained (no third-party
+   requests) and matches the rest of the type. */
+.store-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.store-links a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 11px 16px;
+}
+.store-links a:hover { border-color: var(--accent); }
+
+.store-links svg {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--dim);
+}
+.store-links a:hover svg { color: var(--accent); }
+
+.store-name { font: 600 14px/1.2 var(--mono); }
+.store-sub {
+  font: 11px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
 footer {
   border-top: 1px solid var(--line);
   padding-block: 24px 48px;

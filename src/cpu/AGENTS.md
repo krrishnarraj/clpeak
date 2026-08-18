@@ -69,6 +69,14 @@ local memory, DRAM ↔ global memory.
 - Optimization flags are scoped to `peak_cpu` only (see `CMakeLists.txt`).
 - `peak_common` is compiled with `ENABLE_CPU` too, because `options.cpp` and the
   help text gate the CPU flags on that macro.
+- **The ISA feature TUs never take part in LTO** (`clpeak_add_isa_tu` appends
+  `-fno-lto` / `/GL-`). A TU's `-m`/`-march` flags don't survive GCC's LTRANS
+  re-compile, so the assembler stops accepting its instructions: gcc 16.2 +
+  binutils 2.47 + Arch's `-flto=auto` failed the AMX-TF32 TU with
+  ``` `tmmultf32ps' is not supported on `x86_64' ``` while that same TU had just
+  assembled cleanly at compile time. LTO could also inline ISA code into the
+  baseline dispatcher (SIGILL on older CPUs). The GCC CI job builds with
+  `-flto=auto` to keep this covered.
 - **Build with clang, not GCC.** `NACC=24` assumes the compiler can schedule 24
   independent FMA chains; GCC ≤ 14 serialises them into one register and skips
   the k-loop unroll, roughly halving fp32/fp64. The root `CMakeLists.txt`
