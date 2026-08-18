@@ -44,7 +44,7 @@ local memory, DRAM ↔ global memory.
 | `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains, fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
 | `kernels/crypto_compute.h` | AES-128, SHA-256, SHA-512, CRC32-C. `opsPerIter` counts BYTES so `emitCompute()` lands in GB/s. SHA-512 is ARM-only: x86 SHA512 is *detected* but has no kernel, so that row is Unsupported there |
 | `kernels/lowp_compute.h` | fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, int16 dot, NEON fp8 dot, AVX10.2 bf16 vector FMA |
-| `kernels/matrix_compute.h` | x86 AMX (int8/bf16/fp16/tf32/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA |
+| `kernels/matrix_compute.h` | x86 AMX (int8/bf16/fp16/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA |
 | `kernels/string_compute.h` | memchr-style byte scan (incl. the historical SSE4.2 PCMPISTRI row) + Keiser-Lemire UTF-8 validation, over L1-resident buffers. `opsPerIter` counts BYTES |
 | `kernels/sve_compute.h` | SVE/SVE2 compute, bf16/i8mm matrix, fp8 dot, and the SVE `strscan`. Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME`; owns the one `#include <arm_sve.h>` |
 | `kernels/sme_compute.h` | SME ZA outer products (fp32/fp64/bf16/fp16/int8) + streaming-SVE vector chains. Gated on `__ARM_FEATURE_SME`; owns the one `#include <arm_sme.h>` |
@@ -72,9 +72,8 @@ local memory, DRAM ↔ global memory.
 - **The ISA feature TUs never take part in LTO** (`clpeak_add_isa_tu` appends
   `-fno-lto` / `/GL-`). A TU's `-m`/`-march` flags don't survive GCC's LTRANS
   re-compile, so the assembler stops accepting its instructions: gcc 16.2 +
-  binutils 2.47 + Arch's `-flto=auto` failed the AMX-TF32 TU with
-  ``` `tmmultf32ps' is not supported on `x86_64' ``` while that same TU had just
-  assembled cleanly at compile time. LTO could also inline ISA code into the
+  binutils 2.47 + Arch's `-flto=auto` failed an AMX TU at link time (#193) while
+  that same TU had just assembled cleanly at compile time. LTO could also inline ISA code into the
   baseline dispatcher (SIGILL on older CPUs). The GCC CI job builds with
   `-flto=auto` to keep this covered.
 - **Build with clang, not GCC.** `NACC=24` assumes the compiler can schedule 24
@@ -105,7 +104,7 @@ TU tags (`cpu_tu_registry.h`):
 
 - **x86**: `generic` (SSE2 floor), `sse42`, `avx2`, `avxvnni`, `avxvnniint8`,
   `avxvnniint16`, `avx512`, `avx512vnni`, `avx512bf16`, `avx512fp16`,
-  `avx10bf16`, `amx`, `amxfp16`, `amxtf32`, `amxfp8`; crypto `aes`, `vaes`,
+  `avx10bf16`, `amx`, `amxfp16`, `amxfp8`; crypto `aes`, `vaes`,
   `sha` — CRC32-C has no TU of its own here, it rides in `sse42` (the CRC32
   instruction is part of SSE4.2).
 - **ARM**: `generic` (NEON floor, pinned to `apple-m1` on macOS), `fp16`,

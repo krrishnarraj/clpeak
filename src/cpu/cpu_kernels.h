@@ -29,7 +29,7 @@ struct CpuFeatures {
   bool avxvnniint16 = false; // 256-bit AVX-VNNI-INT16 (mixed-sign int16 dot; Diamond Rapids, Nova Lake)
   bool avx10 = false, avx10_2_512 = false;  // AVX10.2 512-bit (Diamond Rapids): native bf16 FMA
   bool amx_tile = false, amx_int8 = false, amx_bf16 = false;
-  bool amx_fp16 = false, amx_tf32 = false, amx_fp8 = false;  // Granite/Diamond Rapids AMX dtypes
+  bool amx_fp16 = false, amx_fp8 = false;  // Granite/Diamond Rapids AMX dtypes
   // ARM
   bool neon = false, fp16 = false, fp16fml = false, dotprod = false, bf16 = false, i8mm = false;
   // ARM SVE.  The compute kernels are vector-length-agnostic (one binary runs
@@ -78,9 +78,9 @@ struct ChainVariant {
 // One feature TU's offered kernels (null entries = not provided by that ISA).
 struct CpuKernelTable {
   ChainVariant fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
-  // Newer x86 matrix/vector dtypes: AMX fp16 (Granite Rapids), AMX tf32 / AMX fp8
-  // (Diamond Rapids), and native bf16 vector FMA (AVX10.2, full-rate, not a dot).
-  ChainVariant mat_fp16, mat_tf32, mat_fp8, bf16fma;
+  // Newer x86 matrix/vector dtypes: AMX fp16 (Granite Rapids), AMX fp8 (Diamond
+  // Rapids), and native bf16 vector FMA (AVX10.2, full-rate, not a dot).
+  ChainVariant mat_fp16, mat_fp8, bf16fma;
   // int16 dot (x86 VPDPWSSD / VPDPWSUD) and ARM fp8 dot (FEAT_FP8DOT4 FDOT).
   ChainVariant int16dp, fp8dp;
   // ARM SME: fp32/fp64 ZA outer products (no x86 engine has these dtypes) and
@@ -128,7 +128,7 @@ struct IsaVariant {
 // compare instruction sets, rather than only the widest one (see kernels()).
 struct CpuKernelMenu {
   std::vector<IsaVariant> fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
-  std::vector<IsaVariant> mat_fp16, mat_tf32, mat_fp8, bf16fma;
+  std::vector<IsaVariant> mat_fp16, mat_fp8, bf16fma;
   std::vector<IsaVariant> int16dp, fp8dp, mat_fp32, mat_fp64;
   std::vector<IsaVariant> aes, sha256, sha512, crc32c;
   // String tests: the PCMPISTRI kernel rides in the strscan menu as its own

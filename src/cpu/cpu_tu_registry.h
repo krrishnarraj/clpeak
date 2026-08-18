@@ -35,7 +35,6 @@
   CLPEAK_TU(avx10bf16)    /* AVX10.2-512 native bf16 vector FMA */          \
   CLPEAK_TU(amx)          /* AMX int8 + bf16 */                             \
   CLPEAK_TU(amxfp16)                                                        \
-  CLPEAK_TU(amxtf32)                                                        \
   CLPEAK_TU(amxfp8)                                                         \
   /* Crypto TUs: same tag on both arches (only one arch branch builds it) */ \
   CLPEAK_TU(aes)          /* x86 AES-NI / ARM FEAT_AES */                   \

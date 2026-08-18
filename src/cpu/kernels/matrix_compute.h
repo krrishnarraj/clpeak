@@ -5,7 +5,7 @@
 
 // ===========================================================================
 // CPU matrix-engine kernels (the tensor-core analog): Intel AMX tile ops on x86
-// (int8 / bf16 / fp16 / tf32 / fp8) and the ARM NEON matrix instructions SMMLA
+// (int8 / bf16 / fp16 / fp8) and the ARM NEON matrix instructions SMMLA
 // (int8) + BFMMLA (bf16).  ops are PER-k; the table builder multiplies by INNER.
 // Feature-gated + CLPEAK_CORE_ONLY-excluded like the other advanced kernels.  To
 // add a new AMX dtype: reuse amxConfig16x64(), add a #if block + a
@@ -136,13 +136,13 @@ static double runMatFpChain(uint64_t outer)
 }
 #endif
 
-// ---- Newer x86 AMX matrix dtypes: fp16 / tf32 / fp8 ------------------------
+// ---- Newer x86 AMX matrix dtypes: fp16 / fp8 -------------------------------
 // Same 4-accumulator-tile config as the int8/bf16 AMX kernels (opaque tiles, so
 // the accumulate loop can't be scalar-evolved; inputs zero => data-independent
 // throughput; output tiles thread_local so every MT worker gets its own).  The
 // TILECFG is the canonical palette-1 / 16-row / 64-colsb layout for all of them;
 // only the element width (hence K per tile) and the DP intrinsic differ.
-#if (defined(__AMX_FP16__) || defined(__AMX_TF32__) || defined(__AMX_FP8__)) && \
+#if (defined(__AMX_FP16__) || defined(__AMX_FP8__)) && \
     (defined(__x86_64__) || defined(_M_X64))
 static void amxConfig16x64()
 {
@@ -174,31 +174,6 @@ static double runMatFp16Chain(uint64_t outer)
   _tile_stored(1, g_amxCf16, 64); sink += g_amxCf16[0];
   _tile_stored(2, g_amxCf16, 64); sink += g_amxCf16[0];
   _tile_stored(3, g_amxCf16, 64); sink += g_amxCf16[0];
-  return sink;
-}
-#endif
-
-#if defined(__AMX_TF32__) && (defined(__x86_64__) || defined(_M_X64))
-#define CPU_MAT_TF32_KERNEL 1
-static constexpr double MAT_TF32_OPS_PER_K = 4.0 * 16 * 16 * 16 * 2;  // K=16 tf32(fp32-stored)/row
-static thread_local bool g_amxTf32Cfg = false;
-alignas(64) static float g_amxAt32[16 * 16];
-alignas(64) static float g_amxBt32[16 * 16];
-alignas(64) static thread_local float g_amxCt32[16 * 16];
-static double runMatTf32Chain(uint64_t outer)
-{
-  if (!g_amxTf32Cfg) { amxConfig16x64(); g_amxTf32Cfg = true; }
-  _tile_loadd(4, g_amxAt32, 64);
-  _tile_loadd(5, g_amxBt32, 64);
-  _tile_zero(0); _tile_zero(1); _tile_zero(2); _tile_zero(3);
-  for (uint64_t o = 0; o < outer; o++)
-    for (int k = 0; k < INNER; k++)
-    { _tile_mmultf32ps(0, 4, 5); _tile_mmultf32ps(1, 4, 5); _tile_mmultf32ps(2, 4, 5); _tile_mmultf32ps(3, 4, 5); }
-  double sink = 0.0;
-  _tile_stored(0, g_amxCt32, 64); sink += g_amxCt32[0];
-  _tile_stored(1, g_amxCt32, 64); sink += g_amxCt32[0];
-  _tile_stored(2, g_amxCt32, 64); sink += g_amxCt32[0];
-  _tile_stored(3, g_amxCt32, 64); sink += g_amxCt32[0];
   return sink;
 }
 #endif

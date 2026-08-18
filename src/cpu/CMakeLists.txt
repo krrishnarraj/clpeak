@@ -105,9 +105,9 @@ target_compile_options(peak_cpu PRIVATE ${CLPEAK_CPU_OPT})
 
 # Keep the per-ISA feature TUs out of LTO (distros put -flto in the global
 # CXXFLAGS).  A TU's -m/-march flags don't survive GCC's LTRANS re-compile, so
-# the assembler no longer accepts its instructions -- gcc 16.2 + binutils 2.47
-# fail the AMX TU with "`tmmultf32ps' is not supported on `x86_64'" -- and LTO
-# could inline ISA code into the baseline dispatcher (SIGILL on older CPUs).
+# the assembler stops accepting its instructions at link time even though the TU
+# assembled cleanly (#193) -- and LTO could inline ISA code into the baseline
+# dispatcher (SIGILL on older CPUs).
 set(CLPEAK_CPU_NO_LTO "")
 if(_clpeak_real_msvc)
     set(CLPEAK_CPU_NO_LTO /GL-)
@@ -153,34 +153,23 @@ endfunction()
 
 set(CLPEAK_CPU_TU_DEFS "")   # extra per-TU defs (e.g. CLPEAK_CORE_ONLY for MSVC)
 
-# A -march/-m flag check alone doesn't prove a bleeding-edge TU can build, in
-# either direction:
-#   ARM   -- SME additionally needs <arm_sme.h> + the ACLE streaming/ZA keyword
-#            attributes (clang >= ~18), and FP8 needs the fpm_t/mfloat8
-#            intrinsics (clang >= ~20).
-#   x86   -- the driver can accept -mamx-tf32 while the *assembler* refuses the
-#            instruction it emits.  Intel deleted AMX-TF32 from the ISA before
-#            any silicon shipped; binutils dropped `tmmultf32ps' (gas 2.47)
-#            while GCC still advertises the flag, so gcc + new binutils dies with
-#            "`tmmultf32ps' is not supported on `x86_64'" (issues #193, #195).
-#            clang is unaffected -- its integrated assembler never asks gas.
-# These source checks compile the exact constructs the kernels use, so a
-# toolchain that can't build a TU fails them cleanly and simply skips it
-# (-> Unsupported rows) instead of breaking the build.  Compile+link only: the
-# probes never run, so no AMX XSTATE permission is involved.
+# A -march/-m flag check alone doesn't prove a bleeding-edge TU can build: SME
+# also needs <arm_sme.h> + the ACLE streaming/ZA keywords (clang >= ~18), FP8 the
+# fpm_t/mfloat8 intrinsics (clang >= ~20), and on x86 the driver can accept an
+# -mamx-* flag whose instruction the *assembler* then refuses -- that is how
+# AMX-TF32 broke gcc + binutils 2.47 builds (#193, #195) before Intel deleted the
+# ISA.  These probes compile the exact constructs the kernels use, so such a
+# toolchain skips the TU (-> Unsupported rows) instead of failing the build.
+# Compile+link only: they never run, so no AMX XSTATE permission is involved.
 #
-# NOTES for anyone adding one:
-#  * Pass the flags as a list and let the helper join them.  CMAKE_REQUIRED_FLAGS
-#    is a space-separated *string*; assigning a ;-list to it silently drops
-#    everything after the first element, which turns the probe into an
-#    unconditional "fail" and disables the TU on every compiler.
-#  * The helpers append CLPEAK_CPU_NO_LTO so the probe sees what the TU sees:
-#    distros put -flto in CMAKE_CXX_FLAGS, the probe inherits it, and a -flto
-#    probe fails for the LTRANS reason in #193 -- skipping a TU that builds fine
-#    with the -fno-lto that clpeak_add_isa_tu() gives it.
+# When adding one, mind what goes into CMAKE_REQUIRED_FLAGS.  It is a space-
+# separated *string*: assigning a ;-list drops everything after the first
+# element and the probe then fails on every compiler.  The helpers also append
+# CLPEAK_CPU_NO_LTO, so a distro -flto in CMAKE_CXX_FLAGS can't fail a probe for
+# the LTRANS reason in #193 that the TU's own -fno-lto build doesn't have.
 function(clpeak_check_sme outvar)
-    list(JOIN ARGN " " _reqflags)              # string, NOT a ;-list (see above)
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto) # probe the TU as it is really built
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sme.h>
@@ -202,8 +191,8 @@ endfunction()
 # without defining the ACLE __ARM_FEATURE_SME_F64F64 macro, so the TU is gated
 # by a CMake-passed CLPEAK_SME_F64F64 define instead -- see sme_compute.h.)
 function(clpeak_check_sme_f64 outvar)
-    list(JOIN ARGN " " _reqflags)              # string, NOT a ;-list (see above)
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto) # probe the TU as it is really built
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sme.h>
@@ -221,8 +210,8 @@ function(clpeak_check_sme_f64 outvar)
 endfunction()
 
 function(clpeak_check_neon_fp8 outvar)
-    list(JOIN ARGN " " _reqflags)              # string, NOT a ;-list (see above)
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto) # probe the TU as it is really built
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_neon.h>
@@ -239,8 +228,8 @@ function(clpeak_check_neon_fp8 outvar)
 endfunction()
 
 function(clpeak_check_sve_fp8 outvar)
-    list(JOIN ARGN " " _reqflags)              # string, NOT a ;-list (see above)
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto) # probe the TU as it is really built
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sve.h>
@@ -257,13 +246,12 @@ function(clpeak_check_sve_fp8 outvar)
     set(${outvar} ${${outvar}} PARENT_SCOPE)
 endfunction()
 
-# The AMX dtype probes below emit the exact tile op each kernel issues, so a
-# toolchain whose assembler can't encode it skips the TU rather than failing the
-# build.  Unguarded on purpose: callers are already inside the x86 + 64-bit gate,
-# and a probe that compiled vacuously elsewhere would report a false positive.
+# Emits the exact tile op the kernel issues.  Deliberately unguarded by any
+# __x86_64__ #if: callers are already inside the x86 + 64-bit gate, and a probe
+# that compiled vacuously elsewhere would report a false positive.
 function(clpeak_check_amx_tile_op outvar op)
-    list(JOIN ARGN " " _reqflags)              # string, NOT a ;-list (see above)
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto) # probe the TU as it is really built
+    list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
+    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <immintrin.h>
@@ -419,9 +407,8 @@ if(_clpeak_x86)
         # AMX is a 64-bit-only ISA: GCC/clang accept the -mamx-* flags in
         # 32-bit mode, but <immintrin.h> only declares the _tile_* intrinsics
         # under #ifdef __x86_64__, so an i686 build would compile the AMX TU and
-        # then fail with "_tile_loadd was not declared".  The tile-op probes
-        # below would catch that too; the explicit 64-bit gate keeps it obvious
-        # and saves three try_compiles.  This is in the non-
+        # then fail with "_tile_loadd was not declared".  The probes below would
+        # catch that too; the explicit gate keeps it obvious.  This is in the non-
         # real-MSVC branch, so it covers Linux clang/gcc AND Windows clang-cl
         # (the -mamx-* flags route through ${_clpeak_gnuflag}'s /clang: prefix);
         # the AMX XSTATE grant is arch_prctl on Linux / EnableProcessOptional-
@@ -439,19 +426,11 @@ if(_clpeak_x86)
             endif()
             # Newer AMX dtypes as their own TUs (each is a separate CPUID
             # feature + a newer compiler; runtime-gated so an older CPU never
-            # issues them).  amx-tile is the common base; the -mamx-fp16 /
-            # -mamx-tf32 / -mamx-fp8 flags need clang>=~18/20, and the tf32 op
-            # is gone from current binutils -- either way the probe fails and
-            # the TU is simply skipped (-> Unsupported row).
+            # issues them).  amx-tile is the common base.
             set(_amxfp16 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp16)
             clpeak_check_amx_tile_op(_clpeak_f_amxfp16 _tile_dpfp16ps ${_amxfp16})
             if(_clpeak_f_amxfp16)
                 clpeak_add_isa_tu(amxfp16 ${_amxfp16})
-            endif()
-            set(_amxtf32 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-tf32)
-            clpeak_check_amx_tile_op(_clpeak_f_amxtf32 _tile_mmultf32ps ${_amxtf32})
-            if(_clpeak_f_amxtf32)
-                clpeak_add_isa_tu(amxtf32 ${_amxtf32})
             endif()
             set(_amxfp8 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp8)
             clpeak_check_amx_tile_op(_clpeak_f_amxfp8 _tile_dphf8ps ${_amxfp8})
