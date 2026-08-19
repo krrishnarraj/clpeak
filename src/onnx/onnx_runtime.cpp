@@ -5,6 +5,7 @@
 #include <common/common.h>
 #include <common/dynlib.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 
@@ -54,10 +55,25 @@ static void loadRuntime()
     return;
   }
 
-  // Ask for the newest API we were built against, then walk down so an older
-  // installed runtime still works (GetApi returns null for unknown versions).
+  // Ask for the highest API this runtime can actually serve.  ORT numbers its
+  // API after its own minor version (1.23.x serves API 23), so the version
+  // string gives the right answer in one call -- and asking for anything
+  // higher makes ORT print "The requested API version [N] is not available"
+  // to the console, once per attempt, below any log level we control.  Simply
+  // counting down from ORT_API_VERSION produced a wall of those lines against
+  // every older runtime.
+  const char *verStr = base->GetVersionString();
+  uint32_t wanted = ORT_API_VERSION;
+  if (verStr)
+  {
+    unsigned major = 0, minor = 0;
+    if (sscanf(verStr, "%u.%u", &major, &minor) == 2 && major == 1 &&
+        minor < wanted)
+      wanted = minor;
+  }
+
   const OrtApi *api = nullptr;
-  uint32_t version = ORT_API_VERSION;
+  uint32_t version = wanted;
   for (; version >= kMinApiVersion; version--)
   {
     api = base->GetApi(version);

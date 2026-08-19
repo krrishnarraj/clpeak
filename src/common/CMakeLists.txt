@@ -1,6 +1,7 @@
 add_library(peak_common STATIC
     peak.cpp
     common.cpp
+    console_mute.cpp
     dynlib.cpp
     inventory.cpp
     logger.cpp

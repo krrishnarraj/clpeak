@@ -3,6 +3,7 @@
 #include "onnx_session.h"
 
 #include <common/common.h>
+#include <common/console_mute.h>
 
 #include <mutex>
 #include <vector>
@@ -163,6 +164,16 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
     api->ReleaseTensorRTProviderOptions(trt);
     return err;
   }
+  if (providerKey == "DnnlExecutionProvider")
+  {
+    OrtDnnlProviderOptions *dnnl = nullptr;
+    if (OrtStatus *st = api->CreateDnnlProviderOptions(&dnnl))
+      return onnxStatusText(rt, st);
+    std::string err = onnxStatusText(
+        rt, api->SessionOptionsAppendExecutionProvider_Dnnl(so, dnnl));
+    api->ReleaseDnnlProviderOptions(dnnl);
+    return err;
+  }
   if (providerKey == "ROCMExecutionProvider")
   {
     OrtROCMProviderOptions rocm{};
@@ -238,9 +249,16 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                   onnxStatusText(rt, st).c_str());
   }
 
+  // Registering a provider can drag in a second copy of the ONNX schema
+  // registry -- the XNNPACK EP emits hundreds of "Schema error: ... already
+  // registered" lines from the bundled ONNX library, straight to the console
+  // and below any ORT log level.  Mute the build; --verbose keeps it visible.
   OrtSession *session = nullptr;
-  st = api->CreateSessionFromArray(env, modelBytes.data(), modelBytes.size(),
-                                   so, &session);
+  {
+    clpeak::ScopedConsoleMute mute;
+    st = api->CreateSessionFromArray(env, modelBytes.data(), modelBytes.size(),
+                                     so, &session);
+  }
   api->ReleaseSessionOptions(so);
   if (st)
   {

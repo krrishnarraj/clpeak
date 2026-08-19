@@ -53,6 +53,22 @@ against a new header still runs on an older installed runtime.
 **Never `dlclose` the runtime.** ONNX Runtime keeps worker threads alive; the
 handle is deliberately leaked at exit.
 
+**Ask for the right API version in one call.** ORT numbers its API after its
+own minor version (1.23.x serves API 23), so `onnx_runtime.cpp` parses
+`GetVersionString()` and requests that directly. Counting down from
+`ORT_API_VERSION` instead makes ORT print `The requested API version [N] is
+not available` once per failed attempt, straight to the console and below any
+log level — six lines of it against a 1.23 runtime, before any test runs.
+
+## Vendor console spam is muted, not tolerated
+
+Registering a provider can pull in a second copy of the ONNX schema registry:
+the XNNPACK EP emits hundreds of `Schema error: ... already registered` lines
+from the bundled ONNX library, direct to the console, below any ORT log
+level. Session creation therefore runs inside `clpeak::ScopedConsoleMute`
+(`common/console_mute.h`, shared with the ROCm backend's hipBLASLt query).
+The mute is a no-op under `--verbose`.
+
 ## Models are emitted as protobuf bytes, not files
 
 `onnx_model.cpp` writes the ONNX wire format by hand (varint + length-
@@ -238,6 +254,30 @@ unsupported rather than run with defaults — silently measuring something
 unintended is the thing this backend must not do. The CPU EP is implicit in
 every session and is the one provider that registers nothing and keeps its
 fallback.
+
+## A stock onnxruntime is CPU-only
+
+The GPU and NPU providers only exist in a runtime built for them. A default
+install enumerates something like Dnnl / XNNPACK / CPU and nothing else, even
+on a machine with an obvious GPU in it — which makes the backend look broken
+when it is the runtime that cannot reach the hardware. `runAll()` emits a
+one-line note when no accelerator provider is present, pointing at
+`CLPEAK_ONNXRUNTIME_LIB`, which selects a different runtime library.
+
+## Graphs must avoid optional operator behaviour
+
+Providers implement the common shapes and decline the rest, and under the
+CPU-fallback guard one declined node fails the whole session. Two cases found
+on real hardware:
+
+- **Broadcasting.** `onnx-dispatch-latency`'s trivial graph multiplied by a
+  scalar; the XNNPACK EP implements fixed-shape elementwise ops only and
+  refused it, losing the row. Both operands now carry the same shape.
+- **Chained ops against one weight.** See the bandwidth section — the ANE
+  refuses the program outright.
+
+When a graph works on one provider and not another, suspect the optional
+behaviour before the operator.
 
 ## When You Change This Directory
 

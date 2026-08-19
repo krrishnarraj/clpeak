@@ -29,6 +29,7 @@ used by the Flutter GUI on every platform).
 | `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text + baseline deltas, and under `--describe` the wrapped test/reading documentation (desktop CLI) |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`) |
+| `console_mute.cpp` | `clpeak::ScopedConsoleMute` — silences stdout+stderr at the fd level for a scope, so vendor runtimes that print below any log level (hipBLASLt's Tensile internals, the ONNX schema registry) cannot wreck the results table. A no-op under `--verbose` |
 | `dynlib.cpp` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS) so the shipped binary needs only the driver |
 
 ## Scope invariant: one open test at a time

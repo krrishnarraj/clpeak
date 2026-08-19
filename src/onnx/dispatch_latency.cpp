@@ -36,18 +36,27 @@ double nowUs()
              std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// A one-node elementwise graph: y = x * scale over [1, width] fp16.
+// A one-node elementwise graph: y = x * k over [1, width] fp16.
+//
+// k is a full-size constant rather than a scalar on purpose.  A scalar would
+// need broadcasting, and providers that implement only fixed-shape
+// elementwise ops decline it -- the XNNPACK EP does -- which loses the row
+// that this test exists to produce.  Same shape on both operands is the
+// portable spelling.
 std::string trivialModel(int64_t width)
 {
   OnnxGraph g;
   g.input("X", ONNX_DT_FLOAT16, {1, width});
 
-  std::string sc(2, '\0');
-  uint16_t v = floatToHalf(1.0009765625f);   // not 1.0: nothing to fold away
-  std::memcpy(&sc[0], &v, 2);
-  g.initializer("scale", ONNX_DT_FLOAT16, {}, sc);
+  std::string k((size_t)width * 2, '\0');
+  {
+    uint16_t *h = reinterpret_cast<uint16_t *>(&k[0]);
+    for (int64_t i = 0; i < width; i++)
+      h[i] = floatToHalf(1.0009765625f);   // not 1.0: nothing to fold away
+  }
+  g.initializer("K", ONNX_DT_FLOAT16, {1, width}, k);
 
-  g.node("Mul", {"X", "scale"}, {"Y"});
+  g.node("Mul", {"X", "K"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT16, {1, width});
   return g.build();
 }

@@ -43,6 +43,7 @@ static const EpTableEntry kEpTable[] = {
   {"WebGpuExecutionProvider",     "WebGPU (Dawn)",                "GPU", DeviceType::Gpu},
 
   // CPU providers
+  {"DnnlExecutionProvider",       "oneDNN (Dnnl)",                "CPU", DeviceType::Cpu},
   {"XnnpackExecutionProvider",    "XNNPACK",                      "CPU", DeviceType::Cpu},
   {"CPUExecutionProvider",        "ONNX Runtime CPU",             "CPU", DeviceType::Cpu},
 };
@@ -126,6 +127,19 @@ int OnnxPeak::runAll()
     log->note("ONNX: no execution providers available\n");
     return 0;
   }
+
+  // A stock onnxruntime is built CPU-only, and its provider list says so.
+  // Without this note the backend looks broken on a machine with an obvious
+  // GPU or NPU in it -- the accelerator is fine, the runtime just cannot
+  // reach it.
+  bool hasAccelerator = false;
+  for (const auto &ep : eps)
+    if (ep.deviceType == DeviceType::Accelerator || ep.deviceType == DeviceType::Gpu)
+      hasAccelerator = true;
+  if (!hasAccelerator)
+    log->note("ONNX: this onnxruntime build exposes CPU providers only -- "
+              "install a GPU/NPU-enabled build and point "
+              "CLPEAK_ONNXRUNTIME_LIB at it to benchmark accelerators\n");
 
   auto backendScope = log->beginBackend("ONNX");
 
