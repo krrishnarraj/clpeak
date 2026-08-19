@@ -16,7 +16,7 @@ enum ResultStatus {
       };
 }
 
-/// The six canonical categories (stable vocabulary; tests within them churn).
+/// The canonical categories (stable vocabulary; tests within them churn).
 enum BenchCategory {
   fpCompute('fp_compute', 'FP Compute'),
   intCompute('int_compute', 'Integer Compute'),
@@ -24,6 +24,7 @@ enum BenchCategory {
   string('string', 'String'),
   bandwidth('bandwidth', 'Bandwidth'),
   latency('latency', 'Latency'),
+  ai('ai', 'AI'),
   unknown('unknown', 'Other');
 
   const BenchCategory(this.tag, this.label);

@@ -59,6 +59,7 @@ enum class Benchmark : unsigned int {
     BranchPenalty,      // CPU branch mispredict penalty (ns)
     StoreForward,       // CPU store-to-load forwarding roundtrip (ns)
     SmtScaling,         // CPU fp32 FMA at 1 thread/core vs all SMT threads (GFLOPS)
+    OnnxGemm,           // single-node MatMul through ONNX Runtime EP (NPU/GPU/CPU)
     KernelLatency,
     COUNT
 };
@@ -71,6 +72,7 @@ enum class Category {
     String,       // string/text processing (CPU: byte scan, UTF-8 validation)
     Bandwidth,
     Latency,
+    Ai,           // AI-composite tests (fixed transformer-block micro-graphs)
     Unknown
 };
 
@@ -110,6 +112,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::Amx:
     case Benchmark::AppleBlas:
     case Benchmark::SmtScaling:
+    case Benchmark::OnnxGemm:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:

@@ -19,6 +19,7 @@ const char *categoryString(Category c)
     case Category::String:     return "string";
     case Category::Bandwidth:  return "bandwidth";
     case Category::Latency:    return "latency";
+    case Category::Ai:         return "ai";
     case Category::Unknown:    return "";
     }
     return "";
@@ -44,6 +45,7 @@ Category categoryFromString(const std::string &s)
     if (s == "string")      return Category::String;
     if (s == "bandwidth")   return Category::Bandwidth;
     if (s == "latency")     return Category::Latency;
+    if (s == "ai")          return Category::Ai;
     return Category::Unknown;
 }
 

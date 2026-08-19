@@ -77,6 +77,9 @@ static const char *helpStr =
 #ifdef ENABLE_CPU
     "\n  --no-cpu                    skip the native CPU backend"
 #endif
+#ifdef ENABLE_ONNX
+    "\n  --no-onnx                   skip the ONNX Runtime backend"
+#endif
     "\n"
     "\n DEVICE SELECTION (indices are 0-based; comma-separated for multiple,"
     "\n default: run every device):"
@@ -99,6 +102,9 @@ static const char *helpStr =
 #ifdef ENABLE_ONEAPI
     "\n  --oneapi-device list        oneAPI/SYCL device index/indices"
 #endif
+#ifdef ENABLE_ONNX
+    "\n  --onnx-device list          ONNX Runtime execution-provider index/indices"
+#endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
     "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
@@ -109,6 +115,9 @@ static const char *helpStr =
 #endif
     "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (gbps)"
     "\n  --latency     / --no-latency         kernel-launch latency (us)"
+#ifdef ENABLE_ONNX
+    "\n  --ai          / --no-ai              AI-composite micro-graphs      [ONNX]"
+#endif
     "\n  Any positive --<category> flag switches to allow-list mode."
     "\n"
     "\n TEST SELECTION (default: every test the backend supports;"
@@ -177,6 +186,9 @@ static const char *helpStr =
     "\n  --smt-scaling                     | --no-smt-scaling               [CPU: Linux/Windows SMT]"
 #endif
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
+#ifdef ENABLE_ONNX
+    "\n  --onnx-gemm                       | --no-onnx-gemm                 [ONNX: MatMul via EP]"
+#endif
     "\n"
 #ifdef ENABLE_OPENCL
     "\n OPENCL-SPECIFIC:"
@@ -261,6 +273,8 @@ static const TestFlag testFlags[] = {
   {"image-memory-bandwidth",    Benchmark::ImageBW},
   {"transfer-bandwidth",        Benchmark::TransferBW},
   {"kernel-launch-latency",     Benchmark::KernelLatency},
+
+  {"onnx-gemm",                 Benchmark::OnnxGemm},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
@@ -276,6 +290,7 @@ static const CategoryFlag categoryFlags[] = {
   {"string",      Category::String},
   {"bandwidth",   Category::Bandwidth},
   {"latency",     Category::Latency},
+  {"ai",          Category::Ai},
 };
 static const int numCategoryFlags = sizeof(categoryFlags) / sizeof(categoryFlags[0]);
 
@@ -439,7 +454,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false, incOnnx = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
@@ -493,6 +508,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
 #ifdef ENABLE_CPU
     else if (!strcmp(a, "--no-cpu"))    out.skipCpu = true;
     else if (!strcmp(a, "--cpu"))       { incCpu = true; includeAny = true; }
+#endif
+#ifdef ENABLE_ONNX
+    else if (!strcmp(a, "--no-onnx"))   out.skipOnnx = true;
+    else if (!strcmp(a, "--onnx"))      { incOnnx = true; includeAny = true; }
 #endif
 
     // ---- iters / warmup -------------------------------------------------
@@ -613,6 +632,16 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         return invalidList(err, "oneAPI device index list", v);
     }
 #endif
+#ifdef ENABLE_ONNX
+    else if (!strcmp(a, "--onnx-device"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      if (!parseIndexList(v, out.onnxDeviceIndices))
+        return invalidList(err, "ONNX device index list", v);
+    }
+#endif
 
     // ---- OpenCL-specific timer ------------------------------------------
 #ifdef ENABLE_OPENCL
@@ -702,6 +731,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     if (!incMetal)  out.skipMetal  = true;
     if (!incOneapi) out.skipOneapi = true;
     if (!incCpu)    out.skipCpu    = true;
+    if (!incOnnx)   out.skipOnnx   = true;
   }
 
   return ParseResult::Ok;

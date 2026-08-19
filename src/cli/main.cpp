@@ -28,6 +28,9 @@
 #ifdef ENABLE_CPU
 #include <cpu/cpu_peak.h>
 #endif
+#ifdef ENABLE_ONNX
+#include <onnx/onnx_peak.h>
+#endif
 
 static void mergeResults(ResultStore &dst, const ResultStore &src)
 {
@@ -133,6 +136,18 @@ static std::vector<BackendEntry> buildBackends()
         []
         { return std::make_unique<CpuPeak>(); },
         &CliOptions::skipCpu,
+    });
+#endif
+#ifdef ENABLE_ONNX
+    out.push_back({
+        "ONNX",
+        []
+        { return OnnxPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os)
+        { OnnxPeak::printInventory(inv, os); },
+        []
+        { return std::make_unique<OnnxPeak>(); },
+        &CliOptions::skipOnnx,
     });
 #endif
     return out;

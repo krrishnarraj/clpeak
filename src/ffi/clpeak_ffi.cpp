@@ -29,6 +29,9 @@
 #ifdef ENABLE_CPU
 #include <cpu/cpu_peak.h>
 #endif
+#ifdef ENABLE_ONNX
+#include <onnx/onnx_peak.h>
+#endif
 
 #include <atomic>
 #include <cstdlib>
@@ -103,6 +106,12 @@ std::vector<BackendEntry> buildBackends()
                    [] { return CpuPeak::enumerate(); },
                    [] { return std::unique_ptr<Peak>(new CpuPeak()); },
                    &CliOptions::skipCpu});
+#endif
+#ifdef ENABLE_ONNX
+    out.push_back({"ONNX",
+                   [] { return OnnxPeak::enumerate(); },
+                   [] { return std::unique_ptr<Peak>(new OnnxPeak()); },
+                   &CliOptions::skipOnnx});
 #endif
     return out;
 }

@@ -2,7 +2,8 @@
 
 Cross-API compute benchmark tool. Measures compute, bandwidth, and latency
 across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL GPU backends —
-plus a native CPU backend — from a single binary.
+plus a native CPU backend and an ONNX Runtime backend that reaches NPUs —
+from a single binary.
 
 ## Architecture
 
@@ -14,7 +15,8 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 ├── CudaPeak   → src/cuda/                           ← CUDA backend
 ├── RocmPeak   → src/rocm/                           ← ROCm/HIP backend
 ├── MetalPeak  → src/metal/                          ← Metal backend
-└── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
+├── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
+└── OnnxPeak   → src/onnx/                           ← ONNX Runtime backend (NPUs via execution providers)
 ```
 
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
@@ -34,6 +36,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `include/metal/` | Metal backend header — `mtl_peak.h` |
 | `include/oneapi/` | oneAPI/SYCL backend header — `oneapi_peak.h` |
 | `include/cpu/` | Native CPU backend header — `cpu_peak.h` |
+| `include/onnx/` | ONNX Runtime backend header — `onnx_peak.h` |
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
@@ -42,11 +45,12 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
 | `src/oneapi/` | oneAPI/SYCL backend: `OneapiPeak` class + SYCL kernels (inline lambdas, AOT/JIT via DPC++) |
 | `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (one feature TU per ISA, runtime-dispatched); cache/DRAM bandwidth + memory latency |
+| `src/onnx/` | ONNX Runtime backend: `OnnxPeak` class + per-benchmark `.cpp`. Each execution provider (QNN / OpenVINO / VitisAI / CoreML / NNAPI / GPU / CPU) is one device; the runtime is dlopen'd and models are emitted as protobuf bytes in memory |
 | `src/cli/` | Desktop CLI: `main.cpp` |
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
-| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build) |
-| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image) |
+| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` (C API — no library needed to build) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` — refresh the vendored ONNX Runtime headers) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`--xml-file` output) per vendor — the baselines a suspicious number gets checked against |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
