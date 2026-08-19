@@ -1,6 +1,8 @@
 # cmake/version.cmake
 # Derives CLPEAK_VERSION_STR from git-describe and generates version.h from it.
-# Falls back to a hardcoded version when building from a tarball (no .git).
+# Reports "unknown" when git-describe can't run (tarball build, no .git, no git
+# binary): a hardcoded number there is worse than no number, because it silently
+# stamps every such build with a version it isn't.
 #
 # Derived once, at configure time, never during the build: the GUI build rewrites
 # tracked files (Flutter owns pubspec.lock, analysis_options.yaml and the
@@ -14,7 +16,7 @@
 # CMAKE_SOURCE_DIR points deep into the NDK/Xcode project tree).
 
 set(_CLPEAK_VERSION_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
-set(CLPEAK_VERSION_FALLBACK "2.0.16")
+set(CLPEAK_VERSION_UNKNOWN "unknown")
 
 if(NOT DEFINED CLPEAK_GIT_ROOT)
     get_filename_component(CLPEAK_GIT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
@@ -22,7 +24,7 @@ endif()
 
 find_package(Git QUIET)
 
-set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_FALLBACK}")
+set(CLPEAK_VERSION_STR "${CLPEAK_VERSION_UNKNOWN}")
 if(GIT_FOUND AND EXISTS "${CLPEAK_GIT_ROOT}/.git")
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
@@ -32,7 +34,7 @@ if(GIT_FOUND AND EXISTS "${CLPEAK_GIT_ROOT}/.git")
         ERROR_QUIET
         RESULT_VARIABLE _git_result
     )
-    if(_git_result EQUAL 0)
+    if(_git_result EQUAL 0 AND NOT _git_version STREQUAL "")
         # Strip optional leading 'v' (tags mix v1.0 and 1.1.7)
         string(REGEX REPLACE "^v" "" _git_version "${_git_version}")
         set(CLPEAK_VERSION_STR "${_git_version}")
