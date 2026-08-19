@@ -190,6 +190,8 @@ static const char *helpStr =
     "\n  --onnx-gemm                       | --no-onnx-gemm                 [ONNX: MatMul via EP]"
     "\n  --onnx-numeric-error              | --no-onnx-numeric-error        [ONNX: dtype accuracy cost]"
     "\n  --onnx-block                      | --no-onnx-block                [ONNX: transformer block]"
+    "\n  --onnx-tensor-bandwidth           | --no-onnx-tensor-bandwidth     [ONNX: resident-tensor GB/s]"
+    "\n  --onnx-dispatch-latency           | --no-onnx-dispatch-latency     [ONNX: submission overhead]"
 #endif
     "\n"
 #ifdef ENABLE_OPENCL
@@ -279,6 +281,8 @@ static const TestFlag testFlags[] = {
   {"onnx-gemm",                 Benchmark::OnnxGemm},
   {"onnx-numeric-error",        Benchmark::OnnxNumericError},
   {"onnx-block",                Benchmark::OnnxBlock},
+  {"onnx-tensor-bandwidth",     Benchmark::OnnxTensorBW},
+  {"onnx-dispatch-latency",     Benchmark::OnnxDispatchLatency},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 

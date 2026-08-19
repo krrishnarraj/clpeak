@@ -12,6 +12,8 @@ add_library(peak_onnx STATIC
     gemm.cpp
     numeric_error.cpp
     block.cpp
+    tensor_bandwidth.cpp
+    dispatch_latency.cpp
 )
 
 target_link_libraries(peak_onnx PUBLIC peak_common)

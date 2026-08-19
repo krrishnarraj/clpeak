@@ -20,6 +20,7 @@ backend.
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the dtype-accuracy benchmark? → `numeric_error.cpp`
 - Looking for the transformer-block benchmark? → `block.cpp`
+- Looking for the bandwidth / dispatch-overhead benchmarks? → `tensor_bandwidth.cpp`, `dispatch_latency.cpp`
 - Looking for the vendored C API header? → `third_party/onnxruntime/`
 
 ## Key Files
@@ -33,6 +34,8 @@ backend.
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 | `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off two timings: `onnx-block-prefill` (tflops), `onnx-block-decode` (gbps), `onnx-block-latency` (us) |
+| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
+| `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (us) |
 
 ## The runtime is dlopen'd, never linked
 
@@ -134,6 +137,41 @@ block would measure a configuration that does not exist.
 M1 Pro reference: prefill 4.8 TFLOPS against a 6.2 TFLOPS raw fp16 MatMul
 peak, i.e. a complete layer retains ~77% of the pure-matmul rate; decode
 48 GB/s; 2.4 ms per layer per token.
+
+## Measuring bandwidth needs a matmul, not something simpler
+
+`onnx-tensor-bw` streams a resident fp16 weight matrix through a GEMV,
+because that is the operation generating a token performs and the one every
+provider tunes hardest. An elementwise-plus-reduction graph reads ~22 GB/s
+on the M1 Pro against a machine that does roughly ten times that — it
+measures the reduction, not memory. Two operations per weight also puts the
+arithmetic far enough below the memory cost that only memory is left.
+
+One matmul per dispatch, deliberately. Chaining several against the same
+weights would amortise submission overhead and let the small rungs measure
+on-chip memory honestly, but **the ANE refuses a chained program outright**
+(`ANEProgramProcessRequestDirect` fails) while running the single-op form
+happily. The cost of the portable choice is that the smallest rung still
+carries one dispatch, which on a high-overhead provider says more about
+overhead than memory — the metric note says so, and the dispatch row is the
+cross-check. M1 Pro shows no cliff (unified memory, ~50 GB/s flat); a
+discrete GPU or an NPU with real SRAM should show structure.
+
+The 128 MB rung reads 50.6 GB/s and `onnx-block-decode` reads 49 GB/s from a
+completely different graph. Two independent tests landing together is the
+best evidence available here that both are measuring what they claim.
+
+## Dispatch overhead is why NPUs lose small work
+
+M1 Pro, CoreML EP vs CPU EP: an empty dispatch costs **46 µs against 2 µs**,
+and session creation **32 ms against 0.5 ms** — the Core ML figure is a
+compiler run, not bookkeeping. The consequence is visible in the same test:
+a 256-cube matmul takes 64 µs on the ANE, of which ~46 µs is the ask, so it
+lands at ~0.5 TFLOPS against a 6.2 TFLOPS peak. The CPU EP needs 430 µs for
+the same matmul despite its 20x cheaper dispatch. That crossover — cheap to
+ask but slow to compute, versus expensive to ask but fast once asked — is
+the whole reason a device advertising tens of TOPS can still lose, and no
+throughput row in this backend can show it.
 
 ## ORT's own graph rewrites can cost NPU placement
 

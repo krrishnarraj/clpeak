@@ -62,6 +62,8 @@ enum class Benchmark : unsigned int {
     OnnxGemm,           // single-node MatMul through ONNX Runtime EP (NPU/GPU/CPU)
     OnnxNumericError,   // accuracy cost of each dtype vs an fp32 CPU reference
     OnnxBlock,          // fixed transformer decoder block: prefill + decode
+    OnnxTensorBW,       // resident-tensor read bandwidth through an ONNX EP
+    OnnxDispatchLatency,// per-submission overhead of an ONNX EP
     KernelLatency,
     COUNT
 };
@@ -89,6 +91,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::LocalBW:
     case Benchmark::ImageBW:
     case Benchmark::TransferBW:
+    case Benchmark::OnnxTensorBW:
     case Benchmark::CacheBandwidth:
     case Benchmark::TextureSample:
         return Category::Bandwidth;
@@ -141,6 +144,7 @@ inline Category categoryOf(Benchmark b)
         return Category::Ai;
 
     case Benchmark::KernelLatency:
+    case Benchmark::OnnxDispatchLatency:
     case Benchmark::MemoryLatency:
     case Benchmark::Atomics:
     case Benchmark::BranchPenalty:
