@@ -1,10 +1,14 @@
 #ifdef ENABLE_ONNX
 
-// onnx-gemm: single-node MatMul peak through an ONNX Runtime execution
-// provider.  C = A x B with B an embedded constant, so the EP treats it as
-// model weights (pre-packed / kept device-side) -- the weight-stationary
-// GEMM inference is made of.  The identical in-memory model runs on every
-// EP, making NPU / GPU / CPU rows directly comparable.
+// onnx-gemm: MatMul peak through an ONNX Runtime execution provider.
+//
+// Both operands are model constants and the result is summed down to a single
+// row, so nothing large crosses the host boundary per run.  That shape is
+// forced by discrete GPUs: with A as a graph input and C returned to the
+// host, an RTX 5060 reported 15 TFLOPS for fp16 while a whole transformer
+// block -- whose weights are resident -- reached 28 on the same device.  The
+// peak was measuring PCIe.  On unified-memory devices the difference is
+// small, but the graph is identical everywhere so the rows stay comparable.
 //
 // Two scopes, because a test carries one unit: onnx-gemm-fp reports TFLOPS
 // for the float dtypes, onnx-gemm-int reports TOPS for the int8 QDQ form.
@@ -17,6 +21,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -54,11 +59,9 @@ struct Variant
 struct GemmSetup
 {
   OrtSession *session = nullptr;
-  OrtValue   *inVal   = nullptr;
-  OrtValue   *outVal  = nullptr;
+  OrtValue   *inVal   = nullptr;   // the scalar that keeps the graph live
+  OrtValue   *outVal  = nullptr;   // reduced row
   std::vector<uint8_t> inBuf, outBuf;
-  const char *inName  = "A";
-  const char *outName = "C";
   std::string error;
 };
 
@@ -126,25 +129,25 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 {
   GemmSetup g;
 
-  std::string weights;
-  fillTensor(weights, v.dtype, D * D, 0x243f6a88u);
+  std::string aRaw, bRaw;
+  fillTensor(aRaw, v.dtype, D * D, 0x9e3779b9u);
+  fillTensor(bRaw, v.dtype, D * D, 0x243f6a88u);
 
   std::string modelBytes;
   if (v.qdq)
   {
     const float s = 1.0f / 127.0f;
-    modelBytes = onnxQdqMatMulModel(D, D, D, weights, s, s, qdqOutputScale(D));
-    g.inName  = "A_q";
-    g.outName = "C_q";
+    modelBytes = onnxResidentQdqMatMulModel(D, D, D, aRaw, bRaw, s, s,
+                                            qdqOutputScale(D));
   }
   else
   {
-    modelBytes = onnxMatMulModel(D, D, D, v.dtype, weights);
+    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw);
   }
-  weights.clear();
-  weights.shrink_to_fit();
+  aRaw.clear(); aRaw.shrink_to_fit();
+  bRaw.clear(); bRaw.shrink_to_fit();
 
-  auto ses = onnxCreateSession(rt, ep, modelBytes);
+  auto ses = onnxCreateSession(rt, ep, modelBytes, /*keepConstantsUnfolded=*/true);
   if (!ses.session)
   {
     g.error = ses.error;
@@ -152,10 +155,17 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
   g.session = ses.session;
 
-  std::string a;
-  fillTensor(a, v.dtype, D * D, 0x9e3779b9u);
-  g.inBuf.assign(a.begin(), a.end());
-  g.outBuf.resize((size_t)D * D * dtypeSize(v.dtype));
+  // The QDQ graph reduces in float; the plain one keeps its own dtype.
+  const int ioDtype = v.qdq ? ONNX_DT_FLOAT : v.dtype;
+  const size_t es   = dtypeSize(ioDtype);
+  {
+    // The scalar is 1.0-ish: it scales the reduced result and exists only so
+    // the graph depends on something supplied at run time.
+    std::string one;
+    fillTensor(one, ioDtype, 1, 0x12345678u);
+    g.inBuf.assign(one.begin(), one.end());
+  }
+  g.outBuf.assign((size_t)D * es, 0);
 
   OrtMemoryInfo *mi = nullptr;
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
@@ -167,14 +177,14 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return g;
   }
 
-  const int64_t shape[2] = {D, D};
+  const int64_t outShape[1] = {D};
   st = rt.api->CreateTensorWithDataAsOrtValue(
-      mi, g.inBuf.data(), g.inBuf.size(), shape, 2,
-      (ONNXTensorElementDataType)v.dtype, &g.inVal);
+      mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
+      (ONNXTensorElementDataType)ioDtype, &g.inVal);
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, g.outBuf.data(), g.outBuf.size(), shape, 2,
-        (ONNXTensorElementDataType)v.dtype, &g.outVal);
+        mi, g.outBuf.data(), g.outBuf.size(), outShape, 1,
+        (ONNXTensorElementDataType)ioDtype, &g.outVal);
   rt.api->ReleaseMemoryInfo(mi);
   if (st)
   {
@@ -187,8 +197,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
 {
-  const char *inNames[]  = {g.inName};
-  const char *outNames[] = {g.outName};
+  static const char *inNames[]  = {"S"};
+  static const char *outNames[] = {"Y"};
 
   auto t0 = std::chrono::steady_clock::now();
   for (unsigned int i = 0; i < n; i++)
@@ -256,6 +266,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
 
+    // Smallest and largest timings, to confirm the work actually happened
+    // (see the folding check after the loop).
+    double smallestUs = 0.0, largestUs = 0.0;
+
     for (int64_t D : kDims)
     {
       if (clpeak::cancelRequested())
@@ -295,6 +309,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (mean_us <= 0.0)
         continue;
 
+      if (D == kDims[0])
+        smallestUs = mean_us;
+      largestUs = mean_us;
+
       const double ops  = 2.0 * (double)D * (double)D * (double)D;
       const double rate = ops * 1.0e6 / mean_us / 1.0e12;
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 -> %.3f\n", ep.providerKey.c_str(),
@@ -304,6 +322,25 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         best    = rate;
         bestDim = D;
       }
+    }
+
+    // Both operands are constants, so this test depends on ORT honouring the
+    // request not to fold them; if it ever stopped, the matmul would be
+    // evaluated once at load time and every timed run would measure an empty
+    // graph.  Real work grows with the cube of the size -- 64x across this
+    // ladder -- so anything close to flat means nothing was computed.  Better
+    // an error than a spectacular number.
+    if (best > 0.0 && smallestUs > 0.0 && largestUs > 0.0 &&
+        kDims[0] != kDims[2] && largestUs < smallestUs * 8.0)
+    {
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld -- "
+                  "work does not scale, constants were folded\n",
+                  ep.providerKey.c_str(), v.label, smallestUs,
+                  (long long)kDims[0], largestUs, (long long)kDims[2]);
+      best      = 0.0;
+      firstErr  = "constant folding was not disabled; timings do not scale "
+                  "with problem size";
+      errStatus = ResultStatus::Error;
     }
 
     logger::EmitOptions o;

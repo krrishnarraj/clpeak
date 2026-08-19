@@ -196,7 +196,8 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
 
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
-                                    const std::string &modelBytes)
+                                    const std::string &modelBytes,
+                                    bool keepConstantsUnfolded)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -214,6 +215,15 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   {
     res.error = onnxStatusText(rt, st);
     return res;
+  }
+
+  if (keepConstantsUnfolded)
+  {
+    st = api->AddSessionConfigEntry(
+        so, "optimization.disable_specified_optimizers", "ConstantFolding");
+    if (st)
+      CLPEAK_VLOG("onnx: disabling ConstantFolding rejected: %s\n",
+                  onnxStatusText(rt, st).c_str());
   }
 
   // The CPU EP is implicit -- every session already has it -- so it is the
@@ -243,7 +253,9 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     // as authored, which is both what makes the numbers comparable and what
     // an app targeting that NPU would have to do anyway.
     st = api->AddSessionConfigEntry(
-        so, "optimization.disable_specified_optimizers", "MatMulAddFusion");
+        so, "optimization.disable_specified_optimizers",
+        keepConstantsUnfolded ? "MatMulAddFusion;ConstantFolding"
+                              : "MatMulAddFusion");
     if (st)
       CLPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
                   onnxStatusText(rt, st).c_str());

@@ -226,6 +226,64 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
+std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
+                                    const std::string &aRaw,
+                                    const std::string &bRaw)
+{
+  OnnxGraph g;
+  g.input("S", dtype, {});                       // scalar: keeps the graph live
+  g.initializer("A", dtype, {M, K}, aRaw);
+  g.initializer("B", dtype, {K, N}, bRaw);
+
+  // ReduceMax, not ReduceSum: summing the rows of A*B equals multiplying the
+  // summed rows of A, a rewrite an optimiser is free to make and which would
+  // quietly turn this matrix multiply into a matrix-vector one.  Max does not
+  // distribute over the product, so the full result has to be computed.
+  // At opset 17 its axes are an attribute; ReduceSum takes them as an input.
+  g.node("MatMul",    {"A", "B"}, {"C"});
+  g.node("ReduceMax", {"C"}, {"R"},
+         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.node("Mul",       {"R", "S"}, {"Y"});
+  g.output("Y", dtype, {N});
+  return g.build();
+}
+
+std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
+                                       const std::string &aRawInt8,
+                                       const std::string &bRawInt8,
+                                       float aScale, float bScale, float cScale)
+{
+  const std::string zeroI8(1, '\0');
+  auto f32 = [](float v) {
+    std::string s(4, '\0');
+    std::memcpy(&s[0], &v, 4);
+    return s;
+  };
+
+  OnnxGraph g;
+  g.input("S", ONNX_DT_FLOAT, {});
+  g.initializer("A_q",     ONNX_DT_INT8,  {M, K}, aRawInt8);
+  g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
+  g.initializer("a_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, bRawInt8);
+  g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
+  g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
+  g.initializer("c_zp",    ONNX_DT_INT8,  {}, zeroI8);
+
+  // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
+  g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
+  g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
+  g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
+  g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
+  g.node("ReduceMax",        {"C_q"}, {"R_q"},
+         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.node("DequantizeLinear", {"R_q", "c_scale", "c_zp"}, {"R"});
+  g.node("Mul",              {"R", "S"}, {"Y"});
+  g.output("Y", ONNX_DT_FLOAT, {N});
+  return g.build();
+}
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------

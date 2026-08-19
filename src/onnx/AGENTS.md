@@ -116,6 +116,13 @@ it resolves which engine actually ran the work. Reference readings, M1 Pro:
 |-----|------|------|----------|
 | CPU EP | 0.0 ppm | 207 ppm | 9463 ppm |
 | CoreML EP | 0.4 ppm | 214 ppm | (unsupported) |
+| CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 9467 ppm |
+
+The CUDA fp32 row is the design paying off on a second vendor: 261 ppm is
+worse than fp16's, which is not what fp32 arithmetic looks like. It is TF32 —
+ten mantissa bits, the same as fp16 — which cuBLAS selects by default. The
+"fp32" throughput row on NVIDIA is therefore a TF32 number, and only the
+error row says so.
 
 CPU-EP fp32 at exactly 0.0 is the methodology validating itself. CoreML's
 fp16 error matching the CPU's says both accumulate in fp16 — combined with
@@ -152,9 +159,45 @@ ahead of time. A 7B block is 4x the size for no extra insight and minutes of
 AOT compile. fp16 only — nobody serves an LLM in fp32, so a full-precision
 block would measure a configuration that does not exist.
 
-M1 Pro reference: prefill 4.8 TFLOPS against a ~6.0 TFLOPS raw fp16 MatMul
-peak, i.e. a complete layer retains ~80% of the pure-matmul rate; decode
-48 GB/s; 2.4 ms per layer per token.
+M1 Pro reference: prefill 4.8 TFLOPS against an 8.8 TFLOPS raw fp16 MatMul
+peak, so a complete layer retains ~55% of the pure-matmul rate; decode
+48 GB/s; 2.4 ms per layer per token. The block still passes its activations
+across the host boundary each run (2 MB in, 2 MB out), so on a discrete GPU
+its numbers carry a transfer component the GEMM rows no longer do — worth
+fixing the same way if the two are ever compared closely.
+
+## Throughput graphs keep both operands resident
+
+`onnx-gemm` makes **A and B both initializers** and reduces the result to one
+row, so nothing large crosses the host boundary per run. The obvious shape —
+A as a graph input, C returned to the host — measures a discrete GPU through
+its PCIe bus. On an RTX 5060 it reported 15 TFLOPS for fp16 while
+`onnx-block`, whose weights are resident, reached 28 on the same device: a
+composite layer beating the peak of the operation it is built from, which is
+impossible and was the tell. Even on the ANE, where memory is unified, going
+resident moved fp16 from 6.0 to 8.8 TFLOPS.
+
+Three details are load-bearing:
+
+- **Constant folding must be off** (`keepConstantsUnfolded` on
+  `onnxCreateSession`). Two constant operands are otherwise multiplied once at
+  load time and every timed run measures an empty graph. `gemm.cpp` guards
+  this: real work grows with the cube of the size, 64x across the ladder, so
+  timings that stay flat are reported as an error rather than as a
+  spectacular number.
+- **Reduce with `ReduceMax`, never `ReduceSum`.** Summing the rows of `A*B`
+  equals multiplying the summed rows of `A` — a rewrite an optimiser is free
+  to make, and it would quietly turn the matrix multiply into a matrix-vector
+  one. Max does not distribute over the product. (At opset 17 `ReduceMax`
+  takes its axes as an attribute while `ReduceSum` takes them as an input.)
+- **Nothing may sit between the dequantize and the matmul** in the QDQ form,
+  or ORT stops recognising a quantized matmul and silently measures float
+  arithmetic. The scaling input therefore hangs off the far end, and the
+  reduction runs on the int8 result — ORT reduces int8 directly, so the tail
+  costs one pass instead of dequantizing the whole product first.
+
+`numeric_error.cpp` keeps using the plain, non-resident models: it compares
+actual output values, so it needs the real result rather than a reduction.
 
 ## Sizes are swept, never chosen by a probe
 

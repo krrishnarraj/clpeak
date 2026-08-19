@@ -91,6 +91,31 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRawInt8,
                                float aScale, float bScale, float cScale);
 
+// Throughput-shaped GEMM: both operands are initializers and the result is
+// summed down to one row, so nothing large crosses the host boundary on each
+// run.  With A as a graph input and C returned to the host -- the obvious
+// shape -- a discrete GPU is measured through its PCIe bus instead of its
+// tensor cores: on an RTX 5060 that reported 15 TFLOPS for a fp16 matmul
+// while a whole transformer block, whose weights are resident, reached 28.
+//
+// A scalar input scales the reduced result, so the graph has a runtime
+// dependency, and the session must disable constant folding or ORT will
+// evaluate the entire matmul once at load time.  `gemm.cpp` cross-checks that
+// timings still scale with the cube of the size, which is what folding would
+// break.
+std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
+                                    const std::string &aRaw,
+                                    const std::string &bRaw);
+
+// Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
+// is left untouched -- inserting anything between the dequantize and the
+// matmul stops ORT recognising it as a quantized matmul at all, which would
+// silently measure float arithmetic.
+std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
+                                       const std::string &aRawInt8,
+                                       const std::string &bRawInt8,
+                                       float aScale, float bScale, float cScale);
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------

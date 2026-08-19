@@ -25,9 +25,14 @@ struct OnnxSessionResult
 // EP is appended with clpeak's default options for that provider and CPU
 // fallback is disabled.  On failure `error` carries a one-line reason
 // suitable for a skip row.
+// `keepConstantsUnfolded` stops ORT evaluating a subgraph of constants at
+// load time.  Needed only by the throughput models whose operands are both
+// initializers -- without it the whole matmul is computed once during session
+// creation and every timed run measures nothing.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
-                                    const std::string &modelBytes);
+                                    const std::string &modelBytes,
+                                    bool keepConstantsUnfolded = false);
 
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
