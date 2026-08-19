@@ -1,10 +1,15 @@
 #ifdef ENABLE_ONNX
 
 // onnx-gemm: single-node MatMul peak through an ONNX Runtime execution
-// provider.  C[D,D] = A[D,D] x B[D,D] with B an embedded constant, so the EP
-// treats it as model weights (pre-packed / kept device-side), which is the
-// weight-stationary GEMM inference is made of.  The identical in-memory
-// model runs on every EP, making NPU / GPU / CPU rows directly comparable.
+// provider.  C = A x B with B an embedded constant, so the EP treats it as
+// model weights (pre-packed / kept device-side) -- the weight-stationary
+// GEMM inference is made of.  The identical in-memory model runs on every
+// EP, making NPU / GPU / CPU rows directly comparable.
+//
+// Two scopes, because a test carries one unit: onnx-gemm-fp reports TFLOPS
+// for the float dtypes, onnx-gemm-int reports TOPS for the int8 QDQ form.
+// int8 is the dtype most NPUs are actually built for, so an NPU that only
+// shows up in the int scope is the expected shape, not a gap.
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
@@ -19,12 +24,20 @@ namespace
 {
 
 // Probe size and the per-iteration time the chosen size should land at.
-// 20 ms/iter with the 5 s BLAS-style budget gives a ~250-dispatch timed
-// phase -- long enough to ride out NPU/GPU clock ramps.
-constexpr int64_t kProbeDim       = 1024;
-constexpr double  kTargetIterUs   = 20000.0;
-constexpr int64_t kMinDim         = 1024;
-constexpr int64_t kMaxDim         = 4096;   // 4096^3 keeps EP graph compiles sane
+// 20 ms/iter against the 5 s budget gives a ~250-dispatch timed phase --
+// long enough to ride out NPU/GPU clock ramps.
+constexpr int64_t kProbeDim     = 1024;
+constexpr double  kTargetIterUs = 20000.0;
+constexpr int64_t kMinDim       = 1024;
+constexpr int64_t kMaxDim       = 4096;   // keeps EP graph-compile times sane
+
+struct Variant
+{
+  int         dtype;    // element type of the graph's input/output
+  bool        qdq;      // build the quantized (DequantizeLinear/MatMul/Q) form
+  const char *label;
+  const char *note;
+};
 
 struct GemmSetup
 {
@@ -32,32 +45,55 @@ struct GemmSetup
   OrtValue   *inVal   = nullptr;
   OrtValue   *outVal  = nullptr;
   std::vector<uint8_t> inBuf, outBuf;
+  const char *inName  = "A";
+  const char *outName = "C";
   std::string error;
 };
 
-size_t dtypeSize(int dtype) { return dtype == ONNX_DT_FLOAT ? 4 : 2; }
-
-// Deterministic small values in [-0.5, 0.5): keeps fp16 accumulations far
-// from overflow and avoids the NaN/denormal slow paths raw bit patterns hit.
-void fillWeights(std::string &raw, int dtype, int64_t count)
+size_t dtypeSize(int dtype)
 {
-  uint32_t s = 0x243f6a88u;
-  raw.resize((size_t)count * dtypeSize(dtype));
-  float    *f = reinterpret_cast<float *>(&raw[0]);
-  uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-  for (int64_t i = 0; i < count; i++)
+  switch (dtype)
   {
-    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    float v = (float)(s >> 8) / 16777216.0f - 0.5f;
-    if (dtype == ONNX_DT_FLOAT)        f[i] = v;
-    else if (dtype == ONNX_DT_FLOAT16) h[i] = floatToHalf(v);
-    else                               h[i] = floatToBf16(v);
+  case ONNX_DT_FLOAT:                     return 4;
+  case ONNX_DT_FLOAT16: case ONNX_DT_BFLOAT16: return 2;
+  default:                                return 1;   // int8 / uint8
   }
 }
 
-// Releases the ORT handles and drops the buffers.  Deliberately leaves
-// `error` intact: callers tear a failed setup down and then report its
-// message.
+// Deterministic values, generated once and reused for inputs and weights.
+// Floats land in [-0.5, 0.5) and int8 in [-127, 127]: small magnitudes keep
+// fp16 accumulation over a 4096-deep dot product far from overflow, and
+// avoid the NaN/denormal slow paths raw random bit patterns would hit.
+void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
+{
+  uint32_t s = seed;
+  raw.resize((size_t)count * dtypeSize(dtype));
+  float    *f = reinterpret_cast<float *>(&raw[0]);
+  uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
+  int8_t   *q = reinterpret_cast<int8_t *>(&raw[0]);
+  for (int64_t i = 0; i < count; i++)
+  {
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+    float v = (float)(s >> 8) / 16777216.0f - 0.5f;      // [-0.5, 0.5)
+    switch (dtype)
+    {
+    case ONNX_DT_FLOAT:    f[i] = v; break;
+    case ONNX_DT_FLOAT16:  h[i] = floatToHalf(v); break;
+    case ONNX_DT_BFLOAT16: h[i] = floatToBf16(v); break;
+    default:               q[i] = (int8_t)(v * 254.0f); break;   // [-127, 127]
+    }
+  }
+}
+
+// Output scale for the QDQ form.  Each dequantized product is a pair of
+// values in [-1, 1], so a K-deep dot product has standard deviation
+// sqrt(K)/3; four sigma keeps nearly every output inside int8 without
+// compressing the useful range into a handful of codes.
+float qdqOutputScale(int64_t K)
+{
+  return (float)(4.0 * std::sqrt((double)K) / 3.0 / 127.0);
+}
+
 void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 {
   if (g.inVal)   rt.api->ReleaseValue(g.inVal);
@@ -68,17 +104,31 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
   g.session = nullptr;
   g.inBuf.clear();  g.inBuf.shrink_to_fit();
   g.outBuf.clear(); g.outBuf.shrink_to_fit();
+  // `error` is deliberately left intact: callers tear a failed setup down
+  // and then report its message.
 }
 
-// Build model + session + bound input/output tensors for one (dtype, D).
+// Build model + session + bound input/output tensors for one (variant, D).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                    int dtype, int64_t D)
+                    const Variant &v, int64_t D)
 {
   GemmSetup g;
 
   std::string weights;
-  fillWeights(weights, dtype, D * D);
-  std::string modelBytes = onnxMatMulModel(D, D, D, dtype, weights);
+  fillTensor(weights, v.dtype, D * D, 0x243f6a88u);
+
+  std::string modelBytes;
+  if (v.qdq)
+  {
+    const float s = 1.0f / 127.0f;
+    modelBytes = onnxQdqMatMulModel(D, D, D, weights, s, s, qdqOutputScale(D));
+    g.inName  = "A_q";
+    g.outName = "C_q";
+  }
+  else
+  {
+    modelBytes = onnxMatMulModel(D, D, D, v.dtype, weights);
+  }
   weights.clear();
   weights.shrink_to_fit();
 
@@ -90,14 +140,10 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
   g.session = ses.session;
 
-  const size_t es = dtypeSize(dtype);
-  g.inBuf.resize((size_t)D * D * es);
-  g.outBuf.resize((size_t)D * D * es);
-  {
-    std::string a;
-    fillWeights(a, dtype, D * D);
-    std::memcpy(g.inBuf.data(), a.data(), a.size());
-  }
+  std::string a;
+  fillTensor(a, v.dtype, D * D, 0x9e3779b9u);
+  g.inBuf.assign(a.begin(), a.end());
+  g.outBuf.resize((size_t)D * D * dtypeSize(v.dtype));
 
   OrtMemoryInfo *mi = nullptr;
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
@@ -112,11 +158,11 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const int64_t shape[2] = {D, D};
   st = rt.api->CreateTensorWithDataAsOrtValue(
       mi, g.inBuf.data(), g.inBuf.size(), shape, 2,
-      (ONNXTensorElementDataType)dtype, &g.inVal);
+      (ONNXTensorElementDataType)v.dtype, &g.inVal);
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
         mi, g.outBuf.data(), g.outBuf.size(), shape, 2,
-        (ONNXTensorElementDataType)dtype, &g.outVal);
+        (ONNXTensorElementDataType)v.dtype, &g.outVal);
   rt.api->ReleaseMemoryInfo(mi);
   if (st)
   {
@@ -129,8 +175,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
 {
-  static const char *inNames[]  = {"A"};
-  static const char *outNames[] = {"C"};
+  const char *inNames[]  = {g.inName};
+  const char *outNames[] = {g.outName};
 
   auto t0 = std::chrono::steady_clock::now();
   for (unsigned int i = 0; i < n; i++)
@@ -154,10 +200,30 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg, Category category)
 {
   (void)cfg;
-  (void)category;
+  const bool isInt = (category == Category::IntCompute);
+
+  static const Variant kFpVariants[] = {
+    {ONNX_DT_FLOAT,   false, "fp32",
+     "Full 32-bit precision.  Many NPUs cannot run this at all, or route it "
+     "away from the matrix hardware -- that is a finding, not a failure."},
+    {ONNX_DT_FLOAT16, false, "fp16",
+     "16-bit floats, the native currency of most NPU matrix hardware."},
+  };
+  static const Variant kIntVariants[] = {
+    {ONNX_DT_INT8, true, "int8_qdq",
+     "8-bit integers in QDQ form -- quantized in, quantized out, the shape "
+     "quantized inference actually ships in.  This is what an NPU's headline "
+     "TOPS figure is quoted for."},
+  };
+
+  const Variant *variants = isInt ? kIntVariants : kFpVariants;
+  const size_t   nVariants = isInt ? 1 : 2;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-gemm-fp", "ONNX MatMul peak", "tflops", Category::Unknown,
+      {isInt ? "onnx-gemm-int" : "onnx-gemm-fp",
+       isInt ? "ONNX MatMul peak (int8)" : "ONNX MatMul peak",
+       isInt ? "tops" : "tflops",
+       Category::Unknown,
        "Matrix-multiply speed through ONNX Runtime on this execution "
        "provider, using a single-operation model with constant weights.  "
        "The identical model runs on every provider, so NPU, GPU and CPU "
@@ -166,64 +232,64 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "Providers that cannot run an operation entirely on their device "
        "report it as unsupported instead of quietly measuring the CPU."});
 
-  const char *fp32Note = "Full 32-bit precision.  Many NPUs cannot run this "
-                         "at all, or route it away from the matrix hardware "
-                         "-- that is a finding, not a failure.";
-  const char *fp16Note = "16-bit floats, the native currency of most NPU "
-                         "matrix hardware.";
-
-  struct Variant { int dtype; const char *label; const char *note; };
-  const Variant variants[] = {
-      {ONNX_DT_FLOAT,   "fp32", fp32Note},
-      {ONNX_DT_FLOAT16, "fp16", fp16Note},
-  };
-
   // ---- Size probe -------------------------------------------------------
-  // One size per device, chosen from a small fp32 (or fp16) probe run and
-  // bucketed coarsely so a device doesn't drift between sizes run to run.
+  // One size per scope, from a small probe, bucketed coarsely so a device
+  // does not drift between neighbouring sizes run to run.
   int64_t D = 0;
-  for (const Variant &v : variants)
+  std::string probeError;
+  for (size_t i = 0; i < nVariants && D == 0; i++)
   {
-    GemmSetup probe = makeSetup(rt, ep, v.dtype, kProbeDim);
+    GemmSetup probe = makeSetup(rt, ep, variants[i], kProbeDim);
     if (!probe.session)
+    {
+      if (probeError.empty())
+        probeError = probe.error;
       continue;
+    }
     timeRuns(rt, probe, 1);                       // discard: first-run compile
     double t0 = timeRuns(rt, probe, 3);
+    if (t0 > 0.0)
+    {
+      D = (int64_t)((double)kProbeDim * std::cbrt(kTargetIterUs / t0));
+      D = ((D + 512) / 1024) * 1024;
+      if (D < kMinDim) D = kMinDim;
+      if (D > kMaxDim) D = kMaxDim;
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: probe %.0f us/iter at %lld -> D=%lld\n",
+                  ep.providerKey.c_str(), variants[i].label, t0,
+                  (long long)kProbeDim, (long long)D);
+    }
+    else if (probeError.empty())
+    {
+      probeError = probe.error;
+    }
     destroySetup(rt, probe);
-    if (t0 <= 0.0)
-      continue;
-    D = (int64_t)((double)kProbeDim * std::cbrt(kTargetIterUs / t0));
-    D = ((D + 512) / 1024) * 1024;
-    if (D < kMinDim) D = kMinDim;
-    if (D > kMaxDim) D = kMaxDim;
-    CLPEAK_VLOG("onnx-gemm[%s]: probe %.0f us/iter at %lld -> D=%lld\n",
-                ep.providerKey.c_str(), t0, (long long)kProbeDim, (long long)D);
-    break;
   }
   if (D == 0)
   {
-    // Not even the probe session could be built on this EP.
-    GemmSetup why = makeSetup(rt, ep, ONNX_DT_FLOAT, kProbeDim);
-    std::string reason = why.error.empty() ? "no supported datatype" : why.error;
-    destroySetup(rt, why);
-    test.skipAll({"fp32", "fp16"}, ResultStatus::Unsupported, reason);
+    std::vector<std::string> names;
+    for (size_t i = 0; i < nVariants; i++)
+      names.push_back(variants[i].label);
+    for (const auto &n : names)
+      test.skip(n, ResultStatus::Unsupported,
+                probeError.empty() ? "no supported datatype" : probeError);
     return 0;
   }
 
-  const double flops = 2.0 * (double)D * (double)D * (double)D;
+  const double ops = 2.0 * (double)D * (double)D * (double)D;
   const std::string dims = std::to_string(D) + "x" + std::to_string(D) +
                            "x" + std::to_string(D) + ".  ";
 
   // ---- Per-dtype measurement ---------------------------------------------
-  for (const Variant &v : variants)
+  for (size_t i = 0; i < nVariants; i++)
   {
     if (clpeak::cancelRequested())
       break;
+    const Variant &v = variants[i];
 
     logger::EmitOptions o;
     o.description = dims + v.note;
 
-    GemmSetup g = makeSetup(rt, ep, v.dtype, D);
+    GemmSetup g = makeSetup(rt, ep, v, D);
     if (!g.session)
     {
       test.skip(v.label, ResultStatus::Unsupported, g.error, o.description);
@@ -252,7 +318,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       continue;
     }
 
-    test.emit(v.label, (float)(flops * 1.0e6 / mean_us / 1.0e12), o);
+    test.emit(v.label, (float)(ops * 1.0e6 / mean_us / 1.0e12), o);
   }
 
   test.end();

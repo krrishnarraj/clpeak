@@ -160,6 +160,14 @@ int OnnxPeak::runAll()
     if (isAllowedAs(Benchmark::OnnxGemm, Category::FpCompute))
       runGemm(*rt, ep, cfg, Category::FpCompute);
 
+    // ---- Phase 2: integer compute (int8 QDQ) -----------------------------
+    if (isAllowedAs(Benchmark::OnnxGemm, Category::IntCompute))
+      runGemm(*rt, ep, cfg, Category::IntCompute);
+
+    // ---- Phase 3: what the speed rows above cost in accuracy -------------
+    if (isAllowed(Benchmark::OnnxNumericError))
+      runNumericError(*rt, ep, cfg);
+
     currentDeviceScope = nullptr;
   }
 

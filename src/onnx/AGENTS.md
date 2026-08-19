@@ -18,6 +18,7 @@ backend.
 - Looking for session creation / per-EP options / the CPU-fallback guard? → `onnx_session.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
+- Looking for the dtype-accuracy benchmark? → `numeric_error.cpp`
 - Looking for the vendored C API header? → `third_party/onnxruntime/`
 
 ## Key Files
@@ -27,8 +28,9 @@ backend.
 | `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()`, `runAll()`, `enumerate()`, `printInventory()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime once per process and resolves the `OrtApi` table |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
-| `onnx_model.cpp` | `onnxMatMulModel()` — emits ONNX protobuf wire format directly; `floatToHalf`/`floatToBf16` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak, fp32 + fp16 |
+| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 
 ## The runtime is dlopen'd, never linked
 
@@ -73,9 +75,40 @@ graph the EP cannot take **fails session creation** and the row reports
 Limits worth knowing: the guard is enforced at the ORT partitioning level.
 An EP that accepts a node and then falls back *internally* (CoreML choosing
 CPU over the ANE; QNN dropping from HTP to the DSP) is invisible to ORT and
-to clpeak. Cross-reading against the CPU EP row — always run, always last —
-is the practical check: an accelerator row within noise of the CPU row is
-the signal to distrust it.
+to clpeak. Two cross-checks close most of that gap: the CPU EP row — always
+enumerated, always last — should be far below any accelerator row, and the
+`onnx-numeric-error` fp32 row exposes an EP that took an fp32 graph and
+computed it at lower precision (see below).
+
+## What the numeric-error rows are for
+
+A TOPS figure without an accuracy figure is half a number: int8 is fast
+because it discarded precision, and the speed row cannot say how much. Each
+dtype is therefore also measured as relative RMS error against an fp32
+reference built from *the same values the reduced-precision run saw* —
+widened, not re-generated — and computed on the CPU EP.
+
+The fp32 row doubles as a precision-downgrade detector, and on Apple silicon
+it resolves which engine actually ran the work. Reference readings, M1 Pro:
+
+| Row | fp32 | fp16 | int8 QDQ |
+|-----|------|------|----------|
+| CPU EP | 0.0 ppm | 207 ppm | 9463 ppm |
+| CoreML EP | 0.4 ppm | 214 ppm | (unsupported) |
+
+CPU-EP fp32 at exactly 0.0 is the methodology validating itself. CoreML's
+fp16 error matching the CPU's says both accumulate in fp16 — combined with
+6.2 TFLOPS (1.5x this machine's MPS GEMM fp16 peak) that row is the ANE.
+CoreML's fp32 row is the interesting one: 0.4 ppm rules out fp16 arithmetic,
+and its ~2.0 TFLOPS sits in the Accelerate sgemm band (2.18 best / 1.67 at
+8k, `results/Apple/M1_Pro.xml`) — so CoreML serves fp32 from the CPU matrix
+coprocessor, not the Neural Engine, an internal routing decision ORT never
+reports.
+
+**int8 QDQ is unsupported on the CoreML EP** — it declines the
+DequantizeLinear/MatMul/QuantizeLinear graph outright, which is what makes
+the guard fire. The graph shape is not the problem: the CPU EP runs the same
+bytes at 1.7 TOPS, 3.7x its own fp32.
 
 ## Per-EP session options live in one place
 

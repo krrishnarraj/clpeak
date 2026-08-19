@@ -60,6 +60,7 @@ enum class Benchmark : unsigned int {
     StoreForward,       // CPU store-to-load forwarding roundtrip (ns)
     SmtScaling,         // CPU fp32 FMA at 1 thread/core vs all SMT threads (GFLOPS)
     OnnxGemm,           // single-node MatMul through ONNX Runtime EP (NPU/GPU/CPU)
+    OnnxNumericError,   // accuracy cost of each dtype vs an fp32 CPU reference
     KernelLatency,
     COUNT
 };
@@ -113,6 +114,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::AppleBlas:
     case Benchmark::SmtScaling:
     case Benchmark::OnnxGemm:
+    case Benchmark::OnnxNumericError:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:

@@ -45,6 +45,8 @@ public:
   // Per-benchmark entry points (one .cpp each, like the other backends).
   int runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               benchmark_config_t &cfg, Category category);
+  int runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                      benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
 };

@@ -188,6 +188,7 @@ static const char *helpStr =
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
 #ifdef ENABLE_ONNX
     "\n  --onnx-gemm                       | --no-onnx-gemm                 [ONNX: MatMul via EP]"
+    "\n  --onnx-numeric-error              | --no-onnx-numeric-error        [ONNX: dtype accuracy cost]"
 #endif
     "\n"
 #ifdef ENABLE_OPENCL
@@ -275,6 +276,7 @@ static const TestFlag testFlags[] = {
   {"kernel-launch-latency",     Benchmark::KernelLatency},
 
   {"onnx-gemm",                 Benchmark::OnnxGemm},
+  {"onnx-numeric-error",        Benchmark::OnnxNumericError},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
