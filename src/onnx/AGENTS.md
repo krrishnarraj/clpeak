@@ -105,10 +105,12 @@ CPU-EP fp32 at exactly 0.0 is the methodology validating itself. CoreML's
 fp16 error matching the CPU's says both accumulate in fp16 — combined with
 6.2 TFLOPS (1.5x this machine's MPS GEMM fp16 peak) that row is the ANE.
 CoreML's fp32 row is the interesting one: 0.4 ppm rules out fp16 arithmetic,
-and its ~2.0 TFLOPS sits in the Accelerate sgemm band (2.18 best / 1.67 at
-8k, `results/Apple/M1_Pro.xml`) — so CoreML serves fp32 from the CPU matrix
-coprocessor, not the Neural Engine, an internal routing decision ORT never
-reports.
+and its 2.3 TFLOPS sits in the Accelerate sgemm band (2.18 best over a size
+sweep, `results/Apple/M1_Pro.xml`) — so CoreML serves fp32 from the CPU
+matrix coprocessor, not the Neural Engine, an internal routing decision ORT
+never reports. The size curves above agree: the fp32 row behaves like AMX
+(faster the bigger it gets) and the fp16 row like the ANE (a cliff once it
+outgrows on-chip memory).
 
 **int8 QDQ is unsupported on the CoreML EP** — it declines the
 DequantizeLinear/MatMul/QuantizeLinear graph outright, which is what makes
@@ -134,9 +136,41 @@ ahead of time. A 7B block is 4x the size for no extra insight and minutes of
 AOT compile. fp16 only — nobody serves an LLM in fp32, so a full-precision
 block would measure a configuration that does not exist.
 
-M1 Pro reference: prefill 4.8 TFLOPS against a 6.2 TFLOPS raw fp16 MatMul
-peak, i.e. a complete layer retains ~77% of the pure-matmul rate; decode
+M1 Pro reference: prefill 4.8 TFLOPS against a ~6.0 TFLOPS raw fp16 MatMul
+peak, i.e. a complete layer retains ~80% of the pure-matmul rate; decode
 48 GB/s; 2.4 ms per layer per token.
+
+## Sizes are swept, never chosen by a probe
+
+`gemm.cpp` runs a fixed 1024/2048/4096 ladder and reports each datatype's
+best. Picking one size from a timing probe — the pattern `mps-gemm` uses —
+was tried first and is unstable: the estimate comes out of a cube root and
+is then bucketed, so a 2% wobble in the probe can push it across a bucket
+edge, and the size changes the answer. On the M1 Pro the fp16 row alternated
+between 5.8 and 6.2 TFLOPS run to run purely on which side it landed.
+
+No single size is right anyway, which the ladder makes visible:
+
+| CoreML EP | 1024³ | 2048³ | 4096³ |
+|-----------|-------|-------|-------|
+| fp32 | 1.76 | 1.94 | **2.32** |
+| fp16 | 3.13 | **5.98** | 5.57 |
+
+fp32 climbs to 4096 while fp16 peaks at 2048 and *falls* — the two rows are
+served by different engines (see the numeric-error section) with different
+fast-memory limits, and the fp16 drop is the Neural Engine spilling its
+on-chip memory, the same cliff Apple silicon is independently reported to
+have between those two sizes. The CPU EP is flat across the ladder, as a
+cache-blocked CPU should be.
+
+A fixed ladder also means two devices are always compared on identical work,
+which an adaptive probe cannot promise. The per-size budget is 2 s rather
+than the 5 s a single-size test would use, so sweeping three costs about
+what measuring one did.
+
+**`mps-gemm` in the Metal backend still uses the probe pattern** and carries
+the same latent instability; whether it bites depends on where that device's
+estimate lands relative to a bucket edge.
 
 ## Measuring bandwidth needs a matmul, not something simpler
 

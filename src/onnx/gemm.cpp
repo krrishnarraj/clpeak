@@ -23,13 +23,25 @@
 namespace
 {
 
-// Probe size and the per-iteration time the chosen size should land at.
-// 20 ms/iter against the 5 s budget gives a ~250-dispatch timed phase --
-// long enough to ride out NPU/GPU clock ramps.
-constexpr int64_t kProbeDim     = 1024;
-constexpr double  kTargetIterUs = 20000.0;
-constexpr int64_t kMinDim       = 1024;
-constexpr int64_t kMaxDim       = 4096;   // keeps EP graph-compile times sane
+// A fixed ladder, swept in full, best result reported -- deliberately not a
+// size chosen from a timing probe.  Two reasons.
+//
+// A probe is unstable: the size it picks comes out of a cube root and then
+// gets bucketed, so a couple of percent of timing noise can push the estimate
+// across a bucket edge and change the size, and the size changes the answer.
+// On this Mac that made the fp16 row alternate between 5.8 and 6.2 TFLOPS
+// depending on nothing but which side of the boundary the probe landed.
+//
+// And no single size is right anyway: on the same device fp32 runs faster at
+// 3072 while fp16 runs faster at 2048, because they are served by different
+// engines with different fast-memory limits.  Sweeping asks each datatype
+// where its own peak is; a fixed ladder also means two devices are always
+// compared on identical work.
+constexpr int64_t kDims[] = {1024, 2048, 4096};
+
+// Per-size budget for the timed phase.  Lower than the 5 s a single-size test
+// would use, so sweeping three sizes costs about what measuring one did.
+constexpr unsigned int kSizeBudgetUs = 2000000;
 
 struct Variant
 {
@@ -232,93 +244,82 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "Providers that cannot run an operation entirely on their device "
        "report it as unsupported instead of quietly measuring the CPU."});
 
-  // ---- Size probe -------------------------------------------------------
-  // One size per scope, from a small probe, bucketed coarsely so a device
-  // does not drift between neighbouring sizes run to run.
-  int64_t D = 0;
-  std::string probeError;
-  for (size_t i = 0; i < nVariants && D == 0; i++)
-  {
-    GemmSetup probe = makeSetup(rt, ep, variants[i], kProbeDim);
-    if (!probe.session)
-    {
-      if (probeError.empty())
-        probeError = probe.error;
-      continue;
-    }
-    timeRuns(rt, probe, 1);                       // discard: first-run compile
-    double t0 = timeRuns(rt, probe, 3);
-    if (t0 > 0.0)
-    {
-      D = (int64_t)((double)kProbeDim * std::cbrt(kTargetIterUs / t0));
-      D = ((D + 512) / 1024) * 1024;
-      if (D < kMinDim) D = kMinDim;
-      if (D > kMaxDim) D = kMaxDim;
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: probe %.0f us/iter at %lld -> D=%lld\n",
-                  ep.providerKey.c_str(), variants[i].label, t0,
-                  (long long)kProbeDim, (long long)D);
-    }
-    else if (probeError.empty())
-    {
-      probeError = probe.error;
-    }
-    destroySetup(rt, probe);
-  }
-  if (D == 0)
-  {
-    std::vector<std::string> names;
-    for (size_t i = 0; i < nVariants; i++)
-      names.push_back(variants[i].label);
-    for (const auto &n : names)
-      test.skip(n, ResultStatus::Unsupported,
-                probeError.empty() ? "no supported datatype" : probeError);
-    return 0;
-  }
-
-  const double ops = 2.0 * (double)D * (double)D * (double)D;
-  const std::string dims = std::to_string(D) + "x" + std::to_string(D) +
-                           "x" + std::to_string(D) + ".  ";
-
-  // ---- Per-dtype measurement ---------------------------------------------
+  // ---- Sweep every size, keep each datatype's best ----------------------
   for (size_t i = 0; i < nVariants; i++)
   {
     if (clpeak::cancelRequested())
       break;
     const Variant &v = variants[i];
 
-    logger::EmitOptions o;
-    o.description = dims + v.note;
+    double      best     = 0.0;
+    int64_t     bestDim  = 0;
+    std::string firstErr;
+    ResultStatus errStatus = ResultStatus::Unsupported;
 
-    GemmSetup g = makeSetup(rt, ep, v, D);
-    if (!g.session)
+    for (int64_t D : kDims)
     {
-      test.skip(v.label, ResultStatus::Unsupported, g.error, o.description);
-      continue;
-    }
+      if (clpeak::cancelRequested())
+        break;
 
-    double per_iter_us = -1.0;
-    if (timeRuns(rt, g, 1 + warmupCount) > 0.0)    // compile + warmup
-      per_iter_us = timeRuns(rt, g, 3);            // calibration probe
-    if (per_iter_us <= 0.0)
-    {
-      test.skip(v.label, ResultStatus::Error,
-                g.error.empty() ? "run failed" : g.error, o.description);
+      GemmSetup g = makeSetup(rt, ep, v, D);
+      if (!g.session)
+      {
+        if (firstErr.empty())
+          firstErr = g.error;
+        continue;
+      }
+
+      double per_iter_us = -1.0;
+      if (timeRuns(rt, g, 1 + warmupCount) > 0.0)   // compile + warmup
+        per_iter_us = timeRuns(rt, g, 3);           // calibration probe
+      if (per_iter_us <= 0.0)
+      {
+        if (firstErr.empty())
+        {
+          firstErr  = g.error.empty() ? "run failed" : g.error;
+          errStatus = ResultStatus::Error;
+        }
+        destroySetup(rt, g);
+        continue;
+      }
+
+      unsigned int iters = pickIters(per_iter_us, kSizeBudgetUs,
+                                     forceIters ? specifiedIters : 0);
+      double mean_us = timeRuns(rt, g, iters);
+      if (mean_us <= 0.0 && firstErr.empty())
+      {
+        firstErr  = g.error.empty() ? "run failed" : g.error;
+        errStatus = ResultStatus::Error;
+      }
       destroySetup(rt, g);
-      continue;
+      if (mean_us <= 0.0)
+        continue;
+
+      const double ops  = 2.0 * (double)D * (double)D * (double)D;
+      const double rate = ops * 1.0e6 / mean_us / 1.0e12;
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 -> %.3f\n", ep.providerKey.c_str(),
+                  v.label, (long long)D, rate);
+      if (rate > best)
+      {
+        best    = rate;
+        bestDim = D;
+      }
     }
 
-    unsigned int iters = pickIters(per_iter_us, 5000000u,
-                                   forceIters ? specifiedIters : 0);
-    double mean_us = timeRuns(rt, g, iters);
-    destroySetup(rt, g);
-    if (mean_us <= 0.0)
+    logger::EmitOptions o;
+    if (best > 0.0)
     {
-      test.skip(v.label, ResultStatus::Error,
-                g.error.empty() ? "run failed" : g.error, o.description);
-      continue;
+      o.description = "Best of 1024, 2048 and 4096 cubed; fastest at " +
+                      std::to_string(bestDim) + ".  " + v.note;
+      test.emit(v.label, (float)best, o);
     }
-
-    test.emit(v.label, (float)(ops * 1.0e6 / mean_us / 1.0e12), o);
+    else
+    {
+      o.description = std::string("Best of 1024, 2048 and 4096 cubed.  ") + v.note;
+      test.skip(v.label, errStatus,
+                firstErr.empty() ? "no supported datatype" : firstErr,
+                o.description);
+    }
   }
 
   test.end();
