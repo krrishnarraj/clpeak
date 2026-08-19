@@ -19,6 +19,7 @@ backend.
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the dtype-accuracy benchmark? → `numeric_error.cpp`
+- Looking for the transformer-block benchmark? → `block.cpp`
 - Looking for the vendored C API header? → `third_party/onnxruntime/`
 
 ## Key Files
@@ -31,6 +32,7 @@ backend.
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
+| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off two timings: `onnx-block-prefill` (tflops), `onnx-block-decode` (gbps), `onnx-block-latency` (us) |
 
 ## The runtime is dlopen'd, never linked
 
@@ -110,15 +112,60 @@ DequantizeLinear/MatMul/QuantizeLinear graph outright, which is what makes
 the guard fire. The graph shape is not the problem: the CPU EP runs the same
 bytes at 1.7 TOPS, 3.7x its own fp32.
 
+## The AI scope: what `Category::Ai` is for
+
+`onnx-block` is the rung above a raw GEMM peak and below tokens/second: one
+fixed decoder block, run in the two regimes that bound all LLM inference.
+Prefill (512 tokens at once) is compute-bound and reports effective TFLOPS;
+decode (1 token, 2048 of context) is memory-bound and reports the GB/s of
+weights plus KV cache that must move per token. Both come out of the whole
+stack — attention, softmax, SwiGLU, the layout shuffles between them — so
+they are what a device delivers, not what its silicon could do in principle.
+The latency scope restates the same two timings so they can be multiplied by
+a model's layer count to check a tokens/second claim.
+
+Geometry is fixed in `block.cpp` (2048-wide, 16 heads, SwiGLU 5504, 50.6M
+parameters) and deliberately *not* 7B-shaped: the weights must overflow every
+cache while still compiling in seconds on NPU toolchains, which build graphs
+ahead of time. A 7B block is 4x the size for no extra insight and minutes of
+AOT compile. fp16 only — nobody serves an LLM in fp32, so a full-precision
+block would measure a configuration that does not exist.
+
+M1 Pro reference: prefill 4.8 TFLOPS against a 6.2 TFLOPS raw fp16 MatMul
+peak, i.e. a complete layer retains ~77% of the pure-matmul rate; decode
+48 GB/s; 2.4 ms per layer per token.
+
+## ORT's own graph rewrites can cost NPU placement
+
+`MatMulAddFusion` turns `MatMul` + `Add` into `Gemm`, and several NPU
+providers implement MatMul but not Gemm. The CoreML EP accepts 20 of the
+block's 22 nodes and refuses exactly the two fused ones — which, under the
+CPU-fallback guard, fails the entire session. `onnx_session.cpp` therefore
+sets `optimization.disable_specified_optimizers=MatMulAddFusion` on every
+session, so each provider runs the graph as authored. That is both what
+makes the numbers comparable and what an app targeting the NPU would do.
+
+The lesson generalizes: when a provider declines a graph, check what ORT
+rewrote it into before assuming the provider lacks the operator. `--verbose`
+opens the runtime's own log, which names the unsupported ops.
+
 ## Per-EP session options live in one place
 
-`epOptionsFor()` in `onnx_session.cpp` holds every provider's registration
-name and option list. These options are part of what gets measured (CoreML's
-`MLComputeUnits`, QNN's `backend_path`, OpenVINO's `device_type`), so they
-belong in one visible table rather than scattered across benchmarks. An EP
-with no entry is reported as unsupported rather than run with defaults —
-silently measuring something unintended is the thing this backend must not
-do.
+`onnx_session.cpp` holds every provider's registration in `appendProvider()`.
+These options are part of what gets measured (CoreML's `MLComputeUnits`,
+QNN's `backend_path` pointing at HTP rather than the DSP, OpenVINO's
+`device_type`), so they belong in one visible place rather than scattered
+across benchmarks.
+
+Two registration shapes exist in the ORT C API and both are needed:
+`genericEpOptions()` covers the providers taking a name plus string
+key/values (CoreML, QNN, OpenVINO, VitisAI, NvTensorRtRtx, XNNPACK, DML,
+WebGPU), while CUDA, TensorRT, ROCm and MIGraphX have typed options structs
+and dedicated append calls. A provider matching neither is reported as
+unsupported rather than run with defaults — silently measuring something
+unintended is the thing this backend must not do. The CPU EP is implicit in
+every session and is the one provider that registers nothing and keeps its
+fallback.
 
 ## When You Change This Directory
 

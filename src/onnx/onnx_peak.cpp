@@ -168,6 +168,10 @@ int OnnxPeak::runAll()
     if (isAllowed(Benchmark::OnnxNumericError))
       runNumericError(*rt, ep, cfg);
 
+    // ---- Phase 4: AI composite (whole transformer block) -----------------
+    if (isAllowed(Benchmark::OnnxBlock))
+      runBlock(*rt, ep, cfg);
+
     currentDeviceScope = nullptr;
   }
 

@@ -11,6 +11,7 @@ add_library(peak_onnx STATIC
     onnx_model.cpp
     gemm.cpp
     numeric_error.cpp
+    block.cpp
 )
 
 target_link_libraries(peak_onnx PUBLIC peak_common)

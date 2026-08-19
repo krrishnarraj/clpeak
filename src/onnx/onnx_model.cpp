@@ -2,6 +2,7 @@
 
 #include "onnx_model.h"
 
+#include <cmath>
 #include <cstring>
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,26 @@ std::string valueInfo(const std::string &name, int dtype, const OnnxDims &dims)
   return vi.b;
 }
 
+// AttributeProto.  `type` (field 20) must be set or ORT rejects the model:
+// 2 = INT (field 3), 7 = INTS (field 8, written unpacked).
+std::string attribute(const OnnxAttr &a)
+{
+  Pb at;
+  at.str(1, a.name);                // name
+  if (a.isList)
+  {
+    for (int64_t v : a.ints)
+      at.vint(8, (uint64_t)v);      // ints
+    at.vint(20, 7);                 // type = INTS
+  }
+  else
+  {
+    at.vint(3, (uint64_t)a.i);      // i
+    at.vint(20, 2);                 // type = INT
+  }
+  return at.b;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -104,7 +125,8 @@ void OnnxGraph::initializer(const std::string &name, int dtype,
 
 void OnnxGraph::node(const std::string &opType,
                      const std::vector<std::string> &inputs,
-                     const std::vector<std::string> &outputs)
+                     const std::vector<std::string> &outputs,
+                     const std::vector<OnnxAttr> &attrs)
 {
   Pb n;
   for (const auto &i : inputs)
@@ -113,28 +135,47 @@ void OnnxGraph::node(const std::string &opType,
     n.str(2, o);                    // NodeProto.output
   n.str(3, "n" + std::to_string(m_nodeCount++));   // name
   n.str(4, opType);                 // op_type
+  for (const auto &a : attrs)
+    n.str(5, attribute(a));         // attribute
 
   Pb g;
   g.str(1, n.b);                    // GraphProto.node
   m_nodes += g.b;
 }
 
+void OnnxGraph::shapeInitializer(const std::string &name, const OnnxDims &shape)
+{
+  std::string raw(shape.size() * sizeof(int64_t), '\0');
+  std::memcpy(&raw[0], shape.data(), raw.size());
+  initializer(name, ONNX_DT_INT64, {(int64_t)shape.size()}, raw);
+}
+
 std::string OnnxGraph::build() const
 {
-  Pb graph;
-  graph.b += m_nodes;
-  graph.str(2, "clpeak");           // GraphProto.name
-  graph.b += m_inits;
-  graph.b += m_inputs;
-  graph.b += m_outputs;
+  // A block's initializers run to hundreds of megabytes, so the graph body is
+  // never materialised as its own string: its length is computed up front and
+  // the pieces are appended straight into the output.  Assembling graph-then-
+  // model the obvious way would hold three copies of the weights at once.
+  Pb gname;
+  gname.str(2, "clpeak");           // GraphProto.name
+
+  const size_t graphSize = m_nodes.size() + gname.b.size() + m_inits.size() +
+                           m_inputs.size() + m_outputs.size();
 
   Pb opset;
   opset.vint(2, 17);                // OperatorSetIdProto.version (default domain)
 
   Pb m;
+  m.b.reserve(graphSize + 64);
   m.vint(1, 8);                     // ModelProto.ir_version
   m.str(2, "clpeak");               // producer_name
-  m.str(7, graph.b);                // graph
+  m.tag(7, 2);                      // ModelProto.graph, length-delimited
+  m.varint(graphSize);
+  m.b += m_nodes;
+  m.b += gname.b;
+  m.b += m_inits;
+  m.b += m_inputs;
+  m.b += m_outputs;
   m.str(8, opset.b);                // opset_import
   return m.b;
 }
@@ -182,6 +223,123 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
 
   g.output("C_q", ONNX_DT_INT8, {M, N});
+  return g.build();
+}
+
+// ---------------------------------------------------------------------------
+// Transformer decoder block
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Deterministic fp16 weights in [-0.5, 0.5).  Small magnitudes keep fp16
+// accumulation over thousands of terms far from overflow, and avoid the
+// NaN/denormal slow paths raw random bit patterns would hit.
+std::string blockWeights(int64_t count, uint32_t seed)
+{
+  std::string raw((size_t)count * 2, '\0');
+  uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
+  uint32_t s = seed;
+  for (int64_t i = 0; i < count; i++)
+  {
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+    h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
+  }
+  return raw;
+}
+
+} // namespace
+
+std::string onnxBlockModel(const OnnxBlockShape &sh)
+{
+  const int64_t d    = sh.dModel;
+  const int64_t H    = sh.heads;
+  const int64_t Dh   = sh.headDim;
+  const int64_t ffn  = sh.ffnHidden;
+  const int64_t S    = sh.seq;
+  const bool    decode = sh.kvLen > 0;
+  const int64_t ctx  = decode ? sh.kvLen : S;   // keys/values attended over
+
+  OnnxGraph g;
+  g.input("X", ONNX_DT_FLOAT16, {S, d});
+
+  // ---- Weights ----------------------------------------------------------
+  // Distinct seeds so no two projections share a matrix; a repeated weight
+  // matrix would let a runtime cache or fold work that a real model cannot.
+  g.initializer("Wq", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x11111111u));
+  g.initializer("Wk", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x22222222u));
+  g.initializer("Wv", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x33333333u));
+  g.initializer("Wo", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x44444444u));
+  g.initializer("Wg", ONNX_DT_FLOAT16, {d, ffn},   blockWeights(d * ffn, 0x55555555u));
+  g.initializer("Wu", ONNX_DT_FLOAT16, {d, ffn},   blockWeights(d * ffn, 0x66666666u));
+  g.initializer("Wd", ONNX_DT_FLOAT16, {ffn, d},   blockWeights(ffn * d, 0x77777777u));
+
+  // 1/sqrt(head_dim), the standard attention scale.
+  {
+    std::string sc(2, '\0');
+    uint16_t v = floatToHalf(1.0f / std::sqrt((float)Dh));
+    std::memcpy(&sc[0], &v, 2);
+    g.initializer("scale", ONNX_DT_FLOAT16, {}, sc);
+  }
+
+  g.shapeInitializer("sh_heads", {S, H, Dh});
+  g.shapeInitializer("sh_flat",  {S, d});
+
+  // ---- QKV projection ----------------------------------------------------
+  g.node("MatMul", {"X", "Wq"}, {"Q"});
+  g.node("MatMul", {"X", "Wk"}, {"Knew"});
+  g.node("MatMul", {"X", "Wv"}, {"Vnew"});
+
+  g.node("Reshape",   {"Q", "sh_heads"}, {"Qr"});
+  g.node("Transpose", {"Qr"}, {"Qh"}, {OnnxAttr::list("perm", {1, 0, 2})});
+
+  // ---- Attention ---------------------------------------------------------
+  // Decode reads a constant cache; prefill builds K/V from this pass.  The
+  // K side is stored/produced already transposed to [H, Dh, ctx] so the
+  // score matmul needs no extra transpose at run time.
+  if (decode)
+  {
+    g.initializer("Kc", ONNX_DT_FLOAT16, {H, Dh, ctx},
+                  blockWeights(H * Dh * ctx, 0x88888888u));
+    g.initializer("Vc", ONNX_DT_FLOAT16, {H, ctx, Dh},
+                  blockWeights(H * ctx * Dh, 0x99999999u));
+  }
+  else
+  {
+    g.node("Reshape",   {"Knew", "sh_heads"}, {"Kr"});
+    g.node("Transpose", {"Kr"}, {"Kc"}, {OnnxAttr::list("perm", {1, 2, 0})});
+    g.node("Reshape",   {"Vnew", "sh_heads"}, {"Vr"});
+    g.node("Transpose", {"Vr"}, {"Vc"}, {OnnxAttr::list("perm", {1, 0, 2})});
+  }
+
+  g.node("MatMul",  {"Qh", "Kc"},      {"Scores"});
+  g.node("Mul",     {"Scores", "scale"}, {"ScoresS"});
+  g.node("Softmax", {"ScoresS"}, {"P"}, {OnnxAttr::num("axis", -1)});
+  g.node("MatMul",  {"P", "Vc"}, {"Ctx"});
+
+  g.node("Transpose", {"Ctx"}, {"CtxT"}, {OnnxAttr::list("perm", {1, 0, 2})});
+  g.node("Reshape",   {"CtxT", "sh_flat"}, {"CtxF"});
+  g.node("MatMul",    {"CtxF", "Wo"}, {"AttnOut"});
+  g.node("Add",       {"X", "AttnOut"}, {"R1"});
+
+  // ---- SwiGLU feed-forward ----------------------------------------------
+  g.node("MatMul",  {"R1", "Wg"}, {"G"});
+  g.node("MatMul",  {"R1", "Wu"}, {"U"});
+  g.node("Sigmoid", {"G"}, {"Gs"});
+  g.node("Mul",     {"G", "Gs"}, {"Act"});      // SiLU
+  g.node("Mul",     {"Act", "U"}, {"Hh"});
+  g.node("MatMul",  {"Hh", "Wd"}, {"Down"});
+  g.node("Add",     {"R1", "Down"}, {"Y"});
+
+  g.output("Y", ONNX_DT_FLOAT16, {S, d});
+  if (decode)
+  {
+    // Keeps the K/V projections live, and mirrors the cache write a real
+    // decode step performs.
+    g.output("Knew", ONNX_DT_FLOAT16, {S, d});
+    g.output("Vnew", ONNX_DT_FLOAT16, {S, d});
+  }
   return g.build();
 }
 

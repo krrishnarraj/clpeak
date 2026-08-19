@@ -19,11 +19,31 @@ enum OnnxDtype : int
   ONNX_DT_UINT8    = 2,
   ONNX_DT_INT8     = 3,
   ONNX_DT_INT32    = 6,
+  ONNX_DT_INT64    = 7,
   ONNX_DT_FLOAT16  = 10,
   ONNX_DT_BFLOAT16 = 16,
 };
 
 using OnnxDims = std::vector<int64_t>;   // empty = scalar
+
+// One node attribute.  Only the two forms clpeak's graphs need: a single
+// int (Softmax axis) and a list of ints (Transpose perm).
+struct OnnxAttr
+{
+  std::string          name;
+  bool                 isList = false;
+  int64_t              i      = 0;
+  std::vector<int64_t> ints;
+
+  static OnnxAttr num(const std::string &n, int64_t v)
+  {
+    OnnxAttr a; a.name = n; a.i = v; return a;
+  }
+  static OnnxAttr list(const std::string &n, std::vector<int64_t> v)
+  {
+    OnnxAttr a; a.name = n; a.isList = true; a.ints = std::move(v); return a;
+  }
+};
 
 // Builds one GraphProto and wraps it in a ModelProto.  Nodes must be added
 // in topological order (ONNX requires it, and no sort is done here).
@@ -40,7 +60,11 @@ public:
 
   void node(const std::string &opType,
             const std::vector<std::string> &inputs,
-            const std::vector<std::string> &outputs);
+            const std::vector<std::string> &outputs,
+            const std::vector<OnnxAttr> &attrs = {});
+
+  // Convenience for the int64 shape tensors Reshape takes as an input.
+  void shapeInitializer(const std::string &name, const OnnxDims &shape);
 
   std::string build() const;   // ModelProto bytes
 
@@ -66,6 +90,37 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRawInt8,
                                float aScale, float bScale, float cScale);
+
+// ---------------------------------------------------------------------------
+// Transformer decoder block
+// ---------------------------------------------------------------------------
+
+// Geometry of one llama-style decoder block.  Fixed by the caller so every
+// device runs byte-identical work; see src/onnx/block.cpp for the values and
+// why they are what they are.
+struct OnnxBlockShape
+{
+  int64_t dModel;
+  int64_t heads;
+  int64_t headDim;
+  int64_t ffnHidden;
+  int64_t seq;      // tokens processed this pass (prefill: many, decode: 1)
+  int64_t kvLen;    // decode only: length of the cached context (0 = prefill)
+};
+
+// One fp16 decoder block: QKV projection, multi-head attention, output
+// projection + residual, SwiGLU feed-forward + residual.
+//
+//   prefill (kvLen == 0): attention is self-attention over `seq` tokens.
+//   decode  (kvLen  > 0): `seq` is 1 and attention reads a constant KV cache,
+//                         with the new K/V exposed as graph outputs -- a real
+//                         step writes them to the cache, and making them
+//                         outputs is also what stops the projections being
+//                         dead-code eliminated.
+//
+// Weights and KV cache are initializers, so the EP sees them as constants it
+// may pre-pack, exactly as it would a real model's.
+std::string onnxBlockModel(const OnnxBlockShape &s);
 
 // Scalar float -> IEEE fp16 / bfloat16 bit conversion for weight buffers.
 uint16_t floatToHalf(float f);

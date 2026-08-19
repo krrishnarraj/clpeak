@@ -61,6 +61,7 @@ enum class Benchmark : unsigned int {
     SmtScaling,         // CPU fp32 FMA at 1 thread/core vs all SMT threads (GFLOPS)
     OnnxGemm,           // single-node MatMul through ONNX Runtime EP (NPU/GPU/CPU)
     OnnxNumericError,   // accuracy cost of each dtype vs an fp32 CPU reference
+    OnnxBlock,          // fixed transformer decoder block: prefill + decode
     KernelLatency,
     COUNT
 };
@@ -135,6 +136,9 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::StringScan:
     case Benchmark::Utf8Validate:
         return Category::String;
+
+    case Benchmark::OnnxBlock:
+        return Category::Ai;
 
     case Benchmark::KernelLatency:
     case Benchmark::MemoryLatency:

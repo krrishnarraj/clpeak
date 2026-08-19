@@ -47,6 +47,8 @@ public:
               benchmark_config_t &cfg, Category category);
   int runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg);
+  int runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+               benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
 };

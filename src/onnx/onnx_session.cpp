@@ -27,8 +27,12 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   static OrtEnv *env = nullptr;
   static std::once_flag once;
   std::call_once(once, [&rt] {
+    // A provider declining a graph is an expected outcome here -- it becomes
+    // an Unsupported row -- but ORT reports it at ERROR level and writes it
+    // straight to stderr.  Normal runs stay silent (the skip row carries the
+    // message); --verbose opens the runtime's own log up.
     OrtLoggingLevel level = clpeak::verboseEnabled() ? ORT_LOGGING_LEVEL_WARNING
-                                                     : ORT_LOGGING_LEVEL_ERROR;
+                                                     : ORT_LOGGING_LEVEL_FATAL;
     OrtStatus *st = rt.api->CreateEnv(level, "clpeak", &env);
     if (st)
     {
@@ -40,9 +44,13 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
 }
 
 // ---------------------------------------------------------------------------
-// Per-EP registration options.  These are the options a well-behaved app
-// would pass to reach the vendor's accelerator; they are part of what the
-// backend measures, so they live in one visible place.
+// Per-EP registration.  These options are the ones a well-behaved app would
+// pass to reach the vendor's accelerator, and they are part of what the
+// backend measures, so every provider's wiring lives in this one place.
+//
+// Two registration shapes exist in the ORT C API and both are needed: most
+// providers take a name plus string key/values, while CUDA, TensorRT, ROCm
+// and MIGraphX have typed options structs of their own.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -54,15 +62,10 @@ struct EpOptions
   std::vector<std::pair<const char *, const char *>> kv;
 };
 
-// Returns false when clpeak has no wiring for this provider yet (the caller
-// reports it as such, rather than measuring something unintended).
-bool epOptionsFor(const std::string &providerKey, EpOptions &out)
+// Providers registered through the generic string-keyed API.  Returns false
+// for anything not handled here; the caller then tries the typed paths.
+bool genericEpOptions(const std::string &providerKey, EpOptions &out)
 {
-  if (providerKey == "CPUExecutionProvider")
-  {
-    out = {nullptr, {}};            // implicit: every session has the CPU EP
-    return true;
-  }
   if (providerKey == "CoreMLExecutionProvider")
   {
     // MLProgram + Neural Engine: the fp16-native ANE path.  CoreML has no
@@ -74,6 +77,8 @@ bool epOptionsFor(const std::string &providerKey, EpOptions &out)
   }
   if (providerKey == "QNNExecutionProvider")
   {
+    // HTP is the NPU proper; without this the EP would settle for the DSP or
+    // the CPU reference backend and the row would not mean what it says.
 #if defined(_WIN32)
     out = {"QNN", {{"backend_path", "QnnHtp.dll"}}};
 #else
@@ -91,6 +96,11 @@ bool epOptionsFor(const std::string &providerKey, EpOptions &out)
     out = {"VitisAI", {}};
     return true;
   }
+  if (providerKey == "NvTensorRTRTXExecutionProvider")
+  {
+    out = {"NvTensorRtRtx", {}};
+    return true;
+  }
   if (providerKey == "XnnpackExecutionProvider")
   {
     out = {"XNNPACK", {}};
@@ -106,7 +116,69 @@ bool epOptionsFor(const std::string &providerKey, EpOptions &out)
     out = {"WebGPU", {}};
     return true;
   }
-  return false;   // CUDA / TensorRT / ROCm / MIGraphX: wiring comes later
+  return false;
+}
+
+// Register `providerKey` on `so`.  Returns an empty string on success, or a
+// one-line reason -- including "no wiring", so an unknown provider is
+// reported as unsupported rather than silently run with defaults.
+std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
+                           const std::string &providerKey)
+{
+  const OrtApi *api = rt.api;
+
+  EpOptions opts;
+  if (genericEpOptions(providerKey, opts))
+  {
+    std::vector<const char *> keys, vals;
+    for (auto &kvp : opts.kv)
+    {
+      keys.push_back(kvp.first);
+      vals.push_back(kvp.second);
+    }
+    return onnxStatusText(rt, api->SessionOptionsAppendExecutionProvider(
+        so, opts.registrationName, keys.data(), vals.data(), keys.size()));
+  }
+
+  // ---- Typed-options providers -----------------------------------------
+  // Device 0 throughout: this backend enumerates providers, not the physical
+  // GPUs behind them, so a multi-GPU box benchmarks its first device.
+  if (providerKey == "CUDAExecutionProvider")
+  {
+    OrtCUDAProviderOptionsV2 *cuda = nullptr;
+    if (OrtStatus *st = api->CreateCUDAProviderOptions(&cuda))
+      return onnxStatusText(rt, st);
+    std::string err = onnxStatusText(
+        rt, api->SessionOptionsAppendExecutionProvider_CUDA_V2(so, cuda));
+    api->ReleaseCUDAProviderOptions(cuda);
+    return err;
+  }
+  if (providerKey == "TensorrtExecutionProvider")
+  {
+    OrtTensorRTProviderOptionsV2 *trt = nullptr;
+    if (OrtStatus *st = api->CreateTensorRTProviderOptions(&trt))
+      return onnxStatusText(rt, st);
+    std::string err = onnxStatusText(
+        rt, api->SessionOptionsAppendExecutionProvider_TensorRT_V2(so, trt));
+    api->ReleaseTensorRTProviderOptions(trt);
+    return err;
+  }
+  if (providerKey == "ROCMExecutionProvider")
+  {
+    OrtROCMProviderOptions rocm{};
+    rocm.device_id = 0;
+    return onnxStatusText(
+        rt, api->SessionOptionsAppendExecutionProvider_ROCM(so, &rocm));
+  }
+  if (providerKey == "MIGraphXExecutionProvider")
+  {
+    OrtMIGraphXProviderOptions mgx{};
+    mgx.device_id = 0;
+    return onnxStatusText(
+        rt, api->SessionOptionsAppendExecutionProvider_MIGraphX(so, &mgx));
+  }
+
+  return "clpeak has no session wiring for " + providerKey + " yet";
 }
 
 } // namespace
@@ -125,13 +197,6 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     return res;
   }
 
-  EpOptions opts;
-  if (!epOptionsFor(ep.providerKey, opts))
-  {
-    res.error = "clpeak has no session wiring for " + ep.providerKey + " yet";
-    return res;
-  }
-
   OrtSessionOptions *so = nullptr;
   OrtStatus *st = api->CreateSessionOptions(&so);
   if (st)
@@ -140,19 +205,13 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     return res;
   }
 
-  if (opts.registrationName)
+  // The CPU EP is implicit -- every session already has it -- so it is the
+  // one provider that needs no registration and keeps its fallback.
+  if (ep.providerKey != "CPUExecutionProvider")
   {
-    std::vector<const char *> keys, vals;
-    for (auto &kvp : opts.kv)
+    res.error = appendProvider(rt, so, ep.providerKey);
+    if (!res.error.empty())
     {
-      keys.push_back(kvp.first);
-      vals.push_back(kvp.second);
-    }
-    st = api->SessionOptionsAppendExecutionProvider(
-        so, opts.registrationName, keys.data(), vals.data(), keys.size());
-    if (st)
-    {
-      res.error = onnxStatusText(rt, st);
       api->ReleaseSessionOptions(so);
       return res;
     }
@@ -163,6 +222,19 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     st = api->AddSessionConfigEntry(so, "session.disable_cpu_ep_fallback", "1");
     if (st)
       CLPEAK_VLOG("onnx: disable_cpu_ep_fallback rejected: %s\n",
+                  onnxStatusText(rt, st).c_str());
+
+    // ORT's MatMulAddFusion rewrites `MatMul` + `Add` into a single `Gemm`,
+    // and several NPU providers implement MatMul but not Gemm -- the CoreML
+    // EP accepts 20 of the transformer block's 22 nodes and refuses exactly
+    // the two fused ones, which fails the whole session under the guard
+    // above.  Turning the fusion off keeps every provider running the graph
+    // as authored, which is both what makes the numbers comparable and what
+    // an app targeting that NPU would have to do anyway.
+    st = api->AddSessionConfigEntry(
+        so, "optimization.disable_specified_optimizers", "MatMulAddFusion");
+    if (st)
+      CLPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
                   onnxStatusText(rt, st).c_str());
   }
 

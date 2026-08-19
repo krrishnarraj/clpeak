@@ -189,6 +189,7 @@ static const char *helpStr =
 #ifdef ENABLE_ONNX
     "\n  --onnx-gemm                       | --no-onnx-gemm                 [ONNX: MatMul via EP]"
     "\n  --onnx-numeric-error              | --no-onnx-numeric-error        [ONNX: dtype accuracy cost]"
+    "\n  --onnx-block                      | --no-onnx-block                [ONNX: transformer block]"
 #endif
     "\n"
 #ifdef ENABLE_OPENCL
@@ -277,6 +278,7 @@ static const TestFlag testFlags[] = {
 
   {"onnx-gemm",                 Benchmark::OnnxGemm},
   {"onnx-numeric-error",        Benchmark::OnnxNumericError},
+  {"onnx-block",                Benchmark::OnnxBlock},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
