@@ -196,6 +196,11 @@ Three details are load-bearing:
   reduction runs on the int8 result — ORT reduces int8 directly, so the tail
   costs one pass instead of dequantizing the whole product first.
 
+`onnx-block` is built the same way — activations are a constant scaled by a
+runtime scalar, result reduced to one row. Scaling by a runtime value keeps
+every node downstream non-constant, so unlike the GEMM graphs the block does
+not depend on constant folding being disabled.
+
 `numeric_error.cpp` keeps using the plain, non-resident models: it compares
 actual output values, so it needs the real result rather than a reduction.
 
@@ -241,18 +246,23 @@ measures the reduction, not memory. Two operations per weight also puts the
 arithmetic far enough below the memory cost that only memory is left.
 
 One matmul per dispatch, deliberately. Chaining several against the same
-weights would amortise submission overhead and let the small rungs measure
-on-chip memory honestly, but **the ANE refuses a chained program outright**
-(`ANEProgramProcessRequestDirect` fails) while running the single-op form
-happily. The cost of the portable choice is that the smallest rung still
-carries one dispatch, which on a high-overhead provider says more about
-overhead than memory — the metric note says so, and the dispatch row is the
-cross-check. M1 Pro shows no cliff (unified memory, ~50 GB/s flat); a
-discrete GPU or an NPU with real SRAM should show structure.
+weights would amortise submission overhead, but **the ANE refuses a chained
+program outright** (`ANEProgramProcessRequestDirect` fails) while running the
+single-op form happily.
 
-The 128 MB rung reads 50.6 GB/s and `onnx-block-decode` reads 49 GB/s from a
-completely different graph. Two independent tests landing together is the
-best evidence available here that both are measuring what they claim.
+Submission cost is subtracted instead: the same graph is timed once with a
+256×256 weight matrix, whose 128 KB cannot matter, and that floor comes off
+every rung. Without it the ladder reads backwards wherever dispatch is
+expensive — an RTX 5060 charges ~17 µs, half of what eight megabytes takes to
+move, and reported 219 / 265 / 392 GB/s across a ladder whose small end
+should be fastest. The floor probe carries a little transfer of its own on
+slow providers, but only ~128 KB worth, so it over-corrects by under 2% of
+the smallest rung.
+
+The 128 MB rung reads ~50 GB/s on the M1 Pro and `onnx-block-decode` reads
+49 GB/s from a completely different graph. Two independent tests landing
+together is the best evidence available here that both measure what they
+claim.
 
 ## Dispatch overhead is why NPUs lose small work
 

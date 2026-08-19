@@ -13,18 +13,17 @@
 // being measured.
 //
 // One matmul per dispatch, deliberately.  Chaining several against the same
-// weights would amortise submission overhead and let the small rungs measure
-// on-chip memory properly -- but the Apple Neural Engine refuses a chained
-// program outright (ANEProgramProcessRequestDirect fails) while running the
-// single-op form happily, so the portable shape wins.
+// weights would amortise submission overhead -- but the Apple Neural Engine
+// refuses a chained program outright (ANEProgramProcessRequestDirect fails)
+// while running the single-op form happily, so the portable shape wins.
 //
-// The cost of that choice is that the smallest rung still carries one
-// dispatch: on a provider with expensive submission -- Core ML charges tens
-// of microseconds, see onnx-dispatch-latency -- a couple of megabytes moves
-// in about the time one empty dispatch takes, so that rung reads low and
-// says more about overhead than about memory.  Compare it against the
-// dispatch row before drawing conclusions from it.  The largest rung is
-// always dominated by the transfer and is the one to trust.
+// Submission overhead is therefore subtracted instead.  The same graph is
+// timed once with a weight matrix small enough that its transfer cannot
+// matter, and that floor is taken off every rung.  Without it the ladder
+// reads backwards on hardware that is slow to accept work: an RTX 5060
+// charges ~17 us per dispatch, which is half the time eight megabytes takes
+// to move, and it reported 219 / 265 / 392 GB/s across a ladder whose small
+// end should be the fastest.
 //
 // It has to be a matmul rather than something simpler.  An elementwise-plus-
 // reduction graph measures the reduction: on this Mac it reads ~22 GB/s
@@ -62,9 +61,8 @@ struct Size
 // last-level cache or NPU SRAM, and unambiguously main memory.
 const Size kSizes[] = {
   {2048, "8mb",
-   "Eight megabytes of weights -- may still sit in fast local memory.  On a "
-   "provider that is slow to accept work this rung also carries one "
-   "submission, so check it against the dispatch-latency row."},
+   "Eight megabytes of weights -- small enough to sit in fast local memory on "
+   "most devices, so this is usually the fastest rung."},
   {4096, "32mb",
    "Thirty-two megabytes -- around the size of a large cache or an NPU's local memory."},
   {8192, "128mb",
@@ -94,16 +92,20 @@ std::string streamModel(int64_t d)
 
 struct Result
 {
-  double gbps = -1.0;
+  double us = -1.0;              // mean time for one dispatch of this size
   std::string error;
   ResultStatus status = ResultStatus::Ok;
 };
+
+// Weight matrix used to measure the per-dispatch floor: 128 KB moves in well
+// under a microsecond on anything here, so essentially all of its time is the
+// cost of asking.
+constexpr int64_t kFloorDim = 256;
 
 Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
                unsigned int warmup, bool forceIters, unsigned int forced)
 {
   Result r;
-  const int64_t bytes = d * d * 2;
 
   OrtSession *session = nullptr;
   {
@@ -164,14 +166,12 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
     if (probe > 0.0)
     {
       unsigned int iters = pickIters(probe, 1000000u, forceIters ? forced : 0);
-      double mean_us = run(iters);
-      if (mean_us > 0.0)
-        r.gbps = (double)bytes / (mean_us * 1.0e-6) / 1.0e9;
+      r.us = run(iters);
     }
   }
   if (st)
     r.error = onnxStatusText(rt, st);
-  if (r.gbps <= 0.0 && r.status == ResultStatus::Ok)
+  if (r.us <= 0.0 && r.status == ResultStatus::Ok)
     r.status = ResultStatus::Error;
 
   if (inVal)  rt.api->ReleaseValue(inVal);
@@ -197,18 +197,42 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "weight, so this is the ceiling on how fast words can appear.  The "
        "size at which the rate drops is the size at which a model stopped "
        "fitting in the device's fast local memory; past that point its "
-       "weights come from main memory on every single token."});
+       "weights come from main memory on every single token.  The fixed cost "
+       "of handing work to the device is measured separately and subtracted, "
+       "so these are transfer rates rather than round-trip times."});
+
+  // The floor first: every rung is reported net of it.
+  Result floor = measure(rt, ep, kFloorDim, warmupCount, forceIters,
+                         specifiedIters);
+  const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
+  CLPEAK_VLOG("onnx-tensor-bw[%s]: dispatch floor %.2f us\n",
+              ep.providerKey.c_str(), floorUs);
 
   for (const Size &s : kSizes)
   {
     if (clpeak::cancelRequested())
       break;
     Result r = measure(rt, ep, s.dim, warmupCount, forceIters, specifiedIters);
-    if (r.gbps > 0.0)
-      test.emit(s.label, (float)r.gbps, s.note);
-    else
+    if (r.us <= 0.0)
+    {
       test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error,
                 s.note);
+      continue;
+    }
+
+    const double netUs = r.us - floorUs;
+    if (netUs <= 0.0)
+    {
+      // The transfer is lost inside the cost of asking; no honest rate to
+      // report, and reporting the raw one would be a submission benchmark
+      // wearing a bandwidth label.
+      test.skip(s.label, ResultStatus::Error,
+                "too small to measure against this provider's dispatch cost",
+                s.note);
+      continue;
+    }
+    const double bytes = (double)s.dim * (double)s.dim * 2.0;
+    test.emit(s.label, (float)(bytes / (netUs * 1.0e-6) / 1.0e9), s.note);
   }
 
   test.end();

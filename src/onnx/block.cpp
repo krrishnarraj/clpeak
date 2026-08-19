@@ -115,21 +115,16 @@ BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode)
     r.session = ses.session;
   }
 
-  const int64_t S = sh.seq;
-  r.inBuf.assign((size_t)S * kDModel * 2, 0);
+  // The only input is the scalar that scales the resident activations.
+  r.inBuf.assign(2, 0);
   {
-    uint16_t *h = reinterpret_cast<uint16_t *>(r.inBuf.data());
-    uint32_t s = 0x9e3779b9u;
-    for (int64_t i = 0; i < S * kDModel; i++)
-    {
-      s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-      h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
-    }
+    uint16_t v = floatToHalf(1.0009765625f);
+    std::memcpy(r.inBuf.data(), &v, 2);
   }
 
   // Decode also returns the new K/V (the cache write); let ORT allocate
   // those, so only the input needs a bound buffer here.
-  r.outNames.push_back("Y");
+  r.outNames.push_back("Yr");
   if (decode)
   {
     r.outNames.push_back("Knew");
@@ -141,12 +136,9 @@ BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode)
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
                                               OrtMemTypeDefault, &mi);
   if (!st)
-  {
-    const int64_t shape[2] = {S, kDModel};
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, r.inBuf.data(), r.inBuf.size(), shape, 2,
+        mi, r.inBuf.data(), r.inBuf.size(), nullptr, 0,
         (ONNXTensorElementDataType)kDtype, &r.inVal);
-  }
   if (mi) rt.api->ReleaseMemoryInfo(mi);
   if (st)
   {
@@ -159,7 +151,7 @@ BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode)
 // Mean microseconds per block; negative on failure.
 double timeRuns(const OrtRuntime &rt, BlockRun &r, unsigned int n)
 {
-  static const char *inNames[] = {"X"};
+  static const char *inNames[] = {"S"};
 
   auto t0 = std::chrono::steady_clock::now();
   for (unsigned int i = 0; i < n; i++)

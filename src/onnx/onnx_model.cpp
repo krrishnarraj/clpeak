@@ -320,7 +320,18 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   const int64_t ctx  = decode ? sh.kvLen : S;   // keys/values attended over
 
   OnnxGraph g;
-  g.input("X", ONNX_DT_FLOAT16, {S, d});
+
+  // The activations are a constant scaled by a runtime scalar, and the result
+  // leaves as one reduced row.  Passing a [S, d] tensor in and out each run
+  // costs a discrete GPU two host transfers it does not otherwise need -- 4 MB
+  // against a 1.9 ms layer on an RTX 5060, about 15% -- while the weights, the
+  // thing the layer is actually made of, are resident either way.  Scaling by
+  // a runtime value also keeps every node downstream non-constant, so nothing
+  // here depends on constant folding being disabled.
+  g.input("S", ONNX_DT_FLOAT16, {});
+  g.initializer("X0", ONNX_DT_FLOAT16, {S, d},
+                blockWeights(S * d, 0xa5a5a5a5u));
+  g.node("Mul", {"X0", "S"}, {"X"});
 
   // ---- Weights ----------------------------------------------------------
   // Distinct seeds so no two projections share a matrix; a repeated weight
@@ -390,11 +401,16 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   g.node("MatMul",  {"Hh", "Wd"}, {"Down"});
   g.node("Add",     {"R1", "Down"}, {"Y"});
 
-  g.output("Y", ONNX_DT_FLOAT16, {S, d});
+  // ReduceMax rather than ReduceSum: summing rows of a product equals
+  // multiplying the summed rows, a rewrite that would let an optimiser shrink
+  // the work.  See onnxResidentMatMulModel.
+  g.node("ReduceMax", {"Y"}, {"Yr"},
+         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.output("Yr", ONNX_DT_FLOAT16, {d});
   if (decode)
   {
     // Keeps the K/V projections live, and mirrors the cache write a real
-    // decode step performs.
+    // decode step performs.  Both are one row, so they cost nothing to return.
     g.output("Knew", ONNX_DT_FLOAT16, {S, d});
     g.output("Vnew", ONNX_DT_FLOAT16, {S, d});
   }
