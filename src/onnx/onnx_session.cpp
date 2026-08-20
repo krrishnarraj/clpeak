@@ -5,6 +5,11 @@
 #include <common/common.h>
 #include <common/console_mute.h>
 
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <mutex>
 #include <vector>
 
@@ -194,10 +199,110 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
 
 } // namespace
 
+// Where a profile file may be written.  Never the working directory: this is
+// a benchmark, not something that should leave files where it was run from.
+static std::string profilePrefixPath()
+{
+#ifdef _WIN32
+  const char *tmp = std::getenv("TEMP");
+  return std::string(tmp ? tmp : ".") + "\\clpeak_onnx_prof";
+#else
+  const char *tmp = std::getenv("TMPDIR");
+  std::string dir = tmp ? tmp : "/tmp";
+  if (!dir.empty() && dir.back() == '/')
+    dir.pop_back();
+  return dir + "/clpeak_onnx_prof";
+#endif
+}
+
+std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
+                                                OrtSession *session)
+{
+  std::vector<std::string> ops;
+  if (!session)
+    return ops;
+
+  OrtAllocator *alloc = nullptr;
+  if (OrtStatus *st = rt.api->GetAllocatorWithDefaultOptions(&alloc))
+  {
+    rt.api->ReleaseStatus(st);
+    return ops;
+  }
+
+  char *path = nullptr;
+  if (OrtStatus *st = rt.api->SessionEndProfiling(session, alloc, &path))
+  {
+    CLPEAK_VLOG("onnx: SessionEndProfiling failed: %s\n",
+                onnxStatusText(rt, st).c_str());
+    return ops;
+  }
+  if (!path)
+    return ops;
+
+  std::string file(path);
+  if (OrtStatus *st = rt.api->AllocatorFree(alloc, path))
+    rt.api->ReleaseStatus(st);
+
+  // The profile is JSON, and every executed kernel carries an "op_name".
+  // Scanning for that key beats parsing: no dependency, and the format has
+  // been stable for years.
+  std::ifstream in(file, std::ios::binary);
+  std::string json((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
+  in.close();
+  CLPEAK_VLOG("onnx: profile %s (%zu bytes)\n", file.c_str(), json.size());
+  std::remove(file.c_str());
+
+  // ONNX Runtime writes `"op_name" : "QLinearMatMul"`, spaces around the
+  // colon included, so the separator is skipped rather than matched
+  // literally -- a fixed `"op_name":"` finds nothing.
+  const std::string key = "\"op_name\"";
+  size_t pos = 0;
+  while ((pos = json.find(key, pos)) != std::string::npos)
+  {
+    pos += key.size();
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
+      pos++;
+    if (pos >= json.size() || json[pos] != ':')
+      continue;
+    pos++;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
+      pos++;
+    if (pos >= json.size() || json[pos] != '"')
+      continue;
+    pos++;
+    const size_t end = json.find('"', pos);
+    if (end == std::string::npos)
+      break;
+    std::string name = json.substr(pos, end - pos);
+    pos = end;
+    if (!name.empty() &&
+        std::find(ops.begin(), ops.end(), name) == ops.end())
+      ops.push_back(std::move(name));
+  }
+  return ops;
+}
+
+bool onnxOpsIncludeQuantizedMatMul(const std::vector<std::string> &ops)
+{
+  // The kernels that do the multiply in integer arithmetic, across providers.
+  // Matched loosely because providers prefix and suffix their own fusions.
+  static const char *kMarkers[] = {
+    "QLinearMatMul", "MatMulInteger", "QGemm", "QLinearGemm",
+    "MatMulIntegerToFloat", "QuantizeLinearMatMul", "QOrderedMatMul",
+  };
+  for (const auto &op : ops)
+    for (const char *m : kMarkers)
+      if (op.find(m) != std::string::npos)
+        return true;
+  return false;
+}
+
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
-                                    bool keepConstantsUnfolded)
+                                    bool keepConstantsUnfolded,
+                                    bool profile)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -215,6 +320,20 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   {
     res.error = onnxStatusText(rt, st);
     return res;
+  }
+
+  if (profile)
+  {
+    const std::string prefix = profilePrefixPath();
+#ifdef _WIN32
+    std::wstring wide(prefix.begin(), prefix.end());
+    st = api->EnableProfiling(so, wide.c_str());
+#else
+    st = api->EnableProfiling(so, prefix.c_str());
+#endif
+    if (st)
+      CLPEAK_VLOG("onnx: EnableProfiling rejected: %s\n",
+                  onnxStatusText(rt, st).c_str());
   }
 
   if (keepConstantsUnfolded)

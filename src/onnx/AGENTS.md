@@ -60,6 +60,31 @@ own minor version (1.23.x serves API 23), so `onnx_runtime.cpp` parses
 not available` once per failed attempt, straight to the console and below any
 log level — six lines of it against a 1.23 runtime, before any test runs.
 
+## Verifying a row measured what its name says
+
+The CPU-fallback guard proves the work ran on the right device. It cannot
+prove it ran as the right *operation* — ONNX Runtime rewrites graphs before
+executing them, and a provider that will not fuse
+DequantizeLinear/MatMul/QuantizeLinear into a quantized kernel will instead
+dequantize the operands and multiply in floating point. That produces a
+perfectly good number which is not an int8 number at all, and publishing it
+as one would flatter or penalise the wrong hardware in any comparison.
+
+`onnxCollectExecutedOps()` answers it directly: one profiled run, then the
+kernel names ONNX Runtime recorded. `gemm.cpp` runs it once for the
+quantized variant at the smallest size (the fusion decision does not depend
+on size) and reports the row as unsupported, naming what actually ran, when
+no integer matmul kernel appears. When one does, the row's description names
+it — the M1 Pro CPU EP reports `QLinearMatMul`, so its 1.6 TOPS is real.
+
+Two details cost time to find and are easy to get wrong again:
+
+- The profile is JSON with `"op_name" : "QLinearMatMul"` — **spaces around
+  the colon**. Searching for `"op_name":"` matches nothing, silently, and the
+  check then passes everything.
+- The profile is written to a file, so the prefix points at the system
+  temp directory. A benchmark should not leave files where it was run from.
+
 ## Vendor console spam is muted, not tolerated
 
 Registering a provider can pull in a second copy of the ONNX schema registry:

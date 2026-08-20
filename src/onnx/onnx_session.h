@@ -8,6 +8,7 @@
 // Unsupported) instead of silently measuring the CPU.
 
 #include <string>
+#include <vector>
 
 #include "onnx_runtime.h"
 #include <onnx/onnx_peak.h>
@@ -29,10 +30,27 @@ struct OnnxSessionResult
 // load time.  Needed only by the throughput models whose operands are both
 // initializers -- without it the whole matmul is computed once during session
 // creation and every timed run measures nothing.
+// `profile` records which kernels the provider actually runs; collect them
+// afterwards with onnxCollectExecutedOps().
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
-                                    bool keepConstantsUnfolded = false);
+                                    bool keepConstantsUnfolded = false,
+                                    bool profile = false);
+
+// Names of the kernels a profiled session executed, distinct, in first-seen
+// order.  Empty when profiling was off or unavailable.
+//
+// This answers a question no timing can: whether a row measured the operation
+// its name claims.  ONNX Runtime rewrites graphs before running them, and a
+// provider that declines to fuse a quantized matmul will dequantize the
+// operands and multiply them in floating point instead -- producing a
+// perfectly good number that is not an int8 number at all.
+std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
+                                                OrtSession *session);
+
+// True if any of `ops` is a kernel that does integer matrix arithmetic.
+bool onnxOpsIncludeQuantizedMatMul(const std::vector<std::string> &ops);
 
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);

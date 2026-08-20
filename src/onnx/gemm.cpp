@@ -145,7 +145,7 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 
 // Build model + session + bound input/output tensors for one (variant, D).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                    const Variant &v, int64_t D)
+                    const Variant &v, int64_t D, bool profile = false)
 {
   GemmSetup g;
 
@@ -167,7 +167,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   aRaw.clear(); aRaw.shrink_to_fit();
   bRaw.clear(); bRaw.shrink_to_fit();
 
-  auto ses = onnxCreateSession(rt, ep, modelBytes, /*keepConstantsUnfolded=*/true);
+  auto ses = onnxCreateSession(rt, ep, modelBytes, /*keepConstantsUnfolded=*/true,
+                               profile);
   if (!ses.session)
   {
     g.error = ses.error;
@@ -292,6 +293,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t firstDim = 0, lastDim = 0;
     double  lastRate = 0.0;
     int     strikes = 0;
+    std::string ranAs;      // kernel the provider actually used (quantized only)
 
     for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
@@ -394,7 +396,51 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
     }
 
-    // Both operands are constants, so this test depends on ORT honouring the
+      // For the quantized variant, confirm the provider really did the multiply
+    // in integer arithmetic.  ORT rewrites graphs before running them, and a
+    // provider that will not fuse a quantized matmul dequantizes the operands
+    // and multiplies them in floating point instead -- a perfectly good
+    // number that is not an int8 number, and one that would flatter or
+    // penalise the wrong hardware in a comparison.  One profiled run at the
+    // smallest size answers it; the fusion decision does not depend on size.
+    if (v.qdq && best > 0.0 && !clpeak::cancelRequested())
+    {
+      GemmSetup probe = makeSetup(rt, ep, v, kMinDim, /*profile=*/true);
+      if (probe.session)
+      {
+        timeRuns(rt, probe, 1);
+        auto ops = onnxCollectExecutedOps(rt, probe.session);
+        if (!ops.empty())
+        {
+          std::string joined;
+          for (const auto &o : ops)
+            joined += (joined.empty() ? "" : ", ") + o;
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: executed %s\n",
+                      ep.providerKey.c_str(), v.label, joined.c_str());
+
+          if (!onnxOpsIncludeQuantizedMatMul(ops))
+          {
+            best     = 0.0;
+            firstErr = "provider did not fuse a quantized matmul -- it "
+                       "dequantized the operands and multiplied in floating "
+                       "point, so this is not an int8 rate (ran: " + joined + ")";
+            errStatus = ResultStatus::Unsupported;
+          }
+          else
+          {
+            for (const auto &o2 : ops)
+              if (onnxOpsIncludeQuantizedMatMul({o2}))
+              {
+                ranAs = o2;
+                break;
+              }
+          }
+        }
+      }
+      destroySetup(rt, probe);
+    }
+
+  // Both operands are constants, so this test depends on ORT honouring the
     // request not to fold them; if it ever stopped, the matmul would be
     // evaluated once at load time and every timed run would measure an empty
     // graph.  Real work grows with the cube of the size -- 64x across this
@@ -421,6 +467,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       o.description = "Peak over a doubling sweep of square sizes; fastest at "
                       + std::to_string(bestDim) + " cubed.  " + v.note;
+      if (!ranAs.empty())
+        o.description += "  The provider ran the multiply as " + ranAs +
+                         ", confirming it really was integer arithmetic.";
       test.emit(v.label, (float)best, o);
     }
     else
