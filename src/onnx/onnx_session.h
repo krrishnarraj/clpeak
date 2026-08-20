@@ -52,6 +52,32 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
 // True if any of `ops` is a kernel that does integer matrix arithmetic.
 bool onnxOpsIncludeQuantizedMatMul(const std::vector<std::string> &ops);
 
+// A wall-clock budget for one test on one provider.
+//
+// Every sweep in this backend decides how far to climb from measured
+// throughput, which is the right rule when running a graph is the cost.  On
+// the providers that compile ahead of time it is not: Core ML turns a 16 MB
+// elementwise graph into machine code in seconds and a 64 MB one in more
+// than ten minutes, and no amount of throughput data predicts that.  A sweep
+// that consults the clock between steps stops climbing when the provider
+// turns out to be expensive to compile for, and reports what it has instead
+// of appearing to hang.
+class OnnxDeadline
+{
+public:
+  explicit OnnxDeadline(double seconds);
+  bool expired() const;
+
+private:
+  double m_startUs;
+  double m_budgetUs;
+};
+
+// Budget per test, per provider.  Generous next to the ~60 s the slowest
+// test needs on a warm cache, so it only bites when something is genuinely
+// pathological.
+constexpr double kOnnxTestBudgetSec = 180.0;
+
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
 

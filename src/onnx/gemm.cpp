@@ -257,6 +257,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg, Category category)
 {
   (void)cfg;
+  OnnxDeadline deadline(kOnnxTestBudgetSec);
   const bool isInt = (category == Category::IntCompute);
 
   static const Variant kFpVariants[] = {
@@ -313,6 +314,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       if (clpeak::cancelRequested())
         break;
+      if (deadline.expired())
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: out of time, stopping at %lld\n",
+                    ep.providerKey.c_str(), v.label, (long long)D);
+        break;
+      }
 
       // Would this size fit, and would one iteration finish in reasonable
       // time at the rate the previous size managed?

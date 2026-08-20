@@ -325,6 +325,19 @@ ten minutes. Any new test that builds several large graphs needs to count
 sessions, not just iterations, and prefer one measurement at a small size
 over a sweep.
 
+Every sweep therefore also carries an `OnnxDeadline` (`onnx_session.h`) and
+stops climbing when the budget is gone. The sweeps decide how far to go from
+measured throughput, which is the right rule when *running* a graph is the
+cost — and is no guide at all when *compiling* it is. Without the clock, a
+provider that is slow to compile makes the tool look hung rather than slow.
+Reference wall times, M1 Pro CoreML EP with a warm compile cache: conv 64 s,
+block 62 s, gemm 46 s, activation 32 s, bandwidth 11 s, transfer 2 s,
+dispatch 1 s, numeric error under 1 s — 218 s for the provider.
+
+Those figures are warm. Core ML caches compiled models on disk, so the first
+run of a new graph shape on a given machine is far slower than the second,
+and a timing taken after a session of development flatters itself.
+
 ## What the transfer rows can and cannot say
 
 `h2d` reports the **largest** size measured, not the fastest. A provider may

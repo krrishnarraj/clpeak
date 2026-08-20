@@ -143,6 +143,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                                    const onnx_ep_info_t &ep,
                                    benchmark_config_t &cfg)
 {
+  OnnxDeadline deadline(kOnnxTestBudgetSec);
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
@@ -182,6 +183,12 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   {
     if (clpeak::cancelRequested())
       break;
+    if (deadline.expired())
+    {
+      CLPEAK_VLOG("onnx-transfer[%s]: out of time, stopping at %lld MB\n",
+                  ep.providerKey.c_str(), (long long)((elems * 2) >> 20));
+      break;
+    }
     if ((uint64_t)elems * 2ull > kMaxTensorBytes)
       break;
 
