@@ -18,6 +18,7 @@ backend.
 - Looking for session creation / per-EP options / the CPU-fallback guard? → `onnx_session.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
+- Looking for the convolution benchmark? → `conv.cpp`
 - Looking for the dtype-accuracy benchmark? → `numeric_error.cpp`
 - Looking for the transformer-block benchmark? → `block.cpp`
 - Looking for the bandwidth / dispatch-overhead benchmarks? → `tensor_bandwidth.cpp`, `dispatch_latency.cpp`
@@ -32,6 +33,7 @@ backend.
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 | `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off two timings: `onnx-block-prefill` (tflops), `onnx-block-decode` (gbps), `onnx-block-latency` (us) |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
@@ -275,6 +277,27 @@ than because it was convenient, and it is meant to stay fixed forever:
 - **`onnx-numeric-error`'s 1024** is fixed because accumulation depth is part
   of what the error means. Comparing accuracy across devices requires the same
   depth on each.
+
+## Why convolution is measured separately
+
+Accelerators were built for convolution before they were asked to do anything
+else, and the gap between `onnx-conv` and `onnx-gemm` is an architectural
+number in its own right. M1 Pro, CoreML EP:
+
+| | rate | vs its own fp16 matmul peak (8.7) |
+|---|---|---|
+| conv 3×3 | 9.5 TFLOPS | **109%** |
+| conv 1×1 | 5.1 TFLOPS | 58% |
+| depthwise 3×3 | 0.17 TFLOPS | 2% |
+
+The ANE convolves faster than it multiplies, which is what "built for
+convolution" looks like in a measurement. The 1×1 row is arithmetically a
+matmul applied per pixel and still runs at half the 3×3 rate, so the two
+shapes clearly reach different machinery. And depthwise collapses by **56×**
+against the dense 3×3 of identical shape — it loads the same data for a
+fraction of the arithmetic, so it is bandwidth-bound, which is exactly why
+mobile-efficient networks so often run slower than their FLOP counts promise.
+A general-purpose CPU shows none of this spread (0.36 / 0.43 / 0.11).
 
 ## Sizes are swept, never chosen by a probe
 

@@ -120,6 +120,20 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &bRawInt8,
                                        float aScale, float bScale, float cScale);
 
+// Throughput-shaped 2-D convolution, built like the resident GEMM above:
+// input and weights are constants, the result is reduced to one value per
+// output channel, and a runtime scalar keeps the graph live.  NCHW layout,
+// stride 1, padding chosen so the output keeps the input's spatial size.
+//
+// `group` == 1 is an ordinary convolution; `group` == channels is a depthwise
+// one, which has the same shape but a fraction of the arithmetic and is where
+// accelerators built around dense multiply-accumulate arrays tend to fall
+// down.
+std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
+                                  int64_t kernel, int64_t group, int dtype,
+                                  const std::string &xRaw,
+                                  const std::string &wRaw);
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------

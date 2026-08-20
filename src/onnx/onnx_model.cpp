@@ -290,6 +290,36 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
+std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
+                                  int64_t kernel, int64_t group, int dtype,
+                                  const std::string &xRaw,
+                                  const std::string &wRaw)
+{
+  const int64_t pad = (kernel - 1) / 2;   // keeps the output the same size
+  const int64_t inPerGroup = channels / group;
+
+  OnnxGraph g;
+  g.input("S", dtype, {});
+  g.initializer("X0", dtype, {1, channels, spatial, spatial}, xRaw);
+  g.initializer("W",  dtype, {channels, inPerGroup, kernel, kernel}, wRaw);
+
+  g.node("Mul", {"X0", "S"}, {"X"});
+  g.node("Conv", {"X", "W"}, {"Y"},
+         {OnnxAttr::list("kernel_shape", {kernel, kernel}),
+          OnnxAttr::list("pads", {pad, pad, pad, pad}),
+          OnnxAttr::list("strides", {1, 1}),
+          OnnxAttr::list("dilations", {1, 1}),
+          OnnxAttr::num("group", group)});
+
+  // Down to one value per output channel: the result is otherwise as large as
+  // the input and would be measured crossing the host boundary rather than
+  // being computed.
+  g.node("ReduceMax", {"Y"}, {"R"},
+         {OnnxAttr::list("axes", {0, 2, 3}), OnnxAttr::num("keepdims", 0)});
+  g.output("R", dtype, {channels});
+  return g.build();
+}
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------

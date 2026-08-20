@@ -174,6 +174,9 @@ int OnnxPeak::runAll()
     if (isAllowedAs(Benchmark::OnnxGemm, Category::FpCompute))
       runGemm(*rt, ep, cfg, Category::FpCompute);
 
+    if (isAllowed(Benchmark::OnnxConv))
+      runConv(*rt, ep, cfg);
+
     // ---- Phase 2: integer compute (int8 QDQ) -----------------------------
     if (isAllowedAs(Benchmark::OnnxGemm, Category::IntCompute))
       runGemm(*rt, ep, cfg, Category::IntCompute);

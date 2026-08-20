@@ -62,6 +62,7 @@ enum class Benchmark : unsigned int {
     OnnxGemm,           // single-node MatMul through ONNX Runtime EP (NPU/GPU/CPU)
     OnnxNumericError,   // accuracy cost of each dtype vs an fp32 CPU reference
     OnnxBlock,          // fixed transformer decoder block: prefill + decode
+    OnnxConv,           // 2-D convolution peak through an ONNX EP
     OnnxTensorBW,       // resident-tensor read bandwidth through an ONNX EP
     OnnxDispatchLatency,// per-submission overhead of an ONNX EP
     KernelLatency,
@@ -119,6 +120,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::SmtScaling:
     case Benchmark::OnnxGemm:
     case Benchmark::OnnxNumericError:
+    case Benchmark::OnnxConv:
         return Category::FpCompute;
 
     case Benchmark::ComputeInt:
