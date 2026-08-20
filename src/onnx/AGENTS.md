@@ -325,6 +325,26 @@ ten minutes. Any new test that builds several large graphs needs to count
 sessions, not just iterations, and prefer one measurement at a small size
 over a sweep.
 
+## What the transfer rows can and cannot say
+
+`h2d` reports the **largest** size measured, not the fastest. A provider may
+hand small tensors over by pointer and copy only large ones — Core ML costs
+nothing up to 64 MB and then copies at 19 GB/s — so a peak across sizes can
+be a bandwidth figure for a transfer that never happened.
+
+Whether a transfer happens at all is decided structurally: if the time does
+not grow with the tensor, nothing is being copied, and the row says so rather
+than reporting a number. The CPU EP returns the same microsecond for 16 MB
+and 128 MB, which divided out to 133 TB/s before this check existed. Testing
+the *shape* of the curve rather than comparing against some plausible
+bandwidth ceiling means nothing needs revising as links get faster.
+
+The consuming operation is a `Gather` of one element, not a reduction. A
+reduction reads the whole tensor on the device, and where no host transfer
+happens that read *is* the measurement — the CPU EP reported 4 GB/s for a
+transfer that never occurs, which was its fp16 reduction rate wearing a
+transfer label.
+
 ## How decode cost grows with context
 
 `onnx-block-kv-scaling` runs the decode block at 512, 2048 and 8192 tokens of
@@ -334,7 +354,15 @@ and it is why a long conversation answers more slowly than a short one. M1
 Pro CPU EP: 14.0 ms, 16.8 ms, 25.8 ms per layer, so attention goes from
 roughly a tenth of the layer to half of it.
 
-The ladder stops at 8192 because each rung is a separate graph with its own
+`onnx-block-prefill-knee` is the compute-bound counterpart: the same layer
+given 64, 512 and 2048 tokens at once. A short prompt cannot keep wide
+hardware busy, so the rate climbs until the device saturates and then
+flattens, and where it flattens says how much text must arrive together
+before batching stops helping. The 512 rung reuses the prefill timing already
+taken. A CPU is nearly flat across the ladder — ten cores need very little
+work in flight — where wide hardware should climb steeply.
+
+The KV ladder stops at 8192 because each rung is a separate graph with its own
 cache baked in and therefore its own session, and the ahead-of-time providers
 charge dearly for the larger ones. Rows are named by length, so a longer rung
 can be appended later without changing what any existing one means.

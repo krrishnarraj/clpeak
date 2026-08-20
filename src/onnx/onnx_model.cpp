@@ -382,11 +382,20 @@ std::string onnxTransferModel(OnnxTransfer dir, int64_t elems,
   switch (dir)
   {
   case OnnxTransfer::ToDevice:
-    // Everything arrives; one value goes back.
+    // Everything arrives; one element goes back.  Gather rather than a
+    // reduction: a reduction reads the whole tensor on the device, and on a
+    // provider with no real host transfer that read *is* the measurement --
+    // the CPU EP reported 4 GB/s for a "transfer" that never happens, which
+    // was its fp16 reduction rate and nothing else.  Picking one element
+    // still forces the whole input across, because a graph input is
+    // materialised in full before any kernel sees it.
     g.input("X", ONNX_DT_FLOAT16, {elems});
-    g.node("ReduceMax", {"X"}, {"Y"},
-           {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
-    g.output("Y", ONNX_DT_FLOAT16, {});
+    {
+      std::string idx(sizeof(int64_t), '\0');
+      g.initializer("idx", ONNX_DT_INT64, {1}, idx);   // element 0
+    }
+    g.node("Gather", {"X", "idx"}, {"Y"}, {OnnxAttr::num("axis", 0)});
+    g.output("Y", ONNX_DT_FLOAT16, {1});
     break;
 
   case OnnxTransfer::FromDevice:

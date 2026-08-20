@@ -47,6 +47,10 @@ constexpr int64_t kDecodeKv   = 2048;
 // changing what any existing one means.
 const int64_t kKvLadder[] = {512, 2048, 8192};
 
+// Prompt lengths for the saturation row.  512 is measured anyway for the
+// prefill rate, so only the other two cost a session.
+const int64_t kPromptLadder[] = {64, 512, 2048};
+
 // fp16 only.  Nobody serves an LLM in fp32, so a full-precision block would
 // measure a configuration that does not exist -- and it would double both the
 // model size and the run time to say so.
@@ -98,7 +102,7 @@ void destroyRun(const OrtRuntime &rt, BlockRun &r)
 }
 
 BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
-                 int64_t kvLen = kDecodeKv)
+                 int64_t kvLen = kDecodeKv, int64_t prefillSeq = kPrefillSeq)
 {
   BlockRun r;
 
@@ -107,7 +111,7 @@ BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
   sh.heads     = kHeads;
   sh.headDim   = kHeadDim;
   sh.ffnHidden = kFfnHidden;
-  sh.seq       = decode ? 1 : kPrefillSeq;
+  sh.seq       = decode ? 1 : prefillSeq;
   sh.kvLen     = decode ? kvLen : 0;
 
   {
@@ -193,9 +197,9 @@ double timeRuns(const OrtRuntime &rt, BlockRun &r, unsigned int n)
 double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
                unsigned int warmup, bool forceIters, unsigned int forced,
                std::string &error, ResultStatus &status,
-               int64_t kvLen = kDecodeKv)
+               int64_t kvLen = kDecodeKv, int64_t prefillSeq = kPrefillSeq)
 {
-  BlockRun r = makeRun(rt, ep, decode, kvLen);
+  BlockRun r = makeRun(rt, ep, decode, kvLen, prefillSeq);
   if (!r.session)
   {
     error  = r.error;
@@ -337,6 +341,54 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         test.skip(label, st, err.empty() ? "run failed" : err, note);
         break;   // longer contexts will not fare better
       }
+    }
+    test.end();
+  }
+
+  // ---- How much prompt it takes to saturate the device --------------------
+  {
+    auto test = currentDeviceScope->beginTest(
+        {"onnx-block-prefill-knee", "Transformer block, prefill vs prompt",
+         "tflops", Category::Ai,
+         "The same layer given prompts of different lengths.  A short prompt "
+         "cannot keep wide hardware busy -- there is not enough work in flight "
+         "to fill it -- so the rate climbs with the prompt until the device is "
+         "saturated and then flattens.  Where it flattens is how much text has "
+         "to arrive at once before this device is working at full stretch, "
+         "which is what decides whether batching requests together is worth "
+         "doing."});
+
+    for (int64_t seq : kPromptLadder)
+    {
+      if (clpeak::cancelRequested())
+        break;
+
+      const std::string metric = "s" + std::to_string(seq);
+      const std::string note =
+          std::string(geometry) + "A prompt of " + std::to_string(seq) +
+          " tokens in one pass.";
+
+      double us = -1.0;
+      std::string err = prefillErr;
+      ResultStatus status = prefillStatus;
+      if (seq == kPrefillSeq)
+      {
+        us = prefillUs;                 // already measured above
+      }
+      else if (!clpeak::cancelRequested())
+      {
+        err.clear();
+        status = ResultStatus::Ok;
+        us = measure(rt, ep, false, warmupCount, forceIters, specifiedIters,
+                     err, status, kDecodeKv, seq);
+      }
+
+      if (us > 0.0)
+        test.emit(metric,
+                  (float)(blockFlops(seq, seq) * 1.0e6 / us / 1.0e12),
+                  note.c_str());
+      else
+        test.skip(metric, status, err, note);
     }
     test.end();
   }
