@@ -155,12 +155,24 @@ it resolves which engine actually ran the work. Reference readings, M1 Pro:
 | CPU EP | 0.0 ppm | 207 ppm | 9463 ppm |
 | CoreML EP | 0.4 ppm | 214 ppm | (unsupported) |
 | CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 9467 ppm |
+| CPU EP (Zen 2) | 0.0 ppm | 207 ppm | **178926 ppm** |
 
 The CUDA fp32 row is the design paying off on a second vendor: 261 ppm is
 worse than fp16's, which is not what fp32 arithmetic looks like. It is TF32 —
 ten mantissa bits, the same as fp16 — which cuBLAS selects by default. The
 "fp32" throughput row on NVIDIA is therefore a TF32 number, and only the
 error row says so.
+
+The Zen 2 int8 row is the other half of the argument for measuring accuracy
+at all. That CPU fuses the quantized matmul happily and runs it at 1.3 TOPS —
+a perfectly respectable throughput row — while losing **18%** of the answer,
+twenty times the quantization noise the same recipe costs everywhere else.
+The cause is the x86 U8S8 kernel: without VNNI, MLAS multiplies uint8 by int8
+into int16 accumulators, which saturate when the weights use the full int8
+range. It is the reason ONNX Runtime's quantizer offers `reduce_range` for
+pre-VNNI x86. clpeak deliberately does **not** reduce the range — the point
+is to report what full-range int8 actually costs on that hardware, and a
+throughput row alone would have called it a win.
 
 CPU-EP fp32 at exactly 0.0 is the methodology validating itself. CoreML's
 fp16 error matching the CPU's says both accumulate in fp16 — combined with
