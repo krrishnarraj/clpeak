@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdio>
+#include <iomanip>
+#include <locale>
 #include <ostream>
+#include <sstream>
 #include <string>
 
 CpuPeak::CpuPeak() {}
@@ -26,14 +28,19 @@ void CpuPeak::applyOptions(const CliOptions &opts)
   targetTimeUs = opts.targetTimeUsCpu;
 }
 
-// Human-readable byte size for the device property block.
+// Human-readable byte size for the device property block.  Streams pinned to
+// the classic locale, not printf: this string is persisted in the dump files
+// and the GUI runs with the host toolkit's locale set, which would otherwise
+// write "8,0 GB" there but "8.0 GB" from the CLI on the same machine.
 static std::string fmtBytes(uint64_t b)
 {
-  char buf[64];
-  if (b >= (1ull << 30))      std::snprintf(buf, sizeof(buf), "%.1f GB", b / (double)(1ull << 30));
-  else if (b >= (1ull << 20)) std::snprintf(buf, sizeof(buf), "%.0f MB", b / (double)(1ull << 20));
-  else                        std::snprintf(buf, sizeof(buf), "%.0f KB", b / (double)(1ull << 10));
-  return buf;
+  std::ostringstream ss;
+  ss.imbue(std::locale::classic());
+  ss << std::fixed;
+  if (b >= (1ull << 30))      ss << std::setprecision(1) << b / (double)(1ull << 30) << " GB";
+  else if (b >= (1ull << 20)) ss << std::setprecision(0) << b / (double)(1ull << 20) << " MB";
+  else                        ss << std::setprecision(0) << b / (double)(1ull << 10) << " KB";
+  return ss.str();
 }
 
 double CpuPeak::runWorkload(int nThreads, const Workload &body,

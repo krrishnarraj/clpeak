@@ -3,9 +3,10 @@
 #include <common/common.h>
 #include <common/result_store.h>
 
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
+#include <locale>
 #include <sstream>
 
 namespace
@@ -33,11 +34,19 @@ void appendStr(std::ostringstream &ss, const char *key, const std::string &value
     ss << ",\"" << key << "\":\"" << jsonEscape(value) << "\"";
 }
 
+// JSON numbers are '.'-separated by definition, so this must not follow the
+// process locale.  It matters here more than anywhere else in clpeak: the GUI
+// hosts this library inside a toolkit that sets the locale for us (GTK's
+// gtk_init calls setlocale(LC_ALL, "")), so on a comma-decimal desktop a
+// printf("%.4f") emitted `"value":1234,5678` -- malformed JSON that the Dart
+// side dropped, leaving the live results view empty while the XML dump (which
+// never went through the C locale) stayed correct.
 std::string fmtFloat(float v)
 {
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.4f", v);
-    return buf;
+    std::ostringstream ss;
+    ss.imbue(std::locale::classic());
+    ss << std::fixed << std::setprecision(4) << v;
+    return ss.str();
 }
 
 } // namespace
@@ -45,6 +54,7 @@ std::string fmtFloat(float v)
 std::string ffiEventToJson(const LogEvent &e)
 {
     std::ostringstream ss;
+    ss.imbue(std::locale::classic());  // see fmtFloat -- the indices too
     ss << "{\"t\":\"" << kindTag(e.kind) << "\"";
 
     // Scope context — present on every scoped event.
