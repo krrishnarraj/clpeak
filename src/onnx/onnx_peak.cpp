@@ -190,6 +190,8 @@ int OnnxPeak::runAll()
       runBlock(*rt, ep, cfg);
 
     // ---- Phase 5: bandwidth ----------------------------------------------
+    if (isAllowed(Benchmark::OnnxActivation))
+      runActivation(*rt, ep, cfg);
     if (isAllowed(Benchmark::OnnxTensorBW))
       runTensorBandwidth(*rt, ep, cfg);
 

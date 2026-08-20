@@ -19,6 +19,7 @@ backend.
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the convolution benchmark? → `conv.cpp`
+- Looking for the softmax / norm / gate benchmark? → `activation.cpp`
 - Looking for the dtype-accuracy benchmark? → `numeric_error.cpp`
 - Looking for the transformer-block benchmark? → `block.cpp`
 - Looking for the bandwidth / dispatch-overhead benchmarks? → `tensor_bandwidth.cpp`, `dispatch_latency.cpp`
@@ -33,6 +34,7 @@ backend.
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s, each net of a reference graph that reads and reduces the same tensor with no operation applied |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 | `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off two timings: `onnx-block-prefill` (tflops), `onnx-block-decode` (gbps), `onnx-block-latency` (us) |
@@ -289,6 +291,34 @@ than because it was convenient, and it is meant to stay fixed forever:
 - **`onnx-numeric-error`'s 1024** is fixed because accumulation depth is part
   of what the error means. Comparing accuracy across devices requires the same
   depth on each.
+
+## The cheap operations are not cheap
+
+A transformer layer is mostly matmul by arithmetic and mostly everything else
+by op count. `onnx-activation` measures those others — softmax,
+LayerNorm, the feed-forward gate. None does meaningful arithmetic, so their
+ceiling is memory bandwidth and their rate is reported as the bandwidth they
+achieve, directly comparable with `onnx-tensor-bw` above.
+
+M1 Pro, CoreML EP, against 50–90 GB/s of resident-tensor streaming:
+
+| | rate | share of streaming |
+|---|---|---|
+| softmax | 30 GB/s | ~40% |
+| SiLU | 12 GB/s | ~14% |
+| LayerNorm | 13 GB/s | ~15% |
+
+The ANE reads weights four to seven times faster than it can apply a
+pointwise function to them. Hardware shaped for matrix multiplication has no
+particular path for these, which is why a layer can spend a surprising share
+of its time on the parts that look free in a FLOP count — and why these are
+the operations a provider most often hands back to the CPU.
+
+Each rate is net of a reference graph that reads and reduces the same
+constant with no operation applied, so what is left is the operation rather
+than the scaffolding. On providers where the reduction is itself expensive
+the subtraction does heavy lifting (on the CPU EP the reference is most of
+the measured time), which makes those rows noisier than the accelerator ones.
 
 ## Why convolution is measured separately
 

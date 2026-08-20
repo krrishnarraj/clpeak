@@ -320,6 +320,60 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
   return g.build();
 }
 
+std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
+                                        OnnxActivation act,
+                                        const std::string &xRaw)
+{
+  OnnxGraph g;
+  g.input("S", ONNX_DT_FLOAT16, {});
+  g.initializer("X", ONNX_DT_FLOAT16, {rows, cols}, xRaw);
+
+  std::string out = "X";
+  switch (act)
+  {
+  case OnnxActivation::None:
+    break;
+
+  case OnnxActivation::Silu:
+    // x * sigmoid(x): the gate in a SwiGLU feed-forward.
+    g.node("Sigmoid", {"X"}, {"Sg"});
+    g.node("Mul", {"X", "Sg"}, {"A"});
+    out = "A";
+    break;
+
+  case OnnxActivation::Softmax:
+    g.node("Softmax", {"X"}, {"A"}, {OnnxAttr::num("axis", -1)});
+    out = "A";
+    break;
+
+  case OnnxActivation::LayerNorm:
+  {
+    // Opset 17 has LayerNormalization as one node, scale and bias supplied.
+    std::string scale((size_t)cols * 2, '\0');
+    std::string bias((size_t)cols * 2, '\0');
+    uint16_t *sh = reinterpret_cast<uint16_t *>(&scale[0]);
+    uint16_t *bh = reinterpret_cast<uint16_t *>(&bias[0]);
+    for (int64_t i = 0; i < cols; i++)
+    {
+      sh[i] = floatToHalf(1.0f);
+      bh[i] = floatToHalf(0.0f);
+    }
+    g.initializer("Ln_scale", ONNX_DT_FLOAT16, {cols}, scale);
+    g.initializer("Ln_bias",  ONNX_DT_FLOAT16, {cols}, bias);
+    g.node("LayerNormalization", {"X", "Ln_scale", "Ln_bias"}, {"A"},
+           {OnnxAttr::num("axis", -1)});
+    out = "A";
+    break;
+  }
+  }
+
+  g.node("ReduceMax", {out}, {"R"},
+         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.node("Mul", {"R", "S"}, {"Y"});
+  g.output("Y", ONNX_DT_FLOAT16, {cols});
+  return g.build();
+}
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------

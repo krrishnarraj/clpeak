@@ -63,6 +63,7 @@ enum class Benchmark : unsigned int {
     OnnxNumericError,   // accuracy cost of each dtype vs an fp32 CPU reference
     OnnxBlock,          // fixed transformer decoder block: prefill + decode
     OnnxConv,           // 2-D convolution peak through an ONNX EP
+    OnnxActivation,     // softmax / layernorm / gate throughput through an ONNX EP
     OnnxTensorBW,       // resident-tensor read bandwidth through an ONNX EP
     OnnxDispatchLatency,// per-submission overhead of an ONNX EP
     KernelLatency,
@@ -92,6 +93,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::LocalBW:
     case Benchmark::ImageBW:
     case Benchmark::TransferBW:
+    case Benchmark::OnnxActivation:
     case Benchmark::OnnxTensorBW:
     case Benchmark::CacheBandwidth:
     case Benchmark::TextureSample:

@@ -11,6 +11,7 @@ add_library(peak_onnx STATIC
     onnx_model.cpp
     gemm.cpp
     conv.cpp
+    activation.cpp
     numeric_error.cpp
     block.cpp
     tensor_bandwidth.cpp

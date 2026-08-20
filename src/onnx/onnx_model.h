@@ -134,6 +134,19 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
                                   const std::string &xRaw,
                                   const std::string &wRaw);
 
+// The non-matmul operations a transformer layer is padded with.  `None` is
+// the reference graph: the same constant read and reduced with no operation
+// applied, so subtracting its time leaves the operation's own cost.
+enum class OnnxActivation { None, Silu, Softmax, LayerNorm };
+
+// One activation applied to a resident [rows, cols] fp16 constant, reduced to
+// a single row on the way out.  Built like the other throughput models: the
+// operand never crosses the host boundary, and a runtime scalar scales the
+// reduced result so the graph is not entirely constant.
+std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
+                                        OnnxActivation act,
+                                        const std::string &xRaw);
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------
