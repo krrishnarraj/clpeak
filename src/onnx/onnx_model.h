@@ -111,8 +111,12 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // is left untouched -- inserting anything between the dequantize and the
 // matmul stops ORT recognising it as a quantized matmul at all, which would
 // silently measure float arithmetic.
+// Activations are uint8 and weights int8 -- the combination ONNX Runtime's
+// own quantizer emits for deployment, and the one x86 implements without
+// VNNI.  Signed activations fuse on ARM but not there, which showed up as an
+// unfused graph on a Threadripper while the same code fused on an M1.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
-                                       const std::string &aRawInt8,
+                                       const std::string &aRawUint8,
                                        const std::string &bRawInt8,
                                        float aScale, float bScale, float cScale);
 

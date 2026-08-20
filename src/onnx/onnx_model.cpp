@@ -199,7 +199,8 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRawInt8,
                                float aScale, float bScale, float cScale)
 {
-  const std::string zeroI8(1, '\0');   // symmetric quantization: zero_point 0
+  const std::string zeroI8(1, '\0');
+  const std::string zp128(1, (char)(unsigned char)128);
   auto f32 = [](float v) {
     std::string s(4, '\0');
     std::memcpy(&s[0], &v, 4);
@@ -207,22 +208,22 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
-  g.input("A_q", ONNX_DT_INT8, {M, K});
+  g.input("A_q", ONNX_DT_UINT8, {M, K});
 
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
-  g.initializer("a_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("a_zp",    ONNX_DT_UINT8, {}, zp128);
   g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, weightRawInt8);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
   g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
-  g.initializer("c_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("c_zp",    ONNX_DT_UINT8, {}, zp128);
 
   g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
 
-  g.output("C_q", ONNX_DT_INT8, {M, N});
+  g.output("C_q", ONNX_DT_UINT8, {M, N});
   return g.build();
 }
 
@@ -249,11 +250,13 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 }
 
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
-                                       const std::string &aRawInt8,
+                                       const std::string &aRawUint8,
                                        const std::string &bRawInt8,
                                        float aScale, float bScale, float cScale)
 {
+  (void)aScale;   // supplied at run time, see below
   const std::string zeroI8(1, '\0');
+  const std::string zp128(1, (char)(unsigned char)128);
   auto f32 = [](float v) {
     std::string s(4, '\0');
     std::memcpy(&s[0], &v, 4);
@@ -261,25 +264,28 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
+  // The activation scale arrives at run time rather than as a constant.  That
+  // is what keeps the dequantize -- and therefore the matmul below it -- out
+  // of reach of constant folding, so this model needs no optimizer disabled,
+  // unlike its floating-point counterpart.  QLinearMatMul takes scales as
+  // inputs, so the quantized fusion is unaffected.
   g.input("S", ONNX_DT_FLOAT, {});
-  g.initializer("A_q",     ONNX_DT_INT8,  {M, K}, aRawInt8);
-  g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
-  g.initializer("a_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("A_q",     ONNX_DT_UINT8, {M, K}, aRawUint8);
+  g.initializer("a_zp",    ONNX_DT_UINT8, {}, zp128);
   g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, bRawInt8);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
   g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
-  g.initializer("c_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("c_zp",    ONNX_DT_UINT8, {}, zp128);
 
   // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
-  g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
+  g.node("DequantizeLinear", {"A_q", "S", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
   g.node("ReduceMax",        {"C_q"}, {"R_q"},
          {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
-  g.node("DequantizeLinear", {"R_q", "c_scale", "c_zp"}, {"R"});
-  g.node("Mul",              {"R", "S"}, {"Y"});
+  g.node("DequantizeLinear", {"R_q", "c_scale", "c_zp"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
 }

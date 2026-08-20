@@ -77,6 +77,17 @@ on size) and reports the row as unsupported, naming what actually ran, when
 no integer matmul kernel appears. When one does, the row's description names
 it — the M1 Pro CPU EP reports `QLinearMatMul`, so its 1.6 TOPS is real.
 
+It found something on its first outing. A Threadripper reported *no* fusion
+on the CPU EP, where an M1 running the same code fused to `QLinearMatMul` —
+because the graph used int8 for both operands. ARM's MLAS does S8S8 natively
+via SDOT; x86 without VNNI implements **U8S8**, uint8 activations against
+int8 weights, which is also what ORT's own quantizer emits for deployment.
+The quantized models now use U8S8 everywhere, so one identical graph gets
+every provider its best shot. The activation scale arrives as a runtime input
+too, which keeps the dequantize out of reach of constant folding and lets the
+quantized model run with the optimizer untouched — removing a second possible
+cause of non-fusion.
+
 Two details cost time to find and are easy to get wrong again:
 
 - The profile is JSON with `"op_name" : "QLinearMatMul"` — **spaces around

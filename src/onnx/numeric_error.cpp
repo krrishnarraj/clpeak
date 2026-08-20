@@ -57,6 +57,7 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
   int8_t   *q = reinterpret_cast<int8_t *>(&raw[0]);
+  uint8_t  *u = reinterpret_cast<uint8_t *>(&raw[0]);
   for (int64_t i = 0; i < count; i++)
   {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
@@ -66,6 +67,7 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
     case ONNX_DT_FLOAT:    f[i] = v; break;
     case ONNX_DT_FLOAT16:  h[i] = floatToHalf(v); break;
     case ONNX_DT_BFLOAT16: h[i] = floatToBf16(v); break;
+    case ONNX_DT_UINT8:    u[i] = (uint8_t)(v * 254.0f + 128.0f); break;
     default:               q[i] = (int8_t)(v * 254.0f); break;
     }
   }
@@ -86,12 +88,14 @@ std::vector<float> widen(const std::string &raw, int dtype, int64_t count,
   const float    *f = reinterpret_cast<const float *>(raw.data());
   const uint16_t *h = reinterpret_cast<const uint16_t *>(raw.data());
   const int8_t   *q = reinterpret_cast<const int8_t *>(raw.data());
+  const uint8_t  *u = reinterpret_cast<const uint8_t *>(raw.data());
   for (int64_t i = 0; i < count; i++)
   {
     switch (dtype)
     {
     case ONNX_DT_FLOAT:   out[i] = f[i]; break;
     case ONNX_DT_FLOAT16: out[i] = halfToFloat(h[i]); break;
+    case ONNX_DT_UINT8:   out[i] = ((float)u[i] - 128.0f) * scale; break;
     default:              out[i] = (float)q[i] * scale; break;
     }
   }
@@ -222,8 +226,10 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const float qScale = 1.0f / 127.0f;
     const float cScale = qdqOutputScale(kDim);
 
+    // U8S8 for the quantized form: uint8 activations, int8 weights.
+    const int aDtype = v.qdq ? ONNX_DT_UINT8 : v.dtype;
     std::string aRaw, bRaw;
-    fillTensor(aRaw, v.dtype, kDim * kDim, 0x9e3779b9u);
+    fillTensor(aRaw, aDtype, kDim * kDim, 0x9e3779b9u);
     fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
 
     std::string model;
@@ -241,7 +247,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     std::string err;
     auto raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
-                       v.dtype, kDim, kDim, err);
+                       aDtype, kDim, kDim, err);
     if (raw.empty())
     {
       test.skip(v.label, ResultStatus::Unsupported,
@@ -254,11 +260,11 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // next layer does.
     std::vector<float> got = widen(
         std::string(reinterpret_cast<const char *>(raw.data()), raw.size()),
-        v.dtype, kDim * kDim, cScale);
+        aDtype, kDim * kDim, cScale);
 
     // The reference: the same values the provider saw, widened to fp32 and
     // multiplied on the CPU EP.
-    std::vector<float> aRef = widen(aRaw, v.dtype, kDim * kDim, qScale);
+    std::vector<float> aRef = widen(aRaw, aDtype, kDim * kDim, qScale);
     std::vector<float> bRef = widen(bRaw, v.dtype, kDim * kDim, qScale);
 
     std::string refWeights(reinterpret_cast<const char *>(bRef.data()),

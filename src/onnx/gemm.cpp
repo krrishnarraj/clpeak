@@ -106,6 +106,7 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
   int8_t   *q = reinterpret_cast<int8_t *>(&raw[0]);
+  uint8_t  *u = reinterpret_cast<uint8_t *>(&raw[0]);
   for (int64_t i = 0; i < count; i++)
   {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
@@ -115,6 +116,7 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
     case ONNX_DT_FLOAT:    f[i] = v; break;
     case ONNX_DT_FLOAT16:  h[i] = floatToHalf(v); break;
     case ONNX_DT_BFLOAT16: h[i] = floatToBf16(v); break;
+    case ONNX_DT_UINT8:    u[i] = (uint8_t)(v * 254.0f + 128.0f); break;  // zp 128
     default:               q[i] = (int8_t)(v * 254.0f); break;   // [-127, 127]
     }
   }
@@ -150,7 +152,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   GemmSetup g;
 
   std::string aRaw, bRaw;
-  fillTensor(aRaw, v.dtype, D * D, 0x9e3779b9u);
+  // U8S8 for the quantized form: uint8 activations, int8 weights.
+  fillTensor(aRaw, v.qdq ? ONNX_DT_UINT8 : v.dtype, D * D, 0x9e3779b9u);
   fillTensor(bRaw, v.dtype, D * D, 0x243f6a88u);
 
   std::string modelBytes;
@@ -167,8 +170,10 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   aRaw.clear(); aRaw.shrink_to_fit();
   bRaw.clear(); bRaw.shrink_to_fit();
 
-  auto ses = onnxCreateSession(rt, ep, modelBytes, /*keepConstantsUnfolded=*/true,
-                               profile);
+  // Only the floating-point model needs folding held off: the quantized one
+  // takes its activation scale at run time, so nothing in it is foldable.
+  auto ses = onnxCreateSession(rt, ep, modelBytes,
+                               /*keepConstantsUnfolded=*/!v.qdq, profile);
   if (!ses.session)
   {
     g.error = ses.error;
@@ -179,9 +184,18 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // The QDQ graph reduces in float; the plain one keeps its own dtype.
   const int ioDtype = v.qdq ? ONNX_DT_FLOAT : v.dtype;
   const size_t es   = dtypeSize(ioDtype);
+  if (v.qdq)
   {
-    // The scalar is 1.0-ish: it scales the reduced result and exists only so
-    // the graph depends on something supplied at run time.
+    // The runtime scalar is the activation scale, mapping uint8 codes back to
+    // roughly [-1, 1].  It has to be a real scale, not an arbitrary number.
+    const float aScale = 1.0f / 127.0f;
+    g.inBuf.assign(sizeof(float), 0);
+    std::memcpy(g.inBuf.data(), &aScale, sizeof(float));
+  }
+  else
+  {
+    // Scales the reduced result; exists only so the graph depends on
+    // something supplied at run time.
     std::string one;
     fillTensor(one, ioDtype, 1, 0x12345678u);
     g.inBuf.assign(one.begin(), one.end());
