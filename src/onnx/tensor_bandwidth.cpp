@@ -57,8 +57,15 @@ struct Size
   const char *note;
 };
 
-// Three rungs: comfortably inside on-chip memory, around the size of a large
-// last-level cache or NPU SRAM, and unambiguously main memory.
+// The ladder climbs until the rate stops falling, which is where the working
+// set has left the last level of cache and main memory is all that is left.
+//
+// It is open-ended on purpose.  A fixed top rung has to be raised as caches
+// grow -- 128 MB is already inside a single AMD Infinity Cache -- and raising
+// it turns "the main-memory rate" into a different measurement under the same
+// name.  Climbing until the curve flattens finds main memory on any device,
+// now and later, and every rung stays comparable because a rung is named for
+// its working-set size rather than for its position in the list.
 const Size kSizes[] = {
   {2048, "8mb",
    "Eight megabytes of weights -- small enough to sit in fast local memory on "
@@ -66,9 +73,18 @@ const Size kSizes[] = {
   {4096, "32mb",
    "Thirty-two megabytes -- around the size of a large cache or an NPU's local memory."},
   {8192, "128mb",
-   "128 megabytes -- too big for any on-chip memory, so this is the main-memory rate, "
-   "and the reading that sets how fast a large model can generate text."},
+   "128 megabytes -- past the cache of most devices, though not all."},
+  {16384, "512mb",
+   "512 megabytes -- beyond any cache shipping today, so this is main memory "
+   "on anything that still shows a falling rate by this point."},
+  {32768, "2gb",
+   "Two gigabytes.  Only reached by a device whose rate was still dropping at "
+   "512 MB, meaning a cache larger than anything current."},
 };
+
+// A rung is only worth trying if the one before it was still meaningfully
+// faster; once the curve flattens, main memory has been found.
+constexpr double kFallingRatio = 0.9;
 
 // One matrix-vector product against a square fp16 weight matrix.
 std::string streamModel(int64_t d)
@@ -208,13 +224,34 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   CLPEAK_VLOG("onnx-tensor-bw[%s]: dispatch floor %.2f us\n",
               ep.providerKey.c_str(), floorUs);
 
+  double prevGbps = 0.0;
+  bool   stillFalling = true;
   for (const Size &s : kSizes)
   {
     if (clpeak::cancelRequested())
       break;
+
+    // Stop once the curve has flattened: the rungs above only exist for
+    // devices whose caches are larger than the ones below.
+    if (prevGbps > 0.0 && !stillFalling)
+    {
+      CLPEAK_VLOG("onnx-tensor-bw[%s]: rate flattened, stopping below %s\n",
+                  ep.providerKey.c_str(), s.label);
+      break;
+    }
+
     Result r = measure(rt, ep, s.dim, warmupCount, forceIters, specifiedIters);
     if (r.us <= 0.0)
     {
+      // A rung past the standard three is exploratory: a device that cannot
+      // allocate it has simply run out of ladder, which is not a failure
+      // worth a row.
+      if (s.dim > 8192)
+      {
+        CLPEAK_VLOG("onnx-tensor-bw[%s]: %s unavailable (%s)\n",
+                    ep.providerKey.c_str(), s.label, r.error.c_str());
+        break;
+      }
       test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error,
                 s.note);
       continue;
@@ -232,7 +269,11 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       continue;
     }
     const double bytes = (double)s.dim * (double)s.dim * 2.0;
-    test.emit(s.label, (float)(bytes / (netUs * 1.0e-6) / 1.0e9), s.note);
+    const double gbps  = bytes / (netUs * 1.0e-6) / 1.0e9;
+    test.emit(s.label, (float)gbps, s.note);
+
+    stillFalling = (prevGbps <= 0.0) || (gbps < prevGbps * kFallingRatio);
+    prevGbps = gbps;
   }
 
   test.end();

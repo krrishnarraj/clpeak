@@ -204,6 +204,42 @@ not depend on constant folding being disabled.
 `numeric_error.cpp` keeps using the plain, non-resident models: it compares
 actual output values, so it needs the real result rather than a reduction.
 
+## Report asymptotes, not readings at a size someone picked
+
+A number tied to a fixed problem size has an expiry date. Whatever size looks
+generous today will one day be too small to saturate anything, it gets raised,
+and every result recorded before that day silently becomes a different
+measurement under the same name. Two tests here would have hit that, and both
+now search instead:
+
+- **`onnx-gemm`** doubles from 1024 until the rate stops improving, and reports
+  the peak with the size that produced it. "The best this device can do at any
+  size" means the same thing in ten years as it does now; "the rate at 4096"
+  does not. The search is bounded by a predicted per-iteration time and an
+  operand-memory ceiling, both of which scale themselves — hardware fast enough
+  to make a bigger size cheap is exactly the hardware that should try it. A
+  slow provider stops after two or three rungs; the M1 Pro's fp16 curve peaks
+  at 2048 and collapses to 0.3 TFLOPS by 8192, which the strikes rule catches.
+- **`onnx-tensor-bw`** climbs until the rate stops falling, which is where the
+  working set has left the last level of cache. A fixed top rung would have
+  needed raising already: 128 MB fits inside a single AMD Infinity Cache.
+  Rungs are named for their working-set size, so adding more never invalidates
+  the ones below.
+
+Where a size *is* fixed, it is fixed because it defines the workload rather
+than because it was convenient, and it is meant to stay fixed forever:
+
+- **`onnx-block`'s geometry** is a workload definition, in the way a standard
+  benchmark names a model. It is sized to match a real model's layer, not to
+  saturate a particular device, and changing it later would break exactly the
+  comparability the fixed choice buys. Its output is a rate, which stays
+  meaningful as hardware grows; the guard against it becoming *too* small to
+  measure is the `onnx-dispatch-latency` row printed beside it, which says
+  what a submission costs on the same device.
+- **`onnx-numeric-error`'s 1024** is fixed because accumulation depth is part
+  of what the error means. Comparing accuracy across devices requires the same
+  depth on each.
+
 ## Sizes are swept, never chosen by a probe
 
 `gemm.cpp` runs a fixed 1024/2048/4096 ladder and reports each datatype's
@@ -215,10 +251,10 @@ between 5.8 and 6.2 TFLOPS run to run purely on which side it landed.
 
 No single size is right anyway, which the ladder makes visible:
 
-| CoreML EP | 1024³ | 2048³ | 4096³ |
-|-----------|-------|-------|-------|
-| fp32 | 1.76 | 1.94 | **2.32** |
-| fp16 | 3.13 | **5.98** | 5.57 |
+| CoreML EP | 1024³ | 2048³ | 4096³ | 8192³ |
+|-----------|-------|-------|-------|-------|
+| fp32 | 2.11 | 2.09 | **2.30** | 1.84 |
+| fp16 | 4.53 | **8.56** | 6.04 | 0.33 |
 
 fp32 climbs to 4096 while fp16 peaks at 2048 and *falls* — the two rows are
 served by different engines (see the numeric-error section) with different
@@ -227,10 +263,8 @@ on-chip memory, the same cliff Apple silicon is independently reported to
 have between those two sizes. The CPU EP is flat across the ladder, as a
 cache-blocked CPU should be.
 
-A fixed ladder also means two devices are always compared on identical work,
-which an adaptive probe cannot promise. The per-size budget is 2 s rather
-than the 5 s a single-size test would use, so sweeping three costs about
-what measuring one did.
+The per-size budget is 2 s rather than the 5 s a single-size test would use,
+since the ladder measures several.
 
 **`mps-gemm` in the Metal backend still uses the probe pattern** and carries
 the same latent instability; whether it bites depends on where that device's

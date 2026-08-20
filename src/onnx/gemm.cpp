@@ -28,24 +28,44 @@
 namespace
 {
 
-// A fixed ladder, swept in full, best result reported -- deliberately not a
-// size chosen from a timing probe.  Two reasons.
+// The ladder doubles from 1024 until the rate stops improving, and the peak
+// is reported along with the size that produced it.
 //
-// A probe is unstable: the size it picks comes out of a cube root and then
-// gets bucketed, so a couple of percent of timing noise can push the estimate
-// across a bucket edge and change the size, and the size changes the answer.
-// On this Mac that made the fp16 row alternate between 5.8 and 6.2 TFLOPS
-// depending on nothing but which side of the boundary the probe landed.
+// Reporting a peak rather than "the rate at 4096" is what keeps this number
+// comparable over time.  A fixed size has to be raised as hardware grows --
+// today's largest rung will one day be too small to saturate anything -- and
+// the moment it is raised, every result recorded before becomes a different
+// measurement wearing the same name.  An extending search has no such
+// horizon: faster hardware simply climbs further, and "the best this device
+// can do at any size" means the same thing in ten years as it does now.
 //
-// And no single size is right anyway: on the same device fp32 runs faster at
-// 3072 while fp16 runs faster at 2048, because they are served by different
-// engines with different fast-memory limits.  Sweeping asks each datatype
-// where its own peak is; a fixed ladder also means two devices are always
-// compared on identical work.
-constexpr int64_t kDims[] = {1024, 2048, 4096};
+// It is also not a size chosen from a timing probe, which was the previous
+// design.  A probe is unstable -- the size comes out of a cube root and is
+// then bucketed, so a couple of percent of timing noise can push the estimate
+// across a bucket edge and change the answer.  On an M1 Pro that made the
+// fp16 row alternate between 5.8 and 6.2 TFLOPS depending on nothing else.
+// And no single size is right anyway: fp32 there peaks at 4096 while fp16
+// peaks at 2048, because different engines serve them.
+constexpr int64_t kMinDim = 1024;
+constexpr int64_t kMaxDim = 32768;
+
+// A size counts as an improvement only if it beats the best so far by this
+// much; two failures in a row end the search.  The grace of one lets a curve
+// dip at a single size and recover, which happens when one size lands badly
+// against a cache but the next tiles better.
+constexpr double kImproveFactor = 1.03;
+constexpr int    kMaxStrikes    = 2;
+
+// Ceilings that keep the search from running away on either axis.  The time
+// bound is predicted from the previous size's measured rate, so a slow
+// provider stops early instead of spending minutes on one matrix, and it
+// scales itself: hardware fast enough to make a bigger size cheap is exactly
+// the hardware that should try it.
+constexpr double   kMaxIterUs      = 2.0e6;        // one iteration, predicted
+constexpr uint64_t kMaxWeightBytes = 3ull << 30;   // both operands resident
 
 // Per-size budget for the timed phase.  Lower than the 5 s a single-size test
-// would use, so sweeping three sizes costs about what measuring one did.
+// would use, since the ladder measures several.
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
 struct Variant
@@ -266,14 +286,41 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
 
-    // Smallest and largest timings, to confirm the work actually happened
-    // (see the folding check after the loop).
-    double smallestUs = 0.0, largestUs = 0.0;
+    // First and last timings with their sizes, to confirm the work actually
+    // happened (see the folding check after the loop).
+    double  firstUs = 0.0, lastUs = 0.0;
+    int64_t firstDim = 0, lastDim = 0;
+    double  lastRate = 0.0;
+    int     strikes = 0;
 
-    for (int64_t D : kDims)
+    for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
+
+      // Would this size fit, and would one iteration finish in reasonable
+      // time at the rate the previous size managed?
+      const uint64_t weightBytes =
+          2ull * (uint64_t)D * (uint64_t)D * (uint64_t)dtypeSize(v.dtype);
+      if (weightBytes > kMaxWeightBytes)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
+                    "stopping\n", ep.providerKey.c_str(), v.label,
+                    (long long)D, (unsigned long long)(weightBytes >> 20));
+        break;
+      }
+      if (lastRate > 0.0)
+      {
+        const double predictedUs =
+            2.0 * (double)D * (double)D * (double)D / lastRate;
+        if (predictedUs > kMaxIterUs)
+        {
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 would take ~%.1f s per "
+                      "iteration, stopping\n", ep.providerKey.c_str(),
+                      v.label, (long long)D, predictedUs / 1.0e6);
+          break;
+        }
+      }
 
       GemmSetup g = makeSetup(rt, ep, v, D);
       if (!g.session)
@@ -309,18 +356,41 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (mean_us <= 0.0)
         continue;
 
-      if (D == kDims[0])
-        smallestUs = mean_us;
-      largestUs = mean_us;
+      if (firstUs == 0.0)
+      {
+        firstUs  = mean_us;
+        firstDim = D;
+      }
+      lastUs  = mean_us;
+      lastDim = D;
 
       const double ops  = 2.0 * (double)D * (double)D * (double)D;
       const double rate = ops * 1.0e6 / mean_us / 1.0e12;
+      // Rate per FLOP-count is what the ladder is searching on; the raw rate
+      // in ops/us drives the time prediction for the next rung.
+      lastRate = ops / mean_us;
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 -> %.3f\n", ep.providerKey.c_str(),
                   v.label, (long long)D, rate);
-      if (rate > best)
+
+      if (rate > best * kImproveFactor)
       {
+        strikes = 0;
         best    = rate;
         bestDim = D;
+      }
+      else
+      {
+        if (rate > best)
+        {
+          best    = rate;
+          bestDim = D;
+        }
+        if (++strikes >= kMaxStrikes)
+        {
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: no further gain past %lld^3\n",
+                      ep.providerKey.c_str(), v.label, (long long)bestDim);
+          break;
+        }
       }
     }
 
@@ -330,13 +400,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // graph.  Real work grows with the cube of the size -- 64x across this
     // ladder -- so anything close to flat means nothing was computed.  Better
     // an error than a spectacular number.
-    if (best > 0.0 && smallestUs > 0.0 && largestUs > 0.0 &&
-        kDims[0] != kDims[2] && largestUs < smallestUs * 8.0)
+    double expectedGrowth = 1.0;
+    for (int64_t d = firstDim; d > 0 && d < lastDim; d *= 2)
+      expectedGrowth *= 8.0;                       // each doubling is 8x work
+    if (best > 0.0 && firstUs > 0.0 && lastDim > firstDim &&
+        lastUs < firstUs * expectedGrowth / 8.0)
     {
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld -- "
                   "work does not scale, constants were folded\n",
-                  ep.providerKey.c_str(), v.label, smallestUs,
-                  (long long)kDims[0], largestUs, (long long)kDims[2]);
+                  ep.providerKey.c_str(), v.label, firstUs,
+                  (long long)firstDim, lastUs, (long long)lastDim);
       best      = 0.0;
       firstErr  = "constant folding was not disabled; timings do not scale "
                   "with problem size";
@@ -346,13 +419,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     logger::EmitOptions o;
     if (best > 0.0)
     {
-      o.description = "Best of 1024, 2048 and 4096 cubed; fastest at " +
-                      std::to_string(bestDim) + ".  " + v.note;
+      o.description = "Peak over a doubling sweep of square sizes; fastest at "
+                      + std::to_string(bestDim) + " cubed.  " + v.note;
       test.emit(v.label, (float)best, o);
     }
     else
     {
-      o.description = std::string("Best of 1024, 2048 and 4096 cubed.  ") + v.note;
+      o.description = std::string("Peak over a doubling sweep of square sizes.  ")
+                      + v.note;
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "no supported datatype" : firstErr,
                 o.description);
