@@ -247,6 +247,14 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       break;
     }
 
+    if ((uint64_t)s.dim * (uint64_t)s.dim * 2ull >
+        clpeak::memoryBudget(2ull << 30))
+    {
+      CLPEAK_VLOG("onnx-tensor-bw[%s]: %s exceeds this machine's memory "
+                  "budget, stopping\n", ep.providerKey.c_str(), s.label);
+      break;
+    }
+
     Result r = measure(rt, ep, s.dim, warmupCount, forceIters, specifiedIters);
     if (r.us <= 0.0)
     {

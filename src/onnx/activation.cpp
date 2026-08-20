@@ -34,7 +34,7 @@ namespace
 // operation's best and does not depend on a size chosen today.
 constexpr int64_t kCols    = 4096;
 constexpr int64_t kMinRows = 1024;            // 8 MB
-constexpr uint64_t kMaxTensorBytes = 1ull << 30;
+static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
 
 constexpr double kImproveFactor = 1.03;
 constexpr int    kMaxStrikes    = 2;
@@ -199,7 +199,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
       const uint64_t bytes = (uint64_t)rows * kCols * 2ull;
-      if (bytes > kMaxTensorBytes)
+      if (bytes > maxTensorBytes())
         break;
 
       // The reference: same tensor, same read and reduction, no operation.

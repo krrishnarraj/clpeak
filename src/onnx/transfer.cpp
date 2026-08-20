@@ -33,7 +33,7 @@ constexpr int64_t  kMinElems       = 8ll << 20;    // 16 MB of fp16
 // second, not something that improves with problem size -- so unlike the
 // compute sweeps this ceiling is a safety bound rather than a measurement
 // limit.  The improvement rule normally stops well before it.
-constexpr uint64_t kMaxTensorBytes = 128ull << 20;
+static uint64_t maxTensorBytes() { return clpeak::memoryBudget(128ull << 20); }
 constexpr unsigned int kSizeBudgetUs = 300000;
 
 struct Run
@@ -189,7 +189,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                   ep.providerKey.c_str(), (long long)((elems * 2) >> 20));
       break;
     }
-    if ((uint64_t)elems * 2ull > kMaxTensorBytes)
+    if ((uint64_t)elems * 2ull > maxTensorBytes())
       break;
 
     Run r = measure(rt, ep, OnnxTransfer::ToDevice, elems, warmupCount,

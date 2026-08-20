@@ -195,6 +195,27 @@ unsigned int pickIters(double per_iter_us, unsigned int target_us,
 void populate(float *ptr, uint64_t N);
 
 // ---------------------------------------------------------------------------
+// System memory
+// ---------------------------------------------------------------------------
+
+namespace clpeak {
+
+// Total physical RAM in bytes, or 0 if it cannot be determined.
+//
+// Benchmarks that size their own buffers need this: a ceiling that suits a
+// workstation is a crash on a phone, and the difference between them is two
+// orders of magnitude.  Prefer `memoryBudget()` over using this directly.
+uint64_t systemMemoryBytes();
+
+// The largest allocation a test should attempt, being `fraction` of physical
+// memory, never more than `ceiling`.  When physical memory is unknown the
+// ceiling is used, which is why the ceiling should be a figure that is safe
+// on modest hardware rather than the most a big machine could manage.
+uint64_t memoryBudget(uint64_t ceiling, unsigned fraction = 4);
+
+} // namespace clpeak
+
+// ---------------------------------------------------------------------------
 // String helpers
 // ---------------------------------------------------------------------------
 

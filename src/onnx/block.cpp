@@ -236,6 +236,51 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 {
   (void)cfg;
 
+  // The one test here whose size cannot adapt: the geometry defines the
+  // workload, so a small device has to be told it cannot run it rather than
+  // handed a smaller layer whose numbers would not compare with anyone's.
+  // The runtime keeps its own copy of the weights alongside ours, and the
+  // longest context adds a 67 MB cache, so the peak is several times the
+  // 101 MB on paper.
+  {
+    const uint64_t needed = (uint64_t)weightParams() * 2ull   // weights
+                          + (67ull << 20)                     // longest KV cache
+                          + (64ull << 20);                    // activations, slack
+    const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
+    if (budget && budget < needed)
+    {
+      const char *reason = "not enough memory for the canonical block; its "
+                           "geometry is fixed so the numbers stay comparable, "
+                           "and a smaller layer would not be the same test";
+
+      // Every scope still reports, so a reader sees why the rows are missing
+      // rather than finding a gap where a test should have been.
+      struct Scope { const char *tag, *display, *unit; };
+      static const Scope kScopes[] = {
+        {"onnx-block-prefill",     "Transformer block, prefill",           "tflops"},
+        {"onnx-block-decode",      "Transformer block, decode",            "gbps"},
+        {"onnx-block-kv-scaling",  "Transformer block, decode vs context", "us"},
+        {"onnx-block-prefill-knee","Transformer block, prefill vs prompt", "tflops"},
+        {"onnx-block-latency",     "Transformer block latency",            "us"},
+      };
+      for (const Scope &sc : kScopes)
+      {
+        auto t = currentDeviceScope->beginTest(
+            {sc.tag, sc.display, sc.unit, Category::Ai,
+             "One whole transformer layer, in the regimes that bound "
+             "language-model inference."});
+        t.skip("unavailable", ResultStatus::Unsupported, reason);
+        t.end();
+      }
+
+      CLPEAK_VLOG("onnx-block[%s]: needs %llu MB, budget %llu MB\n",
+                  ep.providerKey.c_str(),
+                  (unsigned long long)(needed >> 20),
+                  (unsigned long long)(budget >> 20));
+      return 0;
+    }
+  }
+
   const char *geometry =
       "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
       "(50.6M parameters, 101 MB of fp16 weights).  ";

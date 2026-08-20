@@ -280,11 +280,21 @@ now search instead:
   Rungs are named for their working-set size, so adding more never invalidates
   the ones below.
 
+**Every byte ceiling comes from `clpeak::memoryBudget()`** (`common.h`), a
+fraction of physical RAM rather than a constant. The difference between a
+workstation and a cheap phone is two orders of magnitude, and a ceiling that
+merely wastes time on one is an out-of-memory kill on the other — Android
+kills the process outright rather than failing an allocation. The constants
+passed to it are the ceilings for a *large* machine; the fraction is what
+protects a small one.
+
 Where a size *is* fixed, it is fixed because it defines the workload rather
 than because it was convenient, and it is meant to stay fixed forever:
 
 - **`onnx-block`'s geometry** is a workload definition, in the way a standard
-  benchmark names a model. It is sized to match a real model's layer, not to
+  benchmark names a model. Being fixed, it is the one test that cannot shrink
+  to fit, so it checks memory up front and reports every scope as unsupported
+  on a device too small — a smaller layer would not be the same test. It is sized to match a real model's layer, not to
   saturate a particular device, and changing it later would break exactly the
   comparability the fixed choice buys. Its output is a rate, which stays
   meaningful as hardware grows; the guard against it becoming *too* small to
@@ -326,7 +336,12 @@ sessions, not just iterations, and prefer one measurement at a small size
 over a sweep.
 
 Every sweep therefore also carries an `OnnxDeadline` (`onnx_session.h`) and
-stops climbing when the budget is gone. The sweeps decide how far to go from
+stops climbing when the budget is gone. **The 180 s figure is not derived
+from anything** — it is roughly three times the slowest test on the machine
+this backend was written on, chosen to catch pathology rather than to bound
+ordinary slowness. On much slower hardware it will truncate sweeps, which is
+the intended failure: a short answer beats an apparent hang. Revisit it when
+there is data from hardware that is not a workstation. The sweeps decide how far to go from
 measured throughput, which is the right rule when *running* a graph is the
 cost — and is no guide at all when *compiling* it is. Without the clock, a
 provider that is slow to compile makes the tool look hung rather than slow.

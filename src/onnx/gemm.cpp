@@ -62,7 +62,11 @@ constexpr int    kMaxStrikes    = 2;
 // scales itself: hardware fast enough to make a bigger size cheap is exactly
 // the hardware that should try it.
 constexpr double   kMaxIterUs      = 2.0e6;        // one iteration, predicted
-constexpr uint64_t kMaxWeightBytes = 3ull << 30;   // both operands resident
+
+// Both operands together, capped at a quarter of physical memory.  A fixed
+// ceiling here would be a crash on a phone and a needless limit on a
+// workstation; see clpeak::memoryBudget.
+static uint64_t maxWeightBytes() { return clpeak::memoryBudget(3ull << 30); }
 
 // Per-size budget for the timed phase.  Lower than the 5 s a single-size test
 // would use, since the ladder measures several.
@@ -325,7 +329,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // time at the rate the previous size managed?
       const uint64_t weightBytes =
           2ull * (uint64_t)D * (uint64_t)D * (uint64_t)dtypeSize(v.dtype);
-      if (weightBytes > kMaxWeightBytes)
+      if (weightBytes > maxWeightBytes())
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
                     "stopping\n", ep.providerKey.c_str(), v.label,

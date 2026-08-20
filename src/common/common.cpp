@@ -93,3 +93,54 @@ void populate(float *ptr, uint64_t N)
         ptr[i] = val;
     }
 }
+
+// ---------------------------------------------------------------------------
+// System memory
+// ---------------------------------------------------------------------------
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+#else
+#include <unistd.h>
+#endif
+
+namespace clpeak {
+
+uint64_t systemMemoryBytes()
+{
+#if defined(_WIN32)
+  MEMORYSTATUSEX ms;
+  ms.dwLength = sizeof(ms);
+  if (GlobalMemoryStatusEx(&ms))
+    return (uint64_t)ms.ullTotalPhys;
+  return 0;
+#elif defined(__APPLE__)
+  uint64_t v = 0;
+  size_t len = sizeof(v);
+  if (sysctlbyname("hw.memsize", &v, &len, nullptr, 0) == 0)
+    return v;
+  return 0;
+#else
+  const long pages = sysconf(_SC_PHYS_PAGES);
+  const long psz   = sysconf(_SC_PAGE_SIZE);
+  if (pages > 0 && psz > 0)
+    return (uint64_t)pages * (uint64_t)psz;
+  return 0;
+#endif
+}
+
+uint64_t memoryBudget(uint64_t ceiling, unsigned fraction)
+{
+  if (fraction == 0)
+    fraction = 1;
+  const uint64_t total = systemMemoryBytes();
+  if (!total)
+    return ceiling;
+  const uint64_t share = total / fraction;
+  return share < ceiling ? share : ceiling;
+}
+
+} // namespace clpeak

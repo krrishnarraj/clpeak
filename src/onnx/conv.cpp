@@ -39,8 +39,8 @@ constexpr int64_t kMinSpatial = 32;
 // one pass would take too long, or when the feature map stops fitting -- the
 // same self-scaling bounds the matmul ladder uses, so a faster device climbs
 // further without the number changing meaning.
-constexpr int64_t  kMaxSpatial     = 4096;
-constexpr uint64_t kMaxTensorBytes = 1ull << 30;
+constexpr int64_t kMaxSpatial = 4096;
+static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
 
 constexpr double  kImproveFactor  = 1.03;
 constexpr int     kMaxStrikes     = 2;
@@ -227,7 +227,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       const uint64_t tensorBytes =
           (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * 2ull;
-      if (tensorBytes > kMaxTensorBytes)
+      if (tensorBytes > maxTensorBytes())
       {
         CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld needs %llu MB per tensor, "
                     "stopping\n", ep.providerKey.c_str(), v.label,
