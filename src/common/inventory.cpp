@@ -1,5 +1,6 @@
 #include <common/inventory.h>
 #include <common/common.h>
+#include <locale>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -36,6 +37,10 @@ namespace
 std::string inventoryToJson(const std::vector<BackendInventory> &inv)
 {
   std::ostringstream os;
+  // Machine-readable interchange: JSON is locale-free, and the GUI decodes
+  // this with the host toolkit's locale already installed (see fmtFloat in
+  // src/ffi/logger_ffi.cpp).
+  os.imbue(std::locale::classic());
   os << "{\"backends\":[";
   for (size_t i = 0; i < inv.size(); ++i)
   {

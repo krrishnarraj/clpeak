@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
+#include <locale>
 #include <cstring>
 
 // ---- Enum <-> string ------------------------------------------------------
@@ -111,11 +112,35 @@ static std::string xmlEscape(const std::string &s)
     return out;
 }
 
+// Every number in every dump format goes through here, and every number read
+// back comes through parseFloatC below.  Both pin the classic locale on
+// purpose: the GUI hosts these writers inside a toolkit that sets the process
+// locale (GTK's gtk_init calls setlocale(LC_ALL, "")), and a comma decimal
+// separator would produce files that are neither valid JSON nor readable by
+// the loaders.  The dump formats are machine-readable interchange, not
+// user-facing text -- they are always '.' regardless of where clpeak runs.
 static std::string fmtValue(float v)
 {
     std::stringstream ss;
+    ss.imbue(std::locale::classic());
     ss << std::fixed << std::setprecision(4) << v;
     return ss.str();
+}
+
+// Read a float written by fmtValue.  Leading whitespace is skipped and
+// trailing text ignored, so the caller can hand over the rest of a JSON line
+// or an XML element body.  Returns false (leaving `out` untouched) when the
+// text does not start with a number -- std::stof's `consumed == 0` case, but
+// without stof's dependence on the C locale's LC_NUMERIC.
+static bool parseFloatC(const std::string &s, float &out)
+{
+    std::istringstream is(s);
+    is.imbue(std::locale::classic());
+    float v = 0.0f;
+    if (!(is >> v))
+        return false;
+    out = v;
+    return true;
 }
 
 // ---- JSON save ------------------------------------------------------------
@@ -126,6 +151,7 @@ static std::string fmtValue(float v)
 static void writeJson(const ResultStore &store, std::ostream &f,
                       const DeviceInfoStore &devices)
 {
+    f.imbue(std::locale::classic());
     f << "{\"format_version\":" << RESULT_FORMAT_VERSION
       << ",\"clpeak_version\":\"" << jsonEscape(CLPEAK_VERSION_STR) << "\""
       << ",\"os\":\"" << jsonEscape(OS_NAME) << "\"";
@@ -236,6 +262,7 @@ bool saveCsv(const ResultStore &store, const std::string &filename)
         std::cerr << "clpeak: cannot open CSV output file: " << filename << "\n";
         return false;
     }
+    f.imbue(std::locale::classic());
     f << "format_version,backend,platform,device,driver,category,test,metric,unit,status,value,reason,display,description,metric_description\n";
     for (const ResultEntry &e : store)
     {
@@ -338,6 +365,8 @@ bool saveXml(const ResultStore &store, const std::string &filename,
         std::cerr << "clpeak: cannot open XML output file: " << filename << "\n";
         return false;
     }
+
+    f.imbue(std::locale::classic());
 
     // Rows are streamed in run order; props are looked up per run.
     std::map<std::string, const DeviceInfo *> deviceByKey;
@@ -479,13 +508,8 @@ static float jsonExtractFloat(const std::string &line, const std::string &key)
     pos += needle.size();
     while (pos < line.size() && line[pos] == ' ') pos++;
     if (pos >= line.size() || line[pos] == '"') return 0.0f;
-    try
-    {
-        size_t consumed = 0;
-        float v = std::stof(line.substr(pos), &consumed);
-        return (consumed > 0) ? v : 0.0f;
-    }
-    catch (...) { return 0.0f; }
+    float v = 0.0f;
+    return parseFloatC(line.substr(pos), v) ? v : 0.0f;
 }
 
 static int jsonExtractInt(const std::string &line, const std::string &key)
@@ -728,13 +752,8 @@ ResultStore loadCsv(const std::string &filename)
         e.status   = statusFromString(fields[9]);
         if (e.status == ResultStatus::Ok)
         {
-            try
-            {
-                size_t consumed = 0;
-                e.value = std::stof(fields[10], &consumed);
-                if (consumed == 0) continue;
-            }
-            catch (...) { continue; }
+            if (!parseFloatC(fields[10], e.value))
+                continue;
         }
         e.reason = fields[11];
         if (fields.size() >= 13)
@@ -910,8 +929,8 @@ ResultStore loadXml(const std::string &filename, DeviceInfoStore *devices)
                     continue;
                 std::string content = xmlUnescape(
                     t.substr(openEnd + 1, closePos - openEnd - 1));
-                try { e.value = std::stof(content); }
-                catch (...) { continue; }
+                if (!parseFloatC(content, e.value))
+                    continue;
             }
 
             if (!e.backend.empty() && !e.test.empty() && !e.metric.empty())
