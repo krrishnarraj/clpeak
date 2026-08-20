@@ -57,7 +57,7 @@ jobs:
           - name: Windows arm64
             runner: windows-11-arm
             artifact: clpeak-windows-arm64
-            gui: false
+            gui: true
             binary: build/Release/clpeak.exe
             suffix: ""
             cuda: false
