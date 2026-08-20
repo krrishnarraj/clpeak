@@ -191,7 +191,6 @@ double timeRuns(const OrtRuntime &rt, ConvSetup &c, unsigned int n)
 int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg)
 {
-  OnnxDeadline deadline(kOnnxTestBudgetSec);
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
@@ -219,12 +218,6 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       if (clpeak::cancelRequested())
         break;
-      if (deadline.expired())
-      {
-        CLPEAK_VLOG("onnx-conv[%s/%s]: out of time, stopping at %lld\n",
-                    ep.providerKey.c_str(), v.label, (long long)sp);
-        break;
-      }
       const uint64_t tensorBytes =
           (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * 2ull;
       if (tensorBytes > maxTensorBytes())

@@ -162,7 +162,6 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                             benchmark_config_t &cfg)
 {
-  OnnxDeadline deadline(kOnnxTestBudgetSec);
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
@@ -191,13 +190,6 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       if (clpeak::cancelRequested())
         break;
-      if (deadline.expired())
-      {
-        CLPEAK_VLOG("onnx-activation[%s/%s]: out of time, stopping at %lld "
-                    "rows\n", ep.providerKey.c_str(), v.label,
-                    (long long)rows);
-        break;
-      }
       const uint64_t bytes = (uint64_t)rows * kCols * 2ull;
       if (bytes > maxTensorBytes())
         break;

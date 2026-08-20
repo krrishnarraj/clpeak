@@ -6,7 +6,6 @@
 #include <common/console_mute.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -27,20 +26,6 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
   if (nl != std::string::npos)
     out.resize(nl);
   return out;
-}
-
-OnnxDeadline::OnnxDeadline(double seconds)
-    : m_startUs(std::chrono::duration<double, std::micro>(
-                    std::chrono::steady_clock::now().time_since_epoch()).count()),
-      m_budgetUs(seconds * 1.0e6)
-{
-}
-
-bool OnnxDeadline::expired() const
-{
-  const double now = std::chrono::duration<double, std::micro>(
-      std::chrono::steady_clock::now().time_since_epoch()).count();
-  return (now - m_startUs) > m_budgetUs;
 }
 
 OrtEnv *onnxEnv(const OrtRuntime &rt)

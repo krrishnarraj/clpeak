@@ -201,7 +201,6 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
 int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                  benchmark_config_t &cfg)
 {
-  OnnxDeadline deadline(kOnnxTestBudgetSec);
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
@@ -231,12 +230,6 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     if (clpeak::cancelRequested())
       break;
-    if (deadline.expired())
-    {
-      CLPEAK_VLOG("onnx-tensor-bw[%s]: out of time, stopping below %s\n",
-                  ep.providerKey.c_str(), s.label);
-      break;
-    }
 
     // Stop once the curve has flattened: the rungs above only exist for
     // devices whose caches are larger than the ones below.
