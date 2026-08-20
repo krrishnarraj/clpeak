@@ -55,6 +55,8 @@ public:
                     benchmark_config_t &cfg);
   int runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                          benchmark_config_t &cfg);
+  int runTransferBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                           benchmark_config_t &cfg);
   int runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                          benchmark_config_t &cfg);
 

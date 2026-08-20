@@ -38,6 +38,15 @@ constexpr int64_t kFfnHidden = 5504;
 constexpr int64_t kPrefillSeq = 512;
 constexpr int64_t kDecodeKv   = 2048;
 
+// Context lengths for the scaling row.  Each is a separate graph with its own
+// cache baked in -- 16 MB at 2048, growing with the length -- so each costs a
+// session.  It stops at 8192 not because longer contexts are uninteresting
+// but because providers that compile ahead of time charge dearly for the
+// bigger graphs: Core ML needs the better part of a minute per session here.
+// Rows are named by length, so a longer rung can be appended later without
+// changing what any existing one means.
+const int64_t kKvLadder[] = {512, 2048, 8192};
+
 // fp16 only.  Nobody serves an LLM in fp32, so a full-precision block would
 // measure a configuration that does not exist -- and it would double both the
 // model size and the run time to say so.
@@ -88,7 +97,8 @@ void destroyRun(const OrtRuntime &rt, BlockRun &r)
   // `error` survives: callers tear a failed run down and then report it.
 }
 
-BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode)
+BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
+                 int64_t kvLen = kDecodeKv)
 {
   BlockRun r;
 
@@ -98,7 +108,7 @@ BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode)
   sh.headDim   = kHeadDim;
   sh.ffnHidden = kFfnHidden;
   sh.seq       = decode ? 1 : kPrefillSeq;
-  sh.kvLen     = decode ? kDecodeKv : 0;
+  sh.kvLen     = decode ? kvLen : 0;
 
   {
     std::string model = onnxBlockModel(sh);
@@ -149,6 +159,7 @@ BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode)
 }
 
 // Mean microseconds per block; negative on failure.
+// (declared before measure(), which uses it)
 double timeRuns(const OrtRuntime &rt, BlockRun &r, unsigned int n)
 {
   static const char *inNames[] = {"S"};
@@ -181,9 +192,10 @@ double timeRuns(const OrtRuntime &rt, BlockRun &r, unsigned int n)
 // `error` set.
 double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
                unsigned int warmup, bool forceIters, unsigned int forced,
-               std::string &error, ResultStatus &status)
+               std::string &error, ResultStatus &status,
+               int64_t kvLen = kDecodeKv)
 {
-  BlockRun r = makeRun(rt, ep, decode);
+  BlockRun r = makeRun(rt, ep, decode, kvLen);
   if (!r.session)
   {
     error  = r.error;
@@ -286,6 +298,46 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                 note.c_str());
     else
       test.skip("kv2048", decodeStatus, decodeErr, note);
+    test.end();
+  }
+
+  // ---- How decode cost grows with the context behind it ------------------
+  {
+    auto test = currentDeviceScope->beginTest(
+        {"onnx-block-kv-scaling", "Transformer block, decode vs context", "us",
+         Category::Ai,
+         "How long one layer takes to produce a token as the conversation "
+         "behind it gets longer.  Everything except attention costs the same "
+         "at every length -- the weights are the weights -- so whatever this "
+         "row adds as the context grows is attention, and it is the reason a "
+         "long chat answers more slowly than a short one.  A device whose "
+         "time barely moves is reading its cached context efficiently; one "
+         "that climbs steeply will feel fine in a demo and poor in use."});
+
+    for (int64_t kv : kKvLadder)
+    {
+      if (clpeak::cancelRequested())
+        break;
+
+      std::string  err;
+      ResultStatus st = ResultStatus::Ok;
+      const double us = (kv == kDecodeKv && decodeUs > 0.0)
+                            ? decodeUs        // already measured above
+                            : measure(rt, ep, true, warmupCount, forceIters,
+                                      specifiedIters, err, st, kv);
+
+      const std::string label = "kv" + std::to_string(kv);
+      const std::string note =
+          "One generated token with " + std::to_string(kv) +
+          " tokens of context behind it.";
+      if (us > 0.0)
+        test.emit(label, (float)us, note.c_str());
+      else
+      {
+        test.skip(label, st, err.empty() ? "run failed" : err, note);
+        break;   // longer contexts will not fare better
+      }
+    }
     test.end();
   }
 

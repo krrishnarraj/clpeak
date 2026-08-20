@@ -193,6 +193,7 @@ static const char *helpStr =
     "\n  --onnx-block                      | --no-onnx-block                [ONNX: transformer block]"
     "\n  --onnx-activation                 | --no-onnx-activation           [ONNX: softmax/norm GB/s]"
     "\n  --onnx-tensor-bandwidth           | --no-onnx-tensor-bandwidth     [ONNX: resident-tensor GB/s]"
+    "\n  --onnx-transfer-bandwidth         | --no-onnx-transfer-bandwidth   [ONNX: host<->device GB/s]"
     "\n  --onnx-dispatch-latency           | --no-onnx-dispatch-latency     [ONNX: submission overhead]"
 #endif
     "\n"
@@ -286,6 +287,7 @@ static const TestFlag testFlags[] = {
   {"onnx-block",                Benchmark::OnnxBlock},
   {"onnx-activation",           Benchmark::OnnxActivation},
   {"onnx-tensor-bandwidth",     Benchmark::OnnxTensorBW},
+  {"onnx-transfer-bandwidth",   Benchmark::OnnxTransferBW},
   {"onnx-dispatch-latency",     Benchmark::OnnxDispatchLatency},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);

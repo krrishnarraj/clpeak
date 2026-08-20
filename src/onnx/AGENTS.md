@@ -20,6 +20,7 @@ backend.
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the convolution benchmark? → `conv.cpp`
 - Looking for the softmax / norm / gate benchmark? → `activation.cpp`
+- Looking for the host-transfer benchmark? → `transfer.cpp`
 - Looking for the dtype-accuracy benchmark? → `numeric_error.cpp`
 - Looking for the transformer-block benchmark? → `block.cpp`
 - Looking for the bandwidth / dispatch-overhead benchmarks? → `tensor_bandwidth.cpp`, `dispatch_latency.cpp`
@@ -34,6 +35,7 @@ backend.
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s, each net of a reference graph that reads and reduces the same tensor with no operation applied |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
@@ -291,6 +293,51 @@ than because it was convenient, and it is meant to stay fixed forever:
 - **`onnx-numeric-error`'s 1024** is fixed because accumulation depth is part
   of what the error means. Comparing accuracy across devices requires the same
   depth on each.
+
+## Measuring the cable, and what it cost to try
+
+`onnx-transfer-bw` measures the thing every other test here is built to avoid:
+the cost of getting data to the provider and back. It decides whether
+offloading is worth doing at all, and no vendor quotes it.
+
+Two rows, both honest, where three were attempted:
+
+- `h2d` sends a tensor and returns one value, so nearly all of it is the trip
+  out. Swept, since the rate climbs with size until the link saturates.
+- `roundtrip` sends a tensor, squares it and returns the result — the real
+  cost of offloading a trivial operation. Measured once at the smallest rung,
+  never swept: a link saturates rather than improving, and the compile cost
+  does not scale gently (see below).
+
+The return trip alone is **not** reported. Subtracting `h2d` from `roundtrip`
+leaves the elementwise pass in the answer, and that pass is not always cheap —
+the ANE applies a pointwise operation at roughly a seventh of the rate it
+reads memory, which made a naive difference read four times too slow. The
+correct isolation needs a third graph doing everything the round trip does
+except shipping the result back; that graph took Core ML over twenty minutes
+to compile, so it was dropped. Where the return trip matters it can be
+recovered from `roundtrip` and the provider's own `onnx-activation` rate, on
+the same hardware, for nothing.
+
+**Ahead-of-time compilation is the hidden cost in this backend.** Core ML
+compiles a 16 MB elementwise graph in seconds and a 64 MB one in more than
+ten minutes. Any new test that builds several large graphs needs to count
+sessions, not just iterations, and prefer one measurement at a small size
+over a sweep.
+
+## How decode cost grows with context
+
+`onnx-block-kv-scaling` runs the decode block at 512, 2048 and 8192 tokens of
+context. Everything but attention costs the same at every length — the
+weights are the weights — so what the row adds as context grows is attention,
+and it is why a long conversation answers more slowly than a short one. M1
+Pro CPU EP: 14.0 ms, 16.8 ms, 25.8 ms per layer, so attention goes from
+roughly a tenth of the layer to half of it.
+
+The ladder stops at 8192 because each rung is a separate graph with its own
+cache baked in and therefore its own session, and the ahead-of-time providers
+charge dearly for the larger ones. Rows are named by length, so a longer rung
+can be appended later without changing what any existing one means.
 
 ## The cheap operations are not cheap
 

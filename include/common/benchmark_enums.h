@@ -65,6 +65,7 @@ enum class Benchmark : unsigned int {
     OnnxConv,           // 2-D convolution peak through an ONNX EP
     OnnxActivation,     // softmax / layernorm / gate throughput through an ONNX EP
     OnnxTensorBW,       // resident-tensor read bandwidth through an ONNX EP
+    OnnxTransferBW,     // host<->device transfer cost through an ONNX EP
     OnnxDispatchLatency,// per-submission overhead of an ONNX EP
     KernelLatency,
     COUNT
@@ -95,6 +96,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::TransferBW:
     case Benchmark::OnnxActivation:
     case Benchmark::OnnxTensorBW:
+    case Benchmark::OnnxTransferBW:
     case Benchmark::CacheBandwidth:
     case Benchmark::TextureSample:
         return Category::Bandwidth;

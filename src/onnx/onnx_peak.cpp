@@ -194,6 +194,8 @@ int OnnxPeak::runAll()
       runActivation(*rt, ep, cfg);
     if (isAllowed(Benchmark::OnnxTensorBW))
       runTensorBandwidth(*rt, ep, cfg);
+    if (isAllowed(Benchmark::OnnxTransferBW))
+      runTransferBandwidth(*rt, ep, cfg);
 
     // ---- Phase 6: latency ------------------------------------------------
     if (isAllowed(Benchmark::OnnxDispatchLatency))

@@ -147,6 +147,22 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
                                         OnnxActivation act,
                                         const std::string &xRaw);
 
+// Which direction a transfer model exercises.
+enum class OnnxTransfer { ToDevice, FromDevice, RoundTrip, ComputeOnly };
+
+// Models that deliberately do the opposite of the throughput ones: they push
+// a large tensor across the host boundary and compute almost nothing, so what
+// is timed is the handover.
+//
+//   ToDevice     large input, reduced to one value -- the trip in
+//   FromDevice   scalar input, a resident constant scaled out -- the trip back
+//   RoundTrip    large in, large out
+//   ComputeOnly  large in, same operation as RoundTrip, reduced to one value
+//                -- everything the round trip does except ship the result
+//                back, so the difference between them is the trip back
+std::string onnxTransferModel(OnnxTransfer dir, int64_t elems,
+                              const std::string &constRaw);
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------

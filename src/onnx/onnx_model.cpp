@@ -374,6 +374,53 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
   return g.build();
 }
 
+std::string onnxTransferModel(OnnxTransfer dir, int64_t elems,
+                              const std::string &constRaw)
+{
+  (void)constRaw;   // no longer needed: see FromDevice below
+  OnnxGraph g;
+  switch (dir)
+  {
+  case OnnxTransfer::ToDevice:
+    // Everything arrives; one value goes back.
+    g.input("X", ONNX_DT_FLOAT16, {elems});
+    g.node("ReduceMax", {"X"}, {"Y"},
+           {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+    g.output("Y", ONNX_DT_FLOAT16, {});
+    break;
+
+  case OnnxTransfer::FromDevice:
+    // A scalar arrives and is grown on the device, so the tensor is never
+    // shipped in and only the return trip is timed.  Expand rather than a
+    // large constant: an initializer this size makes session creation, which
+    // compiles ahead of time on the NPU providers, take longer than the
+    // measurement.
+    g.input("S", ONNX_DT_FLOAT16, {});
+    g.shapeInitializer("shape", {elems});
+    g.node("Expand", {"S", "shape"}, {"Y"});
+    g.output("Y", ONNX_DT_FLOAT16, {elems});
+    break;
+
+  case OnnxTransfer::RoundTrip:
+    // Squared rather than scaled: same shape on both operands avoids
+    // broadcasting, which some providers decline, and needs no constant.
+    g.input("X", ONNX_DT_FLOAT16, {elems});
+    g.node("Mul", {"X", "X"}, {"Y"});
+    g.output("Y", ONNX_DT_FLOAT16, {elems});
+    break;
+
+  case OnnxTransfer::ComputeOnly:
+    // The round trip minus the return journey.
+    g.input("X", ONNX_DT_FLOAT16, {elems});
+    g.node("Mul", {"X", "X"}, {"T"});
+    g.node("ReduceMax", {"T"}, {"Y"},
+           {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+    g.output("Y", ONNX_DT_FLOAT16, {});
+    break;
+  }
+  return g.build();
+}
+
 // ---------------------------------------------------------------------------
 // Transformer decoder block
 // ---------------------------------------------------------------------------
