@@ -41,7 +41,7 @@ jobs:
           - name: Linux arm64
             runner: ubuntu-24.04-arm
             artifact: clpeak-linux-arm64
-            gui: false
+            gui: true
             binary: build/clpeak
             suffix: ""
             cuda: false
@@ -81,7 +81,7 @@ jobs:
           - name: Linux arm64 CUDA
             runner: ubuntu-24.04-arm
             artifact: clpeak-linux-arm64-cuda
-            gui: false
+            gui: true
             binary: build/clpeak
             suffix: cuda
             cuda: true
@@ -140,7 +140,8 @@ jobs:
         if: matrix.gui
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: master
+          flutter-version: 3.47.1
           cache: true
 
       - name: Install Vulkan SDK
