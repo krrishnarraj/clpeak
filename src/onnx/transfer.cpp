@@ -51,6 +51,7 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const bool bigIn  = (dir != OnnxTransfer::FromDevice);
   const bool bigOut = (dir == OnnxTransfer::FromDevice ||
                        dir == OnnxTransfer::RoundTrip);
+  // Both of the one-element graphs return a [1] vector rather than a scalar.
 
   OrtSession *session = nullptr;
   {
@@ -70,7 +71,8 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   std::vector<uint16_t> inBuf((size_t)(bigIn ? elems : 1), floatToHalf(0.5f));
   std::vector<uint16_t> outBuf((size_t)(bigOut ? elems : 1), 0);
   // The trip out returns one element, not a scalar.
-  const bool outIsVector = (dir == OnnxTransfer::ToDevice);
+  const bool outIsVector = (dir == OnnxTransfer::ToDevice ||
+                            dir == OnnxTransfer::ComputeOnly);
 
   OrtMemoryInfo *mi = nullptr;
   OrtValue *inVal = nullptr, *outVal = nullptr;

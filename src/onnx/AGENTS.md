@@ -339,11 +339,21 @@ and 128 MB, which divided out to 133 TB/s before this check existed. Testing
 the *shape* of the curve rather than comparing against some plausible
 bandwidth ceiling means nothing needs revising as links get faster.
 
-The consuming operation is a `Gather` of one element, not a reduction. A
-reduction reads the whole tensor on the device, and where no host transfer
-happens that read *is* the measurement — the CPU EP reported 4 GB/s for a
-transfer that never occurs, which was its fp16 reduction rate wearing a
-transfer label.
+**Summarising a tensor with a reduction is the recurring trap in this
+backend.** A reduction looks free next to a transfer or a matmul and is not:
+it reads the whole tensor on the device, and that pass lands in whatever the
+test was trying to isolate. It has bitten three times —
+
+- `h2d` measured the CPU EP's fp16 reduction rate, 4 GB/s, and called it a
+  transfer that never happens;
+- the `d2h` isolation subtracted a read of the result along with the return
+  journey, flattering it by about 40% on the ANE;
+- the activation reference graph carries the same pass, which is why those
+  rows lean on their subtraction.
+
+Where a graph needs a small output and the tensor itself is the measurement,
+**`Gather` one element** instead. A graph input is materialised in full before
+any kernel sees it, so the transfer still happens; only the reading stops.
 
 ## How decode cost grows with context
 

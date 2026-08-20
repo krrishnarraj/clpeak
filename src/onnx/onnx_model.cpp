@@ -419,12 +419,20 @@ std::string onnxTransferModel(OnnxTransfer dir, int64_t elems,
     break;
 
   case OnnxTransfer::ComputeOnly:
-    // The round trip minus the return journey.
+    // The round trip minus the return journey.  The result is picked from
+    // with a Gather, not summarised with a reduction: a reduction would read
+    // the whole result back on the device, and that extra pass would be
+    // subtracted out of the return trip along with everything else, flattering
+    // it.  Gathering one element leaves exactly the round trip's work minus
+    // the journey home.
     g.input("X", ONNX_DT_FLOAT16, {elems});
+    {
+      std::string idx(sizeof(int64_t), '\0');
+      g.initializer("idx", ONNX_DT_INT64, {1}, idx);
+    }
     g.node("Mul", {"X", "X"}, {"T"});
-    g.node("ReduceMax", {"T"}, {"Y"},
-           {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
-    g.output("Y", ONNX_DT_FLOAT16, {});
+    g.node("Gather", {"T", "idx"}, {"Y"}, {OnnxAttr::num("axis", 0)});
+    g.output("Y", ONNX_DT_FLOAT16, {1});
     break;
   }
   return g.build();
