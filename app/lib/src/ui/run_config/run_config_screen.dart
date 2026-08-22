@@ -81,36 +81,46 @@ class RunConfigScreen extends StatelessWidget {
                 ],
               ),
             ),
-            // Docked action bar rather than a floating pill.
+            // Docked so the action never scrolls out of reach, but a
+            // full-width block rather than a corner pill: parked next to the
+            // tab strip's own bottom rule, a small right-aligned button reads
+            // as chrome and gets skipped over.
             Container(
               decoration: BoxDecoration(
                 color: t.panel,
                 border: Border(top: BorderSide(color: t.line)),
               ),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      canRun
-                          ? 'Ready'
-                          : 'Select at least one device and category',
-                      style: t.micro.copyWith(
-                          color: canRun ? t.dim : t.danger),
-                    ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        canRun
+                            ? 'Ready'
+                            : 'Select at least one device and category',
+                        textAlign: TextAlign.center,
+                        style:
+                            t.micro.copyWith(color: canRun ? t.dim : t.danger),
+                      ),
+                      const SizedBox(height: 10),
+                      CButton(
+                        label: 'Run',
+                        icon: Icons.play_arrow,
+                        kind: CButtonKind.primary,
+                        stretch: true,
+                        onPressed: canRun
+                            ? () {
+                                Navigator.of(context).pop();
+                                service.start();
+                              }
+                            : null,
+                      ),
+                    ],
                   ),
-                  CButton(
-                    label: 'Run',
-                    icon: Icons.play_arrow,
-                    kind: CButtonKind.primary,
-                    onPressed: canRun
-                        ? () {
-                            Navigator.of(context).pop();
-                            service.start();
-                          }
-                        : null,
-                  ),
-                ],
+                ),
               ),
             ),
           ],
