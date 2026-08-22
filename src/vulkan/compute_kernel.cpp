@@ -59,9 +59,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // When Vulkan exposes a CU count, mirror OpenCL's
   // numCUs*2048*maxWGSize formula.  Unknown integrated/mobile GPUs use a
   // smaller floor so the calibration probe does not become a watchdog-sized
-  // dispatch.  Cooperative-matrix shaders run one subgroup per work-group
-  // (32 threads on NVIDIA / AMD RDNA3+ / Intel Arc); other compute kernels
-  // use the classic 256.
+  // dispatch.  Cooperative-matrix shaders run 32 threads -- one subgroup,
+  // pinned via requiredSubgroupSize where the device allows it; other compute
+  // kernels use the classic 256.
   const uint32_t wgSize = d.wgSize ? d.wgSize : 256;
   const uint32_t outPerWG = d.outElemsPerWG ? d.outElemsPerWG : wgSize;
   uint64_t globalWIs = targetVulkanGlobalThreads(dev.info);
@@ -159,7 +159,15 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   for (const auto &v : variants)
   {
     VkPipeline pipeline;
-    if (!dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout, pipeline, d.specInfo))
+    bool built = dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout,
+                                           pipeline, d.specInfo, d.requiredSubgroupSize);
+    // A pinned subgroup width is a preference, not a requirement: if the
+    // driver won't compile the stage at that width, run it however it likes
+    // rather than dropping the row.
+    if (!built && d.requiredSubgroupSize)
+      built = dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout,
+                                        pipeline, d.specInfo, 0);
+    if (!built)
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
                 note(v.description));

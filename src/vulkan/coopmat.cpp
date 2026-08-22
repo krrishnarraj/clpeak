@@ -75,8 +75,11 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
 int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart)
 {
   // One subgroup per work-group: each subgroup collectively computes one MxN
-  // output tile.  32 matches NVIDIA / AMD RDNA3+ / Intel Arc subgroup widths.
+  // output tile.  32 threads, pinned to one 32-wide subgroup where the device
+  // supports it -- see coopmatRequiredSubgroupSize() for what goes wrong when
+  // the driver splits the group into several subgroups instead.
   const uint32_t coopWGSize = 32;
+  const uint32_t coopSubgroup = coopmatRequiredSubgroupSize(dev.info);
 
   if (!intPart) {
 #ifdef VK_HAS_COOPMAT_FP32
@@ -91,6 +94,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
                       "full 32-bit numbers.  These units multiply whole small blocks "
                       "of numbers in one step instead of one value at a time.";
       d.unitDivider = 1e12;
+      d.requiredSubgroupSize = coopSubgroup;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
       d.pushSize    = sizeof(A);
@@ -118,17 +122,18 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
                       "total -- the everyday precision of AI inference, and usually "
                       "the fastest widely-supported row here.";
       d.unitDivider = 1e12;
+      d.requiredSubgroupSize = coopSubgroup;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
       d.pushSize    = sizeof(A);
-      if (dev.info.coopmatFP16.supported) {
+      if (dev.info.float16Supported && dev.info.coopmatFP16.supported) {
         d.spirv     = vk_shaders::coopmat_fp16;
         d.spirvSize = vk_shaders::coopmat_fp16_size;
         bindCoopTile(r, d, dev.info.coopmatFP16, coopWGSize, "fp16xfp16+fp32");
       } else {
         d.title   = "Cooperative-matrix fp16xfp16+fp32";
         d.skip    = true;
-        d.skipMsg = "No fp16xfp16+fp32 coopmat property! Skipped";
+        d.skipMsg = "No fp16xfp16+fp32 coopmat support (shaderFloat16 or property)! Skipped";
       }
       runComputeKernel(dev, cfg, d);
     }
@@ -145,17 +150,18 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
                       "trading digits of accuracy for the number range of a full "
                       "float, which makes training far more forgiving.";
       d.unitDivider = 1e12;
+      d.requiredSubgroupSize = coopSubgroup;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
       d.pushSize    = sizeof(A);
-      if (dev.info.coopmatBF16.supported) {
+      if (dev.info.bfloat16Supported && dev.info.coopmatBF16.supported) {
         d.spirv     = vk_shaders::coopmat_bf16;
         d.spirvSize = vk_shaders::coopmat_bf16_size;
         bindCoopTile(r, d, dev.info.coopmatBF16, coopWGSize, "bf16xbf16+fp32");
       } else {
         d.title   = "Cooperative-matrix bf16xbf16+fp32";
         d.skip    = true;
-        d.skipMsg = "No bf16xbf16+fp32 coopmat property! Skipped";
+        d.skipMsg = "No bf16xbf16+fp32 coopmat support (shaderBFloat16Type or property)! Skipped";
       }
       runComputeKernel(dev, cfg, d);
     }
@@ -172,6 +178,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
                       "its bits on accuracy rather than range.  Half the data of fp16 "
                       "per value, so the newest GPUs run it at roughly twice the rate.";
       d.unitDivider = 1e12;
+      d.requiredSubgroupSize = coopSubgroup;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
       d.pushSize    = sizeof(A);
@@ -201,6 +208,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
                       "its bits on range rather than accuracy -- the one that copes "
                       "with very large and very small values.";
       d.unitDivider = 1e12;
+      d.requiredSubgroupSize = coopSubgroup;
       d.elemSize    = sizeof(float);
       d.pushData    = &A;
       d.pushSize    = sizeof(A);
@@ -230,17 +238,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
                     "total -- the format quantized neural networks use when they are "
                     "squeezed down to run fast on cheaper hardware.";
     d.unitDivider = 1e12;
+    d.requiredSubgroupSize = coopSubgroup;
     d.elemSize    = sizeof(int32_t);
     d.pushData    = &A;
     d.pushSize    = sizeof(A);
-    if (dev.info.coopmatINT8.supported) {
+    // Two gates, like fp8: the shader's Int8 capability needs shaderInt8
+    // enabled at device creation, and a matching tile must be advertised.
+    if (dev.info.int8Supported && dev.info.coopmatINT8.supported) {
       d.spirv     = vk_shaders::coopmat_int8;
       d.spirvSize = vk_shaders::coopmat_int8_size;
       bindCoopTile(r, d, dev.info.coopmatINT8, coopWGSize, "int8xint8+int32");
     } else {
       d.title   = "Cooperative-matrix int8xint8+int32";
       d.skip    = true;
-      d.skipMsg = "No int8xint8+int32 coopmat property! Skipped";
+      d.skipMsg = "No int8xint8+int32 coopmat support (shaderInt8 or property)! Skipped";
     }
     runComputeKernel(dev, cfg, d);
   } // if (intPart)
