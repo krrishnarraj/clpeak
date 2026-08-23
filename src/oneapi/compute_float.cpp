@@ -45,17 +45,18 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
 // per-work-item op budget and the two readings stay comparable.
 template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
 
-// Single-chain affine, for the families whose accumulator round-trips through
-// a narrow type once per outer iteration (mp, bf16).  One chain, not four:
-// the round-trip runs once per accumulator, so N chains would cost N
-// conversions per outer iteration against the squaring build's one -- a
-// handicap on the alt build that has nothing to do with the shape being
-// measured.  Alchemist needs the distinct source registers, not the
-// parallelism.
-#define MAD_4_AFF(x, a, b)  x = sycl::fma(a, x, b); x = sycl::fma(a, x, b); \
-                            x = sycl::fma(a, x, b); x = sycl::fma(a, x, b);
-#define MAD_16_AFF(x, a, b) MAD_4_AFF(x, a, b) MAD_4_AFF(x, a, b) \
-                            MAD_4_AFF(x, a, b) MAD_4_AFF(x, a, b)
+// Four-chain affine, for the families whose accumulator round-trips through a
+// narrow type once per outer iteration (mp, bf16).  Four chains cost four
+// conversions per 16 chain instructions against the squaring build's one, but
+// both report the same op budget, so the extra conversions can only understate
+// the affine reading -- never inflate it -- and the caller takes the maximum.
+// The chains earn their keep: with one chain, mp on an Intel CPU runtime
+// measured 373.1 against 373.8, a dead wash, while the four-chain float path
+// on the same device went 396 -> 1552 GFLOPS.
+#define MAD_G_AFF4(a, b)     x0 = sycl::fma(a, x0, b); x1 = sycl::fma(a, x1, b); \
+                             x2 = sycl::fma(a, x2, b); x3 = sycl::fma(a, x3, b);
+#define MAD_16_AFF4(a, b)    MAD_G_AFF4(a, b) MAD_G_AFF4(a, b) \
+                             MAD_G_AFF4(a, b) MAD_G_AFF4(a, b)
 
 // Per-family kernel-name tags (SYCL needs a unique type per parallel_for).
 namespace { struct SpTag; struct HpTag; struct DpTag; }
@@ -361,15 +362,17 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
       h.parallel_for<compute_mp_alt_kernel>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
-          float x = (float)(sycl::half)A;
           float a = (float)(sycl::half)(float)it.get_local_id(0);
           float b = a + 2.0f;
+          float x0 = (float)(sycl::half)A;
+          float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
           #pragma unroll 1
           for (int i = 0; i < 128; i++) {
-            MAD_16_AFF(x, a, b)
-            x = (float)(sycl::half)x;
+            MAD_16_AFF4(a, b)
+            x0 = (float)(sycl::half)x0; x1 = (float)(sycl::half)x1;
+            x2 = (float)(sycl::half)x2; x3 = (float)(sycl::half)x3;
           }
-          out[it.get_global_id(0)] = x;
+          out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
         });
     });
   };
@@ -463,16 +466,18 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
       h.parallel_for<compute_bf16_alt_kernel>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
-          float x = (float)bfloat16(A);
           float a = (float)bfloat16((float)it.get_local_id(0));
           float b = a + 2.0f;
+          float x0 = (float)bfloat16(A);
+          float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
           #pragma unroll 1
           for (int i = 0; i < 16; i++) {
-            MAD_16_AFF(x, a, b) MAD_16_AFF(x, a, b) MAD_16_AFF(x, a, b) MAD_16_AFF(x, a, b)
-            MAD_16_AFF(x, a, b) MAD_16_AFF(x, a, b) MAD_16_AFF(x, a, b) MAD_16_AFF(x, a, b)
-            x = (float)bfloat16(x);
+            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+            x0 = (float)bfloat16(x0); x1 = (float)bfloat16(x1);
+            x2 = (float)bfloat16(x2); x3 = (float)bfloat16(x3);
           }
-          out[it.get_global_id(0)] = x;
+          out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
         });
     });
   };

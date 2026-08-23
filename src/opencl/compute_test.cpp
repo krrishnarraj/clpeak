@@ -175,6 +175,20 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
   catch (cl::Error &error)
   {
+    // A missing kernel is a capability fact, not a failure: the device's
+    // OpenCL compiler declined to provide the builtin the kernel needs, so
+    // the whole family was preprocessed out.  int8_dp hits this on devices
+    // that advertise cl_khr_integer_dot_product and report the 4x8-bit
+    // capability but whose compiler defines neither the extension macro nor
+    // the OpenCL 3.0 feature macro.  Reporting five errors there is noise.
+    if (error.err() == CL_INVALID_KERNEL_NAME || error.err() == CL_INVALID_PROGRAM)
+    {
+      for (int w = 0; w < 5; w++)
+        test.skip(labels[w], ResultStatus::Unsupported,
+                  "device's OpenCL compiler did not build these kernels",
+                  clWidthNote(widths[w]));
+      return 0;
+    }
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
       test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
