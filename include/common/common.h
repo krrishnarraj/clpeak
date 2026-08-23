@@ -104,10 +104,16 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //                    NVIDIA is the mirror image and halves it at one chain,
 //                    which four independent chains restore.
 //
-// The Vulkan and OpenCL backends carry both shapes, time both, and report the
-// faster -- landing within 3% of the best measured shape on every device
-// tested.  The other backends still run the squaring shape alone and
-// under-report Alchemist by half.
+// Vulkan, OpenCL, oneAPI and Metal carry both shapes, time both, and report
+// the faster -- landing within 3% of the best measured shape on every device
+// tested.  That covers every backend that can run on Alchemist.
+//
+// CUDA and ROCm deliberately do not race.  Each targets a single vendor, and
+// racing costs roughly 2x the compute-test budget: on NVIDIA the squaring
+// chain is measured optimal at one chain (1.00 against 0.52 for a single
+// affine chain, on both a 5060 and a 4060), so the second shape would be pure
+// cost.  AMD is simply unmeasured -- run tmp/arc_probe on an AMD GPU before
+// deciding, rather than paying for insurance nobody has priced.
 //
 // Integer families use a third shape rather than the affine one, because an
 // integer affine recurrence is legally foldable (integer multiply and add are

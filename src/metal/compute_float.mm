@@ -10,9 +10,12 @@
 int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
 {
     static const mtl_compute_variant_t variants[] = {
-        { "float ", "compute_sp",  mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(1) },
-        { "float2", "compute_sp2", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(2) },
-        { "float4", "compute_sp4", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(4) },
+        { "float ", "compute_sp",  mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(1),
+          "compute_sp_alt" },
+        { "float2", "compute_sp2", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(2),
+          "compute_sp2_alt" },
+        { "float4", "compute_sp4", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(4),
+          "compute_sp4_alt" },
         { "float8", "compute_sp8", mtl_kernels::compute_sp_src, mtl_kernels::compute_sp_name, mtlWidthNote(8) },
     };
     float A = 1.3f;
@@ -35,9 +38,12 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
 int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
 {
     static const mtl_compute_variant_t variants[] = {
-        { "half ", "compute_hp",  mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(1) },
-        { "half2", "compute_hp2", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(2) },
-        { "half4", "compute_hp4", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(4) },
+        { "half ", "compute_hp",  mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(1),
+          "compute_hp_alt" },
+        { "half2", "compute_hp2", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(2),
+          "compute_hp2_alt" },
+        { "half4", "compute_hp4", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(4),
+          "compute_hp4_alt" },
         { "half8", "compute_hp8", mtl_kernels::compute_hp_src, mtl_kernels::compute_hp_name, mtlWidthNote(8) },
     };
     float A = 1.3f;

@@ -43,8 +43,20 @@ device_info_t getDeviceInfo(cl::Device &d)
     if ((extns.find("cl_khr_fp64") != std::string::npos) || (extns.find("cl_amd_fp64") != std::string::npos))
         devInfo.doubleSupported = true;
 
+    // cl_khr_integer_dot_product advertises two independent input forms, and a
+    // device may implement only the packed one.  The kernels here call
+    // dot_acc_sat(char4, char4, int), which needs the unpacked 4x8-bit form, so
+    // gating on the extension string alone turns an honest "unsupported" into
+    // five clCreateKernel errors -- as seen on Intel Arc (-44) and Intel's CPU
+    // runtime (-46), both of which advertise the extension.
     if (extns.find("cl_khr_integer_dot_product") != std::string::npos)
-        devInfo.int8DotProductSupported = true;
+    {
+        cl_bitfield dpCaps = 0;
+        if (clGetDeviceInfo(d(), CL_DEVICE_INTEGER_DOT_PRODUCT_CAPABILITIES_KHR,
+                            sizeof(dpCaps), &dpCaps, nullptr) == CL_SUCCESS)
+            devInfo.int8DotProductSupported =
+                (dpCaps & CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR) != 0;
+    }
 
     devInfo.clDeviceType = d.getInfo<CL_DEVICE_TYPE>();
 
