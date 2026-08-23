@@ -17,6 +17,20 @@ MSTRINGIFY(
 //
 // The MAC is a plain contracted expression rather than fma() for the same
 // reason compute_sp_kernels.cl avoids mad() -- see the comment there.
+//
+// The fp32 accumulator seed carries a get_local_id term.  It is not
+// decoration: without it every operand in this family is uniform across
+// work-items, and a runtime that vectorises across work-items can compute the
+// whole chain once and broadcast it.  Intel's CPU runtime does exactly that.
+// Adding the term dropped the reported figures by 7.96-8.02x at vector widths
+// 2 through 16 -- precisely the AVX2 fp32 lane count -- so every mp number
+// this family produced on such a runtime had been eight times too high.  The
+// corrected figures also finally agree with their surroundings: mp now reads
+// 378 GFLOPS at best against 187 for pure half on the same device, where
+// before it claimed 2077, eleven times the fp16 rate it is built on.
+// Scalar width 1 was only inflated 1.37x, so the broadcast needed the vector
+// types.  Every other backend's mp kernel already seeded from the thread or
+// lane id, which is why this only ever affected OpenCL.
 
 \n#if defined(cl_khr_fp16)
 \n  #pragma OPENCL EXTENSION cl_khr_fp16 : enable
