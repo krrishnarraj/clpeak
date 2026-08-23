@@ -1,7 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
-// Signed int32 MAC throughput.  Mirrors compute_sp_v1 with `*` + `+` in
-// place of `fma` since GLSL's fma is fp-only.
+// Signed int32 MAC throughput.  Mirrors compute_sp with `*` + `+` in
+// place of fma, which GLSL defines for floating point only.
 
 layout(local_size_x = 256) in;
 
@@ -13,20 +14,24 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-// Chain shape and why: see the MAD chain block in include/common/common.h.
-#define MAD_4(x, c)  x = (x * x) + c; x = (x * x) + c; x = (x * x) + c; x = (x * x) + c;
-#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+// Compiled twice -- squaring chain and affine chain -- and raced against
+// each other at run time.  See mad_chain.glsl, and the MAD chain block in
+// include/common/common.h for the rules both shapes obey.
+#define MAD_CHAIN_INTEGER
+#define MAD_OP(d, m1, m2, ad)  d = (m1 * m2) + ad;
+#define MAD_CHAINS 4
+#include "mad_chain.glsl"
 
 void main()
 {
-    int x = pc.A;
-    int c = int(gl_LocalInvocationID.x);
+    CHAIN_DECL(int, pc.A, int(gl_LocalInvocationID.x))
 
-    // 64 iters * 16 MADs * 2 ops = 2048 per WI (matches COMPUTE_INT_WORK_PER_WI).
+    // 64 iters * 16 MADs * 2 ops = 2048 per WI (COMPUTE_INT_WORK_PER_WI).
     for (int i = 0; i < 64; i++)
     {
-        MAD_16(x, c)
+        MAD_16
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x;
+    int r = CHAIN_RESULT;
+    outputBuf.data[gl_GlobalInvocationID.x] = r;
 }

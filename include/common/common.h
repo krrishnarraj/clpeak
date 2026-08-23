@@ -86,7 +86,41 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //    coefficient and halve the loop.  Squaring raises the polynomial degree,
 //    so folding steps always costs more operations than it saves.  No
 //    compiler in the toolchain set does the affine fold today, but quadratic
-//    is safe by construction rather than by luck.
+//    is safe by construction rather than by luck.  The Vulkan backend's
+//    second shape (below) is the one exception, and it is why that exception
+//    is worth revisiting.
+//
+// Two shapes, raced.  No single recurrence reaches peak on every vendor: the
+// two dominant register files have opposite constraints.
+//
+//   x = x*x + c      reads {x, x, c}.  Intel Alchemist (Xe-HPG) halves any
+//                    three-source mad whose operands are not all distinct
+//                    registers, so this lands at 0.496 instructions per lane
+//                    per clock on an Arc A380 -- at every vector width, every
+//                    chain count and every work-group size.  Full rate on
+//                    NVIDIA, Apple, Adreno and pre-Xe Intel.
+//
+//   x = a*x + b      reads three distinct registers.  Full rate on Alchemist;
+//                    NVIDIA is the mirror image and halves it at one chain,
+//                    which four independent chains restore.
+//
+// The Vulkan and OpenCL backends carry both shapes, time both, and report the
+// faster -- landing within 3% of the best measured shape on every device
+// tested.  The other backends still run the squaring shape alone and
+// under-report Alchemist by half.
+//
+// Integer families use a third shape rather than the affine one, because an
+// integer affine recurrence is legally foldable (integer multiply and add are
+// associative and distributive) and Apple's OpenCL compiler does fold it --
+// int16/char16/short16 came back 15.5x inflated.  Their second shape rotates
+// the multiplier through the other accumulators
+//
+//   x_k = x_k * x_(k+1) + c
+//
+// keeping three distinct source registers and instruction-level parallelism
+// while staying quadratic, so no closed form exists to fold to.  Floating
+// point keeps the affine shape: the same fold there needs FP reassociation,
+// which nothing in the toolchain set does by default.
 //
 //  - The kernel must store x, never c.  c is loop-invariant; storing it lets
 //    the entire chain be dead-coded away and produces an absurd number.
@@ -95,6 +129,13 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // squarings.  That is fine -- integer multiply is fixed-latency on every
 // target here -- but it is why the terminal store matters.
 // ---------------------------------------------------------------------------
+
+// Reject an alt-chain reading more than this many times the squaring reading:
+// past this it is a compiler that folded the chain, not silicon that liked the
+// shape.  Measured legitimate gains top out near 4x (Intel's CPU OpenCL runtime
+// goes 402 -> 1633 GFLOPS purely on the independent chains); the one observed
+// fold was 15.5x.
+static const float MAX_ALT_CHAIN_RATIO = 6.0f;
 
 // compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
 static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;

@@ -1,6 +1,7 @@
 #ifdef ENABLE_VULKAN
 
 #include <vulkan/vk_peak.h>
+#include <common/common.h>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -30,19 +31,21 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // buffer + descriptor set and swaps only the pipeline between dispatches;
   // single-variant benchmarks materialize a one-entry list.
   struct Variant { const char *label; const uint32_t *spirv; size_t spirvSize;
-                   const char *description; };
+                   const char *description;
+                   const uint32_t *altSpirv; size_t altSpirvSize; };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
   {
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].spirv,
-                          d.variants[i].spirvSize, d.variants[i].description});
+                          d.variants[i].spirvSize, d.variants[i].description,
+                          d.variants[i].altSpirv, d.variants[i].altSpirvSize});
   }
   else
   {
     // Single-variant tests (coopmat): the metric name restates the title, so
     // the test-level description covers it.
-    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr});
+    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr, nullptr, 0});
   }
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
@@ -156,40 +159,74 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Build + dispatch each variant's pipeline.  Variants failing pipeline
   // creation are skipped but don't abort the group -- some drivers accept
   // the v1 shader but choke on a wider packed variant.
-  for (const auto &v : variants)
-  {
+  //
+  // Time one shader, returning microseconds per dispatch (<= 0 on failure).
+  // *built distinguishes "the driver rejected the stage" from "the dispatch
+  // failed", which the caller reports differently.
+  auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
+                       bool *built) -> float {
     VkPipeline pipeline;
-    bool built = dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout,
-                                           pipeline, d.specInfo, d.requiredSubgroupSize);
+    *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
+                                       pipeline, d.specInfo, d.requiredSubgroupSize);
     // A pinned subgroup width is a preference, not a requirement: if the
     // driver won't compile the stage at that width, run it however it likes
     // rather than dropping the row.
-    if (!built && d.requiredSubgroupSize)
-      built = dev.createComputePipeline(v.spirv, v.spirvSize, dsLayout, pipeLayout,
-                                        pipeline, d.specInfo, 0);
+    if (!*built && d.requiredSubgroupSize)
+      *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
+                                         pipeline, d.specInfo, 0);
+    if (!*built) return -1.0f;
+
+    float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
+                            cfg.targetTimeUs, forceIters ? specifiedIters : 0,
+                            d.pushData, d.pushSize);
+    vkDestroyPipeline(dev.device, pipeline, nullptr);
+    return timed;
+  };
+
+  double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
+  auto toValue = [&](float timed) {
+    return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
+  };
+
+  for (const auto &v : variants)
+  {
+    bool built = false;
+    float timed = timeShape(v.spirv, v.spirvSize, &built);
     if (!built)
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
                 note(v.description));
       continue;
     }
-
-    float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
-                            cfg.targetTimeUs, forceIters ? specifiedIters : 0,
-                            d.pushData, d.pushSize);
     if (timed <= 0.0f)
     {
       test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
                 note(v.description));
-      vkDestroyPipeline(dev.device, pipeline, nullptr);
       continue;
     }
-    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-    float value = (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
+    float value = toValue(timed);
+
+    // Race the affine build of the same shader and keep the faster.  A shape
+    // that fails to build or run here is not an error -- the first shape
+    // already produced a reading.
+    if (v.altSpirv && v.altSpirvSize)
+    {
+      bool altBuilt = false;
+      float altTimed = timeShape(v.altSpirv, v.altSpirvSize, &altBuilt);
+      if (altBuilt && altTimed > 0.0f)
+      {
+        float altValue = toValue(altTimed);
+        CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
+                    d.resultTag, v.label, value, altValue, d.unit);
+        if (altValue > value * MAX_ALT_CHAIN_RATIO)
+          CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                      "compiler fold\n", d.resultTag, v.label, altValue / value);
+        else if (altValue > value)
+          value = altValue;
+      }
+    }
 
     test.emit(v.label, value, {false, note(v.description)});
-
-    vkDestroyPipeline(dev.device, pipeline, nullptr);
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

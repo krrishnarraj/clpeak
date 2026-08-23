@@ -1,10 +1,17 @@
 #version 450
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_GOOGLE_include_directive : require
 
-// Mixed-precision MAC v2: fp16 x fp16 + fp32 on f16vec2 lanes.
-// See v1 for the amortised-cast rationale.
+// Mixed-precision MAC: fp16 x fp16 + fp32 accumulator.  Dominant
+// arithmetic path in LLM training/prefill.  Distinct from compute_sp
+// (pure fp32) and from compute_hp (fp16 accumulator).
 //
-// Per-WI op budget: 64 iters * 16 FMAs * 2 chains * 2 lanes * 2 ops = 8192.
+// The accumulators are loop-carried in fp32 so glslang SSA-promotes
+// them to phis, and round-trip through fp16 once per outer iteration to
+// force the fp16 type into the data path.  An earlier version cast
+// inside the FMA macro, chaining a downcast and two expands into the
+// critical path of every FMA -- that capped an RTX 5060 at ~5.7 TFLOPS,
+// 27% of its FP32 rate.  The invariants are seeded through fp16 once.
 
 layout(local_size_x = 256) in;
 
@@ -16,20 +23,25 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-// Chain shape and why: see the MAD chain block in include/common/common.h.
-#define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
-#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+// Compiled twice -- squaring chain and affine chain -- and raced against
+// each other at run time.  See mad_chain.glsl, and the MAD chain block in
+// include/common/common.h for the rules both shapes obey.
+#define MAD_CHAINS 2
+#include "mad_chain.glsl"
+
+#define NARROW(v) vec2(f16vec2(v))
 
 void main()
 {
-    vec2 x = vec2(f16vec2(pc.A, pc.A + 1.0));
-    vec2 c = vec2(f16vec2(gl_LocalInvocationID.x));
+    CHAIN_DECL(vec2, vec2(f16vec2(pc.A, pc.A + 1.0)), vec2(f16vec2(gl_LocalInvocationID.x)))
 
+    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
     for (int i = 0; i < 64; i++)
     {
-        MAD_16(x, c)
-        x = vec2(f16vec2(x));
+        MAD_16
+        CHAIN_MAP(NARROW)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y;
+    vec2 r = CHAIN_RESULT;
+    outputBuf.data[gl_GlobalInvocationID.x] = r.x + r.y;
 }
