@@ -114,10 +114,17 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
 }
 
 // ---- affine-chain variants (generated; see mad_chain.cl) ----
+//
+// The invariant multiplier m is seeded from _B, not from get_local_id: every
+// operand in this family is uniform across work-items, and introducing a
+// varying one blocked whatever the Intel CPU runtime does with a fully
+// uniform loop -- 0.12x the squaring rate from width 4 up.  The alt kernel
+// has to differ from the squaring kernel in the duplicated multiplicand and
+// nothing else.
 
 __kernel void compute_mp_alt_v1(__global float *ptr, float _B)
 {
-    MP4_DECL(half, float, (half)(get_local_id(0) + 1), (half)_B, _B)
+    MP4_DECL(half, float, (half)((half)(_B + 0.5f)), (half)_B, _B)
 
     for (int i = 0; i < 128; i++)
     {
@@ -130,7 +137,7 @@ __kernel void compute_mp_alt_v1(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v2(__global float *ptr, float _B)
 {
-    MP2_DECL(half2, float2, (half2)(get_local_id(0) + 1), (half2)((half)_B, (half)(_B+1)), (float2)(_B, _B+1))
+    MP2_DECL(half2, float2, (half2)((half)(_B + 0.5f)), (half2)((half)_B, (half)(_B+1)), (float2)(_B, _B+1))
 
     for (int i = 0; i < 64; i++)
     {
@@ -143,7 +150,7 @@ __kernel void compute_mp_alt_v2(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v4(__global float *ptr, float _B)
 {
-    MP1_DECL(half4, float4, (half4)(get_local_id(0) + 1), (half4)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3)), (float4)(_B, _B+1, _B+2, _B+3))
+    MP1_DECL(half4, float4, (half4)((half)(_B + 0.5f)), (half4)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3)), (float4)(_B, _B+1, _B+2, _B+3))
 
     for (int i = 0; i < 32; i++)
     {
@@ -156,7 +163,7 @@ __kernel void compute_mp_alt_v4(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v8(__global float *ptr, float _B)
 {
-    MP1_DECL(half8, float8, (half8)(get_local_id(0) + 1), (half8)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7)), (float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))
+    MP1_DECL(half8, float8, (half8)((half)(_B + 0.5f)), (half8)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7)), (float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))
 
     for (int i = 0; i < 16; i++)
     {
@@ -169,7 +176,7 @@ __kernel void compute_mp_alt_v8(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v16(__global float *ptr, float _B)
 {
-    MP1_DECL(half16, float16, (half16)(get_local_id(0) + 1), (half16)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7), (half)(_B+8), (half)(_B+9), (half)(_B+10), (half)(_B+11), (half)(_B+12), (half)(_B+13), (half)(_B+14), (half)(_B+15)), (float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))
+    MP1_DECL(half16, float16, (half16)((half)(_B + 0.5f)), (half16)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7), (half)(_B+8), (half)(_B+9), (half)(_B+10), (half)(_B+11), (half)(_B+12), (half)(_B+13), (half)(_B+14), (half)(_B+15)), (float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))
 
     for (int i = 0; i < 8; i++)
     {
