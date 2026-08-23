@@ -49,13 +49,17 @@ MSTRINGIFY(
 // M24_* is the same rotating shape as RT*, spelled with mad24 for the 24-bit
 // fast-integer family.
 //
-// MP* is the mixed-precision family's second shape.  compute_mp measures
-// fp16 x fp16 + fp32, so its chain has to keep the narrow type in the data
-// path: x_k = narrow(m * wide(x_k) + b), with m an fp16 invariant and b an
-// fp32 one.  That is three distinct source registers per mad, and exactly one
-// narrowing conversion per mad -- the same ratio the squaring kernels carry,
-// so adding chains does not quietly hand the alt build extra conversion work.
-// The narrowing also blocks any fold outright, affine form or not.
+// MP* is the mixed-precision family's second shape, and it is deliberately a
+// one-token edit of the squaring kernel rather than a rewrite:
+//
+//   squaring   a = wide(x) * wide(x) + a;  x = narrow(a);   sources {x, x, a}
+//   MP*        a = wide(m) * wide(x) + a;  x = narrow(a);   sources {m, x, a}
+//
+// The fp32 accumulator stays loop-carried and the narrowing stays where it
+// was, so the only difference is the duplicated multiplicand.  An earlier
+// version carried the fp16 value through the loop instead and collapsed at
+// vector widths -- 0.12x the squaring rate on Intel's CPU runtime from width
+// 4 up.  The narrowing blocks any fold outright, affine form or not.
 //
 // runComputeTest also refuses an alt reading more than MAX_ALT_CHAIN_RATIO
 // times the squaring one, as a backstop against a fold nobody predicted.
@@ -126,22 +130,22 @@ MSTRINGIFY(
 \n#define RT2_16                 RT2_G RT2_G RT2_G RT2_G RT2_G RT2_G RT2_G RT2_G
 \n#define RT2_RES                (x0 + x1)
 \n
-\n#define MP_STEP(HT, FT, d, m, b)  d = convert_##HT(convert_##FT(m) * convert_##FT(d) + b);
+\n#define MP_STEP(HT, FT, x, a, m)  a = convert_##FT(m) * convert_##FT(x) + a; x = convert_##HT(a);
 \n
-\n#define MP4_DECL(HT, FT, mseed, bseed, xseed) HT m = (mseed); FT b = (bseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(1); HT x2 = (xseed) + (HT)(2); HT x3 = (xseed) + (HT)(3);
-\n#define MP4_G(HT, FT)          MP_STEP(HT,FT,x0,m,b) MP_STEP(HT,FT,x1,m,b) MP_STEP(HT,FT,x2,m,b) MP_STEP(HT,FT,x3,m,b)
+\n#define MP4_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(1); HT x2 = (xseed) + (HT)(2); HT x3 = (xseed) + (HT)(3); FT a0 = (aseed); FT a1 = (aseed) + (FT)(1); FT a2 = (aseed) + (FT)(2); FT a3 = (aseed) + (FT)(3);
+\n#define MP4_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m) MP_STEP(HT,FT,x1,a1,m) MP_STEP(HT,FT,x2,a2,m) MP_STEP(HT,FT,x3,a3,m)
 \n#define MP4_16(HT, FT)         MP4_G(HT,FT) MP4_G(HT,FT) MP4_G(HT,FT) MP4_G(HT,FT)
-\n#define MP4_RES(FT)            (convert_##FT(x0) + convert_##FT(x1) + convert_##FT(x2) + convert_##FT(x3))
+\n#define MP4_RES(FT)            (((a0 + a1) + (a2 + a3)) + convert_##FT(x0))
 \n
-\n#define MP2_DECL(HT, FT, mseed, bseed, xseed) HT m = (mseed); FT b = (bseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(1);
-\n#define MP2_G(HT, FT)          MP_STEP(HT,FT,x0,m,b) MP_STEP(HT,FT,x1,m,b)
+\n#define MP2_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(1); FT a0 = (aseed); FT a1 = (aseed) + (FT)(1);
+\n#define MP2_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m) MP_STEP(HT,FT,x1,a1,m)
 \n#define MP2_16(HT, FT)         MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT)
-\n#define MP2_RES(FT)            (convert_##FT(x0) + convert_##FT(x1))
+\n#define MP2_RES(FT)            ((a0 + a1) + convert_##FT(x0))
 \n
-\n#define MP1_DECL(HT, FT, mseed, bseed, xseed) HT m = (mseed); FT b = (bseed); HT x0 = (xseed);
-\n#define MP1_G(HT, FT)          MP_STEP(HT,FT,x0,m,b)
+\n#define MP1_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); FT a0 = (aseed);
+\n#define MP1_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m)
 \n#define MP1_16(HT, FT)         MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT)
-\n#define MP1_RES(FT)            (convert_##FT(x0))
+\n#define MP1_RES(FT)            (a0 + convert_##FT(x0))
 \n
 \n#define M24_MAD(d, m1, m2, ad)  d = mad24(m1, m2, ad);
 \n
