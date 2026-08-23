@@ -26,7 +26,14 @@ layout(push_constant) uniform PushConstants {
 // Compiled twice -- squaring chain and affine chain -- and raced against
 // each other at run time.  See mad_chain.glsl, and the MAD chain block in
 // include/common/common.h for the rules both shapes obey.
-#define MAD_CHAINS 2
+// One chain at every width, unlike the other float families.  The fp16
+// round-trip below runs once per accumulator per outer iteration, so N
+// chains would cost N conversions per 16 chain instructions against the
+// squaring build's one -- a 19% instruction-count handicap that has
+// nothing to do with the shape being measured.  Alchemist needs the
+// distinct source registers, not the parallelism: a single affine chain
+// already reaches 0.98 there.
+#define MAD_CHAINS 1
 #include "mad_chain.glsl"
 
 #define NARROW(v) vec2(f16vec2(v))

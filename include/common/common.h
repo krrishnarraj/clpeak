@@ -112,7 +112,7 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // racing costs roughly 2x the compute-test budget: on NVIDIA the squaring
 // chain is measured optimal at one chain (1.00 against 0.52 for a single
 // affine chain, on both a 5060 and a 4060), so the second shape would be pure
-// cost.  AMD is simply unmeasured -- run tmp/arc_probe on an AMD GPU before
+// cost.  AMD is simply unmeasured -- measure both shapes on an AMD GPU before
 // deciding, rather than paying for insurance nobody has priced.
 //
 // Integer families use a third shape rather than the affine one, because an

@@ -113,6 +113,76 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
     ptr[get_global_id(0)] = t3.S0 + t3.S1 + (float)(x.S0);
 }
 
+// ---- affine-chain variants (generated; see mad_chain.cl) ----
+
+__kernel void compute_mp_alt_v1(__global float *ptr, float _B)
+{
+    MP4_DECL(half, float, (half)_B, (float)get_local_id(0) + 2.0f, (half)get_local_id(0))
+
+    for (int i = 0; i < 128; i++)
+    {
+        MP4_16(half, float)
+    }
+
+    float r = MP4_RES(float);
+    ptr[get_global_id(0)] = r;
+}
+
+__kernel void compute_mp_alt_v2(__global float *ptr, float _B)
+{
+    MP2_DECL(half2, float2, (half2)((half)_B, (half)(_B+1)), (float2)get_local_id(0) + (float2)(2.0f), (half2)((half)get_local_id(0), (half)(get_local_id(0)+1)))
+
+    for (int i = 0; i < 64; i++)
+    {
+        MP2_16(half2, float2)
+    }
+
+    float2 r = MP2_RES(float2);
+    ptr[get_global_id(0)] = r.S0 + r.S1;
+}
+
+__kernel void compute_mp_alt_v4(__global float *ptr, float _B)
+{
+    MP1_DECL(half4, float4, (half4)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3)), (float4)get_local_id(0) + (float4)(2.0f), (half4)((half)get_local_id(0), (half)(get_local_id(0)+1), (half)(get_local_id(0)+2), (half)(get_local_id(0)+3)))
+
+    for (int i = 0; i < 32; i++)
+    {
+        MP1_16(half4, float4)
+    }
+
+    float4 r = MP1_RES(float4);
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+}
+
+__kernel void compute_mp_alt_v8(__global float *ptr, float _B)
+{
+    MP1_DECL(half8, float8, (half8)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7)), (float8)get_local_id(0) + (float8)(2.0f), (half8)((half)get_local_id(0), (half)(get_local_id(0)+1), (half)(get_local_id(0)+2), (half)(get_local_id(0)+3), (half)(get_local_id(0)+4), (half)(get_local_id(0)+5), (half)(get_local_id(0)+6), (half)(get_local_id(0)+7)))
+
+    for (int i = 0; i < 16; i++)
+    {
+        MP1_16(half8, float8)
+    }
+
+    float8 r = MP1_RES(float8);
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+}
+
+__kernel void compute_mp_alt_v16(__global float *ptr, float _B)
+{
+    MP1_DECL(half16, float16, (half16)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7), (half)(_B+8), (half)(_B+9), (half)(_B+10), (half)(_B+11), (half)(_B+12), (half)(_B+13), (half)(_B+14), (half)(_B+15)), (float16)get_local_id(0) + (float16)(2.0f), (half16)((half)get_local_id(0), (half)(get_local_id(0)+1), (half)(get_local_id(0)+2), (half)(get_local_id(0)+3), (half)(get_local_id(0)+4), (half)(get_local_id(0)+5), (half)(get_local_id(0)+6), (half)(get_local_id(0)+7), (half)(get_local_id(0)+8), (half)(get_local_id(0)+9), (half)(get_local_id(0)+10), (half)(get_local_id(0)+11), (half)(get_local_id(0)+12), (half)(get_local_id(0)+13), (half)(get_local_id(0)+14), (half)(get_local_id(0)+15)))
+
+    for (int i = 0; i < 8; i++)
+    {
+        MP1_16(half16, float16)
+    }
+
+    float16 r = MP1_RES(float16);
+    float8 t = r.lo + r.hi;
+    float4 t2 = t.lo + t.hi;
+    float2 t3 = t2.lo + t2.hi;
+    ptr[get_global_id(0)] = t3.S0 + t3.S1;
+}
+
 \n#endif      // HALF_AVAILABLE
 \n
 
