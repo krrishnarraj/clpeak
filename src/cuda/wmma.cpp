@@ -194,6 +194,57 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "FP8 mma.sync requires sm_89 or newer (Ada/Hopper+)! Skipped";
       runComputeKernel(dev, cfg, d);
     }
+    // FP8 mma.sync E4M3 with fp16 accumulate (PTX) - sm_89+.  Same shape as the
+    // +fp32 E4M3 row above, so the pair isolates the accumulator width: on
+    // GeForce the fp32-accumulate tensor-core paths are held at half rate.
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "FP8(E4M3) mma.sync m16n8k32+fp16";
+      d.resultTag = "wmma_fp8_f16";
+      d.description = "The same 8-bit tensor-core maths, but keeping the running "
+                      "total in 16 bits rather than 32.  On GeForce cards the "
+                      "32-bit-total form is deliberately capped at half rate, so "
+                      "this row is where the full 8-bit speed shows up.";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp8_e4m3_f16acc";
+      d.kernelName = "wmma_fp8_f16";
+      d.blob = &cuda_kernels::wmma_fp8_f16;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 chains * m16n8k32, as the +fp32 row
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = warp; // one fp32 reduction per thread
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSupported;
+      d.skipMsg = "FP8 mma.sync with fp16 accumulate requires sm_89 or newer (Ada/Hopper+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
+    // FP8 mma.sp 2:4 structured sparsity E4M3 m16n8k64 (PTX) - sm_89+
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp32";
+      d.resultTag = "wmma_fp8_sparse";
+      d.description = "8-bit numbers with structured sparsity: half the values in "
+                      "each group of four are known to be zero and are skipped, so "
+                      "the hardware does twice the useful work per step.";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp8_sparse";
+      d.kernelName = "wmma_fp8_sparse";
+      d.blob = &cuda_kernels::wmma_fp8_sparse;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64 = 2x dense k32
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = 16 * 8;
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSparseSupported;
+      d.skipMsg = "FP8 mma.sp 2:4 sparsity requires sm_89 or newer (Ada/Hopper+)! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
     // FP4 mma.sync E2M1 (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;

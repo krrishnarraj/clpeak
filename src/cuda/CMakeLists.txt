@@ -88,9 +88,10 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
     KERNELS compute_bf16 wmma_bf16 wmma_tf32 wmma_fp64 wmma_int8_k32 wmma_int8_sparse
             wmma_fp16_f16)
 
-# FP8 mma.sync (E4M3 / E5M2) -- sm_89+.
+# FP8 mma.sync (E4M3 / E5M2), the fp16-accumulate E4M3 variant, and E4M3
+# mma.sp 2:4 sparsity (m16n8k64) -- all sm_89+.
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 89
-    KERNELS wmma_fp8_e4m3 wmma_fp8_e5m2)
+    KERNELS wmma_fp8_e4m3 wmma_fp8_e5m2 wmma_fp8_f16 wmma_fp8_sparse)
 
 # FP4 / MXFP4 / NVFP4 mma.sync (dense + 2:4 sparse) -- consumer Blackwell
 # sm_120a (RTX 50) and sm_121a (GB10). Datacenter Blackwell (sm_100a/103a) uses

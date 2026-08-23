@@ -84,6 +84,9 @@ bool CudaDevice::init(int devIndex)
   info.wmmaSupported = (info.major >= 7);
   info.wmmaInt8Supported = (info.major > 7) || (info.major == 7 && info.minor >= 2);
   info.fp8MmaSupported = (info.major >= 9) || (info.major == 8 && info.minor >= 9);
+  // Sparse fp8 mma (m16n8k64) landed with the dense fp8 mma on Ada and is kept
+  // on every later arch, so it shares the fp8 cutoff.
+  info.fp8MmaSparseSupported = info.fp8MmaSupported;
   info.fp4MmaSupported = (info.major >= 12);
   info.fp4MmaSparseSupported = (info.major >= 12);
   // Block-scaled FP4 GEMM via cuBLASLt exists across the whole Blackwell line
