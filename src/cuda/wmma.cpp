@@ -245,6 +245,34 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "FP8 mma.sp 2:4 sparsity requires sm_89 or newer (Ada/Hopper+)! Skipped";
       runComputeKernel(dev, cfg, d);
     }
+    // FP8 mma.sp 2:4 sparsity E4M3 with fp16 accumulate (PTX) - sm_89+.  Both
+    // effects at once: the row above is still held to 2x the CAPPED fp32-accum
+    // rate, so lifting the accumulator is what should let sparsity double the
+    // uncapped rate instead.
+    {
+      float A = 1.3f;
+      cuda_compute_desc_t d = {};
+      d.title = "FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp16";
+      d.resultTag = "wmma_fp8_sparse_f16";
+      d.description = "8-bit numbers with both tricks at once: half the values in "
+                      "each group of four are skipped as known zeros, and the "
+                      "running total is kept in 16 bits rather than 32.  The "
+                      "fastest arrangement these tensor cores offer for 8-bit.";
+      d.unit = "tflops";
+      d.unitDivider = 1e12;
+      d.metricLabel = "fp8_sparse_f16acc";
+      d.kernelName = "wmma_fp8_sparse_f16";
+      d.blob = &cuda_kernels::wmma_fp8_sparse_f16;
+      d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64, as the +fp32 row
+      d.elemSize = sizeof(float);
+      d.blockSize = warp;
+      d.outElemsPerBlock = warp; // one fp32 reduction per thread
+      d.scalarArg = &A;
+      d.scalarSize = sizeof(A);
+      d.skip = !dev.info.wmmaSupported || !dev.info.fp8MmaSparseF16Supported;
+      d.skipMsg = "FP8 mma.sp 2:4 sparsity with fp16 accumulate requires Blackwell sm_120a or newer! Skipped";
+      runComputeKernel(dev, cfg, d);
+    }
     // FP4 mma.sync E2M1 (PTX) - Blackwell sm_120a+
     {
       float A = 1.3f;

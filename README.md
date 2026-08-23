@@ -56,6 +56,9 @@ Backend: CUDA
     FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp32 (TFLOPS)
       fp8_sparse : 169.74
 
+    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp16 (TFLOPS)
+      fp8_sparse_f16acc : 326.15
+
     INT8 mma.sync m16n8k32+int32 (TOPS)
       int8_k32 : 164.68
 

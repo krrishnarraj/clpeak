@@ -45,7 +45,11 @@ struct cuda_device_info_t {
   bool fp8MmaSupported;          // cc >= 8.9 (Ada) -- inline mma.sync.e4m3/e5m2
                                  // (also gates the fp16-accumulate fp8 variant)
   bool fp8MmaSparseSupported;    // cc >= 8.9 (Ada) -- mma.sp.e4m3 2:4 sparsity
-                                 // at m16n8k64 (double the dense K)
+                                 // at m16n8k64 (double the dense K), fp32 accum
+  bool fp8MmaSparseF16Supported; // cc 12.x -- the same sparse shape with an fp16
+                                 // accumulator; ptxas rejects it on sm_89 even
+                                 // though the DENSE fp16-accum fp8 mma is fine
+                                 // there.  Provisional floor, see CMakeLists.
   bool fp4MmaSupported;          // cc 12.x (consumer Blackwell) -- sm_120a/121a
                                  // raw mma.sync FP4/MXFP4 microbench kernels
   bool fp4MmaSparseSupported;    // cc 12.x (consumer Blackwell) -- sm_120a/121a
@@ -239,6 +243,7 @@ namespace cuda_kernels {
   extern const Blob wmma_fp8_e5m2;
   extern const Blob wmma_fp8_f16;
   extern const Blob wmma_fp8_sparse;
+  extern const Blob wmma_fp8_sparse_f16;
   extern const Blob wmma_fp4_e2m1;
   extern const Blob wmma_mxf4_e2m1;
   extern const Blob wmma_nvf4_e2m1;

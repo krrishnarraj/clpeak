@@ -31,10 +31,11 @@
 // halved to 85.11.  Sparsity doubles whatever rate the accumulator allows:
 // int8+int32 sparse k64 reaches 327.30, i.e. 2x the uncapped rate, whereas
 // this kernel's 169.74 is 2x the CAPPED rate -- the 2x is spent climbing back
-// to the uncapped dense rate rather than doubling past it.  A sparse
-// fp16-accumulate FP8 form should therefore land near 330.  Untested:
-// CUTLASS wraps only f32-accumulate sparse FP8, so if a `.f16...f16`
-// m16n8k64 sparse form exists in PTX it is unexercised here.
+// to the uncapped dense rate rather than doubling past it.  Lifting the
+// accumulator on top of the sparsity does compose: the same shape with an fp16
+// accumulator measures 326.15 (wmma_fp8_sparse_f16.cu).  That form needs a
+// newer target than this one -- ptxas refuses it for sm_89 -- which is why the
+// two are separate kernels in separate arch groups.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k64 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32

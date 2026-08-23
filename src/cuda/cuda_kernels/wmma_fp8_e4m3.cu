@@ -27,10 +27,12 @@
 // instruction measures 166.81 on the same part (`wmma_fp8_f16.cu`) and the
 // 2:4 sparse form 169.74 (`wmma_fp8_sparse.cu`) -- the same
 // half-rate-on-fp32-accumulate split that `wmma_fp16_f16.cu` documents for
-// fp16.  Going past ~170 would need wider tiles: `wgmma.mma_async` (Hopper+
-// warpgroup-scope MMA) or `tcgen05.mma` (Blackwell-only, separate tensor
-// memory).  Both are major undertakings and the simpler mma.sync path is
-// what we ship.
+// fp16.  Stacking sparsity on the fp16 accumulator reaches 326.15
+// (`wmma_fp8_sparse_f16.cu`).  ~167 is therefore the ceiling for DENSE fp8
+// mma.sync specifically; going past that without sparsity would need wider
+// tiles -- `wgmma.mma_async` (Hopper+ warpgroup-scope MMA) or `tcgen05.mma`
+// (Blackwell-only, separate tensor memory).  Both are major undertakings and
+// the simpler mma.sync path is what we ship.
 //
 // A DENSE m16n8k64 shape is INT8 / sub-byte only -- ptxas rejects it for
 // FP8; the k64 FP8 shape exists only in the SPARSE form
