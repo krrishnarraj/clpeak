@@ -21,17 +21,20 @@
 // reports ~2x the dense FP8 TFLOPS, matching NVIDIA's "with sparsity" figures.
 //
 // MEASURED, RTX 5060 (sm_120, GeForce/consumer Blackwell): 169.74 TFLOPS,
-// i.e. 1.99x the 85.13 of the dense fp32-accumulate FP8 row.  FP8 therefore
-// sides with FP4 (wmma_nvf4_sparse.cu: 633 vs 328, full 2x) and NOT with INT8
-// (wmma_int8_sparse.cu: 164.85 == dense, no gain) -- consumer Blackwell gates
-// only the INT sparse data-path.
+// i.e. 1.99x the 85.13 of the dense fp32-accumulate FP8 row.  Consumer
+// Blackwell accelerates FP8 2:4 at full rate, as it does INT8
+// (wmma_int8_sparse.cu) and FP4 (wmma_nvf4_sparse.cu).
 //
-// Worth noting alongside wmma_fp8_f16.cu: sparse+fp32-accumulate (169.74) and
-// dense+fp16-accumulate (166.81) land on the same number, so ~170 TFLOPS looks
-// like the FP8 issue-rate ceiling on this part, reachable by either route.
-// Whether the two stack (a sparse fp16-accumulate form, which would imply
-// ~340) is untested: CUTLASS wraps only f32-accumulate sparse FP8, so if a
-// `.f16...f16` m16n8k64 sparse form exists in PTX it is unexercised here.
+// This row is still accumulator-capped, though.  On this part the uncapped
+// 8-bit tensor rate is ~165-170 (int8+int32 dense k32 = 164.81;
+// fp8+fp16 dense k32 = 166.77, wmma_fp8_f16.cu), while fp8+fp32 dense is
+// halved to 85.11.  Sparsity doubles whatever rate the accumulator allows:
+// int8+int32 sparse k64 reaches 327.30, i.e. 2x the uncapped rate, whereas
+// this kernel's 169.74 is 2x the CAPPED rate -- the 2x is spent climbing back
+// to the uncapped dense rate rather than doubling past it.  A sparse
+// fp16-accumulate FP8 form should therefore land near 330.  Untested:
+// CUTLASS wraps only f32-accumulate sparse FP8, so if a `.f16...f16`
+// m16n8k64 sparse form exists in PTX it is unexercised here.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k64 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32

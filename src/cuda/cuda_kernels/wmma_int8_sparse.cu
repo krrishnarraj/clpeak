@@ -10,12 +10,17 @@
 // do.
 //
 // Why NOT the m16n8k32 sparse shape, which PTX also offers: its dense
-// counterpart is m16n8k16, not the m16n8k32 row we report next to it.  Pinned
-// at k32 this kernel measured 164.85 TOPS on RTX 5060 against 164.84 for dense
-// wmma_int8_k32 -- a flat "no sparsity gain" that was an artefact of comparing
-// a sparse k32 against a dense k32 rather than any hardware gating.  (Against
-// its true counterpart, the k16-shaped wmma_int8 at 84.39, that same 164.85
-// was already a ~1.95x.)
+// counterpart is m16n8k16, not the m16n8k32 row we report next to it.  A sparse
+// k32 measures 164.85 TOPS on RTX 5060 against 164.84 for dense wmma_int8_k32 --
+// a flat "no sparsity gain" that is an artefact of pairing a sparse k32 with a
+// dense k32.  (Against its true counterpart, the k16-shaped wmma_int8 at 84.39,
+// that same 164.85 is already ~1.95x.)
+//
+// MEASURED, RTX 5060 (sm_120, GeForce/consumer Blackwell): 327.30 TOPS, i.e.
+// 1.99x the dense m16n8k32 (164.81) and 3.88x the k16 wmma_int8 (84.37).  So
+// consumer Blackwell does NOT gate the INT sparse data-path -- INT8 2:4 gets
+// the same full 2x that FP8 (wmma_fp8_sparse.cu) and FP4
+// (wmma_nvf4_sparse.cu) do.
 //
 // Uses the `mma.sp::ordered_metadata` qualifier (PTX ISA 8.5+).  Plain
 // `mma.sp` still assembles on sm_90+ but maps to a much slower path on

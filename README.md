@@ -59,6 +59,9 @@ Backend: CUDA
     INT8 mma.sync m16n8k32+int32 (TOPS)
       int8_k32 : 164.68
 
+    INT8 mma.sp 2:4 sparsity m16n8k64+int32 (TOPS)
+      int8_sparse : 327.30
+
     MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
       mxf4_e2m1 : 324.54
 

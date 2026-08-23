@@ -21,8 +21,9 @@
 // ~1.93x the dense NVFP4 (328) and ABOVE the advertised 615 "AI TOPS".  So
 // consumer Blackwell DOES accelerate FP4 2:4 sparsity at full rate.  The
 // advertised FP4 AI-TOPS figure is therefore the sparse number and IS reachable
-// on consumer parts via this instruction.  FP8 sparse gets its full 2x on this
-// part too (wmma_fp8_sparse.cu).
+// on consumer parts via this instruction.  INT8 (wmma_int8_sparse.cu, 327.30 vs
+// 164.81 dense) and FP8 (wmma_fp8_sparse.cu) get their full 2x on this part
+// too: consumer Blackwell accelerates 2:4 across all three widths.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k128 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32
