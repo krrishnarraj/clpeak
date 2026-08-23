@@ -19,11 +19,10 @@
 //
 // MEASURED, RTX 5060 (sm_120, GeForce/consumer Blackwell): 632.7 TFLOPS, i.e.
 // ~1.93x the dense NVFP4 (328) and ABOVE the advertised 615 "AI TOPS".  So
-// consumer Blackwell DOES accelerate FP4 2:4 sparsity at full rate.  This is the
-// opposite of INT8: `wmma_int8_sparse.cu` measures int8_sparse == int8_k32 (0%
-// gain) on the very same GPU -- NVIDIA gates the INT sparse data-path on GeForce
-// but NOT the FP4 one.  The advertised FP4 AI-TOPS figure is therefore the
-// sparse number and IS reachable on consumer parts via this instruction.
+// consumer Blackwell DOES accelerate FP4 2:4 sparsity at full rate.  The
+// advertised FP4 AI-TOPS figure is therefore the sparse number and IS reachable
+// on consumer parts via this instruction.  FP8 sparse gets its full 2x on this
+// part too (wmma_fp8_sparse.cu).
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k128 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32

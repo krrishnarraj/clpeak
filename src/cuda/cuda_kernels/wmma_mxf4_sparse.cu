@@ -18,9 +18,10 @@
 //
 // Consumer Blackwell (RTX 5060, sm_120) DOES accelerate FP4 2:4 sparsity -- the
 // sibling NVFP4 sparse kernel measures ~632 TFLOPS (~1.93x dense, above the
-// advertised 615).  This is unlike INT8, where `wmma_int8_sparse.cu` measures
-// int8_sparse == int8_k32 (0% gain) on the same GPU: NVIDIA gates the INT sparse
-// path on GeForce but not the FP4 one.
+// advertised 615).  FP8 sparse gets its full 2x on this part too
+// (wmma_fp8_sparse.cu).  Every sparse kernel here reaches 2x by using the
+// doubled-K shape against its dense counterpart -- see wmma_int8_sparse.cu for
+// what happens when the sparse and dense rows share a K instead.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k128 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32
