@@ -2,6 +2,19 @@
 #include <opencl/cl_utils.h>
 #include <vector>
 
+// cl_khr_integer_dot_product enums, defined here when the platform's OpenCL
+// headers predate the extension -- the OpenCL 2.2 headers that ship with ROCm
+// do, and clpeak builds against whatever headers the system provides.  The
+// values are fixed by the extension spec, so defining them locally is safe;
+// querying them on a device that lacks the extension is not, which is why the
+// call below stays behind the extension-string check.
+#ifndef CL_DEVICE_INTEGER_DOT_PRODUCT_CAPABILITIES_KHR
+#define CL_DEVICE_INTEGER_DOT_PRODUCT_CAPABILITIES_KHR 0x1073
+#endif
+#ifndef CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR
+#define CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR (1 << 1)
+#endif
+
 device_info_t getDeviceInfo(cl::Device &d)
 {
     device_info_t devInfo;
