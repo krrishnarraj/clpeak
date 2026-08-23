@@ -51,6 +51,14 @@
 // shape that issues at the dense m16n8k64 rate and so reports 2x.
 // Datacenter parts (Ampere/Hopper/B200) and AMD RDNA4 are still expected
 // to show the INT8 ~2x; that's the value of keeping this test.
+//
+// SHAPE CAVEAT (see wmma_fp8_sparse.cu): FP8 sparse on this same RTX 5060
+// DOES get the full 2x (169.74 vs the dense 85.13), and it does so at
+// m16n8k64 -- the DOUBLED-K counterpart of its dense m16n8k32.  This kernel
+// is at m16n8k32, the same K as the dense int8 row it is compared against,
+// so it has no doubled K to convert into a 2x.  PTX also defines a sparse
+// m16n8k64 for .u8/.s8; this kernel does not use it, and whether that shape
+// lifts int8 to ~330 on consumer Blackwell is untested.
 
 extern "C" __global__ void wmma_int8_sparse(int *out, int A)
 {

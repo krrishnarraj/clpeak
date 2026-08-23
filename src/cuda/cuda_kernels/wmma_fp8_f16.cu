@@ -5,14 +5,20 @@
 //
 // Why a separate kernel: the same reason wmma_fp16_f16.cu exists.  GeForce
 // parts hold the fp32-accumulate tensor-core paths at half rate -- fp16+fp32
-// measures ~42 TFLOPS on RTX 5060 against ~84 for fp16+fp16.  The dense FP8
-// test (wmma_fp8_e4m3.cu) accumulates in fp32 and lands at ~85 there, while
-// cuBLASLt's fp8 GEMM on the same part reports ~153.  This kernel is the raw
-// mma.sync probe of the fp16-accumulate path, i.e. the direct answer to
-// whether that gap is the accumulator width rather than the FP8 issue rate.
+// measures 42.55 TFLOPS on RTX 5060 against 83.39 for fp16+fp16.  The dense
+// FP8 test (wmma_fp8_e4m3.cu) accumulates in fp32 and lands at 85.13 there,
+// while cuBLASLt's fp8 GEMM on the same part reports 153.33.
 //
 // The shape is unchanged from the fp32-accumulate kernel (m16n8k32), so the
 // two rows are directly comparable: same instruction count, same nominal ops.
+//
+// MEASURED, RTX 5060 (sm_120, GeForce/consumer Blackwell): 166.81 TFLOPS,
+// i.e. 1.96x the 85.13 of the fp32-accumulate form and ABOVE cuBLASLt's
+// 153.33.  So the FP8 gap was the accumulator width, not the FP8 issue rate:
+// the same half-rate-on-fp32-accumulate rule that governs fp16 governs fp8.
+// Note this does NOT extend to the block-scaled FP4 path, which reaches its
+// full ~328 with an fp32 accumulator (wmma_nvf4_e2m1.cu) -- the cap bites on
+// fp16 and fp8, not on fp4.
 //
 // Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major):
 //   A: m16 x k32 = 512 bytes / 32 threads = 16 bytes/thread = 4 x .b32

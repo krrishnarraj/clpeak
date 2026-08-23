@@ -20,11 +20,18 @@
 // same rate as a dense m16n8k32 mma on hardware that accelerates 2:4, so this
 // reports ~2x the dense FP8 TFLOPS, matching NVIDIA's "with sparsity" figures.
 //
-// What to expect: on consumer Blackwell the FP4 sparse path DOES get the full
-// 2x (wmma_nvf4_sparse.cu: 632 vs 328 TFLOPS on RTX 5060) while the INT8 one
-// does not (wmma_int8_sparse.cu: 165 == dense).  Which side FP8 falls on is
-// exactly what this row is for.  Datacenter parts (Ampere/Hopper/B200) are
-// expected to show the full 2x.
+// MEASURED, RTX 5060 (sm_120, GeForce/consumer Blackwell): 169.74 TFLOPS,
+// i.e. 1.99x the 85.13 of the dense fp32-accumulate FP8 row.  FP8 therefore
+// sides with FP4 (wmma_nvf4_sparse.cu: 633 vs 328, full 2x) and NOT with INT8
+// (wmma_int8_sparse.cu: 164.85 == dense, no gain) -- consumer Blackwell gates
+// only the INT sparse data-path.
+//
+// Worth noting alongside wmma_fp8_f16.cu: sparse+fp32-accumulate (169.74) and
+// dense+fp16-accumulate (166.81) land on the same number, so ~170 TFLOPS looks
+// like the FP8 issue-rate ceiling on this part, reachable by either route.
+// Whether the two stack (a sparse fp16-accumulate form, which would imply
+// ~340) is untested: CUTLASS wraps only f32-accumulate sparse FP8, so if a
+// `.f16...f16` m16n8k64 sparse form exists in PTX it is unexercised here.
 //
 // === Per-thread fragment layout (32 threads/warp, A=row-major, B=col-major) ===
 //   A: m16 x k64 @ 2:4 (half non-zero) = 1024 bytes/2 / 32 = 16 B/thread = 4 x .b32
@@ -47,6 +54,8 @@
 //
 // Accumulates in fp32, like every other sparse row here; the fp16-accumulate
 // question is asked separately by wmma_fp8_f16.cu on the dense shape.
+//
+// Datacenter parts (Ampere/Hopper/B200) are expected to show the full 2x too.
 
 extern "C" __global__ void wmma_fp8_sparse(float *out, float A)
 {
