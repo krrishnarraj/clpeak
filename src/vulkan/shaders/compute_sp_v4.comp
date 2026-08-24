@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Single-precision MAC: fp32 x fp32 + fp32.
 
 layout(local_size_x = 256) in;
 
@@ -10,19 +13,22 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-// Chain shape and why: see the MAD chain block in include/common/common.h.
-#define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
-#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+// Compiled twice -- squaring chain and affine chain -- and raced against
+// each other at run time.  See mad_chain.glsl, and the MAD chain block in
+// include/common/common.h for the rules both shapes obey.
+#define MAD_CHAINS 1
+#include "mad_chain.glsl"
 
 void main()
 {
-    vec4 x = vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0);
-    vec4 c = vec4(gl_LocalInvocationID.x);
+    CHAIN_DECL(vec4, vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0), vec4(gl_LocalInvocationID.x))
 
+    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
     for (int i = 0; i < 32; i++)
     {
-        MAD_16(x, c)
+        MAD_16
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y + x.z + x.w;
+    vec4 r = CHAIN_RESULT;
+    outputBuf.data[gl_GlobalInvocationID.x] = (r.x + r.y) + (r.z + r.w);
 }

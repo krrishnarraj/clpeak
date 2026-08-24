@@ -11,6 +11,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 - Looking for the unified compute test helper? → `compute_test.cpp` (`runComputeTest`)
 - Looking for OpenCL utility types? → `cl_common.cpp` + `include/opencl/cl_common.h`
 - Looking for .cl kernel sources? → `kernels/*.cl`
+- Looking for why a compute family has two chain shapes? → `kernels/mad_chain.cl`
 - Looking for the CMake build logic? → `CMakeLists.txt`
 
 ## Key Files
@@ -28,6 +29,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `transfer_bandwidth.cpp` | `runTransferBandwidthTest()` — host↔device transfer |
 | `kernel_latency.cpp` | `runKernelLatency()` — single-dispatch kernel latency |
 | `kernels/` | OpenCL C kernel sources (`.cl` files) |
+| `kernels/mad_chain.cl` | The alternate MAD chains (`AF*` affine, `RT*` rotating) every `compute_*_alt_v*` kernel expands.  Included first in `cl_kernels.cpp` so the macros exist before use |
 | `cmake/` | `BuildSdk.cmake` — SDK fallback finder |
 
 ## Test documentation
@@ -43,6 +45,19 @@ See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
   `enqueueunmap` notes state the zero-copy convention (a route that moves
   nothing reads as `0.00`).  Changing `ZERO_COPY_MULTIPLIER` or the reporting
   rule means updating those strings.
+
+## Chain shapes
+
+Every compute family defines its kernels twice: `compute_<fam>_v<W>` with the
+squaring chain, and `compute_<fam>_alt_v<W>` with a second shape from
+`kernels/mad_chain.cl`.  `runComputeTest` creates both, times both and reports
+the faster; a family with no `_alt` kernel simply races nothing, which is how
+`compute_mp`, `compute_intfast` and `compute_int8_dp` currently behave.
+Float families use the affine `AF*` macros, integer families the rotating
+`RT*` ones -- an integer affine recurrence folds legally and Apple's compiler
+folds it.  Both shapes must spell the same number of chain instructions per
+`_16` so the two readings stay comparable.  Full rationale: `mad_chain.cl` and
+the MAD chain block in `include/common/common.h`.
 
 ## When You Change This Directory
 

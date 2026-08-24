@@ -1,10 +1,18 @@
 #version 450
 #extension GL_EXT_bfloat16 : require
+#extension GL_GOOGLE_include_directive : require
 
-// BF16 x BF16 + FP32 on bf16vec4 lanes.  See v1/v2 for rationale.
+// BF16 x BF16 + FP32 accumulator -- the non-tensor-core BF16 MAD path.
+// Distinct from compute_mp (fp16 x fp16 + fp32) and from the cooperative
+// matrix BF16 test (tensor-core path).  Requires VK_KHR_shader_bfloat16
+// + shaderBFloat16Type.
 //
-// Per-WI op budget: 32 iters * 16 FMAs * 2 chains * 4 lanes * 2 ops
-//                 = 8192 ops.
+// NVIDIA driver note (as of 595): bf16<->fp32 conversions on the shader
+// core are software-emulated, roughly 2x the cost of the fp16 cast in
+// compute_mp.  Hence MAD_128 rather than MAD_16 -- amortising two casts
+// over 128 chain instructions (~0.03 casts/FMA) is what closes the gap
+// to the FP32 ceiling; an earlier version that cast inside the FMA macro
+// ran at ~1.9 TFLOPS on an RTX 5060.  Expected ceiling: FP32 peak.
 
 layout(local_size_x = 256) in;
 
@@ -16,22 +24,25 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-// Chain shape and why: see the MAD chain block in include/common/common.h.
-#define MAD_4(x, c)   x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
-#define MAD_16(x, c)  MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
-#define MAD_64(x, c)  MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
-#define MAD_128(x, c) MAD_64(x, c) MAD_64(x, c)
+// Compiled twice -- squaring chain and affine chain -- and raced against
+// each other at run time.  See mad_chain.glsl, and the MAD chain block in
+// include/common/common.h for the rules both shapes obey.
+#define MAD_CHAINS 1
+#include "mad_chain.glsl"
+
+#define NARROW(v) vec4(bf16vec4(v))
 
 void main()
 {
-    vec4 x = vec4(bf16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0));
-    vec4 c = vec4(bf16vec4(gl_LocalInvocationID.x));
+    CHAIN_DECL(vec4, vec4(bf16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0)), vec4(bf16vec4(gl_LocalInvocationID.x)))
 
+    // 16 iters * 128 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
     for (int i = 0; i < 4; i++)
     {
-        MAD_128(x, c)
-        x = vec4(bf16vec4(x));
+        MAD_128
+        CHAIN_MAP(NARROW)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x.x + x.y + x.z + x.w;
+    vec4 r = CHAIN_RESULT;
+    outputBuf.data[gl_GlobalInvocationID.x] = (r.x + r.y) + (r.z + r.w);
 }

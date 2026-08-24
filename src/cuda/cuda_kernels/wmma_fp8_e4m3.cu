@@ -20,15 +20,23 @@
 // Per warp ops = 256 outer * 8 chains * (16*8*32*2) = 16,777,216;
 // per thread = 524,288 (= 8 * COOPMAT_WORK_PER_WI).
 //
-// Consumer-Blackwell ceiling note: this kernel measures ~85 TFLOPS on
-// RTX 5060 regardless of chain count or asm-block packing, so 85 TFLOPS
-// appears to be the hardware ceiling for dense `mma.sync` FP8 on
-// sm_120 -- roughly 1/4 of the WMMA INT8 number on the same device.
-// Higher FP8 throughput would require `wgmma.mma_async` (Hopper+
-// warpgroup-scope MMA, 4x larger tiles) or `tcgen05.mma` (Blackwell-only,
-// uses separate tensor memory).  Both are major undertakings; the
-// simpler mma.sync path is what we ship.  The m16n8k64 shape only
-// supports INT8 / sub-byte types -- ptxas rejects it for FP8.
+// Consumer-Blackwell ceiling note: this kernel measures 85.13 TFLOPS on
+// RTX 5060 regardless of chain count or asm-block packing, so that is the
+// ceiling for the FP32-ACCUMULATE `mma.sync` FP8 form on sm_120.  It is
+// NOT the ceiling for FP8 as such: the fp16-accumulate form of this very
+// instruction measures 166.81 on the same part (`wmma_fp8_f16.cu`) and the
+// 2:4 sparse form 169.74 (`wmma_fp8_sparse.cu`) -- the same
+// half-rate-on-fp32-accumulate split that `wmma_fp16_f16.cu` documents for
+// fp16.  Stacking sparsity on the fp16 accumulator reaches 326.15
+// (`wmma_fp8_sparse_f16.cu`).  ~167 is therefore the ceiling for DENSE fp8
+// mma.sync specifically; going past that without sparsity would need wider
+// tiles -- `wgmma.mma_async` (Hopper+ warpgroup-scope MMA) or `tcgen05.mma`
+// (Blackwell-only, separate tensor memory).  Both are major undertakings and
+// the simpler mma.sync path is what we ship.
+//
+// A DENSE m16n8k64 shape is INT8 / sub-byte only -- ptxas rejects it for
+// FP8; the k64 FP8 shape exists only in the SPARSE form
+// (`wmma_fp8_sparse.cu`), where K doubles because A is 2:4-compressed.
 
 extern "C" __global__ void wmma_fp8_e4m3(float *out, float A)
 {

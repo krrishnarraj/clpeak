@@ -22,8 +22,23 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
 #define IMAD_4(x, c)  x = x * x + c; x = x * x + c; x = x * x + c; x = x * x + c;
 #define IMAD_16(x, c) IMAD_4(x, c) IMAD_4(x, c) IMAD_4(x, c) IMAD_4(x, c)
 
+// Second chain shape, raced against the one above: x_k = x_k * x_(k+1) + c
+// over N accumulators.  Intel Alchemist halves a three-source mad whose source
+// operands are not all distinct, and x = x*x + c reads {x, x, c}; rotating the
+// multiplier through the other accumulators fixes that while staying
+// quadratic, which the affine shape the FP families use is not.  That matters
+// here and not there: an integer affine recurrence folds legally, because
+// integer multiply and add really are associative and distributive.  Full
+// rationale in the MAD chain block in include/common/common.h.
+//
+// N is 4 at width 1 and 2 above; rotating needs two accumulators minimum to
+// stay quadratic.  Both shapes issue 16 chain instructions per outer
+// iteration, so the two readings stay comparable.
+template <int W> struct RotChains { static constexpr int N = (W == 1) ? 4 : 2; };
+
 namespace { struct IntTag; }
 template <typename Tag, int W> class compute_int_vec_kernel;
+template <typename Tag, int W> class compute_int_rot_kernel;
 
 template <typename Tag, int W>
 static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
@@ -59,11 +74,68 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  constexpr int NCHAIN = RotChains<W>::N;
+  auto submitRot = [=](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_int_rot_kernel<Tag, W>>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) {
+          VecT xs[NCHAIN], c;
+          #pragma unroll
+          for (int k = 0; k < W; k++) c[k] = (int)it.get_local_id(0) + k;
+          #pragma unroll
+          for (int n = 0; n < NCHAIN; n++)
+          {
+            #pragma unroll
+            for (int k = 0; k < W; k++) xs[n][k] = A + k + n;
+          }
+
+          #pragma unroll 1
+          for (int i = 0; i < iters; i++)
+          {
+            #pragma unroll
+            for (int m = 0; m < 16 / NCHAIN; m++)
+            {
+              #pragma unroll
+              for (int n = 0; n < NCHAIN; n++)
+                xs[n] = xs[n] * xs[(n + 1) % NCHAIN] + c;
+            }
+          }
+
+          VecT r = xs[0];
+          #pragma unroll
+          for (int n = 1; n < NCHAIN; n++) r += xs[n];
+          int acc = 0;
+          #pragma unroll
+          for (int k = 0; k < W; k++) acc += r[k];
+          out[it.get_global_id(0)] = acc;
+        });
+    });
+  };
+
   const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9),
-                            {false, note});
+  if (us <= 0.0f)
+  {
+    test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+    return;
+  }
+  float value = clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9);
+
+  // Race the rotating chain and keep the faster reading.
+  float rotUs = peak.runKernel(dev, submitRot, targetTimeUs, forced);
+  if (rotUs > 0.0f)
+  {
+    float rotValue = clpeak_oneapi::computeGflops(totalThreads, workPerWI, rotUs, 1e9);
+    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f gops\n", label, value, rotValue);
+    if (rotValue > value * MAX_ALT_CHAIN_RATIO)
+      CLPEAK_VLOG("%s: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
+                  label, rotValue / value);
+    else if (rotValue > value)
+      value = rotValue;
+  }
+
+  test.emit(label, value, {false, note});
 }
 
 // --------------------------------------------------------------------------

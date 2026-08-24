@@ -5,8 +5,16 @@ MSTRINGIFY(
 // into a 32-bit accumulator and is the hardware DP4a / XDL / INT8-tensor-core
 // path on modern GPUs (NVIDIA Turing+, AMD RDNA2+, Intel Xe+, Adreno, Mali).
 
+// OpenCL 3.0 exposes this as an optional *feature* rather than an extension,
+// so a conforming compiler may define __opencl_c_integer_dot_product_input_4x8bit
+// without ever defining cl_khr_integer_dot_product.  Checking only the
+// extension macro compiled the kernels out on Intel's CPU runtime even though
+// the device advertised the extension and reported the 4x8-bit capability,
+// leaving clCreateKernel to fail with CL_INVALID_KERNEL_NAME.
 \n#if defined(cl_khr_integer_dot_product)
 \n  #pragma OPENCL EXTENSION cl_khr_integer_dot_product : enable
+\n#endif
+\n#if defined(cl_khr_integer_dot_product) || defined(__opencl_c_integer_dot_product_input_4x8bit)
 \n  #define INT8_DP_AVAILABLE
 \n#endif
 

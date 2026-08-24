@@ -101,14 +101,45 @@ if(CLPEAK_ENABLE_CUDA)
 endif()
 # Find ROCm/HIP (needed by src/rocm/CMakeLists.txt)
 if(CLPEAK_ENABLE_ROCM)
-    list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
+    # Install roots to search.  Only Linux has a well-known default prefix; the
+    # Windows HIP SDK installs under Program Files and advertises itself via
+    # HIP_PATH, and a relocated Linux install sets ROCM_PATH -- so both env vars
+    # are honoured first.  The backslashes the Windows SDK uses are replaced by
+    # hand rather than with file(TO_CMAKE_PATH): that command splits its input on
+    # the *host's* path-list separator, which shreds "C:\..." into "C;/..." when
+    # the configure host is Unix.  The regex then drops the trailing separator
+    # the SDK appends, so "C:/.../6.2/" can't yield "C:/.../6.2//bin".
+    set(CLPEAK_ROCM_ROOTS "")
+    foreach(_clpeak_rocm_env HIP_PATH ROCM_PATH)
+        if(DEFINED ENV{${_clpeak_rocm_env}})
+            string(REPLACE "\\" "/" _clpeak_rocm_root "$ENV{${_clpeak_rocm_env}}")
+            string(REGEX REPLACE "/+$" "" _clpeak_rocm_root "${_clpeak_rocm_root}")
+            list(APPEND CLPEAK_ROCM_ROOTS "${_clpeak_rocm_root}")
+        endif()
+    endforeach()
+    list(APPEND CLPEAK_ROCM_ROOTS /opt/rocm)
+    list(REMOVE_DUPLICATES CLPEAK_ROCM_ROOTS)
+
+    # CLPEAK_ROCM_INCLUDE_HINTS is also read by src/rocm/CMakeLists.txt (child
+    # scopes inherit it) for the configure-time hipBLASLt header probe.
+    set(CLPEAK_ROCM_BIN_HINTS "")
+    set(CLPEAK_ROCM_INCLUDE_HINTS "")
+    foreach(_clpeak_rocm_root IN LISTS CLPEAK_ROCM_ROOTS)
+        list(APPEND CMAKE_PREFIX_PATH "${_clpeak_rocm_root}/hip" "${_clpeak_rocm_root}")
+        list(APPEND CLPEAK_ROCM_BIN_HINTS "${_clpeak_rocm_root}/bin")
+        list(APPEND CLPEAK_ROCM_INCLUDE_HINTS "${_clpeak_rocm_root}/include")
+    endforeach()
+
     find_package(hip QUIET CONFIG)
     find_package(rocblas QUIET CONFIG)
     find_package(hipblaslt QUIET CONFIG)
 
     # Kernels are compiled ahead-of-time with hipcc (--genco), so the shipped
     # binary needs only the HIP runtime -- no HIPRTC, no ROCm headers.
-    find_program(CLPEAK_HIPCC NAMES hipcc HINTS /opt/rocm/bin)
+    # hipcc.bat is named explicitly because find_program only auto-appends the
+    # .exe/.com suffixes: the Windows HIP SDK has shipped hipcc as a batch
+    # wrapper in some releases and as a real executable in others.
+    find_program(CLPEAK_HIPCC NAMES hipcc hipcc.bat HINTS ${CLPEAK_ROCM_BIN_HINTS})
     if(CLPEAK_HIPCC)
         set(CLPEAK_HIPCC_FOUND TRUE)
     else()
@@ -117,7 +148,7 @@ if(CLPEAK_ENABLE_ROCM)
 
     find_path(CLPEAK_ROCWMMA_INCLUDE_DIR
         NAMES rocwmma/rocwmma.hpp
-        HINTS /opt/rocm/include)
+        HINTS ${CLPEAK_ROCM_INCLUDE_HINTS})
     if(CLPEAK_ROCWMMA_INCLUDE_DIR)
         set(CLPEAK_ROCWMMA_FOUND TRUE)
     else()

@@ -50,8 +50,20 @@ Backend: CUDA
     FP16 mma.sync m16n8k16+fp16 (TFLOPS)
       fp16_f16acc : 83.36
 
+    FP8(E4M3) mma.sync m16n8k32+fp16 (TFLOPS)
+      fp8_e4m3_f16acc : 166.81
+
+    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp32 (TFLOPS)
+      fp8_sparse : 169.74
+
+    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp16 (TFLOPS)
+      fp8_sparse_f16acc : 326.15
+
     INT8 mma.sync m16n8k32+int32 (TOPS)
       int8_k32 : 164.68
+
+    INT8 mma.sp 2:4 sparsity m16n8k64+int32 (TOPS)
+      int8_sparse : 327.30
 
     MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
       mxf4_e2m1 : 324.54

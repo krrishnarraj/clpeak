@@ -56,6 +56,17 @@ Category files include `mtl_internal.h` which provides ObjC Metal types and
 pimpl access. The public header `include/metal/mtl_peak.h` stays pure C++
 with only forward declarations — it can be included from non-ObjC TUs.
 
+## Chain shapes
+
+Each float family defines its kernels twice: `compute_*` with the squaring
+chain and `compute_*_alt` with the affine one from `mtl_kernels/mad_chain.metal`,
+which `EmbedMetalKernels.cmake` prepends to every embedded source (
+`newLibraryWithSource` cannot resolve `#include` of a sibling file).
+`runComputeKernel` times both and reports the faster; a variant with a null
+`altKernelName` races nothing.  Apple GPUs prefer the squaring chain at every
+width, so this changes no Apple number -- it is here so every backend behaves
+the same.  Why two shapes: the MAD chain block in `include/common/common.h`.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.

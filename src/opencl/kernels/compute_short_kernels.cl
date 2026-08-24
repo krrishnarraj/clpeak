@@ -81,5 +81,71 @@ __kernel void compute_short_v16(__global short *ptr, short _A)
     ptr[get_global_id(0)] = t.S0 + t.S1;
 }
 
+// ---- affine-chain variants (generated; see mad_chain.cl) ----
+
+__kernel void compute_short_alt_v1(__global short *ptr, short _A)
+{
+    RT4_DECL(short, _A, (short)get_local_id(0))
+
+    for (int i = 0; i < 64; i++)
+    {
+        RT4_16
+    }
+
+    short r = RT4_RES;
+    ptr[get_global_id(0)] = r;
+}
+
+__kernel void compute_short_alt_v2(__global short *ptr, short _A)
+{
+    RT2_DECL(short2, (short2)(_A, (_A + 1)), (short2)get_local_id(0))
+
+    for (int i = 0; i < 32; i++)
+    {
+        RT2_16
+    }
+
+    short2 r = RT2_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1;
+}
+
+__kernel void compute_short_alt_v4(__global short *ptr, short _A)
+{
+    RT2_DECL(short4, (short4)(_A, (_A + 1), (_A + 2), (_A + 3)), (short4)get_local_id(0))
+
+    for (int i = 0; i < 16; i++)
+    {
+        RT2_16
+    }
+
+    short4 r = RT2_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+}
+
+__kernel void compute_short_alt_v8(__global short *ptr, short _A)
+{
+    RT2_DECL(short8, (short8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (short8)get_local_id(0))
+
+    for (int i = 0; i < 8; i++)
+    {
+        RT2_16
+    }
+
+    short8 r = RT2_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+}
+
+__kernel void compute_short_alt_v16(__global short *ptr, short _A)
+{
+    RT2_DECL(short16, (short16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (short16)get_local_id(0))
+
+    for (int i = 0; i < 4; i++)
+    {
+        RT2_16
+    }
+
+    short16 r = RT2_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF;
+}
 
 )

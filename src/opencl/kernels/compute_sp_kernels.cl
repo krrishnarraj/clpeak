@@ -92,5 +92,71 @@ __kernel void compute_sp_v16(__global float *ptr, float _A)
     ptr[get_global_id(0)] = t.S0 + t.S1;
 }
 
+// ---- affine-chain variants (generated; see mad_chain.cl) ----
+
+__kernel void compute_sp_alt_v1(__global float *ptr, float _A)
+{
+    AF4_DECL(float, _A, (float)get_local_id(0))
+
+    for (int i = 0; i < 128; i++)
+    {
+        AF4_16
+    }
+
+    float r = AF4_RES;
+    ptr[get_global_id(0)] = r;
+}
+
+__kernel void compute_sp_alt_v2(__global float *ptr, float _A)
+{
+    AF2_DECL(float2, (float2)(_A, (_A + 1)), (float2)get_local_id(0))
+
+    for (int i = 0; i < 64; i++)
+    {
+        AF2_16
+    }
+
+    float2 r = AF2_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1;
+}
+
+__kernel void compute_sp_alt_v4(__global float *ptr, float _A)
+{
+    AF1_DECL(float4, (float4)(_A, (_A + 1), (_A + 2), (_A + 3)), (float4)get_local_id(0))
+
+    for (int i = 0; i < 32; i++)
+    {
+        AF1_16
+    }
+
+    float4 r = AF1_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+}
+
+__kernel void compute_sp_alt_v8(__global float *ptr, float _A)
+{
+    AF1_DECL(float8, (float8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (float8)get_local_id(0))
+
+    for (int i = 0; i < 16; i++)
+    {
+        AF1_16
+    }
+
+    float8 r = AF1_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+}
+
+__kernel void compute_sp_alt_v16(__global float *ptr, float _A)
+{
+    AF1_DECL(float16, (float16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (float16)get_local_id(0))
+
+    for (int i = 0; i < 8; i++)
+    {
+        AF1_16
+    }
+
+    float16 r = AF1_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF;
+}
 
 )

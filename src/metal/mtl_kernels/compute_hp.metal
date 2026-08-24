@@ -91,3 +91,53 @@ kernel void compute_hp8(device float* out [[buffer(0)]],
     half4 r = xa + xb;
     out[tid] = (float)(r.x + r.y + r.z + r.w);
 }
+
+// ---- affine-chain variants (raced against the ones above; see mad_chain.metal) ----
+
+kernel void compute_hp_alt(device float* out [[buffer(0)]],
+                            constant float& A [[buffer(1)]],
+                            uint tid [[thread_position_in_grid]],
+                            uint lid [[thread_position_in_threadgroup]])
+{
+    AF4_DECL(half, (half)A, (half)lid)
+
+    for (int i = 0; i < 128; i++)
+    {
+        AF4_16
+    }
+
+    half r = AF4_RES;
+    out[tid] = (float)r;
+}
+
+kernel void compute_hp2_alt(device float* out [[buffer(0)]],
+                             constant float& A [[buffer(1)]],
+                             uint tid [[thread_position_in_grid]],
+                             uint lid [[thread_position_in_threadgroup]])
+{
+    AF2_DECL(half2, half2((half)A, (half)(A + 1.0f)), half2((half)lid))
+
+    for (int i = 0; i < 64; i++)
+    {
+        AF2_16
+    }
+
+    half2 r = AF2_RES;
+    out[tid] = (float)(r.x + r.y);
+}
+
+kernel void compute_hp4_alt(device float* out [[buffer(0)]],
+                             constant float& A [[buffer(1)]],
+                             uint tid [[thread_position_in_grid]],
+                             uint lid [[thread_position_in_threadgroup]])
+{
+    AF1_DECL(half4, half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f)), half4((half)lid))
+
+    for (int i = 0; i < 32; i++)
+    {
+        AF1_16
+    }
+
+    half4 r = AF1_RES;
+    out[tid] = (float)(r.x + r.y + r.z + r.w);
+}

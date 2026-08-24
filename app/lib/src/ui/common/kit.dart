@@ -226,6 +226,7 @@ class CButton extends StatelessWidget {
     this.onPressed,
     this.kind = CButtonKind.ghost,
     this.danger = false,
+    this.stretch = false,
   });
 
   final String label;
@@ -233,6 +234,10 @@ class CButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final CButtonKind kind;
   final bool danger;
+
+  /// Fill the width given by the parent and centre the label, for a button
+  /// that stands on its own instead of sitting in a row of actions.
+  final bool stretch;
 
   @override
   Widget build(BuildContext context) {
@@ -263,14 +268,17 @@ class CButton extends StatelessWidget {
         }
 
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          padding: EdgeInsets.symmetric(
+              horizontal: 14, vertical: stretch ? 13 : 9),
           decoration: BoxDecoration(
             color: enabled ? bg : t.hover.withValues(alpha: 0.5),
             border: border == null ? null : Border.all(color: border),
             borderRadius: BorderRadius.circular(CP.rControl),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: stretch ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment:
+                stretch ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
               if (icon != null) ...[
                 Icon(icon, size: 13, color: enabled ? fg : t.faint),

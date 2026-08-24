@@ -60,73 +60,106 @@ function(compile_shaders)
     message(FATAL_ERROR "glslc not found. Install the Vulkan SDK or set VULKAN_SDK env var.")
   endif()
 
-  # Re-run cmake configure whenever a shader source changes
+  # Re-run cmake configure whenever a shader source changes.  Shared GLSL
+  # headers (mad_chain.glsl) are picked up too -- they are not in CS_SHADERS
+  # but every shader that includes one has to be rebuilt when they change.
   foreach(SHADER ${CS_SHADERS})
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SHADER}")
+  endforeach()
+  file(GLOB _CS_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl")
+  foreach(HDR ${_CS_HEADERS})
+    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HDR}")
   endforeach()
 
   set(GEN_CPP "${CMAKE_CURRENT_BINARY_DIR}/vk_shaders_generated.cpp")
   set(CPP_CONTENT "#include <cstdint>\n#include <cstddef>\n\nnamespace vk_shaders {\n\n")
 
+  # Compile one .comp into vk_shaders::<SYMBOL> and append it to CPP_CONTENT.
+  # A macro, not a function, so the append lands in the caller's scope.
+  # Sets _CS_OK to TRUE on success, FALSE when glslc rejected the shader.
+  macro(_cs_embed SHADER SYMBOL EXTRA_ARG)
+    set(_CS_SPV "${CMAKE_CURRENT_BINARY_DIR}/${SYMBOL}.spv")
+    get_filename_component(_CS_DIR "${SHADER}" DIRECTORY)
+
+    execute_process(
+      COMMAND "${GLSLC}" --target-env=vulkan1.3 -O -I "${_CS_DIR}"
+              ${EXTRA_ARG} "${SHADER}" -o "${_CS_SPV}"
+      RESULT_VARIABLE _CS_RESULT
+      ERROR_VARIABLE  _CS_ERROR
+    )
+    if(NOT _CS_RESULT EQUAL 0)
+      # Some shaders need newer GLSL/SPIR-V features (integer dot product,
+      # bfloat16, cooperative matrix) that older glslc versions -- notably the
+      # one bundled with the Android NDK -- do not support.  Skip with a
+      # warning so the build still produces a functional binary; host code is
+      # gated on the VK_HAS_<SYMBOL> defines set below.
+      message(WARNING "glslc could not build ${SYMBOL}; skipping it. Error:\n${_CS_ERROR}")
+      set(_CS_OK FALSE)
+    else()
+      # Read SPIR-V binary as a hex string (two chars per byte).
+      # SPIR-V files on all glslc targets use little-endian word order, matching
+      # every platform Vulkan runs on, so we reconstruct each 4-byte word as
+      # 0x<B3><B2><B1><B0> which equals the correct host uint32_t value.
+      file(READ "${_CS_SPV}" _CS_HEX HEX)
+      string(LENGTH "${_CS_HEX}" _CS_HEX_LEN)
+
+      set(_CS_INIT "")
+      set(_CS_COL 0)
+      set(_CS_I 0)
+      while(${_CS_I} LESS ${_CS_HEX_LEN})
+        math(EXPR _CS_I0 "${_CS_I} + 0")
+        math(EXPR _CS_I1 "${_CS_I} + 2")
+        math(EXPR _CS_I2 "${_CS_I} + 4")
+        math(EXPR _CS_I3 "${_CS_I} + 6")
+        string(SUBSTRING "${_CS_HEX}" ${_CS_I0} 2 _CS_B0)
+        string(SUBSTRING "${_CS_HEX}" ${_CS_I1} 2 _CS_B1)
+        string(SUBSTRING "${_CS_HEX}" ${_CS_I2} 2 _CS_B2)
+        string(SUBSTRING "${_CS_HEX}" ${_CS_I3} 2 _CS_B3)
+        string(APPEND _CS_INIT "0x${_CS_B3}${_CS_B2}${_CS_B1}${_CS_B0},")
+        math(EXPR _CS_COL "${_CS_COL} + 1")
+        if(_CS_COL EQUAL 8)
+          string(APPEND _CS_INIT "\n    ")
+          set(_CS_COL 0)
+        endif()
+        math(EXPR _CS_I "${_CS_I} + 8")
+      endwhile()
+
+      # Use 'extern' so the symbols have external linkage.
+      # (In C++, `const` at namespace scope defaults to internal linkage; since
+      #  vk_shaders_generated.cpp doesn't include vk_peak.h the compiler can't
+      #  see that the header already marked these `extern`.)
+      string(APPEND CPP_CONTENT "// Auto-generated from ${SHADER}\n")
+      string(APPEND CPP_CONTENT "extern const uint32_t ${SYMBOL}[] = {\n    ${_CS_INIT}\n};\n")
+      string(APPEND CPP_CONTENT "extern const size_t ${SYMBOL}_size = sizeof(${SYMBOL});\n\n")
+      set(_CS_OK TRUE)
+    endif()
+  endmacro()
+
   foreach(SHADER ${CS_SHADERS})
     get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
-    set(SPV_FILE "${CMAKE_CURRENT_BINARY_DIR}/${SHADER_NAME}.spv")
+    string(TOUPPER "${SHADER_NAME}" SHADER_NAME_UPPER)
 
     message(STATUS "Compiling shader: ${SHADER_NAME}.comp -> SPIR-V")
-    execute_process(
-      COMMAND "${GLSLC}" --target-env=vulkan1.3 -O "${SHADER}" -o "${SPV_FILE}"
-      RESULT_VARIABLE GLSLC_RESULT
-      ERROR_VARIABLE  GLSLC_ERROR
-    )
-    if(NOT GLSLC_RESULT EQUAL 0)
-      # Some shaders require newer GLSL/SPIR-V features (e.g. integer dot
-      # product) that older glslc versions (notably the one bundled with
-      # the Android NDK) don't support. Skip with a warning so the build
-      # still produces a functional binary; host code is gated with
-      # VK_HAS_<SHADER_NAME_UPPER> defines (see below).
-      message(WARNING "glslc could not build ${SHADER_NAME}.comp; skipping it. Error:\n${GLSLC_ERROR}")
+    _cs_embed("${SHADER}" "${SHADER_NAME}" "")
+    if(NOT _CS_OK)
       continue()
     endif()
-    string(TOUPPER "${SHADER_NAME}" SHADER_NAME_UPPER)
     target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER})
 
-    # Read SPIR-V binary as a hex string (two chars per byte)
-    file(READ "${SPV_FILE}" SPV_HEX HEX)
-    string(LENGTH "${SPV_HEX}" HEX_LEN)
-
-    # Build the uint32_t array initializer.
-    # SPIR-V files on all glslc targets use little-endian word order, matching
-    # every platform Vulkan runs on, so we reconstruct each 4-byte word as
-    # 0x<B3><B2><B1><B0> which equals the correct host uint32_t value.
-    set(ARRAY_INIT "")
-    set(COL 0)
-    set(I 0)
-    while(${I} LESS ${HEX_LEN})
-      math(EXPR I0 "${I} + 0")
-      math(EXPR I1 "${I} + 2")
-      math(EXPR I2 "${I} + 4")
-      math(EXPR I3 "${I} + 6")
-      string(SUBSTRING "${SPV_HEX}" ${I0} 2 B0)
-      string(SUBSTRING "${SPV_HEX}" ${I1} 2 B1)
-      string(SUBSTRING "${SPV_HEX}" ${I2} 2 B2)
-      string(SUBSTRING "${SPV_HEX}" ${I3} 2 B3)
-      string(APPEND ARRAY_INIT "0x${B3}${B2}${B1}${B0},")
-      math(EXPR COL "${COL} + 1")
-      if(COL EQUAL 8)
-        string(APPEND ARRAY_INIT "\n    ")
-        set(COL 0)
+    # A shader that pulls in mad_chain.glsl gets a second build with the
+    # affine chain shape, embedded as <name>_alt.  runComputeKernel times both
+    # and reports the faster -- neither shape reaches peak on every vendor.
+    # Adopting the shared chain in a shader is the only step needed; this is
+    # detected from the source rather than listed anywhere.
+    file(READ "${SHADER}" _CS_SRC)
+    if(_CS_SRC MATCHES "mad_chain\\.glsl")
+      _cs_embed("${SHADER}" "${SHADER_NAME}_alt" "-DMAD_CHAIN_AFFINE")
+      if(_CS_OK)
+        target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER}_ALT)
       endif()
-      math(EXPR I "${I} + 8")
-    endwhile()
-
-    # Use 'extern' so the symbols have external linkage.
-    # (In C++, `const` at namespace scope defaults to internal linkage; since
-    #  vk_shaders_generated.cpp doesn't include vk_peak.h the compiler can't
-    #  see that the header already marked these `extern`.)
-    string(APPEND CPP_CONTENT "// Auto-generated from ${SHADER_NAME}.comp\n")
-    string(APPEND CPP_CONTENT "extern const uint32_t ${SHADER_NAME}[] = {\n    ${ARRAY_INIT}\n};\n")
-    string(APPEND CPP_CONTENT "extern const size_t ${SHADER_NAME}_size = sizeof(${SHADER_NAME});\n\n")
+    endif()
   endforeach()
 
   string(APPEND CPP_CONTENT "} // namespace vk_shaders\n")

@@ -85,3 +85,53 @@ kernel void compute_sp8(device float* out [[buffer(0)]],
     float4 r = xa + xb;
     out[tid] = r.x + r.y + r.z + r.w;
 }
+
+// ---- affine-chain variants (raced against the ones above; see mad_chain.metal) ----
+
+kernel void compute_sp_alt(device float* out [[buffer(0)]],
+                            constant float& A [[buffer(1)]],
+                            uint tid [[thread_position_in_grid]],
+                            uint lid [[thread_position_in_threadgroup]])
+{
+    AF4_DECL(float, A, (float)lid)
+
+    for (int i = 0; i < 128; i++)
+    {
+        AF4_16
+    }
+
+    float r = AF4_RES;
+    out[tid] = r;
+}
+
+kernel void compute_sp2_alt(device float* out [[buffer(0)]],
+                             constant float& A [[buffer(1)]],
+                             uint tid [[thread_position_in_grid]],
+                             uint lid [[thread_position_in_threadgroup]])
+{
+    AF2_DECL(float2, float2(A, A + 1.0f), float2((float)lid))
+
+    for (int i = 0; i < 64; i++)
+    {
+        AF2_16
+    }
+
+    float2 r = AF2_RES;
+    out[tid] = r.x + r.y;
+}
+
+kernel void compute_sp4_alt(device float* out [[buffer(0)]],
+                             constant float& A [[buffer(1)]],
+                             uint tid [[thread_position_in_grid]],
+                             uint lid [[thread_position_in_threadgroup]])
+{
+    AF1_DECL(float4, float4(A, A + 1.0f, A + 2.0f, A + 3.0f), float4((float)lid))
+
+    for (int i = 0; i < 32; i++)
+    {
+        AF1_16
+    }
+
+    float4 r = AF1_RES;
+    out[tid] = r.x + r.y + r.z + r.w;
+}

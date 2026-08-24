@@ -1,19 +1,17 @@
 #version 450
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_GOOGLE_include_directive : require
 
-// Mixed-precision MAC: fp16 x fp16 + fp32 accumulator. Dominant arithmetic
-// path in LLM training/prefill. Distinct from compute_sp (pure fp32) and
-// from compute_hp (pure fp16).
+// Mixed-precision MAC: fp16 x fp16 + fp32 accumulator.  Dominant
+// arithmetic path in LLM training/prefill.  Distinct from compute_sp
+// (pure fp32) and from compute_hp (fp16 accumulator).
 //
-// Requires VK_KHR_shader_float16_int8 + shaderFloat16.
-//
-// An earlier version cast x = float16_t(a) inside the FMA macro, chaining
-// a fp16 downcast and two fp16->fp32 expands into the critical path of
-// every FMA -- capped RTX 5060 at ~5.7 TFLOPS (27% of FP32).  This
-// version mirrors compute_sp_v1's ping-pong MAD chain and amortises the
-// fp16<->fp32 conversions across 16 FMAs per outer iter.  Expected
-// ceiling: FP32 peak (NVIDIA shader core's fp16xfp16+fp32 tops out there
-// -- the 2x HFMA2 rate is fp16xfp16+fp16, which is compute_hp, not mp).
+// The accumulators are loop-carried in fp32 so glslang SSA-promotes
+// them to phis, and round-trip through fp16 once per outer iteration to
+// force the fp16 type into the data path.  An earlier version cast
+// inside the FMA macro, chaining a downcast and two expands into the
+// critical path of every FMA -- that capped an RTX 5060 at ~5.7 TFLOPS,
+// 27% of its FP32 rate.  The invariants are seeded through fp16 once.
 
 layout(local_size_x = 256) in;
 
@@ -25,24 +23,33 @@ layout(push_constant) uniform PushConstants {
     float A;
 } pc;
 
-// Chain shape and why: see the MAD chain block in include/common/common.h.
-#define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
-#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+// Compiled twice -- squaring chain and affine chain -- and raced against
+// each other at run time.  See mad_chain.glsl, and the MAD chain block in
+// include/common/common.h for the rules both shapes obey.
+// Standard per-width chain counts, despite the fp16 round-trip below
+// running once per accumulator: N chains cost N conversions per 16 chain
+// instructions against the squaring build's one, but both builds report the
+// same op budget, so the extra conversions can only understate the affine
+// reading -- never inflate it -- and runComputeKernel takes the maximum.
+// Forcing one chain to even up the conversion count cost an RTX 5060 10.6%
+// on mp2 (15726 -> 14061 GFLOPS), because NVIDIA's three-register mad needs
+// the independent chains.
+#define MAD_CHAINS 4
+#include "mad_chain.glsl"
+
+#define NARROW(v) float(float16_t(v))
 
 void main()
 {
-    // Mirror compute_sp_v1.comp exactly -- loop-carried fp32 x so
-    // glslang SSA-promotes it to a phi.  Roundtrip through fp16 once
-    // per outer iter to force the fp16 type into the data path; c is
-    // seeded through fp16 once and never updated.
-    float x = float(float16_t(pc.A));
-    float c = float(float16_t(gl_LocalInvocationID.x));
+    CHAIN_DECL(float, float(float16_t(pc.A)), float(float16_t(gl_LocalInvocationID.x)))
 
+    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
     for (int i = 0; i < 128; i++)
     {
-        MAD_16(x, c)
-        x = float(float16_t(x));
+        MAD_16
+        CHAIN_MAP(NARROW)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x;
+    float r = CHAIN_RESULT;
+    outputBuf.data[gl_GlobalInvocationID.x] = r;
 }

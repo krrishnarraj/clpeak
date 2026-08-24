@@ -17,6 +17,20 @@ MSTRINGIFY(
 //
 // The MAC is a plain contracted expression rather than fma() for the same
 // reason compute_sp_kernels.cl avoids mad() -- see the comment there.
+//
+// The fp32 accumulator seed carries a get_local_id term.  It is not
+// decoration: without it every operand in this family is uniform across
+// work-items, and a runtime that vectorises across work-items can compute the
+// whole chain once and broadcast it.  Intel's CPU runtime does exactly that.
+// Adding the term dropped the reported figures by 7.96-8.02x at vector widths
+// 2 through 16 -- precisely the AVX2 fp32 lane count -- so every mp number
+// this family produced on such a runtime had been eight times too high.  The
+// corrected figures also finally agree with their surroundings: mp now reads
+// 378 GFLOPS at best against 187 for pure half on the same device, where
+// before it claimed 2077, eleven times the fp16 rate it is built on.
+// Scalar width 1 was only inflated 1.37x, so the broadcast needed the vector
+// types.  Every other backend's mp kernel already seeded from the thread or
+// lane id, which is why this only ever affected OpenCL.
 
 \n#if defined(cl_khr_fp16)
 \n  #pragma OPENCL EXTENSION cl_khr_fp16 : enable
@@ -40,7 +54,7 @@ MSTRINGIFY(
 __kernel void compute_mp_v1(__global float *ptr, float _B)
 {
     half x = (half)_B;
-    float a = _B;
+    float a = _B + (float)get_local_id(0);
 
     for(int i=0; i<128; i++)
     {
@@ -53,7 +67,7 @@ __kernel void compute_mp_v1(__global float *ptr, float _B)
 __kernel void compute_mp_v2(__global float *ptr, float _B)
 {
     half2 x = (half2)((half)_B, (half)(_B+1));
-    float2 a = (float2)(_B, _B+1);
+    float2 a = (float2)(_B, _B+1) + (float2)get_local_id(0);
 
     for(int i=0; i<64; i++)
     {
@@ -67,7 +81,7 @@ __kernel void compute_mp_v2(__global float *ptr, float _B)
 __kernel void compute_mp_v4(__global float *ptr, float _B)
 {
     half4 x = (half4)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3));
-    float4 a = (float4)(_B, _B+1, _B+2, _B+3);
+    float4 a = (float4)(_B, _B+1, _B+2, _B+3) + (float4)get_local_id(0);
 
     for(int i=0; i<32; i++)
     {
@@ -82,7 +96,7 @@ __kernel void compute_mp_v8(__global float *ptr, float _B)
 {
     half8 x = (half8)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3),
                       (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7));
-    float8 a = (float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7);
+    float8 a = (float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7) + (float8)get_local_id(0);
 
     for(int i=0; i<16; i++)
     {
@@ -100,7 +114,8 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
                         (half)(_B+8), (half)(_B+9),  (half)(_B+10), (half)(_B+11),
                         (half)(_B+12),(half)(_B+13), (half)(_B+14), (half)(_B+15));
     float16 a = (float16)(_B,    _B+1,  _B+2,  _B+3,  _B+4,  _B+5,  _B+6,  _B+7,
-                          _B+8,  _B+9,  _B+10, _B+11, _B+12, _B+13, _B+14, _B+15);
+                          _B+8,  _B+9,  _B+10, _B+11, _B+12, _B+13, _B+14, _B+15)
+                + (float16)get_local_id(0);
 
     for(int i=0; i<8; i++)
     {
@@ -111,6 +126,82 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
     float4 t2 = t.lo + t.hi;
     float2 t3 = t2.lo + t2.hi;
     ptr[get_global_id(0)] = t3.S0 + t3.S1 + (float)(x.S0);
+}
+
+// ---- affine-chain variants (generated; see mad_chain.cl) ----
+//
+// The invariant multiplier m is seeded from _B rather than get_local_id.  A
+// varying half operand cost 8x on Intel's CPU runtime from vector width 4 up
+// (0.12x the squaring rate); with m uniform the alt matches or beats the
+// squaring chain at every width.  The fp32 accumulator seed carries the
+// per-work-item variation instead, matching the squaring kernels above.
+
+__kernel void compute_mp_alt_v1(__global float *ptr, float _B)
+{
+    MP4_DECL(half, float, (half)((half)(_B + 0.5f)), (half)_B, _B + (float)get_local_id(0))
+
+    for (int i = 0; i < 128; i++)
+    {
+        MP4_16(half, float)
+    }
+
+    float r = MP4_RES(float);
+    ptr[get_global_id(0)] = r;
+}
+
+__kernel void compute_mp_alt_v2(__global float *ptr, float _B)
+{
+    MP2_DECL(half2, float2, (half2)((half)(_B + 0.5f)), (half2)((half)_B, (half)(_B+1)), (float2)(_B, _B+1) + (float2)get_local_id(0))
+
+    for (int i = 0; i < 64; i++)
+    {
+        MP2_16(half2, float2)
+    }
+
+    float2 r = MP2_RES(float2);
+    ptr[get_global_id(0)] = r.S0 + r.S1;
+}
+
+__kernel void compute_mp_alt_v4(__global float *ptr, float _B)
+{
+    MP1_DECL(half4, float4, (half4)((half)(_B + 0.5f)), (half4)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3)), (float4)(_B, _B+1, _B+2, _B+3) + (float4)get_local_id(0))
+
+    for (int i = 0; i < 32; i++)
+    {
+        MP1_16(half4, float4)
+    }
+
+    float4 r = MP1_RES(float4);
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+}
+
+__kernel void compute_mp_alt_v8(__global float *ptr, float _B)
+{
+    MP1_DECL(half8, float8, (half8)((half)(_B + 0.5f)), (half8)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7)), (float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7) + (float8)get_local_id(0))
+
+    for (int i = 0; i < 16; i++)
+    {
+        MP1_16(half8, float8)
+    }
+
+    float8 r = MP1_RES(float8);
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+}
+
+__kernel void compute_mp_alt_v16(__global float *ptr, float _B)
+{
+    MP1_DECL(half16, float16, (half16)((half)(_B + 0.5f)), (half16)((half)_B, (half)(_B+1), (half)(_B+2), (half)(_B+3), (half)(_B+4), (half)(_B+5), (half)(_B+6), (half)(_B+7), (half)(_B+8), (half)(_B+9), (half)(_B+10), (half)(_B+11), (half)(_B+12), (half)(_B+13), (half)(_B+14), (half)(_B+15)), (float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15) + (float16)get_local_id(0))
+
+    for (int i = 0; i < 8; i++)
+    {
+        MP1_16(half16, float16)
+    }
+
+    float16 r = MP1_RES(float16);
+    float8 t = r.lo + r.hi;
+    float4 t2 = t.lo + t.hi;
+    float2 t3 = t2.lo + t2.hi;
+    ptr[get_global_id(0)] = t3.S0 + t3.S1;
 }
 
 \n#endif      // HALF_AVAILABLE

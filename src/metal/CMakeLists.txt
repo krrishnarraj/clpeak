@@ -67,5 +67,6 @@ set(CLPEAK_MTL_KERNELS
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMetalKernels.cmake)
 embed_metal_kernels(
     TARGET peak_metal
+    PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/mad_chain.metal
     KERNELS ${CLPEAK_MTL_KERNELS}
 )
