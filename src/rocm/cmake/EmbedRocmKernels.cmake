@@ -74,6 +74,29 @@ function(embed_rocm_kernels)
   foreach(_a ${_final})
     list(APPEND _flags "--offload-arch=${_a}")
   endforeach()
+  if(WIN32)
+    # Windows-only: ROCm 6.4's bundled clang (20, ~April 2025) mishandles a
+    # sufficiently new MSVC install (observed: 14.44 / VS 17.14, from mid-2025)
+    # during HIP device compilation.  vcruntime.h skips its uintptr_t typedef
+    # (intptr_t, defined two lines above it in the same file, comes through
+    # fine) -- "unknown type name 'uintptr_t'" -- which cascades into
+    # __clang_hip_math.h/__clang_hip_cmath.h ("unknown type name 'uint64_t'",
+    # "undeclared identifier 'FP_NAN'") once those also can't see the stdint
+    # types.  It reproduces on real kernels (multiple --offload-arch in one
+    # genco invocation) but not on the single-arch trial compiles in
+    # _clpeak_rocm_supported_archs() above, so the probe alone can't detect it.
+    #
+    # Telling clang to *claim* an older, long-established MSVC version steers
+    # vcruntime.h down the branch clang has actually been validated against,
+    # without requiring a different Visual Studio install on the runner.
+    # Device-only compilation (--cuda-device-only, no host link) means this
+    # can't skew ABI/mangling for anything this build actually links.
+    #
+    # Best-effort mitigation, not a confirmed upstream root cause: bump (or
+    # drop) this if a future ROCm Windows release no longer needs it, or if a
+    # newer runner MSVC breaks in some other way this doesn't cover.
+    list(APPEND _flags "-fms-compatibility-version=19.40")
+  endif()
   if(ER_CXX17)
     list(APPEND _flags "-std=c++17")
   endif()
