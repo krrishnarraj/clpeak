@@ -267,6 +267,14 @@ Three details are load-bearing:
   to make, and it would quietly turn the matrix multiply into a matrix-vector
   one. Max does not distribute over the product. (At opset 17 `ReduceMax`
   takes its axes as an attribute while `ReduceSum` takes them as an input.)
+- **Every quantization scale is a build-time constant.** Supplying the
+  activation scale as a runtime input is tidier — it keeps the dequantize out
+  of constant folding's reach with no optimizer disabled — and ONNX Runtime
+  accepts it, since `QLinearMatMul` takes scales as inputs. TensorRT does not:
+  it bakes quantization into the engine when it builds, and a scale it cannot
+  see until the run leaves it unable to commit to integer arithmetic. It
+  compiles, reports an opaque kernel, and quietly delivers 20 TOPS —
+  indistinguishable from the same card's fp32 and a third of its fp16.
 - **Nothing may sit between the dequantize and the matmul** in the QDQ form,
   or ORT stops recognising a quantized matmul and silently measures float
   arithmetic. The scaling input therefore hangs off the far end.

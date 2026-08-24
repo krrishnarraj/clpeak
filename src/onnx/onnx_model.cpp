@@ -258,7 +258,6 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        float aScale, float bScale, float cScale,
                                        int actDtype)
 {
-  (void)aScale;   // supplied at run time, see below
   const std::string zeroI8(1, '\0');
   const std::string zp128(1, (char)(unsigned char)128);
   // Signed activations are symmetric (zero point 0); unsigned ones centre on
@@ -272,13 +271,20 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
-  // The activation scale arrives at run time rather than as a constant.  That
-  // is what keeps the dequantize -- and therefore the matmul below it -- out
-  // of reach of constant folding, so this model needs no optimizer disabled,
-  // unlike its floating-point counterpart.  QLinearMatMul takes scales as
-  // inputs, so the quantized fusion is unaffected.
+  // Every quantization scale is a build-time constant, and the runtime scalar
+  // scales the reduced result instead -- exactly as in the floating-point
+  // model.  A runtime scale looks tidier, since it keeps the dequantize out
+  // of constant folding's reach without disabling anything, and ONNX Runtime
+  // is happy with it: QLinearMatMul takes its scales as inputs.  TensorRT is
+  // not.  It bakes quantization into the engine at build time, and a scale it
+  // cannot see until the run means it cannot commit to integer arithmetic --
+  // which showed as an int8 rate of 20 TOPS, indistinguishable from the same
+  // card's fp32 and a third of its fp16.  Constant scales cost a disabled
+  // optimizer (see `keepConstantsUnfolded`) and buy an engine that can
+  // actually use the hardware.
   g.input("S", ONNX_DT_FLOAT, {});
   g.initializer("A_q",     actDtype, {M, K}, aRaw);
+  g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
   g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, bRawInt8);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
@@ -287,7 +293,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.initializer("c_zp",    actDtype, {}, actZp);
 
   // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
-  g.node("DequantizeLinear", {"A_q", "S", "a_zp"}, {"A_f"});
+  g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
@@ -299,8 +305,9 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // node before n4."  The standard pattern costs one full-width pass, about a
   // fifth of the measured rate, and is what real quantized layers do anyway.
   g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C_d"});
-  g.node("ReduceMax",        {"C_d"}, {"Y"},
+  g.node("ReduceMax",        {"C_d"}, {"R"},
          {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.node("Mul",              {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
 }

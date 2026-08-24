@@ -191,10 +191,10 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   aRaw.clear(); aRaw.shrink_to_fit();
   bRaw.clear(); bRaw.shrink_to_fit();
 
-  // Only the floating-point model needs folding held off: the quantized one
-  // takes its activation scale at run time, so nothing in it is foldable.
+  // Both models hold their operands as constants and need folding held off,
+  // or the whole multiply is evaluated once at load time.
   auto ses = onnxCreateSession(rt, ep, modelBytes,
-                               /*keepConstantsUnfolded=*/!v.qdq, profile);
+                               /*keepConstantsUnfolded=*/true, profile);
   if (!ses.session)
   {
     g.error = ses.error;
@@ -205,15 +205,6 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // The QDQ graph reduces in float; the plain one keeps its own dtype.
   const int ioDtype = v.qdq ? ONNX_DT_FLOAT : v.dtype;
   const size_t es   = dtypeSize(ioDtype);
-  if (v.qdq)
-  {
-    // The runtime scalar is the activation scale, mapping uint8 codes back to
-    // roughly [-1, 1].  It has to be a real scale, not an arbitrary number.
-    const float aScale = 1.0f / 127.0f;
-    g.inBuf.assign(sizeof(float), 0);
-    std::memcpy(g.inBuf.data(), &aScale, sizeof(float));
-  }
-  else
   {
     // Scales the reduced result; exists only so the graph depends on
     // something supplied at run time.
