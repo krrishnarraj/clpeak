@@ -281,11 +281,18 @@ now search instead:
   to make a bigger size cheap is exactly the hardware that should try it. A
   slow provider stops after two or three rungs; the M1 Pro's fp16 curve peaks
   at 2048 and collapses to 0.3 TFLOPS by 8192, which the strikes rule catches.
-- **`onnx-tensor-bw`** climbs until the rate stops falling, which is where the
-  working set has left the last level of cache. A fixed top rung would have
-  needed raising already: 128 MB fits inside a single AMD Infinity Cache.
-  Rungs are named for their working-set size, so adding more never invalidates
-  the ones below.
+- **`onnx-tensor-bw`** measures three fixed rungs, then climbs while the rate
+  is still falling, which is where the working set has left the last level of
+  cache. A fixed top rung would have needed raising already: 128 MB fits
+  inside a single AMD Infinity Cache. Rungs are named for their working-set
+  size, so adding more never invalidates the ones below.
+
+  The base three always run. A flat curve means "main memory reached" only
+  when the operation is limited by memory, and a provider limited by its own
+  arithmetic is flat from the first rung — ONNX Runtime 1.30's CPU build
+  streams this at 2.2 GB/s at every size, where 1.28 gave a clean
+  232 / 53 / 20 ladder on the same machine. Stopping on flatness dropped the
+  only reading taken at a size no cache could hold.
 
 **Every byte ceiling comes from `clpeak::memoryBudget()`** (`common.h`), a
 fraction of physical RAM rather than a constant. The difference between a
