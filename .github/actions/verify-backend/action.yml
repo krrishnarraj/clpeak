@@ -1,0 +1,67 @@
+name: Verify backend was enabled
+description: >
+  Fail the build if a backend's toolchain wasn't actually found.  Every backend
+  in clpeak is optional and self-disabling, so a missing SDK produces a *green*
+  build that silently ships a plain clpeak under a backend artifact name -- the
+  one failure a build-only CI job cannot otherwise notice.  Asserting on the
+  CMakeCache entries the backend is gated on turns that into a red build.
+
+inputs:
+  backend:
+    description: Backend name, used in the error message (e.g. ROCm, oneAPI).
+    required: true
+  required:
+    description: >
+      Space-separated CMakeCache variable names that must have resolved.  These
+      should be exactly what the backend's CMakeLists gates on -- no more, or
+      the guard fails builds that would have worked.
+    required: true
+  optional:
+    description: >
+      Space-separated CMakeCache variable names to report but not enforce, for
+      feature-gated extras (a vendor library absent on one OS, say).
+    required: false
+    default: ""
+  build-dir:
+    description: Build directory holding CMakeCache.txt.
+    required: false
+    default: build
+
+runs:
+  using: composite
+  steps:
+    - name: Check CMakeCache
+      shell: bash
+      run: |
+        cache="${{ inputs.build-dir }}/CMakeCache.txt"
+        if [ ! -f "$cache" ]; then
+          echo "::error::${{ inputs.backend }}: no $cache -- did the configure step run?"
+          exit 1
+        fi
+
+        # A cache entry is "resolved" when it is present and CMake did not park
+        # a <VAR>-NOTFOUND sentinel in it.
+        resolved() {
+          val=$(grep -m1 "^$1:" "$cache" | cut -d= -f2-)
+          printf '  %-16s = %s\n' "$1" "${val:-<absent from cache>}" >&2
+          case "$val" in ""|*NOTFOUND*) return 1 ;; *) return 0 ;; esac
+        }
+
+        unresolved=""
+        echo "${{ inputs.backend }} required:"
+        for var in ${{ inputs.required }}; do
+          resolved "$var" || unresolved="${unresolved:+$unresolved, }$var"
+        done
+
+        if [ -n "${{ inputs.optional }}" ]; then
+          echo "${{ inputs.backend }} optional:"
+          for var in ${{ inputs.optional }}; do
+            resolved "$var" || echo "  (not enabled -- feature-gated off)"
+          done
+        fi
+
+        if [ -n "$unresolved" ]; then
+          echo "::error::${{ inputs.backend }} backend not enabled ($unresolved unresolved) -- this artifact would be a plain clpeak build"
+          exit 1
+        fi
+        echo "${{ inputs.backend }} backend enabled."

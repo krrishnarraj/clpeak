@@ -90,6 +90,12 @@ jobs:
             cuda: false
             rocm: true
 
+          # SYCL device code must be compiled *and* linked by the Intel compiler,
+          # so the whole binary is built with it -- icpx on Linux, icx on Windows
+          # (see the root CMakeLists).  Windows additionally needs Ninja, because
+          # icx cannot drive the multi-config MSBuild generator's device link;
+          # that is why this row's binary is build/clpeak.exe and not
+          # build/Release/clpeak.exe like every other Windows row.
           - name: Linux x64 oneAPI
             runner: ubuntu-latest
             artifact: clpeak-linux-x86_64-oneapi
@@ -97,6 +103,16 @@ jobs:
             suffix: oneapi
             cuda: false
             oneapi: true
+            cmake_args: -DCMAKE_CXX_COMPILER=icpx
+
+          - name: Windows x64 oneAPI
+            runner: windows-latest
+            artifact: clpeak-windows-x86_64-oneapi
+            binary: build/clpeak.exe
+            suffix: oneapi
+            cuda: false
+            oneapi: true
+            cmake_args: -G Ninja -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -154,37 +170,38 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
-      # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
-      # source it before invoking cmake/build so IntelSYCL can be located.
-      - name: Configure Cmake & Build oneAPI
+      # setup-oneapi already exported what setvars produces into the job
+      # environment, so this is plain shell on both platforms and the per-OS
+      # compiler/generator flags ride on the matrix row.
+      - name: Configure CMake & Build oneAPI
         if: matrix.oneapi
         shell: bash
         run: |
-          source /opt/intel/oneapi/setvars.sh
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }} \
+            -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
-      # A backend the CMake failed to find degrades to a *green* build that
-      # silently ships a plain clpeak under a backend artifact name.  Assert the
-      # cache entries the backend is gated on actually resolved, before anything
-      # gets run or packaged.
+      # Assert the backend actually got enabled before anything is run or
+      # packaged -- see .github/actions/verify-backend for why a green build is
+      # not evidence of one.  The required vars are exactly what each backend's
+      # CMakeLists gates on.
       - name: Verify ROCm backend was enabled
         if: matrix.rocm
-        shell: bash
-        run: |
-          cache=build/CMakeCache.txt
-          unresolved=""
-          for var in hip_DIR CLPEAK_HIPCC; do
-            val=$(grep -m1 "^${var}:" "$cache" | cut -d= -f2-)
-            echo "${var} = ${val:-<absent from cache>}"
-            case "$val" in
-              ""|*NOTFOUND*) unresolved="${unresolved:+$unresolved, }${var}" ;;
-            esac
-          done
-          if [ -n "$unresolved" ]; then
-            echo "::error::ROCm backend not enabled (${unresolved} unresolved) -- the -rocm artifact would be a plain build"
-            exit 1
-          fi
+        uses: ./.github/actions/verify-backend
+        with:
+          backend: ROCm
+          required: hip_DIR CLPEAK_HIPCC
+
+      # hipBLASLt is Linux-only and rocWMMA may not ship in the Windows SDK, so
+      # neither is required -- both are already feature-gated in the CMake.
+      # MKL is likewise optional: it only adds the vendor-library GEMM.
+      - name: Verify oneAPI backend was enabled
+        if: matrix.oneapi
+        uses: ./.github/actions/verify-backend
+        with:
+          backend: oneAPI
+          required: IntelSYCL_DIR
+          optional: MKL_DIR
 
       - name: Run
         if: ${{ !matrix.cuda && !matrix.oneapi && !(matrix.rocm && runner.os == 'Windows') }}
@@ -224,16 +241,14 @@ jobs:
           export LD_LIBRARY_PATH="$link_dir:${LD_LIBRARY_PATH}"
           ${{ matrix.binary }} || true
 
-      # oneAPI: the SYCL/OpenCL runtime libs live in the oneAPI install dir, so
-      # source setvars.sh to put them on LD_LIBRARY_PATH (the build step does the
-      # same).  Without it the loader can't find libOpenCL.so.1 and the binary
-      # dies before main().
+      # The SYCL/OpenCL runtime libs live in the oneAPI install dir, which is on
+      # the loader path via the environment setup-oneapi exported.  Tolerant of
+      # failure: the runner has no Intel GPU, so this only proves the binary
+      # loads and reaches the no-device path.
       - name: Run oneAPI
         if: matrix.oneapi
         shell: bash
-        run: |
-          source /opt/intel/oneapi/setvars.sh
-          ${{ matrix.binary }} || true
+        run: ${{ matrix.binary }} || true
 
       # Package with CPack into a self-contained zip whose top-level folder is
       # clpeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and

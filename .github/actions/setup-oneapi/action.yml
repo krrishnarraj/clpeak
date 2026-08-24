@@ -1,8 +1,29 @@
 name: Set up Intel oneAPI
 description: >
-  Install the oneAPI components src/oneapi needs: the DPC++/SYCL compiler
-  (icpx/icx -- the whole binary must be built with it, see the root
-  CMakeLists) and oneMKL for the vendor-library GEMM benchmark.
+  Install the oneAPI components src/oneapi needs -- the DPC++/SYCL compiler
+  (the *whole* binary must be built with it, see the root CMakeLists) and
+  oneMKL for the vendor-library GEMM benchmark -- and export the environment
+  setvars produces into GITHUB_ENV/GITHUB_PATH.
+
+  Exporting the environment is what lets the configure, build, run and package
+  steps be plain shell on both platforms: Windows has no `source setvars.sh`
+  equivalent, and threading `call setvars.bat &&` through every step would mean
+  a cmd-only step list on Windows and a bash one on Linux.
+
+inputs:
+  windows-installer-url:
+    description: >
+      Intel oneAPI offline installer to use on Windows.  There is no
+      versionless URL, so bumping the toolkit means bumping this default.
+    required: false
+    default: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/4144bec3-82ce-4672-bd71-5c93a79cd5e7/intel-oneapi-toolkit-2026.1.0.191_offline.exe
+  windows-components:
+    description: >
+      Colon-separated component IDs to install on Windows -- the counterpart of
+      the Linux apt package list below.  Installing the full toolkit would cost
+      tens of GB for components clpeak never touches.
+    required: false
+    default: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel
 
 runs:
   using: composite
@@ -18,3 +39,129 @@ runs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           intel-oneapi-compiler-dpcpp-cpp intel-oneapi-mkl-devel
+
+    # Deliberately not cached, for the same reason as the HIP SDK: the install
+    # runs to several GB, and a cache entry that size keeps evicting the Vulkan
+    # and Flutter caches the rest of the matrix depends on.
+    - name: Install Intel oneAPI (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $exe = Join-Path $env:RUNNER_TEMP 'oneapi-installer.exe'
+
+        Write-Host "Downloading ${{ inputs.windows-installer-url }}"
+        # Invoke-WebRequest's progress rendering costs minutes on a ~2 GB file.
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri '${{ inputs.windows-installer-url }}' -OutFile $exe
+        Write-Host ("Downloaded {0:N0} bytes" -f (Get-Item $exe).Length)
+
+        # -s silences the self-extractor, -a forwards the rest to the installer.
+        # The VS integrations are skipped: they are slow to install and this
+        # build drives the compiler through Ninja, never through an IDE.
+        $args = @(
+          '-s', '-a', '--silent', '--eula', 'accept',
+          '--components', '${{ inputs.windows-components }}',
+          '-p=NEED_VS2019_INTEGRATION=0', '-p=NEED_VS2022_INTEGRATION=0'
+        )
+        $p = Start-Process -FilePath $exe -ArgumentList $args -NoNewWindow -Wait -PassThru
+        Write-Host "Installer exit code: $($p.ExitCode)"
+        if ($p.ExitCode -ne 0) { throw "oneAPI installer failed ($($p.ExitCode))" }
+
+    # icx drives the MSVC toolchain and CMake's IntelSYCL package is only found
+    # through a Ninja build here, neither of which is on PATH by default.
+    - name: Install Ninja (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        if (Get-Command ninja -ErrorAction SilentlyContinue) {
+          Write-Host "ninja already present: $((Get-Command ninja).Source)"
+        } else {
+          choco install ninja -y --no-progress
+        }
+
+    - name: Export the oneAPI environment (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        setvars=/opt/intel/oneapi/setvars.sh
+        [ -f "$setvars" ] || { echo "::error::$setvars not found"; exit 1; }
+
+        before=$(mktemp); after=$(mktemp)
+        env | sort > "$before"
+        # GitHub runs `shell: bash` steps with -eo pipefail, and setvars.sh is
+        # not written to survive -e (one internal command returning non-zero
+        # would abort this whole step).  Relax both across the source, then
+        # restore only -e -- -u was never on.
+        set +eu
+        # shellcheck disable=SC1090
+        . "$setvars" > /dev/null
+        set -e
+        env | sort > "$after"
+
+        # Lines present in `after` but not `before` are the vars setvars added
+        # or changed.  (Line-based, so a multi-line value would be mangled --
+        # setvars sets none.)  PATH is excluded: it belongs in GITHUB_PATH,
+        # which prepends, rather than being frozen as a literal string.
+        comm -13 "$before" "$after" | while IFS= read -r line; do
+          name=${line%%=*}
+          case "$name" in
+            PATH|_|SHLVL|PWD|OLDPWD|"$line") continue ;;
+          esac
+          printf '%s=%s\n' "$name" "${line#*=}" >> "$GITHUB_ENV"
+        done
+
+        old=$(sed -n 's/^PATH=//p' "$before")
+        new=$(sed -n 's/^PATH=//p' "$after")
+        printf '%s' "$new" | tr ':' '\n' | while IFS= read -r entry; do
+          [ -n "$entry" ] || continue
+          case ":$old:" in *":$entry:"*) ;; *) printf '%s\n' "$entry" >> "$GITHUB_PATH" ;; esac
+        done
+
+        echo "Exported $(comm -13 "$before" "$after" | wc -l) environment changes."
+
+    - name: Export the oneAPI environment (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $setvars = 'C:\Program Files (x86)\Intel\oneAPI\setvars.bat'
+        if (-not (Test-Path $setvars)) { throw "setvars.bat not found at $setvars" }
+
+        $before = @{}   # PowerShell hashtables are case-insensitive, which
+        $after  = @{}   # matters because cmd reports "Path", not "PATH".
+        Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+
+        # setvars.bat also configures the Visual Studio environment icx needs,
+        # so this captures both.  One invocation, with a marker separating
+        # setvars' own output from the `set` dump that follows -- so a failure
+        # still shows why instead of being swallowed by a redirect to nul.
+        $marker = '___CLPEAK_SETVARS_DONE___'
+        $lines  = @(cmd /c "call `"$setvars`" 2>&1 && echo $marker && set")
+        $idx    = [Array]::IndexOf($lines, $marker)
+        if ($idx -lt 0) {
+          $lines | Write-Host
+          throw "setvars.bat failed -- see its output above"
+        }
+        if ($idx -gt 0) { $lines[0..($idx - 1)] | Write-Host }
+
+        # The regex skips cmd's internal "=C:"-style entries, whose name is empty.
+        $lines[($idx + 1)..($lines.Count - 1)] | ForEach-Object {
+          if ($_ -match '^([^=]+)=(.*)$') { $after[$Matches[1]] = $Matches[2] }
+        }
+        if ($after.Count -eq 0) { throw "setvars.bat produced no environment" }
+
+        $changed = 0
+        foreach ($name in $after.Keys) {
+          if ($name -eq 'PATH') { continue }   # -eq is case-insensitive here
+          if ($before.ContainsKey($name) -and $before[$name] -eq $after[$name]) { continue }
+          "$name=$($after[$name])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $changed++
+        }
+
+        $old = $before['PATH'] -split ';'
+        ($after['PATH'] -split ';') |
+          Where-Object { $_ -and ($old -notcontains $_) } |
+          Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+        Write-Host "Exported $changed environment changes."
