@@ -159,6 +159,7 @@ it resolves which engine actually ran the work. Reference readings, M1 Pro:
 | CPU EP | 0.0 ppm | 207 ppm | 9463 ppm |
 | CoreML EP | 0.4 ppm | 214 ppm | (unsupported) |
 | CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 9467 ppm |
+| TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | (unsupported) |
 | CPU EP (Zen 2) | 0.0 ppm | 207 ppm | **178926 ppm** |
 
 The CUDA fp32 row is the design paying off on a second vendor: 261 ppm is
@@ -166,6 +167,12 @@ worse than fp16's, which is not what fp32 arithmetic looks like. It is TF32 —
 ten mantissa bits, the same as fp16 — which cuBLAS selects by default. The
 "fp32" throughput row on NVIDIA is therefore a TF32 number, and only the
 error row says so.
+
+TensorRT is the clearest case of the row earning its place. It runs fp16 at
+66.6 TFLOPS against the CUDA EP's 40.1 on the same card — and its fp16 error
+is 1185 ppm against 207. It is 66% faster and nearly six times less accurate,
+because it accumulates in fp16 where cuBLAS accumulates in fp32. Neither
+number alone is the story; the pair is.
 
 The Zen 2 int8 row is the other half of the argument for measuring accuracy
 at all. That CPU fuses the quantized matmul happily and runs it at 1.3 TOPS —
@@ -334,6 +341,11 @@ compiles a 16 MB elementwise graph in seconds and a 64 MB one in more than
 ten minutes. Any new test that builds several large graphs needs to count
 sessions, not just iterations, and prefer one measurement at a small size
 over a sweep.
+
+TensorRT makes the point at the other extreme: building its engines costs
+**454 seconds** of session creation on an RTX 5060, against 7.7 s for the
+CUDA EP on the same card and the same graphs. Whatever a provider's
+throughput, the compile is a separate cost and can dwarf everything else.
 
 Reference wall times, M1 Pro CoreML EP with a warm compile cache: conv 64 s,
 block 62 s, gemm 46 s, activation 32 s, bandwidth 11 s, transfer 2 s,

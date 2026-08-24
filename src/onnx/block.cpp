@@ -19,6 +19,7 @@
 #include "onnx_session.h"
 
 #include <chrono>
+#include <map>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -55,6 +56,11 @@ const int64_t kPromptLadder[] = {64, 512, 2048};
 // measure a configuration that does not exist -- and it would double both the
 // model size and the run time to say so.
 constexpr int kDtype = ONNX_DT_FLOAT16;
+
+// Budget for one point's timed phase.  It doubles as the affordability test:
+// a point whose single iteration costs more than the entire budget for
+// measuring it cannot be measured properly anyway, so it is skipped.
+constexpr unsigned int kBlockBudgetUs = 5000000;
 
 int64_t weightParams()
 {
@@ -218,7 +224,8 @@ double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
     return -1.0;
   }
 
-  unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? forced : 0);
+  unsigned int iters = pickIters(per_iter_us, kBlockBudgetUs,
+                                 forceIters ? forced : 0);
   double mean_us = timeRuns(rt, r, iters);
   if (mean_us <= 0.0)
   {
@@ -285,19 +292,92 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
       "(50.6M parameters, 101 MB of fp16 weights).  ";
 
-  // Both regimes are measured once; the three scopes below are three ways of
-  // reading the same two timings.
-  std::string prefillErr, decodeErr;
-  ResultStatus prefillStatus = ResultStatus::Ok, decodeStatus = ResultStatus::Ok;
+  // Both ladders are measured here, cheapest point first, and every scope
+  // below reads from the results.  Ascending order is what makes the run
+  // affordable: the first point establishes how fast this provider is, and
+  // each later one is skipped when a single iteration of it would cost more
+  // than the whole budget for measuring it -- the rule onnx-gemm and
+  // onnx-conv already use, and which the block ladders were missing.  Without
+  // it a provider that turns out to be very slow drags the block out for
+  // tens of minutes, which is exactly what a stock CPU build of ONNX Runtime
+  // 1.30 does with fp16.
+  struct Point
+  {
+    double       us = -1.0;
+    std::string  error;
+    ResultStatus status = ResultStatus::Ok;
+  };
 
-  double prefillUs = -1.0, decodeUs = -1.0;
+  auto affordable = [&](double flops, double rate) {
+    // rate is FLOP per microsecond from the previous, cheaper point.
+    return rate <= 0.0 || (flops / rate) <= (double)kBlockBudgetUs;
+  };
 
-  if (!clpeak::cancelRequested())
-    prefillUs = measure(rt, ep, false, warmupCount, forceIters, specifiedIters,
-                        prefillErr, prefillStatus);
-  if (!clpeak::cancelRequested())
-    decodeUs = measure(rt, ep, true, warmupCount, forceIters, specifiedIters,
-                       decodeErr, decodeStatus);
+  std::map<int64_t, Point> prefill, decode;
+  double prefillRate = 0.0, decodeRate = 0.0;
+
+  for (int64_t seq : kPromptLadder)
+  {
+    if (clpeak::cancelRequested())
+      break;
+    Point pt;
+    const double flops = blockFlops(seq, seq);
+    if (!affordable(flops, prefillRate))
+    {
+      pt.status = ResultStatus::Error;
+      pt.error  = "one pass would take about " +
+                  std::to_string((long long)(flops / prefillRate / 1.0e6)) +
+                  " s on this provider, too slow to measure";
+      CLPEAK_VLOG("onnx-block[%s]: skipping prefill %lld, %s\n",
+                  ep.providerKey.c_str(), (long long)seq, pt.error.c_str());
+    }
+    else
+    {
+      pt.us = measure(rt, ep, false, warmupCount, forceIters, specifiedIters,
+                      pt.error, pt.status, kDecodeKv, seq);
+      if (pt.us > 0.0)
+        prefillRate = flops / pt.us;
+    }
+    prefill[seq] = pt;
+  }
+
+  // Decode work barely grows with context -- the weights dominate -- so the
+  // rate from the shortest context predicts the rest closely enough to gate on.
+  for (int64_t kv : kKvLadder)
+  {
+    if (clpeak::cancelRequested())
+      break;
+    Point pt;
+    const double flops = blockFlops(1, kv);
+    if (!affordable(flops, decodeRate))
+    {
+      pt.status = ResultStatus::Error;
+      pt.error  = "one token would take about " +
+                  std::to_string((long long)(flops / decodeRate / 1.0e6)) +
+                  " s on this provider, too slow to measure";
+      CLPEAK_VLOG("onnx-block[%s]: skipping decode kv%lld, %s\n",
+                  ep.providerKey.c_str(), (long long)kv, pt.error.c_str());
+    }
+    else
+    {
+      pt.us = measure(rt, ep, true, warmupCount, forceIters, specifiedIters,
+                      pt.error, pt.status, kv);
+      if (pt.us > 0.0)
+        decodeRate = flops / pt.us;
+    }
+    decode[kv] = pt;
+  }
+
+  const double prefillUs = prefill.count(kPrefillSeq) ? prefill[kPrefillSeq].us : -1.0;
+  const double decodeUs  = decode.count(kDecodeKv)    ? decode[kDecodeKv].us    : -1.0;
+  const std::string prefillErr =
+      prefill.count(kPrefillSeq) ? prefill[kPrefillSeq].error : std::string();
+  const std::string decodeErr =
+      decode.count(kDecodeKv) ? decode[kDecodeKv].error : std::string();
+  const ResultStatus prefillStatus =
+      prefill.count(kPrefillSeq) ? prefill[kPrefillSeq].status : ResultStatus::Error;
+  const ResultStatus decodeStatus =
+      decode.count(kDecodeKv) ? decode[kDecodeKv].status : ResultStatus::Error;
 
   // ---- Prefill: compute-bound, so report the rate it sustains ------------
   {
@@ -368,12 +448,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (clpeak::cancelRequested())
         break;
 
-      std::string  err;
-      ResultStatus st = ResultStatus::Ok;
-      const double us = (kv == kDecodeKv && decodeUs > 0.0)
-                            ? decodeUs        // already measured above
-                            : measure(rt, ep, true, warmupCount, forceIters,
-                                      specifiedIters, err, st, kv);
+      const Point &pt = decode[kv];
+      const double us = pt.us;
+      const std::string  err = pt.error;
+      const ResultStatus st  = pt.status;
 
       const std::string label = "kv" + std::to_string(kv);
       const std::string note =
@@ -413,20 +491,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           std::string(geometry) + "A prompt of " + std::to_string(seq) +
           " tokens in one pass.";
 
-      double us = -1.0;
-      std::string err = prefillErr;
-      ResultStatus status = prefillStatus;
-      if (seq == kPrefillSeq)
-      {
-        us = prefillUs;                 // already measured above
-      }
-      else if (!clpeak::cancelRequested())
-      {
-        err.clear();
-        status = ResultStatus::Ok;
-        us = measure(rt, ep, false, warmupCount, forceIters, specifiedIters,
-                     err, status, kDecodeKv, seq);
-      }
+      const Point &pt = prefill[seq];
+      const double us = pt.us;
+      const std::string  err = pt.error;
+      const ResultStatus status = pt.status;
 
       if (us > 0.0)
         test.emit(metric,
