@@ -39,7 +39,10 @@ target_include_directories(peak_rocm PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
 
-set(_clpeak_rocm_inc "/opt/rocm/include")
+# Fallback for the header probe below when hip::host exposes no usable include
+# dir.  CLPEAK_ROCM_INCLUDE_HINTS is set by the root CMakeLists (HIP_PATH /
+# ROCM_PATH / /opt/rocm) and inherited into this scope.
+list(GET CLPEAK_ROCM_INCLUDE_HINTS 0 _clpeak_rocm_inc)
 if(TARGET hip::host)
   get_target_property(_clpeak_hip_incs hip::host INTERFACE_INCLUDE_DIRECTORIES)
   if(_clpeak_hip_incs)
