@@ -226,28 +226,54 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const float qScale = 1.0f / 127.0f;
     const float cScale = qdqOutputScale(kDim);
 
-    // U8S8 for the quantized form: uint8 activations, int8 weights.
-    const int aDtype = v.qdq ? ONNX_DT_UINT8 : v.dtype;
-    std::string aRaw, bRaw;
-    fillTensor(aRaw, aDtype, kDim * kDim, 0x9e3779b9u);
-    fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
+    // Quantized activations may be signed or unsigned; providers disagree
+    // about which they accept, so try both.
+    //
+    // Unsigned first, which is the opposite of the throughput row's order and
+    // deliberate.  That row picks by which scheme *fuses*; this one can only
+    // pick by which one runs, and on x86 both run while only the unsigned one
+    // fuses.  Choosing signed there would quietly measure a floating-point
+    // multiply and report the mild error of one, hiding what unsigned int8
+    // actually costs on that hardware -- the 18% loss from int16 accumulators
+    // saturating, which is the whole reason this row exists.
+    static const int kActDtypes[] = {ONNX_DT_UINT8, ONNX_DT_INT8};
 
-    std::string model;
+    int aDtype = v.dtype;
+    std::string aRaw, bRaw, err;
+    std::vector<uint8_t> raw;
     const char *inName = "A", *outName = "C";
+
     if (v.qdq)
     {
-      model   = onnxQdqMatMulModel(kDim, kDim, kDim, bRaw, qScale, qScale, cScale);
-      inName  = "A_q";
-      outName = "C_q";
+      for (int cand : kActDtypes)
+      {
+        aDtype = cand;
+        fillTensor(aRaw, aDtype, kDim * kDim, 0x9e3779b9u);
+        fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
+        std::string model = onnxQdqMatMulModel(kDim, kDim, kDim, bRaw,
+                                               qScale, qScale, cScale, aDtype);
+        inName  = "A_q";
+        outName = "C_q";
+        err.clear();
+        raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
+                      aDtype, kDim, kDim, err);
+        if (!raw.empty())
+          break;
+      }
     }
     else
     {
-      model = onnxMatMulModel(kDim, kDim, kDim, v.dtype, bRaw);
+      fillTensor(aRaw, aDtype, kDim * kDim, 0x9e3779b9u);
+      fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
+      std::string model = onnxMatMulModel(kDim, kDim, kDim, v.dtype, bRaw);
+      raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
+                    aDtype, kDim, kDim, err);
     }
+    if (v.qdq)
+      o.description += (aDtype == ONNX_DT_UINT8)
+                           ? "  Measured with unsigned activations."
+                           : "  Measured with signed activations.";
 
-    std::string err;
-    auto raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
-                       aDtype, kDim, kDim, err);
     if (raw.empty())
     {
       test.skip(v.label, ResultStatus::Unsupported,

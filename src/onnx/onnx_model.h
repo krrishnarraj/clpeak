@@ -89,7 +89,8 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // ORT's QDQ handling fuses this into the EP's own quantized matmul.
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRawInt8,
-                               float aScale, float bScale, float cScale);
+                               float aScale, float bScale, float cScale,
+                               int actDtype);
 
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each

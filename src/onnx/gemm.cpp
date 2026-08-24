@@ -367,16 +367,15 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %s executed %s\n",
                     ep.providerKey.c_str(), v.label, qs.name, joined.c_str());
 
-        if (onnxOpsIncludeQuantizedMatMul(ops))
+        if (onnxOpsRanIntegerMatMul(ops))
         {
           actDtype   = qs.actDtype;
           schemeName = qs.name;
-          for (const auto &o : ops)
-            if (onnxOpsIncludeQuantizedMatMul({o}))
-            {
-              ranAs = o;
-              break;
-            }
+          // A provider that compiles the whole subgraph names its kernel
+          // after itself, and that name carries a hash of the graph -- it
+          // would differ between runs and has no place in a saved result.
+          const std::string named = onnxQuantizedKernelName(ops);
+          ranAs = named.empty() ? "a kernel it compiled itself" : named;
           break;
         }
         if (!ops.empty())

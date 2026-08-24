@@ -77,7 +77,19 @@ perfectly good number which is not an int8 number at all, and publishing it
 as one would flatter or penalise the wrong hardware in any comparison.
 
 `onnxCollectExecutedOps()` answers it directly: one profiled run, then the
-kernel names ONNX Runtime recorded. `gemm.cpp` runs it once for the
+kernel names ONNX Runtime recorded. The judgement is **inverted** — it looks
+for the failure, not the success. A provider that executes ONNX operators one
+at a time names each kernel and a fused quantized matmul appears as something
+like `QLinearMatMul`, but a provider that compiles whole subgraphs reports one
+opaque kernel of its own: TensorRT builds a working int8 engine and calls it
+`TRTKernel_graph_clpeak_7216741020808563463_0`. Matching known good names
+rejected that. What a *failed* fusion leaves behind is unmistakable, though —
+a bare floating-point `MatMul` beside the dequantize nodes — so that is what
+is tested for. Anything else ran as the provider's own quantized kernel, and
+the fallback guard rules out its having run on the CPU.
+
+That kernel name carries a hash of the graph, so it never reaches a result
+row; the description says "a kernel it compiled itself" instead. `gemm.cpp` runs it once for the
 quantized variant at the smallest size (the fusion decision does not depend
 on size) and reports the row as unsupported, naming what actually ran, when
 no integer matmul kernel appears. When one does, the row's description names

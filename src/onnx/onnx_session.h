@@ -49,8 +49,25 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
                                                 OrtSession *session);
 
-// True if any of `ops` is a kernel that does integer matrix arithmetic.
-bool onnxOpsIncludeQuantizedMatMul(const std::vector<std::string> &ops);
+// Did the provider actually multiply in integers?
+//
+// Evidence comes in two shapes.  A provider that executes ONNX operators one
+// at a time names each kernel, and a fused quantized matmul shows up as
+// something like QLinearMatMul.  A provider that compiles whole subgraphs --
+// TensorRT, Core ML, QNN -- reports one opaque kernel of its own instead,
+// whose name says nothing at all: TensorRT builds a perfectly good int8
+// engine and calls it `TRTKernel_graph_clpeak_7216741020808563463_0`.
+//
+// So the test looks for the *failure* rather than the success: a bare
+// floating-point MatMul sitting beside the dequantize nodes, which is exactly
+// what a provider that declined to fuse leaves behind.  Anything else ran as
+// the provider's own quantized kernel, and it cannot have quietly run on the
+// CPU instead, because the fallback guard would have failed the session.
+bool onnxOpsRanIntegerMatMul(const std::vector<std::string> &ops);
+
+// The recognisable quantized kernel among `ops`, or an empty string when the
+// provider fused everything into a kernel of its own naming.
+std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
 

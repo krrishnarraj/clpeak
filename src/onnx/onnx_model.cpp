@@ -197,10 +197,13 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRawInt8,
-                               float aScale, float bScale, float cScale)
+                               float aScale, float bScale, float cScale,
+                               int actDtype)
 {
   const std::string zeroI8(1, '\0');
   const std::string zp128(1, (char)(unsigned char)128);
+  const std::string &actZp =
+      (actDtype == ONNX_DT_UINT8) ? zp128 : zeroI8;
   auto f32 = [](float v) {
     std::string s(4, '\0');
     std::memcpy(&s[0], &v, 4);
@@ -208,22 +211,22 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
-  g.input("A_q", ONNX_DT_UINT8, {M, K});
+  g.input("A_q", actDtype, {M, K});
 
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
-  g.initializer("a_zp",    ONNX_DT_UINT8, {}, zp128);
+  g.initializer("a_zp",    actDtype, {}, actZp);
   g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, weightRawInt8);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
   g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
-  g.initializer("c_zp",    ONNX_DT_UINT8, {}, zp128);
+  g.initializer("c_zp",    actDtype, {}, actZp);
 
   g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
 
-  g.output("C_q", ONNX_DT_UINT8, {M, N});
+  g.output("C_q", actDtype, {M, N});
   return g.build();
 }
 

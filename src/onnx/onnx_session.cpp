@@ -283,19 +283,38 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   return ops;
 }
 
-bool onnxOpsIncludeQuantizedMatMul(const std::vector<std::string> &ops)
+// The kernels that do the multiply in integer arithmetic, across providers.
+// Matched loosely because providers prefix and suffix their own fusions.
+static const char *kQuantMarkers[] = {
+  "QLinearMatMul", "MatMulInteger", "QGemm", "QLinearGemm",
+  "MatMulIntegerToFloat", "QuantizeLinearMatMul", "QOrderedMatMul",
+};
+
+std::string onnxQuantizedKernelName(const std::vector<std::string> &ops)
 {
-  // The kernels that do the multiply in integer arithmetic, across providers.
-  // Matched loosely because providers prefix and suffix their own fusions.
-  static const char *kMarkers[] = {
-    "QLinearMatMul", "MatMulInteger", "QGemm", "QLinearGemm",
-    "MatMulIntegerToFloat", "QuantizeLinearMatMul", "QOrderedMatMul",
-  };
   for (const auto &op : ops)
-    for (const char *m : kMarkers)
+    for (const char *m : kQuantMarkers)
       if (op.find(m) != std::string::npos)
-        return true;
-  return false;
+        return op;
+  return std::string();
+}
+
+bool onnxOpsRanIntegerMatMul(const std::vector<std::string> &ops)
+{
+  if (ops.empty())
+    return true;          // no profile to judge by; do not reject on silence
+
+  bool sawQuantizeNode = false, sawPlainMatMul = false;
+  for (const auto &op : ops)
+  {
+    // Exact names: "MatMul" is a substring of QLinearMatMul and
+    // MatMulInteger, so a loose match here would reject every success.
+    if (op == "MatMul" || op == "Gemm" || op == "FusedMatMul")
+      sawPlainMatMul = true;
+    if (op == "DequantizeLinear" || op == "QuantizeLinear")
+      sawQuantizeNode = true;
+  }
+  return !(sawPlainMatMul && sawQuantizeNode);
 }
 
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
