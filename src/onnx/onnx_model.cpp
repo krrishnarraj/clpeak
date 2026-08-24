@@ -250,13 +250,18 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 }
 
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
-                                       const std::string &aRawUint8,
+                                       const std::string &aRaw,
                                        const std::string &bRawInt8,
-                                       float aScale, float bScale, float cScale)
+                                       float aScale, float bScale, float cScale,
+                                       int actDtype)
 {
   (void)aScale;   // supplied at run time, see below
   const std::string zeroI8(1, '\0');
   const std::string zp128(1, (char)(unsigned char)128);
+  // Signed activations are symmetric (zero point 0); unsigned ones centre on
+  // 128.  TensorRT accepts only the former, x86 MLAS only fuses the latter.
+  const bool unsignedAct = (actDtype == ONNX_DT_UINT8);
+  const std::string &actZp = unsignedAct ? zp128 : zeroI8;
   auto f32 = [](float v) {
     std::string s(4, '\0');
     std::memcpy(&s[0], &v, 4);
@@ -270,13 +275,13 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // unlike its floating-point counterpart.  QLinearMatMul takes scales as
   // inputs, so the quantized fusion is unaffected.
   g.input("S", ONNX_DT_FLOAT, {});
-  g.initializer("A_q",     ONNX_DT_UINT8, {M, K}, aRawUint8);
-  g.initializer("a_zp",    ONNX_DT_UINT8, {}, zp128);
+  g.initializer("A_q",     actDtype, {M, K}, aRaw);
+  g.initializer("a_zp",    actDtype, {}, actZp);
   g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, bRawInt8);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
   g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
-  g.initializer("c_zp",    ONNX_DT_UINT8, {}, zp128);
+  g.initializer("c_zp",    actDtype, {}, actZp);
 
   // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
   g.node("DequantizeLinear", {"A_q", "S", "a_zp"}, {"A_f"});

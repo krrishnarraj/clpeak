@@ -83,16 +83,20 @@ on size) and reports the row as unsupported, naming what actually ran, when
 no integer matmul kernel appears. When one does, the row's description names
 it — the M1 Pro CPU EP reports `QLinearMatMul`, so its 1.6 TOPS is real.
 
-It found something on its first outing. A Threadripper reported *no* fusion
-on the CPU EP, where an M1 running the same code fused to `QLinearMatMul` —
-because the graph used int8 for both operands. ARM's MLAS does S8S8 natively
-via SDOT; x86 without VNNI implements **U8S8**, uint8 activations against
-int8 weights, which is also what ORT's own quantizer emits for deployment.
-The quantized models now use U8S8 everywhere, so one identical graph gets
-every provider its best shot. The activation scale arrives as a runtime input
-too, which keeps the dequantize out of reach of constant folding and lets the
-quantized model run with the optimizer untouched — removing a second possible
-cause of non-fusion.
+**No single quantization scheme fuses everywhere**, which is why the check
+also chooses one. A Threadripper reported no fusion where an M1 running the
+same code fused to `QLinearMatMul`: the graph used signed activations, and
+while ARM's MLAS does S8S8 natively via SDOT, x86 without VNNI implements
+only U8S8 and declines the signed form. Switching to U8S8 then broke
+TensorRT, which rejects unsigned activations outright (`Found unsupported
+input type of UINT8`) and requires a zero point of zero.
+
+So `gemm.cpp` tries signed first, then unsigned, and keeps whichever actually
+fuses — the fusion check is the selector, and the row names the scheme it
+settled on. Probing happens *before* the sweep, so a provider that fuses
+neither costs two small sessions instead of a full ladder. The activation
+scale arrives as a runtime input in both, which keeps the dequantize out of
+reach of constant folding.
 
 Two details cost time to find and are easy to get wrong again:
 

@@ -240,7 +240,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         if (firstErr.empty())
           firstErr = c.error;
-        continue;
+        break;
       }
 
       double per_iter_us = -1.0;
@@ -254,7 +254,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           errStatus = ResultStatus::Error;
         }
         destroySetup(rt, c);
-        continue;
+        break;
       }
 
       unsigned int iters = pickIters(per_iter_us, kSizeBudgetUs,
@@ -267,7 +267,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       destroySetup(rt, c);
       if (mean_us <= 0.0)
-        continue;
+        break;
 
       const double flops = convFlops(v, sp);
       const double rate  = flops * 1.0e6 / mean_us / 1.0e12;

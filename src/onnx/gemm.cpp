@@ -80,6 +80,22 @@ struct Variant
   const char *note;
 };
 
+// Quantization schemes, tried in order until one fuses.  There is no single
+// choice that works everywhere: TensorRT rejects unsigned activations and
+// demands a zero point of zero, while x86 MLAS without VNNI implements only
+// the unsigned form and quietly declines to fuse the signed one.  Trying is
+// the only way to know, and the fusion check is what decides.
+struct QuantScheme
+{
+  int         actDtype;
+  const char *name;
+};
+
+const QuantScheme kQuantSchemes[] = {
+  {ONNX_DT_INT8,  "signed activations"},     // TensorRT, ARM
+  {ONNX_DT_UINT8, "unsigned activations"},   // x86 without VNNI
+};
+
 struct GemmSetup
 {
   OrtSession *session = nullptr;
@@ -151,13 +167,14 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 
 // Build model + session + bound input/output tensors for one (variant, D).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                    const Variant &v, int64_t D, bool profile = false)
+                    const Variant &v, int64_t D, bool profile = false,
+                    int actDtype = ONNX_DT_UINT8)
 {
   GemmSetup g;
 
   std::string aRaw, bRaw;
-  // U8S8 for the quantized form: uint8 activations, int8 weights.
-  fillTensor(aRaw, v.qdq ? ONNX_DT_UINT8 : v.dtype, D * D, 0x9e3779b9u);
+  // Quantized: `actDtype` activations against int8 weights.
+  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
   fillTensor(bRaw, v.dtype, D * D, 0x243f6a88u);
 
   std::string modelBytes;
@@ -165,7 +182,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     const float s = 1.0f / 127.0f;
     modelBytes = onnxResidentQdqMatMulModel(D, D, D, aRaw, bRaw, s, s,
-                                            qdqOutputScale(D));
+                                            qdqOutputScale(D), actDtype);
   }
   else
   {
@@ -312,6 +329,78 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     double  lastRate = 0.0;
     int     strikes = 0;
     std::string ranAs;      // kernel the provider actually used (quantized only)
+    int     actDtype = ONNX_DT_UINT8;
+    const char *schemeName = "";
+
+    // For the quantized variant, settle the scheme before sweeping anything.
+    // ONNX Runtime rewrites graphs before running them, and a provider that
+    // will not fuse dequantize/matmul/quantize into a quantized kernel
+    // dequantizes the operands and multiplies in floating point instead --
+    // a perfectly good number that is not an int8 number.  One profiled run
+    // per scheme at the smallest size answers it, and doing it first means a
+    // provider that fuses neither is not swept at all.
+    if (v.qdq)
+    {
+      std::string tried;
+      for (const QuantScheme &qs : kQuantSchemes)
+      {
+        if (clpeak::cancelRequested())
+          break;
+        GemmSetup probe = makeSetup(rt, ep, v, kMinDim, /*profile=*/true,
+                                    qs.actDtype);
+        if (!probe.session)
+        {
+          if (firstErr.empty())
+            firstErr = probe.error;
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s rejected: %s\n",
+                      ep.providerKey.c_str(), v.label, qs.name,
+                      probe.error.c_str());
+          continue;
+        }
+        timeRuns(rt, probe, 1);
+        auto ops = onnxCollectExecutedOps(rt, probe.session);
+        destroySetup(rt, probe);
+
+        std::string joined;
+        for (const auto &o : ops)
+          joined += (joined.empty() ? "" : ", ") + o;
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s executed %s\n",
+                    ep.providerKey.c_str(), v.label, qs.name, joined.c_str());
+
+        if (onnxOpsIncludeQuantizedMatMul(ops))
+        {
+          actDtype   = qs.actDtype;
+          schemeName = qs.name;
+          for (const auto &o : ops)
+            if (onnxOpsIncludeQuantizedMatMul({o}))
+            {
+              ranAs = o;
+              break;
+            }
+          break;
+        }
+        if (!ops.empty())
+          tried = joined;
+      }
+
+      if (ranAs.empty())
+      {
+        logger::EmitOptions o;
+        o.description = std::string("Peak over a doubling sweep of square "
+                                    "sizes.  ") + v.note;
+        test.skip(v.label,
+                  tried.empty() ? errStatus : ResultStatus::Unsupported,
+                  tried.empty()
+                      ? (firstErr.empty() ? "no supported quantization scheme"
+                                          : firstErr)
+                      : "provider did not fuse a quantized matmul with either "
+                        "signed or unsigned activations -- it dequantized the "
+                        "operands and multiplied in floating point, so this is "
+                        "not an int8 rate (ran: " + tried + ")",
+                  o.description);
+        continue;
+      }
+    }
 
     for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
@@ -342,12 +431,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
       }
 
-      GemmSetup g = makeSetup(rt, ep, v, D);
+      GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype);
       if (!g.session)
       {
         if (firstErr.empty())
           firstErr = g.error;
-        continue;
+        // Larger sizes need strictly more of everything, so nothing above
+        // this one can succeed either.
+        break;
       }
 
       double per_iter_us = -1.0;
@@ -361,7 +452,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           errStatus = ResultStatus::Error;
         }
         destroySetup(rt, g);
-        continue;
+        break;
       }
 
       unsigned int iters = pickIters(per_iter_us, kSizeBudgetUs,
@@ -374,7 +465,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       destroySetup(rt, g);
       if (mean_us <= 0.0)
-        continue;
+        break;
 
       if (firstUs == 0.0)
       {
@@ -414,51 +505,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
     }
 
-      // For the quantized variant, confirm the provider really did the multiply
-    // in integer arithmetic.  ORT rewrites graphs before running them, and a
-    // provider that will not fuse a quantized matmul dequantizes the operands
-    // and multiplies them in floating point instead -- a perfectly good
-    // number that is not an int8 number, and one that would flatter or
-    // penalise the wrong hardware in a comparison.  One profiled run at the
-    // smallest size answers it; the fusion decision does not depend on size.
-    if (v.qdq && best > 0.0 && !clpeak::cancelRequested())
-    {
-      GemmSetup probe = makeSetup(rt, ep, v, kMinDim, /*profile=*/true);
-      if (probe.session)
-      {
-        timeRuns(rt, probe, 1);
-        auto ops = onnxCollectExecutedOps(rt, probe.session);
-        if (!ops.empty())
-        {
-          std::string joined;
-          for (const auto &o : ops)
-            joined += (joined.empty() ? "" : ", ") + o;
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: executed %s\n",
-                      ep.providerKey.c_str(), v.label, joined.c_str());
-
-          if (!onnxOpsIncludeQuantizedMatMul(ops))
-          {
-            best     = 0.0;
-            firstErr = "provider did not fuse a quantized matmul -- it "
-                       "dequantized the operands and multiplied in floating "
-                       "point, so this is not an int8 rate (ran: " + joined + ")";
-            errStatus = ResultStatus::Unsupported;
-          }
-          else
-          {
-            for (const auto &o2 : ops)
-              if (onnxOpsIncludeQuantizedMatMul({o2}))
-              {
-                ranAs = o2;
-                break;
-              }
-          }
-        }
-      }
-      destroySetup(rt, probe);
-    }
-
-  // Both operands are constants, so this test depends on ORT honouring the
+    // Both operands are constants, so this test depends on ORT honouring the
     // request not to fold them; if it ever stopped, the matmul would be
     // evaluated once at load time and every timed run would measure an empty
     // graph.  Real work grows with the cube of the size -- 64x across this
@@ -487,6 +534,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       + std::to_string(bestDim) + " cubed.  " + v.note;
       if (!ranAs.empty())
         o.description += "  The provider ran the multiply as " + ranAs +
+                         " with " + schemeName +
                          ", confirming it really was integer arithmetic.";
       test.emit(v.label, (float)best, o);
     }

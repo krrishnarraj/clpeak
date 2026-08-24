@@ -336,12 +336,29 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                   onnxStatusText(rt, st).c_str());
   }
 
-  if (keepConstantsUnfolded)
+  // Optimizers this backend turns off, set once: ORT keeps one value per
+  // config key, so a second AddSessionConfigEntry for the same key silently
+  // replaces the first and warns about it.
+  //
+  // MatMulAddFusion rewrites `MatMul` + `Add` into a single `Gemm`, and
+  // several NPU providers implement MatMul but not Gemm -- the CoreML EP
+  // accepts 20 of the transformer block's 22 nodes and refuses exactly the
+  // two fused ones, failing the whole session under the fallback guard
+  // below.  It is disabled for every provider, the CPU one included: the
+  // point is that each runs the graph as authored, and a provider running a
+  // differently-optimised graph is not being compared with the others.
+  //
+  // ConstantFolding is disabled only for the throughput models, whose two
+  // operands are both constants and would otherwise be multiplied once at
+  // load time.
   {
+    const char *disabled = keepConstantsUnfolded
+                               ? "MatMulAddFusion;ConstantFolding"
+                               : "MatMulAddFusion";
     st = api->AddSessionConfigEntry(
-        so, "optimization.disable_specified_optimizers", "ConstantFolding");
+        so, "optimization.disable_specified_optimizers", disabled);
     if (st)
-      CLPEAK_VLOG("onnx: disabling ConstantFolding rejected: %s\n",
+      CLPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
                   onnxStatusText(rt, st).c_str());
   }
 
@@ -362,21 +379,6 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     st = api->AddSessionConfigEntry(so, "session.disable_cpu_ep_fallback", "1");
     if (st)
       CLPEAK_VLOG("onnx: disable_cpu_ep_fallback rejected: %s\n",
-                  onnxStatusText(rt, st).c_str());
-
-    // ORT's MatMulAddFusion rewrites `MatMul` + `Add` into a single `Gemm`,
-    // and several NPU providers implement MatMul but not Gemm -- the CoreML
-    // EP accepts 20 of the transformer block's 22 nodes and refuses exactly
-    // the two fused ones, which fails the whole session under the guard
-    // above.  Turning the fusion off keeps every provider running the graph
-    // as authored, which is both what makes the numbers comparable and what
-    // an app targeting that NPU would have to do anyway.
-    st = api->AddSessionConfigEntry(
-        so, "optimization.disable_specified_optimizers",
-        keepConstantsUnfolded ? "MatMulAddFusion;ConstantFolding"
-                              : "MatMulAddFusion");
-    if (st)
-      CLPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
                   onnxStatusText(rt, st).c_str());
   }
 

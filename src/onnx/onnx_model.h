@@ -115,10 +115,16 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // own quantizer emits for deployment, and the one x86 implements without
 // VNNI.  Signed activations fuse on ARM but not there, which showed up as an
 // unfused graph on a Threadripper while the same code fused on an M1.
+// `actDtype` is ONNX_DT_UINT8 (zero point 128) or ONNX_DT_INT8 (zero point 0).
+// No single choice works everywhere: x86 MLAS without VNNI implements uint8
+// activations against int8 weights and will not fuse signed ones, while
+// TensorRT rejects uint8 outright and requires a zero point of zero.  The
+// caller picks by trying, and `gemm.cpp` uses the fusion check to decide.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
-                                       const std::string &aRawUint8,
+                                       const std::string &aRaw,
                                        const std::string &bRawInt8,
-                                       float aScale, float bScale, float cScale);
+                                       float aScale, float bScale, float cScale,
+                                       int actDtype);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per
