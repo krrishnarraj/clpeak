@@ -1,0 +1,228 @@
+# Desktop builds (Linux x64/arm64, Windows x64/arm64, macOS arm64) plus the
+# backend-specific variants that ship as their own artifact.
+#
+# One shared step list drives every row; per-row differences ride on the matrix
+# entry (which toolchain to install, which binary path the build produces).
+# Toolchain installs live in ../actions/setup-* so this file stays about the
+# build, not about apt keyrings.
+name: Desktop
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-latest
+            artifact: clpeak-linux-x86_64
+            binary: build/clpeak
+            suffix: ""
+            cuda: false
+
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            artifact: clpeak-linux-arm64
+            binary: build/clpeak
+            suffix: ""
+            cuda: false
+
+          - name: Windows x64
+            runner: windows-latest
+            artifact: clpeak-windows-x86_64
+            binary: build/Release/clpeak.exe
+            suffix: ""
+            cuda: false
+
+          - name: Windows arm64
+            runner: windows-11-arm
+            artifact: clpeak-windows-arm64
+            binary: build/Release/clpeak.exe
+            suffix: ""
+            cuda: false
+
+          - name: macOS arm64
+            runner: macos-latest
+            artifact: clpeak-macos-arm64
+            binary: build/clpeak
+            suffix: ""
+            cuda: false
+
+          - name: Linux x64 CUDA
+            runner: ubuntu-latest
+            artifact: clpeak-linux-x86_64-cuda
+            binary: build/clpeak
+            suffix: cuda
+            cuda: true
+
+          - name: Linux arm64 CUDA
+            runner: ubuntu-24.04-arm
+            artifact: clpeak-linux-arm64-cuda
+            binary: build/clpeak
+            suffix: cuda
+            cuda: true
+
+          - name: Windows x64 CUDA
+            runner: windows-latest
+            artifact: clpeak-windows-x86_64-cuda
+            binary: build/Release/clpeak.exe
+            suffix: cuda
+            cuda: true
+
+          - name: Linux x64 ROCm
+            runner: ubuntu-24.04
+            artifact: clpeak-linux-x86_64-rocm
+            binary: build/clpeak
+            suffix: rocm
+            cuda: false
+            rocm: true
+
+          - name: Linux x64 oneAPI
+            runner: ubuntu-latest
+            artifact: clpeak-linux-x86_64-oneapi
+            binary: build/clpeak
+            suffix: oneapi
+            cuda: false
+            oneapi: true
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for git-describe versioning
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # clang: the root CMake prefers it over GCC on Linux for the CPU backend
+          # (GCC<=14 serialises the FMA accumulator chains, ~halving fp32/fp64).
+          sudo apt-get install -y --no-install-recommends build-essential clang
+
+      # `flutter build linux` toolchain.
+      - name: Install GUI dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config libgtk-3-dev liblzma-dev
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: master
+          flutter-version: 3.47.1
+          cache: true
+
+      - name: Install Vulkan SDK
+        if: runner.os != 'macOS'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+
+      - name: Install CUDA Toolkit
+        if: matrix.cuda
+        uses: Jimver/cuda-toolkit@master
+
+      - name: Install ROCm
+        if: matrix.rocm
+        uses: ./.github/actions/setup-rocm
+
+      - name: Install Intel oneAPI
+        if: matrix.oneapi
+        uses: ./.github/actions/setup-oneapi
+
+      - name: Configure CMake & Build
+        if: ${{ !matrix.oneapi }}
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake --build build --config Release -j4
+
+      # oneAPI requires icpx as CXX and `setvars.sh` on the PATH/LD_LIBRARY_PATH;
+      # source it before invoking cmake/build so IntelSYCL can be located.
+      - name: Configure Cmake & Build oneAPI
+        if: matrix.oneapi
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake --build build --config Release -j4
+
+      - name: Run
+        if: ${{ !matrix.cuda && !matrix.oneapi }}
+        shell: bash
+        run: ${{ matrix.binary }}
+
+      # CUDA: the runner has no GPU, so the real driver's libcuda.so.1 is absent.
+      # The toolkit ships a stub libcuda.so (link-time placeholder) -- expose it
+      # as libcuda.so.1 on LD_LIBRARY_PATH so the binary loads and exercises the
+      # graceful no-device path (cuInit returns CUDA_ERROR_STUB_LIBRARY) instead
+      # of dying in the loader.
+      # Linux only: the stub libcuda.so trick is Linux-specific.  On the GPU-less
+      # Windows runner the driver (nvcuda.dll, linked via CUDA::cuda_driver) is
+      # absent and the toolkit ships no stub, so the binary can't load -- that
+      # job just builds + packages, exercising the AOT fatbin compile path.
+      - name: Run CUDA
+        if: ${{ matrix.cuda && runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          # The toolkit stubs dir is root-owned, so symlink into a writable temp
+          # dir (libcuda.so -> libcuda.so.1, the SONAME the binary needs) and put
+          # that on LD_LIBRARY_PATH rather than mutating the toolkit.
+          stub="${CUDA_PATH}/lib64/stubs/libcuda.so"
+          link_dir="${RUNNER_TEMP}/cuda-stub"
+          mkdir -p "$link_dir"
+          [ -f "$stub" ] && ln -sf "$stub" "$link_dir/libcuda.so.1"
+          export LD_LIBRARY_PATH="$link_dir:${LD_LIBRARY_PATH}"
+          ${{ matrix.binary }} || true
+
+      # oneAPI: the SYCL/OpenCL runtime libs live in the oneAPI install dir, so
+      # source setvars.sh to put them on LD_LIBRARY_PATH (the build step does the
+      # same).  Without it the loader can't find libOpenCL.so.1 and the binary
+      # dies before main().
+      - name: Run oneAPI
+        if: matrix.oneapi
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          ${{ matrix.binary }} || true
+
+      # Package with CPack into a self-contained zip whose top-level folder is
+      # clpeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and
+      # any bundled runtime libs.  -C Release picks the Release artifacts on
+      # multi-config generators (Windows); harmless on single-config.
+      - name: Package
+        shell: bash
+        run: cd build && cpack -G ZIP -C Release
+
+      # macOS additionally ships a drag-to-Applications disk image: the zip is
+      # for CLI users, the .dmg is how the GUI actually gets installed.  The app
+      # is ad-hoc signed, so first launch still needs right-click -> Open until
+      # a Developer ID identity is wired in here.
+      - name: Package DMG (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --build build --target clpeak-gui-dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: build/clpeak-*.zip
+
+      # Its own artifact rather than a second file in the one above: the
+      # Actions UI always serves an artifact as a zip, so bundling the .dmg
+      # with the .zip buries both a level deep.  One file per artifact means
+      # each download unpacks straight to the thing you wanted.  (Release
+      # assets are unaffected -- the release job attaches the raw files.)
+      - name: Upload DMG artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-dmg
+          path: build/clpeak-*.dmg

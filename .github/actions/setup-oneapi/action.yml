@@ -1,0 +1,20 @@
+name: Set up Intel oneAPI
+description: >
+  Install the oneAPI components src/oneapi needs: the DPC++/SYCL compiler
+  (icpx/icx -- the whole binary must be built with it, see the root
+  CMakeLists) and oneMKL for the vendor-library GEMM benchmark.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Intel oneAPI (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+          | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+          | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          intel-oneapi-compiler-dpcpp-cpp intel-oneapi-mkl-devel

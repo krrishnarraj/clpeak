@@ -1,0 +1,45 @@
+# iOS — unsigned build of the Flutter app over the clpeak_ffi xcframework.
+# Not shipped: `release` does not depend on this job.
+name: iOS
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: iOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+          optional_components: com.lunarg.vulkan.ios
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build clpeak_ffi xcframework
+        run: tool/build_ios_native.sh
+
+      - name: Build iOS app (unsigned)
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clpeak-ios-app
+          path: app/build/ios/iphoneos/Runner.app

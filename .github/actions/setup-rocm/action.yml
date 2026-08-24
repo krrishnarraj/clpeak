@@ -1,0 +1,23 @@
+name: Set up ROCm
+description: >
+  Install the ROCm/HIP toolchain that src/rocm needs: the HIP runtime and
+  headers, hipcc (which AOT-compiles the kernels via --genco), and the optional
+  vendor libraries whose presence the build feature-detects.
+
+runs:
+  using: composite
+  steps:
+    - name: Install ROCm (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+        wget -O- https://repo.radeon.com/rocm/rocm.gpg.key \
+          | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest noble main" \
+          | sudo tee /etc/apt/sources.list.d/rocm.list
+        echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" \
+          | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          rocm-hip-runtime-dev hipcc rocblas-dev hipblaslt-dev rocwmma-dev
