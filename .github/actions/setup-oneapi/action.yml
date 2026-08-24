@@ -138,7 +138,14 @@ runs:
         # still shows why instead of being swallowed by a redirect to nul.
         $marker = '___CLPEAK_SETVARS_DONE___'
         $lines  = @(cmd /c "call `"$setvars`" 2>&1 && echo $marker && set")
-        $idx    = [Array]::IndexOf($lines, $marker)
+        # Trimmed comparison, not [Array]::IndexOf($lines, $marker): cmd's
+        # CRLF output can leave a stray trailing character (seen in practice --
+        # setvars ran and printed the marker, but exact equality still missed
+        # it and the step threw "setvars.bat failed" over a run that hadn't).
+        $idx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+          if ($lines[$i].Trim() -eq $marker) { $idx = $i; break }
+        }
         if ($idx -lt 0) {
           $lines | Write-Host
           throw "setvars.bat failed -- see its output above"
