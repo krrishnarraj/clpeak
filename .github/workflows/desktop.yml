@@ -80,6 +80,16 @@ jobs:
             cuda: false
             rocm: true
 
+          # windows-2022, not windows-latest: AMD publishes the HIP SDK only as a
+          # Windows Server 2022 build (see .github/actions/setup-rocm).
+          - name: Windows x64 ROCm
+            runner: windows-2022
+            artifact: clpeak-windows-x86_64-rocm
+            binary: build/Release/clpeak.exe
+            suffix: rocm
+            cuda: false
+            rocm: true
+
           - name: Linux x64 oneAPI
             runner: ubuntu-latest
             artifact: clpeak-linux-x86_64-oneapi
@@ -154,10 +164,42 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=icpx -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
+      # A backend the CMake failed to find degrades to a *green* build that
+      # silently ships a plain clpeak under a backend artifact name.  Assert the
+      # cache entries the backend is gated on actually resolved, before anything
+      # gets run or packaged.
+      - name: Verify ROCm backend was enabled
+        if: matrix.rocm
+        shell: bash
+        run: |
+          cache=build/CMakeCache.txt
+          unresolved=""
+          for var in hip_DIR CLPEAK_HIPCC; do
+            val=$(grep -m1 "^${var}:" "$cache" | cut -d= -f2-)
+            echo "${var} = ${val:-<absent from cache>}"
+            case "$val" in
+              ""|*NOTFOUND*) unresolved="${unresolved:+$unresolved, }${var}" ;;
+            esac
+          done
+          if [ -n "$unresolved" ]; then
+            echo "::error::ROCm backend not enabled (${unresolved} unresolved) -- the -rocm artifact would be a plain build"
+            exit 1
+          fi
+
       - name: Run
-        if: ${{ !matrix.cuda && !matrix.oneapi }}
+        if: ${{ !matrix.cuda && !matrix.oneapi && !(matrix.rocm && runner.os == 'Windows') }}
         shell: bash
         run: ${{ matrix.binary }}
+
+      # ROCm on Windows: amdhip64_6.dll ships with the driver half of AMD's
+      # installer, which has no GPU to bind to on the runner, so the binary may
+      # fail to load outright.  Run it anyway -- when the runtime did land this
+      # exercises the graceful no-device path -- but don't fail the build on it,
+      # the same tolerance the CUDA rows get.
+      - name: Run ROCm (Windows)
+        if: ${{ matrix.rocm && runner.os == 'Windows' }}
+        shell: bash
+        run: ${{ matrix.binary }} || true
 
       # CUDA: the runner has no GPU, so the real driver's libcuda.so.1 is absent.
       # The toolkit ships a stub libcuda.so (link-time placeholder) -- expose it
