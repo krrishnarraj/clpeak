@@ -80,15 +80,17 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
          d.description ? d.description : ""});
 
     struct Variant { const char *label; const char *kernelName; const char *src;
-                     const char *srcName; const char *description; };
+                     const char *srcName; const char *description;
+                     const char *altKernelName; };
     std::vector<Variant> variants;
     if (d.variants && d.numVariants > 0)
         for (uint32_t i = 0; i < d.numVariants; i++)
             variants.push_back({d.variants[i].label, d.variants[i].kernelName,
                                 d.variants[i].src,   d.variants[i].srcName,
-                                d.variants[i].description});
+                                d.variants[i].description,
+                                d.variants[i].altKernelName});
     else
-        variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName, nullptr});
+        variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName, nullptr, nullptr});
 
     // Labels carry right-padding for stdout column alignment; the metric tag
     // stored in the dump (and shown in the GUI) must be the clean label.
@@ -146,6 +148,35 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         uint64_t totalThreads = (uint64_t)numGroups * tgSize;
         double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
         float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+
+        // Race the affine chain and keep the faster reading.  A failure here is
+        // not an error -- the squaring chain already produced one.
+        if (v.altKernelName)
+        {
+            id<MTLComputePipelineState> altPso =
+                mtlGetPipeline(dev, v.src, v.srcName, v.altKernelName);
+            if (altPso)
+            {
+                float altUs = mtlRunDispatches(dev, altPso, outBuf, d.scalarArg, d.scalarSize,
+                                               nil, gridSize, tgSizeM, warmupCount,
+                                               cfg.targetTimeUs,
+                                               forceIters ? specifiedIters : 0);
+                if (altUs > 0.0f)
+                {
+                    float altValue = (float)((double)totalThreads * (double)d.workPerWI
+                                             * 1e6 / altUs / divider);
+                    CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
+                                d.resultTag, metricTag(v.label).c_str(), value,
+                                altValue, d.unit);
+                    if (altValue > value * MAX_ALT_CHAIN_RATIO)
+                        CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                                    "compiler fold\n", d.resultTag,
+                                    metricTag(v.label).c_str(), altValue / value);
+                    else if (altValue > value)
+                        value = altValue;
+                }
+            }
+        }
 
         test.emit(metricTag(v.label), value, {false, note(v.description)});
     }

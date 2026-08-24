@@ -62,6 +62,11 @@ struct mtl_compute_variant_t
   const char *src;                 // .metal source text (may be shared by sibling variants)
   const char *srcName;
   const char *description;         // what this one reading means (nullptr = undocumented)
+
+  // Affine-chain twin inside the same source (mad_chain.metal).  When set,
+  // runComputeKernel times both and reports the faster: no single chain shape
+  // reaches peak on every vendor.  nullptr = this variant races nothing.
+  const char *altKernelName;
 };
 
 struct mtl_compute_desc_t

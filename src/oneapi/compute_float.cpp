@@ -32,9 +32,36 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
                      x = sycl::fma(x, x, c); x = sycl::fma(x, x, c);
 #define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
 
+// Second chain shape, raced against the one above: x_k = a*x_k + b over N
+// independent accumulators, three distinct source registers per fma.  Intel
+// Alchemist halves a three-source mad whose operands are not all distinct, so
+// x = x*x + c reports half rate there -- which is most of what this backend
+// runs on.  Full rationale, and why the integer families use a third shape
+// instead: the MAD chain block in include/common/common.h.
+//
+// N is 4 at width 1, 2 at width 2 and 1 above, where the vector itself
+// supplies the parallelism; live values per lane stay at ~5 either way.
+// Both shapes issue 16 chain instructions per outer iteration, so the
+// per-work-item op budget and the two readings stay comparable.
+template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
+
+// Four-chain affine, for the families whose accumulator round-trips through a
+// narrow type once per outer iteration (mp, bf16).  Four chains cost four
+// conversions per 16 chain instructions against the squaring build's one, but
+// both report the same op budget, so the extra conversions can only understate
+// the affine reading -- never inflate it -- and the caller takes the maximum.
+// The chains earn their keep: with one chain, mp on an Intel CPU runtime
+// measured 373.1 against 373.8, a dead wash, while the four-chain float path
+// on the same device went 396 -> 1552 GFLOPS.
+#define MAD_G_AFF4(a, b)     x0 = sycl::fma(a, x0, b); x1 = sycl::fma(a, x1, b); \
+                             x2 = sycl::fma(a, x2, b); x3 = sycl::fma(a, x3, b);
+#define MAD_16_AFF4(a, b)    MAD_G_AFF4(a, b) MAD_G_AFF4(a, b) \
+                             MAD_G_AFF4(a, b) MAD_G_AFF4(a, b)
+
 // Per-family kernel-name tags (SYCL needs a unique type per parallel_for).
 namespace { struct SpTag; struct HpTag; struct DpTag; }
 template <typename Tag, typename T, int W> class compute_fp_vec_kernel;
+template <typename Tag, typename T, int W> class compute_fp_aff_kernel;
 
 // One vector-width variant of an FP compute test.  Builds sycl::vec<T,W>
 // with distinct per-lane seeds (so the compiler can't collapse the vector to
@@ -79,11 +106,77 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  // Affine twin of the same kernel: N independent x_k = a*x_k + b chains,
+  // same 16 chain instructions per outer iteration.
+  constexpr int NCHAIN = AffineChains<W>::N;
+  auto submitAff = [=](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_fp_aff_kernel<Tag, T, W>>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) {
+          VecT xs[NCHAIN], a, b;
+          // Seeds in T arithmetic only, for the same fp64-aspect reason as
+          // the squaring kernel above.
+          #pragma unroll
+          for (int k = 0; k < W; k++)
+          {
+            a[k] = (T)it.get_local_id(0) + (T)k;
+            b[k] = a[k] + (T)2;
+          }
+          #pragma unroll
+          for (int n = 0; n < NCHAIN; n++)
+          {
+            #pragma unroll
+            for (int k = 0; k < W; k++) xs[n][k] = A + (T)k + (T)n;
+          }
+
+          #pragma unroll 1
+          for (int i = 0; i < iters; i++)
+          {
+            #pragma unroll
+            for (int m = 0; m < 16 / NCHAIN; m++)
+            {
+              #pragma unroll
+              for (int n = 0; n < NCHAIN; n++) xs[n] = sycl::fma(a, xs[n], b);
+            }
+          }
+
+          VecT r = xs[0];
+          #pragma unroll
+          for (int n = 1; n < NCHAIN; n++) r += xs[n];
+          T acc = (T)0;
+          #pragma unroll
+          for (int k = 0; k < W; k++) acc += r[k];
+          out[it.get_global_id(0)] = acc;
+        });
+    });
+  };
+
   const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
-  if (us <= 0.0f) test.skip(label, ResultStatus::Error, "kernel launch failed", note);
-  else            test.emit(label, clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9),
-                            {false, note});
+  if (us <= 0.0f)
+  {
+    test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+    return;
+  }
+  float value = clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9);
+
+  // Race the affine chain and keep the faster reading.  A failure here is not
+  // an error -- the squaring chain already produced one.
+  float affUs = peak.runKernel(dev, submitAff, targetTimeUs, forced);
+  if (affUs > 0.0f)
+  {
+    float affValue = clpeak_oneapi::computeGflops(totalThreads, workPerWI, affUs, 1e9);
+    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f gflops\n",
+                label, value, affValue);
+    if (affValue > value * MAX_ALT_CHAIN_RATIO)
+      CLPEAK_VLOG("%s: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
+                  label, affValue / value);
+    else if (affValue > value)
+      value = affValue;
+  }
+
+  test.emit(label, value, {false, note});
 }
 
 // Drive the {1,2,4,8,16} sweep for one FP family.
@@ -218,6 +311,7 @@ int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
 // in float.  Scalar only (the round-trip is inherently per-element).  4096 ops/WI.
 // --------------------------------------------------------------------------
 class compute_mp_kernel;
+class compute_mp_alt_kernel;
 
 int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -263,11 +357,48 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
     });
   };
 
+  auto submitAlt = [&](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_mp_alt_kernel>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) {
+          float a = (float)(sycl::half)(float)it.get_local_id(0);
+          float b = a + 2.0f;
+          float x0 = (float)(sycl::half)A;
+          float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
+          #pragma unroll 1
+          for (int i = 0; i < 128; i++) {
+            MAD_16_AFF4(a, b)
+            x0 = (float)(sycl::half)x0; x1 = (float)(sycl::half)x1;
+            x2 = (float)(sycl::half)x2; x3 = (float)(sycl::half)x3;
+          }
+          out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
+        });
+    });
+  };
+
   float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (us <= 0.0f)
+  {
     test.skip("mp", ResultStatus::Error, "kernel launch failed");
-  else
-    test.emit("mp", clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9));
+    sycl::free(out, dev.stream);
+    return 0;
+  }
+  float value = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9);
+
+  // Race the affine chain and keep the faster reading.
+  float altUs = runKernel(dev, submitAlt, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+  if (altUs > 0.0f)
+  {
+    float altValue = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs, 1e9);
+    CLPEAK_VLOG("mp: squaring chain %.1f, alt chain %.1f gflops\n", value, altValue);
+    if (altValue > value * MAX_ALT_CHAIN_RATIO)
+      CLPEAK_VLOG("mp: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
+                  altValue / value);
+    else if (altValue > value)
+      value = altValue;
+  }
+  test.emit("mp", value);
 
   sycl::free(out, dev.stream);
   return 0;
@@ -280,6 +411,7 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 // --------------------------------------------------------------------------
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 class compute_bf16_kernel;
+class compute_bf16_alt_kernel;
 
 int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -329,11 +461,49 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
     });
   };
 
+  auto submitAlt = [&](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_bf16_alt_kernel>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) {
+          float a = (float)bfloat16((float)it.get_local_id(0));
+          float b = a + 2.0f;
+          float x0 = (float)bfloat16(A);
+          float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
+          #pragma unroll 1
+          for (int i = 0; i < 16; i++) {
+            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+            x0 = (float)bfloat16(x0); x1 = (float)bfloat16(x1);
+            x2 = (float)bfloat16(x2); x3 = (float)bfloat16(x3);
+          }
+          out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
+        });
+    });
+  };
+
   float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (us <= 0.0f)
+  {
     test.skip("bf16", ResultStatus::Error, "kernel launch failed");
-  else
-    test.emit("bf16", clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9));
+    sycl::free(out, dev.stream);
+    return 0;
+  }
+  float value = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9);
+
+  // Race the affine chain and keep the faster reading.
+  float altUs = runKernel(dev, submitAlt, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+  if (altUs > 0.0f)
+  {
+    float altValue = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs, 1e9);
+    CLPEAK_VLOG("bf16: squaring chain %.1f, alt chain %.1f gflops\n", value, altValue);
+    if (altValue > value * MAX_ALT_CHAIN_RATIO)
+      CLPEAK_VLOG("bf16: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
+                  altValue / value);
+    else if (altValue > value)
+      value = altValue;
+  }
+  test.emit("bf16", value);
 
   sycl::free(out, dev.stream);
   return 0;

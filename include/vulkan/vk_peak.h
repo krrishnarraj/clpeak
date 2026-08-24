@@ -51,14 +51,27 @@ struct vk_device_info_t {
   DeviceType deviceType = DeviceType::Unknown;
   uint32_t computeQueueFamily;
 
-  // Optional feature / extension gates
+  // Optional feature / extension gates.  Every flag here is both "the device
+  // reports it" and "we asked for it in vkCreateDevice": a SPIR-V capability
+  // whose feature bit was not enabled is invalid usage, and drivers are free
+  // to fault in their shader compiler rather than fail cleanly.
   bool int8DotProductSupported;   // VK_KHR_shader_integer_dot_product + shaderInt8
+  bool int8Supported;             // VK_KHR_shader_float16_int8::shaderInt8
   bool float16Supported;          // VK_KHR_shader_float16_int8::shaderFloat16
   bool float64Supported;          // VkPhysicalDeviceFeatures::shaderFloat64
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
+  bool vulkanMemoryModelDeviceScopeSupported; // vulkanMemoryModel itself is
+                                  // implied by cooperativeMatrixSupported
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
   bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
+
+  // Subgroup sizing.  subgroupSize is what VkPhysicalDeviceSubgroupProperties
+  // reports; min/max/subgroupSizeControl come from VK_EXT_subgroup_size_control.
+  uint32_t subgroupSize;          // 0 = not reported
+  uint32_t minSubgroupSize;       // 0 = no subgroup-size control
+  uint32_t maxSubgroupSize;
+  bool     subgroupSizeControl;   // requiredSubgroupSize usable on compute
 
   // Canonical cooperative-matrix tile selected per dtype from
   // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.  We don't assume a
@@ -92,6 +105,24 @@ static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
     return 2ULL << 20;
 
   return targetGlobalThreads(0);
+}
+
+// Cooperative-matrix shaders compute one MxN tile per *subgroup* and store it
+// at the work-group's offset, so a work-group has to be exactly one subgroup:
+// if the driver splits the 32-thread group into 2 (Intel SIMD16) or 4 (SIMD8)
+// subgroups, every one of them redundantly computes the same tile into the
+// same place and the reported rate comes out divided by that factor.  The
+// shaders declare local_size_x = 32, so the fix is to pin the stage's subgroup
+// width to 32 wherever the device allows it -- NVIDIA, RDNA and Arc all do.
+// Devices with no subgroup-size control, or whose subgroups can only be 64
+// (CDNA/GCN), return 0 and run unpinned as before.
+static inline uint32_t coopmatRequiredSubgroupSize(const vk_device_info_t &info)
+{
+  const uint32_t coopWGSize = 32;
+  if (info.subgroupSizeControl &&
+      info.minSubgroupSize <= coopWGSize && coopWGSize <= info.maxSubgroupSize)
+    return coopWGSize;
+  return 0;
 }
 
 // Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
@@ -132,11 +163,14 @@ public:
   // Create compute pipeline from SPIR-V.  specInfo (optional) supplies
   // specialization constants -- used by the coopmat shaders to bind the
   // selected M/N/K tile + loop count at pipeline-creation time.
+  // requiredSubgroupSize (0 = leave it to the driver) pins the subgroup width
+  // the stage is compiled for; only legal when info.subgroupSizeControl.
   bool createComputePipeline(const uint32_t *spirv, size_t spirvSize,
                              VkDescriptorSetLayout dsLayout,
                              VkPipelineLayout pipeLayout,
                              VkPipeline &pipeline,
-                             const VkSpecializationInfo *specInfo = nullptr);
+                             const VkSpecializationInfo *specInfo = nullptr,
+                             uint32_t requiredSubgroupSize = 0);
 
   // Submit a command buffer and wait.  Returns the worst VkResult seen
   // across vkQueueSubmit / vkQueueWaitIdle so callers can detect and skip
@@ -168,6 +202,14 @@ struct vk_compute_variant_t
   const uint32_t *spirv;
   size_t spirvSize;
   const char *description;   // what this one reading means (nullptr = undocumented)
+
+  // Second build of the same shader with the affine chain shape
+  // (mad_chain.glsl).  When set, runComputeKernel times both and reports the
+  // faster: no single chain shape reaches peak on every vendor, and picking
+  // one costs Intel Alchemist or NVIDIA half its rate depending which.
+  // nullptr = this variant has only the one shape.
+  const uint32_t *altSpirv;
+  size_t altSpirvSize;
 };
 
 struct vk_compute_desc_t
@@ -195,7 +237,9 @@ struct vk_compute_desc_t
   uint32_t workPerWI;        // matches the kernel's per-WI op budget
   uint32_t elemSize;         // output element size (sizeof float / int32 / ...)
   uint32_t wgSize;           // local_size_x in the shader; 0 => use default 256.
-                             // Cooperative-matrix shaders use 32 (one subgroup).
+                             // Cooperative-matrix shaders use 32 (one
+                             // subgroup -- see coopmatRequiredSubgroupSize).
+  uint32_t requiredSubgroupSize; // pin the stage's subgroup width (0 = don't).
   uint32_t outElemsPerWG;    // number of output buffer elements the shader
                              // writes per work-group.  0 => defaults to wgSize
                              // (one element per WI).  Coopmat shaders write an
@@ -293,49 +337,197 @@ private:
 namespace vk_shaders {
   extern const uint32_t compute_sp_v1[];
   extern const size_t   compute_sp_v1_size;
+#ifdef VK_HAS_COMPUTE_SP_V1_ALT
+  extern const uint32_t compute_sp_v1_alt[];
+  extern const size_t   compute_sp_v1_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_SP_V2
   extern const uint32_t compute_sp_v2[];
   extern const size_t   compute_sp_v2_size;
+#endif
+#ifdef VK_HAS_COMPUTE_SP_V2_ALT
+  extern const uint32_t compute_sp_v2_alt[];
+  extern const size_t   compute_sp_v2_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_SP_V4
   extern const uint32_t compute_sp_v4[];
   extern const size_t   compute_sp_v4_size;
 #endif
+#ifdef VK_HAS_COMPUTE_SP_V4_ALT
+  extern const uint32_t compute_sp_v4_alt[];
+  extern const size_t   compute_sp_v4_alt_size;
+#endif
+
+// -- affine-build selection -------------------------------------------------
+// A shader that includes shaders/mad_chain.glsl is compiled a second time with
+// the affine chain shape; CompileShaders.cmake then defines
+// VK_HAS_<NAME>_ALT.  VK_ALT_SHADER(name) expands to that build's
+// (pointer, size) pair, or to (nullptr, 0) when the second build was skipped,
+// so a variant table entry reads the same either way.  The #ifdefs cannot live
+// inside the macro, hence one block per shader.
+#define VK_ALT_SHADER(name) VK_ALT_##name
+
+#ifdef VK_HAS_COMPUTE_SP_V1_ALT
+  #define VK_ALT_compute_sp_v1 vk_shaders::compute_sp_v1_alt, vk_shaders::compute_sp_v1_alt_size
+#else
+  #define VK_ALT_compute_sp_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_SP_V2_ALT
+  #define VK_ALT_compute_sp_v2 vk_shaders::compute_sp_v2_alt, vk_shaders::compute_sp_v2_alt_size
+#else
+  #define VK_ALT_compute_sp_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_SP_V4_ALT
+  #define VK_ALT_compute_sp_v4 vk_shaders::compute_sp_v4_alt, vk_shaders::compute_sp_v4_alt_size
+#else
+  #define VK_ALT_compute_sp_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_HP_V1_ALT
+  #define VK_ALT_compute_hp_v1 vk_shaders::compute_hp_v1_alt, vk_shaders::compute_hp_v1_alt_size
+#else
+  #define VK_ALT_compute_hp_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_HP_V2_ALT
+  #define VK_ALT_compute_hp_v2 vk_shaders::compute_hp_v2_alt, vk_shaders::compute_hp_v2_alt_size
+#else
+  #define VK_ALT_compute_hp_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_HP_V4_ALT
+  #define VK_ALT_compute_hp_v4 vk_shaders::compute_hp_v4_alt, vk_shaders::compute_hp_v4_alt_size
+#else
+  #define VK_ALT_compute_hp_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_DP_V1_ALT
+  #define VK_ALT_compute_dp_v1 vk_shaders::compute_dp_v1_alt, vk_shaders::compute_dp_v1_alt_size
+#else
+  #define VK_ALT_compute_dp_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_DP_V2_ALT
+  #define VK_ALT_compute_dp_v2 vk_shaders::compute_dp_v2_alt, vk_shaders::compute_dp_v2_alt_size
+#else
+  #define VK_ALT_compute_dp_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_DP_V4_ALT
+  #define VK_ALT_compute_dp_v4 vk_shaders::compute_dp_v4_alt, vk_shaders::compute_dp_v4_alt_size
+#else
+  #define VK_ALT_compute_dp_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT32_V1_ALT
+  #define VK_ALT_compute_int32_v1 vk_shaders::compute_int32_v1_alt, vk_shaders::compute_int32_v1_alt_size
+#else
+  #define VK_ALT_compute_int32_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT32_V2_ALT
+  #define VK_ALT_compute_int32_v2 vk_shaders::compute_int32_v2_alt, vk_shaders::compute_int32_v2_alt_size
+#else
+  #define VK_ALT_compute_int32_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT32_V4_ALT
+  #define VK_ALT_compute_int32_v4 vk_shaders::compute_int32_v4_alt, vk_shaders::compute_int32_v4_alt_size
+#else
+  #define VK_ALT_compute_int32_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_MP_V1_ALT
+  #define VK_ALT_compute_mp_v1 vk_shaders::compute_mp_v1_alt, vk_shaders::compute_mp_v1_alt_size
+#else
+  #define VK_ALT_compute_mp_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_MP_V2_ALT
+  #define VK_ALT_compute_mp_v2 vk_shaders::compute_mp_v2_alt, vk_shaders::compute_mp_v2_alt_size
+#else
+  #define VK_ALT_compute_mp_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_MP_V4_ALT
+  #define VK_ALT_compute_mp_v4 vk_shaders::compute_mp_v4_alt, vk_shaders::compute_mp_v4_alt_size
+#else
+  #define VK_ALT_compute_mp_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_BF16_V1_ALT
+  #define VK_ALT_compute_bf16_v1 vk_shaders::compute_bf16_v1_alt, vk_shaders::compute_bf16_v1_alt_size
+#else
+  #define VK_ALT_compute_bf16_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_BF16_V2_ALT
+  #define VK_ALT_compute_bf16_v2 vk_shaders::compute_bf16_v2_alt, vk_shaders::compute_bf16_v2_alt_size
+#else
+  #define VK_ALT_compute_bf16_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_BF16_V4_ALT
+  #define VK_ALT_compute_bf16_v4 vk_shaders::compute_bf16_v4_alt, vk_shaders::compute_bf16_v4_alt_size
+#else
+  #define VK_ALT_compute_bf16_v4 nullptr, 0
+#endif
 #ifdef VK_HAS_COMPUTE_HP_V1
   extern const uint32_t compute_hp_v1[];
   extern const size_t   compute_hp_v1_size;
+#endif
+#ifdef VK_HAS_COMPUTE_HP_V1_ALT
+  extern const uint32_t compute_hp_v1_alt[];
+  extern const size_t   compute_hp_v1_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V2
   extern const uint32_t compute_hp_v2[];
   extern const size_t   compute_hp_v2_size;
 #endif
+#ifdef VK_HAS_COMPUTE_HP_V2_ALT
+  extern const uint32_t compute_hp_v2_alt[];
+  extern const size_t   compute_hp_v2_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_HP_V4
   extern const uint32_t compute_hp_v4[];
   extern const size_t   compute_hp_v4_size;
+#endif
+#ifdef VK_HAS_COMPUTE_HP_V4_ALT
+  extern const uint32_t compute_hp_v4_alt[];
+  extern const size_t   compute_hp_v4_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V1
   extern const uint32_t compute_dp_v1[];
   extern const size_t   compute_dp_v1_size;
 #endif
+#ifdef VK_HAS_COMPUTE_DP_V1_ALT
+  extern const uint32_t compute_dp_v1_alt[];
+  extern const size_t   compute_dp_v1_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_DP_V2
   extern const uint32_t compute_dp_v2[];
   extern const size_t   compute_dp_v2_size;
+#endif
+#ifdef VK_HAS_COMPUTE_DP_V2_ALT
+  extern const uint32_t compute_dp_v2_alt[];
+  extern const size_t   compute_dp_v2_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V4
   extern const uint32_t compute_dp_v4[];
   extern const size_t   compute_dp_v4_size;
 #endif
+#ifdef VK_HAS_COMPUTE_DP_V4_ALT
+  extern const uint32_t compute_dp_v4_alt[];
+  extern const size_t   compute_dp_v4_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_INT32_V1
   extern const uint32_t compute_int32_v1[];
   extern const size_t   compute_int32_v1_size;
+#endif
+#ifdef VK_HAS_COMPUTE_INT32_V1_ALT
+  extern const uint32_t compute_int32_v1_alt[];
+  extern const size_t   compute_int32_v1_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_INT32_V2
   extern const uint32_t compute_int32_v2[];
   extern const size_t   compute_int32_v2_size;
 #endif
+#ifdef VK_HAS_COMPUTE_INT32_V2_ALT
+  extern const uint32_t compute_int32_v2_alt[];
+  extern const size_t   compute_int32_v2_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_INT32_V4
   extern const uint32_t compute_int32_v4[];
   extern const size_t   compute_int32_v4_size;
+#endif
+#ifdef VK_HAS_COMPUTE_INT32_V4_ALT
+  extern const uint32_t compute_int32_v4_alt[];
+  extern const size_t   compute_int32_v4_alt_size;
 #endif
   extern const uint32_t global_bandwidth_v1[];
   extern const size_t   global_bandwidth_v1_size;
@@ -373,25 +565,49 @@ namespace vk_shaders {
   extern const uint32_t compute_mp_v1[];
   extern const size_t   compute_mp_v1_size;
 #endif
+#ifdef VK_HAS_COMPUTE_MP_V1_ALT
+  extern const uint32_t compute_mp_v1_alt[];
+  extern const size_t   compute_mp_v1_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_MP_V2
   extern const uint32_t compute_mp_v2[];
   extern const size_t   compute_mp_v2_size;
+#endif
+#ifdef VK_HAS_COMPUTE_MP_V2_ALT
+  extern const uint32_t compute_mp_v2_alt[];
+  extern const size_t   compute_mp_v2_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V4
   extern const uint32_t compute_mp_v4[];
   extern const size_t   compute_mp_v4_size;
 #endif
+#ifdef VK_HAS_COMPUTE_MP_V4_ALT
+  extern const uint32_t compute_mp_v4_alt[];
+  extern const size_t   compute_mp_v4_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_BF16_V1
   extern const uint32_t compute_bf16_v1[];
   extern const size_t   compute_bf16_v1_size;
+#endif
+#ifdef VK_HAS_COMPUTE_BF16_V1_ALT
+  extern const uint32_t compute_bf16_v1_alt[];
+  extern const size_t   compute_bf16_v1_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V2
   extern const uint32_t compute_bf16_v2[];
   extern const size_t   compute_bf16_v2_size;
 #endif
+#ifdef VK_HAS_COMPUTE_BF16_V2_ALT
+  extern const uint32_t compute_bf16_v2_alt[];
+  extern const size_t   compute_bf16_v2_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_BF16_V4
   extern const uint32_t compute_bf16_v4[];
   extern const size_t   compute_bf16_v4_size;
+#endif
+#ifdef VK_HAS_COMPUTE_BF16_V4_ALT
+  extern const uint32_t compute_bf16_v4_alt[];
+  extern const size_t   compute_bf16_v4_alt_size;
 #endif
 #ifdef VK_HAS_COOPMAT_FP16
   extern const uint32_t coopmat_fp16[];

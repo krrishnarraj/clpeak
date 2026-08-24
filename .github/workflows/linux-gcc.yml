@@ -1,0 +1,55 @@
+# Linux x64 GCC — build-error smoke test only.
+#
+# The shipped Linux x64 artifact is built with clang (the root CMake prefers it
+# for the CPU backend's FMA-chain scheduling), so GCC's stricter always_inline
+# target-attribute checks — e.g. the ARM NEON crypto intrinsics, and GCC-only
+# diagnostics generally — never get exercised in CI otherwise.  This job forces
+# a GCC/g++ build to catch those.  It is deliberately NOT wired into `release`
+# (release depends on the desktop builds only): no packaging, no artifact
+# upload.  clang is purged so the run genuinely mirrors a GCC-only toolchain,
+# and g++ is also pinned via -DCMAKE_*_COMPILER so the build can't silently
+# fall back.  It also builds with -flto=auto, like the distro packages that
+# first hit GCC's LTRANS-drops-the-TU-ISA-flags failure (see
+# src/cpu/CMakeLists.txt).
+name: Linux GCC
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Linux x64 GCC
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for git-describe versioning
+
+      - name: Install dependencies (GCC only, no clang)
+        run: |
+          sudo apt-get update
+          # Purge any clang the runner image ships with, so the build can only use
+          # GCC (the whole point of this job).  '|| true' keeps it green if clang
+          # was never installed.
+          sudo apt-get remove -y --purge 'clang*' || true
+          sudo apt-get install -y --no-install-recommends build-essential g++
+
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+
+      - name: Configure CMake & Build (GCC, LTO)
+        run: |
+          # GUI off: this job is a compiler smoke test, not a packaging job.
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_ENABLE_GUI=OFF \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_FLAGS=-flto=auto -DCMAKE_CXX_FLAGS=-flto=auto \
+            -DCMAKE_EXE_LINKER_FLAGS=-flto=auto
+          cmake --build build --config Release -j4
+
+      - name: Run
+        run: ./build/clpeak

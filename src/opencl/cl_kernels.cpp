@@ -3,7 +3,10 @@
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
+// mad_chain.cl first: it defines the AF*_ macros the compute_*_alt_v* kernels
+// below expand.  See it for why every compute family carries two chain shapes.
 static const std::string stringifiedKernels =
+#include "kernels/mad_chain.cl"
 #include "kernels/global_bandwidth_kernels.cl"
 #include "kernels/compute_sp_kernels.cl"
 #include "kernels/compute_hp_kernels.cl"

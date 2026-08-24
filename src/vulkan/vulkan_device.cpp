@@ -146,6 +146,8 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
 {
   // Reset all feature gates
   self->info.int8DotProductSupported = false;
+  self->info.int8Supported = false;
+  self->info.vulkanMemoryModelDeviceScopeSupported = false;
   self->info.float16Supported = false;
   self->info.float64Supported = false;
   self->info.bfloat16Supported = false;
@@ -254,6 +256,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
       if (hasExt(VK_KHR_8BIT_STORAGE_EXTENSION_NAME))
         enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
       self->info.int8DotProductSupported = true;
+      self->info.int8Supported = true;
     }
 #endif
 #if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
@@ -268,6 +271,8 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       self->info.cooperativeMatrixSupported = true;
+      self->info.vulkanMemoryModelDeviceScopeSupported =
+          vmmFeatures.vulkanMemoryModelDeviceScope != VK_FALSE;
 #ifdef VK_HAS_COOPMAT_FP16
       if (f16i8Features.shaderFloat16 && !f16i8ExtEnabled)
       {
@@ -284,8 +289,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
           enabledExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
           f16i8ExtEnabled = true;
         }
-        if (hasExt(VK_KHR_8BIT_STORAGE_EXTENSION_NAME))
-          enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
+        self->info.int8Supported = true;
       }
 #endif
 #ifdef VK_HAS_ANY_COOPMAT_FP8
@@ -306,6 +310,52 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   if (hasExt("VK_KHR_portability_subset"))
     enabledExts.push_back("VK_KHR_portability_subset");
 #endif
+
+  // Subgroup width, and whether we may pin it per pipeline.  The
+  // cooperative-matrix shaders need one subgroup per work-group exactly --
+  // see coopmatRequiredSubgroupSize() in vk_peak.h.
+  self->info.subgroupSize = 0;
+  self->info.minSubgroupSize = 0;
+  self->info.maxSubgroupSize = 0;
+  self->info.subgroupSizeControl = false;
+  {
+    const bool hasSizeCtl = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+
+    VkPhysicalDeviceSubgroupProperties sgProps = {};
+    sgProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT sgCtlProps = {};
+    sgCtlProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT;
+    if (hasSizeCtl) sgProps.pNext = &sgCtlProps;
+
+    VkPhysicalDeviceProperties2 props2 = {};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &sgProps;
+    vkGetPhysicalDeviceProperties2(physDev, &props2);
+    self->info.subgroupSize = sgProps.subgroupSize;
+
+    if (hasSizeCtl && (sgCtlProps.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT))
+    {
+      VkPhysicalDeviceSubgroupSizeControlFeaturesEXT sgCtlFeatures = {};
+      sgCtlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT;
+      VkPhysicalDeviceFeatures2 feats2 = {};
+      feats2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      feats2.pNext = &sgCtlFeatures;
+      auto pfnFeat2 = (PFN_vkGetPhysicalDeviceFeatures2)
+          vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceFeatures2");
+      if (!pfnFeat2)
+        pfnFeat2 = (PFN_vkGetPhysicalDeviceFeatures2)
+            vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceFeatures2KHR");
+      if (pfnFeat2) pfnFeat2(physDev, &feats2);
+
+      if (sgCtlFeatures.subgroupSizeControl && sgCtlProps.minSubgroupSize > 0)
+      {
+        enabledExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+        self->info.subgroupSizeControl = true;
+        self->info.minSubgroupSize = sgCtlProps.minSubgroupSize;
+        self->info.maxSubgroupSize = sgCtlProps.maxSubgroupSize;
+      }
+    }
+  }
 
   if (hasExt("VK_EXT_calibrated_timestamps"))
   {
@@ -334,8 +384,25 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   deviceCI.enabledExtensionCount = (uint32_t)enabledExts.size();
   deviceCI.ppEnabledExtensionNames = enabledExts.empty() ? nullptr : enabledExts.data();
 
+  // Re-chain the feature structs for vkCreateDevice.  Enabling the extension
+  // is only half of it: every feature bit the shaders' SPIR-V capabilities
+  // depend on has to be requested here as well.  A capability whose feature
+  // was not enabled is invalid usage, and a driver is free to fault inside its
+  // shader compiler rather than fail cleanly -- coopmat_int8.comp alone needs
+  // Int8 + VulkanMemoryModel + CooperativeMatrixKHR.
+  VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
+  enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+  void *enabledChain = nullptr;
+
+  VkPhysicalDeviceSubgroupSizeControlFeaturesEXT sizeCtlFeatures = {};
+  sizeCtlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT;
+  if (self->info.subgroupSizeControl)
+  {
+    sizeCtlFeatures.subgroupSizeControl = VK_TRUE;
+    enabledChain = chainPNext(enabledChain, &sizeCtlFeatures);
+  }
+
 #if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1)
-  // Re-chain the feature structs we actually enabled for vkCreateDevice.
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
   f16i8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
@@ -357,21 +424,21 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
 #endif
 #endif
 
-  VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
-  enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-  void *enabledChain = nullptr;
 #ifdef VK_HAS_COMPUTE_DP_V1
   if (self->info.float64Supported)
     enabledFeatures2.features.shaderFloat64 = VK_TRUE;
 #endif
-  if (self->info.float16Supported || self->info.int8DotProductSupported)
+  if (self->info.float16Supported || self->info.int8Supported)
   {
+    f16i8Features.shaderFloat16 = self->info.float16Supported ? VK_TRUE : VK_FALSE;
+    f16i8Features.shaderInt8    = self->info.int8Supported    ? VK_TRUE : VK_FALSE;
     f16i8Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &f16i8Features);
   }
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
   if (self->info.int8DotProductSupported)
   {
+    dpFeatures.shaderIntegerDotProduct = VK_TRUE;
     dpFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &dpFeatures);
   }
@@ -379,6 +446,7 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
 #if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
   if (self->info.bfloat16Supported)
   {
+    bf16Features.shaderBFloat16Type = VK_TRUE;
     bf16Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &bf16Features);
   }
@@ -386,26 +454,34 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
 #ifdef VK_HAS_ANY_COOPMAT
   if (self->info.cooperativeMatrixSupported)
   {
+    coopmatFeatures.cooperativeMatrix = VK_TRUE;
     coopmatFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &coopmatFeatures);
+    // The coopmat shaders declare OpMemoryModel Vulkan; device scope is only
+    // requested when the device has it, since we never use it.
+    vmmFeatures.vulkanMemoryModel = VK_TRUE;
+    vmmFeatures.vulkanMemoryModelDeviceScope =
+        self->info.vulkanMemoryModelDeviceScopeSupported ? VK_TRUE : VK_FALSE;
     vmmFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &vmmFeatures);
   }
 #ifdef VK_HAS_ANY_COOPMAT_FP8
   if (self->info.fp8Supported)
   {
+    fp8Features.shaderFloat8 = VK_TRUE;
+    fp8Features.shaderFloat8CooperativeMatrix = VK_TRUE;
     fp8Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &fp8Features);
   }
 #endif
 #endif
-  bool haveBaseFeats = enabledFeatures2.features.shaderFloat64 != VK_FALSE;
-  if (enabledChain || haveBaseFeats)
+#endif
+
+  if (enabledChain || enabledFeatures2.features.shaderFloat64 != VK_FALSE)
   {
     enabledFeatures2.pNext = enabledChain;
     deviceCI.pNext = &enabledFeatures2;
   }
-#endif
 
   if (vkCreateDevice(physDev, &deviceCI, nullptr, &self->device) != VK_SUCCESS)
     return false;
@@ -514,7 +590,8 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
                                          VkDescriptorSetLayout dsLayout,
                                          VkPipelineLayout pipeLayout,
                                          VkPipeline &pipeline,
-                                         const VkSpecializationInfo *specInfo)
+                                         const VkSpecializationInfo *specInfo,
+                                         uint32_t requiredSubgroupSize)
 {
   VkShaderModuleCreateInfo smCI = {};
   smCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -531,6 +608,20 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   stageCI.module = shaderModule;
   stageCI.pName = "main";
   stageCI.pSpecializationInfo = specInfo;
+
+  // Pin the subgroup width when asked (and legal).  Without this the driver
+  // chooses -- Intel compiles the same shader SIMD8/16/32 depending on
+  // register pressure -- and a shader that assumes "one work-group is one
+  // subgroup" silently runs several subgroups per group instead.
+  VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT sgSizeCI = {};
+  sgSizeCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
+  if (requiredSubgroupSize && info.subgroupSizeControl &&
+      requiredSubgroupSize >= info.minSubgroupSize &&
+      requiredSubgroupSize <= info.maxSubgroupSize)
+  {
+    sgSizeCI.requiredSubgroupSize = requiredSubgroupSize;
+    stageCI.pNext = &sgSizeCI;
+  }
 
   VkComputePipelineCreateInfo pipelineCI = {};
   pipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;

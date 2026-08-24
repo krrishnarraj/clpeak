@@ -1,5 +1,6 @@
 #version 450
 #extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_GOOGLE_include_directive : require
 
 // Double-precision MAC: fp64 x fp64 + fp64.  Requires shaderFloat64.
 
@@ -13,20 +14,22 @@ layout(push_constant) uniform PushConstants {
     double A;
 } pc;
 
-// Chain shape and why: see the MAD chain block in include/common/common.h.
-#define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
-#define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+// Compiled twice -- squaring chain and affine chain -- and raced against
+// each other at run time.  See mad_chain.glsl, and the MAD chain block in
+// include/common/common.h for the rules both shapes obey.
+#define MAD_CHAINS 4
+#include "mad_chain.glsl"
 
 void main()
 {
-    double x = pc.A;
-    double c = double(gl_LocalInvocationID.x);
+    CHAIN_DECL(double, pc.A, double(gl_LocalInvocationID.x))
 
-    // 16 iters * 16 FMAs * 2 ops = 512 per WI (matches COMPUTE_DP_WORK_PER_WI).
+    // 16 iters * 16 FMAs * 2 ops = 512 per WI (COMPUTE_DP_WORK_PER_WI).
     for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, c)
+        MAD_16
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = x;
+    double r = CHAIN_RESULT;
+    outputBuf.data[gl_GlobalInvocationID.x] = r;
 }

@@ -1,0 +1,83 @@
+name: Set up ROCm
+description: >
+  Install the ROCm/HIP toolchain that src/rocm needs: the HIP runtime and
+  headers, hipcc (which AOT-compiles the kernels via --genco), and the optional
+  vendor libraries whose presence the build feature-detects.
+
+inputs:
+  windows-installer-url:
+    description: >
+      AMD Software PRO Edition "For HIP" installer to use on Windows.  There is
+      no versionless URL, so bumping the SDK means bumping this default.  AMD
+      publishes no Server 2025 build, which is why the Windows job pins a
+      windows-2022 runner.
+    required: false
+    default: https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-25.Q3-WinSvr2022-For-HIP.exe
+
+runs:
+  using: composite
+  steps:
+    - name: Install ROCm (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+        wget -O- https://repo.radeon.com/rocm/rocm.gpg.key \
+          | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest noble main" \
+          | sudo tee /etc/apt/sources.list.d/rocm.list
+        echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" \
+          | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          rocm-hip-runtime-dev hipcc rocblas-dev hipblaslt-dev rocwmma-dev
+
+    # Windows has no apt equivalent and AMD ships no standalone SDK archive:
+    # the HIP SDK arrives only inside the combined driver+SDK installer (~1.5 GB),
+    # which has to be run silently and then located, since it chooses its own
+    # versioned directory under Program Files.
+    #
+    # Deliberately not cached.  The installed tree is several GB, and a cache
+    # entry that size would keep evicting the Vulkan and Flutter caches that
+    # every other job in the matrix depends on -- the repo shares a 10 GB budget.
+    - name: Install ROCm (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $exe = Join-Path $env:RUNNER_TEMP 'amd-hip-sdk.exe'
+
+        Write-Host "Downloading ${{ inputs.windows-installer-url }}"
+        # Invoke-WebRequest's progress rendering costs minutes on a 1.5 GB file.
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri '${{ inputs.windows-installer-url }}' -OutFile $exe
+        Write-Host ("Downloaded {0:N0} bytes" -f (Get-Item $exe).Length)
+
+        # The installer reports success unreliably (it is the consumer driver
+        # bundle, and the driver half has nothing to bind to on a GPU-less
+        # runner), so its exit code is logged but not trusted -- the real check
+        # is whether hipcc exists afterwards.
+        $p = Start-Process -FilePath $exe -ArgumentList '-install' -NoNewWindow -Wait -PassThru
+        Write-Host "Installer exit code: $($p.ExitCode)"
+
+    - name: Locate the HIP SDK (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $base = 'C:\Program Files\AMD\ROCm'
+        # Version-aware sort, not lexical: "6.10" must outrank "6.4".
+        $root = Get-ChildItem $base -Directory -ErrorAction SilentlyContinue |
+                Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } -Descending |
+                Select-Object -First 1
+        if (-not $root) { throw "No HIP SDK found under $base after install" }
+
+        $hipcc = Get-ChildItem (Join-Path $root.FullName 'bin') -Filter 'hipcc*' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+        if (-not $hipcc) { throw "HIP SDK at $($root.FullName) has no hipcc in bin/" }
+
+        Write-Host "HIP SDK: $($root.FullName)  (hipcc: $($hipcc.Name))"
+        # HIP_PATH is what the root CMakeLists reads to find the SDK; bin/ goes
+        # on PATH so hipcc resolves its own sibling DLLs.
+        "HIP_PATH=$($root.FullName)" | Out-File -FilePath $env:GITHUB_ENV  -Append -Encoding utf8
+        "$($root.FullName)\bin"      | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8

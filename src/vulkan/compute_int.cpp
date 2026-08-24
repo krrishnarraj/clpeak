@@ -13,12 +13,15 @@
 int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size, vkWidthNote(1) },
+    { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size, vkWidthNote(1),
+      VK_ALT_SHADER(compute_int32_v1) },
 #ifdef VK_HAS_COMPUTE_INT32_V2
-    { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size, vkWidthNote(2) },
+    { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size, vkWidthNote(2),
+      VK_ALT_SHADER(compute_int32_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_INT32_V4
-    { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size, vkWidthNote(4) },
+    { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size, vkWidthNote(4),
+      VK_ALT_SHADER(compute_int32_v4) },
 #endif
   };
   int32_t A = 4;

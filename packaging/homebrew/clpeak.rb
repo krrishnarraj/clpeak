@@ -1,6 +1,6 @@
 # Why a git URL instead of a release tarball: clpeak derives its version from
 # `git describe` (src/common/cmake/version.cmake).  A GitHub source tarball has
-# no .git, so the build would fall back to a stale hardcoded version.  Passing
+# no .git, so the build would report its version as "unknown".  Passing
 # `tag:` makes Homebrew fetch that tag, so git-describe reports the real version.
 class Clpeak < Formula
   desc "Benchmark to measure peak compute, bandwidth, and latency of GPU/CPU devices"

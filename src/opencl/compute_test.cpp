@@ -70,40 +70,58 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, globalWIs * elemSize);
 
-    // Create kernels and set arguments
+    // Create kernels and set arguments.  Each width also looks for an
+    // affine-chain twin (compute_*_alt_v*, see kernels/mad_chain.cl); families
+    // that do not define one simply race nothing.
     cl::Kernel kernels[5];
+    cl::Kernel altKernels[5];
+    bool hasAlt[5] = {false, false, false, false, false};
     for (int w = 0; w < 5; w++)
     {
       std::string kname = kernelPrefix + suffixes[w];
       kernels[w] = cl::Kernel(prog, kname.c_str());
       kernels[w].setArg(0, outputBuf);
+      try
+      {
+        altKernels[w] = cl::Kernel(prog, (kernelPrefix + "_alt" + suffixes[w]).c_str());
+        altKernels[w].setArg(0, outputBuf);
+        hasAlt[w] = true;
+      }
+      catch (cl::Error &)
+      {
+        hasAlt[w] = false;
+      }
       // Arg 1: scalar constant -- type depends on the test
-      if (which == Benchmark::ComputeDP)
-      {
-        cl_double A = 1.3;
-        kernels[w].setArg(1, A);
-      }
-      else if (which == Benchmark::ComputeChar || which == Benchmark::ComputeInt8DP)
-      {
-        cl_char A = 4;
-        kernels[w].setArg(1, A);
-      }
-      else if (which == Benchmark::ComputeShort)
-      {
-        cl_short A = 4;
-        kernels[w].setArg(1, A);
-      }
-      else if (which == Benchmark::ComputeInt || which == Benchmark::ComputeIntFast)
-      {
-        cl_int A = 4;
-        kernels[w].setArg(1, A);
-      }
-      else
-      {
-        // SP and HP both take cl_float
-        cl_float A = 1.3f;
-        kernels[w].setArg(1, A);
-      }
+      auto setScalarArg = [&](cl::Kernel &k) {
+        if (which == Benchmark::ComputeDP)
+        {
+          cl_double A = 1.3;
+          k.setArg(1, A);
+        }
+        else if (which == Benchmark::ComputeChar || which == Benchmark::ComputeInt8DP)
+        {
+          cl_char A = 4;
+          k.setArg(1, A);
+        }
+        else if (which == Benchmark::ComputeShort)
+        {
+          cl_short A = 4;
+          k.setArg(1, A);
+        }
+        else if (which == Benchmark::ComputeInt || which == Benchmark::ComputeIntFast)
+        {
+          cl_int A = 4;
+          k.setArg(1, A);
+        }
+        else
+        {
+          // SP and HP both take cl_float
+          cl_float A = 1.3f;
+          k.setArg(1, A);
+        }
+      };
+      setScalarArg(kernels[w]);
+      if (hasAlt[w]) setScalarArg(altKernels[w]);
     }
 
     // Run each vector width. run_kernel clamps the local size to each kernel's
@@ -122,6 +140,30 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed / 1e3f;
 
+        // Race the affine chain and keep the faster reading.  A failure here
+        // is not an error: the squaring chain already produced one.
+        if (hasAlt[w])
+        {
+          try
+          {
+            float altTimed = run_kernel(queue, altKernels[w], globalSize, localSize,
+                                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+            float altThroughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / altTimed / 1e3f;
+            CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
+                        resultTag.c_str(), labels[w].c_str(), throughput,
+                        altThroughput, unit.c_str());
+            if (altThroughput > throughput * MAX_ALT_CHAIN_RATIO)
+              CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                          "compiler fold\n", resultTag.c_str(), labels[w].c_str(),
+                          altThroughput / throughput);
+            else if (altThroughput > throughput)
+              throughput = altThroughput;
+          }
+          catch (cl::Error &)
+          {
+          }
+        }
+
         test.emit(labels[w], throughput, {false, clWidthNote(widths[w])});
       }
       catch (cl::Error &error)
@@ -133,6 +175,20 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
   catch (cl::Error &error)
   {
+    // A missing kernel is a capability fact, not a failure: the device's
+    // OpenCL compiler declined to provide the builtin the kernel needs, so
+    // the whole family was preprocessed out.  int8_dp hits this on devices
+    // that advertise cl_khr_integer_dot_product and report the 4x8-bit
+    // capability but whose compiler defines neither the extension macro nor
+    // the OpenCL 3.0 feature macro.  Reporting five errors there is noise.
+    if (error.err() == CL_INVALID_KERNEL_NAME || error.err() == CL_INVALID_PROGRAM)
+    {
+      for (int w = 0; w < 5; w++)
+        test.skip(labels[w], ResultStatus::Unsupported,
+                  "device's OpenCL compiler did not build these kernels",
+                  clWidthNote(widths[w]));
+      return 0;
+    }
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
       test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));

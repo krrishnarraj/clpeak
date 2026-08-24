@@ -98,6 +98,73 @@ __kernel void compute_hp_v16(__global half *ptr, float _B)
     ptr[get_global_id(0)] = t.S0 + t.S1;
 }
 
+// ---- affine-chain variants (generated; see mad_chain.cl) ----
+
+__kernel void compute_hp_alt_v1(__global half *ptr, float _A)
+{
+    AF4_DECL(half, (half)_A, (half)get_local_id(0))
+
+    for (int i = 0; i < 128; i++)
+    {
+        AF4_16
+    }
+
+    half r = AF4_RES;
+    ptr[get_global_id(0)] = r;
+}
+
+__kernel void compute_hp_alt_v2(__global half *ptr, float _A)
+{
+    AF2_DECL(half2, (half2)((half)_A, ((half)_A + 1)), (half2)get_local_id(0))
+
+    for (int i = 0; i < 64; i++)
+    {
+        AF2_16
+    }
+
+    half2 r = AF2_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1;
+}
+
+__kernel void compute_hp_alt_v4(__global half *ptr, float _A)
+{
+    AF1_DECL(half4, (half4)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3)), (half4)get_local_id(0))
+
+    for (int i = 0; i < 32; i++)
+    {
+        AF1_16
+    }
+
+    half4 r = AF1_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+}
+
+__kernel void compute_hp_alt_v8(__global half *ptr, float _A)
+{
+    AF1_DECL(half8, (half8)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7)), (half8)get_local_id(0))
+
+    for (int i = 0; i < 16; i++)
+    {
+        AF1_16
+    }
+
+    half8 r = AF1_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+}
+
+__kernel void compute_hp_alt_v16(__global half *ptr, float _A)
+{
+    AF1_DECL(half16, (half16)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7), ((half)_A + 8), ((half)_A + 9), ((half)_A + 10), ((half)_A + 11), ((half)_A + 12), ((half)_A + 13), ((half)_A + 14), ((half)_A + 15)), (half16)get_local_id(0))
+
+    for (int i = 0; i < 8; i++)
+    {
+        AF1_16
+    }
+
+    half16 r = AF1_RES;
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF;
+}
+
 \n
 \n#endif      // half_AVAILABLE
 \n

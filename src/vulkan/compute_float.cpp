@@ -12,12 +12,15 @@
 int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size, vkWidthNote(1) },
+    { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size, vkWidthNote(1),
+      VK_ALT_SHADER(compute_sp_v1) },
 #ifdef VK_HAS_COMPUTE_SP_V2
-    { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size, vkWidthNote(2) },
+    { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size, vkWidthNote(2),
+      VK_ALT_SHADER(compute_sp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_SP_V4
-    { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size, vkWidthNote(4) },
+    { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size, vkWidthNote(4),
+      VK_ALT_SHADER(compute_sp_v4) },
 #endif
   };
   float A = 1.3f;
@@ -41,12 +44,15 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size, vkWidthNote(1) },
+    { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size, vkWidthNote(1),
+      VK_ALT_SHADER(compute_hp_v1) },
 #ifdef VK_HAS_COMPUTE_HP_V2
-    { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size, vkWidthNote(2) },
+    { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size, vkWidthNote(2),
+      VK_ALT_SHADER(compute_hp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V4
-    { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size, vkWidthNote(4) },
+    { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size, vkWidthNote(4),
+      VK_ALT_SHADER(compute_hp_v4) },
 #endif
   };
   float A = 1.3f;
@@ -73,12 +79,15 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
-    { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size, vkWidthNote(1) },
+    { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size, vkWidthNote(1),
+      VK_ALT_SHADER(compute_dp_v1) },
 #ifdef VK_HAS_COMPUTE_DP_V2
-    { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size, vkWidthNote(2) },
+    { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size, vkWidthNote(2),
+      VK_ALT_SHADER(compute_dp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V4
-    { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size, vkWidthNote(4) },
+    { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size, vkWidthNote(4),
+      VK_ALT_SHADER(compute_dp_v4) },
 #endif
   };
   double A = 1.3;
@@ -109,12 +118,15 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   // v4 = f16vec4  (wider packing; informs AMD/Intel where issue rate
   //                exceeds two lanes per slot).
   static const vk_compute_variant_t variants[] = {
-    { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size, vkWidthNote(1) },
+    { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size, vkWidthNote(1),
+      VK_ALT_SHADER(compute_mp_v1) },
 #ifdef VK_HAS_COMPUTE_MP_V2
-    { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size, vkWidthNote(2) },
+    { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size, vkWidthNote(2),
+      VK_ALT_SHADER(compute_mp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V4
-    { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size, vkWidthNote(4) },
+    { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size, vkWidthNote(4),
+      VK_ALT_SHADER(compute_mp_v4) },
 #endif
   };
   float A = 1.3f;
@@ -143,12 +155,15 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   // v1 / v2 / v4: same packing story as MP.  NVIDIA shader-core BF16
   // peaks at bf16vec2 via BMMA2-style packed multiply.
   static const vk_compute_variant_t variants[] = {
-    { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size, vkWidthNote(1) },
+    { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size, vkWidthNote(1),
+      VK_ALT_SHADER(compute_bf16_v1) },
 #ifdef VK_HAS_COMPUTE_BF16_V2
-    { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size, vkWidthNote(2) },
+    { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size, vkWidthNote(2),
+      VK_ALT_SHADER(compute_bf16_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V4
-    { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size, vkWidthNote(4) },
+    { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size, vkWidthNote(4),
+      VK_ALT_SHADER(compute_bf16_v4) },
 #endif
   };
   float A = 1.3f;

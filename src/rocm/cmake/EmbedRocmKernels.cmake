@@ -23,6 +23,39 @@
 
 set(_CLPEAK_EMBED_ROCM_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
+# Windows-only command prefix that runs hipcc with the MSVC environment's
+# include paths scrubbed; empty everywhere else.
+#
+# Clang honours the INCLUDE environment variable when it targets the MSVC
+# toolchain.  With INCLUDE set, HIP *device* compilation fails parsing MSVC's
+# own headers: vcruntime.h skips its uintptr_t typedef -- while intptr_t, two
+# lines above it in the same file, comes through fine -- and that cascades into
+# __clang_hip_math.h not seeing uint64_t and __clang_hip_cmath.h not seeing the
+# FP_* classification macros.
+#
+# What pins this on the environment rather than on the source or the arch list:
+# _clpeak_rocm_supported_archs() below compiles a kernel of the same shape as
+# the real ones (#include <hip/hip_runtime.h> plus an extern "C" __global__
+# function) and succeeds for every candidate arch -- but it runs through
+# execute_process() at configure time, where no MSVC environment is present.
+# The kernel compiles run inside MSBuild's custom-build step, which injects the
+# full MSVC environment.  Same compiler, same headers, same include chain; the
+# difference is INCLUDE.
+#
+# So emptying INCLUDE reproduces the environment the probe already proves works,
+# leaving clang to its own MSVC/Windows SDK detection.  EXTERNAL_INCLUDE goes
+# too, since clang also consults it for system headers.  Emptied rather than
+# unset because cmake -E env --unset needs CMake 3.24 and this project targets
+# 3.20.  Device-only compilation never links against host objects, so nothing
+# here can skew the ABI of what the build actually ships.
+function(_clpeak_hipcc_env_wrap out)
+  if(WIN32)
+    set(${out} "${CMAKE_COMMAND}" -E env "INCLUDE=" "EXTERNAL_INCLUDE=" PARENT_SCOPE)
+  else()
+    set(${out} "" PARENT_SCOPE)
+  endif()
+endfunction()
+
 # Probe once which gfx targets the installed hipcc accepts.  Result cached in a
 # global property so repeated embed calls don't re-run the trial compiles.
 function(_clpeak_rocm_supported_archs out)
@@ -39,10 +72,15 @@ function(_clpeak_rocm_supported_archs out)
   set(_probe "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe.hip")
   file(WRITE "${_probe}" "#include <hip/hip_runtime.h>\nextern \"C\" __global__ void p(){}\n")
 
+  # Same env scrubbing as the real compiles: without it, configuring from a
+  # Visual Studio developer prompt (where INCLUDE *is* set) would fail every
+  # probe and silently fall through to stub kernels for the whole backend.
+  _clpeak_hipcc_env_wrap(_wrap)
+
   set(_ok "")
   foreach(_a ${_candidates})
     execute_process(
-      COMMAND "${CLPEAK_HIPCC}" --genco --offload-arch=${_a}
+      COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco --offload-arch=${_a}
               -o "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe_${_a}.co" "${_probe}"
       RESULT_VARIABLE _r OUTPUT_QUIET ERROR_QUIET)
     if(_r EQUAL 0)
@@ -86,6 +124,8 @@ function(embed_rocm_kernels)
   file(MAKE_DIRECTORY "${_codir}" "${_gendir}")
   set(_embed "${_CLPEAK_EMBED_ROCM_DIR}/EmbedBin.cmake")
 
+  _clpeak_hipcc_env_wrap(_wrap)
+
   set(_gen_srcs "")
   foreach(_kn ${ER_KERNELS})
     set(_hip "${CMAKE_CURRENT_SOURCE_DIR}/rocm_kernels/${_kn}.hip")
@@ -98,7 +138,7 @@ function(embed_rocm_kernels)
       set(_co "${_codir}/${_kn}.co")
       add_custom_command(
         OUTPUT  "${_co}"
-        COMMAND "${CLPEAK_HIPCC}" --genco ${_flags} -O3 -o "${_co}" "${_hip}"
+        COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco ${_flags} -O3 -o "${_co}" "${_hip}"
         DEPENDS "${_hip}"
         COMMENT "hipcc --genco ${_kn}.hip"
         VERBATIM)

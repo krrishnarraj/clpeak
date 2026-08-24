@@ -90,6 +90,16 @@ See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
 - `joint_matrix.cpp`: `emitJm()` takes the note next to the metric.
 - `onemkl.cpp` threads a `note` next to `label` through `measure()`.
 
+## Chain shapes
+
+`runFpWidth` and `runIntWidth` each submit two kernels -- the squaring chain
+and a second shape -- and report the faster.  Float families use an affine
+chain, integer families a rotating one, because an integer affine recurrence
+folds legally and one compiler in the fleet folds it.  This backend runs on
+Intel GPUs, where the squaring chain alone reports half rate on Alchemist.
+Each shape needs its own SYCL kernel-name type.  Why: the MAD chain block in
+`include/common/common.h`.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate file + update `CMakeLists.txt` + this file.
