@@ -175,7 +175,7 @@ it resolves which engine actually ran the work. Reference readings, M1 Pro:
 | CPU EP | 0.0 ppm | 207 ppm | 9463 ppm |
 | CoreML EP | 0.4 ppm | 214 ppm | (unsupported) |
 | CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 9467 ppm |
-| TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | (unsupported) |
+| TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | 9463 ppm |
 | CPU EP (Zen 2) | 0.0 ppm | 207 ppm | **178926 ppm** |
 
 The CUDA fp32 row is the design paying off on a second vendor: 261 ppm is
@@ -185,10 +185,17 @@ ten mantissa bits, the same as fp16 — which cuBLAS selects by default. The
 error row says so.
 
 TensorRT is the clearest case of the row earning its place. It runs fp16 at
-66.6 TFLOPS against the CUDA EP's 40.1 on the same card — and its fp16 error
-is 1185 ppm against 207. It is 66% faster and nearly six times less accurate,
+66.2 TFLOPS against the CUDA EP's 40.2 on the same card — and its fp16 error
+is 1185 ppm against 207. It is 65% faster and nearly six times less accurate,
 because it accumulates in fp16 where cuBLAS accumulates in fp32. Neither
 number alone is the story; the pair is.
+
+The same two providers on int8 make the other half of the argument. TensorRT
+reaches **125 TOPS**, 1.9x its own fp16 rate, which is what int8 tensor cores
+are for. The CUDA EP reports nothing at all, because it never fuses a
+quantized matmul — it dequantizes and multiplies in floating point. One card,
+one graph, and a five-fold difference that depends entirely on which runtime
+was asked.
 
 The Zen 2 int8 row is the other half of the argument for measuring accuracy
 at all. That CPU fuses the quantized matmul happily and runs it at 1.3 TOPS —

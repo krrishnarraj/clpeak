@@ -277,11 +277,12 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // of constant folding's reach without disabling anything, and ONNX Runtime
   // is happy with it: QLinearMatMul takes its scales as inputs.  TensorRT is
   // not.  It bakes quantization into the engine at build time, and a scale it
-  // cannot see until the run means it cannot commit to integer arithmetic --
-  // which showed as an int8 rate of 20 TOPS, indistinguishable from the same
-  // card's fp32 and a third of its fp16.  Constant scales cost a disabled
-  // optimizer (see `keepConstantsUnfolded`) and buy an engine that can
-  // actually use the hardware.
+  // cannot see until the run means it cannot commit to integer arithmetic.
+  // On an RTX 5060 that showed as 20 TOPS -- indistinguishable from the same
+  // card's fp32 and a third of its fp16.  With constant scales the same test
+  // reads 125 TOPS, 1.9x the fp16 rate, which is what int8 tensor cores are
+  // supposed to do.  The cost is one disabled optimizer, see
+  // `keepConstantsUnfolded`.
   g.input("S", ONNX_DT_FLOAT, {});
   g.initializer("A_q",     actDtype, {M, K}, aRaw);
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
