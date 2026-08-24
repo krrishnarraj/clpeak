@@ -105,8 +105,20 @@ jobs:
             oneapi: true
             cmake_args: -DCMAKE_CXX_COMPILER=icpx
 
+          # windows-2022, not windows-latest: MSVC's STL began enforcing P2652R2
+          # ("Disallowing User Specialization Of allocator_traits") via a
+          # clang-only [[_Clang::__no_specializations__]] attribute, and Intel's
+          # SYCL headers specialize allocator_traits for their own
+          # aligned_allocator -- exactly what that rule now forbids. icx is
+          # clang-based, so it enforces the attribute; real cl.exe doesn't.
+          # windows-latest rolled to VS2026 (MSVC 14.51, which has the
+          # enforcement) while this was written; windows-2022 is confirmed (from
+          # the ROCm row's own CI logs) to still carry MSVC 14.44, from before
+          # it landed. Same class of problem as the ROCm row above, same fix:
+          # pin the runner instead of floating on whatever windows-latest
+          # becomes next.
           - name: Windows x64 oneAPI
-            runner: windows-latest
+            runner: windows-2022
             artifact: clpeak-windows-x86_64-oneapi
             binary: build/clpeak.exe
             suffix: oneapi
