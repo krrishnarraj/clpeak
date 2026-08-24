@@ -23,6 +23,39 @@
 
 set(_CLPEAK_EMBED_ROCM_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
+# Windows-only command prefix that runs hipcc with the MSVC environment's
+# include paths scrubbed; empty everywhere else.
+#
+# Clang honours the INCLUDE environment variable when it targets the MSVC
+# toolchain.  With INCLUDE set, HIP *device* compilation fails parsing MSVC's
+# own headers: vcruntime.h skips its uintptr_t typedef -- while intptr_t, two
+# lines above it in the same file, comes through fine -- and that cascades into
+# __clang_hip_math.h not seeing uint64_t and __clang_hip_cmath.h not seeing the
+# FP_* classification macros.
+#
+# What pins this on the environment rather than on the source or the arch list:
+# _clpeak_rocm_supported_archs() below compiles a kernel of the same shape as
+# the real ones (#include <hip/hip_runtime.h> plus an extern "C" __global__
+# function) and succeeds for every candidate arch -- but it runs through
+# execute_process() at configure time, where no MSVC environment is present.
+# The kernel compiles run inside MSBuild's custom-build step, which injects the
+# full MSVC environment.  Same compiler, same headers, same include chain; the
+# difference is INCLUDE.
+#
+# So emptying INCLUDE reproduces the environment the probe already proves works,
+# leaving clang to its own MSVC/Windows SDK detection.  EXTERNAL_INCLUDE goes
+# too, since clang also consults it for system headers.  Emptied rather than
+# unset because cmake -E env --unset needs CMake 3.24 and this project targets
+# 3.20.  Device-only compilation never links against host objects, so nothing
+# here can skew the ABI of what the build actually ships.
+function(_clpeak_hipcc_env_wrap out)
+  if(WIN32)
+    set(${out} "${CMAKE_COMMAND}" -E env "INCLUDE=" "EXTERNAL_INCLUDE=" PARENT_SCOPE)
+  else()
+    set(${out} "" PARENT_SCOPE)
+  endif()
+endfunction()
+
 # Probe once which gfx targets the installed hipcc accepts.  Result cached in a
 # global property so repeated embed calls don't re-run the trial compiles.
 function(_clpeak_rocm_supported_archs out)
@@ -39,10 +72,15 @@ function(_clpeak_rocm_supported_archs out)
   set(_probe "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe.hip")
   file(WRITE "${_probe}" "#include <hip/hip_runtime.h>\nextern \"C\" __global__ void p(){}\n")
 
+  # Same env scrubbing as the real compiles: without it, configuring from a
+  # Visual Studio developer prompt (where INCLUDE *is* set) would fail every
+  # probe and silently fall through to stub kernels for the whole backend.
+  _clpeak_hipcc_env_wrap(_wrap)
+
   set(_ok "")
   foreach(_a ${_candidates})
     execute_process(
-      COMMAND "${CLPEAK_HIPCC}" --genco --offload-arch=${_a}
+      COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco --offload-arch=${_a}
               -o "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe_${_a}.co" "${_probe}"
       RESULT_VARIABLE _r OUTPUT_QUIET ERROR_QUIET)
     if(_r EQUAL 0)
@@ -74,29 +112,6 @@ function(embed_rocm_kernels)
   foreach(_a ${_final})
     list(APPEND _flags "--offload-arch=${_a}")
   endforeach()
-  if(WIN32)
-    # Windows-only: ROCm 6.4's bundled clang (20, ~April 2025) mishandles a
-    # sufficiently new MSVC install (observed: 14.44 / VS 17.14, from mid-2025)
-    # during HIP device compilation.  vcruntime.h skips its uintptr_t typedef
-    # (intptr_t, defined two lines above it in the same file, comes through
-    # fine) -- "unknown type name 'uintptr_t'" -- which cascades into
-    # __clang_hip_math.h/__clang_hip_cmath.h ("unknown type name 'uint64_t'",
-    # "undeclared identifier 'FP_NAN'") once those also can't see the stdint
-    # types.  It reproduces on real kernels (multiple --offload-arch in one
-    # genco invocation) but not on the single-arch trial compiles in
-    # _clpeak_rocm_supported_archs() above, so the probe alone can't detect it.
-    #
-    # Telling clang to *claim* an older, long-established MSVC version steers
-    # vcruntime.h down the branch clang has actually been validated against,
-    # without requiring a different Visual Studio install on the runner.
-    # Device-only compilation (--cuda-device-only, no host link) means this
-    # can't skew ABI/mangling for anything this build actually links.
-    #
-    # Best-effort mitigation, not a confirmed upstream root cause: bump (or
-    # drop) this if a future ROCm Windows release no longer needs it, or if a
-    # newer runner MSVC breaks in some other way this doesn't cover.
-    list(APPEND _flags "-fms-compatibility-version=19.40")
-  endif()
   if(ER_CXX17)
     list(APPEND _flags "-std=c++17")
   endif()
@@ -108,6 +123,8 @@ function(embed_rocm_kernels)
   set(_gendir "${CMAKE_CURRENT_BINARY_DIR}/rocm_kernels_gen")
   file(MAKE_DIRECTORY "${_codir}" "${_gendir}")
   set(_embed "${_CLPEAK_EMBED_ROCM_DIR}/EmbedBin.cmake")
+
+  _clpeak_hipcc_env_wrap(_wrap)
 
   set(_gen_srcs "")
   foreach(_kn ${ER_KERNELS})
@@ -121,7 +138,7 @@ function(embed_rocm_kernels)
       set(_co "${_codir}/${_kn}.co")
       add_custom_command(
         OUTPUT  "${_co}"
-        COMMAND "${CLPEAK_HIPCC}" --genco ${_flags} -O3 -o "${_co}" "${_hip}"
+        COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco ${_flags} -O3 -o "${_co}" "${_hip}"
         DEPENDS "${_hip}"
         COMMENT "hipcc --genco ${_kn}.hip"
         VERBATIM)

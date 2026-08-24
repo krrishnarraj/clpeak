@@ -138,10 +138,10 @@ runs:
         # still shows why instead of being swallowed by a redirect to nul.
         $marker = '___CLPEAK_SETVARS_DONE___'
         $lines  = @(cmd /c "call `"$setvars`" 2>&1 && echo $marker && set")
-        # Trimmed comparison, not [Array]::IndexOf($lines, $marker): cmd's
-        # CRLF output can leave a stray trailing character (seen in practice --
-        # setvars ran and printed the marker, but exact equality still missed
-        # it and the step threw "setvars.bat failed" over a run that hadn't).
+        # Trimmed comparison, not [Array]::IndexOf($lines, $marker), which needs
+        # exact equality: cmd's `echo X && set` echoes the space *before* the
+        # &&, so the marker line arrives as "$marker " and exact matching missed
+        # it -- failing the step over a setvars run that had actually succeeded.
         $idx = -1
         for ($i = 0; $i -lt $lines.Count; $i++) {
           if ($lines[$i].Trim() -eq $marker) { $idx = $i; break }
