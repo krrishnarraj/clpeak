@@ -82,9 +82,19 @@ const Size kSizes[] = {
    "512 MB, meaning a cache larger than anything current."},
 };
 
-// A rung is only worth trying if the one before it was still meaningfully
-// faster; once the curve flattens, main memory has been found.
+// A rung beyond the base three is only worth trying if the one before it was
+// still meaningfully faster; once the curve flattens, main memory has been
+// found.
 constexpr double kFallingRatio = 0.9;
+
+// The first three rungs always run.  The stop rule reads a flat curve as
+// "main memory reached", which is true when the operation is limited by
+// memory and false when it is limited by arithmetic -- and a provider slow
+// enough for the latter is exactly the one whose curve is flat from the
+// start.  A stock CPU build of ONNX Runtime 1.30 runs this at 2.2 GB/s at
+// every size, and stopping after two rungs would have dropped the only
+// reading taken at a size no cache could hold.
+constexpr size_t kAlwaysMeasured = 3;
 
 // One matrix-vector product against a square fp16 weight matrix.
 std::string streamModel(int64_t d)
@@ -215,7 +225,10 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "fitting in the device's fast local memory; past that point its "
        "weights come from main memory on every single token.  The fixed cost "
        "of handing work to the device is measured separately and subtracted, "
-       "so these are transfer rates rather than round-trip times."});
+       "so these are transfer rates rather than round-trip times.  A rate "
+       "that is flat across every size, and low, means the provider is "
+       "limited by its own arithmetic rather than by memory -- read it as "
+       "what this provider can stream, not as what the memory could do."});
 
   // The floor first: every rung is reported net of it.
   Result floor = measure(rt, ep, kFloorDim, warmupCount, forceIters,
@@ -226,14 +239,17 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   double prevGbps = 0.0;
   bool   stillFalling = true;
+  size_t index = 0;
   for (const Size &s : kSizes)
   {
+    const size_t rung = index++;
     if (clpeak::cancelRequested())
       break;
 
-    // Stop once the curve has flattened: the rungs above only exist for
-    // devices whose caches are larger than the ones below.
-    if (prevGbps > 0.0 && !stillFalling)
+    // Stop once the curve has flattened, but only past the base rungs: those
+    // exist for devices whose caches are larger, while the base three are
+    // what every reading is compared against.
+    if (rung >= kAlwaysMeasured && prevGbps > 0.0 && !stillFalling)
     {
       CLPEAK_VLOG("onnx-tensor-bw[%s]: rate flattened, stopping below %s\n",
                   ep.providerKey.c_str(), s.label);
