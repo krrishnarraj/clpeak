@@ -288,9 +288,16 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
-  g.node("ReduceMax",        {"C_q"}, {"R_q"},
+  // Dequantize before reducing, not after.  Reducing the quantized result
+  // directly saves a pass over it and ONNX Runtime accepts it, but it is not
+  // the shape a quantized graph normally takes -- a QuantizeLinear is
+  // followed by a DequantizeLinear -- and TensorRT rejects the short version
+  // outright: "Node n4 cannot be quantized by n3.  You might want to add a DQ
+  // node before n4."  The standard pattern costs one full-width pass, about a
+  // fifth of the measured rate, and is what real quantized layers do anyway.
+  g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C_d"});
+  g.node("ReduceMax",        {"C_d"}, {"Y"},
          {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
-  g.node("DequantizeLinear", {"R_q", "c_scale", "c_zp"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
 }

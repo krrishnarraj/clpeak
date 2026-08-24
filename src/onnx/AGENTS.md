@@ -257,9 +257,13 @@ Three details are load-bearing:
   takes its axes as an attribute while `ReduceSum` takes them as an input.)
 - **Nothing may sit between the dequantize and the matmul** in the QDQ form,
   or ORT stops recognising a quantized matmul and silently measures float
-  arithmetic. The scaling input therefore hangs off the far end, and the
-  reduction runs on the int8 result — ORT reduces int8 directly, so the tail
-  costs one pass instead of dequantizing the whole product first.
+  arithmetic. The scaling input therefore hangs off the far end.
+- **The output quantize must be followed by a dequantize.** Reducing the
+  quantized result directly saves a full-width pass and ORT accepts it, but
+  TensorRT refuses to build: *"Node n4 cannot be quantized by n3. You might
+  want to add a DQ node before n4."* The standard Q-then-DQ shape costs about
+  a fifth of the measured rate and is what a real quantized layer does, so it
+  is what the model uses.
 
 `onnx-block` is built the same way — activations are a constant scaled by a
 runtime scalar, result reduced to one row. Scaling by a runtime value keeps
