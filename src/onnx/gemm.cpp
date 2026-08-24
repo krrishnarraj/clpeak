@@ -512,8 +512,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   ep.providerKey.c_str(), v.label, firstUs,
                   (long long)firstDim, lastUs, (long long)lastDim);
       best      = 0.0;
-      firstErr  = "constant folding was not disabled; timings do not scale "
-                  "with problem size";
+      firstErr  = "this runtime folded the operands at load time: it accepted "
+                  "the request to disable constant folding and ignored it, "
+                  "which ONNX Runtime did before about 1.18, so the timings "
+                  "do not scale with the problem size and mean nothing";
       errStatus = ResultStatus::Error;
     }
 

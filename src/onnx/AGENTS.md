@@ -177,6 +177,13 @@ it resolves which engine actually ran the work. Reference readings, M1 Pro:
 | CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 9467 ppm |
 | TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | 9463 ppm |
 | CPU EP (Zen 2) | 0.0 ppm | 207 ppm | **178926 ppm** |
+| DirectML (RTX 5060) | **0.6 ppm** | 1185 ppm | 9443 ppm |
+
+DirectML is the control that shows the fp32 rows are reading something real:
+0.6 ppm on the same card where CUDA and TensorRT both report 261. It computes
+fp32 in fp32 where they substitute TF32, and it accumulates fp16 in fp16 like
+TensorRT does. Three providers, one GPU, three different arithmetic choices —
+none of them stated anywhere but here.
 
 The CUDA fp32 row is the design paying off on a second vendor: 261 ppm is
 worse than fp16's, which is not what fp32 arithmetic looks like. It is TF32 —
@@ -274,6 +281,22 @@ Three details are load-bearing:
   to make, and it would quietly turn the matrix multiply into a matrix-vector
   one. Max does not distribute over the product. (At opset 17 `ReduceMax`
   takes its axes as an attribute while `ReduceSum` takes them as an input.)
+- **The runtime scalar scales the result, not an operand.** That leaves the
+  matmul a product of two constants, so the graph is correct only while
+  constant folding stays disabled — and ONNX Runtime before about 1.18
+  accepts `optimization.disable_specified_optimizers` and ignores it. It then
+  folds the multiply at load time and the timed phase measures an empty
+  graph: 6789 TFLOPS on an RTX 5060 through DirectML, 183000 on its CPU. The
+  scaling guard in `gemm.cpp` catches exactly this and reports an error.
+
+  Scaling an *operand* instead would make the graph unfoldable outright, and
+  it was tried. It cannot be used: **the CPU provider has no fp16 kernel for
+  the multiply**, so it inserts a `Cast` and runs the whole matmul in fp32 —
+  the half-precision row came back equal to the single-precision one, 0.41
+  against 0.40, measuring the wrong arithmetic entirely. A guarded fold beats
+  a silent upcast. Adding any elementwise op to a half-precision graph risks
+  this; check the executed kernels for a `Cast` before believing an
+  improvement.
 - **Every quantization scale is a build-time constant.** Supplying the
   activation scale as a runtime input is tidier — it keeps the dequantize out
   of constant folding's reach with no optimizer disabled — and ONNX Runtime

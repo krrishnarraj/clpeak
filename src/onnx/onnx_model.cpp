@@ -235,7 +235,19 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                     const std::string &bRaw)
 {
   OnnxGraph g;
-  g.input("S", dtype, {});                       // scalar: keeps the graph live
+  // The runtime scalar multiplies the *result*, leaving the matmul itself a
+  // product of two constants -- so this graph runs correctly only while
+  // constant folding stays disabled, and ONNX Runtime 1.17 accepts the
+  // request to disable it and ignores it.  gemm.cpp guards against that by
+  // checking the timings scale with the problem size.
+  //
+  // Scaling an operand instead would make the graph unfoldable outright, and
+  // that was tried.  It cannot be used: the CPU provider has no fp16 kernel
+  // for the multiply, so it inserts a Cast and carries out the whole matmul
+  // in fp32 -- the half-precision row came back equal to the single-precision
+  // one, measuring the wrong arithmetic entirely.  A guarded fold beats a
+  // silent upcast.
+  g.input("S", dtype, {});
   g.initializer("A", dtype, {M, K}, aRaw);
   g.initializer("B", dtype, {K, N}, bRaw);
 
