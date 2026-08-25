@@ -358,6 +358,15 @@ int vkPeak::runAll()
           logPickedTile("fp8e4m3", dev.info.coopmatFP8E4M3);
           logPickedTile("fp8e5m2", dev.info.coopmatFP8E5M2);
           logPickedTile("int8",    dev.info.coopmatINT8);
+          // The width the coopmat shaders will be pinned to, and the range the
+          // device allows.  A tile whose M*N is only 64 spreads 2 accumulator
+          // elements over a 32-wide subgroup, which is a shape far fewer
+          // drivers see than NVIDIA's 16x16 at the same width.
+          CLPEAK_VLOG("  subgroup: pinning %u (device reports %u, range %u..%u,"
+                      " size control %s)\n",
+                      coopmatRequiredSubgroupSize(dev.info), dev.info.subgroupSize,
+                      dev.info.minSubgroupSize, dev.info.maxSubgroupSize,
+                      dev.info.subgroupSizeControl ? "yes" : "no");
         }
       }
     }
