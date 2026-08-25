@@ -247,7 +247,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0, true);
     if (us <= 0.0f)
     {
       test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",

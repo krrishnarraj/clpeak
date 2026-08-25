@@ -150,6 +150,7 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
                         VkDescriptorSet descriptorSet,
                         uint32_t groupCountX,
                         unsigned int targetTimeUsLocal, unsigned int forcedIters,
+                        bool serialize,
                         const void *pushData, uint32_t pushSize)
 {
   // Allocate command buffer
@@ -173,8 +174,27 @@ float vkPeak::runKernel(VulkanDevice &dev, VkPipeline pipeline,
     vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &descriptorSet, 0, nullptr);
     if (pushData && pushSize > 0)
       vkCmdPushConstants(cmdBuf, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
+    // Vulkan lets consecutive vkCmdDispatch calls with no declared dependency
+    // overlap, and NVIDIA does overlap them.  For the bandwidth tests that puts
+    // two passes over the same buffer or image in flight at once, walking it in
+    // the same order, so the trailing pass reads from cache rather than memory
+    // and the "every element is read exactly once" premise the byte count rests
+    // on no longer holds.  CUDA and OpenCL cannot hit this -- one stream and an
+    // in-order queue both serialise -- which is a large part of why Vulkan is
+    // the odd one out on image bandwidth.  Barrier between dispatches where the
+    // caller asks for it; see the runKernel comment in vk_peak.h.
+    VkMemoryBarrier memBarrier = {};
+    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
     for (unsigned int i = 0; i < n; i++)
+    {
+      if (serialize && i > 0)
+        vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                             1, &memBarrier, 0, nullptr, 0, nullptr);
       vkCmdDispatch(cmdBuf, groupCountX, 1, 1);
+    }
     vkEndCommandBuffer(cmdBuf);
 
     auto start = std::chrono::high_resolution_clock::now();

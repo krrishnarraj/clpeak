@@ -315,11 +315,19 @@ private:
   // calibrated from a one-shot warmup so the timed phase lands at
   // ~targetTimeUs.  Returns mean per-iter time in microseconds.  forcedIters
   // != 0 short-circuits calibration (matches --iters).
+  //
+  // serialize inserts a shader-memory barrier between the batched dispatches.
+  // The bandwidth tests need it: their byte count assumes one pass over the
+  // buffer or image, and Vulkan otherwise lets consecutive dispatches overlap,
+  // putting two passes over the same data in flight at once.  The compute
+  // tests pass false -- nothing there is read twice, so the barrier would only
+  // cost them the tail overlap between dispatches (~2% of the peak).
   float runKernel(VulkanDevice &dev, VkPipeline pipeline,
                   VkPipelineLayout pipeLayout,
                   VkDescriptorSet descriptorSet,
                   uint32_t groupCountX,
                   unsigned int targetTimeUs, unsigned int forcedIters,
+                  bool serialize,
                   const void *pushData = nullptr, uint32_t pushSize = 0);
 
   // Shared implementation of the single-buffer compute-peak pattern

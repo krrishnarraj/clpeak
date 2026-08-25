@@ -184,9 +184,12 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     }
     if (!*built) return -1.0f;
 
+    // No barrier between dispatches: a compute peak reads nothing twice, so
+    // overlapping launches cannot flatter it, and forbidding the overlap costs
+    // ~2% of the reading.
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
                             cfg.targetTimeUs, forceIters ? specifiedIters : 0,
-                            d.pushData, d.pushSize);
+                            false, d.pushData, d.pushSize);
     vkDestroyPipeline(dev.device, pipeline, nullptr);
     return timed;
   };
