@@ -331,8 +331,12 @@ bool cancelRequested();
 void resetCancel();
 }
 
-// Gated stderr diagnostic — no-op unless --verbose was passed.
+// Gated stderr diagnostic — no-op unless --verbose was passed.  Flushed, so the
+// last line printed before a driver-side crash is actually on screen: --verbose
+// is the only tool we have for locating a fault inside someone else's shader
+// compiler, and a buffered line would be the one that mattered.
 #define CLPEAK_VLOG(...) \
-    do { if (::clpeak::verboseEnabled()) fprintf(stderr, __VA_ARGS__); } while (0)
+    do { if (::clpeak::verboseEnabled()) { fprintf(stderr, __VA_ARGS__); \
+                                           fflush(stderr); } } while (0)
 
 #endif  // COMMON_H

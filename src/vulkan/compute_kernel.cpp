@@ -163,9 +163,19 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Time one shader, returning microseconds per dispatch (<= 0 on failure).
   // *built distinguishes "the driver rejected the stage" from "the dispatch
   // failed", which the caller reports differently.
+  CLPEAK_VLOG("%s: %u groups x %u threads, %llu KB output buffer\n",
+              d.resultTag, numGroups, wgSize,
+              (unsigned long long)(bufferBytes / 1024));
+
+  // Phase markers.  A driver that faults inside its own shader compiler or on
+  // submit takes the process with it, so the last line printed is the only
+  // evidence of where it went -- which of the two below appears last says
+  // whether pipeline creation or the dispatch was fatal.
   auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
                        bool *built) -> float {
     VkPipeline pipeline;
+    CLPEAK_VLOG("%s: creating pipeline (subgroup %u)\n",
+                d.resultTag, d.requiredSubgroupSize);
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                        pipeline, d.specInfo, d.requiredSubgroupSize);
     // A pinned subgroup width is a preference, not a requirement: if the
@@ -184,6 +194,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     }
     if (!*built) return -1.0f;
 
+    CLPEAK_VLOG("%s: pipeline built, dispatching\n", d.resultTag);
     // No barrier between dispatches: a compute peak reads nothing twice, so
     // overlapping launches cannot flatter it, and forbidding the overlap costs
     // ~2% of the reading.
