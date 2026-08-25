@@ -75,6 +75,19 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // Unlike the MAD chains, neither walk can flatter the result and no ratio guard
 // is needed: both read every pixel exactly once, so the byte count is identical
 // and only the access order differs.
+//
+// Global bandwidth does NOT race, and that is deliberate.  OpenCL carries two
+// shapes -- `_local_offset`, where each work-group owns a contiguous
+// FETCH_PER_WI*local_size block, and `_global_offset`, a grid-stride sweep --
+// and reports the faster; the other five backends implement the local-offset
+// one alone.  Measured across an RTX 5060, pocl and Intel OpenCL on a
+// Threadripper, and an M1 Pro, grid-stride never wins by more than 0.6% (all of
+// it on the 5060, at or below run-to-run noise) while local-offset is up to
+// 9.5% ahead on the CPU runtimes.  So the shape every backend already has is
+// the one that wins where it matters, and porting the twin to the other five
+// would double their global-bandwidth budget to chase 0.6%.  The OpenCL race
+// stays as the canary: --verbose prints both rates, and if a device ever shows
+// grid-stride ahead by a real margin, that is the signal to port it.
 
 // ---------------------------------------------------------------------------
 // The MAD chain, shared by every compute kernel in every backend
