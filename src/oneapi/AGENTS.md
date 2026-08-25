@@ -32,7 +32,7 @@ build time and the SYCL runtime JITs it on first launch.
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeGflops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
 | `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`), `runComputeInt8DP` (DP4a-style `int8_dp/dp2/dp4/dp8` ILP-chain variants with accumulator feedback — see note) |
-| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). FP category emits `joint_matrix_bf16`/`_fp16`/`_tf32`; int category emits `joint_matrix_int8`. Every variant is gated at runtime by `jmComboSupport()` against the device's `matrix_combinations` table, so an unsupported shape/type records a clean `Unsupported` row instead of a launch error |
+| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). The row list is **derived from the device's `matrix_combinations` table**, not hardcoded: one row per advertised (A, B, accumulator) type triple and tile shape, split into the FP and int categories by accumulator type. `CLPEAK_JM_SHAPES` is the compiled (M,N) set — joint_matrix needs the tile at compile time — and an advertised shape outside it records an `Unsupported` row naming the shape. Row names come from `jmBaseName()`: bare dtype (`joint_matrix_bf16`, `_fp16`, `_tf32`, `_int8`) for the first tile of each dtype, `_MxNxK` suffix for any further tile of the same dtype |
 | `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 via `gemm_bias` (tops). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
@@ -73,7 +73,14 @@ Gates:
   the kernel's own element type.
 - **Intel XMX needs the `joint_matrix` B operand in `layout::ext_intel_packed`**
   (VNNI). A `row_major` B is rejected at launch on Xe-HPG (Arc/DG2) as an
-  unsupported combination. Prefer probing `jmComboSupport()` before launching.
+  unsupported combination. Launch only tile shapes the device's
+  `matrix_combinations` table advertises.
+- **A work-group is not one sub-group on Intel**, so per-sub-group ops
+  accounting cannot assume it is. `reqd_sub_group_size` cannot pin it (IGC
+  internal compiler error on DG2), and IGC may compile a 32-wide work-group as
+  four SIMD8 sub-groups, each running the whole chain. `joint_matrix.cpp`
+  measures the real count in-kernel and reports it back — read
+  `JM_SG_COUNT_NOTE` there before writing another sub-group-collective test.
 
 ## Test documentation
 
@@ -87,7 +94,8 @@ See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
   function.  Both helpers live in `oneapi_peak.h`.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are chains, not widths** — hence the separate
   `oneapiChainNote()`.
-- `joint_matrix.cpp`: `emitJm()` takes the note next to the metric.
+- `joint_matrix.cpp`: `jmNote()` composes each row's note from its dtype pair
+  and tile shape, so a row documents the shape it actually ran.
 - `onemkl.cpp` threads a `note` next to `label` through `measure()`.
 
 ## Chain shapes
