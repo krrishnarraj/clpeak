@@ -267,7 +267,29 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     }
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix && vmmFeatures.vulkanMemoryModel)
+    // Cooperative matrix is per-stage: a device may advertise the extension
+    // and still not allow the instructions in compute
+    // (VUID-RuntimeSpirv-cooperativeMatrixSupportedStages-08985).  Every
+    // coopmat shader here is a compute shader, so a device without the compute
+    // bit has no usable coopmat at all.
+    bool coopmatInCompute = false;
+    if (hasCoopmatExt)
+    {
+      VkPhysicalDeviceCooperativeMatrixPropertiesKHR cmProps = {};
+      cmProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+      VkPhysicalDeviceProperties2 cmProps2 = {};
+      cmProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      cmProps2.pNext = &cmProps;
+      vkGetPhysicalDeviceProperties2(physDev, &cmProps2);
+      coopmatInCompute =
+          (cmProps.cooperativeMatrixSupportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
+      if (!coopmatInCompute)
+        CLPEAK_VLOG("Vulkan: cooperative matrix is advertised but not for the "
+                    "compute stage (stages=0x%x); skipping every coopmat row\n",
+                    cmProps.cooperativeMatrixSupportedStages);
+    }
+    if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix &&
+        vmmFeatures.vulkanMemoryModel && coopmatInCompute)
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       self->info.cooperativeMatrixSupported = true;

@@ -170,10 +170,18 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                                        pipeline, d.specInfo, d.requiredSubgroupSize);
     // A pinned subgroup width is a preference, not a requirement: if the
     // driver won't compile the stage at that width, run it however it likes
-    // rather than dropping the row.
+    // rather than dropping the row.  Worth knowing about, though -- a coopmat
+    // shader that lands on several subgroups per work-group has every one of
+    // them recompute the same tile, so the reading comes out divided by that
+    // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).
     if (!*built && d.requiredSubgroupSize)
+    {
+      CLPEAK_VLOG("%s: subgroup size %u refused by the driver, "
+                  "falling back to its own choice\n",
+                  d.resultTag, d.requiredSubgroupSize);
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
+    }
     if (!*built) return -1.0f;
 
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,

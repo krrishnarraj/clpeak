@@ -16,6 +16,40 @@
 #include <time.h>
 #endif
 
+#ifdef VK_HAS_ANY_COOPMAT
+// Short name for a cooperative-matrix component type, for the --verbose dump
+// of what the driver advertised.  Only the types the coopmat shaders can use
+// are named; anything else prints its raw enum value.
+static const char *coopmatComponentName(VkComponentTypeKHR t)
+{
+  switch (t)
+  {
+  case VK_COMPONENT_TYPE_FLOAT16_KHR:     return "fp16";
+  case VK_COMPONENT_TYPE_FLOAT32_KHR:     return "fp32";
+  case VK_COMPONENT_TYPE_FLOAT64_KHR:     return "fp64";
+  case VK_COMPONENT_TYPE_BFLOAT16_KHR:    return "bf16";
+  case VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT: return "fp8e4m3";
+  case VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT: return "fp8e5m2";
+  case VK_COMPONENT_TYPE_SINT8_KHR:       return "sint8";
+  case VK_COMPONENT_TYPE_SINT16_KHR:      return "sint16";
+  case VK_COMPONENT_TYPE_SINT32_KHR:      return "sint32";
+  case VK_COMPONENT_TYPE_UINT8_KHR:       return "uint8";
+  case VK_COMPONENT_TYPE_UINT16_KHR:      return "uint16";
+  case VK_COMPONENT_TYPE_UINT32_KHR:      return "uint32";
+  default:                                return "other";
+  }
+}
+
+// One line per dtype for the --verbose dump: which tile pickTile settled on.
+static void logPickedTile(const char *label, const coopmat_tile_t &t)
+{
+  if (t.supported)
+    CLPEAK_VLOG("  picked %-8s %ux%ux%u\n", label, t.M, t.N, t.K);
+  else
+    CLPEAK_VLOG("  picked %-8s (none)\n", label);
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // vkPeak
 // ---------------------------------------------------------------------------
@@ -243,6 +277,17 @@ int vkPeak::runAll()
         for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
         if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
         {
+          CLPEAK_VLOG("Vulkan: device %zu advertises %u cooperative-matrix "
+                      "properties\n", d, propCount);
+          for (auto &p : props)
+            CLPEAK_VLOG("  %ux%ux%u  A=%s B=%s C=%s D=%s  scope=%s%s\n",
+                        p.MSize, p.NSize, p.KSize,
+                        coopmatComponentName(p.AType), coopmatComponentName(p.BType),
+                        coopmatComponentName(p.CType), coopmatComponentName(p.ResultType),
+                        p.scope == VK_SCOPE_SUBGROUP_KHR  ? "subgroup" :
+                        p.scope == VK_SCOPE_WORKGROUP_KHR ? "workgroup" : "other",
+                        p.saturatingAccumulation ? "  saturating (unusable)" : "");
+
           // Pick the canonical subgroup-scope tile for one input/accumulator
           // dtype combination.  We don't assume a shape -- among the tiles the
           // driver advertises we prefer a square 16x16 face (the shaders run
@@ -257,6 +302,17 @@ int vkPeak::runAll()
               if (p.scope != VK_SCOPE_SUBGROUP_KHR) continue;
               if (p.AType != ab || p.BType != ab) continue;
               if (p.CType != c || p.ResultType != c) continue;
+              // The shaders emit OpCooperativeMatrixMulAddKHR *without* the
+              // SaturatingAccumulationKHR operand, and that operand is required
+              // if and only if the matched property has saturatingAccumulation
+              // set (VUID-RuntimeSpirv-OpCooperativeMatrixMulAddKHR-10060).  A
+              // saturating property therefore describes a shape these shaders
+              // may not run: matching one is invalid usage, which a driver is
+              // free to turn into a fault inside its shader compiler instead of
+              // a clean pipeline-creation failure.  Only integer dtypes ever
+              // advertise a saturating variant, so this never affected the
+              // float rows -- it is the int8 row that picks up a bad shape.
+              if (p.saturatingAccumulation) continue;
               coopmat_tile_t cand{true, p.MSize, p.NSize, p.KSize};
               if (!best.supported) { best = cand; continue; }
               auto rank = [](const coopmat_tile_t &t) {
@@ -275,6 +331,13 @@ int vkPeak::runAll()
           dev.info.coopmatFP8E4M3 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
           dev.info.coopmatFP8E5M2 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
           dev.info.coopmatINT8    = pickTile(VK_COMPONENT_TYPE_SINT8_KHR,       VK_COMPONENT_TYPE_SINT32_KHR);
+
+          logPickedTile("fp32",    dev.info.coopmatFP32);
+          logPickedTile("fp16",    dev.info.coopmatFP16);
+          logPickedTile("bf16",    dev.info.coopmatBF16);
+          logPickedTile("fp8e4m3", dev.info.coopmatFP8E4M3);
+          logPickedTile("fp8e5m2", dev.info.coopmatFP8E5M2);
+          logPickedTile("int8",    dev.info.coopmatINT8);
         }
       }
     }
