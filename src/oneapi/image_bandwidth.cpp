@@ -62,7 +62,7 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     // neither can flatter the result: the image-bandwidth block in
     // include/common/common.h.
     // walk == 0 decomposes the linear index row-major (x fastest); walk == 1
-    // transposes it. Both cover every pixel exactly once.
+    // transposes it.  Both cover every pixel exactly once.
     // Generic lambda + integral_constant rather than a templated lambda: the
     // project builds as C++17, where the latter is not available.
     auto submit = [&](auto walkTag) {
@@ -77,25 +77,29 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
           h.parallel_for<image_bw_kernel<WALK>>(
             sycl::nd_range<1>(globalThreads, blockSize),
             [=](sycl::nd_item<1> it) {
-              uint32_t gid = (uint32_t)it.get_global_id(0);
-              // IMAGE_FETCH_PER_WI samples per WI.  Coordinates wrap to keep
-              // all lanes in-bounds.
-              uint32_t base = gid * IMAGE_FETCH_PER_WI;
+              uint32_t gid   = (uint32_t)it.get_global_id(0);
+              uint32_t gsize = (uint32_t)globalThreads;
+              uint32_t total = (uint32_t)imgW * (uint32_t)imgH;
+              // Stride the IMAGE_FETCH_PER_WI samples by the global size, so
+              // adjacent work-items touch adjacent pixels.  This is the pattern
+              // every other backend uses; reading a contiguous run per work-item
+              // instead made this row incomparable with them.  The wrap keeps
+              // all lanes in-bounds when the grid does not divide the image.
               sycl::float4 sum{0.0f, 0.0f, 0.0f, 0.0f};
               #pragma unroll
               for (int i = 0; i < (int)IMAGE_FETCH_PER_WI; i++)
               {
-                uint32_t idx = base + i;
+                uint32_t pixel = (gid + (uint32_t)i * gsize) % total;
                 int x, y;
                 if constexpr (WALK == 0)
                 {
-                  x = (int)(idx % (uint32_t)imgW);
-                  y = (int)((idx / (uint32_t)imgW) % (uint32_t)imgH);
+                  x = (int)(pixel % (uint32_t)imgW);
+                  y = (int)(pixel / (uint32_t)imgW);
                 }
                 else
                 {
-                  y = (int)(idx % (uint32_t)imgH);
-                  x = (int)((idx / (uint32_t)imgH) % (uint32_t)imgW);
+                  y = (int)(pixel % (uint32_t)imgH);
+                  x = (int)(pixel / (uint32_t)imgH);
                 }
                 sum += acc.read(sycl::int2{x, y});
               }
