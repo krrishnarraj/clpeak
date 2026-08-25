@@ -2,6 +2,7 @@
 
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
+#include <algorithm>
 
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
@@ -88,32 +89,36 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   }
 
   int w = imgW, h = imgH;
-  int walk = 0;   // row-major: this is the reported reading
+  int walk = 0;
   void *args[5] = {&tex, &outBuf, &w, &h, &walk};
-  float us = runKernel(dev, fn, numBlocks, blockSize, args,
-                       cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-  float gbps = (float)bytes / us / 1e3f;
+  const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
 
-  // --verbose-only layout probe.  Re-run the identical fetch count with the walk
-  // transposed, so a warp reads 32 texels down a column instead of along a row.
-  // A CUarray is always block-linear, and a GOB is several rows tall, so the
-  // column stays inside it and the rate should only dip; a pitch-linear image
-  // falls off a cliff.  The point of comparison is the same probe in the Vulkan
-  // backend, which reports ~1.5x this test's figure for the same image on the
-  // same card -- there the layout is the driver's choice and invisible to us.
-  if (::clpeak::verboseEnabled() && us > 0.0f)
-  {
-    walk = 1;
-    float colUs = runKernel(dev, fn, numBlocks, blockSize, args,
-                            cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-    if (colUs > 0.0f)
-      CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f "
-                  "gbps (%.2fx slower)\n", gbps, (float)bytes / colUs / 1e3f,
-                  colUs / us);
-  }
+  // Two walk orders are raced and the faster reported.  Neither can flatter the
+  // result: both read every pixel exactly once, so the byte count is identical
+  // and the only difference is how the reads land in the image's memory layout.
+  // No single walk suits every layout -- a row-major warp reads 32 texels along
+  // x, ideal for a linear surface but 8 scattered chunks of a block-linear one,
+  // and the transposed walk is the mirror image.  Measured on an RTX 5060: this
+  // backend reads 270 GBPS row-major and 419 transposed, while Vulkan gets ~415
+  // either way, so a row-major-only test made this texture path look 1.5x
+  // slower than the Vulkan one when both in fact reach the card's full memory
+  // rate.  Same reasoning as the raced MAD-chain shapes -- see common.h.
+  auto timeWalk = [&](int w_) {
+    walk = w_;
+    return runKernel(dev, fn, numBlocks, blockSize, args,
+                     cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+  };
+  float rowUs = timeWalk(0);
+  float colUs = timeWalk(1);
+  float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
+  float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+  CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+              rowGbps, colGbps);
 
-  test.emit("float4", gbps, fetchNote);
+  if (rowGbps <= 0.0f && colGbps <= 0.0f)
+    test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
+  else
+    test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
 
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);

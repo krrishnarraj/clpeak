@@ -91,12 +91,14 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             continue;
         }
 
+        int walk = 0;
         auto enqueue = [&](unsigned int n) -> id<MTLCommandBuffer> {
             id<MTLCommandBuffer> cb = [dev.impl->queue commandBuffer];
             id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
             [enc setComputePipelineState:pso];
             [enc setTexture:tex atIndex:0];
             [enc setBuffer:outBuf offset:0 atIndex:0];
+            [enc setBytes:&walk length:sizeof(walk) atIndex:1];
             for (unsigned int i = 0; i < n; i++)
                 [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSizeM];
             [enc endEncoding];
@@ -134,9 +136,34 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         if (gpuTimedSec <= 0.0 || gpuTimedSec < wallTimedSec * 0.01)
             gpuTimedUs = wallTimedSec * 1e6;
         float us = (float)(gpuTimedUs / iters);
+        // Two walk orders are raced and the faster reported.  Neither can
+        // flatter the result: both read every pixel exactly once, so the byte
+        // count is identical and the only difference is how the reads land in
+        // the texture's memory layout.  No single walk suits every layout -- a
+        // SIMD group reading 32 texels along x is ideal for a linear surface
+        // but hits scattered chunks of a tiled one, and the transposed walk is
+        // the mirror image.  Same reasoning as the raced MAD-chain shapes; see
+        // include/common/common.h, and the Vulkan and CUDA image_bandwidth.cpp
+        // for the NVIDIA measurements that motivated it.
+        walk = 1;
+        double c0 = [NSProcessInfo processInfo].systemUptime;
+        id<MTLCommandBuffer> c = enqueue(iters);
+        [c waitUntilCompleted];
+        double c1 = [NSProcessInfo processInfo].systemUptime;
+        CFTimeInterval gpuColSec = c.GPUEndTime - c.GPUStartTime;
+        CFTimeInterval wallColSec = c1 - c0;
+        double gpuColUs = gpuColSec * 1e6;
+        if (gpuColSec <= 0.0 || gpuColSec < wallColSec * 0.01)
+            gpuColUs = wallColSec * 1e6;
+        float colUs = (float)(gpuColUs / iters);
+        walk = 0;
+
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
-        float gbps = (float)bytes / us / 1e3f;
-        test.emit(v.label, gbps, v.note);
+        float rowGbps = (float)bytes / us / 1e3f;
+        float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+        CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f gbps\n",
+                    v.label, rowGbps, colGbps);
+        test.emit(v.label, std::max(rowGbps, colGbps), v.note);
     }
 
     return 0;

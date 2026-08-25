@@ -2,6 +2,7 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+#include <algorithm>
 
 int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
@@ -99,19 +100,36 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   }
 
   int w = imgW, h = imgH;
-  void *args[4] = {&tex, &outBuf, &w, &h};
-  float us = runKernel(dev, fn, numBlocks, blockSize, args,
-                       cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (us <= 0.0f)
-  {
-    test.skip("float4", ResultStatus::Error,
-               "kernel launch failed", fetchNote);
-  }
+  int walk = 0;
+  void *args[5] = {&tex, &outBuf, &w, &h, &walk};
+  const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
+
+  // Two walk orders are raced and the faster reported.  Neither can flatter the
+  // result: both read every pixel exactly once, so the byte count is identical
+  // and the only difference is how the reads land in the image's memory layout.
+  // No single walk suits every layout -- a warp reading 32 texels along x is
+  // ideal for a linear surface but hits 8 scattered chunks of a block-linear
+  // one, and the transposed walk is the mirror image.  Measured on an RTX 5060:
+  // CUDA reads 270 GBPS row-major and 419 transposed while Vulkan gets ~415
+  // either way, so a row-major-only test made the CUDA texture path look 1.5x
+  // slower when both in fact reach the card's full memory rate.  Same reasoning
+  // as the raced MAD-chain shapes -- see include/common/common.h.
+  auto timeWalk = [&](int w_) {
+    walk = w_;
+    return runKernel(dev, fn, numBlocks, blockSize, args,
+                     cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+  };
+  float rowUs = timeWalk(0);
+  float colUs = timeWalk(1);
+  float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
+  float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+  CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+              rowGbps, colGbps);
+
+  if (rowGbps <= 0.0f && colGbps <= 0.0f)
+    test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
   else
-  {
-    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    test.emit("float4", (float)bytes / us / 1e3f, fetchNote);
-  }
+    test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
 
   (void)hipFree(outBuf);
   (void)hipDestroyTextureObject(tex);

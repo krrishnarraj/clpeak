@@ -2,6 +2,7 @@
 
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Image (texture) bandwidth (Vulkan)
@@ -9,6 +10,18 @@
 //
 // Combined image-sampler descriptor + storage-buffer output.  Image is
 // VK_FORMAT_R32G32B32A32_SFLOAT, sampled with NEAREST + CLAMP_TO_EDGE.
+//
+// Two walk orders are raced and the faster reported.  Neither can flatter the
+// result: both read every pixel exactly once, so the byte count is identical
+// and the only difference is how the reads land in the image's memory layout.
+// That layout is the driver's choice and invisible from here, and no single
+// walk suits every one -- a row-major warp reads 32 texels along x, ideal for a
+// linear surface but 8 scattered chunks of a block-linear one, and the
+// transposed walk is the mirror image.  Measured on an RTX 5060: CUDA reads 270
+// GBPS row-major and 419 transposed while Vulkan gets ~415 either way, so a
+// row-major-only test made the CUDA texture path look 1.5x slower than the
+// Vulkan one when both in fact reach the card's full memory rate.  Same
+// reasoning as the raced MAD-chain shapes -- see include/common/common.h.
 
 int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
@@ -253,41 +266,23 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
-    int32_t walk = 0;   // row-major: this is the reported reading
-    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                         cfg.targetTimeUs, forceIters ? specifiedIters : 0, true,
-                         &walk, sizeof(walk));
-    if (us <= 0.0f)
-    {
+    auto timeWalk = [&](int32_t walk) {
+      return runKernel(dev, pipe, pipeLayout, descSet, numGroups,
+                       cfg.targetTimeUs, forceIters ? specifiedIters : 0, true,
+                       &walk, sizeof(walk));
+    };
+    float rowUs = timeWalk(0);
+    float colUs = timeWalk(1);
+    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
+    float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+                rowGbps, colGbps);
+
+    if (rowGbps <= 0.0f && colGbps <= 0.0f)
       test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
                 fetchNote);
-    }
     else
-    {
-      float gbps = (float)bytes / us / 1e3f;
-
-      // --verbose-only layout probe.  Re-run the identical fetch count with the
-      // walk transposed, so a warp reads 32 texels down a column instead of
-      // along a row.  A pitch-linear image falls off a cliff there (32 reads a
-      // row pitch apart); a block-linear one degrades far less, because a GOB
-      // is several rows tall and the column stays inside it.  This is here to
-      // settle why Vulkan reports ~1.5x what CUDA and OpenCL do for the same
-      // image on NVIDIA -- they use a CUDA array, which is always block-linear,
-      // while the Vulkan layout is the driver's choice and invisible from here.
-      if (::clpeak::verboseEnabled())
-      {
-        walk = 1;
-        float colUs = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                                cfg.targetTimeUs, forceIters ? specifiedIters : 0,
-                                true, &walk, sizeof(walk));
-        if (colUs > 0.0f)
-          CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f "
-                      "gbps (%.2fx slower)\n", gbps, (float)bytes / colUs / 1e3f,
-                      colUs / us);
-      }
-
-      test.emit("float4", gbps, fetchNote);
-    }
+      test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

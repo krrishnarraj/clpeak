@@ -2,9 +2,11 @@
 
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
+#include <algorithm>
+#include <type_traits>
 #include <sycl/sycl.hpp>
 
-class image_bw_kernel;
+template <int WALK> class image_bw_kernel;
 
 int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -56,42 +58,72 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
                        sycl::image_channel_type::fp32,
                        sycl::range<2>(imgW, imgH));
 
-    auto submit = [&](sycl::queue &q) -> sycl::event {
-      return q.submit([&](sycl::handler &h) {
-        // Unsampled image accessor: read coordinates as int2, get a float4 back.
-        sycl::accessor<sycl::float4, 2, sycl::access::mode::read,
-                       sycl::access::target::image>
-            acc(img, h);
+    // walk == 0 decomposes the linear index row-major (x fastest); walk == 1
+    // transposes it (y fastest).  Both cover every pixel exactly once, so the
+    // byte count is identical and the two rates are directly comparable; the
+    // host races them and reports the faster.  No single walk suits every
+    // image layout -- reading 32 texels along x is ideal for a linear surface
+    // but hits scattered chunks of a tiled one, and the transpose is the mirror
+    // image.  Same reasoning as the raced MAD-chain shapes; see
+    // include/common/common.h, and the Vulkan and CUDA image_bandwidth.cpp for
+    // the NVIDIA measurements that motivated it.
+    // Generic lambda + integral_constant rather than a templated lambda: the
+    // project builds as C++17, where the latter is not available.
+    auto submit = [&](auto walkTag) {
+      constexpr int WALK = decltype(walkTag)::value;
+      return [&](sycl::queue &q) -> sycl::event {
+        return q.submit([&](sycl::handler &h) {
+          // Unsampled image accessor: read coordinates as int2, get a float4 back.
+          sycl::accessor<sycl::float4, 2, sycl::access::mode::read,
+                         sycl::access::target::image>
+              acc(img, h);
 
-        h.parallel_for<image_bw_kernel>(
-          sycl::nd_range<1>(globalThreads, blockSize),
-          [=](sycl::nd_item<1> it) {
-            uint32_t gid = (uint32_t)it.get_global_id(0);
-            // Walk the image in scanline order, IMAGE_FETCH_PER_WI samples
-            // per WI.  Coordinates wrap to keep all lanes in-bounds.
-            uint32_t base = gid * IMAGE_FETCH_PER_WI;
-            sycl::float4 sum{0.0f, 0.0f, 0.0f, 0.0f};
-            #pragma unroll
-            for (int i = 0; i < (int)IMAGE_FETCH_PER_WI; i++)
-            {
-              uint32_t idx = base + i;
-              int x = (int)(idx % (uint32_t)imgW);
-              int y = (int)((idx / (uint32_t)imgW) % (uint32_t)imgH);
-              sum += acc.read(sycl::int2{x, y});
-            }
-            outBuf[gid] = sum.x() + sum.y() + sum.z() + sum.w();
-          });
-      });
+          h.parallel_for<image_bw_kernel<WALK>>(
+            sycl::nd_range<1>(globalThreads, blockSize),
+            [=](sycl::nd_item<1> it) {
+              uint32_t gid = (uint32_t)it.get_global_id(0);
+              // IMAGE_FETCH_PER_WI samples per WI.  Coordinates wrap to keep
+              // all lanes in-bounds.
+              uint32_t base = gid * IMAGE_FETCH_PER_WI;
+              sycl::float4 sum{0.0f, 0.0f, 0.0f, 0.0f};
+              #pragma unroll
+              for (int i = 0; i < (int)IMAGE_FETCH_PER_WI; i++)
+              {
+                uint32_t idx = base + i;
+                int x, y;
+                if constexpr (WALK == 0)
+                {
+                  x = (int)(idx % (uint32_t)imgW);
+                  y = (int)((idx / (uint32_t)imgW) % (uint32_t)imgH);
+                }
+                else
+                {
+                  y = (int)(idx % (uint32_t)imgH);
+                  x = (int)((idx / (uint32_t)imgH) % (uint32_t)imgW);
+                }
+                sum += acc.read(sycl::int2{x, y});
+              }
+              outBuf[gid] = sum.x() + sum.y() + sum.z() + sum.w();
+            });
+        });
+      };
     };
 
-    float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-    if (us <= 0.0f)
+    unsigned int forced = forceIters ? specifiedIters : 0;
+    float rowUs = runKernel(dev, submit(std::integral_constant<int, 0>{}),
+                            cfg.targetTimeUs, forced);
+    float colUs = runKernel(dev, submit(std::integral_constant<int, 1>{}),
+                            cfg.targetTimeUs, forced);
+    const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
+    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
+    float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+                rowGbps, colGbps);
+
+    if (rowGbps <= 0.0f && colGbps <= 0.0f)
       test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
     else
-    {
-      uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-      test.emit("float4", (float)bytes / us / 1e3f, fetchNote);
-    }
+      test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
   }
   catch (const sycl::exception &e)
   {
