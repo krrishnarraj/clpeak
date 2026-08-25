@@ -82,6 +82,17 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       uint64_t movedFloats = ndRangeTotal(globalSize) * widths[w] * FETCH_PER_WI;
       gbps = ((float)movedFloats * sizeof(float)) / timed / 1e3f;
 
+      // OpenCL is the only backend carrying both offset shapes -- the other
+      // five implement the local-offset one alone -- so this race is the only
+      // evidence anywhere of whether the grid-stride shape ever wins.  Print
+      // both: if it never does by more than noise, the second family can go and
+      // every backend measures the same thing; if it does, the shape has to be
+      // ported to the other five instead.
+      CLPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f gbps\n",
+                  labels[w],
+                  ((float)movedFloats * sizeof(float)) / timed_lo / 1e3f,
+                  ((float)movedFloats * sizeof(float)) / timed_go / 1e3f);
+
       test.emit(labels[w], gbps, clWidthNote(widths[w]));
      }
 
