@@ -123,11 +123,16 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
             a[k] = (T)it.get_local_id(0) + (T)k;
             b[k] = a[k] + (T)2;
           }
+          // Chain n starts a whole vector width past chain n-1, not one past.
+          // Two scalar chains that start on the same value stay bitwise
+          // identical forever, and a compiler that scalarises the vector then
+          // CSEs one away, inflating the reading by NCHAIN/(NCHAIN-1).  At
+          // W=2 a +n spacing gave xs[0] = (A, A+1) and xs[1] = (A+1, A+2).
           #pragma unroll
           for (int n = 0; n < NCHAIN; n++)
           {
             #pragma unroll
-            for (int k = 0; k < W; k++) xs[n][k] = A + (T)k + (T)n;
+            for (int k = 0; k < W; k++) xs[n][k] = A + (T)k + (T)(n * W);
           }
 
           #pragma unroll 1

@@ -131,6 +131,17 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //  - The kernel must store x, never c.  c is loop-invariant; storing it lets
 //    the entire chain be dead-coded away and produces an absurd number.
 //
+//  - No two scalar chains may start on the same value.  Independent chains
+//    under the same recurrence stay bitwise identical forever, and a compiler
+//    that scalarises vectors then CSEs one of them away -- the reading comes
+//    out inflated by chains/(chains-1), too small for MAX_ALT_CHAIN_RATIO to
+//    catch.  A width-W vector seed already spans (A, A+1, ... A+W-1) across
+//    its own components, so chain k must start at least W past chain k-1, not
+//    1 past.  This is why the affine width-2 shapes read 4/3 high on NVIDIA
+//    fp64 (Vulkan double2 423 GFLOPS on a 5060 whose FP64 units cap near 335).
+//    It does not apply to the rotating integer shape, which rewrites x_k from
+//    another accumulator, so equal seeds diverge on the first instruction.
+//
 // Narrow integer types (char/short) drive x to a fixed point within a few
 // squarings.  That is fine -- integer multiply is fixed-latency on every
 // target here -- but it is why the terminal store matters.

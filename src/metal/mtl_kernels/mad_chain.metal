@@ -25,15 +25,25 @@
 // N is 4 at vector width 1, 2 at width 2 and 1 from width 4 up, where the
 // vector already supplies the instruction-level parallelism.  Live values per
 // lane stay at ~5 either way, which is what the MAD chain rules require.
+//
+// Chain seeds are spaced CH_STRIDE apart, not 1 apart.  No two *scalar* chains
+// may start on the same value: independent chains under the same recurrence
+// stay bitwise identical forever, and a compiler that scalarises vectors then
+// CSEs one of them away, inflating the reading by chains/(chains-1).  A vector
+// seed already spans (A, A+1, ... A+W-1) across its own components, so at
+// width 2 the old +1 spacing gave x0 = (A, A+1) and x1 = (A+1, A+2) -- one
+// duplicated scalar chain out of four.  NVIDIA ran 3 of them and Vulkan's
+// double2 read 423 GFLOPS on a 5060 whose FP64 units top out near 335.
 
 #define CH_MAD(d, m1, m2, ad)  d = fma(m1, m2, ad);
+#define CH_STRIDE 4
 
-#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + T(2); T x0 = (seed); T x1 = (seed) + T(1); T x2 = (seed) + T(2); T x3 = (seed) + T(3);
+#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + T(2); T x0 = (seed); T x1 = (seed) + T(CH_STRIDE); T x2 = (seed) + T(2*CH_STRIDE); T x3 = (seed) + T(3*CH_STRIDE);
 #define AF4_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b) CH_MAD(x2, a, x2, b) CH_MAD(x3, a, x3, b)
 #define AF4_16                 AF4_G AF4_G AF4_G AF4_G
 #define AF4_RES                ((x0 + x1) + (x2 + x3))
 
-#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + T(2); T x0 = (seed); T x1 = (seed) + T(1);
+#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + T(2); T x0 = (seed); T x1 = (seed) + T(CH_STRIDE);
 #define AF2_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b)
 #define AF2_16                 AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G
 #define AF2_RES                (x0 + x1)
