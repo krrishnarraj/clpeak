@@ -76,6 +76,16 @@ dequantize the operands and multiply in floating point. That produces a
 perfectly good number which is not an int8 number at all, and publishing it
 as one would flatter or penalise the wrong hardware in any comparison.
 
+**A guard that is too tight is as bad as no guard.** Three of them shipped
+too tight and each destroyed or invented a number on first contact with a new
+provider: the folding check threw away a correct 124 TOPS int8 reading because
+TensorRT's rate improves 9.4x across the ladder and it only allowed 8x; the
+activation floor accepted a one-microsecond difference between two ~248 µs
+measurements and published 17 TB/s; the transfer check called a real copy no
+copy. Set the threshold against what the failure looks like — folding leaves
+the time flat, an absent copy leaves it identical — not against what success
+is assumed to look like.
+
 `onnxCollectExecutedOps()` answers it directly: one profiled run, then the
 kernel names ONNX Runtime recorded. The judgement is **inverted** — it looks
 for the failure, not the success. A provider that executes ONNX operators one
@@ -344,6 +354,11 @@ now search instead:
   cache. A fixed top rung would have needed raising already: 128 MB fits
   inside a single AMD Infinity Cache. Rungs are named for their working-set
   size, so adding more never invalidates the ones below.
+
+  Its "did anything get copied" test asks only that the time *grew*, not that
+  it grew in proportion: a transfer amortises its fixed cost as it gets
+  bigger, and TensorRT takes 3437 µs for 16 MB against 11169 µs for 128 MB.
+  Demanding proportionality declared that real copy to be no copy at all.
 
   The base three always run. A flat curve means "main memory reached" only
   when the operation is limited by memory, and a provider limited by its own

@@ -212,14 +212,19 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   // which divided out to an absurd 133 TB/s.  Checking that the time scales
   // with the size settles it without naming a bandwidth any real link would
   // have to stay under, which would need revising as links get faster.
+  // The test is that the time grew, not that it grew in proportion: a
+  // transfer amortises its fixed cost as it gets bigger, so an eightfold
+  // tensor can take only three times as long.  TensorRT does exactly that --
+  // 3437 us for 16 MB against 11169 us for 128 MB -- and demanding
+  // proportionality declared its perfectly real copy to be no copy at all.
+  // Where nothing is copied the time does not move at all: 4 us at both.
   bool transfers = true;
   if (lastElems > firstElems && firstUs > 0.0)
   {
-    const double sizeRatio = (double)lastElems / (double)firstElems;
-    transfers = (lastUs > firstUs * sizeRatio / 2.0);
+    transfers = (lastUs > firstUs * 2.0);
     if (!transfers)
       CLPEAK_VLOG("onnx-transfer[%s]: %.0f us at %lld MB and %.0f us at "
-                  "%lld MB -- time does not track size, nothing is copied\n",
+                  "%lld MB -- time barely moved, nothing is copied\n",
                   ep.providerKey.c_str(), firstUs,
                   (long long)((firstElems * 2) >> 20), lastUs,
                   (long long)((lastElems * 2) >> 20));

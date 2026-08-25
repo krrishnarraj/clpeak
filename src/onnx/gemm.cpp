@@ -501,11 +501,20 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // graph.  Real work grows with the cube of the size -- 64x across this
     // ladder -- so anything close to flat means nothing was computed.  Better
     // an error than a spectacular number.
+    // Folding collapses the graph to a constant, so what remains is dispatch
+    // and the time stops tracking the size at all -- 143 us at 1024 against
+    // 162 us at 8192.  Real work grows as the cube of the size divided by
+    // whatever the rate gained along the way, and that gain can be large:
+    // TensorRT's int8 rate improves 9.4x between 1024 and 16384, so its time
+    // grows 433x where the work grew 4096x.  The tolerance has to clear that
+    // comfortably or the guard discards the very measurements it exists to
+    // protect -- a factor of 8 threw away a correct 124 TOPS reading.  A rate
+    // improving 64x across one ladder has never been observed.
     double expectedGrowth = 1.0;
     for (int64_t d = firstDim; d > 0 && d < lastDim; d *= 2)
       expectedGrowth *= 8.0;                       // each doubling is 8x work
     if (best > 0.0 && firstUs > 0.0 && lastDim > firstDim &&
-        lastUs < firstUs * expectedGrowth / 8.0)
+        lastUs < firstUs * expectedGrowth / 64.0)
     {
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld -- "
                   "work does not scale, constants were folded\n",

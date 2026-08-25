@@ -209,13 +209,20 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
 
-      const double netUs = full.us - ((floor.us > 0.0) ? floor.us : 0.0);
-      if (netUs <= 0.0)
+      // The operation has to account for a real share of the time, not one
+      // microsecond of difference between two noisy measurements.  TensorRT
+      // reported 249 us against a 248 us reference, and the microsecond
+      // between them divided out to 17 TB/s -- forty times the card's memory
+      // bandwidth, published as a peak.  A tenth is a low bar that still
+      // rejects anything the reference's own jitter could account for.
+      const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
+      const double netUs   = full.us - floorUs;
+      if (netUs <= 0.1 * full.us)
       {
-        // Too cheap to separate from reading the tensor at this size; a
-        // bigger one will separate them.
-        CLPEAK_VLOG("onnx-activation[%s/%s]: %lld rows lost in the noise\n",
-                    ep.providerKey.c_str(), v.label, (long long)rows);
+        CLPEAK_VLOG("onnx-activation[%s/%s]: %lld rows lost in the noise "
+                    "(%.0f us against a %.0f us reference)\n",
+                    ep.providerKey.c_str(), v.label, (long long)rows,
+                    full.us, floorUs);
         continue;
       }
 
