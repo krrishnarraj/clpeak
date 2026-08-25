@@ -88,11 +88,31 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   }
 
   int w = imgW, h = imgH;
-  void *args[4] = {&tex, &outBuf, &w, &h};
+  int walk = 0;   // row-major: this is the reported reading
+  void *args[5] = {&tex, &outBuf, &w, &h, &walk};
   float us = runKernel(dev, fn, numBlocks, blockSize, args,
                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
   float gbps = (float)bytes / us / 1e3f;
+
+  // --verbose-only layout probe.  Re-run the identical fetch count with the walk
+  // transposed, so a warp reads 32 texels down a column instead of along a row.
+  // A CUarray is always block-linear, and a GOB is several rows tall, so the
+  // column stays inside it and the rate should only dip; a pitch-linear image
+  // falls off a cliff.  The point of comparison is the same probe in the Vulkan
+  // backend, which reports ~1.5x this test's figure for the same image on the
+  // same card -- there the layout is the driver's choice and invisible to us.
+  if (::clpeak::verboseEnabled() && us > 0.0f)
+  {
+    walk = 1;
+    float colUs = runKernel(dev, fn, numBlocks, blockSize, args,
+                            cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    if (colUs > 0.0f)
+      CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f "
+                  "gbps (%.2fx slower)\n", gbps, (float)bytes / colUs / 1e3f,
+                  colUs / us);
+  }
+
   test.emit("float4", gbps, fetchNote);
 
   cuTexObjectDestroy(tex);

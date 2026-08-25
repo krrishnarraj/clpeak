@@ -195,9 +195,15 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   VkDescriptorSetLayout dsLayout;
   vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsLayout);
 
+  VkPushConstantRange walkRange = {};
+  walkRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  walkRange.offset = 0;
+  walkRange.size = sizeof(int32_t);
+
   VkPipelineLayoutCreateInfo plCI = {};
   plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsLayout;
+  plCI.pushConstantRangeCount = 1; plCI.pPushConstantRanges = &walkRange;
   VkPipelineLayout pipeLayout;
   vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout);
 
@@ -246,8 +252,11 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   }
   else
   {
+    const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
+    int32_t walk = 0;   // row-major: this is the reported reading
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                         cfg.targetTimeUs, forceIters ? specifiedIters : 0, true);
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0, true,
+                         &walk, sizeof(walk));
     if (us <= 0.0f)
     {
       test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
@@ -255,8 +264,28 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     }
     else
     {
-      uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
       float gbps = (float)bytes / us / 1e3f;
+
+      // --verbose-only layout probe.  Re-run the identical fetch count with the
+      // walk transposed, so a warp reads 32 texels down a column instead of
+      // along a row.  A pitch-linear image falls off a cliff there (32 reads a
+      // row pitch apart); a block-linear one degrades far less, because a GOB
+      // is several rows tall and the column stays inside it.  This is here to
+      // settle why Vulkan reports ~1.5x what CUDA and OpenCL do for the same
+      // image on NVIDIA -- they use a CUDA array, which is always block-linear,
+      // while the Vulkan layout is the driver's choice and invisible from here.
+      if (::clpeak::verboseEnabled())
+      {
+        walk = 1;
+        float colUs = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
+                                cfg.targetTimeUs, forceIters ? specifiedIters : 0,
+                                true, &walk, sizeof(walk));
+        if (colUs > 0.0f)
+          CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f "
+                      "gbps (%.2fx slower)\n", gbps, (float)bytes / colUs / 1e3f,
+                      colUs / us);
+      }
+
       test.emit("float4", gbps, fetchNote);
     }
     vkDestroyPipeline(dev.device, pipe, nullptr);
