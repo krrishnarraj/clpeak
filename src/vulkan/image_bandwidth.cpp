@@ -11,17 +11,9 @@
 // Combined image-sampler descriptor + storage-buffer output.  Image is
 // VK_FORMAT_R32G32B32A32_SFLOAT, sampled with NEAREST + CLAMP_TO_EDGE.
 //
-// Two walk orders are raced and the faster reported.  Neither can flatter the
-// result: both read every pixel exactly once, so the byte count is identical
-// and the only difference is how the reads land in the image's memory layout.
-// That layout is the driver's choice and invisible from here, and no single
-// walk suits every one -- a row-major warp reads 32 texels along x, ideal for a
-// linear surface but 8 scattered chunks of a block-linear one, and the
-// transposed walk is the mirror image.  Measured on an RTX 5060: CUDA reads 270
-// GBPS row-major and 419 transposed while Vulkan gets ~415 either way, so a
-// row-major-only test made the CUDA texture path look 1.5x slower than the
-// Vulkan one when both in fact reach the card's full memory rate.  Same
-// reasoning as the raced MAD-chain shapes -- see include/common/common.h.
+// Two walk orders are raced and the faster reported -- why, and why neither
+// can flatter the result: the image-bandwidth block in
+// include/common/common.h.
 
 int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {

@@ -58,15 +58,11 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
                        sycl::image_channel_type::fp32,
                        sycl::range<2>(imgW, imgH));
 
+    // Two walk orders are raced and the faster reported -- why, and why
+    // neither can flatter the result: the image-bandwidth block in
+    // include/common/common.h.
     // walk == 0 decomposes the linear index row-major (x fastest); walk == 1
-    // transposes it (y fastest).  Both cover every pixel exactly once, so the
-    // byte count is identical and the two rates are directly comparable; the
-    // host races them and reports the faster.  No single walk suits every
-    // image layout -- reading 32 texels along x is ideal for a linear surface
-    // but hits scattered chunks of a tiled one, and the transpose is the mirror
-    // image.  Same reasoning as the raced MAD-chain shapes; see
-    // include/common/common.h, and the Vulkan and CUDA image_bandwidth.cpp for
-    // the NVIDIA measurements that motivated it.
+    // transposes it. Both cover every pixel exactly once.
     // Generic lambda + integral_constant rather than a templated lambda: the
     // project builds as C++17, where the latter is not available.
     auto submit = [&](auto walkTag) {

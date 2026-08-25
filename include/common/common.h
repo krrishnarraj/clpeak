@@ -60,6 +60,22 @@ static const unsigned int LMEM_REPS = 64;
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 
+// Image bandwidth races two walk orders, the same way the compute tests race
+// two MAD-chain shapes and for the same reason: no single shape is best on
+// every vendor.  Here the variable is the image's memory layout, which is the
+// driver's choice and not visible through any of these APIs.  A row-major walk
+// gives a warp 32 texels along x -- ideal for a linear surface, but 8 scattered
+// chunks of a block-linear one -- and the transposed walk is the mirror image.
+// On an RTX 5060 that is worth 270 vs 419 GBPS through CUDA (whose CUarray is
+// always block-linear) while Vulkan reads ~415 either way, so a row-major-only
+// test reported the same texture path 1.5x apart across APIs.  Racing the pair
+// brings CUDA, Vulkan and OpenCL within 1.3% of each other, all at ~99% of the
+// card's global bandwidth.
+//
+// Unlike the MAD chains, neither walk can flatter the result and no ratio guard
+// is needed: both read every pixel exactly once, so the byte count is identical
+// and only the access order differs.
+
 // ---------------------------------------------------------------------------
 // The MAD chain, shared by every compute kernel in every backend
 //

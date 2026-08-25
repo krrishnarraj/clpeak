@@ -79,17 +79,9 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       kernel_v1.setArg(0, img);
       kernel_v1.setArg(1, outputBuf);
 
-      // Two walk orders are raced and the faster reported.  Neither can flatter
-      // the result: both read every pixel exactly once, so the byte count is
-      // identical and the only difference is how the reads land in the image's
-      // memory layout.  No single walk suits every layout -- a warp reading 32
-      // texels along x is ideal for a linear surface but hits 8 scattered
-      // chunks of a block-linear one, and the transposed walk is the mirror
-      // image.  Measured on an RTX 5060: this backend reads 271 GBPS row-major
-      // while Vulkan gets ~415 either way, and CUDA's transposed walk reaches
-      // 419 -- so a row-major-only test made the texture path look 1.5x slower
-      // when it in fact reaches the card's full memory rate.  Same reasoning as
-      // the raced MAD-chain shapes -- see include/common/common.h.
+      // Two walk orders are raced and the faster reported -- why, and why
+      // neither can flatter the result: the image-bandwidth block in
+      // include/common/common.h.
       auto timeWalk = [&](cl_int walk) -> float {
         kernel_v1.setArg(2, walk);
         return run_kernel(queue, kernel_v1, globalSize, localSize,

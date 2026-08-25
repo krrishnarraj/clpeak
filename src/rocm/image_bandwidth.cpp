@@ -104,16 +104,9 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   void *args[5] = {&tex, &outBuf, &w, &h, &walk};
   const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
 
-  // Two walk orders are raced and the faster reported.  Neither can flatter the
-  // result: both read every pixel exactly once, so the byte count is identical
-  // and the only difference is how the reads land in the image's memory layout.
-  // No single walk suits every layout -- a warp reading 32 texels along x is
-  // ideal for a linear surface but hits 8 scattered chunks of a block-linear
-  // one, and the transposed walk is the mirror image.  Measured on an RTX 5060:
-  // CUDA reads 270 GBPS row-major and 419 transposed while Vulkan gets ~415
-  // either way, so a row-major-only test made the CUDA texture path look 1.5x
-  // slower when both in fact reach the card's full memory rate.  Same reasoning
-  // as the raced MAD-chain shapes -- see include/common/common.h.
+  // Two walk orders are raced and the faster reported -- why, and why neither
+  // can flatter the result: the image-bandwidth block in
+  // include/common/common.h.
   auto timeWalk = [&](int w_) {
     walk = w_;
     return runKernel(dev, fn, numBlocks, blockSize, args,
