@@ -201,7 +201,17 @@ ten mantissa bits, the same as fp16 — which cuBLAS selects by default. The
 "fp32" throughput row on NVIDIA is therefore a TF32 number, and only the
 error row says so.
 
-TensorRT is the clearest case of the row earning its place. It runs fp16 at
+The clearest single demonstration is one card, one graph, two operating
+systems. TensorRT reaches 66.4 TFLOPS in fp16 on Linux and 20.4 on Windows —
+a threefold gap that looks like a broken installation until the error rows are
+read beside it: **1185 ppm on Linux, 207 on Windows**. The fast one
+accumulates in fp16; the slow one accumulates in fp32, exactly as the CUDA
+provider does, and lands at its fp32 rate of 19.8. The throughput difference
+is not a defect, it is an arithmetic choice, and nothing but the accuracy row
+distinguishes the two. Their int8 rates match to within 1% (125.1 against
+124.0), which is what makes the fp16 gap interpretable rather than mysterious.
+
+TensorRT is also the clearest case of the row earning its place. It runs fp16 at
 66.2 TFLOPS against the CUDA EP's 40.2 on the same card — and its fp16 error
 is 1185 ppm against 207. It is 65% faster and nearly six times less accurate,
 because it accumulates in fp16 where cuBLAS accumulates in fp32. Neither

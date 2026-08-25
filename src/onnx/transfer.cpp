@@ -337,6 +337,10 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                 (float)((double)firstElems * 2.0 /
                         ((roundUs - computeUs) * 1.0e-6) / 1.0e9),
                 d2hNote);
+    else if (roundUs <= 0.0)
+      test.skip("d2h", ResultStatus::Error,
+                "the round trip it is derived from could not be measured",
+                d2hNote);
     else
       test.skip("d2h", ResultStatus::Error,
                 "returning the result cost no more than keeping it on device",
