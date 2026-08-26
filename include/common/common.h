@@ -197,7 +197,9 @@ static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 
 // compute_int8_dp_kernels.cl
 // Each dot_acc_sat(char4, char4, int) is 4 INT8 multiply-adds = 8 ops.
-// v1: 64 iters * MAD_DP_16 (16 dots) * 8 ops = 8192 per WI (all variants equal).
+// One DP_STEP is two dots into a pair of accumulators that feed each other,
+// and every variant issues 512 of them: 1024 dots * 8 ops = 8192 per WI
+// (v1 = 64 iters * 8 steps, v8 = 64 * 1 * 8 chains, v16 = 32 * 1 * 16).
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
 // coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup
