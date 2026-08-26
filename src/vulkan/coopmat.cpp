@@ -21,46 +21,59 @@
 
 namespace {
 
-// Plain-old-data spec-constant payload (constant_id 0..4 in the shaders).
-// wgSize is the shader's local_size_x, declared as local_size_x_id = 4, so the
+// Plain-old-data spec-constant payload (constant_id 0..3 in the shaders).
+// wgSize is the shader's local_size_x, declared as local_size_x_id = 3, so the
 // work-group and the pinned subgroup width always move together.
-struct CoopSpecData { uint32_t M, N, K; int32_t iters; uint32_t wgSize; };
+struct CoopSpecData { uint32_t M, N, K, wgSize; };
+
+// Push payload: the value the shader derives its four A and four B fills from,
+// then the number of trips of the inner loop.  float and int32_t are both four
+// bytes at offset 0, so one struct serves every dtype -- only the shader's
+// spelling of the push block differs.
+//
+// The trip count is pushed rather than specialized on purpose.  A compile-time
+// trip count is an invitation for the driver to unroll the whole run, and a
+// fully unrolled run of an emulated tile is what a shader compiler chokes on;
+// it also leaves the loop open to being folded into a closed form, which has
+// inflated these rows before.  Push it and neither is possible.
+struct CoopPush { union { float f; int32_t i; } A; int32_t trips; };
 
 // Spec-constant storage for one tile.  Must outlive the runComputeKernel call
-// that consumes specInfo, so callers declare it in the dispatching scope.
+// that consumes specInfo and pushData, so callers declare it in the
+// dispatching scope.
 struct CoopTileRun {
   CoopSpecData             data;
-  VkSpecializationMapEntry entries[5];
+  VkSpecializationMapEntry entries[4];
   VkSpecializationInfo     specInfo;
+  CoopPush                 push;
   std::string              title;
 };
 
-// Bind a selected tile into a desc: build the spec constants, scale the outer
-// loop so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
+// Bind a selected tile into a desc: build the spec constants, scale the trip
+// count so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
 // and label the row with the actual MxNxK that runs.
 //
-// Single accumulator chain: explicit multi-chain ILP was measured to make no
-// difference to NVIDIA's Vulkan coopmat throughput (fp16/bf16 stay ~1/4 of
-// CUDA WMMA -- a driver-path limit, not the dependency chain), so it is not
-// worth the host/shader coupling here.
+// The caller has already set r.push.A to the fill this dtype wants.
 void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
                   const coopmat_tile_t &t, uint32_t wgSize,
                   const char *dtypeLabel)
 {
   const uint64_t volume = (uint64_t)t.M * t.N * t.K;   // MACs per coopMatMulAdd
-  uint64_t iters = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
-  if (iters < 1) iters = 1;
+  uint64_t mmas  = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
+  uint64_t trips = mmas / COOPMAT_MMA_PER_TRIP;
+  if (trips < 1) trips = 1;
+  mmas = trips * COOPMAT_MMA_PER_TRIP;   // what the shader will actually run
 
-  r.data = { t.M, t.N, t.K, (int32_t)iters, wgSize };
+  r.data = { t.M, t.N, t.K, wgSize };
   r.entries[0] = { 0, (uint32_t)offsetof(CoopSpecData, M),      sizeof(uint32_t) };
   r.entries[1] = { 1, (uint32_t)offsetof(CoopSpecData, N),      sizeof(uint32_t) };
   r.entries[2] = { 2, (uint32_t)offsetof(CoopSpecData, K),      sizeof(uint32_t) };
-  r.entries[3] = { 3, (uint32_t)offsetof(CoopSpecData, iters),  sizeof(int32_t) };
-  r.entries[4] = { 4, (uint32_t)offsetof(CoopSpecData, wgSize), sizeof(uint32_t) };
-  r.specInfo.mapEntryCount = 5;
+  r.entries[3] = { 3, (uint32_t)offsetof(CoopSpecData, wgSize), sizeof(uint32_t) };
+  r.specInfo.mapEntryCount = 4;
   r.specInfo.pMapEntries   = r.entries;
   r.specInfo.dataSize      = sizeof(r.data);
   r.specInfo.pData         = &r.data;
+  r.push.trips = (int32_t)trips;
   r.title  = std::string("Cooperative-matrix ") + dtypeLabel + " " +
              std::to_string(t.M) + "x" + std::to_string(t.N) + "x" + std::to_string(t.K);
 
@@ -68,9 +81,15 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
   d.title         = r.title.c_str();
   d.wgSize        = wgSize;
   d.outElemsPerWG = t.M * t.N;
-  // Reported work per WI = 2*MACs*ITERS / subgroup-size; exact since M*N is a
-  // multiple of the subgroup width for every advertised tile.
-  d.workPerWI     = (uint32_t)((volume * 2 * iters) / wgSize);
+  d.pushData      = &r.push;
+  d.pushSize      = sizeof(r.push);
+  // Reported work per WI = 2*MACs*MulAdds / subgroup-size; exact since M*N is a
+  // multiple of the subgroup width for every advertised tile, and the MulAdd
+  // count is the trip count the shader was handed times the trip size.
+  d.workPerWI     = (uint32_t)((volume * 2 * mmas) / wgSize);
+  CLPEAK_VLOG("%s: %ux%ux%u at subgroup %u, %llu trips x %u MulAdds, "
+              "%u ops/WI\n", d.resultTag, t.M, t.N, t.K, wgSize,
+              (unsigned long long)trips, COOPMAT_MMA_PER_TRIP, d.workPerWI);
 }
 
 } // namespace
@@ -84,9 +103,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
   // coopmatRequiredSubgroupSize() for what goes wrong when the driver splits
   // the group into several subgroups instead.
   // Width per tile, not per device: the driver may advertise one dtype's tile
-  // only at a narrower subgroup than another's, and running a tile at a width
-  // it was never advertised at is what takes Intel's shader compiler down on
-  // the A380's sint8 8x8x32.  coopmat_tile_t carries the width it came from.
+  // only at a narrower subgroup than another's, and a tile run at a width it
+  // was never advertised at is a shape no driver promised to compile.
+  // coopmat_tile_t carries the width it came from, or 0 when only the
+  // width-agnostic KHR query answered and there is no way to know.
   auto tileWG  = [&](const coopmat_tile_t &t) {
     return coopmatSubgroupWidth(dev.info, t.subgroupSize);
   };
@@ -97,8 +117,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
   if (!intPart) {
 #ifdef VK_HAS_COOPMAT_FP32
     {
-      float A = 1.3f;
       CoopTileRun r;
+      r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
       d.resultTag   = "coopmat_fp32";
       d.metricLabel = "coopmat_fp32";
@@ -109,8 +129,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);
-      d.pushData    = &A;
-      d.pushSize    = sizeof(A);
       if (dev.info.coopmatFP32.supported) {
         d.spirv     = vk_shaders::coopmat_fp32;
         d.spirvSize = vk_shaders::coopmat_fp32_size;
@@ -126,8 +144,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 #endif
 #ifdef VK_HAS_COOPMAT_FP16
     {
-      float A = 1.3f;
       CoopTileRun r;
+      r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
       d.resultTag   = "coopmat_fp16";
       d.metricLabel = "coopmat_fp16";
@@ -138,8 +156,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);
-      d.pushData    = &A;
-      d.pushSize    = sizeof(A);
       if (dev.info.float16Supported && dev.info.coopmatFP16.supported) {
         d.spirv     = vk_shaders::coopmat_fp16;
         d.spirvSize = vk_shaders::coopmat_fp16_size;
@@ -155,8 +171,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 #endif
 #ifdef VK_HAS_COOPMAT_BF16
     {
-      float A = 1.3f;
       CoopTileRun r;
+      r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
       d.resultTag   = "coopmat_bf16";
       d.metricLabel = "coopmat_bf16";
@@ -167,8 +183,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);
-      d.pushData    = &A;
-      d.pushSize    = sizeof(A);
       if (dev.info.bfloat16Supported && dev.info.coopmatBF16.supported) {
         d.spirv     = vk_shaders::coopmat_bf16;
         d.spirvSize = vk_shaders::coopmat_bf16_size;
@@ -184,8 +198,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 #endif
 #ifdef VK_HAS_COOPMAT_FP8_E4M3
     {
-      float A = 1.3f;
       CoopTileRun r;
+      r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
       d.resultTag   = "coopmat_fp8_e4m3";
       d.metricLabel = "coopmat_fp8_e4m3";
@@ -196,8 +210,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);
-      d.pushData    = &A;
-      d.pushSize    = sizeof(A);
       // Two gates: the float8 feature must be enabled at device creation
       // (else pipeline creation fails) AND a matching tile must be advertised.
       if (dev.info.fp8Supported && dev.info.coopmatFP8E4M3.supported) {
@@ -215,8 +227,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 #endif
 #ifdef VK_HAS_COOPMAT_FP8_E5M2
     {
-      float A = 1.3f;
       CoopTileRun r;
+      r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
       d.resultTag   = "coopmat_fp8_e5m2";
       d.metricLabel = "coopmat_fp8_e5m2";
@@ -227,8 +239,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);
-      d.pushData    = &A;
-      d.pushSize    = sizeof(A);
       if (dev.info.fp8Supported && dev.info.coopmatFP8E5M2.supported) {
         d.spirv     = vk_shaders::coopmat_fp8_e5m2;
         d.spirvSize = vk_shaders::coopmat_fp8_e5m2_size;
@@ -246,8 +256,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 
 #ifdef VK_HAS_COOPMAT_INT8
   if (intPart) {
-    int32_t A = 3;
     CoopTileRun r;
+    r.push.A.i = 3;
     vk_compute_desc_t d = {};
     d.resultTag   = "coopmat_int8";
     d.metricLabel = "coopmat_int8";
@@ -258,8 +268,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     d.unitDivider = 1e12;
 
     d.elemSize    = sizeof(int32_t);
-    d.pushData    = &A;
-    d.pushSize    = sizeof(A);
     // Two gates, like fp8: the shader's Int8 capability needs shaderInt8
     // enabled at device creation, and a matching tile must be advertised.
     if (dev.info.int8Supported && dev.info.coopmatINT8.supported) {

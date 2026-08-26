@@ -2,19 +2,13 @@
 #extension GL_KHR_cooperative_matrix       : require
 #extension GL_KHR_memory_scope_semantics   : require
 
-// Cooperative-matrix FP32 x FP32 + FP32.  Not exposed by NVIDIA's
-// tensor-core path (FP32 coopmat there falls back to shader-core FMAs);
-// some AMD / Intel / mobile drivers do advertise this shape and it can
-// expose driver-tile differences vs. the hand-rolled compute_sp.
-//
-// Host gates the test on a matching subgroup-scope property from
-// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR and binds its M/N/K as
-// specialization constants.  See coopmat_fp16.comp for design notes.
+// Cooperative-matrix FP32 x FP32 + FP32 accumulator.  Rare -- only a few
+// drivers advertise an fp32 tile -- but where it exists it is the only
+// tensor-core row that needs no narrowing of the inputs.  See
+// coopmat_chain.glsl for the shape of the MulAdd run and coopmat_fp16.comp
+// for how M/N/K reach the shader.
 
-// One subgroup per work-group.  The width is specialization constant 4 rather
-// than a literal, so each tile runs at the subgroup width its driver actually
-// advertised it at -- see the per-width query in vk_peak.cpp.
-layout(local_size_x_id = 4) in;
+layout(local_size_x_id = 3, local_size_x = 32) in;
 
 layout(set = 0, binding = 0) buffer Output {
     float data[];
@@ -22,25 +16,25 @@ layout(set = 0, binding = 0) buffer Output {
 
 layout(push_constant) uniform PushConstants {
     float A;
+    int   trips;
 } pc;
 
-layout(constant_id = 0) const uint M     = 16u;
-layout(constant_id = 1) const uint N     = 16u;
-layout(constant_id = 2) const uint K     = 16u;
-layout(constant_id = 3) const int  ITERS = 256;
+layout(constant_id = 0) const uint M = 16u;
+layout(constant_id = 1) const uint N = 16u;
+layout(constant_id = 2) const uint K = 16u;
+
+#define CM_AB     float
+#define CM_ACC    float
+#define CM_VAL(i) (pc.A + float(i))
+#include "coopmat_chain.glsl"
 
 void main()
 {
-    coopmat<float, gl_ScopeSubgroup, M, K, gl_MatrixUseA> matA =
-        coopmat<float, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(pc.A);
-    coopmat<float, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
-        coopmat<float, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(pc.A);
-    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
-        coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+    CM_DECLARE
 
-    for (int i = 0; i < ITERS; i++)
+    for (int i = 0; i < pc.trips; i++)
     {
-        matC = coopMatMulAdd(matA, matB, matC);
+        CM_MMA_TRIP
     }
 
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,

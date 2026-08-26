@@ -200,10 +200,18 @@ static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 // v1: 64 iters * MAD_DP_16 (16 dots) * 8 ops = 8192 per WI (all variants equal).
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
-// coopmat_*.comp: 16x16x16 tile, 256 iters per subgroup, one subgroup
-// (32 threads) per work-group.  Per subgroup: M*N*K*2*ITERS = 2,097,152 ops;
+// coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup
+// (32 threads) per work-group.  Per subgroup: M*N*K*2*MulAdds = 2,097,152 ops;
 // per work-item: 2,097,152 / 32 = 65,536 ops.
 static const unsigned int COOPMAT_WORK_PER_WI = 65536;
+
+// MulAdds in one trip of the coopmat inner loop.  Must match CM_MMA_PER_TRIP
+// in src/vulkan/shaders/coopmat_chain.glsl: the host pushes the trip count,
+// the shader runs this many MulAdds per trip, and the product is the MulAdd
+// budget above.  Every tile seen so far -- 8x8x8, 8x8x16, 8x8x32, 16x16x16,
+// 16x16x32, at subgroup 32 and 64 -- divides exactly by it, so the budget is
+// hit on the nose rather than rounded.
+static const unsigned int COOPMAT_MMA_PER_TRIP = 16;
 
 // Max work-group size cap.  Hardware may report higher (1024 on most NVIDIA
 // GPUs), but we clamp to 256 because the v16 kernels hold a float16/double16
