@@ -160,6 +160,8 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.coopmatFP8E5M2 = {};
   self->info.coopmatINT8 = {};
   self->info.calibratedTimestampsSupported = false;
+  self->info.maintenance4Supported = false;
+  self->info.coopmatMaintenance1Supported = false;
 
 #if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
@@ -272,6 +274,44 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     // (VUID-RuntimeSpirv-cooperativeMatrixSupportedStages-08985).  Every
     // coopmat shader here is a compute shader, so a device without the compute
     // bit has no usable coopmat at all.
+    // The coopmat shaders specialize their workgroup size, which is
+    // OpExecutionModeId LocalSizeId, which VUID-RuntimeSpirv-LocalSizeId-06434
+    // makes conditional on maintenance4.  Core in Vulkan 1.3 -- and these
+    // shaders are SPIR-V 1.6, so nothing older can load them anyway -- but the
+    // feature bit still has to be requested, or we are back to a capability
+    // whose feature was never enabled.
+    {
+      VkPhysicalDeviceMaintenance4Features m4 = {};
+      m4.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
+      VkPhysicalDeviceFeatures2 m4f2 = {};
+      m4f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      m4f2.pNext = &m4;
+      if (pfnGetFeat2) pfnGetFeat2(physDev, &m4f2);
+      self->info.maintenance4Supported = m4.maintenance4 != VK_FALSE;
+      if (!self->info.maintenance4Supported)
+        CLPEAK_VLOG("Vulkan: maintenance4 not available; cooperative matrix "
+                    "needs it to specialize the workgroup size\n");
+    }
+
+    // VK_EXT_cooperative_matrix_maintenance1's query takes a subgroup size and
+    // answers for that width alone.  The KHR query cannot: it reports the union
+    // over every width the device supports, so a tile it lists may not be valid
+    // at the width we actually pin.  Detect it here; the enumeration in
+    // vk_peak.cpp dumps the per-width lists under --verbose.
+#ifdef VK_EXT_cooperative_matrix_maintenance1
+    if (hasCoopmatExt && hasExt(VK_EXT_COOPERATIVE_MATRIX_MAINTENANCE_1_EXTENSION_NAME))
+    {
+      VkPhysicalDeviceCooperativeMatrixMaintenance1FeaturesEXT cm1 = {};
+      cm1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_MAINTENANCE_1_FEATURES_EXT;
+      VkPhysicalDeviceFeatures2 cm1f2 = {};
+      cm1f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      cm1f2.pNext = &cm1;
+      if (pfnGetFeat2) pfnGetFeat2(physDev, &cm1f2);
+      self->info.coopmatMaintenance1Supported =
+          cm1.cooperativeMatrixProperties2 != VK_FALSE;
+    }
+#endif
+
     bool coopmatInCompute = false;
     if (hasCoopmatExt)
     {
@@ -289,7 +329,8 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
                     cmProps.cooperativeMatrixSupportedStages);
     }
     if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix &&
-        vmmFeatures.vulkanMemoryModel && coopmatInCompute)
+        vmmFeatures.vulkanMemoryModel && coopmatInCompute &&
+        self->info.maintenance4Supported)
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       self->info.cooperativeMatrixSupported = true;
@@ -474,8 +515,13 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   }
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
+  VkPhysicalDeviceMaintenance4Features m4Features = {};
+  m4Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
   if (self->info.cooperativeMatrixSupported)
   {
+    m4Features.maintenance4 = VK_TRUE;
+    m4Features.pNext = nullptr;
+    enabledChain = chainPNext(enabledChain, &m4Features);
     coopmatFeatures.cooperativeMatrix = VK_TRUE;
     coopmatFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &coopmatFeatures);

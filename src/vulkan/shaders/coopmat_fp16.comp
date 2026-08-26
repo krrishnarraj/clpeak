@@ -22,7 +22,10 @@
 // for simplicity; revisit with multi-chain only if AMD/Intel data shows
 // their coopmat fp16 is latency-bound.
 
-layout(local_size_x = 32) in;
+// One subgroup per work-group.  The width is specialization constant 4 rather
+// than a literal, so each tile runs at the subgroup width its driver actually
+// advertised it at -- see the per-width query in vk_peak.cpp.
+layout(local_size_x_id = 4) in;
 
 layout(set = 0, binding = 0) buffer Output {
     float data[];

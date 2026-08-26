@@ -8,7 +8,10 @@
 // Requires VK_KHR_cooperative_matrix + shaderInt8 + 8-bit storage.  See
 // coopmat_fp16.comp for design notes.
 
-layout(local_size_x = 32) in;
+// One subgroup per work-group.  The width is specialization constant 4 rather
+// than a literal, so each tile runs at the subgroup width its driver actually
+// advertised it at -- see the per-width query in vk_peak.cpp.
+layout(local_size_x_id = 4) in;
 
 layout(set = 0, binding = 0) buffer Output {
     int32_t data[];

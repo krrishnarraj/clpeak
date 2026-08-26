@@ -5,6 +5,7 @@
 #include <common/inventory.h>
 #include <common/common.h>
 #include <algorithm>
+#include <tuple>
 #include <cstring>
 #include <sstream>
 #include <utility>
@@ -40,13 +41,22 @@ static const char *coopmatComponentName(VkComponentTypeKHR t)
   }
 }
 
-// One line per dtype for the --verbose dump: which tile pickTile settled on.
-static void logPickedTile(const char *label, const coopmat_tile_t &t)
+// One line per dtype for the --verbose dump: which tile pickTile settled on,
+// and the subgroup width it will actually run at.  "advertised at N" means the
+// device named that width for this tile; "width unknown" means only the
+// width-agnostic KHR query was available and the default is a guess.
+static void logPickedTile(const char *label, const coopmat_tile_t &t,
+                          const vk_device_info_t &info)
 {
-  if (t.supported)
-    CLPEAK_VLOG("  picked %-8s %ux%ux%u\n", label, t.M, t.N, t.K);
-  else
+  if (!t.supported)
+  {
     CLPEAK_VLOG("  picked %-8s (none)\n", label);
+    return;
+  }
+  CLPEAK_VLOG("  picked %-8s %ux%ux%u, running subgroup %u (%s)\n", label,
+              t.M, t.N, t.K,
+              coopmatSubgroupWidth(info, t.subgroupSize),
+              t.subgroupSize ? "advertised at this width" : "width unknown");
 }
 #endif
 
@@ -281,94 +291,159 @@ int vkPeak::runAll()
     }
 
 #ifdef VK_HAS_ANY_COOPMAT
-    // Enumerate cooperative-matrix properties to decide which dtype
-    // combinations are advertised at the canonical 16x16x16 subgroup-scope
-    // tile.  Done here (not in VulkanDevice::init) because the entry point
-    // is an instance-level extension function that must be resolved via
-    // vkGetInstanceProcAddr against the real VkInstance.
+    // Enumerate cooperative-matrix properties to decide which tile to run for
+    // each dtype, and at which subgroup width.  Done here (not in
+    // VulkanDevice::init) because the entry points are instance-level extension
+    // functions that must be resolved via vkGetInstanceProcAddr against the
+    // real VkInstance.
+    //
+    // Two queries, and the difference matters.  The KHR one is width-agnostic:
+    // it returns the union of tiles over every subgroup width the device
+    // supports, so a tile it lists is not necessarily valid at the width we
+    // pin.  VK_EXT_cooperative_matrix_maintenance1 takes a subgroup size and
+    // answers for that width alone, so asking it per width tells us which tile
+    // goes with which width.  Prefer it; fall back to KHR when it is absent,
+    // where the best we can do is the device's native width.
     if (dev.info.cooperativeMatrixSupported)
     {
-      auto pfn = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)
-          vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
-      uint32_t propCount = 0;
-      if (pfn && pfn(physicalDevices[d], &propCount, nullptr) == VK_SUCCESS && propCount > 0)
-      {
-        std::vector<VkCooperativeMatrixPropertiesKHR> props(propCount);
-        for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
-        if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
-        {
-          CLPEAK_VLOG("Vulkan: device %zu advertises %u cooperative-matrix "
-                      "properties\n", d, propCount);
-          for (auto &p : props)
-            CLPEAK_VLOG("  %ux%ux%u  A=%s B=%s C=%s D=%s  scope=%s%s\n",
-                        p.MSize, p.NSize, p.KSize,
-                        coopmatComponentName(p.AType), coopmatComponentName(p.BType),
-                        coopmatComponentName(p.CType), coopmatComponentName(p.ResultType),
-                        p.scope == VK_SCOPE_SUBGROUP_KHR  ? "subgroup" :
-                        p.scope == VK_SCOPE_WORKGROUP_KHR ? "workgroup" : "other",
-                        p.saturatingAccumulation ? "  saturating (unusable)" : "");
+      // One advertised (dtype, shape, width) combination.  width == 0 means it
+      // came from the width-agnostic KHR query.
+      struct CoopCand {
+        uint32_t M, N, K, width;
+        VkComponentTypeKHR a, b, c, d;
+      };
+      std::vector<CoopCand> cands;
 
-          // Pick the canonical subgroup-scope tile for one input/accumulator
-          // dtype combination.  We don't assume a shape -- among the tiles the
-          // driver advertises we prefer a square 16x16 face (the shaders run
-          // one subgroup per 16x16 output tile), then the largest volume
-          // (M*N*K) to minimize loop overhead.  Whatever K the hardware wants
-          // (16 for fp16/bf16, 32 for NVIDIA's 8-bit types, ...) flows through
-          // to the shader as a specialization constant.
-          auto pickTile = [&](VkComponentTypeKHR ab, VkComponentTypeKHR c) {
-            coopmat_tile_t best;
+#ifdef VK_EXT_cooperative_matrix_maintenance1
+      if (dev.info.coopmatMaintenance1Supported)
+      {
+        auto pfn2 = (PFN_vkGetPhysicalDeviceCooperativeMatrixProperties2EXT)
+            vkGetInstanceProcAddr(instance,
+                "vkGetPhysicalDeviceCooperativeMatrixProperties2EXT");
+        const uint32_t lo = dev.info.minSubgroupSize ? dev.info.minSubgroupSize
+                                                     : dev.info.subgroupSize;
+        const uint32_t hi = dev.info.maxSubgroupSize ? dev.info.maxSubgroupSize
+                                                     : dev.info.subgroupSize;
+        for (uint32_t sg = lo; pfn2 && sg && sg <= hi; sg *= 2)
+        {
+          VkPhysicalDeviceCooperativeMatrixInfo2EXT info2 = {};
+          info2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_INFO_2_EXT;
+          info2.scope = VK_SCOPE_SUBGROUP_KHR;
+          info2.subgroupSize = sg;
+          uint32_t n2 = 0;
+          if (pfn2(physicalDevices[d], &info2, &n2, nullptr) != VK_SUCCESS)
+          {
+            CLPEAK_VLOG("  at subgroup %u: query failed\n", sg);
+            continue;
+          }
+          std::vector<VkCooperativeMatrixProperties2EXT> p2(n2);
+          for (auto &q : p2) q.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_2_EXT;
+          if (n2 && pfn2(physicalDevices[d], &info2, &n2, p2.data()) != VK_SUCCESS)
+            continue;
+          CLPEAK_VLOG("  at subgroup %u: %u tile(s)\n", sg, n2);
+          for (auto &q : p2)
+          {
+            CLPEAK_VLOG("    %ux%ux%u  A=%s B=%s C=%s D=%s\n",
+                        q.MGranularity, q.NGranularity, q.KGranularity,
+                        coopmatComponentName(q.AType), coopmatComponentName(q.BType),
+                        coopmatComponentName(q.CType), coopmatComponentName(q.ResultType));
+            cands.push_back({q.MGranularity, q.NGranularity, q.KGranularity, sg,
+                             q.AType, q.BType, q.CType, q.ResultType});
+          }
+        }
+      }
+#endif
+
+      if (cands.empty())
+      {
+        CLPEAK_VLOG("  no per-subgroup-width tile list (%s); falling back to the "
+                    "width-agnostic KHR query\n",
+                    dev.info.coopmatMaintenance1Supported
+                        ? "query returned nothing"
+                        : "VK_EXT_cooperative_matrix_maintenance1 not available");
+        auto pfn = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)
+            vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
+        uint32_t propCount = 0;
+        if (pfn && pfn(physicalDevices[d], &propCount, nullptr) == VK_SUCCESS && propCount > 0)
+        {
+          std::vector<VkCooperativeMatrixPropertiesKHR> props(propCount);
+          for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+          if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
+          {
+            CLPEAK_VLOG("Vulkan: device %zu advertises %u cooperative-matrix "
+                        "properties\n", d, propCount);
             for (auto &p : props)
             {
+              CLPEAK_VLOG("  %ux%ux%u  A=%s B=%s C=%s D=%s  scope=%s%s\n",
+                          p.MSize, p.NSize, p.KSize,
+                          coopmatComponentName(p.AType), coopmatComponentName(p.BType),
+                          coopmatComponentName(p.CType), coopmatComponentName(p.ResultType),
+                          p.scope == VK_SCOPE_SUBGROUP_KHR  ? "subgroup" :
+                          p.scope == VK_SCOPE_WORKGROUP_KHR ? "workgroup" : "other",
+                          p.saturatingAccumulation ? "  saturating (unusable)" : "");
               if (p.scope != VK_SCOPE_SUBGROUP_KHR) continue;
-              if (p.AType != ab || p.BType != ab) continue;
-              if (p.CType != c || p.ResultType != c) continue;
               // The shaders emit OpCooperativeMatrixMulAddKHR *without* the
               // SaturatingAccumulationKHR operand, and that operand is required
               // if and only if the matched property has saturatingAccumulation
               // set (VUID-RuntimeSpirv-OpCooperativeMatrixMulAddKHR-10060).  A
-              // saturating property therefore describes a shape these shaders
-              // may not run: matching one is invalid usage, which a driver is
-              // free to turn into a fault inside its shader compiler instead of
-              // a clean pipeline-creation failure.  Only integer dtypes ever
-              // advertise a saturating variant, so this never affected the
-              // float rows -- it is the int8 row that picks up a bad shape.
+              // saturating property describes a shape these shaders may not run.
               if (p.saturatingAccumulation) continue;
-              coopmat_tile_t cand{true, p.MSize, p.NSize, p.KSize};
-              if (!best.supported) { best = cand; continue; }
-              auto rank = [](const coopmat_tile_t &t) {
-                bool square16 = (t.M == 16 && t.N == 16);
-                // smaller is better: prefer square16, then larger volume.
-                return std::make_pair(square16 ? 0 : 1,
-                                      -(int64_t)t.M * (int64_t)t.N * (int64_t)t.K);
-              };
-              if (rank(cand) < rank(best)) best = cand;
+              cands.push_back({p.MSize, p.NSize, p.KSize, 0,
+                               p.AType, p.BType, p.CType, p.ResultType});
             }
-            return best;
-          };
-          dev.info.coopmatFP32    = pickTile(VK_COMPONENT_TYPE_FLOAT32_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
-          dev.info.coopmatFP16    = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
-          dev.info.coopmatBF16    = pickTile(VK_COMPONENT_TYPE_BFLOAT16_KHR,    VK_COMPONENT_TYPE_FLOAT32_KHR);
-          dev.info.coopmatFP8E4M3 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
-          dev.info.coopmatFP8E5M2 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
-          dev.info.coopmatINT8    = pickTile(VK_COMPONENT_TYPE_SINT8_KHR,       VK_COMPONENT_TYPE_SINT32_KHR);
-
-          logPickedTile("fp32",    dev.info.coopmatFP32);
-          logPickedTile("fp16",    dev.info.coopmatFP16);
-          logPickedTile("bf16",    dev.info.coopmatBF16);
-          logPickedTile("fp8e4m3", dev.info.coopmatFP8E4M3);
-          logPickedTile("fp8e5m2", dev.info.coopmatFP8E5M2);
-          logPickedTile("int8",    dev.info.coopmatINT8);
-          // The width the coopmat shaders will be pinned to, and the range the
-          // device allows.  A tile whose M*N is only 64 spreads 2 accumulator
-          // elements over a 32-wide subgroup, which is a shape far fewer
-          // drivers see than NVIDIA's 16x16 at the same width.
-          CLPEAK_VLOG("  subgroup: pinning %u (device reports %u, range %u..%u,"
-                      " size control %s)\n",
-                      coopmatRequiredSubgroupSize(dev.info), dev.info.subgroupSize,
-                      dev.info.minSubgroupSize, dev.info.maxSubgroupSize,
-                      dev.info.subgroupSizeControl ? "yes" : "no");
+          }
         }
       }
+
+      // Pick one tile per input/accumulator dtype.  We don't assume a shape --
+      // among the advertised tiles prefer a square 16x16 face (fewer, larger
+      // MMAs per output element), then the largest volume (M*N*K) to minimize
+      // loop overhead.  Whatever K the hardware wants (16 for fp16/bf16, 32 for
+      // 8-bit types, ...) flows through to the shader as a specialization
+      // constant, and so does the width.
+      //
+      // Among widths for the same shape, prefer the device's native subgroup
+      // size, then the widest available: native is what every device measured
+      // so far wants, and falling to a narrower one is what lets a tile run at
+      // all when the driver does not offer it at the native width.
+      auto pickTile = [&](VkComponentTypeKHR ab, VkComponentTypeKHR acc) {
+        coopmat_tile_t best;
+        auto rank = [&](const coopmat_tile_t &t) {
+          bool square16 = (t.M == 16 && t.N == 16);
+          bool native   = (t.subgroupSize == dev.info.subgroupSize);
+          return std::make_tuple(square16 ? 0 : 1,
+                                 -(int64_t)t.M * (int64_t)t.N * (int64_t)t.K,
+                                 native ? 0 : 1,
+                                 -(int64_t)t.subgroupSize);
+        };
+        for (auto &p : cands)
+        {
+          if (p.a != ab || p.b != ab) continue;
+          if (p.c != acc || p.d != acc) continue;
+          coopmat_tile_t cand{true, p.M, p.N, p.K, p.width};
+          if (!best.supported || rank(cand) < rank(best)) best = cand;
+        }
+        return best;
+      };
+
+      dev.info.coopmatFP32    = pickTile(VK_COMPONENT_TYPE_FLOAT32_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP16    = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatBF16    = pickTile(VK_COMPONENT_TYPE_BFLOAT16_KHR,    VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP8E4M3 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP8E5M2 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatINT8    = pickTile(VK_COMPONENT_TYPE_SINT8_KHR,       VK_COMPONENT_TYPE_SINT32_KHR);
+
+      logPickedTile("fp32",    dev.info.coopmatFP32,    dev.info);
+      logPickedTile("fp16",    dev.info.coopmatFP16,    dev.info);
+      logPickedTile("bf16",    dev.info.coopmatBF16,    dev.info);
+      logPickedTile("fp8e4m3", dev.info.coopmatFP8E4M3, dev.info);
+      logPickedTile("fp8e5m2", dev.info.coopmatFP8E5M2, dev.info);
+      logPickedTile("int8",    dev.info.coopmatINT8,    dev.info);
+
+      CLPEAK_VLOG("  subgroup: device reports %u, range %u..%u, size control %s\n",
+                  dev.info.subgroupSize, dev.info.minSubgroupSize,
+                  dev.info.maxSubgroupSize,
+                  dev.info.subgroupSizeControl ? "yes" : "no");
     }
 #endif
 
