@@ -15,7 +15,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   auto test = currentDeviceScope->beginTest(
     {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
      Category::Unknown,
-     "How many bytes per second the GPU moves through local memory -- the "
+     "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
      "which never goes out to main memory."});
 

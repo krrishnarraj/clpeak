@@ -166,7 +166,7 @@ int clPeak::runAll()
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "gflops",
-                       "Peak arithmetic speed of the GPU's shader cores on 32-bit "
+                       "Peak arithmetic speed of the device's compute units on 32-bit "
                        "fractional numbers -- the ordinary float type.  Nothing "
                        "touches memory, so only the arithmetic units limit the rate.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
@@ -184,13 +184,14 @@ int clPeak::runAll()
                        "compute_dp", "double", "gflops",
                        "Peak arithmetic speed on 64-bit fractional numbers, the "
                        "high-accuracy type scientific computing relies on.  Consumer "
-                       "GPUs deliberately run these many times slower than 32-bit.",
+                       "graphics parts deliberately run these many times slower than "
+                       "32-bit.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
                        "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
                        "compute_mp", "mp", "gflops",
-                       "Peak speed when the GPU multiplies 16-bit numbers but keeps "
+                       "Peak speed when the device multiplies 16-bit numbers but keeps "
                        "the running total in 32 bits -- the accuracy-preserving "
                        "pattern AI code uses.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
@@ -200,7 +201,7 @@ int clPeak::runAll()
                        "Integer compute", "integer_compute",
                        "compute_integer", "int", "gops",
                        "Peak speed on 32-bit whole numbers -- the arithmetic behind "
-                       "indexing, addressing and bit manipulation, which shaders do "
+                       "indexing, addressing and bit manipulation, which kernels do "
                        "alongside their fractional maths.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
@@ -208,7 +209,7 @@ int clPeak::runAll()
                        "Integer compute Fast 24bit", "integer_compute_fast",
                        "compute_intfast", "int", "gops",
                        "The same integer maths restricted to 24-bit values, which "
-                       "some GPUs multiply on their faster floating-point hardware "
+                       "some devices multiply on their faster floating-point hardware "
                        "instead.  Where this beats the plain integer row, the full "
                        "32-bit multiply is the slower path.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
@@ -251,9 +252,9 @@ int clPeak::runAll()
           auto test = deviceScope.beginTest(
             {"kernel_launch_latency", "Kernel launch latency", "us",
              Category::Unknown,
-             "The overhead of asking the GPU to do anything at all, measured "
-             "with a kernel that does no work.  It is what small, frequent GPU "
-             "jobs pay before any of their own work begins."});
+             "The overhead of asking the device to do anything at all, measured "
+             "with a kernel that does no work.  It is what small, frequent jobs "
+             "pay before any of their own work begins."});
           test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
                        "No profiling queue support");
         }

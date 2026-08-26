@@ -27,7 +27,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   auto test = currentDeviceScope->beginTest(
     {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
      Category::Unknown,
-     "How many bytes per second the GPU can stream out of its main memory, "
+     "How many bytes per second the device can stream out of its main memory, "
      "reading a buffer far too large to cache.  Each reading fetches a "
      "different number of values per instruction, since wider fetches usually "
      "pull more through before the memory system saturates."});

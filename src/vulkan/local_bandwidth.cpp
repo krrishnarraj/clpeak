@@ -18,8 +18,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Local memory bandwidth";
   testSpec.unit = "gbps";
   testSpec.description =
-      "How many bytes per second the GPU moves through shared local memory -- "
-      "the small on-chip scratchpad a group of threads passes data through, "
+      "How many bytes per second the device moves through shared local memory "
+      "-- the small on-chip scratchpad a group of threads passes data through, "
       "which never goes out to main memory.";
   auto test = currentDeviceScope->beginTest(testSpec);
 

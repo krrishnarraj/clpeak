@@ -62,7 +62,11 @@ unified-memory devices, and OpenCL's test description explains that.
 
 Style: plain language for someone who doesn't know the term in the metric
 name; no "lower/higher is better" (the GUI already orders and scales the
-readings).
+readings).  Say "the device", not "the GPU": OpenCL, Vulkan and oneAPI
+enumerate CPU devices too and show the same string for them -- and "the host"
+for the side submitting the work, since "the CPU" is ambiguous once the device
+is one.  A claim that only holds for graphics hardware names it as such
+("consumer graphics parts run these many times slower than 32-bit").
 
 Trap: the sugar overload takes `const char *`, not `std::string` — a
 std::string parameter makes existing braced calls (`emit(m, v, {true})`)

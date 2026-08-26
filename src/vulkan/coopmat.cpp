@@ -103,7 +103,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.resultTag   = "coopmat_fp32";
       d.metricLabel = "coopmat_fp32";
       d.unit        = "tflops";
-      d.description = "Peak speed of the GPU's matrix engine (its tensor cores) on "
+      d.description = "Peak speed of the device's matrix engine (its tensor cores) on "
                       "full 32-bit numbers.  These units multiply whole small blocks "
                       "of numbers in one step instead of one value at a time.";
       d.unitDivider = 1e12;
@@ -192,7 +192,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.unit        = "tflops";
       d.description = "The matrix engine on 8-bit numbers, in the variant that spends "
                       "its bits on accuracy rather than range.  Half the data of fp16 "
-                      "per value, so the newest GPUs run it at roughly twice the rate.";
+                      "per value, so the newest hardware runs it at roughly twice the rate.";
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);

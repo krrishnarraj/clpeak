@@ -26,7 +26,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Global memory bandwidth";
   testSpec.unit = "gbps";
   testSpec.description =
-      "How many bytes per second the GPU can stream out of its main memory, "
+      "How many bytes per second the device can stream out of its main memory, "
       "reading a buffer far too large to cache.  Each reading fetches a "
       "different number of values per instruction, since wider fetches usually "
       "pull more through before the memory system saturates.";

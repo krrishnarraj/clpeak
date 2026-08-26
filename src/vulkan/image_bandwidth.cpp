@@ -22,7 +22,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Image memory bandwidth";
   testSpec.unit = "gbps";
   testSpec.description =
-      "How many bytes per second the GPU reads through its texture units, "
+      "How many bytes per second the device reads through its texture units, "
       "which take a different path to memory than plain buffer reads.  Each "
       "pixel of the image is read exactly once, so caching cannot flatter the "
       "number.";

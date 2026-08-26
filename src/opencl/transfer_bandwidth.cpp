@@ -54,8 +54,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
      "How fast data crosses between the host's memory and the device's.  On a "
      "discrete card that means the PCIe link, which is far narrower than "
-     "either side's own memory and is what makes moving data to the GPU worth "
-     "avoiding; where the two share one pool of memory the numbers are much "
+     "either side's own memory and is what makes moving data to the device "
+     "worth avoiding; where the two share one pool of memory the numbers are much "
      "higher.  Both readings use pinned host memory, the fast path."});
 
   const char *h2dNote = "Host to device: sending data across to the device.";

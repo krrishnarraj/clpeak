@@ -12,7 +12,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   auto test = currentDeviceScope->beginTest(
     {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
      Category::Unknown,
-     "How many bytes per second the GPU reads through its texture units, "
+     "How many bytes per second the device reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
      "pixel of the image is read exactly once, so caching cannot flatter the "
      "number."});
