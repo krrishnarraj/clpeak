@@ -1,5 +1,24 @@
 #version 450
+// clpeak-alt: -DINT8_DP_INVARIANT
+//
+// Two operand shapes are raced.  The default rewrites y from the accumulator
+// after every dot, so no two dots share operands and none can be hoisted out of
+// the loop -- but that XOR is a second dependent integer op per dot, and it is
+// not in the op budget.  On an Arc A380 that costs more than half the rate:
+// 8.8 TOPS where the same instruction is measured at 19.5 elsewhere.  The alt
+// build holds both operands loop-invariant, leaving the accumulator as the only
+// thing that moves.  That is the fast shape and the fold-exposed one:
+// dotPacked4x8AccSatEXT(x, y, a) with x and y invariant is legally
+// strength-reducible to one dot plus N saturating adds, so it is raced rather
+// than adopted, and runComputeKernel drops a reading more than
+// MAX_ALT_CHAIN_RATIO above the safe shape -- a hoist would be ~16x.
 #extension GL_EXT_integer_dot_product : require
+
+#ifdef INT8_DP_INVARIANT
+#define INT8_DP_REPACK(y, a)
+#else
+#define INT8_DP_REPACK(y, a)  y ^= a;
+#endif
 
 // INT8 packed-dp4a v4: four parallel dp4a chains per thread.  See v1/v2
 // for lowering / extension details.  v4 doubles v2's independent work
@@ -19,10 +38,10 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 #define STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
-    a0 = dotPacked4x8AccSatEXT(x0, y0, a0); y0 ^= a0; \
-    a1 = dotPacked4x8AccSatEXT(x1, y1, a1); y1 ^= a1; \
-    a2 = dotPacked4x8AccSatEXT(x2, y2, a2); y2 ^= a2; \
-    a3 = dotPacked4x8AccSatEXT(x3, y3, a3); y3 ^= a3;
+    a0 = dotPacked4x8AccSatEXT(x0, y0, a0); INT8_DP_REPACK(y0, a0) \
+    a1 = dotPacked4x8AccSatEXT(x1, y1, a1); INT8_DP_REPACK(y1, a1) \
+    a2 = dotPacked4x8AccSatEXT(x2, y2, a2); INT8_DP_REPACK(y2, a2) \
+    a3 = dotPacked4x8AccSatEXT(x3, y3, a3); INT8_DP_REPACK(y3, a3)
 #define STEP4_4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
     STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \
     STEP4(x0,y0,a0,x1,y1,a1,x2,y2,a2,x3,y3,a3) \

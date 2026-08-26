@@ -21,6 +21,14 @@
 
 namespace {
 
+// VK_ALT_SHADER(name) expands to a (pointer, size) pair, so it needs a
+// two-argument sink rather than a plain assignment.
+inline void vkSetAlt(vk_compute_desc_t &d, const uint32_t *spirv, size_t size)
+{
+  d.altSpirv = spirv;
+  d.altSpirvSize = size;
+}
+
 // Plain-old-data spec-constant payload (constant_id 0..4 in the shaders).
 // wgSize is the shader's local_size_x, declared as local_size_x_id = 4, so the
 // work-group and the pinned subgroup width always move together.
@@ -114,6 +122,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       if (dev.info.coopmatFP32.supported) {
         d.spirv     = vk_shaders::coopmat_fp32;
         d.spirvSize = vk_shaders::coopmat_fp32_size;
+        vkSetAlt(d, VK_ALT_SHADER(coopmat_fp32));
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP32);
         bindCoopTile(r, d, dev.info.coopmatFP32, tileWG(dev.info.coopmatFP32), "fp32xfp32+fp32");
       } else {
@@ -143,6 +152,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       if (dev.info.float16Supported && dev.info.coopmatFP16.supported) {
         d.spirv     = vk_shaders::coopmat_fp16;
         d.spirvSize = vk_shaders::coopmat_fp16_size;
+        vkSetAlt(d, VK_ALT_SHADER(coopmat_fp16));
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16);
         bindCoopTile(r, d, dev.info.coopmatFP16, tileWG(dev.info.coopmatFP16), "fp16xfp16+fp32");
       } else {
@@ -172,6 +182,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       if (dev.info.bfloat16Supported && dev.info.coopmatBF16.supported) {
         d.spirv     = vk_shaders::coopmat_bf16;
         d.spirvSize = vk_shaders::coopmat_bf16_size;
+        vkSetAlt(d, VK_ALT_SHADER(coopmat_bf16));
         d.requiredSubgroupSize = tileSub(dev.info.coopmatBF16);
         bindCoopTile(r, d, dev.info.coopmatBF16, tileWG(dev.info.coopmatBF16), "bf16xbf16+fp32");
       } else {
@@ -203,6 +214,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       if (dev.info.fp8Supported && dev.info.coopmatFP8E4M3.supported) {
         d.spirv     = vk_shaders::coopmat_fp8_e4m3;
         d.spirvSize = vk_shaders::coopmat_fp8_e4m3_size;
+        vkSetAlt(d, VK_ALT_SHADER(coopmat_fp8_e4m3));
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP8E4M3);
         bindCoopTile(r, d, dev.info.coopmatFP8E4M3, tileWG(dev.info.coopmatFP8E4M3), "fp8(E4M3)xfp8(E4M3)+fp32");
       } else {
@@ -232,6 +244,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       if (dev.info.fp8Supported && dev.info.coopmatFP8E5M2.supported) {
         d.spirv     = vk_shaders::coopmat_fp8_e5m2;
         d.spirvSize = vk_shaders::coopmat_fp8_e5m2_size;
+        vkSetAlt(d, VK_ALT_SHADER(coopmat_fp8_e5m2));
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP8E5M2);
         bindCoopTile(r, d, dev.info.coopmatFP8E5M2, tileWG(dev.info.coopmatFP8E5M2), "fp8(E5M2)xfp8(E5M2)+fp32");
       } else {
@@ -265,6 +278,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     if (dev.info.int8Supported && dev.info.coopmatINT8.supported) {
       d.spirv     = vk_shaders::coopmat_int8;
       d.spirvSize = vk_shaders::coopmat_int8_size;
+      vkSetAlt(d, VK_ALT_SHADER(coopmat_int8));
       d.requiredSubgroupSize = tileSub(dev.info.coopmatINT8);
       bindCoopTile(r, d, dev.info.coopmatINT8, tileWG(dev.info.coopmatINT8), "int8xint8+int32");
     } else {

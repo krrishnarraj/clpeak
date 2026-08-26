@@ -12,6 +12,7 @@
 // One subgroup per work-group.  The width is specialization constant 4 rather
 // than a literal, so each tile runs at the subgroup width its driver actually
 // advertised it at -- see the per-width query in vk_peak.cpp.
+// clpeak-alt: -DCOOPMAT_DUAL
 layout(local_size_x_id = 4) in;
 
 layout(set = 0, binding = 0) buffer Output {
@@ -33,13 +34,34 @@ void main()
         coopmat<bfloat16_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(bfloat16_t(pc.A));
     coopmat<bfloat16_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
         coopmat<bfloat16_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(bfloat16_t(pc.A));
+#ifdef COOPMAT_DUAL
+    // Two independent accumulator chains.  Intel's XMX is latency-bound on one
+    // chain -- an A380 reads 12.5 TFLOPS fp16 single-chain against 25.9 for the
+    // same tile with two -- while NVIDIA measured no difference either way, so
+    // the pair is raced and the faster reported.  Half the trip count, two
+    // MulAdds per trip: the same ITERS multiply-accumulates either way, so the
+    // op budget the host credits is unchanged.
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+#else
     coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
         coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+#endif
 
+#ifdef COOPMAT_DUAL
+    for (int i = 0; i < ITERS / 2; i++)
+    {
+        matC0 = coopMatMulAdd(matA, matB, matC0);
+        matC1 = coopMatMulAdd(matA, matB, matC1);
+    }
+    matC0 = matC0 + matC1;
+#define matC matC0
+#else
     for (int i = 0; i < ITERS; i++)
     {
         matC = coopMatMulAdd(matA, matB, matC);
     }
+#endif
 
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
                  gl_CooperativeMatrixLayoutRowMajor);

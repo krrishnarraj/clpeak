@@ -44,8 +44,10 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   else
   {
     // Single-variant tests (coopmat): the metric name restates the title, so
-    // the test-level description covers it.
-    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr, nullptr, 0});
+    // the test-level description covers it.  The alt build, where there is one,
+    // is raced exactly as a variant's is.
+    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr,
+                        d.altSpirv, d.altSpirvSize});
   }
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
