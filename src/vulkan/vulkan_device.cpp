@@ -36,6 +36,7 @@ static bool queryBasicInfo(VulkanDevice *self, VkPhysicalDevice physDev)
                              std::to_string(VK_VERSION_MINOR(props.driverVersion)) + "." +
                              std::to_string(VK_VERSION_PATCH(props.driverVersion));
   self->info.maxWGSize = std::min(props.limits.maxComputeWorkGroupSize[0], (uint32_t)MAX_WG_SIZE);
+  self->info.maxWGCount = props.limits.maxComputeWorkGroupCount[0];
   self->info.maxAllocSize = props.limits.maxStorageBufferRange;
   self->info.vkDeviceType = props.deviceType;
 
@@ -274,12 +275,14 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     // (VUID-RuntimeSpirv-cooperativeMatrixSupportedStages-08985).  Every
     // coopmat shader here is a compute shader, so a device without the compute
     // bit has no usable coopmat at all.
-    // The coopmat shaders specialize their workgroup size, which is
-    // OpExecutionModeId LocalSizeId, which VUID-RuntimeSpirv-LocalSizeId-06434
-    // makes conditional on maintenance4.  Core in Vulkan 1.3 -- and these
-    // shaders are SPIR-V 1.6, so nothing older can load them anyway -- but the
-    // feature bit still has to be requested, or we are back to a capability
-    // whose feature was never enabled.
+    // The coopmat shaders specialize their workgroup size.  Compiled to
+    // SPIR-V 1.6 that is OpExecutionModeId LocalSizeId, which
+    // VUID-RuntimeSpirv-LocalSizeId-06434 makes conditional on maintenance4;
+    // compiled to 1.5, which is what CompileShaders.cmake targets and why, it
+    // is the classic LocalSize execution mode plus a gl_WorkGroupSize
+    // spec-constant composite and no feature is involved.  Detect maintenance4
+    // anyway and request it where present -- it costs nothing and keeps the
+    // modules loadable either way -- but do not gate coopmat on it.
     {
       VkPhysicalDeviceMaintenance4Features m4 = {};
       m4.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
@@ -288,9 +291,6 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
       m4f2.pNext = &m4;
       if (pfnGetFeat2) pfnGetFeat2(physDev, &m4f2);
       self->info.maintenance4Supported = m4.maintenance4 != VK_FALSE;
-      if (!self->info.maintenance4Supported)
-        CLPEAK_VLOG("Vulkan: maintenance4 not available; cooperative matrix "
-                    "needs it to specialize the workgroup size\n");
     }
 
     // VK_EXT_cooperative_matrix_maintenance1's query takes a subgroup size and
@@ -329,8 +329,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
                     cmProps.cooperativeMatrixSupportedStages);
     }
     if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix &&
-        vmmFeatures.vulkanMemoryModel && coopmatInCompute &&
-        self->info.maintenance4Supported)
+        vmmFeatures.vulkanMemoryModel && coopmatInCompute)
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       self->info.cooperativeMatrixSupported = true;
@@ -519,9 +518,12 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   m4Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
   if (self->info.cooperativeMatrixSupported)
   {
-    m4Features.maintenance4 = VK_TRUE;
-    m4Features.pNext = nullptr;
-    enabledChain = chainPNext(enabledChain, &m4Features);
+    if (self->info.maintenance4Supported)
+    {
+      m4Features.maintenance4 = VK_TRUE;
+      m4Features.pNext = nullptr;
+      enabledChain = chainPNext(enabledChain, &m4Features);
+    }
     coopmatFeatures.cooperativeMatrix = VK_TRUE;
     coopmatFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &coopmatFeatures);

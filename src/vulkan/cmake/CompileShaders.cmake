@@ -84,7 +84,16 @@ function(compile_shaders)
     get_filename_component(_CS_DIR "${SHADER}" DIRECTORY)
 
     execute_process(
-      COMMAND "${GLSLC}" --target-env=vulkan1.3 -O -I "${_CS_DIR}"
+      # vulkan1.2 (SPIR-V 1.5), not vulkan1.3 (SPIR-V 1.6), and the difference
+      # is not cosmetic.  At 1.6 a specialized work-group size compiles to
+      # OpExecutionModeId LocalSizeId, which is conditional on the maintenance4
+      # feature and is the one structural difference between our coopmat
+      # modules and the ones a driver that faults on ours is known to compile.
+      # At 1.5 the same GLSL compiles to the classic OpExecutionMode LocalSize
+      # plus a gl_WorkGroupSize spec-constant composite, which every driver has
+      # handled since Vulkan 1.0.  Nothing here needs 1.6, and 1.5 modules load
+      # on Vulkan 1.2 devices that 1.6 modules cannot.
+      COMMAND "${GLSLC}" --target-env=vulkan1.2 -O -I "${_CS_DIR}"
               ${EXTRA_ARG} "${SHADER}" -o "${_CS_SPV}"
       RESULT_VARIABLE _CS_RESULT
       ERROR_VARIABLE  _CS_ERROR

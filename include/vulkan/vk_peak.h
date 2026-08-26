@@ -47,8 +47,9 @@ struct vk_device_info_t {
   std::string driverVersion;
   std::string apiVersion;
 
-  unsigned int numCUs;            // maxComputeWorkGroupCount[0] as proxy
+  unsigned int numCUs;            // 0 unless a vendor property reports it
   unsigned int maxWGSize;
+  uint32_t maxWGCount;            // maxComputeWorkGroupCount[0]
   uint64_t maxAllocSize;          // maxStorageBufferRange
   uint64_t heapSize;              // device-local heap
   unsigned int maxClockFreq;      // not always available (0 if unknown)
@@ -76,14 +77,14 @@ struct vk_device_info_t {
                                   // takes a subgroup size and answers for that
                                   // width specifically, where the KHR one
                                   // reports the union over all widths.
-  bool maintenance4Supported;     // required to specialize the workgroup size:
-                                  // the coopmat shaders use OpExecutionModeId
-                                  // LocalSizeId, and VUID-RuntimeSpirv-
-                                  // LocalSizeId-06434 makes maintenance4 a
-                                  // precondition for it.  Core in Vulkan 1.3,
-                                  // which anything running these SPIR-V 1.6
-                                  // modules already is -- but it still has to
-                                  // be asked for at device creation.
+  bool maintenance4Supported;     // requested where present, not required.
+                                  // It is the precondition for OpExecutionModeId
+                                  // LocalSizeId (VUID-RuntimeSpirv-LocalSizeId-
+                                  // 06434), which is how a specialized workgroup
+                                  // size compiles at SPIR-V 1.6; the shaders
+                                  // target 1.5, where the same GLSL becomes the
+                                  // classic LocalSize mode plus a
+                                  // gl_WorkGroupSize spec constant instead.
 
   // Subgroup sizing.  subgroupSize is what VkPhysicalDeviceSubgroupProperties
   // reports; min/max/subgroupSizeControl come from VK_EXT_subgroup_size_control.
@@ -130,9 +131,9 @@ static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
 // at the work-group's offset, so a work-group has to be exactly one subgroup:
 // if the driver splits the 32-thread group into 2 (Intel SIMD16) or 4 (SIMD8)
 // subgroups, every one of them redundantly computes the same tile into the
-// same place and the reported rate comes out divided by that factor.  The
-// shaders declare local_size_x = 32, so the fix is to pin the stage's subgroup
-// width to 32 wherever the device allows it -- NVIDIA, RDNA and Arc all do.
+// same place and the reported rate comes out divided by that factor.  So the
+// fix is to pin the stage's subgroup width to the work-group size wherever the
+// device allows it -- NVIDIA, RDNA and Arc all do.
 // Devices with no subgroup-size control, or whose subgroups can only be 64
 // (CDNA/GCN), return 0 and run unpinned as before.
 // The width one coopmat work-group runs at.  32 unless overridden: it is what

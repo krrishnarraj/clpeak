@@ -71,6 +71,13 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Buffer footprint = numGroups * outPerWG * elemSize.  Bound by allocation.
   uint64_t bytesPerWG = (uint64_t)outPerWG * d.elemSize;
   uint64_t maxWGs = dev.info.maxAllocSize / bytesPerWG;
+  // maxComputeWorkGroupCount is a hard limit, and dispatching past it is
+  // invalid usage a driver may fault on rather than report.  Several vendors
+  // report 65535 here while the buffer would happily hold far more groups, so
+  // this is not slack -- without it the coopmat dispatch (32 threads per group,
+  // so 16x the groups of a 256-thread kernel) is the first to go over.
+  if (dev.info.maxWGCount)
+    maxWGs = std::min(maxWGs, (uint64_t)dev.info.maxWGCount);
   uint64_t wantWGs = globalWIs / wgSize;
   uint32_t numGroups = (uint32_t)std::min(wantWGs, maxWGs);
   globalWIs = (uint64_t)numGroups * wgSize;
