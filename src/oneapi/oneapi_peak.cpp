@@ -156,7 +156,7 @@ int OneapiPeak::runAll()
       continue;
     }
 
-    benchmark_config_t cfg = benchmark_config_t::forDevice(dev.info.deviceType);
+    benchmark_config_t cfg = benchmark_config_t::forDevice(dev.info.deviceType, dev.info.globalMemCacheSize);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;

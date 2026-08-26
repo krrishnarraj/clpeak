@@ -302,7 +302,13 @@ struct benchmark_config_t {
   unsigned int kernelLatencyIters;    // separately-submitted dispatch count
   uint64_t transferBWMaxSize;
 
-  static benchmark_config_t forDevice(DeviceType type);
+  // `lastLevelCacheBytes` is the device's last-level cache -- OpenCL's
+  // CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, CUDA/HIP's L2 size, SYCL's
+  // global_mem_cache_size.  Pass 0 when the API has no such query (Vulkan,
+  // Metal) or the driver leaves it unset; it can only grow globalBWMaxSize,
+  // never shrink it.  See forDevice() for why the working set has to outgrow it.
+  static benchmark_config_t forDevice(DeviceType type,
+                                      uint64_t lastLevelCacheBytes = 0);
 };
 
 // ---------------------------------------------------------------------------

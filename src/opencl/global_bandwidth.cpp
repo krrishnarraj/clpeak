@@ -15,6 +15,15 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
   uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize / sizeof(float));
 
+  // The one number that decides whether this test measured memory or cache:
+  // the timed phase re-reads the same buffer, so a working set that fits behind
+  // the last-level cache reports the cache.  benchmark_config_t::forDevice
+  // sizes globalBWMaxSize to clear the cache the device reported; print both so
+  // an implausible reading can be checked against them without a rebuild.
+  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
+              (unsigned long long)(numItems * sizeof(float) >> 20),
+              (unsigned long long)(devInfo.globalMemCacheSize >> 20));
+
   auto test = currentDeviceScope->beginTest(
     {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
      Category::Unknown,
@@ -28,9 +37,20 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     arr = new float[numItems];
     populate(arr, numItems);
 
+    // Every kernel writes one float per work-item, and the widest launch is the
+    // float one at numItems / FETCH_PER_WI work-items (the vector kernels launch
+    // fewer, and run_kernel's work-group clamp only ever shrinks the range), so
+    // the output needs a sixteenth of the input -- worth spelling out now that
+    // the input is sized to outrun a 96 MB+ last-level cache.
     cl::Buffer inputBuf = cl::Buffer(ctx, CL_MEM_READ_ONLY, (numItems * sizeof(float)));
-    cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
+    cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, ((numItems / FETCH_PER_WI) * sizeof(float)));
     queue.enqueueWriteBuffer(inputBuf, CL_TRUE, 0, (numItems * sizeof(float)), arr);
+    // Blocking write, so the staging copy is dead the moment it returns.  At a
+    // working set sized to clear the last-level cache that is half a gigabyte
+    // or more of host memory not to be holding through the timed run -- which
+    // on a CPU device is the same memory the benchmark is measuring.
+    delete[] arr;
+    arr = nullptr;
 
     cl::Kernel kernel_v1_lo(prog, "global_bandwidth_v1_local_offset");
     kernel_v1_lo.setArg(0, inputBuf), kernel_v1_lo.setArg(1, outputBuf);
@@ -95,8 +115,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       test.emit(labels[w], gbps, clWidthNote(widths[w]));
      }
-
-    delete[] arr;
   }
   catch (cl::Error &error)
   {

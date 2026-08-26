@@ -75,7 +75,7 @@ int clPeak::runAll()
           continue;
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
-        benchmark_config_t cfg = benchmark_config_t::forDevice(devInfo.deviceType);
+        benchmark_config_t cfg = benchmark_config_t::forDevice(devInfo.deviceType, devInfo.globalMemCacheSize);
         cfg.targetTimeUs = targetTimeUs;
         if (forceIters)
           cfg.kernelLatencyIters = specifiedIters;

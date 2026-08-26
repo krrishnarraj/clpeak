@@ -56,6 +56,12 @@ struct oneapi_device_info_t {
   int      numCUs = 0;            // sycl::info::device::max_compute_units
   size_t   maxWorkGroupSize = 0;
   uint64_t totalGlobalMem = 0;
+  // sycl::info::device::global_mem_cache_size -- the last level of cache in
+  // front of global memory.  0 when the runtime does not report one.
+  uint64_t globalMemCacheSize = 0;
+  // sycl::info::device::local_mem_type == local.  `global` means the device has
+  // no scratchpad and the runtime carves local memory out of global memory.
+  bool localMemDedicated = true;
   int      clockRateMHz = 0;
   uint32_t preferredSubGroupSize = 0;
   std::vector<size_t> subGroupSizes;

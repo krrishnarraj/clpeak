@@ -141,7 +141,7 @@ int CudaPeak::runAll()
       continue;
     }
 
-    benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu);
+    benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu, dev.info.l2CacheSize);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;

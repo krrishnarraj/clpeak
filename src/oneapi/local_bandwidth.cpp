@@ -66,6 +66,19 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
      "small on-chip scratchpad a group of work-items passes data through, "
      "which never goes out to main memory."});
 
+  // local_mem_type == global: the device has no scratchpad and the runtime
+  // carves local memory out of ordinary global memory -- every CPU device.
+  // What the barrier-per-rep kernel below would then time is the runtime's
+  // work-item serialization against DRAM, not a scratchpad, so there is
+  // nothing here to report.  Matches the OpenCL backend's CL_DEVICE_LOCAL_MEM_TYPE
+  // check.
+  if (!dev.info.localMemDedicated)
+  {
+    test.skipAll({"float", "float2", "float4"}, ResultStatus::Unsupported,
+                 "Device has no dedicated local memory (SYCL local_mem_type is global)");
+    return 0;
+  }
+
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
   uint32_t numBlocks = (uint32_t)(globalThreads / blockSize);

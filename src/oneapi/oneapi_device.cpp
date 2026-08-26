@@ -36,6 +36,10 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
     info.maxWorkGroupSize = dev.get_info<sycl::info::device::max_work_group_size>();
     info.totalGlobalMem   = dev.get_info<sycl::info::device::global_mem_size>();
     info.clockRateMHz     = (int)dev.get_info<sycl::info::device::max_clock_frequency>();
+    // Last, so a runtime that declines these still leaves the rest filled in.
+    info.globalMemCacheSize = dev.get_info<sycl::info::device::global_mem_cache_size>();
+    info.localMemDedicated =
+        (dev.get_info<sycl::info::device::local_mem_type>() == sycl::info::local_mem_type::local);
   }
   catch (const sycl::exception &)
   {
