@@ -28,20 +28,6 @@ layout(constant_id = 1) const uint N     = 16u;
 layout(constant_id = 2) const uint K     = 16u;
 layout(constant_id = 3) const int  ITERS = 256;
 
-// MMA_PER_TRIP multiply-accumulates per loop trip rather than one.  ITERS is a
-// specialization constant, so the trip count is known when the driver compiles
-// the pipeline and it is free to unroll the whole loop; presenting 512 trips of
-// one MulAdd rather than 32 trips of sixteen is the difference between a
-// compiler unrolling a 512-deep chain and one that mostly does not.  Intel's
-// Windows driver faults compiling the A380's 8x8x32 sint8 tile, and this is the
-// last structural difference left against an implementation that compiles the
-// same tile on the same device.  bindCoopTile keeps ITERS a multiple of this,
-// so the op budget is exact either way.
-#define MMA_PER_TRIP 16
-#define MMA_1        matC = coopMatMulAdd(matA, matB, matC);
-#define MMA_4        MMA_1 MMA_1 MMA_1 MMA_1
-#define MMA_16       MMA_4 MMA_4 MMA_4 MMA_4
-
 void main()
 {
     coopmat<floate4m3_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA> matA =
@@ -51,9 +37,9 @@ void main()
     coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
         coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
 
-    for (int i = 0; i < ITERS / MMA_PER_TRIP; i++)
+    for (int i = 0; i < ITERS; i++)
     {
-        MMA_16
+        matC = coopMatMulAdd(matA, matB, matC);
     }
 
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,

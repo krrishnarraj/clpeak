@@ -57,14 +57,12 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.
 - If you add a new `.comp` shader → add to `CLPEAK_VK_SHADERS` in `CMakeLists.txt`
   and declare its extern in the `vk_shaders` namespace (`include/vulkan/vk_peak.h`).
-- A shader can be compiled **twice** and the two builds raced, embedded as
-  `<name>` and `<name>_alt`.  Two ways to ask, both detected from the source by
-  `CompileShaders.cmake`: `#include shaders/mad_chain.glsl` (second build gets
-  `-DMAD_CHAIN_AFFINE`), or a `// clpeak-alt: -DMACRO` line for shapes that are
-  not a MAD chain — the coopmat accumulator count and the int8-dot operand
-  liveness use this.  Then declare the `_alt` extern and its `VK_ALT_<name>`
-  block in `vk_peak.h`, and pass `VK_ALT_SHADER(<name>)` as the variant's last
-  field, or `vkSetAlt()` for a single-variant test such as coopmat.  `runComputeKernel` times both and emits the
+- A shader that `#include`s `shaders/mad_chain.glsl` is compiled **twice**,
+  the second time with `-DMAD_CHAIN_AFFINE`, and embedded as `<name>` and
+  `<name>_alt`.  `CompileShaders.cmake` detects this from the source, so
+  adopting the shared chain is the only step; then declare the `_alt` extern
+  and its `VK_ALT_<name>` block in `vk_peak.h` and pass `VK_ALT_SHADER(<name>)`
+  as the variant's last field.  `runComputeKernel` times both and emits the
   faster; `--verbose` prints both readings.  Why two shapes: the MAD chain
   block in `include/common/common.h`.
 - If you change `vkPeak` interface → update `include/vulkan/vk_peak.h`.

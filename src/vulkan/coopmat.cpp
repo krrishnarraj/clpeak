@@ -49,13 +49,7 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
 {
   const uint64_t volume = (uint64_t)t.M * t.N * t.K;   // MACs per coopMatMulAdd
   uint64_t iters = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
-  // The shaders run MMA_PER_TRIP multiply-accumulates per loop trip, so ITERS
-  // has to stay a multiple of it or the trip count truncates and the reported
-  // op budget stops matching what ran.  Round to the nearest multiple, never
-  // below one full trip.
-  const uint64_t perTrip = 16;                        // == MMA_PER_TRIP
-  iters = ((iters + perTrip / 2) / perTrip) * perTrip;
-  if (iters < perTrip) iters = perTrip;
+  if (iters < 1) iters = 1;
 
   r.data = { t.M, t.N, t.K, (int32_t)iters, wgSize };
   r.entries[0] = { 0, (uint32_t)offsetof(CoopSpecData, M),      sizeof(uint32_t) };

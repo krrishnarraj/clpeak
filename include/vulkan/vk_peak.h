@@ -262,12 +262,9 @@ struct vk_compute_desc_t
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
 
-  // Single-variant shader (used when variants == nullptr).  altSpirv is its
-  // second build, raced the same way a variant's is -- coopmat uses this path.
+  // Single-variant shader (used when variants == nullptr)
   const uint32_t *spirv;
   size_t spirvSize;
-  const uint32_t *altSpirv;
-  size_t altSpirvSize;
 
   // Multi-variant shader list (takes precedence over single-variant fields)
   const vk_compute_variant_t *variants;
@@ -406,11 +403,9 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v4_alt_size;
 #endif
 
-
-// -- alt-build selection ----------------------------------------------------
-// A shader gets a second build of itself either by including
-// shaders/mad_chain.glsl (the affine chain shape) or by carrying a
-// "// clpeak-alt: -DMACRO" line; CompileShaders.cmake then defines
+// -- affine-build selection -------------------------------------------------
+// A shader that includes shaders/mad_chain.glsl is compiled a second time with
+// the affine chain shape; CompileShaders.cmake then defines
 // VK_HAS_<NAME>_ALT.  VK_ALT_SHADER(name) expands to that build's
 // (pointer, size) pair, or to (nullptr, 0) when the second build was skipped,
 // so a variant table entry reads the same either way.  The #ifdefs cannot live
