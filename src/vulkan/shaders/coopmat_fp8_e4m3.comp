@@ -54,14 +54,17 @@ void main()
     coopmat<floate4m3_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
         coopmat<floate4m3_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(floate4m3_t(pc.A));
 #ifdef COOPMAT_DUAL
-    // Two independent accumulator chains.  Intel's XMX is latency-bound on one
+    // Two independent accumulator chains, seeded differently on purpose: two
+    // chains that start on the same value and run the same recurrence stay
+    // bitwise identical, and the compiler keeps one -- see the MAD chain rules
+    // in include/common/common.h.  Intel's XMX is latency-bound on one
     // chain -- an A380 reads 12.5 TFLOPS fp16 single-chain against 25.9 for the
     // same tile with two -- while NVIDIA measured no difference either way, so
     // the pair is raced and the faster reported.  Half the trip count, two
     // MulAdds per trip: the same ITERS multiply-accumulates either way, so the
     // op budget the host credits is unchanged.
     coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(pc.A);
 #else
     coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
         coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0.0);

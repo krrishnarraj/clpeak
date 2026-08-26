@@ -14,26 +14,7 @@
 // accumulator as the new y -- changes every iter so the compiler can't
 // fold the dot to a constant, but runs at full IALU rate (no byte
 // extracts like the old i8vec4 version).
-// clpeak-alt: -DINT8_DP_INVARIANT
-//
-// Two operand shapes are raced.  The default rewrites y from the accumulator
-// after every dot, so no two dots share operands and none can be hoisted out of
-// the loop -- but that XOR is a second dependent integer op per dot, and it is
-// not in the op budget.  On an Arc A380 that costs more than half the rate:
-// 8.8 TOPS where the same instruction is measured at 19.5 elsewhere.  The alt
-// build holds both operands loop-invariant, leaving the accumulator as the only
-// thing that moves.  That is the fast shape and the fold-exposed one:
-// dotPacked4x8AccSatEXT(x, y, a) with x and y invariant is legally
-// strength-reducible to one dot plus N saturating adds, so it is raced rather
-// than adopted, and runComputeKernel drops a reading more than
-// MAX_ALT_CHAIN_RATIO above the safe shape -- a hoist would be ~16x.
 #extension GL_EXT_integer_dot_product : require
-
-#ifdef INT8_DP_INVARIANT
-#define INT8_DP_REPACK(y, a)
-#else
-#define INT8_DP_REPACK(y, a)  y ^= a;
-#endif
 
 layout(local_size_x = 256) in;
 
@@ -45,7 +26,7 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-#define STEP(x, y, a)     a = dotPacked4x8AccSatEXT(x, y, a); INT8_DP_REPACK(y, a)
+#define STEP(x, y, a)     a = dotPacked4x8AccSatEXT(x, y, a); y ^= a;
 #define STEP_4(x, y, a)   STEP(x, y, a) STEP(x, y, a) STEP(x, y, a) STEP(x, y, a)
 #define STEP_16(x, y, a)  STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a)
 

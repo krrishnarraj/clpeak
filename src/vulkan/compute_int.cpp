@@ -52,19 +52,16 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   //       NVIDIA Turing+ / AMD RDNA2+ / Intel Xe+).
   static const vk_compute_variant_t variants[] = {
     { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
-      "One chain of dot products, each waiting on the one before it.",
-      VK_ALT_SHADER(compute_int8_dp_v1) },
+      "One chain of dot products, each waiting on the one before it." },
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
     { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size,
       "Two independent chains, so the device has a second dot product to get on "
-      "with while the first is still finishing.",
-      VK_ALT_SHADER(compute_int8_dp_v2) },
+      "with while the first is still finishing." },
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
     { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size,
       "Four independent chains -- usually enough to keep the dot-product "
-      "hardware busy with no waiting at all.",
-      VK_ALT_SHADER(compute_int8_dp_v4) },
+      "hardware busy with no waiting at all." },
 #endif
   };
   int32_t A = 4;

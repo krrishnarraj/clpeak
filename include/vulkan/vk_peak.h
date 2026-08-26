@@ -406,18 +406,6 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v4_alt_size;
 #endif
 
-#ifdef VK_HAS_COMPUTE_INT8_DP_V1_ALT
-  extern const uint32_t compute_int8_dp_v1_alt[];
-  extern const size_t   compute_int8_dp_v1_alt_size;
-#endif
-#ifdef VK_HAS_COMPUTE_INT8_DP_V2_ALT
-  extern const uint32_t compute_int8_dp_v2_alt[];
-  extern const size_t   compute_int8_dp_v2_alt_size;
-#endif
-#ifdef VK_HAS_COMPUTE_INT8_DP_V4_ALT
-  extern const uint32_t compute_int8_dp_v4_alt[];
-  extern const size_t   compute_int8_dp_v4_alt_size;
-#endif
 #ifdef VK_HAS_COOPMAT_FP32_ALT
   extern const uint32_t coopmat_fp32_alt[];
   extern const size_t   coopmat_fp32_alt_size;
@@ -453,21 +441,6 @@ namespace vk_shaders {
 // inside the macro, hence one block per shader.
 #define VK_ALT_SHADER(name) VK_ALT_##name
 
-#ifdef VK_HAS_COMPUTE_INT8_DP_V1_ALT
-  #define VK_ALT_compute_int8_dp_v1 vk_shaders::compute_int8_dp_v1_alt, vk_shaders::compute_int8_dp_v1_alt_size
-#else
-  #define VK_ALT_compute_int8_dp_v1 nullptr, 0
-#endif
-#ifdef VK_HAS_COMPUTE_INT8_DP_V2_ALT
-  #define VK_ALT_compute_int8_dp_v2 vk_shaders::compute_int8_dp_v2_alt, vk_shaders::compute_int8_dp_v2_alt_size
-#else
-  #define VK_ALT_compute_int8_dp_v2 nullptr, 0
-#endif
-#ifdef VK_HAS_COMPUTE_INT8_DP_V4_ALT
-  #define VK_ALT_compute_int8_dp_v4 vk_shaders::compute_int8_dp_v4_alt, vk_shaders::compute_int8_dp_v4_alt_size
-#else
-  #define VK_ALT_compute_int8_dp_v4 nullptr, 0
-#endif
 #ifdef VK_HAS_COOPMAT_FP32_ALT
   #define VK_ALT_coopmat_fp32 vk_shaders::coopmat_fp32_alt, vk_shaders::coopmat_fp32_alt_size
 #else
