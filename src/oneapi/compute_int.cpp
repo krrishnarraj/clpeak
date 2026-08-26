@@ -174,19 +174,60 @@ int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 }
 
 // --------------------------------------------------------------------------
-// INT8 dot-product compute (DP4a-style).  Mirrors compute_int8_dp.hip:
-// each STEP does a 4-lane int8 dot-accumulate into an int32, then feeds the
-// accumulator back into an operand (y ^= a) so the chain CANNOT be hoisted
-// (this is the fix for the bogus loop-invariant version).
+// INT8 dot-product compute (DP4a-style).  Mirrors compute_int8_dp.hip.
 //
 // dp4(xp, yp, a): unpack 4 signed int8 lanes from packed ints xp, yp and
-//   accumulate sum(xi*yi) into a.  4 muls + 4 adds = 8 ops.
-// STEP_16 = 16 dp4 = 128 ops.  All variants total 8192 ops/WI
-// (COMPUTE_INT8_DP_WORK_PER_WI); they differ only in ILP (chain count):
-//   dp:  64 iters * 1 chain, dp2: 32 * 2, dp4: 16 * 4, dp8: 8 * 8.
-// On Intel HW the compiler may fuse to dp4a; on CPU it is honest int MACs.
+//   accumulate sum(xi*yi) into a.  4 muls + 4 adds = 8 ops.  On Intel HW the
+//   compiler may fuse this to dp4a; on CPU it is honest int MACs.
+//
+// The chain shape.  Three constraints have to hold at once, and each one has
+// already produced a wrong reading in some backend:
+//
+//  - Both multiplicands may not be loop-invariant.  a = dp4(x, y, a) with x
+//    and y both fixed is a + n*dot(x, y), which a compiler may and does
+//    strength-reduce; the OpenCL backend shipped that shape, and in Vulkan it
+//    read 74939 GOPS on an RTX 5060 whose dp4a peak, measured by CUDA's own
+//    __dp4a on the same card, is 33928.
+//
+//  - Nothing may run between the dots.  This kernel used to keep an operand
+//    moving by rewriting it from the accumulator (y ^= a), but that XOR is a
+//    second dependent integer op per dot and the op budget credits none of
+//    it.  On an Arc A380 that mistake cost the Vulkan int8 chain more than
+//    half its rate (8832 GOPS against 19497).
+//
+//  - All three source operands must be distinct registers.  Intel Alchemist
+//    halves a three-source op that reads the same register twice, so
+//    a = dp4(x, a, a) is not the answer either.
+//
+// What satisfies all three: two accumulators feeding each other.  Each dot
+// reads {x, the other accumulator, its own} and writes its own, so a pair is
+// one dependent chain, not two, and because the dot extracts the bytes of a
+// value that is itself a 32-bit accumulator the recurrence is not affine and
+// has no closed form to fold to.  NCH counts pairs, so the ILP ladder is
+// 1/2/4/8 independent copies of the pair.
+//
+// Op accounting: 1024 dp4 calls per work-item, each 8 ops = 8192
+// (COMPUTE_INT8_DP_WORK_PER_WI), the same for every variant.  One STEP2 is
+// two dots, so every variant issues 512 of them over 64 outer iterations:
+// the chain count sets the steps per chain (8/NCH), not the trip count.
+// Accumulators are seeded 4 apart -- chains that start on the same value stay
+// bitwise equal forever and a compiler is free to keep only one of them.
+//
+// NOTE: dp4 is spelled out rather than issued as one instruction, so the
+// unpack shifts are work the 8-ops-per-dot budget does not credit either.
+// That is a separate, larger accounting gap from the XOR removed here, and it
+// is why this row is not directly comparable to the CUDA/ROCm ones.
 // --------------------------------------------------------------------------
 template <int NCH> class compute_int8_dp_kernel;
+
+// The chain count divides the 8 STEP2 an outer iteration issues, so it has to
+// divide 8 exactly or the variant silently reports against the wrong budget.
+template <int NCH> struct Int8DpChains
+{
+  static_assert(NCH >= 1 && NCH <= 8 && 8 % NCH == 0,
+                "int8-dp chain count must divide 8 (STEPS = 8 / NCH)");
+  static constexpr int steps = 8 / NCH;
+};
 
 template <int NCH>
 static void runInt8DpVariant(OneapiPeak &peak, OneapiDevice &dev,
@@ -214,28 +255,32 @@ static void runInt8DpVariant(OneapiPeak &peak, OneapiDevice &dev,
           int x = (A & 0xff) | (((A + 1) & 0xff) << 8)
                 | (((A + 2) & 0xff) << 16) | (((A + 3) & 0xff) << 24);
 
-          int y[NCH], a[NCH];
+          // Chain c is the pair (p[c], q[c]); no two accumulators start equal.
+          int p[NCH], q[NCH];
           #pragma unroll
-          for (int c = 0; c < NCH; c++) { y[c] = lid + c; a[c] = lid + 7 * c; }
+          for (int c = 0; c < NCH; c++) { p[c] = lid + 8 * c; q[c] = lid + 8 * c + 4; }
+
+          // 8 STEP2 per outer iteration in total, however the chains divide it.
+          constexpr int STEPS = Int8DpChains<NCH>::steps;
 
           #pragma unroll 1
           for (int i = 0; i < outerIters; i++)
           {
             #pragma unroll
-            for (int c = 0; c < NCH; c++)
+            for (int s = 0; s < STEPS; s++)
             {
-              // STEP_16: 16 dot-accumulates with feedback per chain
               #pragma unroll
-              for (int s = 0; s < 16; s++)
+              for (int c = 0; c < NCH; c++)
               {
-                a[c] = dp4(x, y[c], a[c]);
-                y[c] ^= a[c];
+                // STEP2: two dots, one dependent chain, nothing beside them.
+                p[c] = dp4(x, q[c], p[c]);
+                q[c] = dp4(x, p[c], q[c]);
               }
             }
           }
           int acc = 0;
           #pragma unroll
-          for (int c = 0; c < NCH; c++) acc += a[c];
+          for (int c = 0; c < NCH; c++) acc += p[c] + q[c];
           out[it.get_global_id(0)] = acc;
         });
     });
@@ -271,11 +316,12 @@ int OneapiPeak::runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg)
 
   const int A = 4;
   const unsigned int forced = forceIters ? specifiedIters : 0;
-  // outerIters scaled by chain count so every variant totals 8192 ops/WI.
+  // 64 outer iters for every variant: the chain count divides the 8 STEP2 per
+  // iteration between the chains, so all four total 8192 ops/WI.
   runInt8DpVariant<1>(*this, dev, test, "int8_dp",  out, totalThreads, blockSize, 64, A, cfg.targetTimeUs, forced);
-  runInt8DpVariant<2>(*this, dev, test, "int8_dp2", out, totalThreads, blockSize, 32, A, cfg.targetTimeUs, forced);
-  runInt8DpVariant<4>(*this, dev, test, "int8_dp4", out, totalThreads, blockSize, 16, A, cfg.targetTimeUs, forced);
-  runInt8DpVariant<8>(*this, dev, test, "int8_dp8", out, totalThreads, blockSize,  8, A, cfg.targetTimeUs, forced);
+  runInt8DpVariant<2>(*this, dev, test, "int8_dp2", out, totalThreads, blockSize, 64, A, cfg.targetTimeUs, forced);
+  runInt8DpVariant<4>(*this, dev, test, "int8_dp4", out, totalThreads, blockSize, 64, A, cfg.targetTimeUs, forced);
+  runInt8DpVariant<8>(*this, dev, test, "int8_dp8", out, totalThreads, blockSize, 64, A, cfg.targetTimeUs, forced);
 
   sycl::free(out, dev.stream);
   return 0;

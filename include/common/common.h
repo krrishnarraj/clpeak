@@ -195,11 +195,15 @@ static const unsigned int COMPUTE_DP_WORK_PER_WI = 512;
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 
-// compute_int8_dp_kernels.cl
-// Each dot_acc_sat(char4, char4, int) is 4 INT8 multiply-adds = 8 ops.
-// One DP_STEP is two dots into a pair of accumulators that feed each other,
-// and every variant issues 512 of them: 1024 dots * 8 ops = 8192 per WI
-// (v1 = 64 iters * 8 steps, v8 = 64 * 1 * 8 chains, v16 = 32 * 1 * 16).
+// The int8 dot-product kernels in every backend (compute_int8_dp_kernels.cl,
+// compute_int8_dp.cu / .hip, compute_int8_dp_v*.comp, oneapi/compute_int.cpp).
+// Each dot is 4 INT8 multiply-adds = 8 ops.  All of them spell the chain the
+// same way -- one STEP is two dots into a pair of accumulators that feed each
+// other -- and every variant issues 512 STEPs, so 1024 dots * 8 ops = 8192 per
+// WI (1 chain = 64 iters * 8 steps, 8 chains = 64 * 1 * 8; OpenCL's v16 is
+// 32 * 1 * 16).  Read the comment at the top of any of those files for why the
+// chain has to be shaped that way; a different shape silently reports a wrong
+// number.
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
 // coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup

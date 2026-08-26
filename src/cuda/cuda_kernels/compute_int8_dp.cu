@@ -15,13 +15,52 @@
 //                        The variant is kept because the v1..v8 series
 //                        is itself the documentation of that ceiling.
 //
-// Op accounting: 8192 ops/thread = 1024 dp4a calls.  v1 = 64*16, v2 = each
-// chain does 32*16 = 512 calls => 1024 total per thread.  v4 = each chain
-// does 16*16 = 256 => 1024 total.
+// The chain shape.  Three constraints have to hold at once, and each one
+// has already produced a wrong reading in some backend:
+//
+//  - Both multiplicands may not be loop-invariant.  a = __dp4a(x, y, a)
+//    with x and y both fixed is a + n*dot(x, y), which a compiler may and
+//    does strength-reduce; the OpenCL backend shipped that shape, and in
+//    Vulkan it read 74939 GOPS on an RTX 5060 -- 2.2x past this kernel's
+//    own 33928 on the same card.
+//
+//  - Nothing may run between the dots.  This kernel used to keep an
+//    operand moving by rewriting it from the accumulator (y ^= a), but
+//    that XOR is a second dependent integer op per dot and the op budget
+//    credits none of it, so the reading came out as the dp4a rate divided
+//    by however much issue the extra op took.  On an Arc A380 the same
+//    mistake cost more than half the rate (8832 GOPS against 19497).
+//    Every 33928 GOPS this kernel has ever reported is therefore a floor,
+//    not this card's real __dp4a ceiling.
+//
+//  - All three source operands must be distinct registers.  Intel
+//    Alchemist halves a three-source op that reads the same register
+//    twice, so a = __dp4a(x, a, a) is not the answer either.  NVIDIA does
+//    not have that restriction, but the kernels are kept the same shape
+//    across backends so the rows stay comparable.
+//
+// What satisfies all three: two accumulators feeding each other.  Each dot
+// reads {x, the other accumulator, its own}, three distinct registers, and
+// writes its own.  Every dot depends on the one before it, so a pair is one
+// dependent chain, not two; and because the dot extracts the bytes of a
+// value that is itself a 32-bit accumulator, the recurrence is not affine
+// and has no closed form to fold to.  dp2/dp4/dp8 run 2/4/8 independent
+// copies of the pair, which is what the ILP ladder measures.
+//
+// Op accounting: 1024 dp4a calls per thread, each 4 INT8 multiply-adds
+// = 8 ops, = COMPUTE_INT8_DP_WORK_PER_WI (8192), the same for every
+// variant.  One STEP2 is two dots, so each variant issues 512 of them:
+// dp = 64 iters x 8, dp2 = 64 x 4 per chain x 2 chains, dp4 = 64 x 2 x 4,
+// dp8 = 64 x 1 x 8.  Chain k holds accumulators a<k> and b<k>, seeded 4
+// apart from every other accumulator in the thread: chains that start on
+// the same value stay bitwise equal forever and a compiler is free to
+// keep only one of them.
 
-#define STEP(x, y, a)    a = __dp4a(x, y, a); y ^= a;
-#define STEP_4(x, y, a)  STEP(x, y, a) STEP(x, y, a) STEP(x, y, a) STEP(x, y, a)
-#define STEP_16(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a)
+// Two dots, one dependent chain, no third instruction.
+#define STEP2(x, p, q)    p = __dp4a(x, q, p); q = __dp4a(x, p, q);
+#define STEP2_2(x, p, q)  STEP2(x, p, q) STEP2(x, p, q)
+#define STEP2_4(x, p, q)  STEP2_2(x, p, q) STEP2_2(x, p, q)
+#define STEP2_8(x, p, q)  STEP2_4(x, p, q) STEP2_4(x, p, q)
 
 extern "C" __global__ void compute_int8_dp(int *out, int A)
 {
@@ -29,94 +68,78 @@ extern "C" __global__ void compute_int8_dp(int *out, int A)
           | (((A + 1) & 0xff) << 8)
           | (((A + 2) & 0xff) << 16)
           | (((A + 3) & 0xff) << 24);
-    int y = (int)threadIdx.x;
-    int a = (int)threadIdx.x;
+    int tid = (int)threadIdx.x;
+    int a0 = tid, b0 = tid + 4;
 
     #pragma unroll
     for (int i = 0; i < 64; i++)
     {
-        STEP_16(x, y, a)
+        STEP2_8(x, a0, b0)
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = a;
+    out[blockIdx.x * blockDim.x + threadIdx.x] = a0 + b0;
 }
 
 extern "C" __global__ void compute_int8_dp2(int *out, int A)
 {
     int x  = (A & 0xff) | (((A+1)&0xff)<<8) | (((A+2)&0xff)<<16) | (((A+3)&0xff)<<24);
-    int y0 = (int)threadIdx.x;
-    int y1 = (int)threadIdx.x + 1;
-    int a0 = (int)threadIdx.x;
-    int a1 = (int)threadIdx.x + 7;
+    int tid = (int)threadIdx.x;
+    int a0 = tid,     b0 = tid + 4;
+    int a1 = tid + 8, b1 = tid + 12;
 
     #pragma unroll
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < 64; i++)
     {
-        STEP_16(x, y0, a0)
-        STEP_16(x, y1, a1)
+        STEP2(x, a0, b0) STEP2(x, a1, b1)
+        STEP2(x, a0, b0) STEP2(x, a1, b1)
+        STEP2(x, a0, b0) STEP2(x, a1, b1)
+        STEP2(x, a0, b0) STEP2(x, a1, b1)
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = a0 + a1;
+    out[blockIdx.x * blockDim.x + threadIdx.x] = (a0 + b0) + (a1 + b1);
 }
 
 extern "C" __global__ void compute_int8_dp4(int *out, int A)
 {
     int x  = (A & 0xff) | (((A+1)&0xff)<<8) | (((A+2)&0xff)<<16) | (((A+3)&0xff)<<24);
-    int y0 = (int)threadIdx.x;
-    int y1 = (int)threadIdx.x + 1;
-    int y2 = (int)threadIdx.x + 2;
-    int y3 = (int)threadIdx.x + 3;
-    int a0 = (int)threadIdx.x;
-    int a1 = (int)threadIdx.x + 7;
-    int a2 = (int)threadIdx.x + 13;
-    int a3 = (int)threadIdx.x + 19;
+    int tid = (int)threadIdx.x;
+    int a0 = tid + 0,  b0 = tid + 4;
+    int a1 = tid + 8,  b1 = tid + 12;
+    int a2 = tid + 16, b2 = tid + 20;
+    int a3 = tid + 24, b3 = tid + 28;
 
     #pragma unroll
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < 64; i++)
     {
-        STEP_16(x, y0, a0)
-        STEP_16(x, y1, a1)
-        STEP_16(x, y2, a2)
-        STEP_16(x, y3, a3)
+        STEP2(x, a0, b0) STEP2(x, a1, b1) STEP2(x, a2, b2) STEP2(x, a3, b3)
+        STEP2(x, a0, b0) STEP2(x, a1, b1) STEP2(x, a2, b2) STEP2(x, a3, b3)
     }
 
-    out[blockIdx.x * blockDim.x + threadIdx.x] = a0 + a1 + a2 + a3;
+    out[blockIdx.x * blockDim.x + threadIdx.x] =
+        ((a0 + b0) + (a1 + b1)) + ((a2 + b2) + (a3 + b3));
 }
 
 extern "C" __global__ void compute_int8_dp8(int *out, int A)
 {
     int x  = (A & 0xff) | (((A+1)&0xff)<<8) | (((A+2)&0xff)<<16) | (((A+3)&0xff)<<24);
-    int y0 = (int)threadIdx.x;
-    int y1 = (int)threadIdx.x + 1;
-    int y2 = (int)threadIdx.x + 2;
-    int y3 = (int)threadIdx.x + 3;
-    int y4 = (int)threadIdx.x + 4;
-    int y5 = (int)threadIdx.x + 5;
-    int y6 = (int)threadIdx.x + 6;
-    int y7 = (int)threadIdx.x + 7;
-    int a0 = (int)threadIdx.x;
-    int a1 = (int)threadIdx.x + 11;
-    int a2 = (int)threadIdx.x + 17;
-    int a3 = (int)threadIdx.x + 23;
-    int a4 = (int)threadIdx.x + 29;
-    int a5 = (int)threadIdx.x + 31;
-    int a6 = (int)threadIdx.x + 37;
-    int a7 = (int)threadIdx.x + 41;
+    int tid = (int)threadIdx.x;
+    int a0 = tid + 0,  b0 = tid + 4;
+    int a1 = tid + 8,  b1 = tid + 12;
+    int a2 = tid + 16, b2 = tid + 20;
+    int a3 = tid + 24, b3 = tid + 28;
+    int a4 = tid + 32, b4 = tid + 36;
+    int a5 = tid + 40, b5 = tid + 44;
+    int a6 = tid + 48, b6 = tid + 52;
+    int a7 = tid + 56, b7 = tid + 60;
 
-    // 8 outer * (16 dots/chain * 8 ops) * 8 chains = 8192 ops/thread.
     #pragma unroll
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 64; i++)
     {
-        STEP_16(x, y0, a0)
-        STEP_16(x, y1, a1)
-        STEP_16(x, y2, a2)
-        STEP_16(x, y3, a3)
-        STEP_16(x, y4, a4)
-        STEP_16(x, y5, a5)
-        STEP_16(x, y6, a6)
-        STEP_16(x, y7, a7)
+        STEP2(x, a0, b0) STEP2(x, a1, b1) STEP2(x, a2, b2) STEP2(x, a3, b3)
+        STEP2(x, a4, b4) STEP2(x, a5, b5) STEP2(x, a6, b6) STEP2(x, a7, b7)
     }
 
     out[blockIdx.x * blockDim.x + threadIdx.x] =
-        a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7;
+        (((a0 + b0) + (a1 + b1)) + ((a2 + b2) + (a3 + b3)))
+      + (((a4 + b4) + (a5 + b5)) + ((a6 + b6) + (a7 + b7)));
 }

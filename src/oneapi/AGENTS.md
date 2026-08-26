@@ -59,9 +59,14 @@ Gates:
 - **Compute kernels must carry a real data-dependency chain** or the SYCL
   compiler hoists loop-invariant work out and reports a fabricated peak. The
   FP/INT MAD kernels alternate `x = fma(y,x,y); y = fma(x,y,x);` and the INT8
-  DP kernel feeds the accumulator back via `y ^= a`. A symptom of getting this
-  wrong was the INT8 test reporting ~768 TOPS on a Xeon CPU (physically
-  impossible). Keep every new compute kernel's output dependent on the loop.
+  DP kernel runs two accumulators feeding each other (`p = dp4(x,q,p);
+  q = dp4(x,p,q);`). A symptom of getting this wrong was the INT8 test
+  reporting ~768 TOPS on a Xeon CPU (physically impossible). Keep every new
+  compute kernel's output dependent on the loop — but the dependency may not
+  cost an extra instruction: the INT8 DP kernel used to rewrite an operand with
+  `y ^= a`, a second dependent integer op per dot that the op budget credits
+  none of, so the reading came out deflated instead. Full rationale above
+  `runInt8DpVariant` in `compute_int.cpp`.
 - **Vector-width sweeps keep ops/WI constant** by running `baseIters/W` outer
   iterations for width `W`, so the same work-constant (`COMPUTE_FP_WORK_PER_WI`
   etc.) is reported for every width and the numbers stay comparable.
