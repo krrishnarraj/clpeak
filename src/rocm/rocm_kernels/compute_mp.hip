@@ -7,6 +7,8 @@
 
 #define MAD_4(x, c)  x = fmaf(x, x, c); x = fmaf(x, x, c); x = fmaf(x, x, c); x = fmaf(x, x, c);
 #define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_128(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) \
+                      MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
 
 extern "C" __global__ void compute_mp(float *out, float A)
 {
@@ -14,9 +16,9 @@ extern "C" __global__ void compute_mp(float *out, float A)
     float c = __half2float(__float2half((float)threadIdx.x));
 
     #pragma unroll 1
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
         x = __half2float(__float2half(x));
     }
 

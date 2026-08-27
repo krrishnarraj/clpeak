@@ -26,14 +26,20 @@ layout(push_constant) uniform PushConstants {
 // Compiled twice -- squaring chain and affine chain -- and raced against
 // each other at run time.  See mad_chain.glsl, and the MAD chain block in
 // include/common/common.h for the rules both shapes obey.
-// Standard per-width chain counts, despite the fp16 round-trip below
-// running once per accumulator: N chains cost N conversions per 16 chain
-// instructions against the squaring build's one, but both builds report the
-// same op budget, so the extra conversions can only understate the affine
-// reading -- never inflate it -- and runComputeKernel takes the maximum.
-// Forcing one chain to even up the conversion count cost an RTX 5060 10.6%
-// on mp2 (15726 -> 14061 GFLOPS), because NVIDIA's three-register mad needs
-// the independent chains.
+// Standard per-width chain counts, despite the fp16 round-trip below running
+// once per accumulator.  Forcing one chain to even up the conversion count
+// cost an RTX 5060 10.6% on mp2 (15726 -> 14061 GFLOPS), because NVIDIA's
+// three-register mad needs the independent chains.
+//
+// The N conversions those chains cost are why the inner loop is MAD_128 and
+// not MAD_16, matching compute_bf16_v*.  At MAD_16 the affine build paid N
+// conversions per 16 chain instructions -- 25% uncounted instruction overhead
+// at 4 chains -- and on Alchemist that is not a shape you can decline: the
+// squaring build, which needs only one conversion per round, is the one the
+// three-distinct-source rule halves there.  Cheap conversions or a full-rate
+// mad, never both, so an Arc A380 read mp at 2.78 TFLOPS against 4.89 for
+// fp32 (57%) where an RTX 5060, free to take the squaring build, sat at 88%.
+// Over 128 the same N conversions cost ~3%, so both shapes stay usable.
 #define MAD_CHAINS 2
 #include "mad_chain.glsl"
 
@@ -43,10 +49,10 @@ void main()
 {
     CHAIN_DECL(vec2, vec2(f16vec2(pc.A, pc.A + 1.0)), vec2(f16vec2(gl_LocalInvocationID.x)))
 
-    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
-    for (int i = 0; i < 64; i++)
+    // 16 iters * 128 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
+    for (int i = 0; i < 8; i++)
     {
-        MAD_16
+        MAD_128
         CHAIN_MAP(NARROW)
     }
 

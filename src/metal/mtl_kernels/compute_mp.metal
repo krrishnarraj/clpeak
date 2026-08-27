@@ -13,6 +13,8 @@ using namespace metal;
 
 #define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
 #define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_128(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) \
+                      MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
 
 kernel void compute_mp(device float* out [[buffer(0)]],
                        constant float& A [[buffer(1)]],
@@ -22,9 +24,9 @@ kernel void compute_mp(device float* out [[buffer(0)]],
     float x = (float)((half)A);
     float c = (float)((half)lid);
 
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
         x = (float)((half)x);
     }
 
@@ -32,7 +34,7 @@ kernel void compute_mp(device float* out [[buffer(0)]],
 }
 
 // float2 accumulator, half2 cast per outer iter.
-// 64 outer * 16 fmas * 4 ops = 4096 ops/thread.
+// 8 outer * 128 fmas * 4 ops = 4096 ops/thread.
 kernel void compute_mp2(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
                         uint tid [[thread_position_in_grid]],
@@ -41,9 +43,9 @@ kernel void compute_mp2(device float* out [[buffer(0)]],
     float2 x = float2((float)((half)A),         (float)((half)(A + 1.0f)));
     float2 c = float2((float)((half)lid),       (float)((half)(lid + 1u)));
 
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < 8; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
         x = float2((float)(half)x.x, (float)(half)x.y);
     }
 
@@ -51,7 +53,7 @@ kernel void compute_mp2(device float* out [[buffer(0)]],
 }
 
 // float4 accumulator, half4 cast per outer iter.
-// 32 outer * 16 fmas * 8 ops = 4096 ops/thread.
+// 4 outer * 128 fmas * 8 ops = 4096 ops/thread.
 kernel void compute_mp4(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
                         uint tid [[thread_position_in_grid]],
@@ -66,9 +68,9 @@ kernel void compute_mp4(device float* out [[buffer(0)]],
                       (float)((half)(lid + 2u)),
                       (float)((half)(lid + 3u)));
 
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < 4; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
         half4 hx = half4(x);
         x = float4(hx);
     }
