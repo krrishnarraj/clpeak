@@ -9,11 +9,24 @@
 //   compute_int8_dp4  -- 4 independent chains (matches Vulkan int8_dp4)
 //   compute_int8_dp8  -- 8 independent chains.  Probed whether v4's
 //                        plateau was chain-count bound or hardware
-//                        pinned: v8 measured at the same ~34 TIOPS,
-//                        confirming __dp4a is hardware-capped at ~half
-//                        of theoretical SP rate on consumer Blackwell.
-//                        The variant is kept because the v1..v8 series
-//                        is itself the documentation of that ceiling.
+//                        pinned.  The variant is kept because the
+//                        v1..v8 series is itself the documentation of
+//                        that ceiling.
+//
+// Where the ceiling is, on an RTX 5060 (sm_120, 30 SMs), derived from rows
+// the same card produced in the same run: fp32 21112 GFLOPS over 30 SMs x
+// 128 cores x 2 flops puts the sustained clock at 2.749 GHz.  At that clock
+// int32 IMAD (10536 GOPS, 2 ops/MAD) is 63.9 instructions per SM per clock
+// -- half the core count, the usual consumer-NVIDIA INT rate -- and __dp4a
+// measures 63.5, the same issue slot.  So the dp4a ceiling is 64 x 30 x
+// 2.749 x 8 = 42225 GOPS, and this kernel reads 41918: 99.3% of it, with
+// v1..v8 spanning only 0.56%, which is what issue-bound looks like.  The
+// pre-fix shape read 33928 (80.4%); the XOR was costing ~19% here against
+// the >50% it cost an Arc A380.
+//
+// This is the peak of the *shader-core* INT8 path, not of the card: the
+// same 5060 does 84.4 TOPS on WMMA 16x16x16 and 164.8 on mma.sync
+// m16n8k32.  That gap is why both rows exist.
 //
 // The chain shape.  Three constraints have to hold at once, and each one
 // has already produced a wrong reading in some backend:
