@@ -21,7 +21,7 @@ struct BackendInventory; // forward decl
 #if defined(VK_HAS_COOPMAT_FP8_E4M3) || defined(VK_HAS_COOPMAT_FP8_E5M2)
 #define VK_HAS_ANY_COOPMAT_FP8 1
 #endif
-#if defined(VK_HAS_COOPMAT_FP16) || defined(VK_HAS_COOPMAT_BF16) || defined(VK_HAS_COOPMAT_INT8) || defined(VK_HAS_ANY_COOPMAT_FP8) || defined(VK_HAS_COOPMAT_FP32)
+#if defined(VK_HAS_COOPMAT_FP16) || defined(VK_HAS_COOPMAT_FP16_F16ACC) || defined(VK_HAS_COOPMAT_BF16) || defined(VK_HAS_COOPMAT_INT8) || defined(VK_HAS_ANY_COOPMAT_FP8) || defined(VK_HAS_COOPMAT_FP32)
 #define VK_HAS_ANY_COOPMAT 1
 #endif
 
@@ -103,6 +103,9 @@ struct vk_device_info_t {
   // matching subgroup-scope property was advertised.
   coopmat_tile_t coopmatFP32;     // fp32 A/B,    fp32 C
   coopmat_tile_t coopmatFP16;     // fp16 A/B,    fp32 C
+  coopmat_tile_t coopmatFP16F16;  // fp16 A/B,    fp16 C -- a separate property,
+                                  // and on GeForce a separate rate: consumer
+                                  // parts run fp32 accumulation at half speed
   coopmat_tile_t coopmatBF16;     // bf16 A/B,    fp32 C
   coopmat_tile_t coopmatFP8E4M3;  // fp8 E4M3 A/B, fp32 C
   coopmat_tile_t coopmatFP8E5M2;  // fp8 E5M2 A/B, fp32 C
@@ -660,6 +663,10 @@ namespace vk_shaders {
   extern const size_t   coopmat_fp16_size;
 #endif
 #ifdef VK_HAS_COOPMAT_BF16
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC
+  extern const uint32_t coopmat_fp16_f16acc[];
+  extern const size_t   coopmat_fp16_f16acc_size;
+#endif
   extern const uint32_t coopmat_bf16[];
   extern const size_t   coopmat_bf16_size;
 #endif

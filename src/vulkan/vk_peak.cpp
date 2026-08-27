@@ -428,6 +428,7 @@ int vkPeak::runAll()
 
       dev.info.coopmatFP32    = pickTile(VK_COMPONENT_TYPE_FLOAT32_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
       dev.info.coopmatFP16    = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP16F16 = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT16_KHR);
       dev.info.coopmatBF16    = pickTile(VK_COMPONENT_TYPE_BFLOAT16_KHR,    VK_COMPONENT_TYPE_FLOAT32_KHR);
       dev.info.coopmatFP8E4M3 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
       dev.info.coopmatFP8E5M2 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
@@ -435,6 +436,7 @@ int vkPeak::runAll()
 
       logPickedTile("fp32",    dev.info.coopmatFP32,    dev.info);
       logPickedTile("fp16",    dev.info.coopmatFP16,    dev.info);
+      logPickedTile("fp16+f16", dev.info.coopmatFP16F16, dev.info);
       logPickedTile("bf16",    dev.info.coopmatBF16,    dev.info);
       logPickedTile("fp8e4m3", dev.info.coopmatFP8E4M3, dev.info);
       logPickedTile("fp8e5m2", dev.info.coopmatFP8E5M2, dev.info);
