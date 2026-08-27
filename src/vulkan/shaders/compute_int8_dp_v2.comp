@@ -16,8 +16,30 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
-                         q = dotPacked4x8AccSatEXT(x, p, q);
+
+// clpeak-alt: -DINT8_DP_NOSAT
+//
+// The alt build spells the same dot without the saturate.  CUDA's __dp4a and
+// PTX's dp4a.s32.s32 do not saturate and there is no saturating dp4a in the
+// ISA, so OpSDotAccSat has to be lowered as the dot plus a clamp -- which the
+// driver reporting the saturating form as "accelerated" does not contradict,
+// since that only means it is not fully emulated.  On a 5060 the saturating
+// row reads 79% of what the same card's __dp4a reaches, and this is the one
+// structural difference left between the two.
+//
+// DOT expands to OpSDot + OpIAdd, which is one IDP4A only if the driver folds
+// the add into the dot's accumulate operand.  If it does not, the alt build is
+// issuing an op the budget does not credit -- but then it is *slower*, so the
+// race discards it and no inflated number can come out of this.  The ceiling
+// is the check: the same card's CUDA row.
+#ifdef INT8_DP_NOSAT
+  #define DOT(x, y, a)  (dotPacked4x8EXT(x, y) + (a))
+#else
+  #define DOT(x, y, a)  dotPacked4x8AccSatEXT(x, y, a)
+#endif
+
+#define STEP2(x, p, q)   p = DOT(x, q, p); \
+                         q = DOT(x, p, q);
 #define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
 #define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
 

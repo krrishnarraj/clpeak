@@ -245,7 +245,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       if (altBuilt && altTimed > 0.0f)
       {
         float altValue = toValue(altTimed);
-        CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
+        CLPEAK_VLOG("%s %s: first shape %.1f, alt shape %.1f %s\n",
                     d.resultTag, v.label, value, altValue, d.unit);
         if (altValue > value * MAX_ALT_CHAIN_RATIO)
           CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "

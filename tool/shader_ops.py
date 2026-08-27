@@ -38,9 +38,17 @@ WORK_OPS = {
     "OpCooperativeMatrixMulAddKHR": "coopmat MulAdd",
     "OpSDotAccSat": "int8 dot-accumulate",
     "OpUDotAccSat": "uint8 dot-accumulate",
+    "OpSDot": "int8 dot (non-accumulating)",
+    "OpUDot": "uint8 dot (non-accumulating)",
     "OpFma": "fma",
     "OpExtInst": "fma",          # GLSL.std.450 Fma
 }
+
+# A non-accumulating dot is spelled dot + add, and every ISA that has the
+# instruction gives it an accumulate operand for the add to fold into.  Whether
+# a given driver folds it is not visible here, so allow one add per dot and say
+# so rather than reporting the adds as uncounted work.
+PAIRED_WITH_ADD = {"OpSDot", "OpUDot"}
 
 # Bookkeeping every loop has and no budget counts: the trip counter and its
 # compare.  Reported separately from real uncounted work.
@@ -140,6 +148,11 @@ def report(shader, body, quiet_ops):
     kind = WORK_OPS[work[0][1]]
     print(f"  loop body      : {len(work)} x {kind}")
 
+    paired = len(work) if work[0][1] in PAIRED_WITH_ADD else 0
+    if paired:
+        adds = [o for o in other if o == "OpIAdd"]
+        for _ in range(min(paired, len(adds))):
+            other.remove("OpIAdd")
     bookkeeping = [o for o in other if o in LOOP_OVERHEAD]
     local = [o for o in other if o in LOCAL_TRAFFIC]
     overhead = [o for o in other
@@ -150,6 +163,9 @@ def report(shader, body, quiet_ops):
     else:
         print(f"  uncounted      : none "
               f"({len(bookkeeping)} loop-control op(s) only)")
+    if paired:
+        print(f"  pairing        : each dot carries its own accumulate add; one "
+              f"instruction only if the driver folds it into the dot")
     if local:
         print(f"  note           : {len(local)} local-variable op(s) spirv-opt "
               f"left unpromoted; drivers promote these themselves")
@@ -161,10 +177,18 @@ def report(shader, body, quiet_ops):
     verdict = "OK" if distinct == len(pairs) else "REPEATS -- foldable"
     print(f"  operand pairs  : {distinct} distinct of {len(pairs)}  [{verdict}]")
 
-    # Chain shape: how many work ops consume the immediately preceding result.
+    # Chain shape: how many work ops consume the immediately preceding result,
+    # directly or through the accumulate add a non-accumulating dot carries.
+    consumers = {}
+    for _, r, _, ids in body:
+        for operand in ids:
+            consumers.setdefault(operand, []).append(r)
     results = [r for r, _, _ in work]
-    chained = sum(1 for i in range(1, len(work))
-                  if results[i - 1] in work[i][2])
+    chained = 0
+    for i in range(1, len(work)):
+        reach = {results[i - 1]} | set(consumers.get(results[i - 1], []))
+        if reach & set(work[i][2]):
+            chained += 1
     if chained == len(work) - 1:
         print(f"  chain          : one dependent chain, {len(work)} deep")
     else:
