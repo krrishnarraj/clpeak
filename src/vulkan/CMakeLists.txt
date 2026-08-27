@@ -53,6 +53,7 @@ set(CLPEAK_VK_SHADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_bf16_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_bf16_v4.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/coopmat_fp16.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/coopmat_fp16_f16acc.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/coopmat_bf16.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/coopmat_int8.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/coopmat_fp8_e4m3.comp

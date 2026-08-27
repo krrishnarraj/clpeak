@@ -151,8 +151,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.metricLabel = "coopmat_fp16";
       d.unit        = "tflops";
       d.description = "The matrix engine on 16-bit inputs with a 32-bit running "
-                      "total -- the everyday precision of AI inference, and usually "
-                      "the fastest widely-supported row here.";
+                      "total -- the everyday precision of AI inference, and the "
+                      "widest-supported row here.  Keeping the total at 32 bits "
+                      "costs accuracy nothing and, on consumer graphics cards, "
+                      "costs half the speed: see the 16-bit-total row below.";
       d.unitDivider = 1e12;
 
       d.elemSize    = sizeof(float);
@@ -165,6 +167,34 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.title   = "Cooperative-matrix fp16xfp16+fp32";
         d.skip    = true;
         d.skipMsg = "No fp16xfp16+fp32 coopmat support (shaderFloat16 or property)! Skipped";
+      }
+      runComputeKernel(dev, cfg, d);
+    }
+#endif
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC
+    {
+      CoopTileRun r;
+      r.push.A.f = 1.3f;
+      vk_compute_desc_t d = {};
+      d.resultTag   = "coopmat_fp16_f16acc";
+      d.metricLabel = "coopmat_fp16_f16acc";
+      d.unit        = "tflops";
+      d.description = "The matrix engine on 16-bit inputs with the running total also "
+                      "kept at 16 bits.  Consumer graphics cards run this at twice the "
+                      "rate of the 32-bit total above, which is why a card's headline "
+                      "AI figure is usually this one; server parts run both alike.";
+      d.unitDivider = 1e12;
+
+      d.elemSize    = sizeof(float);
+      if (dev.info.float16Supported && dev.info.coopmatFP16F16.supported) {
+        d.spirv     = vk_shaders::coopmat_fp16_f16acc;
+        d.spirvSize = vk_shaders::coopmat_fp16_f16acc_size;
+        d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16F16);
+        bindCoopTile(r, d, dev.info.coopmatFP16F16, tileWG(dev.info.coopmatFP16F16), "fp16xfp16+fp16");
+      } else {
+        d.title   = "Cooperative-matrix fp16xfp16+fp16";
+        d.skip    = true;
+        d.skipMsg = "No fp16xfp16+fp16 coopmat support (shaderFloat16 or property)! Skipped";
       }
       runComputeKernel(dev, cfg, d);
     }
