@@ -260,6 +260,29 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
         enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
       self->info.int8DotProductSupported = true;
       self->info.int8Supported = true;
+
+      // Which spelling of the 4x8-bit dot the driver actually accelerates.
+      // "Supported" and "accelerated" are different questions here: a driver
+      // must accept OpSDotAccSat either way, but where it is not accelerated it
+      // is lowered to unpack-multiply-add-clamp and the row measures that
+      // lowering rather than a dot-product unit.  The saturating and
+      // non-saturating forms are advertised separately and can disagree, so
+      // print each -- an int8_dp far below a sibling card's is the first thing
+      // to check against.
+      VkPhysicalDeviceShaderIntegerDotProductProperties dpProps = {};
+      dpProps.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES;
+      VkPhysicalDeviceProperties2 dpProps2 = {};
+      dpProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      dpProps2.pNext = &dpProps;
+      vkGetPhysicalDeviceProperties2(physDev, &dpProps2);
+      CLPEAK_VLOG("Vulkan: 4x8-bit dot accelerated? packed signed %s, "
+                  "packed unsigned %s, packed sat signed %s (the one the "
+                  "shader emits), packed sat unsigned %s\n",
+                  dpProps.integerDotProduct4x8BitPackedSignedAccelerated ? "yes" : "no",
+                  dpProps.integerDotProduct4x8BitPackedUnsignedAccelerated ? "yes" : "no",
+                  dpProps.integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated ? "yes" : "no",
+                  dpProps.integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated ? "yes" : "no");
     }
 #endif
 #if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
