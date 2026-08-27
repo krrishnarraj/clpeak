@@ -189,7 +189,6 @@ int OneapiPeak::runAll()
       runOnemkl(dev, cfg, Category::FpCompute);
 
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-    if (isAllowed(Benchmark::ComputeInt8DP))      runComputeInt8DP(dev, cfg);
 
     if (isAllowedAs(Benchmark::JointMatrix, Category::IntCompute))
       runJointMatrix(dev, cfg, Category::IntCompute);

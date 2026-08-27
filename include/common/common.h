@@ -195,8 +195,9 @@ static const unsigned int COMPUTE_DP_WORK_PER_WI = 512;
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 
-// The int8 dot-product kernels in every backend (compute_int8_dp_kernels.cl,
-// compute_int8_dp.cu / .hip, compute_int8_dp_v*.comp, oneapi/compute_int.cpp).
+// The int8 dot-product kernels (compute_int8_dp_kernels.cl,
+// compute_int8_dp.cu / .hip, compute_int8_dp_v*.comp, and the CPU backend).
+// oneAPI has no such test -- see the Gotchas in src/oneapi/AGENTS.md.
 // Each dot is 4 INT8 multiply-adds = 8 ops.  All of them spell the chain the
 // same way -- one STEP is two dots into a pair of accumulators that feed each
 // other -- and every variant issues 512 STEPs, so 1024 dots * 8 ops = 8192 per

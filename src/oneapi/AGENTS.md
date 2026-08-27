@@ -31,7 +31,7 @@ build time and the SYCL runtime JITs it on first launch.
 | `oneapi_device.cpp` | `OneapiDevice::init()` — sets up `sycl::queue`, populates `oneapi_device_info_t` (vendor, CUs, sub-group sizes, fp16/fp64/bf16/XMX flags) |
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeGflops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
-| `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`), `runComputeInt8DP` (DP4a-style `int8_dp/dp2/dp4/dp8` ILP-chain variants with accumulator feedback — see note) |
+| `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`). No int8 dot-product test — see Gotchas |
 | `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). The row list is **derived from the device's `matrix_combinations` table**, not hardcoded: one row per advertised (A, B, accumulator) type triple and tile shape, split into the FP and int categories by accumulator type. `CLPEAK_JM_SHAPES` is the compiled (M,N) set — joint_matrix needs the tile at compile time — and an advertised shape outside it records an `Unsupported` row naming the shape. Row names come from `jmBaseName()`: bare dtype (`joint_matrix_bf16`, `_fp16`, `_tf32`, `_int8`) for the first tile of each dtype, `_MxNxK` suffix for any further tile of the same dtype |
 | `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 via `gemm_bias` (tops). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
@@ -56,17 +56,32 @@ Gates:
 
 ## Gotchas
 
+- **No INT8 dot-product test here, deliberately — do not re-add one.** SYCL
+  exposes no DP4a intrinsic. `sycl::ext::oneapi::dot_acc`
+  (`sycl_ext_oneapi_dot_accumulate`) is pure portable C++ in the header — a
+  union of `char[4]` and four multiply-adds, no `__SYCL_DEVICE_ONLY__`, no
+  `__spirv_*`, no inline asm — so whether the dot-product unit is used at all
+  is left to IGC pattern-matching. It does not match: the kernel this backend
+  used to carry read **1.83 TOPS on an Arc A380 where Vulkan read 16** on the
+  same silicon, because each "dot" issued 4 muls + 4 adds + 7 unpack shifts
+  instead of one instruction. Spelling it as `dot_acc` changes nothing — both
+  compile to byte-identical IR. A number that low under a DP4a label is worse
+  than no number, and the OpenCL (`dot_acc_sat`) and Vulkan
+  (`dotPacked4x8AccSatEXT`) backends already measure this properly on the same
+  device. Reviving it needs a device-specific builtin under
+  `__SYCL_DEVICE_ONLY__` (IGC's `__builtin_IB_dp4a_ss`, or `OpSDotAccSat` via a
+  `__spirv_` declaration), which is Intel-GPU-only and would leave the CPU path
+  on the emulation.
+
 - **Compute kernels must carry a real data-dependency chain** or the SYCL
   compiler hoists loop-invariant work out and reports a fabricated peak. The
-  FP/INT MAD kernels alternate `x = fma(y,x,y); y = fma(x,y,x);` and the INT8
-  DP kernel runs two accumulators feeding each other (`p = dp4(x,q,p);
-  q = dp4(x,p,q);`). A symptom of getting this wrong was the INT8 test
-  reporting ~768 TOPS on a Xeon CPU (physically impossible). Keep every new
-  compute kernel's output dependent on the loop — but the dependency may not
-  cost an extra instruction: the INT8 DP kernel used to rewrite an operand with
-  `y ^= a`, a second dependent integer op per dot that the op budget credits
-  none of, so the reading came out deflated instead. Full rationale above
-  `runInt8DpVariant` in `compute_int.cpp`.
+  FP/INT MAD kernels alternate `x = fma(y,x,y); y = fma(x,y,x);`. A symptom of
+  getting this wrong was the (now removed) INT8 test reporting ~768 TOPS on a
+  Xeon CPU (physically impossible). Keep every new compute kernel's output
+  dependent on the loop — but the dependency may not cost an extra instruction
+  either: an op beside the work is throughput the per-WI budget does not
+  credit, and the reading comes out deflated instead. Chain-shape rules live in
+  the MAD chain block in `include/common/common.h`.
 - **Vector-width sweeps keep ops/WI constant** by running `baseIters/W` outer
   iterations for width `W`, so the same work-constant (`COMPUTE_FP_WORK_PER_WI`
   etc.) is reported for every width and the numbers stay comparable.
@@ -93,12 +108,9 @@ See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
 
 - No descriptor struct: the description is the 5th field of the braced
   `TestSpec` at each `beginTest()` call site.
-- The width and chain notes come off the **template parameter**, not a call
-  site: `runFpWidth<…,W>` / `runIntWidth<…,W>` call `oneapiWidthNote(W)` and
-  `runInt8DpVariant<NCH>` calls `oneapiChainNote(NCH)`, each once inside the
-  function.  Both helpers live in `oneapi_peak.h`.
-- **`int8_dp`/`dp2`/`dp4`/`dp8` are chains, not widths** — hence the separate
-  `oneapiChainNote()`.
+- The width note comes off the **template parameter**, not a call site:
+  `runFpWidth<…,W>` / `runIntWidth<…,W>` call `oneapiWidthNote(W)` once inside
+  the function.  The helper lives in `oneapi_peak.h`.
 - `joint_matrix.cpp`: `jmNote()` composes each row's note from its dtype pair
   and tile shape, so a row documents the shape it actually ran.
 - `onemkl.cpp` threads a `note` next to `label` through `measure()`.

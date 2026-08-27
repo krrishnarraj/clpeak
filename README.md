@@ -78,7 +78,7 @@ Backend: CUDA
       nvf4_sparse : 630.45
 
     INT8 dot-product compute (__dp4a) (GOPS)
-      int8_dp8 : 33587.22
+      int8_dp8 : 41683.39
 
     cuBLASLt GEMM peak (TFLOPS)
       fp16     : 77.54
