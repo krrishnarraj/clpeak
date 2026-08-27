@@ -157,21 +157,16 @@ function(compile_shaders)
     endif()
     target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER})
 
-    # A shader can ask for a second build of itself, embedded as <name>_alt;
-    # runComputeKernel times both and reports the faster, because no single
-    # shape reaches peak on every vendor.  Two ways to ask, both detected from
-    # the source rather than listed anywhere: pulling in mad_chain.glsl gets
-    # the affine chain shape, and a `// clpeak-alt: -DMACRO` line gets that
-    # macro defined.
+    # A shader that pulls in mad_chain.glsl gets a second build with the
+    # affine chain shape, embedded as <name>_alt.  runComputeKernel times both
+    # and reports the faster -- neither shape reaches peak on every vendor.
+    # Adopting the shared chain in a shader is the only step needed; this is
+    # detected from the source rather than listed anywhere.  Match the #include
+    # and not the bare filename: shaders that only mention mad_chain.glsl in a
+    # comment were getting a second build they never use.
     file(READ "${SHADER}" _CS_SRC)
-    set(_CS_ALT_ARG "")
-    if(_CS_SRC MATCHES "mad_chain\\.glsl")
-      set(_CS_ALT_ARG "-DMAD_CHAIN_AFFINE")
-    elseif(_CS_SRC MATCHES "// clpeak-alt:[ \t]*(-D[A-Za-z0-9_]+)")
-      set(_CS_ALT_ARG "${CMAKE_MATCH_1}")
-    endif()
-    if(NOT _CS_ALT_ARG STREQUAL "")
-      _cs_embed("${SHADER}" "${SHADER_NAME}_alt" "${_CS_ALT_ARG}")
+    if(_CS_SRC MATCHES "#[ \t]*include[ \t]*\"mad_chain\\.glsl\"")
+      _cs_embed("${SHADER}" "${SHADER_NAME}_alt" "-DMAD_CHAIN_AFFINE")
       if(_CS_OK)
         target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER}_ALT)
       endif()

@@ -59,34 +59,28 @@ layout(push_constant) uniform PushConstants {
 // The per-work-item budget is unchanged either way: 16 trips of 64 dots is the
 // same 1024 dots as 64 trips of 16.
 //
-// What actually costs this row ~20% against __dp4a on the same silicon is
-// still open; the saturating-vs-not spelling below is the current candidate.
+
+// Not the saturation.  dotPacked4x8AccSatEXT is the saturating form and CUDA's
+// __dp4a is not -- there is no saturating dp4a in the ISA, so this one has to
+// carry a clamp somewhere -- but spelling it dotPacked4x8EXT + add and racing
+// the two on a 5060 gave 33524 against 33535 on one chain, and 28159/28459
+// against 29963/32068 on two and four, where the add stops folding into the
+// dot.  Identical or worse, never better.  The driver reports every 4x8-bit
+// form accelerated and evidently means it.
+//
+// So the ~20% this row sits below __dp4a on the same silicon (33535 against
+// 42293, which is 100% of that card's derived ceiling) is not the instruction
+// and not the loop.  Both kernels run the same two-accumulator chain with
+// nothing beside the dots.  What is left is how NVIDIA's Vulkan compiler
+// allocates registers for a three-source instruction against what ptxas does,
+// which is not reachable from GLSL.  Do not spend another shape on it without
+// a way to read the SASS.
 
 // Two dots, one dependent chain, no third instruction.
 
-// clpeak-alt: -DINT8_DP_NOSAT
-//
-// The alt build spells the same dot without the saturate.  CUDA's __dp4a and
-// PTX's dp4a.s32.s32 do not saturate and there is no saturating dp4a in the
-// ISA, so OpSDotAccSat has to be lowered as the dot plus a clamp -- which the
-// driver reporting the saturating form as "accelerated" does not contradict,
-// since that only means it is not fully emulated.  On a 5060 the saturating
-// row reads 79% of what the same card's __dp4a reaches, and this is the one
-// structural difference left between the two.
-//
-// DOT expands to OpSDot + OpIAdd, which is one IDP4A only if the driver folds
-// the add into the dot's accumulate operand.  If it does not, the alt build is
-// issuing an op the budget does not credit -- but then it is *slower*, so the
-// race discards it and no inflated number can come out of this.  The ceiling
-// is the check: the same card's CUDA row.
-#ifdef INT8_DP_NOSAT
-  #define DOT(x, y, a)  (dotPacked4x8EXT(x, y) + (a))
-#else
-  #define DOT(x, y, a)  dotPacked4x8AccSatEXT(x, y, a)
-#endif
 
-#define STEP2(x, p, q)   p = DOT(x, q, p); \
-                         q = DOT(x, p, q);
+#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
+                         q = dotPacked4x8AccSatEXT(x, p, q);
 #define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
 #define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
 
