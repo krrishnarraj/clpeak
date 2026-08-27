@@ -46,13 +46,19 @@ float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
 template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
 
 // Four-chain affine, for the families whose accumulator round-trips through a
-// narrow type once per outer iteration (mp, bf16).  Four chains cost four
-// conversions per 16 chain instructions against the squaring build's one, but
-// both report the same op budget, so the extra conversions can only understate
-// the affine reading -- never inflate it -- and the caller takes the maximum.
-// The chains earn their keep: with one chain, mp on an Intel CPU runtime
-// measured 373.1 against 373.8, a dead wash, while the four-chain float path
-// on the same device went 396 -> 1552 GFLOPS.
+// narrow type once per outer iteration (mp, bf16).  The chains earn their keep:
+// with one chain, mp on an Intel CPU runtime measured 373.1 against 373.8, a
+// dead wash, while the four-chain float path on the same device went 396 ->
+// 1552 GFLOPS.
+//
+// Four chains do cost four conversions per round against the squaring build's
+// one, which is why both families run a 128-instruction inner loop rather than
+// MAD_16.  Amortised over 16 that was 25% uncounted instruction overhead, and
+// on Alchemist it is not a shape you can decline -- the squaring build, which
+// needs only one conversion, is the one the three-distinct-source rule halves
+// there.  An Arc A380 read mp at 2.78 TFLOPS against 4.89 for fp32 (57%) at
+// MAD_16, where an RTX 5060, free to take the squaring build, sat at 88%.
+// Over 128 the same four conversions cost ~3%.
 #define MAD_G_AFF4(a, b)     x0 = sycl::fma(a, x0, b); x1 = sycl::fma(a, x1, b); \
                              x2 = sycl::fma(a, x2, b); x3 = sycl::fma(a, x3, b);
 #define MAD_16_AFF4(a, b)    MAD_G_AFF4(a, b) MAD_G_AFF4(a, b) \
@@ -353,8 +359,10 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
           float x = (float)(sycl::half)A;
           float c = (float)(sycl::half)(float)it.get_local_id(0);
           #pragma unroll 1
-          for (int i = 0; i < 128; i++) {
-            MAD_16(x, c)
+          for (int i = 0; i < 16; i++) {
+            // MAD_128 = 8 * MAD_16 = 256 ops
+            MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
+            MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
             x = (float)(sycl::half)x;
           }
           out[it.get_global_id(0)] = x;
@@ -372,8 +380,10 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
           float x0 = (float)(sycl::half)A;
           float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
           #pragma unroll 1
-          for (int i = 0; i < 128; i++) {
-            MAD_16_AFF4(a, b)
+          for (int i = 0; i < 16; i++) {
+            // MAD_128 = 8 * MAD_16_AFF4 = 256 ops
+            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
             x0 = (float)(sycl::half)x0; x1 = (float)(sycl::half)x1;
             x2 = (float)(sycl::half)x2; x3 = (float)(sycl::half)x3;
           }

@@ -49,17 +49,30 @@ MSTRINGIFY(
 // M24_* is the same rotating shape as RT*, spelled with mad24 for the 24-bit
 // fast-integer family.
 //
-// MP* is the mixed-precision family's second shape, and it is deliberately a
-// one-token edit of the squaring kernel rather than a rewrite:
+// MP* is the mixed-precision family's second shape.  It is now just AF* over
+// an fp32 accumulator with a narrowing round-trip every 128 chain
+// instructions (MP*_128 + MP*_NARROW), which is the shape the CUDA, ROCm,
+// Metal, Vulkan and oneAPI mp kernels all use.
 //
-//   squaring   a = wide(x) * wide(x) + a;  x = narrow(a);   sources {x, x, a}
-//   MP*        a = wide(m) * wide(x) + a;  x = narrow(a);   sources {m, x, a}
+// It used to narrow once per MAC, inside the chain:
 //
-// The fp32 accumulator stays loop-carried and the narrowing stays where it
-// was, so the only difference is the duplicated multiplicand.  An earlier
-// version carried the fp16 value through the loop instead and collapsed at
-// vector widths -- 0.12x the squaring rate on Intel's CPU runtime from width
-// 4 up.  The narrowing blocks any fold outright, affine form or not.
+//   old   a = wide(m) * wide(x) + a;  x = narrow(a);   every step
+//
+// which put an uncounted conversion in the dependent chain for every counted
+// FMA -- two instructions issued per FMA, so at best half the fp32 rate.  An
+// Arc A380 read 2.78 TFLOPS against 4.89 for fp32.  Note this is not a return
+// to the version that carried the fp16 value through the loop and collapsed
+// at vector widths (0.12x the squaring rate on Intel's CPU runtime from width
+// 4 up): there are no half operands inside the loop at all now, only fp32
+// values that are periodically rounded to fp16 and back.
+//
+// Because nothing in the loop is half any more, the old requirement that the
+// invariant multiplier stay uniform across work-items is gone -- a is an fp32
+// value and is seeded from the lane id, as the oneAPI mp alt kernel does.  The
+// per-work-item variation the family needs (see compute_mp_kernels.cl) comes
+// from it either way.  Folding is held off by the same thing that holds it off
+// for AF*: the fold needs FP reassociation, which nothing in the toolchain set
+// does by default, with MAX_ALT_CHAIN_RATIO as the backstop.
 //
 // runComputeTest also refuses an alt reading more than MAX_ALT_CHAIN_RATIO
 // times the squaring one, as a backstop against a fold nobody predicted.
@@ -105,12 +118,13 @@ MSTRINGIFY(
 \n#undef RT2_G
 \n#undef RT2_16
 \n#undef RT2_RES
-\n#undef MP4_DECL
-\n#undef MP4_16
-\n#undef MP2_DECL
-\n#undef MP2_16
-\n#undef MP1_DECL
-\n#undef MP1_16
+\n#undef MP_NARROW
+\n#undef MP4_128
+\n#undef MP4_NARROW
+\n#undef MP2_128
+\n#undef MP2_NARROW
+\n#undef MP1_128
+\n#undef MP1_NARROW
 \n#undef M24_4_DECL
 \n#undef M24_4_16
 \n#undef M24_2_DECL
@@ -144,22 +158,28 @@ MSTRINGIFY(
 \n#define RT2_16                 RT2_G RT2_G RT2_G RT2_G RT2_G RT2_G RT2_G RT2_G
 \n#define RT2_RES                (x0 + x1)
 \n
-\n#define MP_STEP(HT, FT, x, a, m)  a = convert_##FT(m) * convert_##FT(x) + a; x = convert_##HT(a);
+\n// Mixed-precision (mp) chains.  The accumulator is FT throughout and the
+\n// narrow round-trip happens once per MP*_128 round, not once per MAC: the
+\n// conversion is an uncounted instruction sitting in the dependent chain, so
+\n// at one per MAC it issued two instructions per counted FMA and halved the
+\n// reading.  An Arc A380 read mp at 2.78 TFLOPS against 4.89 for fp32 (57%)
+\n// before this; the other five backends had always amortised it.  Matches the
+\n// depth compute_bf16_v*.comp and the oneAPI bf16 kernel already used.
+\n//
+\n// These reuse the AF* float chains -- there are no half operands left inside
+\n// the loop, so the "keep the multiplier uniform" rule the old MP_STEP form
+\n// needed no longer applies; a is a float and may vary per work-item, exactly
+\n// as the oneAPI mp alt kernel seeds it.
+\n#define MP_NARROW(HT, FT, x)   x = convert_##FT(convert_##HT(x));
 \n
-\n#define MP4_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(CH_STRIDE); HT x2 = (xseed) + (HT)(2*CH_STRIDE); HT x3 = (xseed) + (HT)(3*CH_STRIDE); FT a0 = (aseed); FT a1 = (aseed) + (FT)(CH_STRIDE); FT a2 = (aseed) + (FT)(2*CH_STRIDE); FT a3 = (aseed) + (FT)(3*CH_STRIDE);
-\n#define MP4_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m) MP_STEP(HT,FT,x1,a1,m) MP_STEP(HT,FT,x2,a2,m) MP_STEP(HT,FT,x3,a3,m)
-\n#define MP4_16(HT, FT)         MP4_G(HT,FT) MP4_G(HT,FT) MP4_G(HT,FT) MP4_G(HT,FT)
-\n#define MP4_RES(FT)            (((a0 + a1) + (a2 + a3)) + convert_##FT(x0))
+\n#define MP4_128                AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16
+\n#define MP4_NARROW(HT, FT)     MP_NARROW(HT,FT,x0) MP_NARROW(HT,FT,x1) MP_NARROW(HT,FT,x2) MP_NARROW(HT,FT,x3)
 \n
-\n#define MP2_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(CH_STRIDE); FT a0 = (aseed); FT a1 = (aseed) + (FT)(CH_STRIDE);
-\n#define MP2_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m) MP_STEP(HT,FT,x1,a1,m)
-\n#define MP2_16(HT, FT)         MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT)
-\n#define MP2_RES(FT)            ((a0 + a1) + convert_##FT(x0))
+\n#define MP2_128                AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16
+\n#define MP2_NARROW(HT, FT)     MP_NARROW(HT,FT,x0) MP_NARROW(HT,FT,x1)
 \n
-\n#define MP1_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); FT a0 = (aseed);
-\n#define MP1_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m)
-\n#define MP1_16(HT, FT)         MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT) MP1_G(HT,FT)
-\n#define MP1_RES(FT)            (a0 + convert_##FT(x0))
+\n#define MP1_128                AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16
+\n#define MP1_NARROW(HT, FT)     MP_NARROW(HT,FT,x0)
 \n
 \n#define M24_MAD(d, m1, m2, ad)  d = mad24(m1, m2, ad);
 \n

@@ -20,7 +20,10 @@ layout(push_constant) uniform PushConstants {
 // Compiled twice -- squaring chain and affine chain -- and raced against
 // each other at run time.  See mad_chain.glsl, and the MAD chain block in
 // include/common/common.h for the rules both shapes obey.
-#define MAD_CHAINS 4
+// fp16 accumulators pack two per 32-bit register, so these carry 8 values --
+// twice the fp32 shaders' value count, the same register footprint.  See the
+// MAD_CHAINS block in mad_chain.glsl for why the budget is registers.
+#define MAD_CHAINS 8
 #include "mad_chain.glsl"
 
 void main()

@@ -26,6 +26,11 @@ layout(push_constant) uniform PushConstants {
 // Compiled twice -- squaring chain and affine chain -- and raced against
 // each other at run time.  See mad_chain.glsl, and the MAD chain block in
 // include/common/common.h for the rules both shapes obey.
+//
+// The inner loop is MAD_128, not MAD_16, matching compute_bf16_v*: the fp16
+// round-trip below runs once per accumulator per round, and at MAD_16 that
+// was up to 25% uncounted instruction overhead across the width sweep.  See
+// compute_mp_v1.comp for the Alchemist measurement that forced it.
 #define MAD_CHAINS 1
 #include "mad_chain.glsl"
 
@@ -35,10 +40,10 @@ void main()
 {
     CHAIN_DECL(vec4, vec4(f16vec4(pc.A, pc.A + 1.0, pc.A + 2.0, pc.A + 3.0)), vec4(f16vec4(gl_LocalInvocationID.x)))
 
-    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
-    for (int i = 0; i < 32; i++)
+    // 16 iters * 128 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
+    for (int i = 0; i < 4; i++)
     {
-        MAD_16
+        MAD_128
         CHAIN_MAP(NARROW)
     }
 
