@@ -18,6 +18,8 @@ layout(push_constant) uniform PushConstants {
 
 #define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
                          q = dotPacked4x8AccSatEXT(x, p, q);
+#define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
+#define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
 
 void main()
 {
@@ -31,13 +33,12 @@ void main()
     int a0 = lid,      a1 = lid + 4;
     int b0 = lid + 8,  b1 = lid + 12;
 
-    // 64 iters * (4 STEP2 per chain * 2 chains) = 1024 dots.
-    for (int i = 0; i < 64; i++)
+    // 16 iters * (32 dots per chain * 2 chains) = 1024 dots.  Depth per trip
+    // is what keeps the loop counter off the dots' issue port -- see v1.
+    for (int i = 0; i < 16; i++)
     {
-        STEP2(x, a0, a1) STEP2(x, b0, b1)
-        STEP2(x, a0, a1) STEP2(x, b0, b1)
-        STEP2(x, a0, a1) STEP2(x, b0, b1)
-        STEP2(x, a0, a1) STEP2(x, b0, b1)
+        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
+        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
     }
 
     outputBuf.data[gl_GlobalInvocationID.x] = (a0 + a1) + (b0 + b1);
