@@ -71,6 +71,13 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Buffer footprint = numGroups * outPerWG * elemSize.  Bound by allocation.
   uint64_t bytesPerWG = (uint64_t)outPerWG * d.elemSize;
   uint64_t maxWGs = dev.info.maxAllocSize / bytesPerWG;
+  // maxComputeWorkGroupCount is a hard limit, and dispatching past it is
+  // invalid usage a driver may fault on rather than report.  Several vendors
+  // report 65535 here while the buffer would happily hold far more groups, so
+  // this is not slack -- without it the coopmat dispatch (32 threads per group,
+  // so 16x the groups of a 256-thread kernel) is the first to go over.
+  if (dev.info.maxWGCount)
+    maxWGs = std::min(maxWGs, (uint64_t)dev.info.maxWGCount);
   uint64_t wantWGs = globalWIs / wgSize;
   uint32_t numGroups = (uint32_t)std::min(wantWGs, maxWGs);
   globalWIs = (uint64_t)numGroups * wgSize;
@@ -163,22 +170,44 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Time one shader, returning microseconds per dispatch (<= 0 on failure).
   // *built distinguishes "the driver rejected the stage" from "the dispatch
   // failed", which the caller reports differently.
+  CLPEAK_VLOG("%s: %u groups x %u threads, %llu KB output buffer\n",
+              d.resultTag, numGroups, wgSize,
+              (unsigned long long)(bufferBytes / 1024));
+
+  // Phase markers.  A driver that faults inside its own shader compiler or on
+  // submit takes the process with it, so the last line printed is the only
+  // evidence of where it went -- which of the two below appears last says
+  // whether pipeline creation or the dispatch was fatal.
   auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
                        bool *built) -> float {
     VkPipeline pipeline;
+    CLPEAK_VLOG("%s: creating pipeline (subgroup %u)\n",
+                d.resultTag, d.requiredSubgroupSize);
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                        pipeline, d.specInfo, d.requiredSubgroupSize);
     // A pinned subgroup width is a preference, not a requirement: if the
     // driver won't compile the stage at that width, run it however it likes
-    // rather than dropping the row.
+    // rather than dropping the row.  Worth knowing about, though -- a coopmat
+    // shader that lands on several subgroups per work-group has every one of
+    // them recompute the same tile, so the reading comes out divided by that
+    // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).
     if (!*built && d.requiredSubgroupSize)
+    {
+      CLPEAK_VLOG("%s: subgroup size %u refused by the driver, "
+                  "falling back to its own choice\n",
+                  d.resultTag, d.requiredSubgroupSize);
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
+    }
     if (!*built) return -1.0f;
 
+    CLPEAK_VLOG("%s: pipeline built, dispatching\n", d.resultTag);
+    // No barrier between dispatches: a compute peak reads nothing twice, so
+    // overlapping launches cannot flatter it, and forbidding the overlap costs
+    // ~2% of the reading.
     float timed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
                             cfg.targetTimeUs, forceIters ? specifiedIters : 0,
-                            d.pushData, d.pushSize);
+                            false, d.pushData, d.pushSize);
     vkDestroyPipeline(dev.device, pipeline, nullptr);
     return timed;
   };
@@ -216,7 +245,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       if (altBuilt && altTimed > 0.0f)
       {
         float altValue = toValue(altTimed);
-        CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
+        CLPEAK_VLOG("%s %s: first shape %.1f, alt shape %.1f %s\n",
                     d.resultTag, v.label, value, altValue, d.unit);
         if (altValue > value * MAX_ALT_CHAIN_RATIO)
           CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "

@@ -46,7 +46,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build) |
-| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `shader_ops.py` — reads a Vulkan shader's inner loop back out of the compiled SPIR-V) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`--xml-file` output) per vendor — the baselines a suspicious number gets checked against |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |

@@ -64,6 +64,18 @@ MSTRINGIFY(
 // runComputeTest also refuses an alt reading more than MAX_ALT_CHAIN_RATIO
 // times the squaring one, as a backstop against a fold nobody predicted.
 //
+// Chain seeds are spaced CH_STRIDE apart, not 1 apart.  No two *scalar* chains
+// may start on the same value: independent chains under the same recurrence
+// stay bitwise identical forever, and a compiler that scalarises vectors then
+// CSEs one of them away, inflating the reading by chains/(chains-1).  A vector
+// seed already spans (A, A+1, ... A+W-1) across its own components, so at
+// width 2 the old +1 spacing gave x0 = (A, A+1) and x1 = (A+1, A+2) -- one
+// duplicated scalar chain out of four.  NVIDIA ran 3 of them and Vulkan's
+// double2 read 423 GFLOPS on a 5060 whose FP64 units top out near 335.  Only
+// AF* and MP* need this: RT*/M24_* seed the same way but rewrite x_k from the
+// *other* accumulator, so equal starting values diverge on the first
+// instruction rather than tracking each other.
+//
 // Live values per lane stay at ~5 in both shapes, which is what the MAD chain
 // rules in include/common/common.h require.
 //
@@ -72,6 +84,7 @@ MSTRINGIFY(
 // as a slow precise path.  Qualcomm's is 26x slower on it.
 
 \n#undef CH_MAD
+\n#undef CH_STRIDE
 \n#undef AF4_DECL
 \n#undef AF4_G
 \n#undef AF4_16
@@ -104,13 +117,14 @@ MSTRINGIFY(
 \n#undef M24_2_16
 \n
 \n#define CH_MAD(d, m1, m2, ad)  d = (m1) * (m2) + (ad);
+\n#define CH_STRIDE 4
 \n
-\n#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(1); T x2 = (seed) + (T)(2); T x3 = (seed) + (T)(3);
+\n#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE); T x2 = (seed) + (T)(2*CH_STRIDE); T x3 = (seed) + (T)(3*CH_STRIDE);
 \n#define AF4_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b) CH_MAD(x2, a, x2, b) CH_MAD(x3, a, x3, b)
 \n#define AF4_16                 AF4_G AF4_G AF4_G AF4_G
 \n#define AF4_RES                ((x0 + x1) + (x2 + x3))
 \n
-\n#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(1);
+\n#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE);
 \n#define AF2_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b)
 \n#define AF2_16                 AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G
 \n#define AF2_RES                (x0 + x1)
@@ -132,12 +146,12 @@ MSTRINGIFY(
 \n
 \n#define MP_STEP(HT, FT, x, a, m)  a = convert_##FT(m) * convert_##FT(x) + a; x = convert_##HT(a);
 \n
-\n#define MP4_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(1); HT x2 = (xseed) + (HT)(2); HT x3 = (xseed) + (HT)(3); FT a0 = (aseed); FT a1 = (aseed) + (FT)(1); FT a2 = (aseed) + (FT)(2); FT a3 = (aseed) + (FT)(3);
+\n#define MP4_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(CH_STRIDE); HT x2 = (xseed) + (HT)(2*CH_STRIDE); HT x3 = (xseed) + (HT)(3*CH_STRIDE); FT a0 = (aseed); FT a1 = (aseed) + (FT)(CH_STRIDE); FT a2 = (aseed) + (FT)(2*CH_STRIDE); FT a3 = (aseed) + (FT)(3*CH_STRIDE);
 \n#define MP4_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m) MP_STEP(HT,FT,x1,a1,m) MP_STEP(HT,FT,x2,a2,m) MP_STEP(HT,FT,x3,a3,m)
 \n#define MP4_16(HT, FT)         MP4_G(HT,FT) MP4_G(HT,FT) MP4_G(HT,FT) MP4_G(HT,FT)
 \n#define MP4_RES(FT)            (((a0 + a1) + (a2 + a3)) + convert_##FT(x0))
 \n
-\n#define MP2_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(1); FT a0 = (aseed); FT a1 = (aseed) + (FT)(1);
+\n#define MP2_DECL(HT, FT, mseed, xseed, aseed) HT m = (mseed); HT x0 = (xseed); HT x1 = (xseed) + (HT)(CH_STRIDE); FT a0 = (aseed); FT a1 = (aseed) + (FT)(CH_STRIDE);
 \n#define MP2_G(HT, FT)          MP_STEP(HT,FT,x0,a0,m) MP_STEP(HT,FT,x1,a1,m)
 \n#define MP2_16(HT, FT)         MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT) MP2_G(HT,FT)
 \n#define MP2_RES(FT)            ((a0 + a1) + convert_##FT(x0))

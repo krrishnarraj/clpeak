@@ -33,6 +33,12 @@ struct BackendInventory; // forward decl
 struct coopmat_tile_t {
   bool     supported = false;
   uint32_t M = 0, N = 0, K = 0;
+  // Subgroup width this tile was advertised at, or 0 when the device only has
+  // the width-agnostic KHR query and we have no way to know.  The KHR list is
+  // the union over every width the device supports, so a tile from it is not
+  // necessarily valid at the width we pin -- see
+  // VK_EXT_cooperative_matrix_maintenance1 in vk_peak.cpp.
+  uint32_t subgroupSize = 0;
 };
 
 // Vulkan device info (mirrors OpenCL device_info_t for display)
@@ -41,8 +47,9 @@ struct vk_device_info_t {
   std::string driverVersion;
   std::string apiVersion;
 
-  unsigned int numCUs;            // maxComputeWorkGroupCount[0] as proxy
+  unsigned int numCUs;            // 0 unless a vendor property reports it
   unsigned int maxWGSize;
+  uint32_t maxWGCount;            // maxComputeWorkGroupCount[0]
   uint64_t maxAllocSize;          // maxStorageBufferRange
   uint64_t heapSize;              // device-local heap
   unsigned int maxClockFreq;      // not always available (0 if unknown)
@@ -65,6 +72,19 @@ struct vk_device_info_t {
                                   // implied by cooperativeMatrixSupported
   bool fp8Supported;              // VK_EXT_shader_float8 + shaderFloat8CoopMatrix
   bool calibratedTimestampsSupported; // VK_EXT_calibrated_timestamps
+  bool coopmatMaintenance1Supported;  // VK_EXT_cooperative_matrix_maintenance1
+                                  // + cooperativeMatrixProperties2.  Its query
+                                  // takes a subgroup size and answers for that
+                                  // width specifically, where the KHR one
+                                  // reports the union over all widths.
+  bool maintenance4Supported;     // requested where present, not required.
+                                  // It is the precondition for OpExecutionModeId
+                                  // LocalSizeId (VUID-RuntimeSpirv-LocalSizeId-
+                                  // 06434), which is how a specialized workgroup
+                                  // size compiles at SPIR-V 1.6; the shaders
+                                  // target 1.5, where the same GLSL becomes the
+                                  // classic LocalSize mode plus a
+                                  // gl_WorkGroupSize spec constant instead.
 
   // Subgroup sizing.  subgroupSize is what VkPhysicalDeviceSubgroupProperties
   // reports; min/max/subgroupSizeControl come from VK_EXT_subgroup_size_control.
@@ -111,17 +131,35 @@ static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
 // at the work-group's offset, so a work-group has to be exactly one subgroup:
 // if the driver splits the 32-thread group into 2 (Intel SIMD16) or 4 (SIMD8)
 // subgroups, every one of them redundantly computes the same tile into the
-// same place and the reported rate comes out divided by that factor.  The
-// shaders declare local_size_x = 32, so the fix is to pin the stage's subgroup
-// width to 32 wherever the device allows it -- NVIDIA, RDNA and Arc all do.
+// same place and the reported rate comes out divided by that factor.  So the
+// fix is to pin the stage's subgroup width to the work-group size wherever the
+// device allows it -- NVIDIA, RDNA and Arc all do.
 // Devices with no subgroup-size control, or whose subgroups can only be 64
 // (CDNA/GCN), return 0 and run unpinned as before.
-static inline uint32_t coopmatRequiredSubgroupSize(const vk_device_info_t &info)
+// The width one coopmat work-group runs at.  32 unless overridden: it is what
+// every device measured so far wants, and the shaders take it as a
+// specialization constant so an override changes the work-group and the pinned
+// subgroup together, keeping the one-subgroup-per-group invariant intact.
+static inline uint32_t coopmatSubgroupWidth(const vk_device_info_t &info,
+                                            uint32_t tileWidth)
 {
-  const uint32_t coopWGSize = 32;
+  uint32_t want = tileWidth ? tileWidth : 32;
   if (info.subgroupSizeControl &&
-      info.minSubgroupSize <= coopWGSize && coopWGSize <= info.maxSubgroupSize)
-    return coopWGSize;
+      info.minSubgroupSize <= want && want <= info.maxSubgroupSize)
+    return want;
+  // No size control, or the width is out of range: run at whatever the device
+  // says its subgroups are, so a group is still one subgroup.
+  return info.subgroupSize ? info.subgroupSize : 32;
+}
+
+// The width to pin the stage to, or 0 when the device will not let us.
+static inline uint32_t coopmatRequiredSubgroupSize(const vk_device_info_t &info,
+                                                   uint32_t tileWidth)
+{
+  uint32_t want = tileWidth ? tileWidth : 32;
+  if (info.subgroupSizeControl &&
+      info.minSubgroupSize <= want && want <= info.maxSubgroupSize)
+    return want;
   return 0;
 }
 
@@ -315,11 +353,19 @@ private:
   // calibrated from a one-shot warmup so the timed phase lands at
   // ~targetTimeUs.  Returns mean per-iter time in microseconds.  forcedIters
   // != 0 short-circuits calibration (matches --iters).
+  //
+  // serialize inserts a shader-memory barrier between the batched dispatches.
+  // The bandwidth tests need it: their byte count assumes one pass over the
+  // buffer or image, and Vulkan otherwise lets consecutive dispatches overlap,
+  // putting two passes over the same data in flight at once.  The compute
+  // tests pass false -- nothing there is read twice, so the barrier would only
+  // cost them the tail overlap between dispatches (~2% of the peak).
   float runKernel(VulkanDevice &dev, VkPipeline pipeline,
                   VkPipelineLayout pipeLayout,
                   VkDescriptorSet descriptorSet,
                   uint32_t groupCountX,
                   unsigned int targetTimeUs, unsigned int forcedIters,
+                  bool serialize,
                   const void *pushData = nullptr, uint32_t pushSize = 0);
 
   // Shared implementation of the single-buffer compute-peak pattern

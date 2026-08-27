@@ -60,6 +60,35 @@ static const unsigned int LMEM_REPS = 64;
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 
+// Image bandwidth races two walk orders, the same way the compute tests race
+// two MAD-chain shapes and for the same reason: no single shape is best on
+// every vendor.  Here the variable is the image's memory layout, which is the
+// driver's choice and not visible through any of these APIs.  A row-major walk
+// gives a warp 32 texels along x -- ideal for a linear surface, but 8 scattered
+// chunks of a block-linear one -- and the transposed walk is the mirror image.
+// On an RTX 5060 that is worth 270 vs 419 GBPS through CUDA (whose CUarray is
+// always block-linear) while Vulkan reads ~415 either way, so a row-major-only
+// test reported the same texture path 1.5x apart across APIs.  Racing the pair
+// brings CUDA, Vulkan and OpenCL within 1.3% of each other, all at ~99% of the
+// card's global bandwidth.
+//
+// Unlike the MAD chains, neither walk can flatter the result and no ratio guard
+// is needed: both read every pixel exactly once, so the byte count is identical
+// and only the access order differs.
+//
+// Global bandwidth does NOT race, and that is deliberate.  OpenCL carries two
+// shapes -- `_local_offset`, where each work-group owns a contiguous
+// FETCH_PER_WI*local_size block, and `_global_offset`, a grid-stride sweep --
+// and reports the faster; the other five backends implement the local-offset
+// one alone.  Measured across an RTX 5060, pocl and Intel OpenCL on a
+// Threadripper, and an M1 Pro, grid-stride never wins by more than 0.6% (all of
+// it on the 5060, at or below run-to-run noise) while local-offset is up to
+// 9.5% ahead on the CPU runtimes.  So the shape every backend already has is
+// the one that wins where it matters, and porting the twin to the other five
+// would double their global-bandwidth budget to chase 0.6%.  The OpenCL race
+// stays as the canary: --verbose prints both rates, and if a device ever shows
+// grid-stride ahead by a real margin, that is the signal to port it.
+
 // ---------------------------------------------------------------------------
 // The MAD chain, shared by every compute kernel in every backend
 //
@@ -131,6 +160,17 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //  - The kernel must store x, never c.  c is loop-invariant; storing it lets
 //    the entire chain be dead-coded away and produces an absurd number.
 //
+//  - No two scalar chains may start on the same value.  Independent chains
+//    under the same recurrence stay bitwise identical forever, and a compiler
+//    that scalarises vectors then CSEs one of them away -- the reading comes
+//    out inflated by chains/(chains-1), too small for MAX_ALT_CHAIN_RATIO to
+//    catch.  A width-W vector seed already spans (A, A+1, ... A+W-1) across
+//    its own components, so chain k must start at least W past chain k-1, not
+//    1 past.  This is why the affine width-2 shapes read 4/3 high on NVIDIA
+//    fp64 (Vulkan double2 423 GFLOPS on a 5060 whose FP64 units cap near 335).
+//    It does not apply to the rotating integer shape, which rewrites x_k from
+//    another accumulator, so equal seeds diverge on the first instruction.
+//
 // Narrow integer types (char/short) drive x to a fixed point within a few
 // squarings.  That is fine -- integer multiply is fixed-latency on every
 // target here -- but it is why the terminal store matters.
@@ -155,15 +195,30 @@ static const unsigned int COMPUTE_DP_WORK_PER_WI = 512;
 // compute_integer/intfast/char/short_kernels.cl  (64 iters * MAD_16 * 2 = 2048)
 static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 
-// compute_int8_dp_kernels.cl
-// Each dot_acc_sat(char4, char4, int) is 4 INT8 multiply-adds = 8 ops.
-// v1: 64 iters * MAD_DP_16 (16 dots) * 8 ops = 8192 per WI (all variants equal).
+// The int8 dot-product kernels (compute_int8_dp_kernels.cl,
+// compute_int8_dp.cu / .hip, compute_int8_dp_v*.comp, and the CPU backend).
+// oneAPI has no such test -- see the Gotchas in src/oneapi/AGENTS.md.
+// Each dot is 4 INT8 multiply-adds = 8 ops.  All of them spell the chain the
+// same way -- one STEP is two dots into a pair of accumulators that feed each
+// other -- and every variant issues 512 STEPs, so 1024 dots * 8 ops = 8192 per
+// WI (1 chain = 64 iters * 8 steps, 8 chains = 64 * 1 * 8; OpenCL's v16 is
+// 32 * 1 * 16).  Read the comment at the top of any of those files for why the
+// chain has to be shaped that way; a different shape silently reports a wrong
+// number.
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
-// coopmat_*.comp: 16x16x16 tile, 256 iters per subgroup, one subgroup
-// (32 threads) per work-group.  Per subgroup: M*N*K*2*ITERS = 2,097,152 ops;
+// coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup
+// (32 threads) per work-group.  Per subgroup: M*N*K*2*MulAdds = 2,097,152 ops;
 // per work-item: 2,097,152 / 32 = 65,536 ops.
 static const unsigned int COOPMAT_WORK_PER_WI = 65536;
+
+// MulAdds in one trip of the coopmat inner loop.  Must match CM_MMA_PER_TRIP
+// in src/vulkan/shaders/coopmat_chain.glsl: the host pushes the trip count,
+// the shader runs this many MulAdds per trip, and the product is the MulAdd
+// budget above.  Every tile seen so far -- 8x8x8, 8x8x16, 8x8x32, 16x16x16,
+// 16x16x32, at subgroup 32 and 64 -- divides exactly by it, so the budget is
+// hit on the nose rather than rounded.
+static const unsigned int COOPMAT_MMA_PER_TRIP = 16;
 
 // Max work-group size cap.  Hardware may report higher (1024 on most NVIDIA
 // GPUs), but we clamp to 256 because the v16 kernels hold a float16/double16
@@ -262,7 +317,13 @@ struct benchmark_config_t {
   unsigned int kernelLatencyIters;    // separately-submitted dispatch count
   uint64_t transferBWMaxSize;
 
-  static benchmark_config_t forDevice(DeviceType type);
+  // `lastLevelCacheBytes` is the device's last-level cache -- OpenCL's
+  // CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, CUDA/HIP's L2 size, SYCL's
+  // global_mem_cache_size.  Pass 0 when the API has no such query (Vulkan,
+  // Metal) or the driver leaves it unset; it can only grow globalBWMaxSize,
+  // never shrink it.  See forDevice() for why the working set has to outgrow it.
+  static benchmark_config_t forDevice(DeviceType type,
+                                      uint64_t lastLevelCacheBytes = 0);
 };
 
 // ---------------------------------------------------------------------------
@@ -291,8 +352,12 @@ bool cancelRequested();
 void resetCancel();
 }
 
-// Gated stderr diagnostic — no-op unless --verbose was passed.
+// Gated stderr diagnostic — no-op unless --verbose was passed.  Flushed, so the
+// last line printed before a driver-side crash is actually on screen: --verbose
+// is the only tool we have for locating a fault inside someone else's shader
+// compiler, and a buffered line would be the one that mattered.
 #define CLPEAK_VLOG(...) \
-    do { if (::clpeak::verboseEnabled()) fprintf(stderr, __VA_ARGS__); } while (0)
+    do { if (::clpeak::verboseEnabled()) { fprintf(stderr, __VA_ARGS__); \
+                                           fflush(stderr); } } while (0)
 
 #endif  // COMMON_H

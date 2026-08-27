@@ -18,8 +18,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Local memory bandwidth";
   testSpec.unit = "gbps";
   testSpec.description =
-      "How many bytes per second the GPU moves through shared local memory -- "
-      "the small on-chip scratchpad a group of threads passes data through, "
+      "How many bytes per second the device moves through shared local memory "
+      "-- the small on-chip scratchpad a group of threads passes data through, "
       "which never goes out to main memory.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
@@ -94,7 +94,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0, true);
     // Strip padding from the display label for the result metric key.
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ') key.pop_back();

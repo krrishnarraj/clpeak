@@ -30,7 +30,7 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   d.resultTag   = "integer_compute";
   d.unit        = "gops";
   d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
-                  "indexing, addressing and bit manipulation, which shaders do "
+                  "indexing, addressing and bit manipulation, which kernels do "
                   "alongside their fractional maths.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
@@ -55,7 +55,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
       "One chain of dot products, each waiting on the one before it." },
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
     { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size,
-      "Two independent chains, so the GPU has a second dot product to get on "
+      "Two independent chains, so the device has a second dot product to get on "
       "with while the first is still finishing." },
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4

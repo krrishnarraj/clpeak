@@ -4,6 +4,11 @@
 #include <common/common.h>
 #include <sycl/sycl.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
@@ -13,18 +18,24 @@
 #endif
 
 // XMX matrix engine peak — Intel's analog of rocWMMA / cuda WMMA / Vulkan
-// coopMatrix / Metal simdgroup_matrix.  Tile shapes map to Intel XMX:
-//   bf16/fp16 -> 8xNx16 (A,B 16-bit, fp32 accumulate; N=8 on DG2, N=16 on PVC)
-//   tf32      -> 8xNx8  (A,B tf32,   fp32 accumulate; N=8 on DG2, N=16 on PVC)
-//   int8      -> 8xNx32 (A,B int8,   int32 accumulate; N=8 on DG2, N=16 on PVC)
+// coopMatrix / Metal simdgroup_matrix.
 //
-// N is queried from the device's matrix_combinations table at runtime and
-// varies across architectures (DG2 reports N=8, PVC/BMG/LNL/PTL/WCL/CRI
-// report N=16).  M is always 8 for the standard tile on all Xe.
+// The row list is not hardcoded: every combination the device advertises in
+// its `matrix_combinations` table becomes a row.  Each entry names the A, B
+// and accumulator element types plus a tile shape, where a dimension the
+// hardware leaves free is reported as 0 with a `max_*` bound (Xe reports M
+// that way) and a fixed dimension carries its single legal size.  Alchemist
+// (A380/A770) advertises seven: four 8-bit sign combinations at 8x8x32, fp16
+// and bf16 at 8x8x16, and a second, large bf16 tile at 32x32x16.  PVC / Xe2 /
+// Xe3 report N=16 and add tf32.
 //
-// Each sub-group runs Iters back-to-back MMA ops on its own accumulator;
-// per-sub-group ops = M*N*K*2*Iters (multiply-add counted as 2).  One
-// sub-group per work-group, so numBlocks == number of sub-groups.
+// joint_matrix needs M, N and K at compile time, so the shapes below are the
+// compiled set; a device advertising anything else records a row naming the
+// shape rather than dropping it silently, which is how we learn what to add.
+//
+// Ops accounting is per sub-group: each sub-group runs its own accumulator
+// chain, and how many sub-groups the compiler packs into a work-group is its
+// choice — see the note on JM_SG_COUNT_NOTE below.
 
 #ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
 
@@ -32,15 +43,31 @@ namespace {
 
 namespace syclex = sycl::ext::oneapi::experimental::matrix;
 
-constexpr uint32_t JM_M = 8;
+// MMA iterations per sub-group.  Fixed rather than scaled per tile: the block
+// count is derived from a fixed output-byte budget (JM_OUT_BYTES), so blocks
+// fall as the tile grows and the work per launch comes out the same for every
+// row of a given K.  That keeps launch duration bounded on the large 32x32
+// tile -- a fixed block count there would make the launch 16x longer, into
+// Windows TDR range on a slow part -- and keeps the end-of-chain store the
+// same small fraction of every row, so the rows compare directly.
 constexpr uint32_t JM_ITERS = 256;
 
-// Per-variant kernel-name tags (SYCL needs a unique type per parallel_for).
-template <int N> struct JmBf16Tag;
-template <int N> struct JmFp16Tag;
-template <int N> struct JmTf32Tag;
-template <int N> struct JmInt8Tag;
+// Output budget for the test, clamped by device memory at the call site.
+// Sized so the 8x8 tile keeps exactly the block count this benchmark has
+// always used, which puts the single store at the end of the chain at ~1% of
+// a launch.
+constexpr uint64_t JM_OUT_BYTES = 512ull << 20;
 
+// Per-instantiation kernel-name tag: SYCL needs a distinct type per
+// parallel_for, and the template arguments already are the distinction.
+template <typename At, typename Bt, typename Acc, int M, int N, int K> struct JmTag;
+
+// Returned when the device advertises a tile whose shape has no compiled
+// instantiation.  Distinct from -1 (launch failed) so the row can say which
+// of the two actually happened.
+constexpr float JM_NOT_COMPILED = -2.0f;
+
+// Long spelling, for the verbose combination dump.
 static const char *mtName(syclex::matrix_type t)
 {
   using mt = syclex::matrix_type;
@@ -63,6 +90,29 @@ static const char *mtName(syclex::matrix_type t)
   }
 }
 
+// Compact spelling, for row names and tile labels ("s8xu8+s32").
+static const char *mtShort(syclex::matrix_type t)
+{
+  using mt = syclex::matrix_type;
+  switch (t)
+  {
+    case mt::bf16:   return "bf16";
+    case mt::fp16:   return "fp16";
+    case mt::tf32:   return "tf32";
+    case mt::fp32:   return "fp32";
+    case mt::fp64:   return "fp64";
+    case mt::sint8:  return "s8";
+    case mt::sint16: return "s16";
+    case mt::sint32: return "s32";
+    case mt::sint64: return "s64";
+    case mt::uint8:  return "u8";
+    case mt::uint16: return "u16";
+    case mt::uint32: return "u32";
+    case mt::uint64: return "u64";
+    default:         return "x";
+  }
+}
+
 // Pull the device's joint_matrix combination table.  Sets `threw` so callers
 // can distinguish "queried OK, none" from "couldn't query at all".
 static std::vector<syclex::combination> queryCombos(const sycl::device &d, bool &threw)
@@ -79,7 +129,7 @@ static std::vector<syclex::combination> queryCombos(const sycl::device &d, bool 
 }
 
 // Verbose-only: print every (a/b/c/d type, M/N/K, max M/N/K) the device accepts.
-// This is the ground truth for picking tile shapes on a new device.
+// This is the ground truth the row list below is derived from.
 static void dumpMatrixCombinations(const std::vector<syclex::combination> &combos)
 {
   if (!::clpeak::verboseEnabled()) return;
@@ -93,78 +143,257 @@ static void dumpMatrixCombinations(const std::vector<syclex::combination> &combo
                 c.max_msize, c.max_nsize, c.max_ksize);
 }
 
-// Ask whether (atype,btype,ctype,dtype) at shape MxNxK is in the device table.
-// `threw` carries through whether the one-time query failed.
-// Returns 1 supported, 0 unsupported (queried OK but absent, incl. empty table),
-// -1 when the query threw (caller should attempt and let runKernel report).
-static int jmComboSupport(const std::vector<syclex::combination> &combos, bool threw,
-                          syclex::matrix_type at, syclex::matrix_type bt,
-                          syclex::matrix_type ct, syclex::matrix_type dt,
-                          size_t M, size_t N, size_t K)
+// ---------------------------------------------------------------------------
+// One row: a combination from the device's table resolved to a concrete tile.
+// ---------------------------------------------------------------------------
+
+struct JmTile {
+  syclex::matrix_type at{}, bt{}, ct{};
+  uint32_t    M = 0, N = 0, K = 0;
+  bool        advertised = true;  // false => placeholder for a canonical row
+                                  // this device does not offer at all
+  std::string metric;             // "joint_matrix_bf16", "joint_matrix_bf16_32x32x16"
+  std::string shape;              // "8x8x16"
+  std::string label;              // "bf16xbf16+fp32"
+
+  uint64_t volume() const { return (uint64_t)M * N * K; }
+};
+
+// A free dimension is reported as 0 with a max_* bound; a fixed one carries
+// its single legal size.  Take the largest tile the entry permits.
+static uint32_t resolveDim(size_t fixed, size_t maxv)
 {
-  if (threw) return -1;
-  for (const auto &c : combos) {
-    if (c.atype != at || c.btype != bt || c.ctype != ct || c.dtype != dt) continue;
-    // Xe reports a flexible dim as 0 with a max_* bound; AMX-style backends
-    // report a single fixed size.  Accept either encoding.
-    const bool mok = (c.msize == 0) ? (M <= c.max_msize) : (M == c.msize);
-    const bool nok = (c.nsize == 0) ? (N <= c.max_nsize) : (N == c.nsize);
-    const bool kok = (c.ksize == 0) ? (K <= c.max_ksize) : (K == c.ksize);
-    if (mok && nok && kok) return 1;
-  }
-  return 0;  // queried fine; shape/type absent (empty table => nothing supported)
+  return (uint32_t)(fixed != 0 ? fixed : maxv);
 }
 
-// Look up the N dimension from the device's matrix_combinations table for a
-// given (atype,btype,ctype,dtype) quadruple at the desired M and K.  Returns
-// the device's N (nsize if discrete, max_nsize if continuous) or 0 if no
-// entry accommodates (wantM, wantK).
-static uint32_t pickJmN(const std::vector<syclex::combination> &combos,
-                         syclex::matrix_type at, syclex::matrix_type bt,
-                         syclex::matrix_type ct, syclex::matrix_type dt,
-                         uint32_t wantM, uint32_t wantK)
+// Row-name stem for an (A,B) type pair.  A same-type FP pair gets the bare
+// dtype (bf16/fp16/tf32) and signed8 x signed8 keeps the historical "int8",
+// so rows that already exist keep their names and saved baselines still line
+// up.  Every other pair spells out both operands: "u8u8", "s8u8", "u8s8".
+static std::string jmBaseName(syclex::matrix_type at, syclex::matrix_type bt)
 {
-  for (const auto &c : combos) {
-    if (c.atype != at || c.btype != bt || c.ctype != ct || c.dtype != dt) continue;
-    const bool mok = (c.msize == 0) ? (wantM <= c.max_msize) : (wantM == c.msize);
-    const bool kok = (c.ksize == 0) ? (wantK <= c.max_ksize) : (wantK == c.ksize);
-    if (!mok || !kok) continue;
-    return (uint32_t)(c.nsize != 0 ? c.nsize : c.max_nsize);
+  using mt = syclex::matrix_type;
+  if (at == bt)
+  {
+    switch (at)
+    {
+      case mt::bf16: case mt::fp16: case mt::tf32:
+      case mt::fp32: case mt::fp64:
+        return mtShort(at);
+      case mt::sint8:
+        return "int8";
+      default:
+        break;
+    }
   }
-  return 0;
+  return std::string(mtShort(at)) + mtShort(bt);
 }
 
-// Run one matrix-engine variant.  ABt is the joint_matrix element type
-// (e.g. bfloat16, sycl::half, precision::tf32, int8_t); FillT is the type
-// used to fill A/B (float for tf32, otherwise == ABt); ACCt is the
-// accumulator/output element type.  K and N are compile-time tile dimensions.
-template <typename KernelName, typename ABt, typename FillT, typename ACCt, int K, int N>
+// Plain-language note for one row, with the tile shape appended so a reader
+// can tell the two bf16 rows on Alchemist apart without decoding the name.
+static std::string jmNote(const JmTile &t)
+{
+  using mt = syclex::matrix_type;
+  std::string s;
+
+  if (t.at == mt::bf16 && t.bt == mt::bf16)
+    s = "bfloat16 inputs with 32-bit totals -- 16 bits arranged for AI work, "
+        "trading digits of accuracy for the number range of a full float.";
+  else if (t.at == mt::fp16 && t.bt == mt::fp16)
+    s = "16-bit inputs with 32-bit totals -- the everyday precision of AI "
+        "inference.";
+  else if (t.at == mt::tf32 && t.bt == mt::tf32)
+    s = "tf32, a trimmed-down stand-in for 32-bit float: it keeps the full "
+        "number range but drops accuracy to fit the matrix engine.  Not every "
+        "Intel part has it.";
+  else if (t.at == mt::sint8 && t.bt == mt::sint8)
+    s = "8-bit whole numbers with 32-bit totals, the format quantized neural "
+        "networks use.";
+  else if (t.at == mt::uint8 && t.bt == mt::uint8)
+    s = "Unsigned 8-bit whole numbers with 32-bit totals -- the same engine as "
+        "the signed row, reading both operands as 0..255.";
+  else if ((t.at == mt::uint8 && t.bt == mt::sint8) ||
+           (t.at == mt::sint8 && t.bt == mt::uint8))
+    s = "Mixed-sign 8-bit whole numbers with 32-bit totals -- one operand "
+        "unsigned, the other signed, which is what quantized networks get when "
+        "unsigned activations meet signed weights.";
+  else
+    s = std::string(mtShort(t.at)) + " inputs against " + mtShort(t.bt) +
+        ", accumulating in " + mtShort(t.ct) + ".";
+
+  if (!t.shape.empty())
+    s += "  Tile " + t.shape + ".";
+  return s;
+}
+
+// True when this accumulator type makes the combination an integer one.  The
+// benchmark reports integer rows in TOPS under the IntCompute category and
+// floating-point rows in TFLOPS under FpCompute.
+static bool jmIsIntAcc(syclex::matrix_type t)
+{
+  using mt = syclex::matrix_type;
+  switch (t)
+  {
+    case mt::sint8:  case mt::uint8:
+    case mt::sint16: case mt::uint16:
+    case mt::sint32: case mt::uint32:
+    case mt::sint64: case mt::uint64:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Resolve the device's table into the concrete tiles this category will run.
+static std::vector<JmTile> resolveTiles(const std::vector<syclex::combination> &combos,
+                                        bool wantInt)
+{
+  std::vector<JmTile> out;
+  for (const auto &c : combos)
+  {
+    // c and d are the accumulator in and out.  Xe always reports them equal
+    // and the kernel below feeds one accumulator back into itself, so a
+    // combination that separates them is not something this test can express.
+    if (c.ctype != c.dtype) continue;
+    if (jmIsIntAcc(c.ctype) != wantInt) continue;
+
+    JmTile t;
+    t.at = c.atype;
+    t.bt = c.btype;
+    t.ct = c.ctype;
+    t.M  = resolveDim(c.msize, c.max_msize);
+    t.N  = resolveDim(c.nsize, c.max_nsize);
+    t.K  = resolveDim(c.ksize, c.max_ksize);
+    if (t.M == 0 || t.N == 0 || t.K == 0) continue;   // unresolvable entry
+
+    // Some drivers list one shape twice (once fixed, once as a free dimension
+    // whose max lands on the same size).  One row per distinct tile.
+    const bool dup = std::any_of(out.begin(), out.end(), [&](const JmTile &o) {
+      return o.at == t.at && o.bt == t.bt && o.ct == t.ct &&
+             o.M == t.M && o.N == t.N && o.K == t.K;
+    });
+    if (!dup) out.push_back(t);
+  }
+  return out;
+}
+
+// Make sure the historical row set always appears.  An explicit "tf32 not in
+// this device's combinations" row is more useful to a reader than a silently
+// missing one, and it keeps the row set stable across devices so baselines
+// still compare.
+static void addMissingCanonical(std::vector<JmTile> &tiles, bool wantInt)
+{
+  using mt = syclex::matrix_type;
+  struct Canon { mt at, bt, ct; };
+  static const Canon fpCanon[]  = {{mt::bf16, mt::bf16, mt::fp32},
+                                   {mt::fp16, mt::fp16, mt::fp32},
+                                   {mt::tf32, mt::tf32, mt::fp32}};
+  static const Canon intCanon[] = {{mt::sint8, mt::sint8, mt::sint32}};
+
+  const Canon *list = wantInt ? intCanon : fpCanon;
+  const size_t n    = wantInt ? (sizeof(intCanon) / sizeof(intCanon[0]))
+                              : (sizeof(fpCanon)  / sizeof(fpCanon[0]));
+
+  for (size_t i = 0; i < n; i++)
+  {
+    const std::string want = jmBaseName(list[i].at, list[i].bt);
+    const bool have = std::any_of(tiles.begin(), tiles.end(), [&](const JmTile &o) {
+      return jmBaseName(o.at, o.bt) == want;
+    });
+    if (have) continue;
+    JmTile t;
+    t.at = list[i].at;
+    t.bt = list[i].bt;
+    t.ct = list[i].ct;
+    t.advertised = false;
+    tiles.push_back(t);
+  }
+}
+
+// Order the rows and name them.  Grouping by stem and putting the smallest
+// tile of a stem first makes the naming rule below independent of the order
+// the driver happened to list its combinations in.
+static void finalizeTiles(std::vector<JmTile> &tiles)
+{
+  std::stable_sort(tiles.begin(), tiles.end(), [](const JmTile &a, const JmTile &b) {
+    const std::string an = jmBaseName(a.at, a.bt);
+    const std::string bn = jmBaseName(b.at, b.bt);
+    if (an != bn) return an < bn;
+    return a.volume() < b.volume();
+  });
+
+  for (size_t i = 0; i < tiles.size(); i++)
+  {
+    JmTile &t = tiles[i];
+    if (t.advertised)
+      t.shape = std::to_string(t.M) + "x" + std::to_string(t.N) + "x" + std::to_string(t.K);
+    t.label = std::string(mtShort(t.at)) + "x" + mtShort(t.bt) + "+" + mtShort(t.ct);
+
+    // Bare stem for the first tile of each stem, MxNxK suffix for any further
+    // tile of the same stem — Alchemist advertises bf16 at both 8x8x16 and
+    // 32x32x16, and the two need distinct row names.  Devices that advertise
+    // one tile per dtype (every part before that one) keep the old names.
+    const std::string base = jmBaseName(t.at, t.bt);
+    const bool dup = (i > 0) && jmBaseName(tiles[i - 1].at, tiles[i - 1].bt) == base;
+    t.metric = "joint_matrix_" + base + (dup ? "_" + t.shape : "");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The kernel.
+// ---------------------------------------------------------------------------
+
+// Run one matrix-engine variant.  At/Bt are the joint_matrix element types
+// (bfloat16, sycl::half, precision::tf32, int8_t, uint8_t); FillA/FillB are
+// the types used to fill A/B (float for tf32, otherwise == At/Bt); Acc is the
+// accumulator/output element type.  M, N and K are the compile-time tile.
+template <typename At, typename Bt, typename Acc, int M, int N, int K,
+          typename FillA, typename FillB>
 static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
-                          ACCt *outBuf, uint32_t numBlocks, uint32_t blockSize,
-                          FillT abFill, ACCt cFill,
+                          Acc *outBuf, uint32_t *sgCountBuf,
+                          uint32_t numBlocks, uint32_t blockSize,
+                          FillA aFill, FillB bFill,
                           unsigned int targetTimeUs, unsigned int forced)
 {
   const uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
 
   auto submit = [=](sycl::queue &q) -> sycl::event {
     return q.submit([&](sycl::handler &h) {
-      h.parallel_for<KernelName>(
+      h.parallel_for<JmTag<At, Bt, Acc, M, N, K>>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
           auto sg = it.get_sub_group();
-          syclex::joint_matrix<sycl::sub_group, ABt,  syclex::use::a, JM_M, K, syclex::layout::row_major>       a;
+          syclex::joint_matrix<sycl::sub_group, At,  syclex::use::a, M, K, syclex::layout::row_major>       a;
           // Intel XMX requires the B operand in VNNI/packed layout; a row_major
           // B is rejected at launch on Xe-HPG (Arc/DG2).
-          syclex::joint_matrix<sycl::sub_group, ABt,  syclex::use::b, K, N, syclex::layout::ext_intel_packed> b;
-          syclex::joint_matrix<sycl::sub_group, ACCt, syclex::use::accumulator, JM_M, N> c;
-          syclex::joint_matrix_fill(sg, a, abFill);
-          syclex::joint_matrix_fill(sg, b, abFill);
-          syclex::joint_matrix_fill(sg, c, cFill);
+          syclex::joint_matrix<sycl::sub_group, Bt,  syclex::use::b, K, N, syclex::layout::ext_intel_packed> b;
+          syclex::joint_matrix<sycl::sub_group, Acc, syclex::use::accumulator, M, N> c;
+          syclex::joint_matrix_fill(sg, a, aFill);
+          syclex::joint_matrix_fill(sg, b, bFill);
+          syclex::joint_matrix_fill(sg, c, (Acc)0);
           #pragma unroll 1
-          for (int i = 0; i < (int)JM_ITERS; i++)
+          for (uint32_t i = 0; i < JM_ITERS; i++)
             syclex::joint_matrix_mad(sg, c, a, b, c);
 
-          ACCt *blockOut = outBuf + (size_t)it.get_group(0) * JM_M * N;
+          // JM_SG_COUNT_NOTE: the ops accounting is per sub-group, because
+          // every sub-group in the work-group runs the whole chain above.  How
+          // many sub-groups a work-group holds is IGC's choice: the work-group
+          // is sized to the device's widest sub-group, but reqd_sub_group_size
+          // cannot be used to pin it (the attribute triggers an IGC "Divide by
+          // zero" internal compiler error on DG2 with any non-default size),
+          // and DG2's dpas is a SIMD8 instruction, so a 32-wide work-group can
+          // compile to four sub-groups.  Assuming one would under-report by
+          // exactly that factor, so report the real count back to the host
+          // instead of assuming.
+          const uint32_t sgPerWG = (uint32_t)sg.get_group_range()[0];
+          if (it.get_global_linear_id() == 0) *sgCountBuf = sgPerWG;
+
+          // One output tile per work-group, written by every sub-group in it.
+          // They all ran the same chain from the same fill values, so they
+          // store identical bytes and the race is benign -- and sharing the
+          // slot keeps both the buffer and the store traffic independent of
+          // how many sub-groups the compiler decided to pack in.
+          Acc *blockOut = outBuf + (size_t)it.get_group(0) * (size_t)(M * N);
           syclex::joint_matrix_store(sg, c,
             sycl::address_space_cast<sycl::access::address_space::global_space,
                                      sycl::access::decorated::no>(blockOut),
@@ -175,37 +404,89 @@ static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
   return peak.runKernel(dev, submit, targetTimeUs, forced);
 }
 
-static void emitJm(logger::TestScope &test, const char *metric, const char *note,
-                   float us, uint32_t numBlocks, uint32_t K, uint32_t N)
+// Tile shapes with a compiled instantiation.  Covers every (M,N) Intel Xe
+// advertises today: 8x8 (DG2/Alchemist), 8x16 (PVC/Xe2/Xe3), 16x16, and the
+// large 32x32 bf16 tile Alchemist reports alongside its 8x8 one.  A shape
+// outside this list records a row that names it rather than vanishing, so the
+// next unusual part tells us exactly which instantiation to add.
+#define CLPEAK_JM_SHAPES(X)  X(8, 8)  X(8, 16)  X(16, 16)  X(32, 32)
+
+template <typename At, typename Bt, typename Acc, int K, typename FillA, typename FillB>
+static float dispatchJmShape(OneapiPeak &peak, OneapiDevice &dev,
+                             Acc *out, uint32_t *sgCount,
+                             uint32_t numBlocks, uint32_t blockSize,
+                             FillA aFill, FillB bFill,
+                             unsigned int targetTimeUs, unsigned int forced,
+                             uint32_t M, uint32_t N)
 {
-  if (us <= 0.0f)
-  {
-    test.skip(metric, ResultStatus::Error, "kernel launch failed", note);
-    return;
-  }
-  const double ops = (double)numBlocks * (double)JM_M * (double)N *
-                     (double)K * 2.0 * (double)JM_ITERS;
-  test.emit(metric, (float)(ops * 1.0e6 / us / 1.0e12), {false, note});
+#define CLPEAK_JM_CASE(MM, NN)                                                  \
+  if (M == (MM) && N == (NN))                                                   \
+    return runJmVariant<At, Bt, Acc, MM, NN, K, FillA, FillB>(                   \
+        peak, dev, out, sgCount, numBlocks, blockSize,                           \
+        aFill, bFill, targetTimeUs, forced);
+  CLPEAK_JM_SHAPES(CLPEAK_JM_CASE)
+#undef CLPEAK_JM_CASE
+  return JM_NOT_COMPILED;
 }
 
-// Dispatch runJmVariant to the right compile-time N instantiation.
-// Handles N ∈ {8,16,32,64}; logs and returns -1.f for unexpected N.
-template <template<int> class KernelTag, typename ABt, typename FillT, typename ACCt, int K>
-static float dispatchJm(OneapiPeak &peak, OneapiDevice &dev,
-                         ACCt *out, uint32_t numBlocks, uint32_t blockSize,
-                         unsigned int targetTimeUs, unsigned int forced,
-                         uint32_t N)
+// Floating-point tiles: fp32 accumulator, three A/B element types.  K is fixed
+// by the element width on Xe (32 bytes per row of A), so a table entry that
+// asks for a different K has no instantiation and says so.
+static float runJmFp(OneapiPeak &peak, OneapiDevice &dev,
+                     float *out, uint32_t *sgCount,
+                     uint32_t numBlocks, uint32_t blockSize,
+                     unsigned int targetTimeUs, unsigned int forced, const JmTile &t)
 {
-  switch (N)
-  {
-    case 8:  return runJmVariant<KernelTag<8>,  ABt, FillT, ACCt, K, 8>(peak, dev, out, numBlocks, blockSize, (FillT)1, (ACCt)0, targetTimeUs, forced);
-    case 16: return runJmVariant<KernelTag<16>, ABt, FillT, ACCt, K, 16>(peak, dev, out, numBlocks, blockSize, (FillT)1, (ACCt)0, targetTimeUs, forced);
-    case 32: return runJmVariant<KernelTag<32>, ABt, FillT, ACCt, K, 32>(peak, dev, out, numBlocks, blockSize, (FillT)1, (ACCt)0, targetTimeUs, forced);
-    case 64: return runJmVariant<KernelTag<64>, ABt, FillT, ACCt, K, 64>(peak, dev, out, numBlocks, blockSize, (FillT)1, (ACCt)0, targetTimeUs, forced);
-    default:
-      CLPEAK_VLOG("joint_matrix: unhandled tile N=%u\n", (unsigned)N);
-      return -1.f;
-  }
+  using mt = syclex::matrix_type;
+  if (t.ct != mt::fp32) return JM_NOT_COMPILED;
+#ifdef CLPEAK_ONEAPI_JM_HAS_BF16
+  using bfloat16 = sycl::ext::oneapi::bfloat16;
+  if (t.at == mt::bf16 && t.bt == mt::bf16 && t.K == 16)
+    return dispatchJmShape<bfloat16, bfloat16, float, 16>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        (bfloat16)1.f, (bfloat16)1.f, targetTimeUs, forced, t.M, t.N);
+#endif
+  if (t.at == mt::fp16 && t.bt == mt::fp16 && t.K == 16)
+    return dispatchJmShape<sycl::half, sycl::half, float, 16>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        (sycl::half)1.f, (sycl::half)1.f, targetTimeUs, forced, t.M, t.N);
+
+  // tf32: the matrix element type is precision::tf32, filled with a float.
+  if (t.at == mt::tf32 && t.bt == mt::tf32 && t.K == 8)
+    return dispatchJmShape<syclex::precision::tf32, syclex::precision::tf32, float, 8>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        1.f, 1.f, targetTimeUs, forced, t.M, t.N);
+
+  return JM_NOT_COMPILED;
+}
+
+// Integer tiles: int32 accumulator, all four signed/unsigned 8-bit A/B pairs.
+static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
+                      int32_t *out, uint32_t *sgCount,
+                      uint32_t numBlocks, uint32_t blockSize,
+                      unsigned int targetTimeUs, unsigned int forced, const JmTile &t)
+{
+  using mt = syclex::matrix_type;
+  if (t.ct != mt::sint32 || t.K != 32) return JM_NOT_COMPILED;
+
+  if (t.at == mt::sint8 && t.bt == mt::sint8)
+    return dispatchJmShape<int8_t, int8_t, int32_t, 32>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        (int8_t)1, (int8_t)1, targetTimeUs, forced, t.M, t.N);
+  if (t.at == mt::uint8 && t.bt == mt::uint8)
+    return dispatchJmShape<uint8_t, uint8_t, int32_t, 32>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        (uint8_t)1, (uint8_t)1, targetTimeUs, forced, t.M, t.N);
+  if (t.at == mt::uint8 && t.bt == mt::sint8)
+    return dispatchJmShape<uint8_t, int8_t, int32_t, 32>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        (uint8_t)1, (int8_t)1, targetTimeUs, forced, t.M, t.N);
+  if (t.at == mt::sint8 && t.bt == mt::uint8)
+    return dispatchJmShape<int8_t, uint8_t, int32_t, 32>(
+        peak, dev, out, sgCount, numBlocks, blockSize,
+        (int8_t)1, (uint8_t)1, targetTimeUs, forced, t.M, t.N);
+
+  return JM_NOT_COMPILED;
 }
 
 } // namespace
@@ -217,194 +498,184 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   const bool isInt = (category == Category::IntCompute);
   auto test = currentDeviceScope->beginTest(
     {isInt ? "joint-matrix-int" : "joint-matrix-fp",
-     isInt ? "joint_matrix int8xint8+int32 8x16x32"
-           : "joint_matrix (bf16/fp16/tf32)x(bf16/fp16/tf32)+fp32 8x16x{16,16,8}",
+     isInt ? "joint_matrix integer peak (every combination the device advertises)"
+           : "joint_matrix float peak (every combination the device advertises)",
      isInt ? "tops" : "tflops", Category::Unknown,
      isInt ? "Peak speed of Intel's XMX matrix engine on 8-bit whole numbers -- "
              "dedicated units that multiply whole blocks of numbers in one step "
              "rather than one value at a time.  This is the format quantized "
-             "neural networks use."
+             "neural networks use.  One row per A/B sign combination and tile "
+             "shape the device advertises."
            : "Peak speed of Intel's XMX matrix engine -- dedicated units that "
              "multiply whole blocks of numbers in one step rather than one "
              "value at a time -- across the reduced-precision formats AI work "
-             "runs on."});
+             "runs on.  One row per input-type and tile shape the device "
+             "advertises."});
 
-  // int8 is the only row the no-header path below documents individually (the
-  // FP rows go through skipAll, which carries no per-reading notes), so the FP
-  // notes live inside the #else -- declaring them here warns unused.
+  // Note for the historical int8 row, used by the paths that skip before any
+  // enumeration has happened.  The FP equivalents go through skipAll, which
+  // carries no per-reading notes, so they have nothing to declare here.
   const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
                          "quantized neural networks use.";
 
+  // Nothing to enumerate (no toolchain support, no matrix engine, no table):
+  // record the historical row set so a device that has never been able to run
+  // this still produces the rows it always did.
+  auto skipEverything = [&](ResultStatus status, const char *reason) {
+    if (isInt)
+      test.skip("joint_matrix_int8", status, reason, int8Note);
+    else
+      test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
+                   status, reason);
+  };
+
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
-  if (isInt)
-    test.skip("joint_matrix_int8", ResultStatus::Unsupported,
-              "joint_matrix header not available in this oneAPI toolchain", int8Note);
-  else
-    test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
-                 ResultStatus::Unsupported,
+  skipEverything(ResultStatus::Unsupported,
                  "joint_matrix header not available in this oneAPI toolchain");
   return 0;
 #else
-  // One note per FP dtype row, shared by every emit and skip path below.
-  const char *bf16Note = "bfloat16 inputs with 32-bit totals -- 16 bits arranged "
-                         "for AI work, trading digits of accuracy for the number "
-                         "range of a full float.";
-  const char *fp16Note = "16-bit inputs with 32-bit totals -- the everyday "
-                         "precision of AI inference.";
-  const char *tf32Note = "tf32, a trimmed-down stand-in for 32-bit float: it keeps "
-                         "the full number range but drops accuracy to fit the "
-                         "matrix engine.  Not every Intel part has it.";
-
-  namespace syclex = sycl::ext::oneapi::experimental::matrix;
-
-  // Query the device's matrix-combination table ONCE and reuse it for the dump
-  // and every per-variant support check below.
+  // Query the device's matrix-combination table ONCE: it is both the verbose
+  // dump and the source of the row list below.
   bool combosThrew = false;
   const auto combos = queryCombos(dev.dev, combosThrew);
 
-  // Ground-truth diagnostic (verbose only): what shapes/types does this device
-  // actually accept?  Dump once (FP pass), BEFORE the xmxSupported gate, so even
-  // a device we mis-classify still reveals its real table under --verbose.
+  // Ground-truth diagnostic (verbose only).  Dumped once, on the FP pass, and
+  // BEFORE the xmxSupported gate, so even a device we mis-classify still
+  // reveals its real table under --verbose.
   if (!isInt && !combosThrew)
     dumpMatrixCombinations(combos);
 
   if (!dev.info.xmxSupported)
   {
-    if (isInt)
-      test.skip("joint_matrix_int8", ResultStatus::Unsupported,
-                "XMX matrix engine not available on this device", int8Note);
-    else
-      test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
-                   ResultStatus::Unsupported,
+    skipEverything(ResultStatus::Unsupported,
                    "XMX matrix engine not available on this device");
     return 0;
   }
 
-  // Look up N from the device's combo table for each type variant,
-  // matching all four types (a/b/c/d) per spec.
-  // DG2 (Arc) reports N=8; PVC/BMG/LNL/PTL report N=16.
-  uint32_t jmN_int   = pickJmN(combos, syclex::matrix_type::sint8, syclex::matrix_type::sint8,
-                                syclex::matrix_type::sint32, syclex::matrix_type::sint32, JM_M, 32);
-  uint32_t jmN_fp    = pickJmN(combos, syclex::matrix_type::bf16,  syclex::matrix_type::bf16,
-                                syclex::matrix_type::fp32,  syclex::matrix_type::fp32,  JM_M, 16);
-  uint32_t jmN_tf32  = pickJmN(combos, syclex::matrix_type::tf32,  syclex::matrix_type::tf32,
-                                syclex::matrix_type::fp32,  syclex::matrix_type::fp32,  JM_M, 8);
-
-  // One sub-group per work-group: joint_matrix executes per sub-group and the
-  // ops accounting below counts one matrix chain per block, so the work-group
-  // must be exactly one sub-group.  Use the device's preferred sub-group size.
-  //
-  // reqd_sub_group_size is intentionally omitted — the attribute triggers an
-  // IGC "Divide by zero" internal compiler error on DG2 (Arc A770) with any
-  // non-default sub-group size.  Setting work-group = preferred sub-group size
-  // gives one sub-group per work-group without the attribute.
-  uint32_t blockSize = dev.info.preferredSubGroupSize;
-  if (blockSize == 0) blockSize = 32;  // fallback
-  uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
-
-  uint64_t wantBlocks = globalThreads / blockSize;
-  uint32_t jmN_max = jmN_int;
-  if (jmN_fp > jmN_max) jmN_max = jmN_fp;
-  if (jmN_tf32 > jmN_max) jmN_max = jmN_tf32;
-  if (jmN_max == 0)
+  std::vector<JmTile> tiles = resolveTiles(combos, isInt);
+  if (tiles.empty())
   {
-    test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32", "joint_matrix_int8"},
-                 ResultStatus::Unsupported,
-                 "no joint_matrix tile shapes supported by this device");
+    skipEverything(ResultStatus::Unsupported,
+                   combosThrew
+                     ? "device's matrix-combination table could not be queried"
+                     : (isInt ? "device advertises no integer matrix combinations"
+                              : "device advertises no floating-point matrix combinations"));
     return 0;
   }
-  uint64_t bytesPerBlock = (uint64_t)JM_M * jmN_max * sizeof(float);
-  uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock;
-  uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
-  if (pickBlocks == 0) pickBlocks = 1;
-  uint32_t numBlocks = (uint32_t)pickBlocks;
-  const uint64_t outElems = (uint64_t)numBlocks * JM_M * jmN_max;
+  addMissingCanonical(tiles, isInt);
+  finalizeTiles(tiles);
+
+  // The work-group is the device's widest sub-group, but IGC decides the SIMD
+  // width it compiles at, so a work-group may end up holding several sub-groups
+  // -- see JM_SG_COUNT_NOTE in the kernel, which reports the real count back.
+  // maxSgPerWG (widest work-group split into narrowest sub-groups) is the
+  // sanity bound that readback is checked against.
+  uint32_t blockSize = dev.info.preferredSubGroupSize;
+  if (blockSize == 0) blockSize = 32;      // fallback
+  uint32_t minSgSize = blockSize;
+  for (size_t s : dev.info.subGroupSizes)
+    if (s > 0 && (uint32_t)s < minSgSize) minSgSize = (uint32_t)s;
+  const uint32_t maxSgPerWG =
+      std::max<uint32_t>(1u, blockSize / std::max<uint32_t>(1u, minSgSize));
+
+  // One allocation shared by every row, sized to a fixed byte budget; each row
+  // then takes as many blocks as its own tile fits into it.  Blocks therefore
+  // fall as the tile grows, which is what keeps the work per launch -- and so
+  // the launch duration and the store overhead -- the same for every row.
+  uint64_t maxTileElems = 0;
+  for (const auto &t : tiles)
+    if (t.advertised)
+      maxTileElems = std::max<uint64_t>(maxTileElems, (uint64_t)t.M * t.N);
+
+  const uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
+  const uint64_t wantBlocks    = globalThreads / blockSize;
+  // fp32 and int32 accumulators are both 4 bytes, so one figure covers both.
+  uint64_t outElems = std::min(JM_OUT_BYTES, dev.info.totalGlobalMem / 4) / 4;
+  if (outElems < maxTileElems) outElems = maxTileElems;   // room for one block
 
   const unsigned int forced = forceIters ? specifiedIters : 0;
 
-  if (isInt)
-  {
-    if (jmN_int == 0)
-    {
-      test.skip("joint_matrix_int8", ResultStatus::Unsupported,
-                "int8 8xNx32 not in this device's matrix-engine combinations", int8Note);
-      return 0;
-    }
-    int32_t *out = sycl::malloc_device<int32_t>(outElems, dev.stream);
-    if (!out)
-    {
-      test.skip("joint_matrix_int8", ResultStatus::Error, "Failed to allocate output buffer", int8Note);
-      return -1;
-    }
-    const float us = dispatchJm<JmInt8Tag, int8_t, int8_t, int32_t, 32>(
-        *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_int);
-    emitJm(test, "joint_matrix_int8", int8Note, us, numBlocks, 32, jmN_int);
-    sycl::free(out, dev.stream);
-    return 0;
-  }
+  auto skipRows = [&](ResultStatus status, const std::string &reason) {
+    for (const auto &t : tiles)
+      test.skip(t.metric, status, reason, jmNote(t));
+  };
 
-  // FP category: bf16, fp16, tf32 — all fp32 accumulate, one shared buffer.
-  if (jmN_fp == 0 && jmN_tf32 == 0)
+  void *out = isInt ? (void *)sycl::malloc_device<int32_t>(outElems, dev.stream)
+                    : (void *)sycl::malloc_device<float>(outElems, dev.stream);
+  uint32_t *sgCount = sycl::malloc_device<uint32_t>(1, dev.stream);
+  if (!out || !sgCount)
   {
-    test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
-                 ResultStatus::Unsupported,
-                 "no joint_matrix FP tile shapes supported by this device");
-    return 0;
-  }
-  float *out = sycl::malloc_device<float>(outElems, dev.stream);
-  if (!out)
-  {
-    test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
-                 ResultStatus::Error, "Failed to allocate output buffer");
+    if (out)     sycl::free(out, dev.stream);
+    if (sgCount) sycl::free(sgCount, dev.stream);
+    skipRows(ResultStatus::Error, "Failed to allocate output buffer");
     return -1;
   }
 
-#ifdef CLPEAK_ONEAPI_JM_HAS_BF16
-  if (jmN_fp == 0)
+  for (const auto &t : tiles)
   {
-    test.skip("joint_matrix_bf16", ResultStatus::Unsupported,
-              "bf16 8xNx16 not in this device's matrix-engine combinations", bf16Note);
-  }
-  else
-  {
-    using bfloat16 = sycl::ext::oneapi::bfloat16;
-    const float us = dispatchJm<JmBf16Tag, bfloat16, bfloat16, float, 16>(
-        *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_fp);
-    emitJm(test, "joint_matrix_bf16", bf16Note, us, numBlocks, 16, jmN_fp);
-  }
-#else
-  test.skip("joint_matrix_bf16", ResultStatus::Unsupported,
-            "SYCL bfloat16 header not available in this oneAPI toolchain", bf16Note);
-#endif
+    if (!t.advertised)
+    {
+      test.skip(t.metric, ResultStatus::Unsupported,
+                t.label + " not in this device's matrix-engine combinations",
+                jmNote(t));
+      continue;
+    }
 
-  if (jmN_fp == 0)
-  {
-    test.skip("joint_matrix_fp16", ResultStatus::Unsupported,
-              "fp16 8xNx16 not in this device's matrix-engine combinations", fp16Note);
-  }
-  else
-  {
-    const float us = dispatchJm<JmFp16Tag, sycl::half, sycl::half, float, 16>(
-        *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_fp);
-    emitJm(test, "joint_matrix_fp16", fp16Note, us, numBlocks, 16, jmN_fp);
-  }
+    // As many blocks as this tile fits into the shared buffer -- see the
+    // sizing note above.
+    const uint64_t tileElems = (uint64_t)t.M * t.N;
+    uint64_t blocks = std::min<uint64_t>(wantBlocks, outElems / tileElems);
+    if (blocks == 0) blocks = 1;
+    const uint32_t numBlocks = (uint32_t)blocks;
 
-  if (jmN_tf32 == 0)
-  {
-    // Not every Xe part exposes tf32 XMX (older Arc/DG2 reported no tf32 combo);
-    // newer parts and PVC do.  Gated purely by the device's combination table.
-    test.skip("joint_matrix_tf32", ResultStatus::Unsupported,
-              "tf32 8x16x8 not in this device's matrix-engine combinations", tf32Note);
-  }
-  else
-  {
-    // tf32: matrix element type is precision::tf32, filled with float.
-    const float us = dispatchJm<JmTf32Tag, syclex::precision::tf32, float, float, 8>(
-        *this, dev, out, numBlocks, blockSize, cfg.targetTimeUs, forced, jmN_tf32);
-    emitJm(test, "joint_matrix_tf32", tf32Note, us, numBlocks, 8, jmN_tf32);
+    const float us = isInt
+        ? runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize,
+                   cfg.targetTimeUs, forced, t)
+        : runJmFp (*this, dev, (float *)out, sgCount, numBlocks, blockSize,
+                   cfg.targetTimeUs, forced, t);
+
+    if (us == JM_NOT_COMPILED)
+    {
+      test.skip(t.metric, ResultStatus::Unsupported,
+                "tile " + t.label + " " + t.shape +
+                  " has no compiled instantiation in this build",
+                jmNote(t));
+      continue;
+    }
+    if (us <= 0.0f)
+    {
+      test.skip(t.metric, ResultStatus::Error, "kernel launch failed", jmNote(t));
+      continue;
+    }
+
+    // How many chains actually ran per work-group (JM_SG_COUNT_NOTE).
+    uint32_t sgPerWG = 0;
+    try {
+      dev.stream.memcpy(&sgPerWG, sgCount, sizeof(uint32_t)).wait();
+    } catch (const std::exception &e) {
+      CLPEAK_VLOG("joint_matrix: sub-group count readback failed: %s\n", e.what());
+      sgPerWG = 0;
+    }
+    // maxSgPerWG is a hard upper bound (widest work-group over narrowest
+    // advertised sub-group), so a value outside it means the readback is not
+    // to be trusted; fall back to the historical assumption and say so.
+    if (sgPerWG == 0 || sgPerWG > maxSgPerWG)
+    {
+      CLPEAK_VLOG("joint_matrix: implausible sub-group count %u (bound %u), "
+                  "assuming 1\n", sgPerWG, maxSgPerWG);
+      sgPerWG = 1;
+    }
+    CLPEAK_VLOG("joint_matrix: %s %s -- %u work-items/work-group ran as %u "
+                "sub-group(s), %u blocks\n",
+                t.label.c_str(), t.shape.c_str(), blockSize, sgPerWG, numBlocks);
+
+    const double ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() *
+                       2.0 * (double)JM_ITERS;
+    test.emit(t.metric, (float)(ops * 1.0e6 / us / 1.0e12), {false, jmNote(t)});
   }
 
   sycl::free(out, dev.stream);
+  sycl::free(sgCount, dev.stream);
   return 0;
 #endif
 }

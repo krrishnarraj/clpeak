@@ -13,6 +13,15 @@ layout(set = 0, binding = 1) writeonly buffer Output {
     float data[];
 } outputBuf;
 
+// walk == 0 gives each warp 32 texels consecutive along x; walk == 1 gives it
+// 32 texels consecutive along y, one row pitch apart.  Both cover every pixel
+// exactly once (the map is a transpose), so the byte count is the same and the
+// two rates are directly comparable.  The pair is a --verbose-only probe of how
+// the driver laid the image out -- see image_bandwidth.cpp.
+layout(push_constant) uniform PushConstants {
+    int walk;
+} pc;
+
 void main()
 {
     int gid    = int(gl_GlobalInvocationID.x);
@@ -22,13 +31,27 @@ void main()
     int height = sz.y;
     int total  = width * height;
 
+    // The two walks are spelled as separate loops, not a select on the
+    // coordinate, so the row-major path stays exactly the shape it had before
+    // the probe existed.
     vec4 sum = vec4(0.0);
-    for (int i = 0; i < 16; i++)
+    if (pc.walk == 0)
     {
-        int pixel = (gid + i * gsize) % total;
-        vec2 coord = vec2(float(pixel % width),
-                          float(pixel / width));
-        sum += texture(img, coord);
+        for (int i = 0; i < 16; i++)
+        {
+            int pixel = (gid + i * gsize) % total;
+            sum += texture(img, vec2(float(pixel % width),
+                                     float(pixel / width)));
+        }
+    }
+    else
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            int pixel = (gid + i * gsize) % total;
+            sum += texture(img, vec2(float(pixel / height),
+                                     float(pixel % height)));
+        }
     }
     outputBuf.data[gid] = sum.x + sum.y + sum.z + sum.w;
 }

@@ -36,6 +36,7 @@ static bool queryBasicInfo(VulkanDevice *self, VkPhysicalDevice physDev)
                              std::to_string(VK_VERSION_MINOR(props.driverVersion)) + "." +
                              std::to_string(VK_VERSION_PATCH(props.driverVersion));
   self->info.maxWGSize = std::min(props.limits.maxComputeWorkGroupSize[0], (uint32_t)MAX_WG_SIZE);
+  self->info.maxWGCount = props.limits.maxComputeWorkGroupCount[0];
   self->info.maxAllocSize = props.limits.maxStorageBufferRange;
   self->info.vkDeviceType = props.deviceType;
 
@@ -160,6 +161,8 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.coopmatFP8E5M2 = {};
   self->info.coopmatINT8 = {};
   self->info.calibratedTimestampsSupported = false;
+  self->info.maintenance4Supported = false;
+  self->info.coopmatMaintenance1Supported = false;
 
 #if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT) || defined(VK_HAS_COMPUTE_DP_V1)
   VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16i8Features = {};
@@ -257,6 +260,29 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
         enabledExts.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
       self->info.int8DotProductSupported = true;
       self->info.int8Supported = true;
+
+      // Which spelling of the 4x8-bit dot the driver actually accelerates.
+      // "Supported" and "accelerated" are different questions here: a driver
+      // must accept OpSDotAccSat either way, but where it is not accelerated it
+      // is lowered to unpack-multiply-add-clamp and the row measures that
+      // lowering rather than a dot-product unit.  The saturating and
+      // non-saturating forms are advertised separately and can disagree, so
+      // print each -- an int8_dp far below a sibling card's is the first thing
+      // to check against.
+      VkPhysicalDeviceShaderIntegerDotProductProperties dpProps = {};
+      dpProps.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES;
+      VkPhysicalDeviceProperties2 dpProps2 = {};
+      dpProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      dpProps2.pNext = &dpProps;
+      vkGetPhysicalDeviceProperties2(physDev, &dpProps2);
+      CLPEAK_VLOG("Vulkan: 4x8-bit dot accelerated? packed signed %s, "
+                  "packed unsigned %s, packed sat signed %s (the one the "
+                  "shader emits), packed sat unsigned %s\n",
+                  dpProps.integerDotProduct4x8BitPackedSignedAccelerated ? "yes" : "no",
+                  dpProps.integerDotProduct4x8BitPackedUnsignedAccelerated ? "yes" : "no",
+                  dpProps.integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated ? "yes" : "no",
+                  dpProps.integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated ? "yes" : "no");
     }
 #endif
 #if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
@@ -267,7 +293,66 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     }
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix && vmmFeatures.vulkanMemoryModel)
+    // Cooperative matrix is per-stage: a device may advertise the extension
+    // and still not allow the instructions in compute
+    // (VUID-RuntimeSpirv-cooperativeMatrixSupportedStages-08985).  Every
+    // coopmat shader here is a compute shader, so a device without the compute
+    // bit has no usable coopmat at all.
+    // The coopmat shaders specialize their workgroup size.  Compiled to
+    // SPIR-V 1.6 that is OpExecutionModeId LocalSizeId, which
+    // VUID-RuntimeSpirv-LocalSizeId-06434 makes conditional on maintenance4;
+    // compiled to 1.5, which is what CompileShaders.cmake targets and why, it
+    // is the classic LocalSize execution mode plus a gl_WorkGroupSize
+    // spec-constant composite and no feature is involved.  Detect maintenance4
+    // anyway and request it where present -- it costs nothing and keeps the
+    // modules loadable either way -- but do not gate coopmat on it.
+    {
+      VkPhysicalDeviceMaintenance4Features m4 = {};
+      m4.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
+      VkPhysicalDeviceFeatures2 m4f2 = {};
+      m4f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      m4f2.pNext = &m4;
+      if (pfnGetFeat2) pfnGetFeat2(physDev, &m4f2);
+      self->info.maintenance4Supported = m4.maintenance4 != VK_FALSE;
+    }
+
+    // VK_EXT_cooperative_matrix_maintenance1's query takes a subgroup size and
+    // answers for that width alone.  The KHR query cannot: it reports the union
+    // over every width the device supports, so a tile it lists may not be valid
+    // at the width we actually pin.  Detect it here; the enumeration in
+    // vk_peak.cpp dumps the per-width lists under --verbose.
+#ifdef VK_EXT_cooperative_matrix_maintenance1
+    if (hasCoopmatExt && hasExt(VK_EXT_COOPERATIVE_MATRIX_MAINTENANCE_1_EXTENSION_NAME))
+    {
+      VkPhysicalDeviceCooperativeMatrixMaintenance1FeaturesEXT cm1 = {};
+      cm1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_MAINTENANCE_1_FEATURES_EXT;
+      VkPhysicalDeviceFeatures2 cm1f2 = {};
+      cm1f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      cm1f2.pNext = &cm1;
+      if (pfnGetFeat2) pfnGetFeat2(physDev, &cm1f2);
+      self->info.coopmatMaintenance1Supported =
+          cm1.cooperativeMatrixProperties2 != VK_FALSE;
+    }
+#endif
+
+    bool coopmatInCompute = false;
+    if (hasCoopmatExt)
+    {
+      VkPhysicalDeviceCooperativeMatrixPropertiesKHR cmProps = {};
+      cmProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+      VkPhysicalDeviceProperties2 cmProps2 = {};
+      cmProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      cmProps2.pNext = &cmProps;
+      vkGetPhysicalDeviceProperties2(physDev, &cmProps2);
+      coopmatInCompute =
+          (cmProps.cooperativeMatrixSupportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
+      if (!coopmatInCompute)
+        CLPEAK_VLOG("Vulkan: cooperative matrix is advertised but not for the "
+                    "compute stage (stages=0x%x); skipping every coopmat row\n",
+                    cmProps.cooperativeMatrixSupportedStages);
+    }
+    if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix &&
+        vmmFeatures.vulkanMemoryModel && coopmatInCompute)
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       self->info.cooperativeMatrixSupported = true;
@@ -452,8 +537,16 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   }
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
+  VkPhysicalDeviceMaintenance4Features m4Features = {};
+  m4Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
   if (self->info.cooperativeMatrixSupported)
   {
+    if (self->info.maintenance4Supported)
+    {
+      m4Features.maintenance4 = VK_TRUE;
+      m4Features.pNext = nullptr;
+      enabledChain = chainPNext(enabledChain, &m4Features);
+    }
     coopmatFeatures.cooperativeMatrix = VK_TRUE;
     coopmatFeatures.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &coopmatFeatures);

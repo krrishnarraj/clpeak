@@ -156,7 +156,7 @@ int OneapiPeak::runAll()
       continue;
     }
 
-    benchmark_config_t cfg = benchmark_config_t::forDevice(dev.info.deviceType);
+    benchmark_config_t cfg = benchmark_config_t::forDevice(dev.info.deviceType, dev.info.globalMemCacheSize);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
@@ -189,7 +189,6 @@ int OneapiPeak::runAll()
       runOnemkl(dev, cfg, Category::FpCompute);
 
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-    if (isAllowed(Benchmark::ComputeInt8DP))      runComputeInt8DP(dev, cfg);
 
     if (isAllowedAs(Benchmark::JointMatrix, Category::IntCompute))
       runJointMatrix(dev, cfg, Category::IntCompute);

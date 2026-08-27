@@ -35,6 +35,9 @@ struct cuda_device_info_t {
   int maxThreadsPerBlock;
   uint64_t totalGlobalMem;
   int clockRateKHz;
+  // CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE -- the last level of cache in front of
+  // device memory.  0 when the driver does not report one.
+  uint64_t l2CacheSize = 0;
 
   // Per-test capability flags
   bool fp16Supported;            // cc >= 5.3

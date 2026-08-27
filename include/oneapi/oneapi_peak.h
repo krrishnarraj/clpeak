@@ -12,8 +12,7 @@
 #include <string>
 #include <vector>
 
-// Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
-// rows: those are independent chains -- see oneapiChainNote().
+// Shared note for one reading of a vector-width sweep.
 static inline const char *oneapiWidthNote(int width)
 {
   switch (width)
@@ -23,22 +22,6 @@ static inline const char *oneapiWidthNote(int width)
   case 4:  return "Four values per work-item at a time, as one 4-wide vector.";
   case 8:  return "Eight values per work-item at a time, as one 8-wide vector.";
   case 16: return "Sixteen values per work-item at a time, the widest vector SYCL offers.";
-  default: return "";
-  }
-}
-
-// Shared note for one reading of the int8 dot-product sweep: these variants
-// are independent chains, not wider vectors.  Work per item is identical.
-static inline const char *oneapiChainNote(int chains)
-{
-  switch (chains)
-  {
-  case 1: return "One chain of dot products, each waiting on the one before it.";
-  case 2: return "Two independent chains, so the device has a second dot product "
-                 "to get on with while the first is still finishing.";
-  case 4: return "Four independent chains.";
-  case 8: return "Eight independent chains.  Where this stops improving on four, "
-                 "the hardware itself is the limit, not the waiting.";
   default: return "";
   }
 }
@@ -56,6 +39,12 @@ struct oneapi_device_info_t {
   int      numCUs = 0;            // sycl::info::device::max_compute_units
   size_t   maxWorkGroupSize = 0;
   uint64_t totalGlobalMem = 0;
+  // sycl::info::device::global_mem_cache_size -- the last level of cache in
+  // front of global memory.  0 when the runtime does not report one.
+  uint64_t globalMemCacheSize = 0;
+  // sycl::info::device::local_mem_type == local.  `global` means the device has
+  // no scratchpad and the runtime carves local memory out of global memory.
+  bool localMemDedicated = true;
   int      clockRateMHz = 0;
   uint32_t preferredSubGroupSize = 0;
   std::vector<size_t> subGroupSizes;
@@ -108,7 +97,6 @@ public:
   int runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg);
   int runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg);
   int runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg);
-  int runComputeInt8DP(OneapiDevice &dev, benchmark_config_t &cfg);
   int runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category);
   int runOnemkl(OneapiDevice &dev, benchmark_config_t &cfg, Category category);
   int runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg);

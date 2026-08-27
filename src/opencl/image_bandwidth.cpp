@@ -12,7 +12,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   auto test = currentDeviceScope->beginTest(
     {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
      Category::Unknown,
-     "How many bytes per second the GPU reads through its texture units, "
+     "How many bytes per second the device reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
      "pixel of the image is read exactly once, so caching cannot flatter the "
      "number."});
@@ -79,11 +79,25 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       kernel_v1.setArg(0, img);
       kernel_v1.setArg(1, outputBuf);
 
-      timed = run_kernel(queue, kernel_v1, globalSize, localSize, cfg.targetTimeUs, forced);
+      // Two walk orders are raced and the faster reported -- why, and why
+      // neither can flatter the result: the image-bandwidth block in
+      // include/common/common.h.
+      auto timeWalk = [&](cl_int walk) -> float {
+        kernel_v1.setArg(2, walk);
+        return run_kernel(queue, kernel_v1, globalSize, localSize,
+                          cfg.targetTimeUs, forced);
+      };
+      float rowUs = timeWalk(0);
+      float colUs = timeWalk(1);
 
       // Each WI reads IMAGE_FETCH_PER_WI float4 pixels = IMAGE_FETCH_PER_WI * 4 * sizeof(float) bytes
       uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * ndRangeTotal(globalSize);
-      gbps = (float)bytesPerCall / timed / 1e3f;
+      float rowGbps = rowUs > 0.0f ? (float)bytesPerCall / rowUs / 1e3f : 0.0f;
+      float colGbps = colUs > 0.0f ? (float)bytesPerCall / colUs / 1e3f : 0.0f;
+      CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+                  rowGbps, colGbps);
+      gbps = std::max(rowGbps, colGbps);
+      (void)timed;
 
       test.emit("float4", gbps, fetchNote);
     }

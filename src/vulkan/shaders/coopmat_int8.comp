@@ -5,10 +5,15 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
 
 // Cooperative-matrix INT8 x INT8 + INT32 accumulator (tensor-core INT8).
-// Requires VK_KHR_cooperative_matrix + shaderInt8 + 8-bit storage.  See
-// coopmat_fp16.comp for design notes.
+// Requires VK_KHR_cooperative_matrix + shaderInt8.  See coopmat_chain.glsl
+// for the shape of the MulAdd run and coopmat_fp16.comp for how M/N/K reach
+// the shader.
+//
+// Integer accumulate is where a folded MulAdd run is not just plausible but
+// exactly legal, so the sixteen distinct products and the runtime trip count
+// coopmat_chain.glsl insists on matter most here.
 
-layout(local_size_x = 32) in;
+layout(local_size_x_id = 3, local_size_x = 32) in;
 
 layout(set = 0, binding = 0) buffer Output {
     int32_t data[];
@@ -16,25 +21,25 @@ layout(set = 0, binding = 0) buffer Output {
 
 layout(push_constant) uniform PushConstants {
     int32_t A;
+    int     trips;
 } pc;
 
-layout(constant_id = 0) const uint M     = 16u;
-layout(constant_id = 1) const uint N     = 16u;
-layout(constant_id = 2) const uint K     = 16u;
-layout(constant_id = 3) const int  ITERS = 256;
+layout(constant_id = 0) const uint M = 16u;
+layout(constant_id = 1) const uint N = 16u;
+layout(constant_id = 2) const uint K = 16u;
+
+#define CM_AB     int8_t
+#define CM_ACC    int32_t
+#define CM_VAL(i) int8_t(pc.A + (i))
+#include "coopmat_chain.glsl"
 
 void main()
 {
-    coopmat<int8_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA> matA =
-        coopmat<int8_t, gl_ScopeSubgroup, M, K, gl_MatrixUseA>(int8_t(pc.A));
-    coopmat<int8_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB> matB =
-        coopmat<int8_t, gl_ScopeSubgroup, K, N, gl_MatrixUseB>(int8_t(pc.A));
-    coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> matC =
-        coopmat<int32_t, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(0);
+    CM_DECLARE
 
-    for (int i = 0; i < ITERS; i++)
+    for (int i = 0; i < pc.trips; i++)
     {
-        matC = coopMatMulAdd(matA, matB, matC);
+        CM_MMA_TRIP
     }
 
     coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,

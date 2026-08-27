@@ -34,15 +34,15 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Kernel launch latency";
   testSpec.unit = "us";
   testSpec.description =
-      "The overhead of asking the GPU to do anything at all, measured with a "
-      "shader that does no work.  It is what small, frequent GPU jobs pay "
-      "before any of their own work begins.";
+      "The overhead of asking the device to do anything at all, measured with "
+      "a shader that does no work.  It is what small, frequent jobs pay before "
+      "any of their own work begins.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
-  const char *dispatchNote = "One way only: from the moment the CPU submits the "
-                             "work to the moment the GPU starts running it.";
+  const char *dispatchNote = "One way only: from the moment the host submits the "
+                             "work to the moment the device starts running it.";
   const char *roundtripNote = "The full round trip -- submit, run, and hear back "
-                              "that it finished.  This is what the CPU waits for "
+                              "that it finished.  This is what the host waits for "
                               "if it has nothing else to get on with.";
 
   // Pipeline layout with no descriptor sets and no push constants.

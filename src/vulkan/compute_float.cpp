@@ -28,7 +28,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Single-precision compute";
   d.resultTag   = "single_precision_compute";
   d.unit        = "gflops";
-  d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
+  d.description = "Peak arithmetic speed of the device's compute units on 32-bit "
                   "fractional numbers -- the ordinary float type.  Nothing touches "
                   "memory, so only the arithmetic units limit the rate.";
   d.variants    = variants;
@@ -96,8 +96,9 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.resultTag   = "double_precision_compute";
   d.unit        = "gflops";
   d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
-                  "high-accuracy type scientific computing relies on.  Consumer GPUs "
-                  "deliberately run these many times slower than 32-bit.";
+                  "high-accuracy type scientific computing relies on.  Consumer "
+                  "graphics parts deliberately run these many times slower than "
+                  "32-bit.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_DP_WORK_PER_WI;
@@ -134,9 +135,9 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Mixed-precision compute fp16xfp16+fp32";
   d.resultTag   = "mixed_precision_compute";
   d.unit        = "gflops";
-  d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
-                  "running total in 32 bits -- the accuracy-preserving pattern AI "
-                  "code uses.";
+  d.description = "Peak speed when the device multiplies 16-bit numbers but keeps "
+                  "the running total in 32 bits -- the accuracy-preserving pattern "
+                  "AI code uses.";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;

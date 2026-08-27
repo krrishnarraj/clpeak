@@ -215,19 +215,34 @@ class _DeviceHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CPanelHead(
-            title: run.device,
-            tag: run.backend,
-            trailing: trail.isEmpty
-                ? null
-                : ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 260),
-                    child: Text(trail.join('  ·  '),
-                        style: t.monoSmallDim,
-                        maxLines: 1,
-                        textAlign: TextAlign.right,
-                        overflow: TextOverflow.ellipsis),
-                  ),
+          // The platform/driver line is sized off the panel, not off a fixed
+          // column: a 260px column ellipsized a driver version away even on a
+          // wide desktop window, where the panel had hundreds of pixels to
+          // spare.  It wraps rather than ellipsizes for the same reason names
+          // do — the version tail is what tells two installs of the same
+          // driver apart — so `ellipsis` here only ever bites a single token
+          // too long to break.
+          LayoutBuilder(
+            builder: (context, c) {
+              // Head padding (12 + 12) off the panel, then half of what is
+              // left, so the device name keeps a column of its own.  A loose
+              // constraint: a shorter line still shrink-wraps, so the cap only
+              // decides where a very long one wraps.
+              final trailMax = ((c.maxWidth - 24) / 2).clamp(0.0, 640.0);
+              return CPanelHead(
+                title: run.device,
+                tag: run.backend,
+                trailing: trail.isEmpty
+                    ? null
+                    : ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: trailMax),
+                        child: Text(trail.join('  ·  '),
+                            style: t.monoSmallDim,
+                            textAlign: TextAlign.right,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+              );
+            },
           ),
           if (run.props.isNotEmpty)
             Padding(
