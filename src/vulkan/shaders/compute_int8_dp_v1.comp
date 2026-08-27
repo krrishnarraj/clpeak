@@ -49,14 +49,18 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-// Sixty-four dots per trip, not sixteen.  This is the one compute-peak shader
-// whose loop control competes with its own work: on NVIDIA Turing and later
-// IMAD issues on the FP32 pipe, so the integer MAD chain's counter is free,
-// but IDP4A is an ALU-pipe instruction and the counter's add/compare/branch sit
-// in the same queue as the dots.  At 16 dots a trip that is 3 ops in 19 and a
-// 5060 reads 32.4 TOPS against an architectural 41.9 (30 SMs x 64 INT32 lanes x
-// 8 ops x 2.72 GHz); at 64 it is 3 in 67.  The per-work-item budget is
-// unchanged -- 16 trips x 64 dots is the same 1024 dots as 64 x 16.
+// Sixty-four dots per trip, not sixteen.  Worth 3.6% on a 5060 and nothing
+// like the 23% first claimed for it: the theory was that the loop counter
+// competed with the dots for an issue port, and it does not.  __dp4a measures
+// 63.5 instructions per SM per clock on that card against IMAD's 63.9 -- the
+// same slot, which on Turing and later is the FP32 pipe, while the counter's
+// add and compare go to the ALU pipe.  Fewer branches is all this is.
+//
+// The per-work-item budget is unchanged either way: 16 trips of 64 dots is the
+// same 1024 dots as 64 trips of 16.
+//
+// What actually costs this row ~20% against __dp4a on the same silicon is
+// still open; the saturating-vs-not spelling below is the current candidate.
 
 // Two dots, one dependent chain, no third instruction.
 
