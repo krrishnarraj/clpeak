@@ -140,8 +140,9 @@ for one float8 E5M2 graph it was never going to accept.
 None of that search can help here. Every session in this backend disables CPU
 fallback, so a partition TensorRT only partly claims fails the session exactly
 as a rejected one does. `onnx_session.cpp` sets the limit to **1**, which
-answers the only question clpeak asks — all of it, or none — and turns a
-four-second scroll of noise into a single refusal.
+answers the only question clpeak asks — all of it, or none. Measured on the
+same E5M2 graph that produced the flood: **four seconds and dozens of identical
+errors became one millisecond and two lines.**
 
 ## Vendor console spam is muted, not tolerated
 
@@ -421,17 +422,51 @@ For the same reason the operands are stored spending float4's whole range:
 `onnxQuantScaleFor` returns 1/6, so [-1, 1] uses all eight magnitudes rather
 than the five a scale of one would reach.
 
-ONNX Runtime 1.29's CPU EP has no float4 kernel at all — `Could not find an
-implementation for DequantizeLinear(23)` — which is the correct answer and the
-expected one. Float4 is very new.
+Measured, RTX 5060 and M1 Pro:
 
-**MXFP4 and NVFP4 are not here yet.** Both need a float8 *scale* type, and the
-vendored header says `FLOAT8E8M0` arrived in ONNX **1.21**, well after float4's
-1.18 — a different and much newer opset than the one `fp4_e2m1` needs. NVFP4
-needs more than that: its second, global scale has to become an extra `Mul`,
-and nothing may sit between the dequantize and the matmul without ORT losing
-track of the quantized pattern. Probe what a runtime accepts before committing
-to either.
+| provider | `fp4_e2m1` | `fp4_weight` | `int4_weight` | fp16 |
+|---|---|---|---|---|
+| TensorRT | engine build fails | **65.75** | 65.61 | 66.24 |
+| CUDA EP | no fp4 dequantize | no fp4 kernel | 39.66 | 39.99 |
+| CPU EP | no fp4 kernel | no fp4 kernel | 1.19 | 0.03 |
+
+**The two weight-only rows land on top of each other and on fp16.** 65.75
+against 65.61 against 66.24 — whether the four bits are a float or an integer
+makes no difference at all, because neither is doing four-bit arithmetic and
+the shape is compute-bound either way. That is the clearest confirmation
+available that these rows measure the unpack and not the format, and it is why
+the pair only earns its place on providers where the two *disagree*: the CUDA
+EP fuses int4 into `MatMulNBits` and refuses float4 outright, because
+`MatMulNBits` is an integer kernel.
+
+**`fp4_e2m1`'s failure on TensorRT is the most useful result of the phase.**
+The graph parses; the engine will not build:
+
+```
+MyelinCheckException: cask_op.h:1926: CHECK(output_quantize_axis_.has_value()) failed.
+Could not find any implementation for node {ForeignNode[...]}
+```
+
+TensorRT is asking for a quantization **axis** that a per-tensor scale does not
+have. Its float4 path wants block scaling, not one scale for the whole tensor —
+which is to say it wants NVFP4, and a symmetric per-tensor E2M1 graph is not a
+shape it implements. That is worth knowing before attempting NVFP4 rather than
+after.
+
+**And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
+is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph
+needs nothing newer than float4's own opset 23. MXFP4's scale is `FLOAT8E8M0`,
+which the vendored header dates to ONNX **1.21** — a later opset than anything
+this backend emits. The two are not one step, and NVFP4 is the near one.
+
+ONNX Runtime 1.30's CUDA EP has no float4 `DequantizeLinear` and 1.29's CPU EP
+has no float4 kernel at all — `Could not find an implementation for
+DequantizeLinear(23)`. Both are the correct answer. Float4 is very new.
+
+**MXFP4 and NVFP4 are not here yet**, and they are not equally far away — see
+the measurements below. NVFP4's remaining obstacle is its second, global scale,
+which has to become an extra `Mul` where nothing may sit between the dequantize
+and the matmul. MXFP4's is the scale type itself.
 
 ## int4 is a memory format here, not a compute one
 
