@@ -1168,6 +1168,38 @@ unintended is the thing this backend must not do. The CPU EP is implicit in
 every session and is the one provider that registers nothing and keeps its
 fallback.
 
+## Never report a refusal with an empty reason
+
+A skip row's whole value is the message in it, and two paths could hand back an
+empty one. `CreateSessionFromArray` is documented to return a status on failure,
+and a stock ONNX Runtime 1.23 asked for a float4 graph returns **a status whose
+message is the empty string** — and the C API also permits, in practice, a null
+status beside a null session. Either way the row read
+`[unsupported] no supported quantization scheme`, which names the test's own
+fallback rather than anything the runtime said.
+
+`onnxStatusText()` now substitutes a reason when the runtime supplies none, and
+`onnxCreateSession()` treats a null session as a failure whatever the status
+says. The rule generalises: **a skip is only worth emitting if it carries why**,
+so any path that can produce one has to be able to answer that question.
+
+## Runtime version is part of what gets measured
+
+The same machine, the same graphs, two ONNX Runtime builds, and the rows differ
+in ways worth reading rather than dismissing as noise:
+
+- **1.23.2's CPU EP does not fuse int4**, running `Cast, DequantizeLinear,
+  MatMul` where 1.30's fuses to `MatMulNBits`. The row is refused on 1.23 and
+  reports 1.18 TFLOPS on 1.30 — the fusion check discriminating between two
+  versions of the *same provider*, which is exactly what it is for.
+- **1.23.2's CPU EP runs fp16 at 0.66 TFLOPS; 1.30's manages 0.03.** A
+  twentyfold regression in the runtime itself, on identical hardware and an
+  identical model. Nothing about the device changed.
+
+Neither is a defect in the backend and both are the sort of thing a
+single-runtime benchmark cannot see. The runtime version is reported on every
+device row for this reason.
+
 ## A stock onnxruntime is CPU-only
 
 The GPU and NPU providers only exist in a runtime built for them. A default

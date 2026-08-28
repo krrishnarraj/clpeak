@@ -18,8 +18,13 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
   if (!st)
     return "";
   const char *msg = rt.api->GetErrorMessage(st);
-  std::string out = msg ? msg : "unknown error";
+  std::string out = msg ? msg : "";
   rt.api->ReleaseStatus(st);
+  // A status with an empty message is as useless as no status: the row would
+  // report a refusal with nothing in it, which is what a stock ONNX Runtime
+  // 1.23 does for the float4 graphs.  Never hand back an empty reason.
+  if (out.empty())
+    return "the runtime refused it without saying why";
   // Session-creation errors from EP compilers can run to many lines; the
   // result rows are line-oriented, so keep the first line only.
   size_t nl = out.find('\n');
@@ -445,6 +450,13 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   if (st)
   {
     res.error = onnxStatusText(rt, st);
+    return res;
+  }
+  // Success and no session is a combination the API does not promise but has
+  // been seen: the caller then reports a failure with an empty reason.
+  if (!session)
+  {
+    res.error = "the runtime returned no session and no error";
     return res;
   }
 

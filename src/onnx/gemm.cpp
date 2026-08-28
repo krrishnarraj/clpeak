@@ -639,8 +639,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         test.skip(v.label,
                   tried.empty() ? errStatus : ResultStatus::Unsupported,
                   tried.empty()
-                      ? (firstErr.empty() ? "no supported quantization scheme"
-                                          : firstErr)
+                      ? (firstErr.empty()
+                             ? std::string("this provider accepted no session "
+                                           "for ") + v.label
+                             : firstErr)
                       : std::string("provider did not fuse a quantized matmul "
                         "-- it dequantized the operands and multiplied in "
                         "floating point, so this is not a ") + v.label +
