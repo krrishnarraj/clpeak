@@ -344,69 +344,6 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
-std::string onnxNvfp4AccuracyModel(int64_t M, int64_t K, int64_t N,
-                                   int64_t blockSize,
-                                   const std::string &aBlockScales,
-                                   const std::string &bPacked,
-                                   const std::string &bBlockScales,
-                                   const std::string &cBlockScales,
-                                   float globalScale)
-{
-  auto f32 = [](float v) {
-    std::string s(4, '\0');
-    std::memcpy(&s[0], &v, 4);
-    return s;
-  };
-
-  OnnxGraph g;
-  g.setOpset(onnxOpsetForDtype(ONNX_DT_FLOAT4E2M1));
-  g.input("A", ONNX_DT_FLOAT, {M, K});
-
-  g.initializer("A_bs", ONNX_DT_FLOAT8E4M3FN, {M, K / blockSize}, aBlockScales);
-  g.initializer("B_q",  ONNX_DT_FLOAT4E2M1,   {K, N}, bPacked);
-  g.initializer("B_bs", ONNX_DT_FLOAT8E4M3FN, {K / blockSize, N}, bBlockScales);
-  g.initializer("C_bs", ONNX_DT_FLOAT8E4M3FN, {M, N / blockSize}, cBlockScales);
-  g.initializer("gs",   ONNX_DT_FLOAT, {}, f32(globalScale));
-
-  // The block scales, recovered by the global one.
-  g.node("DequantizeLinear", {"A_bs", "gs"}, {"A_s"});
-  g.node("DequantizeLinear", {"B_bs", "gs"}, {"B_s"});
-  g.node("DequantizeLinear", {"C_bs", "gs"}, {"C_s"});
-
-  // The activations are quantized here rather than on the host, and the target
-  // type is named by a zero point rather than by the `output_dtype` attribute.
-  // Both spellings are legal at this opset and `output_dtype` is the tidier
-  // one, but it is also the newer one -- opset 21 against a zero point every
-  // parser has understood for years -- and TensorRT segfaults on a graph that
-  // uses it here.  A zero point of the target type, shaped like the scale it
-  // accompanies and full of zeros because float4 quantization is symmetric,
-  // says the same thing in a dialect older than the bug.
-  g.initializer("A_zp", ONNX_DT_FLOAT4E2M1, {M, K / blockSize},
-                std::string((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1,
-                                                  M * (K / blockSize)), '\0'));
-  g.initializer("C_zp", ONNX_DT_FLOAT4E2M1, {M, N / blockSize},
-                std::string((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1,
-                                                  M * (N / blockSize)), '\0'));
-  g.node("QuantizeLinear", {"A", "A_s", "A_zp"}, {"A_q"},
-         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
-  g.node("DequantizeLinear", {"A_q", "A_s"}, {"A_f"},
-         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
-  g.node("DequantizeLinear", {"B_q", "B_s"}, {"B_f"},
-         {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
-
-  g.node("MatMul", {"A_f", "B_f"}, {"C_f"});
-
-  // Back to float4 and out again: the result blocks along its own second axis,
-  // which is the reduction axis of whatever consumes it next.
-  g.node("QuantizeLinear", {"C_f", "C_s", "C_zp"}, {"C_q"},
-         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
-  g.node("DequantizeLinear", {"C_q", "C_s"}, {"C"},
-         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
-
-  g.output("C", ONNX_DT_FLOAT, {M, N});
-  return g.build();
-}
-
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
                                          const std::string &aPacked,
@@ -939,17 +876,14 @@ float onnxWeightAt(int64_t i, int64_t j, uint32_t seed)
 }
 
 void onnxFillNvfp4(std::string &packed, std::string &blockScales,
-                   std::vector<float> *deq, int64_t rows, int64_t cols,
-                   int blockAxis, int64_t blockSize, float globalScale,
-                   uint32_t seed)
+                   int64_t rows, int64_t cols, int blockAxis, int64_t blockSize,
+                   float globalScale, uint32_t seed)
 {
   const int64_t sRows = (blockAxis == 0) ? rows / blockSize : rows;
   const int64_t sCols = (blockAxis == 0) ? cols : cols / blockSize;
   packed.assign((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1, rows * cols), '\0');
   blockScales.assign((size_t)sRows * (size_t)sCols, '\0');
   uint8_t *bs = reinterpret_cast<uint8_t *>(&blockScales[0]);
-  if (deq)
-    deq->assign((size_t)rows * (size_t)cols, 0.0f);
 
   for (int64_t sr = 0; sr < sRows; sr++)
   {
@@ -984,10 +918,7 @@ void onnxFillNvfp4(std::string &packed, std::string &blockScales,
         const int64_t i = (blockAxis == 0) ? i0 + b : i0;
         const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
         const float   w = onnxWeightAt(i, j, seed) * 2.0f;
-        const uint8_t code = floatToFp4E2M1(w * inv);
-        onnxStoreNibble(&packed[0], i * cols + j, code);
-        if (deq)
-          (*deq)[(size_t)(i * cols + j)] = fp4E2M1ToFloat(code) * scale;
+        onnxStoreNibble(&packed[0], i * cols + j, floatToFp4E2M1(w * inv));
       }
     }
   }

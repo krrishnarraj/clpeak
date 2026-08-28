@@ -349,10 +349,10 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   if (v.nvfp4)
   {
     std::string aPacked, aScales, bPacked, bScales;
-    onnxFillNvfp4(aPacked, aScales, nullptr, D, D, /*blockAxis=*/1,
-                  v.blockSize, kNvfp4GlobalScale, 0x9e3779b9u);
-    onnxFillNvfp4(bPacked, bScales, nullptr, D, D, /*blockAxis=*/0,
-                  v.blockSize, kNvfp4GlobalScale, 0x243f6a88u);
+    onnxFillNvfp4(aPacked, aScales, D, D, /*blockAxis=*/1, v.blockSize,
+                  kNvfp4GlobalScale, 0x9e3779b9u);
+    onnxFillNvfp4(bPacked, bScales, D, D, /*blockAxis=*/0, v.blockSize,
+                  kNvfp4GlobalScale, 0x243f6a88u);
     modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
                                               aScales, bPacked, bScales,
                                               kNvfp4GlobalScale);

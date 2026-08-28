@@ -491,46 +491,34 @@ of what the format costs, and quantizing against the value that will actually
 come back is what keeps the row measuring NVFP4 rather than an idealisation of
 it. The global scale is a power of two so that factoring it out is exact.
 
-**The NVFP4 accuracy row exists, and two things about its shape are
-load-bearing.**
+**There is no NVFP4 accuracy row, and the reason is a TensorRT crash.**
 
-*The activations arrive at run time.* An accuracy model has to return real
-values, so it cannot reduce them away — and with both operands left as
-initializers TensorRT would be free to fold the product while building its
-engine and answer in something wider. That reads as **better** accuracy rather
-than as a failure, and unlike the throughput row, whose guard watches time scale
-with problem size, an accuracy row has no tell at all. Handing the activations
-in as fp32 and quantizing them on device against supplied block scales removes
-the possibility rather than detecting it. It costs nothing: the values passed in
-are exactly what the format recovers, so the device's own quantize round-trips
-them.
+Pricing the four-bit rate needs the result kept in four bits — without that the
+row would measure accumulation alone, land near zero beside int8's 9443, and
+read as though four bits were more accurate than eight. That is the same
+objection that rules out an int4 accuracy row, and it is decisive.
 
-*The result is quantized back to float4 before it returns.* Without that the row
-would measure accumulation alone and could not be read beside the eight-bit
-rows, which all include the width their answer is kept in. It is blocked along
-the result's own second axis — the reduction axis of whatever consumes it next —
-both because that is what a real four-bit pipeline hands on, and because a
-per-tensor float4 quantize is precisely the shape TensorRT already refused. Its
-scale is one calibrated value per block, four sigma of a K-deep dot product over
-float4's widest magnitude, which is how a real pipeline gets them too.
+Keeping the result in four bits needs a **blocked `QuantizeLinear`**, and
+TensorRT segfaults on one. Not an error, not a refused engine: the process dies
+and takes every remaining device with it.
 
-Expect roughly **four times `fp8_e4m3`'s figure**: E2M1 holds the answer in one
-mantissa bit against E4M3's three.
+The attribution is by elimination, and one hypothesis was tested and wrong.
+Three graphs here carry float4 to TensorRT — the NVFP4 throughput model, which
+only ever *dequantizes* and builds an engine at 238 TFLOPS; `fp4_e2m1`'s
+accuracy model, which quantizes **per-tensor** and fails cleanly; and the NVFP4
+accuracy model, which quantizes **blocked** and crashes. The first suspect was
+the `output_dtype` attribute, since only the crashing graph used it; naming the
+target type with a zero point instead changed nothing. What remains unique to it
+is the blocked quantize. TensorRT consumes NVFP4 weights that arrive already
+quantized, and nothing else here asks it to *produce* NVFP4 with block scales
+inside a graph.
 
-**Say "quantize to float4" with a zero point, not with `output_dtype`.** Both
-are legal at this opset and `output_dtype` is much the tidier — it exists so a
-symmetric quantize need not carry a tensor of zeros — but it is also the newer
-spelling, opset 21 against a zero point every parser has understood for years,
-and **TensorRT segfaults on a graph that uses it**. Not an error, not a refused
-engine: the process dies and takes every remaining device with it.
-
-The diagnosis came from what did *not* crash. Three graphs reach TensorRT with
-float4 in them: the NVFP4 throughput model, which uses `DequantizeLinear` alone
-and builds; `fp4_e2m1`'s accuracy model, which quantizes with a zero point and
-fails cleanly; and the NVFP4 accuracy model, which quantized with `output_dtype`
-and crashed. The same `fp4_e2m1` failure had been survived in an earlier run, so
-the crash was not in the recovery path — it was the one graph using the one
-attribute the others do not.
+So `onnx-gemm-fp`'s `nvfp4` row publishes a rate with no accuracy figure beside
+it, which this backend otherwise refuses to do. That is the honest outcome
+rather than a preferred one: a number nobody can trust would be worse, and a
+crash that ends the run is worse still. It becomes buildable the moment any
+provider can quantize to blocked float4 without dying — the git history holds
+the model that would do it.
 
 NVFP4 is also the first variant narrow enough to reach 32768 on the size ladder:
 its operands come to 1.125 bytes per element against fp16's four, so a size the

@@ -201,30 +201,6 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 //
 // Scales are E4M3 and therefore reachable at float4's own opset 23; MXFP4's
 // E8M0 scale is a later opset than anything here emits.
-// NVFP4 shaped for the accuracy test: the full product comes back rather than
-// being reduced away, so the values can be compared.
-//
-// The activations arrive as fp32 at run time and are quantized on device
-// against supplied block scales.  That is not merely tidier than baking them
-// in -- it is what makes the row trustworthy.  With both operands constant,
-// TensorRT is free to fold the product while building its engine and answer in
-// something wider, which would read as *better* accuracy rather than as a
-// failure, and unlike the throughput row there is no timing that would give it
-// away.  A runtime input removes the possibility instead of detecting it.
-//
-// The result is quantized back to float4 before it is returned, blocked along
-// its own reduction axis, because that is what the next layer of a real
-// four-bit pipeline would receive -- and because a per-tensor float4 quantize
-// is the shape TensorRT already refused.  Without it the row would measure
-// accumulation alone and could not be read beside the eight-bit rows.
-std::string onnxNvfp4AccuracyModel(int64_t M, int64_t K, int64_t N,
-                                   int64_t blockSize,
-                                   const std::string &aBlockScales,
-                                   const std::string &bPacked,
-                                   const std::string &bBlockScales,
-                                   const std::string &cBlockScales,
-                                   float globalScale);
-
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
                                          const std::string &aPacked,
@@ -402,13 +378,9 @@ float onnxWeightAt(int64_t i, int64_t j, uint32_t seed);
 // 1 when they run along columns; both operands of a matmul block along the
 // reduction axis, which is a different axis number for each.
 //
-// `deq`, when given, receives the fp32 values the format actually recovers --
-// what an accuracy reference has to multiply, and what the device must be
-// handed so its own quantize round-trips rather than rounding a second time.
 void onnxFillNvfp4(std::string &packed, std::string &blockScales,
-                   std::vector<float> *deq, int64_t rows, int64_t cols,
-                   int blockAxis, int64_t blockSize, float globalScale,
-                   uint32_t seed);
+                   int64_t rows, int64_t cols, int blockAxis, int64_t blockSize,
+                   float globalScale, uint32_t seed);
 
 // Bytes a tensor of `count` elements of `dtype` occupies, nibble packing
 // included -- dtypeSize()-style helpers cannot express a half.
