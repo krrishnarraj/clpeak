@@ -373,12 +373,22 @@ std::string onnxNvfp4AccuracyModel(int64_t M, int64_t K, int64_t N,
   g.node("DequantizeLinear", {"B_bs", "gs"}, {"B_s"});
   g.node("DequantizeLinear", {"C_bs", "gs"}, {"C_s"});
 
-  // The activations are quantized here rather than on the host.  There is no
-  // zero point, so the target type has to be named outright.
-  const OnnxAttr toFp4 = OnnxAttr::num("output_dtype", ONNX_DT_FLOAT4E2M1);
-  g.node("QuantizeLinear", {"A", "A_s"}, {"A_q"},
-         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize),
-          toFp4});
+  // The activations are quantized here rather than on the host, and the target
+  // type is named by a zero point rather than by the `output_dtype` attribute.
+  // Both spellings are legal at this opset and `output_dtype` is the tidier
+  // one, but it is also the newer one -- opset 21 against a zero point every
+  // parser has understood for years -- and TensorRT segfaults on a graph that
+  // uses it here.  A zero point of the target type, shaped like the scale it
+  // accompanies and full of zeros because float4 quantization is symmetric,
+  // says the same thing in a dialect older than the bug.
+  g.initializer("A_zp", ONNX_DT_FLOAT4E2M1, {M, K / blockSize},
+                std::string((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1,
+                                                  M * (K / blockSize)), '\0'));
+  g.initializer("C_zp", ONNX_DT_FLOAT4E2M1, {M, N / blockSize},
+                std::string((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1,
+                                                  M * (N / blockSize)), '\0'));
+  g.node("QuantizeLinear", {"A", "A_s", "A_zp"}, {"A_q"},
+         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
   g.node("DequantizeLinear", {"A_q", "A_s"}, {"A_f"},
          {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
   g.node("DequantizeLinear", {"B_q", "B_s"}, {"B_f"},
@@ -388,9 +398,8 @@ std::string onnxNvfp4AccuracyModel(int64_t M, int64_t K, int64_t N,
 
   // Back to float4 and out again: the result blocks along its own second axis,
   // which is the reduction axis of whatever consumes it next.
-  g.node("QuantizeLinear", {"C_f", "C_s"}, {"C_q"},
-         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize),
-          toFp4});
+  g.node("QuantizeLinear", {"C_f", "C_s", "C_zp"}, {"C_q"},
+         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
   g.node("DequantizeLinear", {"C_q", "C_s"}, {"C"},
          {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
 

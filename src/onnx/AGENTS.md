@@ -517,6 +517,21 @@ float4's widest magnitude, which is how a real pipeline gets them too.
 Expect roughly **four times `fp8_e4m3`'s figure**: E2M1 holds the answer in one
 mantissa bit against E4M3's three.
 
+**Say "quantize to float4" with a zero point, not with `output_dtype`.** Both
+are legal at this opset and `output_dtype` is much the tidier — it exists so a
+symmetric quantize need not carry a tensor of zeros — but it is also the newer
+spelling, opset 21 against a zero point every parser has understood for years,
+and **TensorRT segfaults on a graph that uses it**. Not an error, not a refused
+engine: the process dies and takes every remaining device with it.
+
+The diagnosis came from what did *not* crash. Three graphs reach TensorRT with
+float4 in them: the NVFP4 throughput model, which uses `DequantizeLinear` alone
+and builds; `fp4_e2m1`'s accuracy model, which quantizes with a zero point and
+fails cleanly; and the NVFP4 accuracy model, which quantized with `output_dtype`
+and crashed. The same `fp4_e2m1` failure had been survived in an earlier run, so
+the crash was not in the recovery path — it was the one graph using the one
+attribute the others do not.
+
 NVFP4 is also the first variant narrow enough to reach 32768 on the size ladder:
 its operands come to 1.125 bytes per element against fp16's four, so a size the
 wider rows cannot afford is within both the memory budget and the protobuf
