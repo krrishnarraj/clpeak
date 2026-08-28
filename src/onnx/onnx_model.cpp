@@ -285,7 +285,7 @@ static std::string quantZeroPoint(int dtype)
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRaw,
                                float aScale, float bScale, float cScale,
-                               int actDtype, int wDtype)
+                               int actDtype, int wDtype, bool floatIo)
 {
   auto f32 = [](float v) {
     std::string s(4, '\0');
@@ -299,7 +299,10 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // The opset follows whichever operand type is newer: float8 cannot be named
   // below 19, int8 needs nothing beyond 17.
   g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
-  g.input("A_q", actDtype, {M, K});
+  if (floatIo)
+    g.input("A", ONNX_DT_FLOAT, {M, K});
+  else
+    g.input("A_q", actDtype, {M, K});
 
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
@@ -309,12 +312,25 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
   g.initializer("c_zp",    actDtype, {}, actZp);
 
+  // Quantize on device when the boundary must stay floating point.  Nothing
+  // sits between the dequantize and the matmul either way, which is what ORT
+  // needs to see to recognise a quantized matmul at all.
+  if (floatIo)
+    g.node("QuantizeLinear", {"A", "a_scale", "a_zp"}, {"A_q"});
   g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
 
-  g.output("C_q", actDtype, {M, N});
+  if (floatIo)
+  {
+    g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C"});
+    g.output("C", ONNX_DT_FLOAT, {M, N});
+  }
+  else
+  {
+    g.output("C_q", actDtype, {M, N});
+  }
   return g.build();
 }
 

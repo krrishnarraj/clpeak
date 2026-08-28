@@ -126,10 +126,20 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // `wDtype` is the weight element type and `actDtype` the activation one.  Both
 // may be int8/uint8 or one of the float8 formats; the model's opset follows
 // whichever is newer.
+//
+// `floatIo` keeps the quantized type off the graph boundary: the input arrives
+// as fp32 and is quantized on device, and the result is dequantized before it
+// leaves.  Needed because an EP may implement a datatype internally and still
+// refuse it as a tensor it must receive -- TensorRT imports float8
+// initializers happily and answers "input onnx tensor data type: 17 not
+// supported" for the same type as a graph input.  The values are unchanged:
+// every number handed in is already exactly representable in the target type,
+// so the added QuantizeLinear round-trips it rather than rounding it again.
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRaw,
                                float aScale, float bScale, float cScale,
-                               int actDtype, int wDtype = ONNX_DT_INT8);
+                               int actDtype, int wDtype = ONNX_DT_INT8,
+                               bool floatIo = false);
 
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each

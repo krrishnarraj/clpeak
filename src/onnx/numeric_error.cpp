@@ -306,11 +306,21 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int aDtype = v.dtype;
     std::string aRaw, bRaw, err;
     std::vector<uint8_t> raw;
+    std::vector<float> aDeq;
     std::vector<std::string> ranOps;
     const char *inName = "A", *outName = "C";
 
     if (v.qdq)
     {
+      // The quantized type never crosses the graph boundary.  The input is
+      // handed over as the fp32 values it dequantizes to and quantized on
+      // device; the result is dequantized before it leaves.  That costs
+      // nothing in accuracy -- every value passed in is already exactly
+      // representable in the target type, so the added QuantizeLinear
+      // round-trips it -- and it is the only way an EP that implements a type
+      // internally but refuses it at its boundary can be measured at all.
+      // TensorRT is exactly that: it imports float8 initializers and answers
+      // "input onnx tensor data type: 17 not supported" for a float8 input.
       for (size_t ci = 0; ci < nActCands; ci++)
       {
         aDtype = actCands[ci];
@@ -318,15 +328,21 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
         std::string model = onnxQdqMatMulModel(
             kDim, kDim, kDim, bRaw, onnxQuantScaleFor(aDtype),
-            onnxQuantScaleFor(v.dtype), cScale, aDtype, v.dtype);
-        inName  = "A_q";
-        outName = "C_q";
+            onnxQuantScaleFor(v.dtype), cScale, aDtype, v.dtype,
+            /*floatIo=*/true);
+        inName  = "A";
+        outName = "C";
         err.clear();
         ranOps.clear();
         const bool float8 = (v.dtype == ONNX_DT_FLOAT8E4M3FN ||
                              v.dtype == ONNX_DT_FLOAT8E5M2);
-        raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
-                      aDtype, kDim, kDim, err, &ranOps, float8);
+        // What the device is given is the dequantized form of what was
+        // quantized here, so the reference below and the run see one set of
+        // values.
+        aDeq = widen(aRaw, aDtype, kDim * kDim, onnxQuantScaleFor(aDtype));
+        raw = runOnce(rt, ep, model, inName, outName, aDeq.data(),
+                      aDeq.size() * sizeof(float), ONNX_DT_FLOAT, kDim, kDim,
+                      err, &ranOps, float8);
         if (!raw.empty())
           break;
       }
@@ -380,14 +396,26 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // The provider's answer, widened to fp32.  For the QDQ path that means
     // undoing the output quantization -- the same thing a real pipeline's
     // next layer does.
-    std::vector<float> got = widen(
-        std::string(reinterpret_cast<const char *>(raw.data()), raw.size()),
-        aDtype, kDim * kDim, cScale);
+    // The quantized path returns fp32 already dequantized; the plain one
+    // returns its own dtype and is widened here.
+    std::vector<float> got;
+    if (v.qdq)
+    {
+      got.resize((size_t)kDim * kDim);
+      std::memcpy(got.data(), raw.data(), got.size() * sizeof(float));
+    }
+    else
+    {
+      got = widen(std::string(reinterpret_cast<const char *>(raw.data()),
+                              raw.size()),
+                  aDtype, kDim * kDim, cScale);
+    }
 
     // The reference: the same values the provider saw, widened to fp32 and
     // multiplied on the CPU EP.
-    std::vector<float> aRef = widen(aRaw, aDtype, kDim * kDim,
-                                    onnxQuantScaleFor(aDtype));
+    std::vector<float> aRef = v.qdq
+        ? aDeq
+        : widen(aRaw, aDtype, kDim * kDim, onnxQuantScaleFor(aDtype));
     std::vector<float> bRef = widen(bRaw, v.dtype, kDim * kDim,
                                     onnxQuantScaleFor(v.dtype));
     if (got.empty() || aRef.empty() || bRef.empty())

@@ -73,7 +73,15 @@ const Size kSizes[] = {
   {16384, "128mb"},
 };
 
+// The rungs are fixed, so the budget check is the only thing standing between
+// a phone and an out-of-memory kill -- Android ends the process rather than
+// failing an allocation, so a rung has to be declined on an estimate rather
+// than attempted and recovered from.  The estimate is three times the tensor,
+// not one: the raw values and the model embedding them are both alive while
+// the model is built, and the model and ORT's own copy are both alive while
+// the session is created.
 static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+constexpr uint64_t kCopiesAtPeak = 3;
 
 constexpr unsigned int kSizeBudgetUs = 1000000;
 
@@ -252,7 +260,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           "how much of its streaming rate this provider keeps once it has to "
           "apply a function to the data.";
 
-      if (bytes > maxTensorBytes())
+      if (bytes * kCopiesAtPeak > maxTensorBytes())
       {
         test.skip(metric, ResultStatus::Unsupported,
                   "larger than this machine's memory budget allows", note);

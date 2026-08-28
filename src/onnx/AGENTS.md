@@ -369,13 +369,14 @@ rather than guessed at:
 - **A float8 tensor cannot cross the EP boundary** — *"TensorRT EP input onnx
   tensor data type: 17 not supported"*. Initializers are fine, which is why
   `onnx-gemm` works: both its operands are baked into the model.
-  `onnx-numeric-error` hands its input in at run time, so its float8 rows are
-  unmeasurable on TensorRT. Their values are known from the CUDA and CPU
-  providers, and the format's rounding cost is device-independent — every
-  provider that accumulates in fp32 reports the same figure to the last
-  decimal — but what cannot be checked on TensorRT specifically is whether it
-  accumulates float8 differently, the way it does fp16. Closing that needs the
-  accuracy model to take a fp32 input and quantize on device.
+  That is why `onnxQdqMatMulModel` takes `floatIo`: the accuracy model hands
+  its input over as the fp32 values it dequantizes to and quantizes them on
+  device, then dequantizes the result before it leaves, so the quantized type
+  never touches the boundary. It costs nothing in accuracy — every value passed
+  in is already exactly representable in the target type, so the added
+  `QuantizeLinear` round-trips it rather than rounding twice — and the numbers
+  prove it: int8 still reads 9443.09 ppm and float8 26545.94 / 52823.74, to the
+  last decimal, before and after the change.
 
 **A float8 QDQ graph must not be fused into `QLinearMatMul`.** ORT's QDQ
 selector rewrites DequantizeLinear/MatMul/QuantizeLinear into `QLinearMatMul`,
@@ -571,7 +572,19 @@ workstation and a cheap phone is two orders of magnitude, and a ceiling that
 merely wastes time on one is an out-of-memory kill on the other — Android
 kills the process outright rather than failing an allocation. The constants
 passed to it are the ceilings for a *large* machine; the fraction is what
-protects a small one.
+protects a small one. **This backend runs on phones, not only on desktops with
+an NPU**, which is what makes every one of these checks load-bearing rather
+than defensive.
+
+**Count the copies, not the tensor.** A graph's weights exist about three times
+over at peak: the raw values and the model embedding them overlap while the
+model is built, and the model and ORT's own copy overlap while the session is
+created. A check against the tensor alone under-estimates by 3x, and on a phone
+that is the difference between a skipped row and a killed process. It matters
+most where a rung list is *fixed* rather than swept — `onnx-activation` and
+`onnx-tensor-bw` both always attempt 8 / 32 / 128 MB, so their budget check is
+the only thing that declines the large one, and both multiply by three before
+asking.
 
 Where a size *is* fixed, it is fixed because it defines the workload rather
 than because it was convenient, and it is meant to stay fixed forever:
