@@ -47,6 +47,10 @@ namespace
 // And no single size is right anyway: fp32 there peaks at 4096 while fp16
 // peaks at 2048, because different engines serve them.
 constexpr int64_t kMinDim = 1024;
+
+// NVFP4's second scale.  A power of two so factoring it out of the block scales
+// is exact and the row measures the format rather than an arithmetic accident.
+constexpr float kNvfp4GlobalScale = 0.125f;
 constexpr int64_t kMaxDim = 32768;
 
 // A size counts as an improvement only if it beats the best so far by this
@@ -90,7 +94,8 @@ struct Variant
   bool        qdq;      // build the quantized (DequantizeLinear/MatMul/Q) form
   const char *label;
   const char *note;
-  int64_t     blockSize;  // >0: weight-only, one scale per this many rows
+  int64_t     blockSize;  // >0: blocked, one scale per this many elements
+  bool        nvfp4;      // blocked on *both* operands, with a second scale
 };
 
 // Quantization schemes, tried in order until one fuses.  There is no single
@@ -178,6 +183,11 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
 
 size_t schemesFor(const Variant &v, QuantScheme out[2])
 {
+  if (v.nvfp4)
+  {
+    out[0] = {v.dtype, v.dtype, "both operands blocked, with a global scale"};
+    return 1;
+  }
   if (v.blockSize > 0)
   {
     // Weight-only has no activation type to choose: the activations are fp16
@@ -207,6 +217,64 @@ float weightAt(int64_t i, int64_t j, uint32_t seed)
   uint32_t s = seed ^ (uint32_t)(i * 0x9E3779B1u) ^ (uint32_t)(j * 0x85EBCA77u);
   s ^= s << 13; s ^= s >> 17; s ^= s << 5;
   return (float)(s >> 8) / 16777216.0f - 0.5f;      // [-0.5, 0.5)
+}
+
+// Quantize a [rows, cols] matrix into packed float4 plus one E4M3 scale per
+// block, with a global scale factored out of the block scales.
+//
+// `blockAxis` is 0 when blocks run down rows (the weights, grouped along K) and
+// 1 when they run along columns (the activations, whose K is their second
+// axis).  Both operands are blocked along the reduction axis; it is simply a
+// different axis number for each.
+void fillNvfp4(std::string &packed, std::string &blockScales,
+               int64_t rows, int64_t cols, int blockAxis, int64_t blockSize,
+               float globalScale, uint32_t seed)
+{
+  const int64_t sRows = (blockAxis == 0) ? rows / blockSize : rows;
+  const int64_t sCols = (blockAxis == 0) ? cols : cols / blockSize;
+  packed.assign((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1, rows * cols), '\0');
+  blockScales.assign((size_t)sRows * (size_t)sCols, '\0');
+  uint8_t *bs = reinterpret_cast<uint8_t *>(&blockScales[0]);
+
+  for (int64_t sr = 0; sr < sRows; sr++)
+  {
+    for (int64_t sc = 0; sc < sCols; sc++)
+    {
+      // Walk the block twice: once for its largest magnitude, once to quantize
+      // against it.  weightAt() is a hash of the position precisely so this
+      // costs nothing but arithmetic.
+      const int64_t i0 = (blockAxis == 0) ? sr * blockSize : sr;
+      const int64_t j0 = (blockAxis == 0) ? sc : sc * blockSize;
+
+      float maxAbs = 0.0f;
+      for (int64_t b = 0; b < blockSize; b++)
+      {
+        const int64_t i = (blockAxis == 0) ? i0 + b : i0;
+        const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
+        const float   w = weightAt(i, j, seed) * 2.0f;   // spread over [-1, 1]
+        const float   a = w < 0.0f ? -w : w;
+        if (a > maxAbs) maxAbs = a;
+      }
+
+      // The block scale maps this block's peak onto float4's largest magnitude,
+      // and is itself stored in E4M3 after the global scale is divided out.
+      // Rounding it there is part of the format, so the quantization below uses
+      // the value that will actually be recovered, not the one intended.
+      const float wanted = (maxAbs > 0.0f) ? maxAbs / 6.0f : 1.0f;
+      const uint8_t stored = floatToFp8E4M3(wanted / globalScale);
+      bs[sr * sCols + sc] = stored;
+      const float scale = fp8E4M3ToFloat(stored) * globalScale;
+      const float inv   = (scale > 0.0f) ? 1.0f / scale : 0.0f;
+
+      for (int64_t b = 0; b < blockSize; b++)
+      {
+        const int64_t i = (blockAxis == 0) ? i0 + b : i0;
+        const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
+        const float   w = weightAt(i, j, seed) * 2.0f;
+        onnxStoreNibble(&packed[0], i * cols + j, floatToFp4E2M1(w * inv));
+      }
+    }
+  }
 }
 
 // Quantize a [K, N] weight matrix into packed int4 plus one fp16 scale per
@@ -350,6 +418,25 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   GemmSetup g;
 
   std::string modelBytes;
+  if (v.nvfp4)
+  {
+    std::string aPacked, aScales, bPacked, bScales;
+    fillNvfp4(aPacked, aScales, D, D, /*blockAxis=*/1, v.blockSize,
+              kNvfp4GlobalScale, 0x9e3779b9u);
+    fillNvfp4(bPacked, bScales, D, D, /*blockAxis=*/0, v.blockSize,
+              kNvfp4GlobalScale, 0x243f6a88u);
+    modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
+                                              aScales, bPacked, bScales,
+                                              kNvfp4GlobalScale);
+    aPacked.clear(); aPacked.shrink_to_fit();
+    aScales.clear(); aScales.shrink_to_fit();
+    bPacked.clear(); bPacked.shrink_to_fit();
+    bScales.clear(); bScales.shrink_to_fit();
+    finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT, D, profile,
+                /*keepQdqUnfused=*/true);
+    return g;
+  }
+
   if (v.blockSize > 0)
   {
     // Weight-only: fp16 activations, blocked-quantized weights, no quantized
@@ -457,6 +544,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "narrowest format current tensor cores implement, and unlike int4 there "
      "is a chance a provider fuses it into a real 4-bit multiply rather than "
      "unpacking it -- the row says which happened."},
+    {ONNX_DT_FLOAT4E2M1, false, "nvfp4",
+     "NVIDIA's 4-bit block format on both operands: E2M1 values, an 8-bit "
+     "float scale for every 16 of them along the reduction axis, and one more "
+     "scale for the whole tensor.  Two levels are what let four bits carry a "
+     "real model, and this is the arrangement a float4 tensor core expects -- "
+     "so unlike every other narrow row here, a number in it would be genuine "
+     "4-bit arithmetic rather than four bits unpacked into something wider.",
+     /*blockSize=*/16, /*nvfp4=*/true},
     {ONNX_DT_FLOAT4E2M1, false, "fp4_weight",
      "The same 4-bit float used only for the weights, one scale per 32 of "
      "them, against 16-bit activations.  Directly comparable with the int4 "
@@ -639,7 +734,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // is an out-of-memory kill rather than a slow row.
       const uint64_t elems = (uint64_t)D * (uint64_t)D;
       const uint64_t weightBytes =
-          (v.blockSize > 0)
+          v.nvfp4
+              ? 2ull * (onnxElemBytes(ONNX_DT_FLOAT4E2M1, (int64_t)elems)
+                        + elems / (uint64_t)v.blockSize)
+          : (v.blockSize > 0)
               ? (elems * 2ull                                  // fp16 A
                  + onnxElemBytes(v.dtype, (int64_t)elems)      // packed weights
                  + elems / (uint64_t)v.blockSize * 2ull)       // fp16 scales

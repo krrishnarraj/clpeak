@@ -344,6 +344,51 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
+std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
+                                         int64_t blockSize,
+                                         const std::string &aPacked,
+                                         const std::string &aBlockScales,
+                                         const std::string &bPacked,
+                                         const std::string &bBlockScales,
+                                         float globalScale)
+{
+  auto f32 = [](float v) {
+    std::string s(4, '\0');
+    std::memcpy(&s[0], &v, 4);
+    return s;
+  };
+
+  OnnxGraph g;
+  g.setOpset(onnxOpsetForDtype(ONNX_DT_FLOAT4E2M1));
+  g.input("S", ONNX_DT_FLOAT, {});
+
+  // A blocks along K, which is its second axis; B blocks along K, which is its
+  // first.  The reduction axis is the one a group-quantized tensor groups on,
+  // and it is a different axis number for each operand.
+  g.initializer("A_q",  ONNX_DT_FLOAT4E2M1,   {M, K}, aPacked);
+  g.initializer("A_bs", ONNX_DT_FLOAT8E4M3FN, {M, K / blockSize}, aBlockScales);
+  g.initializer("B_q",  ONNX_DT_FLOAT4E2M1,   {K, N}, bPacked);
+  g.initializer("B_bs", ONNX_DT_FLOAT8E4M3FN, {K / blockSize, N}, bBlockScales);
+  g.initializer("gs",   ONNX_DT_FLOAT, {}, f32(globalScale));
+
+  // Level one: the block scales are themselves quantized, and the global scale
+  // dequantizes them.  Per-tensor, so no axis and no block size here.
+  g.node("DequantizeLinear", {"A_bs", "gs"}, {"A_s"});
+  g.node("DequantizeLinear", {"B_bs", "gs"}, {"B_s"});
+
+  // Level two: the data, against the scales just recovered.
+  g.node("DequantizeLinear", {"A_q", "A_s"}, {"A_f"},
+         {OnnxAttr::num("axis", 1), OnnxAttr::num("block_size", blockSize)});
+  g.node("DequantizeLinear", {"B_q", "B_s"}, {"B_f"},
+         {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
+
+  g.node("MatMul", {"A_f", "B_f"}, {"C"});
+  g.reduceMax("C", "R", {0});
+  g.node("Mul", {"R", "S"}, {"Y"});
+  g.output("Y", ONNX_DT_FLOAT, {N});
+  return g.build();
+}
+
 std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               int wDtype, int64_t blockSize,
                                               const std::string &aRaw,

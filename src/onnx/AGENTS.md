@@ -463,10 +463,46 @@ ONNX Runtime 1.30's CUDA EP has no float4 `DequantizeLinear` and 1.29's CPU EP
 has no float4 kernel at all — `Could not find an implementation for
 DequantizeLinear(23)`. Both are the correct answer. Float4 is very new.
 
-**MXFP4 and NVFP4 are not here yet**, and they are not equally far away — see
-the measurements below. NVFP4's remaining obstacle is its second, global scale,
-which has to become an extra `Mul` where nothing may sit between the dequantize
-and the matmul. MXFP4's is the scale type itself.
+**NVFP4 is here; MXFP4 is not**, and the difference is the scale type. NVFP4's
+block scale is `FLOAT8E4M3FN` — opset 19, already implemented — so an NVFP4
+graph needs nothing newer than float4's own opset 23. MXFP4's is `FLOAT8E8M0`,
+which the vendored header dates to ONNX **1.21**, a later opset than anything
+this backend emits. Park MXFP4 until a runtime carries that type.
+
+The second, global scale turned out not to be the obstacle it looked like.
+NVFP4 scales twice — an E4M3 scale per block of 16 along the reduction axis,
+and one fp32 scale for the whole tensor — and the worry was that the second
+would have to become a `Mul` sitting exactly where nothing may sit. It does not.
+ONNX expresses it as **a dequantize feeding a dequantize**: the block scales are
+themselves dequantized by the global one *before* they scale the data. That puts
+the second level on the scale path, leaving the data's dequantize adjacent to
+the matmul, which is what ORT needs in order to keep recognising a quantized
+matmul at all.
+
+`onnxResidentNvfp4MatMulModel` builds it, on **both** operands — blocked along
+the reduction axis, which is axis 1 for the activations and axis 0 for the
+weights, the same axis under two different numbers. Both narrow is the point:
+every other four-bit row here unpacks into something wider, and this is the only
+shape in which a number would be genuine four-bit arithmetic.
+
+The block scale is rounded to E4M3 *before* the data is quantized against it,
+not after. Recovering a slightly different scale than the one intended is part
+of what the format costs, and quantizing against the value that will actually
+come back is what keeps the row measuring NVFP4 rather than an idealisation of
+it. The global scale is a power of two so that factoring it out is exact.
+
+**There is no NVFP4 accuracy row yet, deliberately.** Until a provider is found
+that fuses the shape, an accuracy row would measure a graph nobody executes as
+NVFP4 — and the same cancellation that rules out an int4 accuracy row applies
+to the operand rounding. If a provider does fuse it, the row becomes worth
+building, because then the *accumulation* is four-bit hardware's own and that
+does not cancel.
+
+Note that NVFP4 is the first variant narrow enough to reach 32768 on the size
+ladder: its operands come to 1.125 bytes per element against fp16's four, so a
+size the wider rows cannot afford is within both the memory budget and the
+protobuf ceiling. Expect it to build a large model and, on TensorRT, a long
+engine.
 
 ## int4 is a memory format here, not a compute one
 

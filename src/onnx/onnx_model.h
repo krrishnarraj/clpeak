@@ -186,6 +186,29 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 // shape is [K / blockSize, N] and its element type is fp16, which is also the
 // type the dequantize produces.  Zero points are omitted: the quantization is
 // symmetric, and a blocked zero-point tensor would have to be packed too.
+// NVFP4 on both operands: the shape a Blackwell-class float4 tensor core wants,
+// and the one TensorRT asked for when it refused a per-tensor E2M1 graph with
+// "CHECK(output_quantize_axis_.has_value()) failed" -- it wants a quantization
+// axis, which only block scaling has.
+//
+// Two levels of scale, which is what makes it NVFP4 rather than plain blocked
+// float4: an E4M3 scale per block of 16 along the reduction axis, and one fp32
+// scale for the whole tensor.  ONNX expresses that as a dequantize feeding a
+// dequantize -- the block scales are themselves dequantized by the global one
+// before they scale the data.  That second level sits on the *scale* path, so
+// nothing is inserted between the data's dequantize and the matmul, which is
+// the arrangement ORT needs to keep recognising a quantized matmul.
+//
+// Scales are E4M3 and therefore reachable at float4's own opset 23; MXFP4's
+// E8M0 scale is a later opset than anything here emits.
+std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
+                                         int64_t blockSize,
+                                         const std::string &aPacked,
+                                         const std::string &aBlockScales,
+                                         const std::string &bPacked,
+                                         const std::string &bBlockScales,
+                                         float globalScale);
+
 std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               int wDtype, int64_t blockSize,
                                               const std::string &aRaw,
