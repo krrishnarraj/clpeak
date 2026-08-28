@@ -5,14 +5,22 @@
 // below tokens/second: an intermediate number that is meaningful, comparable
 // across completely different hardware, and needs no model download.
 //
-//   prefill (512 tokens at once) is compute-bound   -> effective TFLOPS
-//   decode  (1 token, 2048 of context) is memory-bound -> effective GB/s
+//   prefill (64/512/2048 tokens at once)      compute-bound -> effective TFLOPS
+//   decode  (1 token, 512/2048/8192 context)  memory-bound  -> effective GB/s
 //
 // Both numbers come out of the whole stack -- graph scheduling, layout
 // conversions, softmax, the lot -- not just the matmuls, so they are what a
 // real pipeline can actually reach rather than what the silicon could do in
 // principle.  Multiply the latency rows by a model's layer count to sanity
 // check any tokens/second claim made for this device.
+//
+// Six timings, three scopes, one unit each, and nothing restated: the prompt
+// ladder is onnx-block-prefill (tflops), the 2048-context token is
+// onnx-block-decode (gbps) because that is the row onnx-tensor-bw compares
+// against, and every timing that is worth reading as a duration lands in
+// onnx-block-latency (us).  Splitting a ladder's headline rung into a scope of
+// its own is what to avoid here: the rung and the scope hold the same timing
+// in the same unit, so one of the two rows is pure repetition.
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
@@ -39,17 +47,18 @@ constexpr int64_t kFfnHidden = 5504;
 constexpr int64_t kPrefillSeq = 512;
 constexpr int64_t kDecodeKv   = 2048;
 
-// Context lengths for the scaling row.  Each is a separate graph with its own
-// cache baked in -- 16 MB at 2048, growing with the length -- so each costs a
-// session.  It stops at 8192 not because longer contexts are uninteresting
-// but because providers that compile ahead of time charge dearly for the
-// bigger graphs: Core ML needs the better part of a minute per session here.
+// Context lengths for the decode rows of onnx-block-latency.  Each is a
+// separate graph with its own cache baked in -- 16 MB at 2048, growing with
+// the length -- so each costs a session.  It stops at 8192 not because longer
+// contexts are uninteresting but because providers that compile ahead of time
+// charge dearly for the bigger graphs: Core ML needs the better part of a
+// minute per session here.
 // Rows are named by length, so a longer rung can be appended later without
 // changing what any existing one means.
 const int64_t kKvLadder[] = {512, 2048, 8192};
 
-// Prompt lengths for the saturation row.  512 is measured anyway for the
-// prefill rate, so only the other two cost a session.
+// Prompt lengths for onnx-block-prefill.  The 512 rung is the one to quote on
+// its own; the other two are what show where the device saturates.
 const int64_t kPromptLadder[] = {64, 512, 2048};
 
 // fp16 only.  Nobody serves an LLM in fp32, so a full-precision block would
@@ -266,8 +275,6 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       static const Scope kScopes[] = {
         {"onnx-block-prefill",     "Transformer block, prefill",           "tflops"},
         {"onnx-block-decode",      "Transformer block, decode",            "gbps"},
-        {"onnx-block-kv-scaling",  "Transformer block, decode vs context", "us"},
-        {"onnx-block-prefill-knee","Transformer block, prefill vs prompt", "tflops"},
         {"onnx-block-latency",     "Transformer block latency",            "us"},
       };
       for (const Scope &sc : kScopes)
@@ -368,16 +375,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     decode[kv] = pt;
   }
 
-  const double prefillUs = prefill.count(kPrefillSeq) ? prefill[kPrefillSeq].us : -1.0;
-  const double decodeUs  = decode.count(kDecodeKv)    ? decode[kDecodeKv].us    : -1.0;
-  const std::string prefillErr =
-      prefill.count(kPrefillSeq) ? prefill[kPrefillSeq].error : std::string();
-  const std::string decodeErr =
-      decode.count(kDecodeKv) ? decode[kDecodeKv].error : std::string();
-  const ResultStatus prefillStatus =
-      prefill.count(kPrefillSeq) ? prefill[kPrefillSeq].status : ResultStatus::Error;
-  const ResultStatus decodeStatus =
-      decode.count(kDecodeKv) ? decode[kDecodeKv].status : ResultStatus::Error;
+  const double decodeUs = decode.count(kDecodeKv) ? decode[kDecodeKv].us : -1.0;
 
   // ---- Prefill: compute-bound, so report the rate it sustains ------------
   {
@@ -385,24 +383,43 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {"onnx-block-prefill", "Transformer block, prefill", "tflops",
          Category::Ai,
          "Speed of one whole transformer layer while it is chewing through a "
-         "prompt -- 512 tokens in a single pass.  This is the phase that "
-         "decides how long you wait before the first word appears.  Unlike "
-         "the raw matmul rows, everything a real layer does is in here: "
-         "attention, softmax, the feed-forward network and the data "
-         "shuffling between them, so it is what a device actually delivers "
-         "rather than what its silicon could do in principle."});
+         "prompt, at three prompt lengths.  This is the phase that decides "
+         "how long you wait before the first word appears.  Unlike the raw "
+         "matmul rows, everything a real layer does is in here: attention, "
+         "softmax, the feed-forward network and the data shuffling between "
+         "them, so it is what a device actually delivers rather than what its "
+         "silicon could do in principle.  A short prompt cannot fill wide "
+         "hardware, so the rate climbs with the prompt and then flattens; "
+         "where it flattens is how much text has to arrive together before "
+         "batching requests stops helping."});
 
-    std::string note = std::string(geometry) +
-        "512 tokens at once, counting every multiply in the layer.";
-    if (prefillUs > 0.0)
-      test.emit("s512", (float)(blockFlops(kPrefillSeq, kPrefillSeq) * 1.0e6 /
-                                prefillUs / 1.0e12), note.c_str());
-    else
-      test.skip("s512", prefillStatus, prefillErr, note);
+    for (int64_t seq : kPromptLadder)
+    {
+      if (clpeak::cancelRequested())
+        break;
+
+      const std::string metric = "s" + std::to_string(seq);
+      const std::string note =
+          std::string(geometry) + "A prompt of " + std::to_string(seq) +
+          " tokens in one pass, counting every multiply in the layer.";
+
+      const Point &pt = prefill[seq];
+      if (pt.us > 0.0)
+        test.emit(metric,
+                  (float)(blockFlops(seq, seq) * 1.0e6 / pt.us / 1.0e12),
+                  note.c_str());
+      else
+        test.skip(metric, pt.status, pt.error, note);
+    }
     test.end();
   }
 
   // ---- Decode: memory-bound, so report how fast bytes move ---------------
+  //
+  // One rung, in GB/s, because this is the row that compares directly with
+  // onnx-tensor-bw: how much of the device's raw streaming rate a complete
+  // layer manages to keep.  How the cost grows with context is a latency
+  // question and is answered in the latency scope below.
   {
     auto test = currentDeviceScope->beginTest(
         {"onnx-block-decode", "Transformer block, decode", "gbps",
@@ -426,87 +443,20 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                 (float)((weightBytes + kvBytes) / (decodeUs * 1.0e-6) / 1.0e9),
                 note.c_str());
     else
-      test.skip("kv2048", decodeStatus, decodeErr, note);
-    test.end();
-  }
-
-  // ---- How decode cost grows with the context behind it ------------------
-  {
-    auto test = currentDeviceScope->beginTest(
-        {"onnx-block-kv-scaling", "Transformer block, decode vs context", "us",
-         Category::Ai,
-         "How long one layer takes to produce a token as the conversation "
-         "behind it gets longer.  Everything except attention costs the same "
-         "at every length -- the weights are the weights -- so whatever this "
-         "row adds as the context grows is attention, and it is the reason a "
-         "long chat answers more slowly than a short one.  A device whose "
-         "time barely moves is reading its cached context efficiently; one "
-         "that climbs steeply will feel fine in a demo and poor in use."});
-
-    for (int64_t kv : kKvLadder)
     {
-      if (clpeak::cancelRequested())
-        break;
-
-      const Point &pt = decode[kv];
-      const double us = pt.us;
-      const std::string  err = pt.error;
-      const ResultStatus st  = pt.status;
-
-      const std::string label = "kv" + std::to_string(kv);
-      const std::string note =
-          "One generated token with " + std::to_string(kv) +
-          " tokens of context behind it.";
-      if (us > 0.0)
-        test.emit(label, (float)us, note.c_str());
-      else
-      {
-        test.skip(label, st, err.empty() ? "run failed" : err, note);
-        break;   // longer contexts will not fare better
-      }
+      const Point &pt = decode[kDecodeKv];
+      test.skip("kv2048", pt.status, pt.error, note);
     }
     test.end();
   }
 
-  // ---- How much prompt it takes to saturate the device --------------------
-  {
-    auto test = currentDeviceScope->beginTest(
-        {"onnx-block-prefill-knee", "Transformer block, prefill vs prompt",
-         "tflops", Category::Ai,
-         "The same layer given prompts of different lengths.  A short prompt "
-         "cannot keep wide hardware busy -- there is not enough work in flight "
-         "to fill it -- so the rate climbs with the prompt until the device is "
-         "saturated and then flattens.  Where it flattens is how much text has "
-         "to arrive at once before this device is working at full stretch, "
-         "which is what decides whether batching requests together is worth "
-         "doing."});
-
-    for (int64_t seq : kPromptLadder)
-    {
-      if (clpeak::cancelRequested())
-        break;
-
-      const std::string metric = "s" + std::to_string(seq);
-      const std::string note =
-          std::string(geometry) + "A prompt of " + std::to_string(seq) +
-          " tokens in one pass.";
-
-      const Point &pt = prefill[seq];
-      const double us = pt.us;
-      const std::string  err = pt.error;
-      const ResultStatus status = pt.status;
-
-      if (us > 0.0)
-        test.emit(metric,
-                  (float)(blockFlops(seq, seq) * 1.0e6 / us / 1.0e12),
-                  note.c_str());
-      else
-        test.skip(metric, status, err, note);
-    }
-    test.end();
-  }
-
-  // ---- The same two timings as latency, the per-layer TTFT/TPOT analog ---
+  // ---- The same timings as latency, the per-layer TTFT/TPOT analog -------
+  //
+  // Both ladders in microseconds in one place: a prefill pass, and a decode
+  // token at each context length.  Everything except attention costs the same
+  // at every context length -- the weights are the weights -- so whatever the
+  // decode rows add as the context grows is attention, and it is why a long
+  // conversation answers more slowly than a short one.
   {
     auto test = currentDeviceScope->beginTest(
         {"onnx-block-latency", "Transformer block latency", "us",
@@ -515,21 +465,41 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
          "layer count for a floor on that model's time-to-first-token and "
          "per-token time on this device -- a 32-layer 7B model runs 32 of "
          "these back to back per token.  It is the honest way to check a "
-         "tokens-per-second claim without downloading anything."});
+         "tokens-per-second claim without downloading anything.  The decode "
+         "rows also show what a longer conversation costs: everything but "
+         "attention takes the same time at every context length, so whatever "
+         "they add as the context grows is attention.  A device whose time "
+         "barely moves is reading its cached context efficiently; one that "
+         "climbs steeply will feel fine in a demo and poor in use."});
 
-    if (prefillUs > 0.0)
-      test.emit("prefill_s512", (float)prefillUs,
-                "One pass over a 512-token prompt.");
-    else
-      test.skip("prefill_s512", prefillStatus, prefillErr,
-                "One pass over a 512-token prompt.");
+    {
+      const Point &pt = prefill[kPrefillSeq];
+      const char *note = "One pass over a 512-token prompt.";
+      if (pt.us > 0.0)
+        test.emit("prefill_s512", (float)pt.us, note);
+      else
+        test.skip("prefill_s512", pt.status, pt.error, note);
+    }
 
-    if (decodeUs > 0.0)
-      test.emit("decode_kv2048", (float)decodeUs,
-                "One generated token with 2048 tokens of context.");
-    else
-      test.skip("decode_kv2048", decodeStatus, decodeErr,
-                "One generated token with 2048 tokens of context.");
+    for (int64_t kv : kKvLadder)
+    {
+      if (clpeak::cancelRequested())
+        break;
+
+      const Point &pt = decode[kv];
+      const std::string label = "decode_kv" + std::to_string(kv);
+      const std::string note =
+          "One generated token with " + std::to_string(kv) +
+          " tokens of context behind it.";
+      if (pt.us > 0.0)
+        test.emit(label, (float)pt.us, note.c_str());
+      else
+      {
+        test.skip(label, pt.status, pt.error.empty() ? "run failed" : pt.error,
+                  note);
+        break;   // longer contexts will not fare better
+      }
+    }
     test.end();
   }
 

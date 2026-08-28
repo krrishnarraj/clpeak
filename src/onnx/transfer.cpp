@@ -48,14 +48,11 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             unsigned int warmup, bool forceIters, unsigned int forced)
 {
   Run r;
-  const bool bigIn  = (dir != OnnxTransfer::FromDevice);
-  const bool bigOut = (dir == OnnxTransfer::FromDevice ||
-                       dir == OnnxTransfer::RoundTrip);
-  // Both of the one-element graphs return a [1] vector rather than a scalar.
+  const bool bigOut = (dir == OnnxTransfer::RoundTrip);
 
   OrtSession *session = nullptr;
   {
-    std::string model = onnxTransferModel(dir, elems, std::string());
+    std::string model = onnxTransferModel(dir, elems);
 
     auto ses = onnxCreateSession(rt, ep, model);
     model.clear(); model.shrink_to_fit();
@@ -68,11 +65,11 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     session = ses.session;
   }
 
-  std::vector<uint16_t> inBuf((size_t)(bigIn ? elems : 1), floatToHalf(0.5f));
+  // Every graph here takes the whole tensor in; they differ in what comes
+  // back.  ToDevice and ComputeOnly gather one element, RoundTrip returns the
+  // lot.
+  std::vector<uint16_t> inBuf((size_t)elems, floatToHalf(0.5f));
   std::vector<uint16_t> outBuf((size_t)(bigOut ? elems : 1), 0);
-  // The trip out returns one element, not a scalar.
-  const bool outIsVector = (dir == OnnxTransfer::ToDevice ||
-                            dir == OnnxTransfer::ComputeOnly);
 
   OrtMemoryInfo *mi = nullptr;
   OrtValue *inVal = nullptr, *outVal = nullptr;
@@ -81,20 +78,17 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const int64_t big[1] = {elems};
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, inBuf.data(), inBuf.size() * 2, bigIn ? big : nullptr,
-        bigIn ? 1 : 0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
+        mi, inBuf.data(), inBuf.size() * 2, big, 1,
+        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
   const int64_t one[1] = {1};
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, outBuf.data(), outBuf.size() * 2,
-        bigOut ? big : (outIsVector ? one : nullptr),
-        (bigOut || outIsVector) ? 1 : 0,
+        mi, outBuf.data(), outBuf.size() * 2, bigOut ? big : one, 1,
         ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &outVal);
   if (mi) rt.api->ReleaseMemoryInfo(mi);
 
-  const char *inName  = (dir == OnnxTransfer::FromDevice) ? "S" : "X";
   auto run = [&](unsigned int n) -> double {
-    const char *ins[]  = {inName};
+    static const char *ins[]  = {"X"};
     static const char *outs[] = {"Y"};
     auto a = std::chrono::steady_clock::now();
     for (unsigned int i = 0; i < n; i++)
@@ -288,20 +282,6 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     test.skip("roundtrip", ResultStatus::Error, "no usable size",
               "Both directions, which is what an offloaded operation pays.");
   }
-
-  // The return journey is deliberately not reported.
-  //
-  // Isolating it needs a third graph -- everything the round trip does except
-  // shipping the result back -- because subtracting the trip out would leave
-  // the elementwise pass in the answer, and that pass is not always cheap:
-  // the ANE applies a pointwise operation at about a seventh of the rate it
-  // reads memory (see onnx-activation), which made a naive difference read
-  // four times too slow.  That third graph turned out to cost more than it is
-  // worth: Core ML compiles ahead of time and took over twenty minutes on it.
-  //
-  // Two honest rows beat three with one wrong.  Where the return trip matters,
-  // the round trip minus the provider's own elementwise rate from
-  // onnx-activation gives it, on the same hardware, for free.
 
   // ---- Trip back, by difference ------------------------------------------
   //

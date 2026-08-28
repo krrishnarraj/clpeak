@@ -7,6 +7,13 @@
 // A TOPS figure without this is half a number: int8 is fast because it threw
 // precision away, and how much it threw away is not visible from the speed.
 //
+// The int8 row carries a second fact of its own: whether the provider fused a
+// quantized matmul at all.  A provider that declined dequantizes the operands
+// and multiplies in floating point, and the error that comes back is then the
+// quantization scheme's rather than the integer unit's -- the same distinction
+// onnx-gemm-int refuses to publish a rate without, and the two tests can
+// disagree because they choose the activation signedness on different grounds.
+//
 // The fp32 row does a second job.  clpeak's CPU-fallback guard works at
 // ORT's partitioning level, so it cannot see an EP that accepts a node and
 // then quietly computes it at lower precision internally -- Core ML running
@@ -20,6 +27,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace
@@ -103,17 +111,22 @@ std::vector<float> widen(const std::string &raw, int dtype, int64_t count,
 }
 
 // Run one already-built model on one EP, returning the raw output bytes.
-// `error` is set (and the vector left empty) on any failure.
+// `error` is set (and the vector left empty) on any failure.  When `ops` is
+// given the session is profiled and the kernels the provider actually ran are
+// written to it.
 std::vector<uint8_t> runOnce(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                              const std::string &modelBytes,
                              const char *inName, const char *outName,
                              const void *inData, size_t inBytes,
                              int ioDtype, int64_t rows, int64_t cols,
-                             std::string &error)
+                             std::string &error,
+                             std::vector<std::string> *ops = nullptr)
 {
   std::vector<uint8_t> out;
 
-  auto ses = onnxCreateSession(rt, ep, modelBytes);
+  auto ses = onnxCreateSession(rt, ep, modelBytes,
+                               /*keepConstantsUnfolded=*/false,
+                               /*profile=*/ops != nullptr);
   if (!ses.session)
   {
     error = ses.error;
@@ -152,6 +165,8 @@ std::vector<uint8_t> runOnce(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     error = onnxStatusText(rt, st);
     out.clear();
   }
+  if (ops && !out.empty())
+    *ops = onnxCollectExecutedOps(rt, ses.session);
 
   if (inVal)  rt.api->ReleaseValue(inVal);
   if (outVal) rt.api->ReleaseValue(outVal);
@@ -195,7 +210,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "the fp32 answer."},
     {ONNX_DT_INT8, true, "int8_qdq",
      "What quantization costs, end to end -- quantizing the inputs, the "
-     "integer matmul, and re-quantizing the result."},
+     "matmul, and re-quantizing the result.  Whether the multiply itself ran "
+     "in integers is a separate question, and this row says which it was."},
   };
 
   auto test = currentDeviceScope->beginTest(
@@ -241,6 +257,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int aDtype = v.dtype;
     std::string aRaw, bRaw, err;
     std::vector<uint8_t> raw;
+    std::vector<std::string> ranOps;
     const char *inName = "A", *outName = "C";
 
     if (v.qdq)
@@ -255,8 +272,9 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         inName  = "A_q";
         outName = "C_q";
         err.clear();
+        ranOps.clear();
         raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
-                      aDtype, kDim, kDim, err);
+                      aDtype, kDim, kDim, err, &ranOps);
         if (!raw.empty())
           break;
       }
@@ -270,9 +288,34 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     aDtype, kDim, kDim, err);
     }
     if (v.qdq)
+    {
       o.description += (aDtype == ONNX_DT_UINT8)
                            ? "  Measured with unsigned activations."
                            : "  Measured with signed activations.";
+      // Whether the provider fused a quantized matmul decides what this row
+      // is the error *of*.  onnx-gemm-int refuses to publish a rate when the
+      // fusion did not happen, because a float multiply is not an int8 rate;
+      // the error is still worth reporting either way -- quantizing and
+      // dequantizing costs precision whatever the multiply ran as -- but it
+      // must not be read as the cost of integer arithmetic when no integer
+      // arithmetic took place.  The scheme here is chosen by which one runs
+      // rather than which one fuses (see above), so the two tests can and do
+      // disagree on the same provider.
+      if (!raw.empty() && !ranOps.empty() && !onnxOpsRanIntegerMatMul(ranOps))
+      {
+        std::string joined;
+        for (const auto &op : ranOps)
+          joined += (joined.empty() ? "" : ", ") + op;
+        o.description +=
+            "  This provider did not fuse a quantized matmul: it dequantized "
+            "the operands and multiplied in floating point (ran: " + joined +
+            "), so this is what the quantization scheme costs rather than "
+            "what integer arithmetic costs on this hardware.";
+        CLPEAK_VLOG("onnx-numeric-error[%s/int8_qdq]: no fused integer "
+                    "matmul, executed %s\n", ep.providerKey.c_str(),
+                    joined.c_str());
+      }
+    }
 
     if (raw.empty())
     {

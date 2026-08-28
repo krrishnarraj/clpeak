@@ -155,20 +155,24 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
                                         const std::string &xRaw);
 
 // Which direction a transfer model exercises.
-enum class OnnxTransfer { ToDevice, FromDevice, RoundTrip, ComputeOnly };
+enum class OnnxTransfer { ToDevice, RoundTrip, ComputeOnly };
 
 // Models that deliberately do the opposite of the throughput ones: they push
 // a large tensor across the host boundary and compute almost nothing, so what
-// is timed is the handover.
+// is timed is the handover.  All three take the whole tensor in; they differ
+// in what comes back.
 //
-//   ToDevice     large input, reduced to one value -- the trip in
-//   FromDevice   scalar input, a resident constant scaled out -- the trip back
+//   ToDevice     large in, one gathered element out -- the trip in
 //   RoundTrip    large in, large out
-//   ComputeOnly  large in, same operation as RoundTrip, reduced to one value
-//                -- everything the round trip does except ship the result
+//   ComputeOnly  large in, same operation as RoundTrip, one gathered element
+//                out -- everything the round trip does except ship the result
 //                back, so the difference between them is the trip back
-std::string onnxTransferModel(OnnxTransfer dir, int64_t elems,
-                              const std::string &constRaw);
+//
+// One element is *gathered*, never reduced: a reduction reads the whole
+// tensor on the device, and that pass lands in whatever the test was trying
+// to isolate.  A graph input is materialised in full before any kernel sees
+// it, so gathering still forces the transfer.
+std::string onnxTransferModel(OnnxTransfer dir, int64_t elems);
 
 // ---------------------------------------------------------------------------
 // Transformer decoder block

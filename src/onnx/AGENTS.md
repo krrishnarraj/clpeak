@@ -36,10 +36,10 @@ backend.
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
-| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s, each net of a reference graph that reads and reduces the same tensor with no operation applied |
+| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off two timings: `onnx-block-prefill` (tflops), `onnx-block-decode` (gbps), `onnx-block-latency` (us) |
+| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off six timings, one unit each: `onnx-block-prefill` (tflops, prompt ladder), `onnx-block-decode` (gbps), `onnx-block-latency` (us, prefill pass + context ladder) |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (us) |
 
@@ -224,6 +224,17 @@ quantized matmul — it dequantizes and multiplies in floating point. One card,
 one graph, and a five-fold difference that depends entirely on which runtime
 was asked.
 
+The error row does not vanish when the fusion does, and it must not be read as
+if it had. `numeric_error.cpp` profiles its quantized run the same way
+`gemm.cpp` does and says in the row's own description when the provider
+dequantized and multiplied in floating point, because the number is then what
+the quantization scheme costs rather than what this hardware's integer unit
+costs. The two tests can legitimately disagree on one provider: the throughput
+row picks the activation signedness by which scheme *fuses* and reports
+nothing when neither does, while the error row picks by which scheme *runs*,
+deliberately, so that x86's unsigned kernel is the one measured (see the Zen 2
+row below).
+
 The Zen 2 int8 row is the other half of the argument for measuring accuracy
 at all. That CPU fuses the quantized matmul happily and runs it at 1.3 TOPS —
 a perfectly respectable throughput row — while losing **18%** of the answer,
@@ -260,8 +271,8 @@ decode (1 token, 2048 of context) is memory-bound and reports the GB/s of
 weights plus KV cache that must move per token. Both come out of the whole
 stack — attention, softmax, SwiGLU, the layout shuffles between them — so
 they are what a device delivers, not what its silicon could do in principle.
-The latency scope restates the same two timings so they can be multiplied by
-a model's layer count to check a tokens/second claim.
+The latency scope carries both ladders in microseconds, so any of them can be
+multiplied by a model's layer count to check a tokens/second claim.
 
 Geometry is fixed in `block.cpp` (2048-wide, 16 heads, SwiGLU 5504, 50.6M
 parameters) and deliberately *not* 7B-shaped: the weights must overflow every
@@ -272,7 +283,7 @@ block would measure a configuration that does not exist.
 
 M1 Pro reference: prefill 4.8 TFLOPS against an 8.8 TFLOPS raw fp16 MatMul
 peak, so a complete layer retains ~55% of the pure-matmul rate; decode
-48 GB/s; 2.4 ms per layer per token. The block still passes its activations
+48 GB/s; 2.5 ms per layer per token. The block still passes its activations
 across the host boundary each run (2 MB in, 2 MB out), so on a discrete GPU
 its numbers carry a transfer component the GEMM rows no longer do — worth
 fixing the same way if the two are ever compared closely.
@@ -348,8 +359,9 @@ actual output values, so it needs the real result rather than a reduction.
 A number tied to a fixed problem size has an expiry date. Whatever size looks
 generous today will one day be too small to saturate anything, it gets raised,
 and every result recorded before that day silently becomes a different
-measurement under the same name. Two tests here would have hit that, and both
-now search instead:
+measurement under the same name. Three tests here would have hit that. Two
+search for the asymptote; the third publishes its whole ladder and names each
+rung for its working set, which does not expire either:
 
 - **`onnx-gemm`** doubles from 1024 until the rate stops improving, and reports
   the peak with the size that produced it. "The best this device can do at any
@@ -376,6 +388,26 @@ now search instead:
   streams this at 2.2 GB/s at every size, where 1.28 gave a clean
   232 / 53 / 20 ladder on the same machine. Stopping on flatness dropped the
   only reading taken at a size no cache could hold.
+
+- **`onnx-activation`** publishes every rung, at `onnx-tensor-bw`'s three
+  working-set sizes, and picks nothing. Both single-number rules were tried and
+  neither is honest. Its reference graph cannot be made cheap — something has to
+  consume the result or the optimiser deletes the operation under test — and on
+  TensorRT the reference *scales with the tensor* (175 / 321 / 612 µs at 8 / 16 /
+  32 MB), so the **fastest** rung is whichever one the subtraction over-credited
+  most: that card's SiLU ladder reads 361 / 202 / 128 GB/s and the 361 comes from
+  the rung where 79% of the time was subtracted away. The **largest** rung is no
+  better, because the strike rule climbs one rung past the peak on purpose to
+  detect the fall, so the last rung measured is usually the collapsed one — and
+  whether it is reached at all turns on jitter at the rung before. On an M1 Pro
+  that made SiLU alternate between 12.0 and 4.1 GB/s run to run, off a 0.3%
+  difference in whether 4096 rows counted as an improvement over 2048.
+
+  A fixed ladder has no selection to be unstable. It also costs less than the
+  sweep it replaced (nine measurements plus three shared references, always) and
+  it is what makes the comparison this test exists for a division rather than an
+  argument: `silu_32mb` over `onnx-tensor-bw`'s `32mb` is one number about one
+  working set.
 
 **Every byte ceiling comes from `clpeak::memoryBudget()`** (`common.h`), a
 fraction of physical RAM rather than a constant. The difference between a
@@ -407,24 +439,26 @@ than because it was convenient, and it is meant to stay fixed forever:
 the cost of getting data to the provider and back. It decides whether
 offloading is worth doing at all, and no vendor quotes it.
 
-Two rows, both honest, where three were attempted:
+Three rows:
 
-- `h2d` sends a tensor and returns one value, so nearly all of it is the trip
-  out. Swept, since the rate climbs with size until the link saturates.
+- `h2d` sends a tensor and gathers one element back, so nearly all of it is
+  the trip out. Swept, since the rate climbs with size until the link
+  saturates.
 - `roundtrip` sends a tensor, squares it and returns the result — the real
   cost of offloading a trivial operation. Measured once at the smallest rung,
   never swept: a link saturates rather than improving, and the compile cost
   does not scale gently (see below).
+- `d2h` is the round trip minus a third graph that does everything the round
+  trip does except ship the result back.
 
-The return trip alone is **not** reported. Subtracting `h2d` from `roundtrip`
-leaves the elementwise pass in the answer, and that pass is not always cheap —
-the ANE applies a pointwise operation at roughly a seventh of the rate it
-reads memory, which made a naive difference read four times too slow. The
-correct isolation needs a third graph doing everything the round trip does
-except shipping the result back; that graph took Core ML over twenty minutes
-to compile, so it was dropped. Where the return trip matters it can be
-recovered from `roundtrip` and the provider's own `onnx-activation` rate, on
-the same hardware, for nothing.
+**The return trip must be isolated against that third graph, not against
+`h2d`.** Subtracting `h2d` leaves the elementwise pass in the answer, and that
+pass is not always cheap — the ANE applies a pointwise operation at roughly a
+seventh of the rate it reads memory, which made a naive difference read four
+times too slow. The third graph is only affordable because it gathers one
+element rather than reducing: a reduction reads the whole result on the
+device, and that extra pass would be subtracted out along with the journey
+home.
 
 **Ahead-of-time compilation is the hidden cost in this backend.** Core ML
 compiles a 16 MB elementwise graph in seconds and a 64 MB one in more than
@@ -484,22 +518,38 @@ Where a graph needs a small output and the tensor itself is the measurement,
 **`Gather` one element** instead. A graph input is materialised in full before
 any kernel sees it, so the transfer still happens; only the reading stops.
 
-## How decode cost grows with context
+## Three scopes, six timings, nothing said twice
 
-`onnx-block-kv-scaling` runs the decode block at 512, 2048 and 8192 tokens of
-context. Everything but attention costs the same at every length — the
-weights are the weights — so what the row adds as context grows is attention,
-and it is why a long conversation answers more slowly than a short one. M1
-Pro CPU EP: 14.0 ms, 16.8 ms, 25.8 ms per layer, so attention goes from
-roughly a tenth of the layer to half of it.
+`onnx-block` measures two ladders — prompt lengths 64/512/2048 for prefill,
+context lengths 512/2048/8192 for decode — and every row comes out of those
+six timings. A scope carries one unit, so the split follows the unit and
+nothing else:
 
-`onnx-block-prefill-knee` is the compute-bound counterpart: the same layer
-given 64, 512 and 2048 tokens at once. A short prompt cannot keep wide
-hardware busy, so the rate climbs until the device saturates and then
-flattens, and where it flattens says how much text must arrive together
-before batching stops helping. The 512 rung reuses the prefill timing already
-taken. A CPU is nearly flat across the ladder — ten cores need very little
-work in flight — where wide hardware should climb steeply.
+| scope | unit | rows |
+|---|---|---|
+| `onnx-block-prefill` | tflops | `s64`, `s512`, `s2048` |
+| `onnx-block-decode` | gbps | `kv2048` |
+| `onnx-block-latency` | us | `prefill_s512`, `decode_kv512`, `decode_kv2048`, `decode_kv8192` |
+
+**A ladder's headline rung does not also get a scope of its own.** A scope for
+prefill's 512 rung, or for decode's 2048 rung in microseconds, republishes a
+row verbatim — same timing, same unit, same value, printed twice per device —
+and a reader cannot tell a repetition from an independent confirmation. Where a
+second scope is genuinely earned it is because the unit differs and the
+conversion carries meaning: `onnx-block-decode` exists in GB/s because that is
+what compares against `onnx-tensor-bw`, not because decode deserves a header.
+
+The decode rows are why a long conversation answers more slowly than a short
+one. Everything but attention costs the same at every length — the weights are
+the weights — so what they add as context grows is attention. M1 Pro CPU EP:
+8.3 ms, 10.9 ms, 19.6 ms per layer, so attention goes from roughly a tenth of
+the layer to three fifths of it.
+
+The prefill rows are the compute-bound counterpart. A short prompt cannot keep
+wide hardware busy, so the rate climbs until the device saturates and then
+flattens, and where it flattens says how much text must arrive together before
+batching stops helping. A CPU is nearly flat across the ladder — ten cores need
+very little work in flight — where wide hardware should climb steeply.
 
 The KV ladder stops at 8192 because each rung is a separate graph with its own
 cache baked in and therefore its own session, and the ahead-of-time providers
@@ -512,27 +562,35 @@ A transformer layer is mostly matmul by arithmetic and mostly everything else
 by op count. `onnx-activation` measures those others — softmax,
 LayerNorm, the feed-forward gate. None does meaningful arithmetic, so their
 ceiling is memory bandwidth and their rate is reported as the bandwidth they
-achieve, directly comparable with `onnx-tensor-bw` above.
+achieve — at `onnx-tensor-bw`'s own three working-set sizes, so the two
+ladders divide row for row rather than being compared by eye.
 
-M1 Pro, CoreML EP, against 50–90 GB/s of resident-tensor streaming:
+M1 Pro, CoreML EP, each rung beside `onnx-tensor-bw`'s rung of the same name
+(GB/s, with the share of streaming in brackets):
 
-| | rate | share of streaming |
-|---|---|---|
-| softmax | 30 GB/s | ~40% |
-| SiLU | 12 GB/s | ~14% |
-| LayerNorm | 13 GB/s | ~15% |
+| | 8mb | 32mb | 128mb |
+|---|---|---|---|
+| `onnx-tensor-bw` | 88.8 | 45.3 | 50.7 |
+| softmax | 30.8 (35%) | 12.4 (27%) | 15.2 (30%) |
+| LayerNorm | 12.6 (14%) | 10.7 (24%) | 11.7 (23%) |
+| SiLU | 11.1 (13%) | 12.3 (27%) | **4.1 (8%)** |
 
-The ANE reads weights four to seven times faster than it can apply a
-pointwise function to them. Hardware shaped for matrix multiplication has no
-particular path for these, which is why a layer can spend a surprising share
-of its time on the parts that look free in a FLOP count — and why these are
-the operations a provider most often hands back to the CPU.
+The ANE applies a pointwise function at roughly a quarter of the rate it
+streams weights, and at 128 MB SiLU collapses to a twelfth of it. Hardware
+shaped for matrix multiplication has no particular path for these, which is why
+a layer can spend a surprising share of its time on the parts that look free in
+a FLOP count — and why these are the operations a provider most often hands back
+to the CPU. The SiLU cliff reproduces run to run — 4.1, 4.1, 3.7, 4.3 GB/s over
+four runs — where any single reported number would have either hidden it or,
+worse, published it as the operation's rate. The 8 MB and 32 MB rungs hold to
+a few percent between runs; the 128 MB one moves by up to a fifth on a 16 GB
+machine, since it is a large allocation competing with everything else.
 
-Each rate is net of a reference graph that reads and reduces the same
-constant with no operation applied, so what is left is the operation rather
-than the scaffolding. On providers where the reduction is itself expensive
-the subtraction does heavy lifting (on the CPU EP the reference is most of
-the measured time), which makes those rows noisier than the accelerator ones.
+How much the subtraction matters is entirely a property of the provider and it
+spans the whole range: negligible on CoreML, whose reference costs a flat
+44–46 µs at every size (under 1% of the measurement), half to three quarters of
+the measurement on the CPU EP, and on TensorRT proportional to the tensor. On
+the CPU EP the rows are correspondingly noisier than the accelerator ones.
 
 ## Why convolution is measured separately
 
@@ -608,19 +666,19 @@ should be fastest. The floor probe carries a little transfer of its own on
 slow providers, but only ~128 KB worth, so it over-corrects by under 2% of
 the smallest rung.
 
-The 128 MB rung reads ~50 GB/s on the M1 Pro and `onnx-block-decode` reads
-49 GB/s from a completely different graph. Two independent tests landing
+The 128 MB rung reads ~51 GB/s on the M1 Pro and `onnx-block-decode` reads
+47 GB/s from a completely different graph. Two independent tests landing
 together is the best evidence available here that both measure what they
 claim.
 
 ## Dispatch overhead is why NPUs lose small work
 
-M1 Pro, CoreML EP vs CPU EP: an empty dispatch costs **46 µs against 2 µs**,
-and session creation **32 ms against 0.5 ms** — the Core ML figure is a
+M1 Pro, CoreML EP vs CPU EP: an empty dispatch costs **53 µs against 2 µs**,
+and session creation **64 ms against 0.6 ms** — the Core ML figure is a
 compiler run, not bookkeeping. The consequence is visible in the same test:
-a 256-cube matmul takes 64 µs on the ANE, of which ~46 µs is the ask, so it
-lands at ~0.5 TFLOPS against a 6.2 TFLOPS peak. The CPU EP needs 430 µs for
-the same matmul despite its 20x cheaper dispatch. That crossover — cheap to
+a 256-cube matmul takes 68 µs on the ANE, of which ~53 µs is the ask, so it
+lands at ~0.5 TFLOPS against an 8.5 TFLOPS peak. The CPU EP needs 465 µs for
+the same matmul despite its 25x cheaper dispatch. That crossover — cheap to
 ask but slow to compute, versus expensive to ask but fast once asked — is
 the whole reason a device advertising tens of TOPS can still lose, and no
 throughput row in this backend can show it.

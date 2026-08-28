@@ -16,6 +16,28 @@
 // Each rate is measured against a reference graph that reads and reduces the
 // same constant with no operation applied.  Subtracting it leaves the
 // operation's own cost rather than the cost of the scaffolding around it.
+// The reference depends only on the tensor size, so it is timed once per size
+// and shared by all three operations rather than re-timed for each.
+//
+// Every rung is reported, at the same three working-set sizes onnx-tensor-bw
+// uses, so the two ladders divide row for row: silu_32mb against that test's
+// 32mb rung is "what share of its streaming rate this provider keeps when it
+// has to apply a function to the data".
+//
+// Reporting a single number per operation was tried and cannot be made
+// honest, because there are two real regimes and no rule picks between them
+// without lying about one.  Taking the *fastest* rung reports whichever one
+// the subtraction over-credited most -- the reference cannot be made cheap
+// (something must consume the result or the optimiser deletes the operation
+// under test), and on TensorRT its cost scales with the tensor, so at 8 MB
+// 79% of the time is reference and the rung reads 2.8x the next one down.
+// Taking the *largest* rung instead reports whichever cliff the ladder
+// happened to fall off: the stop rule climbs one rung past the peak on
+// purpose, so the last rung measured is usually the collapsed one, and
+// whether it is taken at all turns on a fraction of a percent of jitter at
+// the rung before.  On this M1 Pro that made SiLU alternate between 12.0 and
+// 4.1 GB/s run to run.  Both cliffs are real and both regimes are worth
+// knowing; a ladder says so and a single number cannot.
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
@@ -23,21 +45,36 @@
 
 #include <chrono>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
 namespace
 {
 
-// A transformer-shaped tensor: rows of model-width vectors.  The row count
-// doubles until the rate stops improving, so the reported figure is the
-// operation's best and does not depend on a size chosen today.
-constexpr int64_t kCols    = 4096;
-constexpr int64_t kMinRows = 1024;            // 8 MB
+// A transformer-shaped tensor: rows of model-width vectors.  The sizes are
+// fixed and named for their working set rather than swept, because the point
+// of the row is the comparison against onnx-tensor-bw's rung of the same name
+// -- a sweep that stopped in a different place per operation would compare
+// two different working sets against each other.  They are the same three
+// sizes that test always measures, for the same reason it always measures
+// them: 8 MB sits in fast local memory nearly everywhere, 128 MB does not.
+constexpr int64_t kCols = 4096;
+
+struct Size
+{
+  int64_t     rows;        // bytes = rows * kCols * 2
+  const char *label;
+};
+
+const Size kSizes[] = {
+  {1024,  "8mb"},
+  {4096,  "32mb"},
+  {16384, "128mb"},
+};
+
 static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
 
-constexpr double kImproveFactor = 1.03;
-constexpr int    kMaxStrikes    = 2;
 constexpr unsigned int kSizeBudgetUs = 1000000;
 
 struct Variant
@@ -174,39 +211,62 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "resident-tensor rows, it shows how much of a layer goes on the cheap "
        "parts: hardware built for matrix multiplication often runs these at a "
        "small fraction of its streaming speed, and they are also the "
-       "operations a provider is most likely to hand back to the CPU."});
+       "operations a provider is most likely to hand back to the CPU.  Each "
+       "row is net of a reference graph that reads the same tensor and "
+       "applies nothing, and is measured at the same three working-set sizes "
+       "as the resident-tensor rows, so the two divide row for row.  Where a "
+       "row drops sharply against the one above it, the activations have "
+       "outgrown the memory the provider keeps close."});
+
+  // The reference: same tensor, same read and reduction, no operation.  It
+  // depends only on the size, so it is measured once per size and reused by
+  // every variant -- three variants over one ladder otherwise pay for the
+  // identical session three times over, and on providers that compile ahead
+  // of time the session is the expensive part.
+  std::map<int64_t, Run> floors;
+  auto floorFor = [&](int64_t rows) -> const Run & {
+    auto it = floors.find(rows);
+    if (it == floors.end())
+      it = floors.emplace(rows,
+                          measure(rt, ep, OnnxActivation::None, rows,
+                                  warmupCount, forceIters, specifiedIters))
+               .first;
+    return it->second;
+  };
 
   for (const Variant &v : kVariants)
   {
     if (clpeak::cancelRequested())
       break;
 
-    double       best = 0.0;
-    int          strikes = 0;
-    std::string  firstErr;
-    ResultStatus errStatus = ResultStatus::Unsupported;
-
-    for (int64_t rows = kMinRows;; rows *= 2)
+    for (const Size &sz : kSizes)
     {
       if (clpeak::cancelRequested())
         break;
-      const uint64_t bytes = (uint64_t)rows * kCols * 2ull;
-      if (bytes > maxTensorBytes())
-        break;
 
-      // The reference: same tensor, same read and reduction, no operation.
-      Run floor = measure(rt, ep, OnnxActivation::None, rows, warmupCount,
-                          forceIters, specifiedIters);
-      Run full  = measure(rt, ep, v.act, rows, warmupCount, forceIters,
-                          specifiedIters);
+      const uint64_t bytes = (uint64_t)sz.rows * kCols * 2ull;
+      const std::string metric = std::string(v.label) + "_" + sz.label;
+      const std::string note =
+          std::string(sz.label) + " of activations -- " + v.note +
+          "  Read against onnx-tensor-bw's rung of the same name: the ratio is "
+          "how much of its streaming rate this provider keeps once it has to "
+          "apply a function to the data.";
+
+      if (bytes > maxTensorBytes())
+      {
+        test.skip(metric, ResultStatus::Unsupported,
+                  "larger than this machine's memory budget allows", note);
+        continue;
+      }
+
+      const Run &floor = floorFor(sz.rows);
+      Run full = measure(rt, ep, v.act, sz.rows, warmupCount, forceIters,
+                         specifiedIters);
       if (full.us <= 0.0)
       {
-        if (firstErr.empty())
-        {
-          firstErr  = full.error.empty() ? "run failed" : full.error;
-          errStatus = full.status;
-        }
-        break;
+        test.skip(metric, full.status,
+                  full.error.empty() ? "run failed" : full.error, note);
+        continue;
       }
 
       // The operation has to account for a real share of the time, not one
@@ -219,39 +279,23 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const double netUs   = full.us - floorUs;
       if (netUs <= 0.1 * full.us)
       {
-        CLPEAK_VLOG("onnx-activation[%s/%s]: %lld rows lost in the noise "
+        CLPEAK_VLOG("onnx-activation[%s/%s]: %s lost in the noise "
                     "(%.0f us against a %.0f us reference)\n",
-                    ep.providerKey.c_str(), v.label, (long long)rows,
+                    ep.providerKey.c_str(), v.label, sz.label,
                     full.us, floorUs);
+        test.skip(metric, ResultStatus::Error,
+                  "too close to the reference graph it is measured against",
+                  note);
         continue;
       }
 
       // One pass in, one pass out.
       const double gbps = 2.0 * (double)bytes / (netUs * 1.0e-6) / 1.0e9;
-      CLPEAK_VLOG("onnx-activation[%s/%s]: %lld rows -> %.1f GB/s (%.0f us, "
+      CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n", ep.providerKey.c_str(), v.label,
-                  (long long)rows, gbps, full.us, floor.us);
-
-      if (gbps > best * kImproveFactor)
-      {
-        strikes = 0;
-        best = gbps;
-      }
-      else
-      {
-        if (gbps > best) best = gbps;
-        if (++strikes >= kMaxStrikes)
-          break;
-      }
+                  sz.label, gbps, full.us, floorUs);
+      test.emit(metric, (float)gbps, note.c_str());
     }
-
-    logger::EmitOptions o;
-    o.description = v.note;
-    if (best > 0.0)
-      test.emit(v.label, (float)best, o);
-    else
-      test.skip(v.label, errStatus,
-                firstErr.empty() ? "unsupported" : firstErr, o.description);
   }
 
   test.end();
