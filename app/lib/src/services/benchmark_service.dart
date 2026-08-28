@@ -11,6 +11,7 @@ import '../model/run_config.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
 import 'run_history_store.dart';
+import 'screen_wake.dart';
 
 enum BenchmarkState { idle, running, cancelling, finished }
 
@@ -96,6 +97,7 @@ class BenchmarkService extends ChangeNotifier {
   @override
   void dispose() {
     _stopLiveTicker();
+    ScreenWake.release();
     super.dispose();
   }
 
@@ -131,6 +133,9 @@ class BenchmarkService extends ChangeNotifier {
     _state = BenchmarkState.running;
     notifyListeners();
     _startLiveTicker();
+    // Held until _finalize(), which the run's event stream always reaches --
+    // it closes on the native `done` event and on a failed launch alike.
+    ScreenWake.acquire();
 
     final xmlPath = await _history.xmlPathFor(_runId!);
     final args = [..._config.toArgs(_catalog), '--xml-file', xmlPath];
@@ -200,6 +205,7 @@ class BenchmarkService extends ChangeNotifier {
 
   Future<void> _finalize() async {
     _stopLiveTicker(); // back to immediate notifications
+    ScreenWake.release();
     final startedAt = _startedAt ?? DateTime.now();
     if (!_document.isEmpty) {
       final summary = RunSummary.fromDocument(

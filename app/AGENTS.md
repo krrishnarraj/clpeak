@@ -60,6 +60,10 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   properties reach a reopened run through the file's `devices` block, not the
   event stream — see `RunDocument.fromEntriesJson`.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
+- Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
+  (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
+  Android/iOS only — a sleeping display stops the frames the run was budgeted
+  for, which moves the scores of everything measured after it)
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
 - Colours / type / geometry? → `lib/src/theme/clpeak_theme.dart` (`CP.of(context)`

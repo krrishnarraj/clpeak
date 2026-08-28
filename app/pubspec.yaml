@@ -19,6 +19,7 @@ dependencies:
   file_selector: ^1.0.0
   shared_preferences: ^2.3.0
   url_launcher: ^6.3.0
+  wakelock_plus: ^1.7.0
 
 dev_dependencies:
   flutter_test:
