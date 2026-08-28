@@ -154,6 +154,25 @@ void clpeak_free_string(char *s)
     std::free(s);
 }
 
+char *clpeak_copy_onnx_status_json(void)
+{
+#ifdef ENABLE_ONNX
+    const OnnxRuntimeStatus st = onnxRuntimeStatus();
+    std::string json = "{\"available\":";
+    json += st.available ? "true" : "false";
+    json += ",\"linkedIn\":";
+    json += st.linkedIn ? "true" : "false";
+    json += ",\"version\":\"" + jsonEscape(st.version) + "\"";
+    json += ",\"path\":\"" + jsonEscape(st.path) + "\"";
+    json += ",\"error\":\"" + jsonEscape(st.error) + "\"}";
+    return copyString(json);
+#else
+    return copyString(
+        "{\"available\":false,\"linkedIn\":false,\"version\":\"\","
+        "\"path\":\"\",\"error\":\"ONNX backend not built in\"}");
+#endif
+}
+
 void clpeak_set_onnx_library(const char *path)
 {
 #ifdef ENABLE_ONNX

@@ -3,5 +3,7 @@ build/
 .claude/
 .opencode/
 TODO
-# iOS native artifacts staged by tool/build_ios_native.sh
+# iOS native artifacts staged by tool/build_ios_native.sh, and its build tree
+# (which also caches the ~61 MB ONNX Runtime pod archive)
 app/ios/clpeak_native/
+build-ios/

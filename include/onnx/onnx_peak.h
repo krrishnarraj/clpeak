@@ -79,5 +79,20 @@ void onnxSetLibraryOverride(const std::string &path);
 // Details: src/onnx/onnx_runtime.h.
 std::string onnxLoadDiagnostic();
 
+// What a settings screen needs to say about the runtime in one place: which
+// one is loaded and from where, or why none is.  The device catalog carries
+// the version and the provider list already, but not the reason a chosen
+// library was refused -- and that reason is the whole feedback loop for
+// picking one.
+struct OnnxRuntimeStatus
+{
+  bool        available = false;
+  bool        linkedIn  = false;  // built in rather than loaded (iOS)
+  std::string version;            // "1.29.0"
+  std::string path;               // what was loaded; empty = found by name
+  std::string error;              // populated only when !available
+};
+OnnxRuntimeStatus onnxRuntimeStatus();
+
 #endif // ENABLE_ONNX
 #endif // ONNX_PEAK_H

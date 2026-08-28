@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/benchmark_service.dart';
-import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';
 import '../app.dart';
 import '../common/kit.dart';
@@ -17,7 +16,6 @@ class AboutScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final service = context.watch<BenchmarkService>();
-    final settings = context.watch<SettingsService>();
 
     return Scaffold(
       body: SafeArea(
@@ -56,27 +54,6 @@ class AboutScreen extends StatelessWidget {
                           style: t.body,
                         ),
                       ],
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  const CSection(label: 'Settings'),
-                  const SizedBox(height: 10),
-                  CPanel(
-                    child: CRow(
-                      rule: false,
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                      child: Row(
-                        children: [
-                          Icon(Icons.dark_mode_outlined,
-                              size: 15, color: t.dim),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text('Theme', style: t.mono)),
-                          _ThemeToggle(
-                            value: settings.themeMode,
-                            onChanged: settings.setThemeMode,
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                   const SizedBox(height: 22),
@@ -138,65 +115,6 @@ class AboutScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Square segmented control — hairline frame, solid block on the active cell.
-class _ThemeToggle extends StatelessWidget {
-  const _ThemeToggle({required this.value, required this.onChanged});
-
-  final ThemeMode value;
-  final ValueChanged<ThemeMode> onChanged;
-
-  static const _modes = [
-    (ThemeMode.system, 'Auto'),
-    (ThemeMode.light, 'Light'),
-    (ThemeMode.dark, 'Dark'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(CP.rControl),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < _modes.length; i++)
-            CTap(
-              onTap: () => onChanged(_modes[i].$1),
-              builder: (context, hovered, pressed) {
-                final on = value == _modes[i].$1;
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: on
-                        ? t.inverse
-                        : (hovered || pressed
-                            ? t.hover
-                            : Colors.transparent),
-                    border: Border(
-                      left: i == 0
-                          ? BorderSide.none
-                          : BorderSide(color: t.line),
-                    ),
-                  ),
-                  child: Text(
-                    _modes[i].$2.toUpperCase(),
-                    style: t.micro
-                        .copyWith(color: on ? t.onInverse : t.dim),
-                  ),
-                );
-              },
-            ),
-        ],
       ),
     );
   }

@@ -1,32 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// App settings — currently just the theme mode (follows the system by
-/// default).
+/// App settings: the theme mode, and which ONNX Runtime the ONNX backend
+/// loads.
+///
+/// Loaded synchronously from an already-read [SharedPreferences] so main()
+/// can apply the ONNX library before the first enumeration — enumeration is
+/// what loads the runtime, so a path applied afterwards would be a restart
+/// late.
 class SettingsService extends ChangeNotifier {
-  SettingsService() {
-    _load();
-  }
+  SettingsService._(this._prefs)
+      : _themeMode = ThemeMode.values.firstWhere(
+            (m) => m.name == _prefs.getString(_themeKey),
+            orElse: () => ThemeMode.system),
+        _onnxLibraryPath = _prefs.getString(_onnxLibKey) ?? '';
+
+  static Future<SettingsService> load() async =>
+      SettingsService._(await SharedPreferences.getInstance());
 
   static const _themeKey = 'themeMode';
+  static const _onnxLibKey = 'onnxLibraryPath';
 
-  ThemeMode _themeMode = ThemeMode.system;
+  final SharedPreferences _prefs;
+
+  ThemeMode _themeMode;
   ThemeMode get themeMode => _themeMode;
 
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_themeKey);
-    if (v != null) {
-      _themeMode = ThemeMode.values.firstWhere((m) => m.name == v,
-          orElse: () => ThemeMode.system);
-      notifyListeners();
-    }
-  }
+  /// Absolute path to an onnxruntime shared library, or empty to let the
+  /// backend search its conventional names.  Ignored where ONNX Runtime is
+  /// linked into the app (iOS).
+  String _onnxLibraryPath;
+  String get onnxLibraryPath => _onnxLibraryPath;
 
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_themeKey, mode.name);
+    await _prefs.setString(_themeKey, mode.name);
+  }
+
+  Future<void> setOnnxLibraryPath(String path) async {
+    if (path == _onnxLibraryPath) return;
+    _onnxLibraryPath = path;
+    notifyListeners();
+    if (path.isEmpty) {
+      await _prefs.remove(_onnxLibKey);
+    } else {
+      await _prefs.setString(_onnxLibKey, path);
+    }
   }
 }

@@ -21,9 +21,15 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   clpeak-gui target owns final assembly).
 - Android: `flutter build apk --release` (Gradle drives
   `src/ffi/android/CMakeLists.txt`; needs `git submodule update --init`).
+  The APK bundles ONNX Runtime for **arm64-v8a only** — see the packaging
+  block in `android/app/build.gradle.kts` for the arithmetic; it is the
+  difference between an 86 MB and a 107 MB fat APK.
 - iOS: `tool/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
-  `flutter build ios` / `flutter run`.
+  `flutter build ios` / `flutter run`.  That script also fetches the ONNX
+  Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
+  `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
+  own build.
 - Tests: `flutter test` (pure Dart) or
   `CLPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
 
@@ -60,6 +66,18 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   properties reach a reopened run through the file's `devices` block, not the
   event stream — see `RunDocument.fromEntriesJson`.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
+- Which ONNX Runtime is loaded, and how a user changes it? →
+  `lib/src/ui/settings/settings_screen.dart` + `SettingsService.onnxLibraryPath`.
+  The path is applied in `main()` **before** `BenchmarkService` is built,
+  because that constructor enumerates and enumeration is what loads the
+  runtime — applied any later it would be a launch too late, which is why
+  `main()` is async and `SettingsService.load()` reads prefs up front.
+  Changing it calls `clpeak_set_onnx_library()` and then
+  `BenchmarkService.reloadCatalog()`, so the device list reflects the new
+  runtime's execution providers without a restart.  On iOS the picker is
+  replaced by "Built into the app": ONNX Runtime is statically linked there
+  (Apple's pod is a static framework and iOS will not dlopen another), which
+  `OnnxStatus.linkedIn` reports.
 - Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
   (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
   Android/iOS only — a sleeping display stops the frames the run was budgeted

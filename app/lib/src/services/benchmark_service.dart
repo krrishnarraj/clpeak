@@ -27,7 +27,7 @@ class BenchmarkService extends ChangeNotifier {
   final ClpeakBindings _bindings;
   final RunHistoryStore _history;
 
-  late final BackendCatalog _catalog;
+  late BackendCatalog _catalog;
   late RunConfig _config;
   late final String version;
 
@@ -108,6 +108,45 @@ class BenchmarkService extends ChangeNotifier {
 
   void updateConfig(void Function(RunConfig) mutate) {
     mutate(_config);
+    notifyListeners();
+  }
+
+  /// Which ONNX Runtime the backend has loaded, or why none is.
+  OnnxStatus onnxStatus() => _bindings.onnxStatus();
+
+  /// Point the ONNX backend at a library and re-enumerate, so the device
+  /// list reflects the providers the new runtime brings.  Empty path = back
+  /// to searching the conventional names.
+  void setOnnxLibrary(String path) {
+    if (isRunning) return;
+    _bindings.setOnnxLibrary(path);
+    reloadCatalog();
+  }
+
+  /// Re-enumerate after something changed what the native side can see —
+  /// today only the ONNX Runtime the settings screen chose.
+  ///
+  /// Selections survive where they still mean something: a device the user
+  /// had turned off stays off, one that has gone away is dropped, and a
+  /// backend that has just appeared comes in fully selected, which is what
+  /// picking a runtime was asking for.
+  void reloadCatalog() {
+    if (isRunning) return;
+    _catalog = BackendCatalog.fromJson(_bindings.backendCatalog());
+
+    final fresh = RunConfig.allDevices(_catalog,
+        maxTimeMs: _config.maxTimeMs, maxTimeCpuMs: _config.maxTimeCpuMs);
+    for (final backend in _catalog.usable) {
+      final previous = _config.selectedDevices[backend.name];
+      if (previous == null) continue; // newly present: keep it all selected
+      final present = fresh.selectedDevices[backend.name] ?? const {};
+      fresh.selectedDevices[backend.name] =
+          previous.where(present.contains).toSet();
+    }
+    fresh.categories
+      ..clear()
+      ..addAll(_config.categories);
+    _config = fresh;
     notifyListeners();
   }
 

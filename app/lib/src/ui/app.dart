@@ -10,6 +10,7 @@ import 'dashboard/dashboard_screen.dart';
 import 'history/history_screen.dart';
 import 'live_run/live_run_screen.dart';
 import 'results/results_screen.dart';
+import 'settings/settings_screen.dart';
 
 class ClpeakApp extends StatelessWidget {
   const ClpeakApp({super.key});
@@ -44,6 +45,11 @@ class _ClpeakShellState extends State<ClpeakShell> {
   static const _destinations = [
     (icon: Icons.speed_outlined, selected: Icons.speed, label: 'Benchmark'),
     (icon: Icons.history_outlined, selected: Icons.history, label: 'History'),
+    (
+      icon: Icons.tune_outlined,
+      selected: Icons.tune,
+      label: 'Settings'
+    ),
     (icon: Icons.info_outline, selected: Icons.info, label: 'About'),
   ];
 
@@ -57,6 +63,7 @@ class _ClpeakShellState extends State<ClpeakShell> {
       children: const [
         BenchmarkTab(),
         HistoryScreen(),
+        SettingsScreen(),
         AboutScreen(),
       ],
     );

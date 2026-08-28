@@ -99,6 +99,27 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
   return out;
 }
 
+OnnxRuntimeStatus onnxRuntimeStatus()
+{
+  OnnxRuntimeStatus st;
+#ifdef CLPEAK_ONNX_STATIC
+  st.linkedIn = true;
+#endif
+  if (const OrtRuntime *rt = ortRuntime())
+  {
+    st.available = true;
+    st.version   = rt->versionString;
+    st.path      = rt->path;
+  }
+  else
+  {
+    st.error = onnxLoadDiagnostic();
+    if (st.error.empty())
+      st.error = "onnxruntime library not found";
+  }
+  return st;
+}
+
 // ---------------------------------------------------------------------------
 // OnnxPeak
 // ---------------------------------------------------------------------------

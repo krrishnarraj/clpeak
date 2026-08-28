@@ -48,6 +48,15 @@ CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 // that link ONNX Runtime statically (iOS) or omit the backend entirely.
 CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 
+// State of the ONNX Runtime, for a settings screen to report back with:
+//   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str}
+// `linkedIn` means the runtime is built into this binary (iOS) and
+// clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
+// empty when it was found by name.  `error` says why nothing loaded --
+// naming a library that cannot be opened is the ordinary way to get here.
+// {"available":false,"error":"ONNX backend not built in"} without one.
+CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
+
 // ---- Event stream -------------------------------------------------------------
 
 // Every run event arrives as one malloc'd UTF-8 JSON document.  OWNERSHIP

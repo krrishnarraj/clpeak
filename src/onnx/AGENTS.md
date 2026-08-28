@@ -14,7 +14,7 @@ backend.
 ## Quick Lookups
 
 - Looking for the main class (`OnnxPeak` ctor, `runAll`, inventory, EP table)? → `onnx_peak.cpp`
-- Looking for how the runtime library is found/loaded? → `onnx_runtime.cpp` + `onnx_runtime.h`
+- Looking for how the runtime library is found/loaded, or how `--onnx-lib` picks one? → `onnx_runtime.cpp` + `onnx_runtime.h`
 - Looking for session creation / per-EP options / the CPU-fallback guard? → `onnx_session.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
@@ -31,7 +31,7 @@ backend.
 | File | Purpose |
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()`, `runAll()`, `enumerate()`, `printInventory()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
-| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime once per process and resolves the `OrtApi` table |
+| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only) and `onnx-gemm-int` (tops, int8 QDQ) |
@@ -43,12 +43,31 @@ backend.
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (us) |
 
-## The runtime is dlopen'd, never linked
+## The runtime is dlopen'd, never linked (except on iOS)
 
 Only `OrtGetApiBase` is resolved by name; everything else comes through the
 `OrtApi` function-pointer table it returns.  A machine without ONNX Runtime
 gets a one-line "library not found" note and no rows — the same shape as a
-missing GPU driver.  `CLPEAK_ONNXRUNTIME_LIB` overrides the search.
+missing GPU driver.
+
+**Choosing a runtime.** `--onnx-lib PATH`, `clpeak_set_onnx_library()` on the
+C ABI (what the GUI's settings screen calls, since
+`clpeak_copy_backend_catalog_json()` takes no arguments and enumeration is
+what loads the runtime), then `CLPEAK_ONNXRUNTIME_LIB`, then the platform's
+conventional names.  **A named library is authoritative**: if it will not
+load, the backend reports itself unavailable rather than falling through to
+whatever else is installed — a run labelled with one runtime and measured on
+another is the mistake the setting exists to prevent.  `onnxLoadDiagnostic()`
+carries the reason, and `onnxRuntimeStatus()` packages it for a UI.
+
+Naming a different library after one is loaded takes effect on the next
+`ortRuntime()` call, so the settings screen needs no restart.
+
+**iOS is the exception** (`CLPEAK_ONNX_STATIC`): Apple's official pod ships
+`onnxruntime.xcframework` as a *static* framework, and iOS will not dlopen a
+library that was not built into the app.  There the runtime is linked in,
+`OrtGetApiBase` is called directly, and the override does nothing because
+there is no second runtime to choose.
 
 The build needs only the vendored header (`third_party/onnxruntime/`,
 pinned to the ORT release in its `ORT_API_VERSION`), so no ONNX Runtime
@@ -1253,8 +1272,12 @@ The GPU and NPU providers only exist in a runtime built for them. A default
 install enumerates something like Dnnl / XNNPACK / CPU and nothing else, even
 on a machine with an obvious GPU in it — which makes the backend look broken
 when it is the runtime that cannot reach the hardware. `runAll()` emits a
-one-line note when no accelerator provider is present, pointing at
-`CLPEAK_ONNXRUNTIME_LIB`, which selects a different runtime library.
+one-line note when no accelerator provider is present; `--onnx-lib` (or the
+GUI's settings screen) selects a different runtime library.
+
+The mobile packages are the counter-example, and it is why they are bundled:
+`com.microsoft.onnxruntime:onnxruntime-android` carries NNAPI, and the iOS
+pod carries CoreML, so on a phone the accelerator is there out of the box.
 
 ## Graphs must avoid optional operator behaviour
 

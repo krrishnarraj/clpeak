@@ -28,3 +28,11 @@ target_include_directories(peak_onnx PRIVATE
 )
 target_compile_definitions(peak_onnx PRIVATE ENABLE_ONNX)
 target_compile_definitions(peak_common PRIVATE ENABLE_ONNX)
+
+# CLPEAK_ONNX_STATIC: the runtime is linked into this binary rather than
+# dlopen'd, so OrtGetApiBase is called directly and there is no library path
+# to choose.  Set by the iOS build, where Apple's official pod is a static
+# framework and dlopen is not available to an app anyway.
+if(CLPEAK_ONNX_STATIC)
+    target_compile_definitions(peak_onnx PRIVATE CLPEAK_ONNX_STATIC)
+endif()

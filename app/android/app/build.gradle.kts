@@ -37,6 +37,31 @@ android {
         }
     }
 
+    // ONNX Runtime ships as a real .so on Android, so the ONNX backend loads
+    // it the same way it does on desktop -- see src/onnx/onnx_runtime.cpp.
+    //
+    // arm64-v8a only, and the arithmetic is why: `flutter build apk` produces
+    // one fat APK over armeabi-v7a/arm64-v8a/x86_64, AGP stores native
+    // libraries uncompressed so they can be mapped straight out of the APK,
+    // and ORT is 27 MB on arm64 and 20 MB on armeabi-v7a.  Shipping every
+    // slice put 48 MB on the download for two ABIs nobody benchmarks an NPU
+    // on: x86_64 exists to run the emulator, and a 32-bit-only handset that
+    // meets minSdk 33 is a rounding error.  The Java API that came with the
+    // AAR goes too -- clpeak talks to the C API through the FFI library.
+    //
+    // On the excluded ABIs the backend simply reports itself unavailable, and
+    // the settings screen can still point it at a runtime by path.
+    packaging {
+        jniLibs {
+            excludes += setOf(
+                "lib/armeabi-v7a/libonnxruntime.so",
+                "lib/x86/libonnxruntime.so",
+                "lib/x86_64/libonnxruntime.so",
+                "**/libonnxruntime4j_jni.so",
+            )
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
@@ -44,6 +69,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    // Packaged for its jni/<abi>/libonnxruntime.so; the Java API that comes
+    // with it is unused (clpeak talks to the C API through the FFI library).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
 }
 
 kotlin {
