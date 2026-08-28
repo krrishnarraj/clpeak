@@ -491,18 +491,63 @@ of what the format costs, and quantizing against the value that will actually
 come back is what keeps the row measuring NVFP4 rather than an idealisation of
 it. The global scale is a power of two so that factoring it out is exact.
 
-**There is no NVFP4 accuracy row yet, deliberately.** Until a provider is found
-that fuses the shape, an accuracy row would measure a graph nobody executes as
-NVFP4 — and the same cancellation that rules out an int4 accuracy row applies
-to the operand rounding. If a provider does fuse it, the row becomes worth
-building, because then the *accumulation* is four-bit hardware's own and that
-does not cancel.
+**There is no NVFP4 accuracy row yet, and now there should be.** The reasoning
+for leaving it out was that until some provider fused the shape it would measure
+a graph nobody executes as NVFP4. TensorRT now does, so the accumulation is
+four-bit hardware's own and does not cancel the way operand rounding does.
 
-Note that NVFP4 is the first variant narrow enough to reach 32768 on the size
-ladder: its operands come to 1.125 bytes per element against fp16's four, so a
-size the wider rows cannot afford is within both the memory budget and the
-protobuf ceiling. Expect it to build a large model and, on TensorRT, a long
-engine.
+Building it needs care about one hazard the throughput row does not have. The
+accuracy model must return real values, so it cannot reduce them away — and if
+both operands stay initializers, TensorRT is free to fold the product at engine
+build time and hand back an answer computed in something wider, which would
+read as *better* accuracy rather than as a failure. The throughput row is safe
+from this because its guard watches the time scale with the problem size; an
+accuracy row has no such tell. The way out is the one `floatIo` already takes:
+hand the activations in at run time as fp32 and quantize them on device against
+supplied block scales, so the product cannot be constant-folded at all.
+
+NVFP4 is also the first variant narrow enough to reach 32768 on the size ladder:
+its operands come to 1.125 bytes per element against fp16's four, so a size the
+wider rows cannot afford is within both the memory budget and the protobuf
+ceiling.
+
+## What four bits are worth, measured
+
+TensorRT fuses NVFP4 into an engine of its own and reads **238.66 TFLOPS** on an
+RTX 5060. The whole card, in one place:
+
+| row | rate | what actually ran |
+|---|---|---|
+| fp32 | 19.18 | TF32, per the 261 ppm error row |
+| bf16 | 38.08 | fp32 accumulate |
+| fp16 | 66.20 | fp16 accumulate |
+| fp8_e4m3 | 75.40 | fused, 8-bit |
+| int8_qdq | 124.77 TOPS | fused, 8-bit |
+| **nvfp4** | **238.66** | **fused, 4-bit** |
+| fp4_weight | 65.88 | fp16 arithmetic, 4-bit storage |
+| int4_weight | 65.87 | fp16 arithmetic, 4-bit storage |
+
+**The last three rows are the argument for having built all of them.** `nvfp4`
+and `fp4_weight` use the same element type on the same card and are **3.6x
+apart**, because one is four-bit arithmetic and the other is four bits unpacked
+into something wider. No single "fp4" row could have said that, and either one
+alone would have been quoted as though it were the format's rate.
+
+Against the eight-bit rows, `nvfp4` is **1.91x** int8 and 3.17x float8 — close
+enough to the doubling a four-bit tensor core is supposed to deliver over an
+eight-bit one that the number needs no defending.
+
+**It is a floor, not a peak.** The ladder was still climbing 10.5% at 32768 and
+stopped because the next rung exceeds the operand budget, not because the rate
+flattened. Every other row on this card reaches its asymptote; this one runs out
+of memory first, which is the size search behaving exactly as designed and worth
+knowing when the figure is compared against a vendor's.
+
+**And the per-tensor row stays refused**, with the same
+`CHECK(output_quantize_axis_.has_value())` it gave before. That is the pair
+working: TensorRT wanted a quantization axis, `nvfp4` has one, `fp4_e2m1` does
+not, and the two rows together say what the hardware requires rather than
+leaving it to be guessed.
 
 ## int4 is a memory format here, not a compute one
 
