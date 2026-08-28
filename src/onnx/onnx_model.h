@@ -133,9 +133,19 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 // evaluate the entire matmul once at load time.  `gemm.cpp` cross-checks that
 // timings still scale with the cube of the size, which is what folding would
 // break.
+//
+// `reduceInFloat` casts the product to fp32 before reducing it, and makes the
+// runtime scalar and the output fp32 with it.  A provider can have a matmul
+// for a datatype and no reduction for it -- the CUDA EP multiplies bf16 and
+// has no bf16 ReduceMax, and ORT does not fail that cleanly, it throws out of
+// its memcpy transformer complaining that the node has no provider.  Only
+// used when the native-dtype form is refused, since the cast is a full pass
+// over the result and costs a few percent at the large sizes and more at the
+// small ones.
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                     const std::string &aRaw,
-                                    const std::string &bRaw);
+                                    const std::string &bRaw,
+                                    bool reduceInFloat = false);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the

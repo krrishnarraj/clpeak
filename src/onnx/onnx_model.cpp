@@ -300,10 +300,14 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                     const std::string &aRaw,
-                                    const std::string &bRaw)
+                                    const std::string &bRaw,
+                                    bool reduceInFloat)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(dtype));
+  // The scalar and the output follow the reduction, not the matmul: casting
+  // the product to fp32 means everything downstream of it is fp32 too.
+  const int tailDtype = reduceInFloat ? ONNX_DT_FLOAT : dtype;
   // The runtime scalar multiplies the *result*, leaving the matmul itself a
   // product of two constants -- so this graph runs correctly only while
   // constant folding stays disabled, and ONNX Runtime 1.17 accepts the

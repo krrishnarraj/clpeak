@@ -168,7 +168,8 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 // Build model + session + bound input/output tensors for one (variant, D).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile = false,
-                    int actDtype = ONNX_DT_UINT8)
+                    int actDtype = ONNX_DT_UINT8,
+                    bool reduceInFloat = false)
 {
   GemmSetup g;
 
@@ -186,7 +187,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
   else
   {
-    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw);
+    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw,
+                                        reduceInFloat);
   }
   aRaw.clear(); aRaw.shrink_to_fit();
   bRaw.clear(); bRaw.shrink_to_fit();
@@ -202,8 +204,9 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
   g.session = ses.session;
 
-  // The QDQ graph reduces in float; the plain one keeps its own dtype.
-  const int ioDtype = v.qdq ? ONNX_DT_FLOAT : v.dtype;
+  // The QDQ graph reduces in float, and so does a plain one whose reduction
+  // had to be cast; otherwise the tail keeps the matmul's dtype.
+  const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
   const size_t es   = dtypeSize(ioDtype);
   {
     // Scales the reduced result; exists only so the graph depends on
@@ -328,6 +331,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::string ranAs;      // kernel the provider actually used (quantized only)
     int     actDtype = ONNX_DT_UINT8;
     const char *schemeName = "";
+    // A provider can implement the matmul for a datatype and not the reduction
+    // that keeps the result on the device: the CUDA EP multiplies bf16 and has
+    // no bf16 ReduceMax.  Retried once, lazily, so a provider that needs
+    // nothing pays nothing -- and never for the quantized form, whose reduction
+    // already runs on a dequantized fp32 result.
+    bool reduceInFloat = false, triedFloatReduce = false;
 
     // For the quantized variant, settle the scheme before sweeping anything.
     // ONNX Runtime rewrites graphs before running them, and a provider that
@@ -427,7 +436,26 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
       }
 
-      GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype);
+      GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
+                              reduceInFloat);
+      if (!g.session && !v.qdq && !triedFloatReduce)
+      {
+        triedFloatReduce = true;
+        // Keep the native refusal: when the cast form fails too, the cause is
+        // almost always the matmul rather than the reduction, and the first
+        // message is the one that says so.
+        const std::string nativeErr = g.error;
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: native reduction refused (%s), "
+                    "retrying with the product cast to fp32\n",
+                    ep.providerKey.c_str(), v.label, nativeErr.c_str());
+        destroySetup(rt, g);
+        g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
+                      /*reduceInFloat=*/true);
+        if (g.session)
+          reduceInFloat = true;
+        else
+          g.error = nativeErr;
+      }
       if (!g.session)
       {
         if (firstErr.empty())
@@ -543,6 +571,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         o.description += "  The provider ran the multiply as " + ranAs +
                          " with " + schemeName +
                          ", confirming it really was integer arithmetic.";
+      if (reduceInFloat)
+        o.description += "  This provider has no reduction for the datatype, "
+                         "so the product is cast to fp32 before being reduced; "
+                         "the multiply itself is unaffected, but the cast is a "
+                         "full pass over the result and costs a few percent.";
       test.emit(v.label, (float)best, o);
     }
     else

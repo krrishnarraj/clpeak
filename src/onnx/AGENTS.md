@@ -188,11 +188,15 @@ stay in step — a rate without its accuracy is half a number here.
 
 bf16 is the row that separates hardware with a real bf16 path from hardware
 emulating one. It is expressible at opset 17, so it needs no version gate; what
-it does need is a provider with the kernel. Two ways it comes back unsupported,
-both worth reading rather than skipping past: the CoreML EP fails the
-CPU-fallback guard, because it has no bf16 matmul to offer and ORT would have
-run the node on the CPU; the ARM CPU EP says `Could not find an implementation
-for MatMul(13)` outright. Neither is a defect in the graph.
+it does need is a provider with the kernel, and there are three distinct ways
+that goes wrong, all of them findings rather than defects in the graph:
+
+- **No matmul at all.** The ARM and x86 CPU EPs answer `Could not find an
+  implementation for MatMul(13)`.
+- **No matmul the provider will own.** The CoreML EP fails the CPU-fallback
+  guard: it would have handed the node back to the CPU.
+- **A matmul but no reduction.** The CUDA EP, which is why `gemm.cpp` retries
+  with the product cast to fp32 (see above).
 
 **`widen()` in `numeric_error.cpp` must know every dtype the rows use.** Its
 switch used to treat the integer path as `default:`, so the first float type it
@@ -229,14 +233,31 @@ widened, not re-generated — and computed on the CPU EP.
 The fp32 row doubles as a precision-downgrade detector, and on Apple silicon
 it resolves which engine actually ran the work. Reference readings, M1 Pro:
 
-| Row | fp32 | fp16 | int8 QDQ |
-|-----|------|------|----------|
-| CPU EP | 0.0 ppm | 207 ppm | 9463 ppm |
-| CoreML EP | 0.4 ppm | 214 ppm | (unsupported) |
-| CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 9467 ppm |
-| TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | 9463 ppm |
-| CPU EP (Zen 2) | 0.0 ppm | 207 ppm | **178926 ppm** |
-| DirectML (RTX 5060) | **0.6 ppm** | 1185 ppm | 9443 ppm |
+| Row | fp32 | fp16 | bf16 | int8 QDQ |
+|-----|------|------|------|----------|
+| CPU EP (M1 Pro) | 0.0 ppm | 207 ppm | (no kernel) | 9463 ppm |
+| CoreML EP | 0.4 ppm | 214 ppm | (unsupported) | (unsupported) |
+| CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 1659 ppm | 9447 ppm |
+| TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | 1659 ppm | 9463 ppm |
+| CPU EP (Zen 2) | 0.0 ppm | 207 ppm | (no kernel) | **178926 ppm** |
+| DirectML (RTX 5060) | **0.6 ppm** | 1185 ppm | — | 9443 ppm |
+
+**bf16 is the row that validates the arithmetic of the whole test.** It reads
+1659.32 ppm on both NVIDIA providers, and 1659.32 / 207.39 = **8.000**. bf16
+has exactly three fewer mantissa bits than fp16, so if what is being measured
+is input rounding and nothing else, the ratio has to be 2³ — and it is, to four
+figures, across two providers that agree on nothing else. Alongside CPU-EP fp32
+reading exactly 0.0, that is the second place this test proves itself rather
+than merely reporting.
+
+It also settles what TensorRT does with each format. Its fp16 error is 1185 and
+its bf16 error is 1659 — the same as the CUDA EP's bf16 — so it accumulates
+fp16 in fp16 and bf16 in fp32, two different choices for two formats of the
+same width. The throughput rows agree without being asked: TensorRT reaches
+66.5 TFLOPS in fp16 and 38.1 in bf16, and that 38.1 sits beside the CUDA EP's
+40.0 for fp32-accumulated fp16. What looks like bf16 being a second-class
+format on this card is the well-known half-rate fp32 accumulate of a consumer
+GeForce part, and it took a rate row and an accuracy row together to say so.
 
 DirectML is the control that shows the fp32 rows are reading something real:
 0.6 ppm on the same card where CUDA and TensorRT both report 261. It computes
@@ -305,6 +326,19 @@ matrix coprocessor, not the Neural Engine, an internal routing decision ORT
 never reports. The size curves above agree: the fp32 row behaves like AMX
 (faster the bigger it gets) and the fp16 row like the ANE (a cliff once it
 outgrows on-chip memory).
+
+**A provider can have a matmul for a datatype and no reduction for it.** The
+CUDA EP multiplies bf16 perfectly well — the error row above was measured on it
+— but has no bf16 `ReduceMax`, which is the node `onnx-gemm` uses to keep the
+result on the device. ORT does not refuse that cleanly: it throws out of
+`transformer_memcpy.cc` saying the ReduceMax node has no provider set, rather
+than reporting the node as unassigned. `gemm.cpp` retries once with the product
+cast to fp32 before the reduction, lazily, so a provider that needs nothing
+pays nothing, and the row's description says when the cast was used. The cast
+sits after the multiply and cannot change the arithmetic being timed; the
+numeric-error row is the independent check, since a matmul quietly promoted to
+fp32 would report fp32's rate *and* fp32's error. The quantized form never
+needs this — its reduction already runs on a dequantized fp32 result.
 
 **int8 QDQ is unsupported on the CoreML EP** — it declines the
 DequantizeLinear/MatMul/QuantizeLinear graph outright, which is what makes
