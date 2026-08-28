@@ -39,10 +39,10 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Transfer bandwidth";
   testSpec.unit = "gbps";
   testSpec.description =
-      "How fast data crosses between the computer's own memory and the GPU's.  "
-      "On a discrete card that means the PCIe link, which is usually far "
-      "narrower than either side's own memory and is what makes moving data to "
-      "the GPU worth avoiding.";
+      "How fast data crosses between the host's memory and the device's.  On a "
+      "discrete card that means the PCIe link, which is usually far narrower "
+      "than either side's own memory and is what makes moving data to the "
+      "device worth avoiding.";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   VkBuffer hostBuf = VK_NULL_HANDLE;
@@ -197,9 +197,9 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     test.emit(metric, gbps, note);
   };
 
-  reportCopy("h2d", "Host to device: sending data up to the GPU.",
+  reportCopy("h2d", "Host to device: sending data across to the device.",
              runCopy(hostBuf, devBuf));
-  reportCopy("d2h", "Device to host: reading results back down.  Often slower "
+  reportCopy("d2h", "Device to host: reading results back.  Often slower "
                     "than the other direction.",
              runCopy(devBuf, hostBuf));
 

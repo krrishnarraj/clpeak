@@ -2,6 +2,7 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+#include <algorithm>
 
 int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
@@ -99,19 +100,29 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   }
 
   int w = imgW, h = imgH;
-  void *args[4] = {&tex, &outBuf, &w, &h};
-  float us = runKernel(dev, fn, numBlocks, blockSize, args,
-                       cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (us <= 0.0f)
-  {
-    test.skip("float4", ResultStatus::Error,
-               "kernel launch failed", fetchNote);
-  }
+  int walk = 0;
+  void *args[5] = {&tex, &outBuf, &w, &h, &walk};
+  const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
+
+  // Two walk orders are raced and the faster reported -- why, and why neither
+  // can flatter the result: the image-bandwidth block in
+  // include/common/common.h.
+  auto timeWalk = [&](int w_) {
+    walk = w_;
+    return runKernel(dev, fn, numBlocks, blockSize, args,
+                     cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+  };
+  float rowUs = timeWalk(0);
+  float colUs = timeWalk(1);
+  float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
+  float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+  CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+              rowGbps, colGbps);
+
+  if (rowGbps <= 0.0f && colGbps <= 0.0f)
+    test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
   else
-  {
-    uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    test.emit("float4", (float)bytes / us / 1e3f, fetchNote);
-  }
+    test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
 
   (void)hipFree(outBuf);
   (void)hipDestroyTextureObject(tex);

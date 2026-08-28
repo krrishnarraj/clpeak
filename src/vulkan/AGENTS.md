@@ -35,6 +35,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
 | `shaders/mad_chain.glsl` | The two MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_MAP` / `CHAIN_RESULT`) |
+| `shaders/coopmat_chain.glsl` | The MulAdd run every coopmat shader runs (`CM_TA`/`CM_TB`/`CM_TC`, `CM_DECLARE`, `CM_MMA_TRIP`) — and why it is shaped that way |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
 
 ## Test documentation
@@ -57,6 +58,27 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.
 - If you add a new `.comp` shader → add to `CLPEAK_VK_SHADERS` in `CMakeLists.txt`
   and declare its extern in the `vk_shaders` namespace (`include/vulkan/vk_peak.h`).
+- **Never change a compute-peak shader's inner loop without reading the compiled
+  SPIR-V back.**  `tool/shader_ops.py <shader.comp> [--tile MxNxK]` freezes the
+  specialization constants to a real device's tile and prints what the loop
+  actually issues: the work ops, anything issued beside them that the op budget
+  does not credit, how many distinct operand pairs the run uses, and whether the
+  chain is dependent.  It exits non-zero on the two failure modes that have
+  shipped wrong numbers from here — an uncounted op in the loop, and a run of
+  identical work ops a compiler can strength-reduce.  Every backend has a dtype
+  somebody cannot test on; this is the check that needs no hardware.
+- Shaders compile to **SPIR-V 1.5** (`--target-env=vulkan1.2`), not 1.6.  At 1.6
+  a specialized work-group size becomes `OpExecutionModeId LocalSizeId`, gated on
+  maintenance4; at 1.5 the same GLSL becomes the classic `LocalSize` mode plus a
+  `gl_WorkGroupSize` spec constant, which every driver has handled since Vulkan
+  1.0.  Nothing here needs 1.6.
+- Coopmat shaders take **M/N/K and the work-group width as specialization
+  constants (ids 0–3) and the trip count as a push constant**.  The trip count
+  is pushed on purpose: a compile-time bound lets the driver unroll the whole
+  run, and a fully unrolled run is both what a shader compiler chokes on and what
+  it can fold into a closed form.  `COOPMAT_MMA_PER_TRIP` in
+  `include/common/common.h` must stay equal to `CM_MMA_PER_TRIP` in
+  `shaders/coopmat_chain.glsl`.
 - A shader that `#include`s `shaders/mad_chain.glsl` is compiled **twice**,
   the second time with `-DMAD_CHAIN_AFFINE`, and embedded as `<name>` and
   `<name>_alt`.  `CompileShaders.cmake` detects this from the source, so

@@ -1,24 +1,15 @@
 #include <opencl/cl_peak.h>
 #include <opencl/cl_utils.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
-#include <cstring>
 #include <functional>
-
-// If map/unmap bandwidth exceeds this multiplier of the peak real-transfer
-// bandwidth measured earlier in the same run, it's a zero-copy / shared-memory
-// operation with no actual data movement.  3x is conservative: on M1 the ratio
-// is ~15000x, on Mali ~10x; on discrete GPUs the ratio is ~1x.
-static const float ZERO_COPY_MULTIPLIER = 3.0f;
-
-// Absolute floor: if no real-transfer baselines were measured (e.g. user ran
-// only the map sub-test), fall back to this.  Well above any real hardware.
-static const float ZERO_COPY_ABSOLUTE_GBPS = 10000.0f;
 
 #if defined(_WIN32) || defined(__ANDROID__)
 #include <malloc.h>
 #endif
 
-// Platform-specific aligned alloc/free
+// Platform-specific aligned alloc/free, for the pageable fallback below.
 static float *allocAligned(size_t bytes)
 {
 #if defined(_WIN32)
@@ -49,303 +40,136 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
   unsigned int forced = forceIters ? specifiedIters : 0;
-  float *arr = nullptr;
 
-  uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
-  uint64_t numItems = roundToMultipleOf(maxItems, devInfo.maxWGSize, cfg.transferBWMaxSize / sizeof(float));
-  size_t bytes = numItems * sizeof(float);
-
-  // Track the peak bandwidth from real-transfer tests (write/read) so that
-  // map/unmap can be compared against it to detect zero-copy.
-  float peakRealTransferBW = 0;
-
-  // Helper: run a timed transfer test with warmup + calibration, return
-  // measured gbps.  Calibrates iters from a one-iteration timed probe so the
-  // measurement window lands at ~cfg.targetTimeUs regardless of bus speed.
-  auto runTransfer = [&](std::function<void(cl::Event *)> op, bool forceWallClock = false) -> float
-  {
-    // Phase 1: untimed warmup
-    for (unsigned int w = 0; w < warmupCount; w++)
-    {
-      op(nullptr);
-      queue.finish();
-    }
-
-    auto runBatch = [&](unsigned int n) -> float {
-      float total = 0;
-      if (useEventTimer && !forceWallClock)
-      {
-        for (unsigned int i = 0; i < n; i++)
-        {
-          cl::Event timeEvent;
-          op(&timeEvent);
-          queue.finish();
-          total += timeInUS(timeEvent);
-        }
-        return total;
-      }
-      auto t1 = std::chrono::high_resolution_clock::now();
-      for (unsigned int i = 0; i < n; i++)
-        op(nullptr);
-      queue.finish();
-      auto t2 = std::chrono::high_resolution_clock::now();
-      return (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-    };
-
-    // Phase 2: timed probe -> per-iter time -> calibrated iters.
-    unsigned int probeIters = 1;
-    float probeUs = runBatch(probeIters);
-    double per_iter_us = (double)probeUs / (double)probeIters;
-    unsigned int iters = pickIters(per_iter_us, cfg.targetTimeUs, forced);
-
-    // Phase 3: real timed run.
-    float timed = runBatch(iters) / static_cast<float>(iters);
-
-    float gbps = (float)bytes / timed / 1e3f;
-    return gbps;
-  };
-
-  // Helper: check if a bandwidth value looks like zero-copy
-  auto isZeroCopy = [&](float gbps) -> bool
-  {
-    if (peakRealTransferBW > 0)
-      return gbps > peakRealTransferBW * ZERO_COPY_MULTIPLIER;
-    return gbps > ZERO_COPY_ABSOLUTE_GBPS;
-  };
+  // Two live allocations of this size (device buffer + host staging buffer),
+  // so cap at half the largest single allocation the device admits to.
+  uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
+  if (devInfo.maxAllocSize > 0)
+    bytes = std::min<uint64_t>(bytes, devInfo.maxAllocSize / 2);
+  bytes &= ~255ull;
+  if (bytes == 0)
+    bytes = 256;
 
   auto test = currentDeviceScope->beginTest(
     {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
-     "How fast data crosses between the host's memory and the device's, by "
-     "each of the routes OpenCL offers.  On a discrete card this is the PCIe "
-     "link and is what makes moving data to the GPU worth avoiding; where the "
-     "two share one pool of memory a route can move nothing at all, and those "
-     "readings are reported as zero rather than as an impossible speed."});
+     "How fast data crosses between the host's memory and the device's.  On a "
+     "discrete card that means the PCIe link, which is far narrower than "
+     "either side's own memory and is what makes moving data to the device "
+     "worth avoiding; where the two share one pool of memory the numbers are much "
+     "higher.  Both readings use pinned host memory, the fast path."});
 
-  // One note per reading, in emit order; shared with the bulk-skip paths below.
-  const char *wbNote  = "Copying host memory into the device buffer, with the "
-                        "host waiting for it to finish.";
-  const char *rbNote  = "Copying the device buffer back into host memory, with "
-                        "the host waiting for it to finish.";
-  const char *wbnNote = "The same upload, issued without waiting, so the driver "
-                        "is free to overlap it with other work.";
-  const char *rbnNote = "The same download, issued without waiting.";
-  const char *mapNote = "Handing the host direct access to the buffer instead of "
-                        "copying it.  Zero here means the host and device share "
-                        "the memory, so nothing had to move.";
-  const char *mcFromNote = "Once mapped, how fast the host reads that memory with "
-                           "an ordinary copy.";
-  const char *unmapNote = "Handing the buffer back to the device after writing to "
-                          "it.  Zero here again means nothing had to move.";
-  const char *mcToNote = "Once mapped, how fast the host writes into that memory "
-                         "with an ordinary copy.";
+  const char *h2dNote = "Host to device: sending data across to the device.";
+  const char *d2hNote = "Device to host: reading results back.  Often a little "
+                        "slower than the other direction.";
 
-  // Helper: report a map/unmap result, detecting zero-copy
-  auto reportMapUnmap = [&](float gbps, const std::string &resultName,
-                            logger::EmitOptions opts = {})
-  {
-    if (isZeroCopy(gbps))
-      test.emit(resultName, 0.0f, opts);
-    else
-      test.emit(resultName, gbps, opts);
+  // Host staging memory.  The pinned path is a CL_MEM_ALLOC_HOST_PTR buffer
+  // mapped once and left mapped: that pointer is host memory the driver may
+  // DMA from directly, which is what cuMemAllocHost/hipHostMalloc give the
+  // other backends.  Drivers that refuse to map it fall back to an ordinary
+  // (pageable) aligned allocation, which measures the same route more slowly.
+  cl::Buffer pinnedBuf;
+  void *hostPtr = nullptr;
+  float *pageable = nullptr;
+
+  auto releaseHost = [&]() {
+    if (hostPtr && pageable == nullptr)
+    {
+      try { queue.enqueueUnmapMemObject(pinnedBuf, hostPtr); queue.finish(); }
+      catch (cl::Error &) {}
+    }
+    freeAligned(pageable);
   };
 
   try
   {
-    arr = allocAligned(bytes);
-    if (!arr)
+    cl::Buffer devBuf = cl::Buffer(ctx, CL_MEM_READ_WRITE, bytes);
+
+    try
     {
-      test.skip("enqueuewritebuffer", ResultStatus::Error, "Out of memory", wbNote);
-      test.skip("enqueuereadbuffer", ResultStatus::Error, "Out of memory", rbNote);
-      test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, "Out of memory", wbnNote);
-      test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, "Out of memory", rbnNote);
-      test.skip("enqueuemapbuffer", ResultStatus::Error, "Out of memory", mapNote);
-      test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, "Out of memory", mcFromNote);
-      test.skip("enqueueunmap", ResultStatus::Error, "Out of memory", unmapNote);
-      test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, "Out of memory", mcToNote);
+      pinnedBuf = cl::Buffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, bytes);
+      hostPtr = queue.enqueueMapBuffer(pinnedBuf, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, bytes);
+      queue.finish();
+    }
+    catch (cl::Error &error)
+    {
+      CLPEAK_VLOG("Pinned host buffer unavailable (%s, %d); falling back to pageable memory\n",
+                  error.what(), error.err());
+      hostPtr = nullptr;
+    }
+
+    if (!hostPtr)
+    {
+      pageable = allocAligned(bytes);
+      hostPtr = pageable;
+    }
+    if (!hostPtr)
+    {
+      test.skip("h2d_pinned", ResultStatus::Error, "Out of memory", h2dNote);
+      test.skip("d2h_pinned", ResultStatus::Error, "Out of memory", d2hNote);
       return -1;
     }
-    populate(arr, bytes / sizeof(float));
-    cl::Buffer clBuffer = cl::Buffer(ctx, (CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR), bytes);
 
-    // enqueueWriteBuffer (blocking)
-    float bw;
-    bw = runTransfer(
-      [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuewritebuffer", bw, {false, wbNote});
-    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
+    // Pseudo-random contents, to defeat hardware memory compression on both
+    // directions.
+    populate((float *)hostPtr, bytes / sizeof(float));
 
-    // enqueueReadBuffer (blocking)
-    bw = runTransfer(
-      [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_TRUE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuereadbuffer", bw, {false, rbNote});
-    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
+    // Warm up, probe one iteration to size the measurement window at
+    // ~cfg.targetTimeUs, then run.  The copies are enqueued non-blocking and
+    // the batch is drained once, so the driver can keep the link busy -- the
+    // same shape as the async memcpy loops in the CUDA/ROCm/oneAPI backends.
+    //
+    // Always wall-clock, even under --use-event-timer: CL profiling events
+    // time the device's command processing, which on a unified-memory device
+    // is near zero for a copy that moves nothing (Apple M1 reports ~70x the
+    // real rate).  The host clock over a ~targetTimeUs window is both accurate
+    // enough and the number a caller actually pays.  oneAPI times this the
+    // same way.
+    auto runTransfer = [&](std::function<void()> op) -> float
+    {
+      for (unsigned int w = 0; w < warmupCount; w++)
+      {
+        op();
+        queue.finish();
+      }
 
-    // enqueueWriteBuffer non-blocking
-    bw = runTransfer(
-      [&](cl::Event *ev) { queue.enqueueWriteBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuewritebuffer_nonblocking", bw, {false, wbnNote});
-    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
+      auto runBatch = [&](unsigned int n) -> float {
+        auto t1 = std::chrono::high_resolution_clock::now();
+        for (unsigned int i = 0; i < n; i++)
+          op();
+        queue.finish();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        return (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+      };
 
-    // enqueueReadBuffer non-blocking
-    bw = runTransfer(
-      [&](cl::Event *ev) { queue.enqueueReadBuffer(clBuffer, CL_FALSE, 0, bytes, arr, nullptr, ev); });
-    test.emit("enqueuereadbuffer_nonblocking", bw, {false, rbnNote});
-    if (bw > peakRealTransferBW) peakRealTransferBW = bw;
-
-    // Helper: calibrate iter count for the open-coded map/unmap loops below.
-    // Each loop runs `iter()` per iteration (one full setup+timed-segment+
-    // teardown) but only times a sub-segment.  We probe full-iter wall-clock
-    // so calibration sizes total runtime to ~cfg.targetTimeUs.
-    auto calibrateMapIters = [&](std::function<void()> iter) -> unsigned int {
-      for (unsigned int w = 0; w < warmupCount; w++) iter();
-      unsigned int probe = 1;
-      auto t1 = std::chrono::high_resolution_clock::now();
-      for (unsigned int i = 0; i < probe; i++) iter();
-      auto t2 = std::chrono::high_resolution_clock::now();
-      float probeUs = (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-      return pickIters((double)probeUs / (double)probe, cfg.targetTimeUs, forced);
+      float probeUs = runBatch(1);
+      unsigned int iters = pickIters((double)probeUs, cfg.targetTimeUs, forced);
+      float timed = runBatch(iters) / static_cast<float>(iters);
+      if (timed <= 0.0f)
+        return -1.0f;
+      return (float)bytes / timed / 1e3f;
     };
 
-    // enqueueMapBuffer(for read)
-    // Always use wall-clock for map/unmap: CL events measure only GPU command
-    // processing time, which is zero on unified-memory platforms (Apple Silicon),
-    // causing division-by-zero / inf with --use-event-timer.
-    {
-      queue.finish();
+    float bw;
 
-      unsigned int iters = calibrateMapIters([&]() {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
-        queue.finish();
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      });
+    bw = runTransfer(
+      [&]() { queue.enqueueWriteBuffer(devBuf, CL_FALSE, 0, bytes, hostPtr); });
+    if (bw > 0.0f) test.emit("h2d_pinned", bw, h2dNote);
+    else           test.skip("h2d_pinned", ResultStatus::Error, "timer returned zero", h2dNote);
 
-      float timed = 0;
-      for (unsigned int i = 0; i < iters; i++)
-      {
-        auto t1 = std::chrono::high_resolution_clock::now();
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
-        queue.finish();
-        auto t2 = std::chrono::high_resolution_clock::now();
-        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+    bw = runTransfer(
+      [&]() { queue.enqueueReadBuffer(devBuf, CL_FALSE, 0, bytes, hostPtr); });
+    if (bw > 0.0f) test.emit("d2h_pinned", bw, d2hNote);
+    else           test.skip("d2h_pinned", ResultStatus::Error, "timer returned zero", d2hNote);
 
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      }
-      timed /= static_cast<float>(iters);
-
-      float gbps = (float)bytes / timed / 1e3f;
-      reportMapUnmap(gbps, "enqueuemapbuffer", {false, mapNote});
-    }
-
-    // memcpy from mapped ptr
-    {
-      queue.finish();
-
-      unsigned int iters = calibrateMapIters([&]() {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
-        queue.finish();
-        memcpy(arr, mapPtr, bytes);
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      });
-
-      float timed = 0;
-      for (unsigned int i = 0; i < iters; i++)
-      {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_READ, 0, bytes);
-        queue.finish();
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        memcpy(arr, mapPtr, bytes);
-        auto t2 = std::chrono::high_resolution_clock::now();
-        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      }
-      timed /= static_cast<float>(iters);
-
-      float gbps = (float)bytes / timed / 1e3f;
-      test.emit("memcpy_from_mapped_ptr", gbps, {true, mcFromNote});
-    }
-
-    // enqueueUnmap(after write)
-    {
-      queue.finish();
-
-      unsigned int iters = calibrateMapIters([&]() {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
-        queue.finish();
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      });
-
-      float timed = 0;
-      for (unsigned int i = 0; i < iters; i++)
-      {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
-        queue.finish();
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-        auto t2 = std::chrono::high_resolution_clock::now();
-        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-      }
-      timed /= static_cast<float>(iters);
-
-      float gbps = (float)bytes / timed / 1e3f;
-      reportMapUnmap(gbps, "enqueueunmap", {false, unmapNote});
-    }
-
-    // memcpy to mapped ptr
-    {
-      queue.finish();
-
-      unsigned int iters = calibrateMapIters([&]() {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
-        queue.finish();
-        memcpy(mapPtr, arr, bytes);
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      });
-
-      float timed = 0;
-      for (unsigned int i = 0; i < iters; i++)
-      {
-        void *mapPtr = queue.enqueueMapBuffer(clBuffer, CL_TRUE, CL_MAP_WRITE, 0, bytes);
-        queue.finish();
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        memcpy(mapPtr, arr, bytes);
-        auto t2 = std::chrono::high_resolution_clock::now();
-        timed += (float)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-
-        queue.enqueueUnmapMemObject(clBuffer, mapPtr);
-        queue.finish();
-      }
-      timed /= static_cast<float>(iters);
-
-      float gbps = (float)bytes / timed / 1e3f;
-      test.emit("memcpy_to_mapped_ptr", gbps, {true, mcToNote});
-    }
-
-    freeAligned(arr);
+    releaseHost();
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    test.skip("enqueuewritebuffer", ResultStatus::Error, reason, wbNote);
-    test.skip("enqueuereadbuffer", ResultStatus::Error, reason, rbNote);
-    test.skip("enqueuewritebuffer_nonblocking", ResultStatus::Error, reason, wbnNote);
-    test.skip("enqueuereadbuffer_nonblocking", ResultStatus::Error, reason, rbnNote);
-    test.skip("enqueuemapbuffer", ResultStatus::Error, reason, mapNote);
-    test.skip("memcpy_from_mapped_ptr", ResultStatus::Error, reason, mcFromNote);
-    test.skip("enqueueunmap", ResultStatus::Error, reason, unmapNote);
-    test.skip("memcpy_to_mapped_ptr", ResultStatus::Error, reason, mcToNote);
+    test.skip("h2d_pinned", ResultStatus::Error, reason, h2dNote);
+    test.skip("d2h_pinned", ResultStatus::Error, reason, d2hNote);
 
-    freeAligned(arr);
+    releaseHost();
     return -1;
   }
 

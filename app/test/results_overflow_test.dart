@@ -13,6 +13,7 @@ import 'package:clpeak/src/model/run_document.dart';
 import 'package:clpeak/src/theme/clpeak_theme.dart';
 import 'package:clpeak/src/ui/results/results_body.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _longDevice = 'Goldfish GFXStream (llvmpipe (LLVM 21.1.4, 128 bits))';
@@ -25,12 +26,14 @@ ResultEntry _entry({
   String test = 'compute_hp',
   String display = _longTest,
   String description = '',
+  String? platform,
+  String driver = '24.2.0',
 }) =>
     ResultEntry(
       backend: backend,
-      platform: backend,
+      platform: platform ?? backend,
       device: device,
-      driver: '24.2.0',
+      driver: driver,
       category: 'fp_compute',
       test: test,
       display: display,
@@ -121,5 +124,39 @@ void main() {
     final longGlyph = tester.getRect(glyphs.at(1));
 
     expect(shortGlyph.left, lessThan(longGlyph.left));
+  });
+
+  testWidgets('the driver line uses the width the panel has, not a fixed column',
+      (tester) async {
+    // The header's platform/driver line used to sit in a 260px column, so a
+    // driver version got ellipsized away even here, with the panel hundreds
+    // of pixels wider than the text.
+    tester.view.physicalSize = const Size(2560, 1600);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    const platform = 'Intel(R) OpenCL Graphics';
+    const driver = '32.0.101.8993';
+
+    final doc = RunDocument();
+    doc.addEntry(_entry(
+      backend: 'OpenCL',
+      device: 'Intel(R) Arc(TM) A380 Graphics',
+      platform: platform,
+      driver: driver,
+    ));
+
+    await tester.pumpWidget(_host(doc));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+
+    final line = find.text('$platform  ·  $driver');
+    expect(line, findsOneWidget);
+
+    // Laid out at its full one-line width: nothing was cut or wrapped away.
+    final paragraph = tester.renderObject<RenderParagraph>(line);
+    expect(paragraph.size.width,
+        greaterThanOrEqualTo(paragraph.getMaxIntrinsicWidth(double.infinity) - 0.5));
   });
 }

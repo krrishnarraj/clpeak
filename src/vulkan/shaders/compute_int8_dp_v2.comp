@@ -1,13 +1,10 @@
 #version 450
 #extension GL_EXT_integer_dot_product : require
 
-// INT8 packed-dp4a v2: two parallel dp4a chains per thread.  Each chain
-// has its own (x, y, a) so the per-chain REPACK dependency doesn't block
-// the instruction issue queue; NVIDIA / AMD / Intel can pipeline the
-// independent dp4a's at full IDP4A rate.  See v1 for the extension /
-// lowering rationale.
+// INT8 packed-dp4a v2: two independent dot-product chains per thread.
+// See v1 for the chain shape and why every other spelling of it is wrong.
 //
-// Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1).
+// Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1/v4).
 
 layout(local_size_x = 256) in;
 
@@ -19,31 +16,32 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-#define STEP2(x0, y0, a0, x1, y1, a1) \
-    a0 = dotPacked4x8AccSatEXT(x0, y0, a0); y0 ^= a0; \
-    a1 = dotPacked4x8AccSatEXT(x1, y1, a1); y1 ^= a1;
-#define STEP2_8(x0, y0, a0, x1, y1, a1) \
-    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1) \
-    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1) \
-    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1) \
-    STEP2(x0, y0, a0, x1, y1, a1) STEP2(x0, y0, a0, x1, y1, a1)
+
+
+#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
+                         q = dotPacked4x8AccSatEXT(x, p, q);
+#define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
+#define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
 
 void main()
 {
-    int A = pc.A;
-    int x0 = (A & 0xff) | (((A+1) & 0xff) << 8) | (((A+2) & 0xff) << 16) | (((A+3) & 0xff) << 24);
-    int x1 = ((A+4) & 0xff) | (((A+5) & 0xff) << 8) | (((A+6) & 0xff) << 16) | (((A+7) & 0xff) << 24);
+    int x = (pc.A & 0xff)
+          | (((pc.A + 1) & 0xff) << 8)
+          | (((pc.A + 2) & 0xff) << 16)
+          | (((pc.A + 3) & 0xff) << 24);
+    // No two accumulators start on the same value: chains that begin equal
+    // stay bitwise equal forever and a compiler is free to keep one.
     int lid = int(gl_LocalInvocationID.x);
-    int y0 = lid;
-    int y1 = lid + 1;
-    int a0 = lid;
-    int a1 = lid + 1;
+    int a0 = lid,      a1 = lid + 4;
+    int b0 = lid + 8,  b1 = lid + 12;
 
-    // 64 outer iters * STEP2_8 (= 8 pairs = 16 dots total) = 1024 dots.
-    for (int i = 0; i < 64; i++)
+    // 16 iters * (32 dots per chain * 2 chains) = 1024 dots.  Depth per trip
+    // is what keeps the loop counter off the dots' issue port -- see v1.
+    for (int i = 0; i < 16; i++)
     {
-        STEP2_8(x0, y0, a0, x1, y1, a1)
+        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
+        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1;
+    outputBuf.data[gl_GlobalInvocationID.x] = (a0 + a1) + (b0 + b1);
 }

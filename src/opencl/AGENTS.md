@@ -41,10 +41,9 @@ See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
 - `clWidthNote()` (`cl_peak.h`) is the shared wording for the
   `float`/`float2`/…/`float16` readings, used by the compute helper and the
   global/local bandwidth tests.
-- `transfer_bandwidth`'s test description and its `enqueuemapbuffer` /
-  `enqueueunmap` notes state the zero-copy convention (a route that moves
-  nothing reads as `0.00`).  Changing `ZERO_COPY_MULTIPLIER` or the reporting
-  rule means updating those strings.
+- `transfer_bandwidth` reports the same two readings as the CUDA/ROCm/oneAPI
+  backends -- `h2d_pinned` / `d2h_pinned` -- so the four are directly
+  comparable on one machine.
 
 ## Chain shapes
 

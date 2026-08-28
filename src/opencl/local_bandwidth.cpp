@@ -15,18 +15,34 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   auto test = currentDeviceScope->beginTest(
     {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
      Category::Unknown,
-     "How many bytes per second the GPU moves through local memory -- the "
+     "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
      "which never goes out to main memory."});
+
+  const int widths[] = {1, 2, 4, 8};
+  const char *labels[] = {"float", "float2", "float4", "float8"};
+
+  // CL_DEVICE_LOCAL_MEM_TYPE == CL_GLOBAL: the device has no scratchpad and the
+  // runtime carves __local out of ordinary global memory -- every CPU runtime,
+  // and some GPUs that back local memory with cache.  There is nothing here for
+  // this test to measure: the ping-pong kernel's two barriers per rep then time
+  // the runtime's work-item serialization against DRAM, which is why the same
+  // CPU reads 79 GBPS under Intel's runtime and 170 under pocl.  Reporting
+  // either under "local memory bandwidth" is reporting a number for a memory
+  // that isn't there.
+  if (!devInfo.localMemDedicated)
+  {
+    test.skipAll({labels[0], labels[1], labels[2], labels[3]}, ResultStatus::Unsupported,
+                 "Device has no dedicated local memory (CL_DEVICE_LOCAL_MEM_TYPE is not CL_LOCAL)");
+    return 0;
+  }
 
   try
   {
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));
 
-    const int widths[] = {1, 2, 4, 8};
     const char *knames[] = {"local_bandwidth_v1", "local_bandwidth_v2", "local_bandwidth_v4", "local_bandwidth_v8"};
-    const char *labels[] = {"float", "float2", "float4", "float8"};
 
     cl::Kernel kernels[4];
     for (int w = 0; w < 4; w++)
@@ -40,7 +56,12 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     {
       // float8 requires enough local memory
       if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
+      {
+        test.skip(labels[w], ResultStatus::Unsupported,
+                  "Local memory too small for a float8 scratchpad at this work-group size",
+                  clWidthNote(widths[w]));
         continue;
+      }
 
       // Reset each iteration: run_kernel may clamp global/local for a kernel
       // whose work-group limit is below the device max.
@@ -58,8 +79,6 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   }
   catch (cl::Error &error)
   {
-    const char *labels[] = {"float", "float2", "float4", "float8"};
-    const int widths[] = {1, 2, 4, 8};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 4; w++)
       test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));

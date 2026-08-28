@@ -31,6 +31,12 @@ struct device_info_t
     DeviceType deviceType;       // neutral equivalent
 
     uint64_t localMemSize;
+    // CL_DEVICE_LOCAL_MEM_TYPE == CL_LOCAL.  CL_GLOBAL means the device has no
+    // scratchpad and __local is carved out of ordinary global memory.
+    bool localMemDedicated;
+    // CL_DEVICE_GLOBAL_MEM_CACHE_SIZE -- the last level of cache in front of
+    // global memory.  0 when the runtime does not report one.
+    uint64_t globalMemCacheSize;
 
     bool imageSupported;
     uint64_t image2dMaxWidth;

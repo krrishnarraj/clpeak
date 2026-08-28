@@ -1,8 +1,9 @@
 #version 450
+#extension GL_EXT_integer_dot_product : require
 
 // INT8 dot-product compute throughput (packed dp4a).
 //
-// Uses dotPacked4x8AccSatEXT(uint, uint, int) -- the uint32-packed form of
+// Uses dotPacked4x8AccSatEXT(int, int, int) -- the uint32-packed form of
 // dotAccSatEXT.  Packed is the hardware-native path on NVIDIA, AMD and
 // Intel (dp4a / V_DOT4 / IDPAS take 32-bit packed operands natively), so
 // the driver doesn't insert any pack/unpack around the op.  An earlier
@@ -10,11 +11,33 @@
 // lowering overhead.
 //
 // Each dotPacked4x8AccSatEXT is 4 signed INT8 multiply-adds into a 32-bit
-// accumulator = 8 INT8 ops.  REPACK is a cheap int XOR that reuses the
-// accumulator as the new y -- changes every iter so the compiler can't
-// fold the dot to a constant, but runs at full IALU rate (no byte
-// extracts like the old i8vec4 version).
-#extension GL_EXT_integer_dot_product : require
+// accumulator = 8 INT8 ops.  Nothing else runs in the loop: every
+// instruction issued is one the op budget credits.
+//
+// The chain shape.  Three constraints have to hold at once:
+//
+//  - Both multiplicands may not be loop-invariant.  dp4a with fixed
+//    operands is `a + n*dot(x, y)`, which a driver may and does fold: the
+//    shape read 74939 GOPS on an RTX 5060 whose dp4a peak, measured
+//    through CUDA's own __dp4a on the same card, is 33928.
+//
+//  - Nothing may run between the dots.  The obvious way to keep an operand
+//    moving is to rewrite it from the accumulator (`y ^= a`), but that XOR
+//    is a second dependent integer op per dot and the op budget does not
+//    credit it; on an Arc A380 it cost more than half the rate (8832 GOPS
+//    against 19497 for the same instruction with nothing beside it).
+//
+//  - All three source operands must be distinct registers.  Intel
+//    Alchemist halves a three-source op that reads the same register twice
+//    -- the rule the MAD chains in mad_chain.glsl are built around -- so
+//    `a = dot(x, a, a)` is not the answer either.
+//
+// What satisfies all three: two accumulators feeding each other.  Each dot
+// reads {x, the other accumulator, its own}, three distinct registers, and
+// writes its own.  Every dot depends on the one before it, so this is still
+// a single chain; and because the dot extracts bytes of a value that is
+// itself a 32-bit accumulator, the recurrence is not affine and has no
+// closed form to fold to.  v2/v4 run two and four independent copies.
 
 layout(local_size_x = 256) in;
 
@@ -26,9 +49,40 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-#define STEP(x, y, a)     a = dotPacked4x8AccSatEXT(x, y, a); y ^= a;
-#define STEP_4(x, y, a)   STEP(x, y, a) STEP(x, y, a) STEP(x, y, a) STEP(x, y, a)
-#define STEP_16(x, y, a)  STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a) STEP_4(x, y, a)
+// Sixty-four dots per trip, not sixteen.  Worth 3.6% on a 5060 and nothing
+// like the 23% first claimed for it: the theory was that the loop counter
+// competed with the dots for an issue port, and it does not.  __dp4a measures
+// 63.5 instructions per SM per clock on that card against IMAD's 63.9 -- the
+// same slot, which on Turing and later is the FP32 pipe, while the counter's
+// add and compare go to the ALU pipe.  Fewer branches is all this is.
+//
+// The per-work-item budget is unchanged either way: 16 trips of 64 dots is the
+// same 1024 dots as 64 trips of 16.
+//
+
+// Not the saturation.  dotPacked4x8AccSatEXT is the saturating form and CUDA's
+// __dp4a is not -- there is no saturating dp4a in the ISA, so this one has to
+// carry a clamp somewhere -- but spelling it dotPacked4x8EXT + add and racing
+// the two on a 5060 gave 33524 against 33535 on one chain, and 28159/28459
+// against 29963/32068 on two and four, where the add stops folding into the
+// dot.  Identical or worse, never better.  The driver reports every 4x8-bit
+// form accelerated and evidently means it.
+//
+// So the ~20% this row sits below __dp4a on the same silicon (33535 against
+// 42293, which is 100% of that card's derived ceiling) is not the instruction
+// and not the loop.  Both kernels run the same two-accumulator chain with
+// nothing beside the dots.  What is left is how NVIDIA's Vulkan compiler
+// allocates registers for a three-source instruction against what ptxas does,
+// which is not reachable from GLSL.  Do not spend another shape on it without
+// a way to read the SASS.
+
+// Two dots, one dependent chain, no third instruction.
+
+
+#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
+                         q = dotPacked4x8AccSatEXT(x, p, q);
+#define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
+#define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
 
 void main()
 {
@@ -40,14 +94,16 @@ void main()
           | (((pc.A + 1) & 0xff) << 8)
           | (((pc.A + 2) & 0xff) << 16)
           | (((pc.A + 3) & 0xff) << 24);
-    int y = int(gl_LocalInvocationID.x);
-    int a = int(gl_LocalInvocationID.x);
+    int lid = int(gl_LocalInvocationID.x);
+    int a0 = lid;
+    int a1 = lid + 4;
 
-    // 64 outer iters * 16 dots = 1024 dots * 8 ops = 8192 ops per WI.
-    for (int i = 0; i < 64; i++)
+    // 16 outer iters * 64 dots = 1024 dots * 8 ops = 8192 ops per WI.
+    for (int i = 0; i < 16; i++)
     {
-        STEP_16(x, y, a)
+        STEP2_8(x, a0, a1) STEP2_8(x, a0, a1)
+        STEP2_8(x, a0, a1) STEP2_8(x, a0, a1)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a;
+    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1;
 }

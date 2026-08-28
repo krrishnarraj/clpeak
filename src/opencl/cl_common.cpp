@@ -38,6 +38,8 @@ device_info_t getDeviceInfo(cl::Device &d)
 
     devInfo.maxAllocSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>());
     devInfo.localMemSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>());
+    devInfo.localMemDedicated = (d.getInfo<CL_DEVICE_LOCAL_MEM_TYPE>() == CL_LOCAL);
+    devInfo.globalMemCacheSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_GLOBAL_MEM_CACHE_SIZE>());
     devInfo.maxGlobalSize = static_cast<uint64_t>(d.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
 
     devInfo.imageSupported = (d.getInfo<CL_DEVICE_IMAGE_SUPPORT>() == CL_TRUE);

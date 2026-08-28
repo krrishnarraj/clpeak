@@ -33,9 +33,23 @@
 // tested (Arc A380, RTX 5060, RTX 4060, Arc UHD 630, Adreno X1-45, M1 Pro via
 // MoltenVK) where the squaring form alone reports half rate on Alchemist.
 //
-// MAD_CHAINS is set by the includer: 4 at vector width 1, 2 at width 2, 1 at
-// width 4, keeping live values per lane at ~5 whatever the width -- the
-// register-pressure rule in include/common/common.h still applies.
+// MAD_CHAINS is set by the includer to hold the chain state at ~4 32-bit
+// registers per lane whatever the vector width -- the register-pressure rule
+// in include/common/common.h still applies.  For 32-bit accumulators that is
+// 4 values: 4 chains at width 1, 2 at width 2, 1 at width 4.
+//
+// Note that the budget is registers, not values.  Two fp16 accumulators share
+// one 32-bit register, so a 16-bit-accumulator shader has to carry 8 values to
+// reach the same footprint -- 8 chains at width 1, 4 at width 2, 2 at width 4.
+// Normalising on values instead halves the independent-FMA count on hardware
+// that issues fp16 two per lane, which is the wrong direction: such hardware
+// also retires fp16 twice as fast, so it needs more chains in flight, not
+// fewer.  An Arc A380 (fp16 peak 10.04 TFLOPS) read 4.94 TFLOPS on all three
+// hp widths at 4 values -- flat across the sweep, because cutting MAD_CHAINS
+// in lockstep with the width meant the sweep never varied the ILP at all --
+// against 9.84 from oneAPI and 9.56 from OpenCL, whose sweeps reach half8/
+// half16 and so clear the bar.  Only compute_hp_v* is affected: mp and bf16
+// carry their chains in vec2/vec4 and are already at 4 registers.
 //
 // MAD_CHAIN_INTEGER selects a rotating second shape instead of the affine one;
 // integer shaders must set it, because an integer affine recurrence folds
@@ -57,6 +71,17 @@
 #define MAD_OP(d, m1, m2, ad)  d = fma(m1, m2, ad);
 #endif
 
+// Spacing between the seeds of two chains.  No two *scalar* chains may start
+// on the same value: independent chains under the same recurrence stay bitwise
+// identical forever, and a compiler that scalarises vectors then CSEs one of
+// them away, inflating the reading by chains/(chains-1).  A vector seed already
+// spans (A, A+1, ... A+W-1) across its own components, so chain k has to start
+// a whole vector width away, not 1 away.  4 is the widest vector any shader
+// here uses.  This is not hypothetical: at +1 the width-2 shaders had
+// x0 = (A, A+1) and x1 = (A+1, A+2), and NVIDIA ran 3 of the 4 fp64 chains --
+// double2 read 423 GFLOPS on a 5060 whose FP64 units top out near 335.
+#define MAD_CHAIN_STRIDE 4
+
 #if defined(MAD_CHAIN_AFFINE) && defined(MAD_CHAIN_INTEGER)
 
   // Integer families get a rotating chain rather than the affine one.  An
@@ -70,8 +95,8 @@
   #if MAD_CHAINS == 4
     #define CHAIN_DECL(T, seed, inv)                                          \
         T c = (inv);                                                          \
-        T x0 = (seed);        T x1 = (seed) + T(1);                           \
-        T x2 = (seed) + T(2); T x3 = (seed) + T(3);
+        T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
+        T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, x0, x1, c) MAD_OP(x1, x1, x2, c) \
                          MAD_OP(x2, x2, x3, c) MAD_OP(x3, x3, x0, c)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP
@@ -79,7 +104,7 @@
     #define CHAIN_RESULT ((x0 + x1) + (x2 + x3))
   #else
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T c = (inv);  T x0 = (seed);  T x1 = (seed) + T(1);
+        T c = (inv);  T x0 = (seed);  T x1 = (seed) + T(MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, x0, x1, c) MAD_OP(x1, x1, x0, c)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP \
                          MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP
@@ -89,11 +114,26 @@
 
 #elif defined(MAD_CHAIN_AFFINE)
 
-  #if MAD_CHAINS == 4
+  #if MAD_CHAINS == 8
     #define CHAIN_DECL(T, seed, inv)                                          \
         T a = (inv);  T b = a + T(2);                                         \
-        T x0 = (seed);        T x1 = (seed) + T(1);                           \
-        T x2 = (seed) + T(2); T x3 = (seed) + T(3);
+        T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
+        T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE); \
+        T x4 = (seed) + T(4*MAD_CHAIN_STRIDE); T x5 = (seed) + T(5*MAD_CHAIN_STRIDE); \
+        T x6 = (seed) + T(6*MAD_CHAIN_STRIDE); T x7 = (seed) + T(7*MAD_CHAIN_STRIDE);
+    #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b) \
+                         MAD_OP(x2, a, x2, b) MAD_OP(x3, a, x3, b) \
+                         MAD_OP(x4, a, x4, b) MAD_OP(x5, a, x5, b) \
+                         MAD_OP(x6, a, x6, b) MAD_OP(x7, a, x7, b)
+    #define MAD_16       MAD_GROUP MAD_GROUP
+    #define CHAIN_MAP(f) x0 = f(x0); x1 = f(x1); x2 = f(x2); x3 = f(x3); \
+                         x4 = f(x4); x5 = f(x5); x6 = f(x6); x7 = f(x7);
+    #define CHAIN_RESULT (((x0 + x1) + (x2 + x3)) + ((x4 + x5) + (x6 + x7)))
+  #elif MAD_CHAINS == 4
+    #define CHAIN_DECL(T, seed, inv)                                          \
+        T a = (inv);  T b = a + T(2);                                         \
+        T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
+        T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b) \
                          MAD_OP(x2, a, x2, b) MAD_OP(x3, a, x3, b)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP
@@ -102,7 +142,7 @@
   #elif MAD_CHAINS == 2
     #define CHAIN_DECL(T, seed, inv)                                          \
         T a = (inv);  T b = a + T(2);                                         \
-        T x0 = (seed); T x1 = (seed) + T(1);
+        T x0 = (seed); T x1 = (seed) + T(MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP \
                          MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP

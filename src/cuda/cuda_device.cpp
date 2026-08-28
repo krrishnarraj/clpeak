@@ -55,6 +55,12 @@ bool CudaDevice::init(int devIndex)
   CU_CHECK(cuDeviceTotalMem(&mem, device));
   info.totalGlobalMem = mem;
 
+  // Not CU_CHECK'd: an unreported L2 just leaves the global-bandwidth working
+  // set at its default, which is not worth failing device init over.
+  int l2Bytes = 0;
+  if (cuDeviceGetAttribute(&l2Bytes, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, device) == CUDA_SUCCESS && l2Bytes > 0)
+    info.l2CacheSize = (uint64_t)l2Bytes;
+
   int driverVer = 0;
   cuDriverGetVersion(&driverVer);
   {

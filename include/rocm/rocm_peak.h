@@ -32,6 +32,10 @@ struct rocm_device_info_t {
   int maxThreadsPerBlock = 0;
   uint64_t totalGlobalMem = 0;
   int clockRateKHz = 0;
+  // hipDeviceProp_t::l2CacheSize -- the last level of cache HIP reports in
+  // front of device memory (the MALL / Infinity Cache is not included).  0 when
+  // the driver does not report one.
+  uint64_t l2CacheSize = 0;
   int warpSize = 0;
 
   bool fp16Supported = false;

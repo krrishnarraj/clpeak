@@ -84,7 +84,16 @@ function(compile_shaders)
     get_filename_component(_CS_DIR "${SHADER}" DIRECTORY)
 
     execute_process(
-      COMMAND "${GLSLC}" --target-env=vulkan1.3 -O -I "${_CS_DIR}"
+      # vulkan1.2 (SPIR-V 1.5), not vulkan1.3 (SPIR-V 1.6), and the difference
+      # is not cosmetic.  At 1.6 a specialized work-group size compiles to
+      # OpExecutionModeId LocalSizeId, which is conditional on the maintenance4
+      # feature and is the one structural difference between our coopmat
+      # modules and the ones a driver that faults on ours is known to compile.
+      # At 1.5 the same GLSL compiles to the classic OpExecutionMode LocalSize
+      # plus a gl_WorkGroupSize spec-constant composite, which every driver has
+      # handled since Vulkan 1.0.  Nothing here needs 1.6, and 1.5 modules load
+      # on Vulkan 1.2 devices that 1.6 modules cannot.
+      COMMAND "${GLSLC}" --target-env=vulkan1.2 -O -I "${_CS_DIR}"
               ${EXTRA_ARG} "${SHADER}" -o "${_CS_SPV}"
       RESULT_VARIABLE _CS_RESULT
       ERROR_VARIABLE  _CS_ERROR
@@ -152,9 +161,11 @@ function(compile_shaders)
     # affine chain shape, embedded as <name>_alt.  runComputeKernel times both
     # and reports the faster -- neither shape reaches peak on every vendor.
     # Adopting the shared chain in a shader is the only step needed; this is
-    # detected from the source rather than listed anywhere.
+    # detected from the source rather than listed anywhere.  Match the #include
+    # and not the bare filename: shaders that only mention mad_chain.glsl in a
+    # comment were getting a second build they never use.
     file(READ "${SHADER}" _CS_SRC)
-    if(_CS_SRC MATCHES "mad_chain\\.glsl")
+    if(_CS_SRC MATCHES "#[ \t]*include[ \t]*\"mad_chain\\.glsl\"")
       _cs_embed("${SHADER}" "${SHADER_NAME}_alt" "-DMAD_CHAIN_AFFINE")
       if(_CS_OK)
         target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER}_ALT)

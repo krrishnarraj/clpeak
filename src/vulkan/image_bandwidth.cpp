@@ -2,6 +2,7 @@
 
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Image (texture) bandwidth (Vulkan)
@@ -9,6 +10,10 @@
 //
 // Combined image-sampler descriptor + storage-buffer output.  Image is
 // VK_FORMAT_R32G32B32A32_SFLOAT, sampled with NEAREST + CLAMP_TO_EDGE.
+//
+// Two walk orders are raced and the faster reported -- why, and why neither
+// can flatter the result: the image-bandwidth block in
+// include/common/common.h.
 
 int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 {
@@ -17,7 +22,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Image memory bandwidth";
   testSpec.unit = "gbps";
   testSpec.description =
-      "How many bytes per second the GPU reads through its texture units, "
+      "How many bytes per second the device reads through its texture units, "
       "which take a different path to memory than plain buffer reads.  Each "
       "pixel of the image is read exactly once, so caching cannot flatter the "
       "number.";
@@ -195,9 +200,15 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   VkDescriptorSetLayout dsLayout;
   vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsLayout);
 
+  VkPushConstantRange walkRange = {};
+  walkRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  walkRange.offset = 0;
+  walkRange.size = sizeof(int32_t);
+
   VkPipelineLayoutCreateInfo plCI = {};
   plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsLayout;
+  plCI.pushConstantRangeCount = 1; plCI.pPushConstantRanges = &walkRange;
   VkPipelineLayout pipeLayout;
   vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout);
 
@@ -246,19 +257,24 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   }
   else
   {
-    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-    if (us <= 0.0f)
-    {
+    const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
+    auto timeWalk = [&](int32_t walk) {
+      return runKernel(dev, pipe, pipeLayout, descSet, numGroups,
+                       cfg.targetTimeUs, forceIters ? specifiedIters : 0, true,
+                       &walk, sizeof(walk));
+    };
+    float rowUs = timeWalk(0);
+    float colUs = timeWalk(1);
+    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
+    float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
+                rowGbps, colGbps);
+
+    if (rowGbps <= 0.0f && colGbps <= 0.0f)
       test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
                 fetchNote);
-    }
     else
-    {
-      uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
-      float gbps = (float)bytes / us / 1e3f;
-      test.emit("float4", gbps, fetchNote);
-    }
+      test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 
