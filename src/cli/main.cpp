@@ -168,6 +168,12 @@ int main(int argc, char **argv)
     CliOptions opts;
     parseCliOptions(argc, argv, opts);
     clpeak::setVerbose(opts.verbose);
+#ifdef ENABLE_ONNX
+    // Before any enumeration: --onnx-lib decides which runtime gets loaded,
+    // and enumerate() is what loads it.
+    if (!opts.onnxLibPath.empty())
+        onnxSetLibraryOverride(opts.onnxLibPath);
+#endif
 
     auto backends = buildBackends();
 

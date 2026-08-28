@@ -104,6 +104,8 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_ONNX
     "\n  --onnx-device list          ONNX Runtime execution-provider index/indices"
+    "\n  --onnx-lib path             onnxruntime shared library to load"
+    "\n                              (overrides $CLPEAK_ONNXRUNTIME_LIB)"
 #endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
@@ -654,6 +656,13 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         return missingArg(err, a);
       if (!parseIndexList(v, out.onnxDeviceIndices))
         return invalidList(err, "ONNX device index list", v);
+    }
+    else if (!strcmp(a, "--onnx-lib"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.onnxLibPath = v;
     }
 #endif
 

@@ -154,6 +154,15 @@ void clpeak_free_string(char *s)
     std::free(s);
 }
 
+void clpeak_set_onnx_library(const char *path)
+{
+#ifdef ENABLE_ONNX
+    onnxSetLibraryOverride(path ? path : "");
+#else
+    (void)path;
+#endif
+}
+
 void clpeak_request_cancel(void)
 {
     clpeak::requestCancel();
@@ -195,6 +204,10 @@ int clpeak_launch(int argc, const char **argv,
     }
 
     clpeak::setVerbose(opts.verbose);
+#ifdef ENABLE_ONNX
+    if (!opts.onnxLibPath.empty())
+        onnxSetLibraryOverride(opts.onnxLibPath);
+#endif
 
     ResultStore     combined;
     DeviceInfoStore combinedDevices;

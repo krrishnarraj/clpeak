@@ -5,6 +5,7 @@
 
 #include <common/common.h>
 #include <common/console_mute.h>
+#include <common/dynlib.h>
 
 #include <algorithm>
 #include <atomic>
@@ -180,6 +181,34 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
     }
     return onnxStatusText(rt, api->SessionOptionsAppendExecutionProvider(
         so, opts.registrationName, keys.data(), vals.data(), keys.size()));
+  }
+
+  // ---- NNAPI: an exported function, not an OrtApi entry -----------------
+  // Android's EP predates the generic string-keyed API and never moved onto
+  // it, so registration goes through a plain exported symbol taking a flag
+  // word.  That symbol lives in the runtime we dlopen'd, which is also why
+  // this path cannot exist on a statically linked build -- and does not need
+  // to, NNAPI being Android-only.
+  if (providerKey == "NnapiExecutionProvider")
+  {
+    if (!rt.lib)
+      return "NNAPI needs a dynamically loaded onnxruntime";
+
+    using AppendNnapiFn = OrtStatus *(ORT_API_CALL *)(OrtSessionOptions *,
+                                                      uint32_t);
+    auto append = reinterpret_cast<AppendNnapiFn>(clpeak::dynSym(
+        rt.lib, "OrtSessionOptionsAppendExecutionProvider_Nnapi"));
+    if (!append)
+      return "this onnxruntime was built without the NNAPI provider";
+
+    // NNAPI_FLAG_CPU_DISABLED (0x004).  NNAPI falls back to its own
+    // nnapi-reference CPU implementation for anything the accelerator will
+    // not take, and a row that quietly measured that would be an NPU number
+    // in name only -- the same reason QNN is pinned to HTP and CoreML to
+    // CPUAndNeuralEngine above.  A model the NPU cannot take then fails
+    // loudly here instead, which is the honest outcome.  Ignored below
+    // Android API 29; the app's minSdk is 33.
+    return onnxStatusText(rt, append(so, 0x004));
   }
 
   // ---- Typed-options providers -----------------------------------------

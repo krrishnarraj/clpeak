@@ -8,52 +8,25 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <string>
 
 // Oldest OrtApi we are prepared to speak.  Every entry point this backend
 // calls existed well before this; requesting downwards from ORT_API_VERSION
 // lets a binary built against a new header run on an older installed runtime.
 static const uint32_t kMinApiVersion = 17;  // ONNX Runtime 1.17 (2024)
 
+static std::mutex g_mutex;
 static OrtRuntime g_rt;
-static bool       g_loaded = false;
-static std::once_flag g_once;
+static bool       g_loaded    = false;
+static bool       g_attempted = false;  // a failed search is not retried
+static std::string g_loadError;         // why the last attempt failed
 
-static void loadRuntime()
+// Fill g_rt from an OrtApiBase, whether it came from dlsym or a direct call.
+// Returns false when the runtime serves no API version this build can speak.
+static bool adoptApiBase(const OrtApiBase *base)
 {
-  // Explicit override first, then the platform's conventional names.  The
-  // absolute Homebrew/local paths matter on macOS: /opt/homebrew/lib is not
-  // on the default dlopen search path.
-  const char *env = std::getenv("CLPEAK_ONNXRUNTIME_LIB");
-  void *lib = clpeak::dynOpen({
-      env,
-#if defined(_WIN32)
-      "onnxruntime.dll",
-#elif defined(__APPLE__)
-      "libonnxruntime.dylib",
-      "/opt/homebrew/lib/libonnxruntime.dylib",
-      "/usr/local/lib/libonnxruntime.dylib",
-#else
-      "libonnxruntime.so",
-      "libonnxruntime.so.1",
-#endif
-  });
-  if (!lib)
-    return;
-
-  auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(
-      clpeak::dynSym(lib, "OrtGetApiBase"));
-  if (!getBase)
-  {
-    clpeak::dynClose(lib);
-    return;
-  }
-
-  const OrtApiBase *base = getBase();
   if (!base)
-  {
-    clpeak::dynClose(lib);
-    return;
-  }
+    return false;
 
   // Ask for the highest API this runtime can actually serve.  ORT numbers its
   // API after its own minor version (1.23.x serves API 23), so the version
@@ -82,26 +55,135 @@ static void loadRuntime()
   }
   if (!api)
   {
-    if (clpeak::verboseEnabled())
-      fprintf(stderr, "clpeak: onnxruntime %s exposes no OrtApi in [%u, %u]\n",
-              base->GetVersionString(), kMinApiVersion,
-              (unsigned)ORT_API_VERSION);
-    clpeak::dynClose(lib);
-    return;
+    g_loadError = "onnxruntime " + std::string(base->GetVersionString()) +
+                  " exposes no OrtApi in [" + std::to_string(kMinApiVersion) +
+                  ", " + std::to_string((unsigned)ORT_API_VERSION) + "]";
+    return false;
   }
 
-  g_rt.lib           = lib;
   g_rt.base          = base;
   g_rt.api           = api;
   g_rt.apiVersion    = version;
   g_rt.versionString = base->GetVersionString();
-  g_loaded = true;
+  return true;
 }
+
+#ifdef CLPEAK_ONNX_STATIC
+
+// Statically linked (iOS): the runtime is already in the binary.
+static void loadRuntime()
+{
+  g_rt.lib  = nullptr;
+  g_rt.path.clear();
+  g_loaded  = adoptApiBase(OrtGetApiBase());
+  if (!g_loaded)
+    g_loadError = "the linked-in ONNX Runtime exposes no usable OrtApi";
+}
+
+void onnxSetLibraryOverride(const std::string &) {}
+
+#else
+
+static std::string g_override;  // --onnx-lib / clpeak_set_onnx_library
+
+static void loadRuntime()
+{
+  // A library the user named -- by --onnx-lib, by the FFI setter, or in the
+  // environment -- is the library to measure, and nothing else will do.  The
+  // conventional names are searched only when nobody named one: quietly
+  // falling back would report a different runtime's version and a different
+  // runtime's numbers under the name of the one that was asked for, which is
+  // the one mistake this setting exists to prevent.
+  const char *ovr   = g_override.empty() ? nullptr : g_override.c_str();
+  const char *env   = std::getenv("CLPEAK_ONNXRUNTIME_LIB");
+  const char *named = ovr ? ovr : ((env && *env) ? env : nullptr);
+
+  void *lib = nullptr;
+  if (named)
+  {
+    lib = clpeak::dynOpen({named});
+    if (!lib)
+      g_loadError = std::string("could not load onnxruntime from '") + named +
+                    "'";
+  }
+  else
+  {
+    // The absolute Homebrew/local paths matter on macOS: /opt/homebrew/lib is
+    // not on the default dlopen search path.  On Android the bare soname is
+    // what resolves -- a packaged runtime lands in the APK's read-only lib
+    // dir, which is on the linker path.
+    lib = clpeak::dynOpen({
+#if defined(_WIN32)
+        "onnxruntime.dll",
+#elif defined(__APPLE__)
+        "libonnxruntime.dylib",
+        "/opt/homebrew/lib/libonnxruntime.dylib",
+        "/usr/local/lib/libonnxruntime.dylib",
+#else
+        "libonnxruntime.so",
+        "libonnxruntime.so.1",
+#endif
+    });
+    if (!lib)
+      g_loadError = "onnxruntime library not found";
+  }
+  if (!lib)
+    return;
+
+  auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(
+      clpeak::dynSym(lib, "OrtGetApiBase"));
+  if (!getBase)
+  {
+    g_loadError = std::string(named ? named : "onnxruntime") +
+                  " exports no OrtGetApiBase -- not an ONNX Runtime library";
+    clpeak::dynClose(lib);
+    return;
+  }
+
+  if (!adoptApiBase(getBase()))
+  {
+    clpeak::dynClose(lib);
+    return;
+  }
+
+  // Deliberately not dlclosed for the rest of the process: see the note on
+  // onnxSetLibraryOverride() in the header.
+  g_rt.lib  = lib;
+  g_rt.path = named ? named : "";
+  g_loaded  = true;
+}
+
+void onnxSetLibraryOverride(const std::string &path)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (path == g_override)
+    return;
+  g_override = path;
+  // Force the next ortRuntime() to search again.  The previously loaded
+  // handle stays mapped; g_rt is simply repointed once the new one loads.
+  g_loaded    = false;
+  g_attempted = false;
+  g_rt        = OrtRuntime{};
+  g_loadError.clear();
+}
+
+#endif // CLPEAK_ONNX_STATIC
 
 const OrtRuntime *ortRuntime()
 {
-  std::call_once(g_once, loadRuntime);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_attempted)
+  {
+    g_attempted = true;
+    loadRuntime();
+  }
   return g_loaded ? &g_rt : nullptr;
+}
+
+std::string onnxLoadDiagnostic()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_loadError;
 }
 
 #endif // ENABLE_ONNX

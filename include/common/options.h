@@ -34,6 +34,12 @@ struct CliOptions {
   std::vector<int> oneapiDeviceIndices;
   std::vector<int> onnxDeviceIndices;
 
+  // --onnx-lib: absolute path to the onnxruntime shared library to load,
+  // overriding the platform's conventional names.  Empty = search the
+  // default names (see src/onnx/onnx_runtime.cpp).  Ignored on a build that
+  // links ONNX Runtime statically, where there is nothing to load.
+  std::string onnxLibPath;
+
   // Iters / warmup.  When forceIters is false, each backend's runKernel
   // calibrates iters from a one-shot timed warmup so the timed phase lands
   // at ~targetTimeUs regardless of device speed.

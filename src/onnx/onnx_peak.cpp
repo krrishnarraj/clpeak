@@ -117,7 +117,10 @@ int OnnxPeak::runAll()
   const OrtRuntime *rt = ortRuntime();
   if (!rt)
   {
-    log->note("ONNX: onnxruntime library not found\n");
+    std::string why = onnxLoadDiagnostic();
+    log->note("ONNX: " +
+              (why.empty() ? std::string("onnxruntime library not found") : why) +
+              "\n");
     return 0;   // absent runtime is not an error, like a missing GPU driver
   }
 
@@ -244,7 +247,10 @@ void OnnxPeak::printInventory(const BackendInventory &b, std::ostream &os)
   os << "\n=== ONNX backend ===\n";
   if (!b.available)
   {
-    os << "ONNX: onnxruntime library not found\n";
+    std::string why = onnxLoadDiagnostic();
+    os << "ONNX: "
+       << (why.empty() ? std::string("onnxruntime library not found") : why)
+       << "\n";
     return;
   }
   for (const auto &plat : b.platforms)
