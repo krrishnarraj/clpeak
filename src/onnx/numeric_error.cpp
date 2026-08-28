@@ -45,7 +45,11 @@ struct Variant
   bool        qdq;
   const char *label;
   const char *note;
+  int64_t     blockSize;   // >0: NVFP4, blocked on both operands
 };
+
+// Matches gemm.cpp's, so the two tests describe the same NVFP4.
+constexpr float kNvfp4GlobalScale = 0.125f;
 
 // Only ever asked about the types that cross the graph boundary, which are
 // fp32 and the plain float widths -- the quantized ones are handed over as
@@ -267,6 +271,13 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "The same for 4-bit floating point, which has eight magnitudes to hold "
      "the answer in.  Expect roughly four times fp8_e4m3's error: two fewer "
      "mantissa bits."},
+    {ONNX_DT_FLOAT4E2M1, false, "nvfp4",
+     "What the fastest format here costs.  Four bits on both operands with a "
+     "scale per 16 and another for the tensor, the result kept in the same "
+     "form for whatever consumes it next.  Read it against the throughput row "
+     "of the same name: that is the only genuinely 4-bit rate in this backend, "
+     "and this is the price of it.",
+     /*blockSize=*/16},
     {ONNX_DT_INT8, true, "int8_qdq",
      "What the integer path costs once the operands are already quantized: "
      "the multiply, and storing the result back in 8 bits.  Rounding the "
@@ -327,11 +338,41 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int aDtype = v.dtype;
     std::string aRaw, bRaw, err;
     std::vector<uint8_t> raw;
-    std::vector<float> aDeq;
+    std::vector<float> aDeq, bDeq;
     std::vector<std::string> ranOps;
     const char *inName = "A", *outName = "C";
 
-    if (v.qdq)
+    if (v.blockSize > 0)
+    {
+      // NVFP4.  The activations are handed over as the values the format
+      // recovers and re-quantized on device, so nothing four-bit crosses the
+      // boundary and nothing can be constant-folded into a wider answer.
+      std::string aPacked, aScales, bPacked, bScales, cScales;
+      std::vector<float> aDeqF, bDeqF;
+      onnxFillNvfp4(aPacked, aScales, &aDeqF, kDim, kDim, /*blockAxis=*/1,
+                    v.blockSize, kNvfp4GlobalScale, 0x9e3779b9u);
+      onnxFillNvfp4(bPacked, bScales, &bDeqF, kDim, kDim, /*blockAxis=*/0,
+                    v.blockSize, kNvfp4GlobalScale, 0x243f6a88u);
+
+      // One calibrated scale for every output block, the way a real pipeline
+      // gets them: four sigma of a K-deep dot product over float4's widest
+      // magnitude, stored in E4M3 with the global scale divided out.
+      {
+        const float want = qdqOutputScale(kDim, ONNX_DT_FLOAT4E2M1);
+        cScales.assign((size_t)kDim * (size_t)(kDim / v.blockSize),
+                       (char)floatToFp8E4M3(want / kNvfp4GlobalScale));
+      }
+
+      std::string model = onnxNvfp4AccuracyModel(kDim, kDim, kDim, v.blockSize,
+                                                 aScales, bPacked, bScales,
+                                                 cScales, kNvfp4GlobalScale);
+      aDeq = aDeqF;
+      raw = runOnce(rt, ep, model, "A", "C", aDeq.data(),
+                    aDeq.size() * sizeof(float), ONNX_DT_FLOAT, kDim, kDim,
+                    err, &ranOps, /*keepQdqUnfused=*/true);
+      bDeq = bDeqF;
+    }
+    else if (v.qdq)
     {
       // The quantized type never crosses the graph boundary.  The input is
       // handed over as the fp32 values it dequantizes to and quantized on
@@ -377,9 +418,9 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
                     aDtype, kDim, kDim, err);
     }
-    if (v.qdq)
+    if (v.qdq || v.blockSize > 0)
     {
-      if (v.dtype == ONNX_DT_INT8)
+      if (v.dtype == ONNX_DT_INT8 && v.blockSize == 0)
         o.description += (aDtype == ONNX_DT_UINT8)
                              ? "  Measured with unsigned activations."
                              : "  Measured with signed activations.";
@@ -421,7 +462,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // The quantized path returns fp32 already dequantized; the plain one
     // returns its own dtype and is widened here.
     std::vector<float> got;
-    if (v.qdq)
+    if (v.qdq || v.blockSize > 0)
     {
       got.resize((size_t)kDim * kDim);
       std::memcpy(got.data(), raw.data(), got.size() * sizeof(float));
@@ -435,11 +476,12 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     // The reference: the same values the provider saw, widened to fp32 and
     // multiplied on the CPU EP.
-    std::vector<float> aRef = v.qdq
+    std::vector<float> aRef = (v.qdq || v.blockSize > 0)
         ? aDeq
         : widen(aRaw, aDtype, kDim * kDim, onnxQuantScaleFor(aDtype));
-    std::vector<float> bRef = widen(bRaw, v.dtype, kDim * kDim,
-                                    onnxQuantScaleFor(v.dtype));
+    std::vector<float> bRef = (v.blockSize > 0)
+        ? bDeq
+        : widen(bRaw, v.dtype, kDim * kDim, onnxQuantScaleFor(v.dtype));
     if (got.empty() || aRef.empty() || bRef.empty())
     {
       test.skip(v.label, ResultStatus::Error,

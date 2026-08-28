@@ -205,78 +205,6 @@ size_t schemesFor(const Variant &v, QuantScheme out[2])
   return 1;
 }
 
-// Weights for the weight-only form, quantized per block.
-//
-// Values are drawn from a hash of the position rather than a running xorshift
-// so a block can be visited twice -- once to find its maximum, once to
-// quantize against it -- without holding the whole matrix in floats.  At
-// 16384 square that would be a gigabyte of scratch to produce 128 MB of
-// weights, which is the wrong way round on any machine and fatal on a phone.
-float weightAt(int64_t i, int64_t j, uint32_t seed)
-{
-  uint32_t s = seed ^ (uint32_t)(i * 0x9E3779B1u) ^ (uint32_t)(j * 0x85EBCA77u);
-  s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-  return (float)(s >> 8) / 16777216.0f - 0.5f;      // [-0.5, 0.5)
-}
-
-// Quantize a [rows, cols] matrix into packed float4 plus one E4M3 scale per
-// block, with a global scale factored out of the block scales.
-//
-// `blockAxis` is 0 when blocks run down rows (the weights, grouped along K) and
-// 1 when they run along columns (the activations, whose K is their second
-// axis).  Both operands are blocked along the reduction axis; it is simply a
-// different axis number for each.
-void fillNvfp4(std::string &packed, std::string &blockScales,
-               int64_t rows, int64_t cols, int blockAxis, int64_t blockSize,
-               float globalScale, uint32_t seed)
-{
-  const int64_t sRows = (blockAxis == 0) ? rows / blockSize : rows;
-  const int64_t sCols = (blockAxis == 0) ? cols : cols / blockSize;
-  packed.assign((size_t)onnxElemBytes(ONNX_DT_FLOAT4E2M1, rows * cols), '\0');
-  blockScales.assign((size_t)sRows * (size_t)sCols, '\0');
-  uint8_t *bs = reinterpret_cast<uint8_t *>(&blockScales[0]);
-
-  for (int64_t sr = 0; sr < sRows; sr++)
-  {
-    for (int64_t sc = 0; sc < sCols; sc++)
-    {
-      // Walk the block twice: once for its largest magnitude, once to quantize
-      // against it.  weightAt() is a hash of the position precisely so this
-      // costs nothing but arithmetic.
-      const int64_t i0 = (blockAxis == 0) ? sr * blockSize : sr;
-      const int64_t j0 = (blockAxis == 0) ? sc : sc * blockSize;
-
-      float maxAbs = 0.0f;
-      for (int64_t b = 0; b < blockSize; b++)
-      {
-        const int64_t i = (blockAxis == 0) ? i0 + b : i0;
-        const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
-        const float   w = weightAt(i, j, seed) * 2.0f;   // spread over [-1, 1]
-        const float   a = w < 0.0f ? -w : w;
-        if (a > maxAbs) maxAbs = a;
-      }
-
-      // The block scale maps this block's peak onto float4's largest magnitude,
-      // and is itself stored in E4M3 after the global scale is divided out.
-      // Rounding it there is part of the format, so the quantization below uses
-      // the value that will actually be recovered, not the one intended.
-      const float wanted = (maxAbs > 0.0f) ? maxAbs / 6.0f : 1.0f;
-      const uint8_t stored = floatToFp8E4M3(wanted / globalScale);
-      bs[sr * sCols + sc] = stored;
-      const float scale = fp8E4M3ToFloat(stored) * globalScale;
-      const float inv   = (scale > 0.0f) ? 1.0f / scale : 0.0f;
-
-      for (int64_t b = 0; b < blockSize; b++)
-      {
-        const int64_t i = (blockAxis == 0) ? i0 + b : i0;
-        const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
-        const float   w = weightAt(i, j, seed) * 2.0f;
-        onnxStoreNibble(&packed[0], i * cols + j, floatToFp4E2M1(w * inv));
-      }
-    }
-  }
-}
-
 // Quantize a [K, N] weight matrix into packed int4 plus one fp16 scale per
 // block of `blockSize` rows per column.  Symmetric, so the scale is the block
 // maximum over 7 and there is no zero point.
@@ -299,7 +227,7 @@ void fillBlockedWeights(std::string &packed, std::string &scales,
       float maxAbs = 0.0f;
       for (int64_t r = 0; r < blockSize; r++)
       {
-        const float w = weightAt(b * blockSize + r, j, seed);
+        const float w = onnxWeightAt(b * blockSize + r, j, seed);
         const float a = w < 0.0f ? -w : w;
         if (a > maxAbs) maxAbs = a;
       }
@@ -311,7 +239,7 @@ void fillBlockedWeights(std::string &packed, std::string &scales,
       for (int64_t r = 0; r < blockSize; r++)
       {
         const int64_t i = b * blockSize + r;
-        const float   w = weightAt(i, j, seed);
+        const float   w = onnxWeightAt(i, j, seed);
         const float   t = w / scale;
         if (isFp4)
           onnxStoreNibble(&packed[0], i * N + j, floatToFp4E2M1(t));
@@ -421,10 +349,10 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   if (v.nvfp4)
   {
     std::string aPacked, aScales, bPacked, bScales;
-    fillNvfp4(aPacked, aScales, D, D, /*blockAxis=*/1, v.blockSize,
-              kNvfp4GlobalScale, 0x9e3779b9u);
-    fillNvfp4(bPacked, bScales, D, D, /*blockAxis=*/0, v.blockSize,
-              kNvfp4GlobalScale, 0x243f6a88u);
+    onnxFillNvfp4(aPacked, aScales, nullptr, D, D, /*blockAxis=*/1,
+                  v.blockSize, kNvfp4GlobalScale, 0x9e3779b9u);
+    onnxFillNvfp4(bPacked, bScales, nullptr, D, D, /*blockAxis=*/0,
+                  v.blockSize, kNvfp4GlobalScale, 0x243f6a88u);
     modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
                                               aScales, bPacked, bScales,
                                               kNvfp4GlobalScale);

@@ -491,20 +491,31 @@ of what the format costs, and quantizing against the value that will actually
 come back is what keeps the row measuring NVFP4 rather than an idealisation of
 it. The global scale is a power of two so that factoring it out is exact.
 
-**There is no NVFP4 accuracy row yet, and now there should be.** The reasoning
-for leaving it out was that until some provider fused the shape it would measure
-a graph nobody executes as NVFP4. TensorRT now does, so the accumulation is
-four-bit hardware's own and does not cancel the way operand rounding does.
+**The NVFP4 accuracy row exists, and two things about its shape are
+load-bearing.**
 
-Building it needs care about one hazard the throughput row does not have. The
-accuracy model must return real values, so it cannot reduce them away — and if
-both operands stay initializers, TensorRT is free to fold the product at engine
-build time and hand back an answer computed in something wider, which would
-read as *better* accuracy rather than as a failure. The throughput row is safe
-from this because its guard watches the time scale with the problem size; an
-accuracy row has no such tell. The way out is the one `floatIo` already takes:
-hand the activations in at run time as fp32 and quantize them on device against
-supplied block scales, so the product cannot be constant-folded at all.
+*The activations arrive at run time.* An accuracy model has to return real
+values, so it cannot reduce them away — and with both operands left as
+initializers TensorRT would be free to fold the product while building its
+engine and answer in something wider. That reads as **better** accuracy rather
+than as a failure, and unlike the throughput row, whose guard watches time scale
+with problem size, an accuracy row has no tell at all. Handing the activations
+in as fp32 and quantizing them on device against supplied block scales removes
+the possibility rather than detecting it. It costs nothing: the values passed in
+are exactly what the format recovers, so the device's own quantize round-trips
+them.
+
+*The result is quantized back to float4 before it returns.* Without that the row
+would measure accumulation alone and could not be read beside the eight-bit
+rows, which all include the width their answer is kept in. It is blocked along
+the result's own second axis — the reduction axis of whatever consumes it next —
+both because that is what a real four-bit pipeline hands on, and because a
+per-tensor float4 quantize is precisely the shape TensorRT already refused. Its
+scale is one calibrated value per block, four sigma of a K-deep dot product over
+float4's widest magnitude, which is how a real pipeline gets them too.
+
+Expect roughly **four times `fp8_e4m3`'s figure**: E2M1 holds the answer in one
+mantissa bit against E4M3's three.
 
 NVFP4 is also the first variant narrow enough to reach 32768 on the size ladder:
 its operands come to 1.125 bytes per element against fp16's four, so a size the

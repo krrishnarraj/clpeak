@@ -201,6 +201,30 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 //
 // Scales are E4M3 and therefore reachable at float4's own opset 23; MXFP4's
 // E8M0 scale is a later opset than anything here emits.
+// NVFP4 shaped for the accuracy test: the full product comes back rather than
+// being reduced away, so the values can be compared.
+//
+// The activations arrive as fp32 at run time and are quantized on device
+// against supplied block scales.  That is not merely tidier than baking them
+// in -- it is what makes the row trustworthy.  With both operands constant,
+// TensorRT is free to fold the product while building its engine and answer in
+// something wider, which would read as *better* accuracy rather than as a
+// failure, and unlike the throughput row there is no timing that would give it
+// away.  A runtime input removes the possibility instead of detecting it.
+//
+// The result is quantized back to float4 before it is returned, blocked along
+// its own reduction axis, because that is what the next layer of a real
+// four-bit pipeline would receive -- and because a per-tensor float4 quantize
+// is the shape TensorRT already refused.  Without it the row would measure
+// accumulation alone and could not be read beside the eight-bit rows.
+std::string onnxNvfp4AccuracyModel(int64_t M, int64_t K, int64_t N,
+                                   int64_t blockSize,
+                                   const std::string &aBlockScales,
+                                   const std::string &bPacked,
+                                   const std::string &bBlockScales,
+                                   const std::string &cBlockScales,
+                                   float globalScale);
+
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
                                          const std::string &aPacked,
@@ -363,6 +387,28 @@ void    onnxStoreNibble(void *dst, int64_t index, uint8_t nib);
 uint8_t onnxLoadNibble(const void *src, int64_t index);
 void onnxStoreInt4(void *dst, int64_t index, int q);
 int  onnxLoadInt4(const void *src, int64_t index);
+
+// Deterministic weight value at a position, in [-0.5, 0.5).
+//
+// A hash of the position rather than a running sequence, so a block can be
+// visited twice -- once to find its maximum, once to quantize against it --
+// without holding the matrix in floats.  At 16384 square that would be a
+// gigabyte of scratch to produce 128 MB of weights.
+float onnxWeightAt(int64_t i, int64_t j, uint32_t seed);
+
+// Quantize a [rows, cols] matrix into NVFP4: packed E2M1 values plus one E4M3
+// scale per block of `blockSize` along the blocked axis, with `globalScale`
+// factored out of those scales.  `blockAxis` is 0 when blocks run down rows and
+// 1 when they run along columns; both operands of a matmul block along the
+// reduction axis, which is a different axis number for each.
+//
+// `deq`, when given, receives the fp32 values the format actually recovers --
+// what an accuracy reference has to multiply, and what the device must be
+// handed so its own quantize round-trips rather than rounding a second time.
+void onnxFillNvfp4(std::string &packed, std::string &blockScales,
+                   std::vector<float> *deq, int64_t rows, int64_t cols,
+                   int blockAxis, int64_t blockSize, float globalScale,
+                   uint32_t seed);
 
 // Bytes a tensor of `count` elements of `dtype` occupies, nibble packing
 // included -- dtypeSize()-style helpers cannot express a half.
