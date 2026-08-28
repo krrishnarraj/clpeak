@@ -244,8 +244,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "like these, which all sit comfortably inside both ranges -- bf16 buys "
      "headroom against overflow, not precision, and this shows the price."},
     {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
-     "What 8 bits of floating point costs, in the precision-favouring variant. "
-     " Read it beside int8: both are eight bits over the same operands, and "
+     "The same for 8-bit floating point, in the precision-favouring variant.  "
+     "Read it beside int8: both are eight bits holding the same product, and "
      "which one loses less depends entirely on how the values are spread.  "
      "These are uniform over a fixed range, which is int8's best case and "
      "float8's worst -- float8 buys dynamic range, and uniform data has none "
@@ -254,9 +254,12 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "The same in the range-favouring variant, with one fewer mantissa bit.  "
      "It should be about twice fp8_e4m3's error on data like this."},
     {ONNX_DT_INT8, true, "int8_qdq",
-     "What quantization costs, end to end -- quantizing the inputs, the "
-     "matmul, and re-quantizing the result.  Whether the multiply itself ran "
-     "in integers is a separate question, and this row says which it was."},
+     "What the integer path costs once the operands are already quantized: "
+     "the multiply, and storing the result back in 8 bits.  Rounding the "
+     "operands is not counted -- the reference multiplies the same quantized "
+     "values, so that part cancels and what is left is this hardware's doing.  "
+     "Whether the multiply ran in integers at all is a separate question, and "
+     "this row says which it was."},
   };
 
   auto test = currentDeviceScope->beginTest(
@@ -264,10 +267,14 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        Category::FpCompute,
        "How far each datatype's answer drifts from a full-precision one, in "
        "parts per million, on a fixed 1024x1024x1024 matrix multiply.  Speed "
-       "rows alone cannot be compared honestly across datatypes: int8 is fast "
-       "because it discarded precision, and this is how much.  The fp32 row "
-       "also catches a provider that accepts a full-precision graph and then "
-       "computes it at lower precision behind your back."});
+       "rows alone cannot be compared honestly across datatypes: a format is "
+       "fast because it discarded precision, and this is how much.  The "
+       "reference multiplies the very same operands the device was given, so "
+       "what is measured is the arithmetic and the width the answer is kept "
+       "in -- not the rounding of the inputs, which is a property of the "
+       "format rather than of the hardware and would be identical everywhere.  "
+       "The fp32 row also catches a provider that accepts a full-precision "
+       "graph and then computes it at lower precision behind your back."});
 
   // The reference always runs on the CPU EP in fp32 -- it is the one path
   // present on every machine and the one whose arithmetic is not in question.

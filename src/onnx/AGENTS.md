@@ -233,6 +233,17 @@ dtype is therefore also measured as relative RMS error against an fp32
 reference built from *the same values the reduced-precision run saw* —
 widened, not re-generated — and computed on the CPU EP.
 
+**That choice decides what the number means, so it is worth stating plainly.**
+Because the reference multiplies the operands the device was actually handed,
+already rounded, the operand rounding is identical on both sides and cancels.
+What each row reports is therefore the *arithmetic* plus the width the answer
+is kept in — the part that belongs to the hardware — and not the cost of
+quantizing the inputs, which is a property of the format, the same on every
+device, and would swamp the comparison this test exists for. It is why fp16
+reads 207 ppm rather than something far larger, and why the ratios below fall
+on exact powers of two: they are ratios of how many mantissa bits the *result*
+was stored in.
+
 The fp32 row doubles as a precision-downgrade detector, and on Apple silicon
 it resolves which engine actually ran the work. Reference readings, M1 Pro:
 
@@ -245,6 +256,7 @@ Float8, M1 Pro CPU EP (quantized correctly, multiplied in float): e4m3
 | CoreML EP | 0.4 ppm | 214 ppm | (unsupported) | (unsupported) |
 | CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 1659 ppm | 9447 ppm |
 | TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | 1659 ppm | 9463 ppm |
+| TensorRT float8 (RTX 5060) | — | — | e4m3 **26546 ppm** | — |
 | CPU EP (Zen 2) | 0.0 ppm | 207 ppm | (no kernel) | **178926 ppm** |
 | DirectML (RTX 5060) | **0.6 ppm** | 1185 ppm | — | 9443 ppm |
 
@@ -255,6 +267,21 @@ is input rounding and nothing else, the ratio has to be 2³ — and it is, to fo
 figures, across two providers that agree on nothing else. Alongside CPU-EP fp32
 reading exactly 0.0, that is the second place this test proves itself rather
 than merely reporting.
+
+The CUDA EP makes the same point from the other direction, and more
+usefully. There bf16 and fp16 run at **the same speed** — 40.14 against
+40.01 TFLOPS, once the cast fallback lets the bf16 row report at all — while
+bf16's error is 1659 ppm against fp16's 207. Identical throughput, eight times
+the error: on that provider there is no reason to prefer bf16 unless the values
+need its exponent range, and only the pair of rows says so.
+
+TensorRT's float8 accuracy settles the last question about it. It reads
+**26545.94 ppm**, the same figure the CUDA and CPU providers report from a
+float multiply, so TensorRT accumulates float8 in fp32 — unlike fp16, which it
+accumulates in fp16 for the extra rate. Its 75.5 TFLOPS is therefore roughly
+1.9x its own fp32-accumulated fp16 rate, which is exactly what a doubled-rate
+float8 path should look like. Rate and accuracy agreeing on the same
+explanation is the strongest form this test's evidence takes.
 
 The float8 pair says it a third time. On the M1 Pro CPU EP, which quantizes
 correctly and then multiplies in floating point (the fusion check says so), the
