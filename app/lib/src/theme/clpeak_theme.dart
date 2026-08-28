@@ -296,6 +296,7 @@ class ClpeakTheme {
               BenchCategory.string => const Color(0xFF00806A), // teal
               BenchCategory.bandwidth => const Color(0xFF23803B), // green
               BenchCategory.latency => const Color(0xFF9A6B00), // amber
+              BenchCategory.ai => const Color(0xFFB0247C), // magenta
               BenchCategory.unknown => const Color(0xFF5E6870), // neutral
             }
           : switch (c) {
@@ -305,6 +306,7 @@ class ClpeakTheme {
               BenchCategory.string => const Color(0xFF34E0C2), // teal
               BenchCategory.bandwidth => const Color(0xFF6FDD75), // green
               BenchCategory.latency => const Color(0xFFFFD35C), // amber
+              BenchCategory.ai => const Color(0xFFFF86C8), // magenta
               BenchCategory.unknown => const Color(0xFF9AA7B0), // neutral
             };
 
@@ -315,11 +317,13 @@ class ClpeakTheme {
         BenchCategory.string => Icons.text_fields,
         BenchCategory.bandwidth => Icons.swap_vert,
         BenchCategory.latency => Icons.timer_outlined,
+        BenchCategory.ai => Icons.auto_awesome,
         BenchCategory.unknown => Icons.help_outline,
       };
 
   static IconData backendIcon(String backend) => switch (backend) {
         'CPU' => Icons.memory,
+        'ONNX' => Icons.hub_outlined,
         'Metal' || 'Vulkan' || 'OpenCL' || 'CUDA' || 'ROCm' || 'oneAPI' =>
           Icons.developer_board,
         _ => Icons.device_unknown,

@@ -48,6 +48,20 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
             }
           ]
         },
+        {
+          'name': 'ONNX',
+          'available': true,
+          'platforms': [
+            {
+              'index': 0,
+              'name': 'ONNX Runtime 1.20.1',
+              'devices': [
+                {'index': 0, 'name': 'CPUExecutionProvider', 'type': 'CPU'},
+                {'index': 1, 'name': 'CoreMLExecutionProvider', 'type': 'NPU'},
+              ]
+            }
+          ]
+        },
         {'name': 'Vulkan', 'available': false, 'platforms': []},
       ]
     });
@@ -74,6 +88,20 @@ void main() {
           'OpenCL', (platformIndex: 0, deviceIndex: 0), false);
       final args = config.toArgs(catalog);
       expect(args, ['--cl-platform', '0', '--cl-device', '1']);
+    });
+
+    test('deselected ONNX backend emits --no-onnx', () {
+      final catalog = _catalog();
+      final config = RunConfig.allDevices(catalog);
+      config.selectedDevices.remove('ONNX');
+      expect(config.toArgs(catalog), ['--no-onnx']);
+    });
+
+    test('partial ONNX selection emits an EP index list', () {
+      final catalog = _catalog();
+      final config = RunConfig.allDevices(catalog);
+      config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 0), false);
+      expect(config.toArgs(catalog), ['--onnx-device', '1']);
     });
 
     test('category subset flips to allow-list flags', () {

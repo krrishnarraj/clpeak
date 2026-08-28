@@ -29,8 +29,11 @@ import 'result_entry.dart';
   }
 }
 
-/// For latency units lower is better — bars and "peak" picking invert.
-bool isLowerBetter(String unit) => unit == 'us' || unit == 'ns';
+/// For latency units — and for `ppm`, the ONNX numeric-error unit, where the
+/// reading is a distance from the right answer — lower is better; bars and
+/// "peak" picking invert.
+bool isLowerBetter(String unit) =>
+    unit == 'us' || unit == 'ns' || unit == 'ppm';
 
 /// One test's rows on one device (all metric variants).
 class TestResult {
