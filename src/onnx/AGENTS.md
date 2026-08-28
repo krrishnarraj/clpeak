@@ -34,7 +34,7 @@ backend.
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime once per process and resolves the `OrtApi` table |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + int4 weight-only) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
@@ -375,6 +375,51 @@ matrix coprocessor, not the Neural Engine, an internal routing decision ORT
 never reports. The size curves above agree: the fp32 row behaves like AMX
 (faster the bigger it gets) and the fp16 row like the ANE (a cliff once it
 outgrows on-chip memory).
+
+## int4 is a memory format here, not a compute one
+
+**ONNX has no 4-bit matmul.** `MatMulInteger` and `QLinearMatMul` are both
+8-bit, and opset 21 added int4 to `DequantizeLinear` and nowhere else. A
+symmetric int4 graph — both operands narrow — could therefore only ever
+dequantize into a floating-point multiply, which the fusion check would refuse
+on every provider forever. There would be no row, only a permanent refusal.
+
+What ONNX *can* express is the form quantized language models actually ship in,
+and which AWQ, GPTQ and ORT's own `MatMulNBits` all have: **16-bit activations
+against blocked-quantized weights**, one scale per 32 weights along the
+reduction axis, no zero point. `onnxResidentWeightOnlyMatMulModel` builds it and
+`int4_weight` reports it.
+
+**Its unit is TFLOPS, not TOPS, and that is the whole point.** The weights are
+unpacked on the way into the multiply, so the arithmetic is 16-bit and four bits
+buys a quarter of the weight traffic rather than a faster multiply. Reporting it
+in TOPS beside `int8_qdq` would invite a comparison between a compute rate and a
+memory saving. On a square problem it mostly reads near the fp16 row; a provider
+well below it is unpacking badly, and a provider well above it — as the M1 Pro
+CPU EP is, at 0.52 against fp16's 0.09 — has a fused narrow-weight kernel where
+its plain fp16 matmul has nothing.
+
+The fusion check runs here for the same reason it runs on int8, and matters
+more: a provider without a fused kernel dequantizes the entire weight matrix
+into floats on **every run**, which is a real measurement of a shape nobody
+deploys. `MatMulNBits` joins the recognised kernel names.
+
+**Watch for an inserted `Cast`.** The M1 Pro CPU EP fuses to `MatMulNBits` and
+also casts the fp16 activations to fp32 first, because that is the width its
+kernel wants — a full pass over the activations on every run, inside the
+figure. The row says so when it happens, which is the same discipline the
+throughput models already needed: adding anything to a half-precision graph
+risks a silent conversion, so read the executed kernels before believing a
+number.
+
+**There is deliberately no `int4_weight` accuracy row.** Under this test's
+methodology the reference multiplies the operands the device was handed, already
+rounded — so weight rounding cancels, and an int4 row would report the fp16
+arithmetic's error, near 207 ppm, sitting next to int8's 9443 and reading as
+though four bits were more accurate than eight. What four-bit weights actually
+cost is the rounding that cancels: a property of the format, identical on every
+device, and outside what these rows measure. An absent row with a reason beats a
+present one that misleads.
 
 **TensorRT reaches float8 and clpeak's own numbers say what it costs.** RTX 5060,
 ONNX Runtime 1.30: fp8_e4m3 fuses into a `TRTKernel_...` at **75.4 TFLOPS**,

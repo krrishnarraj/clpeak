@@ -173,6 +173,12 @@ int onnxOpsetForDtype(int dtype)
   case ONNX_DT_FLOAT8E4M3FN:
   case ONNX_DT_FLOAT8E5M2:
     return 19;
+
+  // Int4 arrived with ONNX 1.16, opset 21, which is also where
+  // DequantizeLinear gained the block_size attribute the blocked scales need.
+  case ONNX_DT_UINT4:
+  case ONNX_DT_INT4:
+    return 21;
   }
 }
 
@@ -331,6 +337,35 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   {
     g.output("C_q", actDtype, {M, N});
   }
+  return g.build();
+}
+
+std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
+                                              int wDtype, int64_t blockSize,
+                                              const std::string &aRaw,
+                                              const std::string &wPacked,
+                                              const std::string &wScalesRaw)
+{
+  OnnxGraph g;
+  g.setOpset(onnxOpsetForDtype(wDtype));
+
+  // Activations are fp16 and resident, exactly as in the plain throughput
+  // model: only the weights are narrow, and only the weights are what a
+  // quantized model actually shrinks.
+  g.input("S", ONNX_DT_FLOAT16, {});
+  g.initializer("A",       ONNX_DT_FLOAT16, {M, K}, aRaw);
+  g.initializer("B_q",     wDtype,          {K, N}, wPacked);
+  g.initializer("b_scale", ONNX_DT_FLOAT16, {K / blockSize, N}, wScalesRaw);
+
+  // Blocked dequantize: one scale per `blockSize` rows per column, which is
+  // the axis the reduction runs along and therefore the axis a group-quantized
+  // model groups on.  No zero point -- the quantization is symmetric.
+  g.node("DequantizeLinear", {"B_q", "b_scale"}, {"B_f"},
+         {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
+  g.node("MatMul", {"A", "B_f"}, {"C"});
+  g.reduceMax("C", "R", {0});
+  g.node("Mul", {"R", "S"}, {"Y"});
+  g.output("Y", ONNX_DT_FLOAT16, {N});
   return g.build();
 }
 
@@ -740,6 +775,37 @@ float halfToFloat(uint16_t h)
   float f;
   std::memcpy(&f, &x, 4);
   return f;
+}
+
+void onnxStoreInt4(void *dst, int64_t index, int q)
+{
+  if (q < -8) q = -8;
+  if (q >  7) q =  7;
+  uint8_t *b = static_cast<uint8_t *>(dst) + (index >> 1);
+  const uint8_t nib = (uint8_t)(q & 0x0F);
+  if (index & 1)
+    *b = (uint8_t)((*b & 0x0F) | (nib << 4));   // odd elements: high nibble
+  else
+    *b = (uint8_t)((*b & 0xF0) | nib);          // even elements: low nibble
+}
+
+int onnxLoadInt4(const void *src, int64_t index)
+{
+  const uint8_t b = static_cast<const uint8_t *>(src)[index >> 1];
+  const uint8_t nib = (index & 1) ? (uint8_t)(b >> 4) : (uint8_t)(b & 0x0F);
+  return (nib & 0x8) ? (int)nib - 16 : (int)nib;   // sign-extend from 4 bits
+}
+
+uint64_t onnxElemBytes(int dtype, int64_t count)
+{
+  switch (dtype)
+  {
+  case ONNX_DT_FLOAT:                          return (uint64_t)count * 4;
+  case ONNX_DT_FLOAT16: case ONNX_DT_BFLOAT16: return (uint64_t)count * 2;
+  case ONNX_DT_UINT4:   case ONNX_DT_INT4:
+    return (uint64_t)((count + 1) / 2);        // two to a byte, last one padded
+  default:                                     return (uint64_t)count;
+  }
 }
 
 bool onnxIsQuantElem(int dtype)

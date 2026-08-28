@@ -29,6 +29,12 @@ enum OnnxDtype : int
   // pair of rows exists to answer.
   ONNX_DT_FLOAT8E4M3FN = 17,
   ONNX_DT_FLOAT8E5M2   = 19,
+  // Int4, ONNX 1.16 / opset 21.  Two elements to a byte, first in the low
+  // nibble.  There is no int4 matmul operator in ONNX -- MatMulInteger and
+  // QLinearMatMul are both 8-bit -- so int4 only ever appears on the weights,
+  // dequantized on the way into a floating-point multiply.
+  ONNX_DT_UINT4 = 21,
+  ONNX_DT_INT4  = 22,
 };
 
 // The lowest opset that can express `dtype` at all.  Datatypes arrived in the
@@ -162,6 +168,25 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 // used when the native-dtype form is refused, since the cast is a full pass
 // over the result and costs a few percent at the large sizes and more at the
 // small ones.
+// Weight-only quantized GEMM, throughput-shaped: fp16 activations against a
+// blocked-quantized weight matrix, which is the form quantized language models
+// actually ship in (AWQ, GPTQ, ORT's own MatMulNBits all have this shape).
+//
+// The arithmetic is fp16 -- the weights are dequantized on the way into the
+// multiply, by a fused kernel where the provider has one -- so what a narrow
+// weight type buys here is *weight traffic*, not arithmetic rate.  Reporting it
+// in TFLOPS rather than TOPS is deliberate for that reason.
+//
+// `wScalesRaw` holds one scale per block of `blockSize` rows per column, so its
+// shape is [K / blockSize, N] and its element type is fp16, which is also the
+// type the dequantize produces.  Zero points are omitted: the quantization is
+// symmetric, and a blocked zero-point tensor would have to be packed too.
+std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
+                                              int wDtype, int64_t blockSize,
+                                              const std::string &aRaw,
+                                              const std::string &wPacked,
+                                              const std::string &wScalesRaw);
+
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                     const std::string &aRaw,
                                     const std::string &bRaw,
@@ -291,5 +316,15 @@ float onnxQuantScaleFor(int dtype);
 
 // Encode `v` (already in [-1, 1]) into one element of `dtype`, little-endian.
 void onnxStoreQuantElem(void *dst, int64_t index, int dtype, float v);
+
+// Store one signed 4-bit value at `index` of a packed nibble array.  ONNX packs
+// two elements per byte in flattened order with the first in the low nibble.
+// `q` is clamped to [-8, 7].
+void onnxStoreInt4(void *dst, int64_t index, int q);
+int  onnxLoadInt4(const void *src, int64_t index);
+
+// Bytes a tensor of `count` elements of `dtype` occupies, nibble packing
+// included -- dtypeSize()-style helpers cannot express a half.
+uint64_t onnxElemBytes(int dtype, int64_t count);
 
 #endif // CLPEAK_ONNX_MODEL_H

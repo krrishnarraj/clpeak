@@ -90,6 +90,7 @@ struct Variant
   bool        qdq;      // build the quantized (DequantizeLinear/MatMul/Q) form
   const char *label;
   const char *note;
+  int64_t     blockSize;  // >0: weight-only, one scale per this many rows
 };
 
 // Quantization schemes, tried in order until one fuses.  There is no single
@@ -112,17 +113,8 @@ const QuantScheme kInt8Schemes[] = {
   {ONNX_DT_UINT8, ONNX_DT_INT8, "unsigned activations"},   // x86 without VNNI
 };
 
-size_t schemesFor(int dtype, QuantScheme out[2])
-{
-  if (dtype == ONNX_DT_INT8)
-  {
-    out[0] = kInt8Schemes[0];
-    out[1] = kInt8Schemes[1];
-    return 2;
-  }
-  out[0] = {dtype, dtype, "matching activations and weights"};
-  return 1;
-}
+struct Variant;
+size_t schemesFor(const Variant &v, QuantScheme out[2]);
 
 struct GemmSetup
 {
@@ -131,6 +123,17 @@ struct GemmSetup
   OrtValue   *outVal  = nullptr;   // reduced row
   std::vector<uint8_t> inBuf, outBuf;
   std::string error;
+
+  // Not copyable, and the compiler has to enforce it: inVal and outVal are
+  // OrtValues built over inBuf and outBuf, so a copy leaves them pointing at
+  // the original's buffers.  Moving is fine -- a moved vector keeps its
+  // allocation -- which is why returning one of these by value works and
+  // handing back a reference to one does not.
+  GemmSetup() = default;
+  GemmSetup(const GemmSetup &) = delete;
+  GemmSetup &operator=(const GemmSetup &) = delete;
+  GemmSetup(GemmSetup &&) = default;
+  GemmSetup &operator=(GemmSetup &&) = default;
 };
 
 size_t dtypeSize(int dtype)
@@ -171,6 +174,77 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   }
 }
 
+size_t schemesFor(const Variant &v, QuantScheme out[2])
+{
+  if (v.blockSize > 0)
+  {
+    // Weight-only has no activation type to choose: the activations are fp16
+    // and only the weights are narrow.
+    out[0] = {ONNX_DT_FLOAT16, v.dtype, "16-bit activations against blocked weights"};
+    return 1;
+  }
+  if (v.dtype == ONNX_DT_INT8)
+  {
+    out[0] = kInt8Schemes[0];
+    out[1] = kInt8Schemes[1];
+    return 2;
+  }
+  out[0] = {v.dtype, v.dtype, "matching activations and weights"};
+  return 1;
+}
+
+// Weights for the weight-only form, quantized per block.
+//
+// Values are drawn from a hash of the position rather than a running xorshift
+// so a block can be visited twice -- once to find its maximum, once to
+// quantize against it -- without holding the whole matrix in floats.  At
+// 16384 square that would be a gigabyte of scratch to produce 128 MB of
+// weights, which is the wrong way round on any machine and fatal on a phone.
+float weightAt(int64_t i, int64_t j, uint32_t seed)
+{
+  uint32_t s = seed ^ (uint32_t)(i * 0x9E3779B1u) ^ (uint32_t)(j * 0x85EBCA77u);
+  s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+  return (float)(s >> 8) / 16777216.0f - 0.5f;      // [-0.5, 0.5)
+}
+
+// Quantize a [K, N] weight matrix into packed int4 plus one fp16 scale per
+// block of `blockSize` rows per column.  Symmetric, so the scale is the block
+// maximum over 7 and there is no zero point.
+void fillBlockedWeights(std::string &packed, std::string &scales,
+                        int64_t K, int64_t N, int64_t blockSize, uint32_t seed)
+{
+  packed.assign((size_t)onnxElemBytes(ONNX_DT_INT4, K * N), '\0');
+  const int64_t blocks = K / blockSize;
+  scales.assign((size_t)blocks * (size_t)N * 2, '\0');
+  uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
+
+  for (int64_t b = 0; b < blocks; b++)
+  {
+    for (int64_t j = 0; j < N; j++)
+    {
+      float maxAbs = 0.0f;
+      for (int64_t r = 0; r < blockSize; r++)
+      {
+        const float w = weightAt(b * blockSize + r, j, seed);
+        const float a = w < 0.0f ? -w : w;
+        if (a > maxAbs) maxAbs = a;
+      }
+      // A block of identical zeros cannot happen with this generator, but a
+      // zero scale would produce NaNs on dequantize rather than a bad number.
+      const float scale = (maxAbs > 0.0f) ? maxAbs / 7.0f : 1.0f;
+      sc[b * N + j] = floatToHalf(scale);
+
+      for (int64_t r = 0; r < blockSize; r++)
+      {
+        const int64_t i = b * blockSize + r;
+        const float   w = weightAt(i, j, seed);
+        const int     q = (int)(w / scale + (w < 0.0f ? -0.5f : 0.5f));
+        onnxStoreInt4(&packed[0], i * N + j, q);
+      }
+    }
+  }
+}
+
 // Output scale for the QDQ form.  Each dequantized product is a pair of
 // values in [-1, 1], so a K-deep dot product has standard deviation
 // sqrt(K)/3; four sigma keeps nearly every output inside int8 without
@@ -195,56 +269,27 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 }
 
 // Build model + session + bound input/output tensors for one (variant, D).
-GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                    const Variant &v, int64_t D, bool profile = false,
-                    int actDtype = ONNX_DT_UINT8,
-                    bool reduceInFloat = false,
-                    int wgtDtype = ONNX_DT_INT8)
+// Create the session and bind the scalar input and reduced output.  Shared by
+// every model shape here: they differ in what they compute and agree entirely
+// on how they are driven.
+void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                 GemmSetup &g, const std::string &modelBytes,
+                 int ioDtype, int64_t D, bool profile,
+                 bool keepQdqUnfused)
 {
-  GemmSetup g;
-
-  std::string aRaw, bRaw;
-  const int wDtype = v.qdq ? wgtDtype : v.dtype;
-  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
-  fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
-
-  std::string modelBytes;
-  if (v.qdq)
-  {
-    modelBytes = onnxResidentQdqMatMulModel(
-        D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
-        onnxQuantScaleFor(wDtype), qdqOutputScale(D), actDtype, wDtype);
-  }
-  else
-  {
-    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw,
-                                        reduceInFloat);
-  }
-  aRaw.clear(); aRaw.shrink_to_fit();
-  bRaw.clear(); bRaw.shrink_to_fit();
-
-  // Both models hold their operands as constants and need folding held off,
-  // or the whole multiply is evaluated once at load time.
-  // A float8 QDQ graph must not be fused into QLinearMatMul, which is an
-  // integer operator: the rewrite makes the model fail its own type check.
-  const bool float8 = (actDtype == ONNX_DT_FLOAT8E4M3FN ||
-                       actDtype == ONNX_DT_FLOAT8E5M2 ||
-                       wDtype   == ONNX_DT_FLOAT8E4M3FN ||
-                       wDtype   == ONNX_DT_FLOAT8E5M2);
+  // Every model here holds its operands as constants and needs folding held
+  // off, or the whole multiply is evaluated once at load time.
   auto ses = onnxCreateSession(rt, ep, modelBytes,
                                /*keepConstantsUnfolded=*/true, profile,
-                               /*keepQdqUnfused=*/v.qdq && float8);
+                               keepQdqUnfused);
   if (!ses.session)
   {
     g.error = ses.error;
-    return g;
+    return;
   }
   g.session = ses.session;
 
-  // The QDQ graph reduces in float, and so does a plain one whose reduction
-  // had to be cast; otherwise the tail keeps the matmul's dtype.
-  const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
-  const size_t es   = dtypeSize(ioDtype);
+  const size_t es = dtypeSize(ioDtype);
   {
     // Scales the reduced result; exists only so the graph depends on
     // something supplied at run time.
@@ -261,7 +306,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     g.error = onnxStatusText(rt, st);
     destroySetup(rt, g);
-    return g;
+    return;
   }
 
   const int64_t outShape[1] = {D};
@@ -278,6 +323,63 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     g.error = onnxStatusText(rt, st);
     destroySetup(rt, g);
   }
+}
+
+GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                    const Variant &v, int64_t D, bool profile = false,
+                    int actDtype = ONNX_DT_UINT8,
+                    bool reduceInFloat = false,
+                    int wgtDtype = ONNX_DT_INT8)
+{
+  GemmSetup g;
+
+  std::string modelBytes;
+  if (v.blockSize > 0)
+  {
+    // Weight-only: fp16 activations, blocked-quantized weights, no quantized
+    // tensor anywhere near the graph boundary.
+    std::string aRaw, wPacked, wScales;
+    fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
+    fillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u);
+    modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
+                                                   v.blockSize, aRaw, wPacked,
+                                                   wScales);
+    aRaw.clear();    aRaw.shrink_to_fit();
+    wPacked.clear(); wPacked.shrink_to_fit();
+    wScales.clear(); wScales.shrink_to_fit();
+    finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, D, profile,
+                /*keepQdqUnfused=*/false);
+    return g;
+  }
+
+  std::string aRaw, bRaw;
+  const int wDtype = v.qdq ? wgtDtype : v.dtype;
+  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
+  fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
+
+  if (v.qdq)
+  {
+    modelBytes = onnxResidentQdqMatMulModel(
+        D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
+        onnxQuantScaleFor(wDtype), qdqOutputScale(D), actDtype, wDtype);
+  }
+  else
+  {
+    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw,
+                                        reduceInFloat);
+  }
+  aRaw.clear(); aRaw.shrink_to_fit();
+  bRaw.clear(); bRaw.shrink_to_fit();
+
+  const bool float8 = (actDtype == ONNX_DT_FLOAT8E4M3FN ||
+                       actDtype == ONNX_DT_FLOAT8E5M2 ||
+                       wDtype   == ONNX_DT_FLOAT8E4M3FN ||
+                       wDtype   == ONNX_DT_FLOAT8E5M2);
+  // The QDQ graph reduces in float, and so does a plain one whose reduction
+  // had to be cast; otherwise the tail keeps the matmul's dtype.
+  const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
+  finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile,
+              /*keepQdqUnfused=*/v.qdq && float8);
   return g;
 }
 
@@ -332,6 +434,15 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "reaches 57344 and rounds more coarsely.  Hardware usually runs both at "
      "the same rate, so a difference between these two rows is the provider "
      "choosing different machinery, and the accuracy rows say what each costs."},
+    {ONNX_DT_INT4, false, "int4_weight",
+     "4-bit weights with one scale per 32 of them, against 16-bit activations "
+     "-- the form quantized language models actually ship in.  The arithmetic "
+     "is still 16-bit, because ONNX has no 4-bit multiply and the weights are "
+     "unpacked on the way in, so this row is reported in TFLOPS and what four "
+     "bits buys is a quarter of the weight traffic rather than a faster "
+     "multiply.  On a square problem like this one that mostly shows up as "
+     "matching the fp16 row; a provider well below it is unpacking badly.",
+     /*blockSize=*/32},
   };
   static const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
@@ -364,6 +475,23 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       break;
     const Variant &v = variants[i];
 
+    // A datatype newer than the installed runtime fails to *load*, with a
+    // message about opsets that says nothing about the datatype.  Name it.
+    const int      needOpset = onnxOpsetForDtype(v.dtype);
+    const uint32_t needApi   = onnxMinOrtApiForOpset(needOpset);
+    if (needApi && rt.apiVersion < needApi)
+    {
+      logger::EmitOptions o;
+      o.description = v.note;
+      test.skip(v.label, ResultStatus::Unsupported,
+                "needs opset " + std::to_string(needOpset) +
+                    ", which arrived in ONNX Runtime 1." +
+                    std::to_string(needApi) + "; this runtime is " +
+                    rt.versionString,
+                o.description);
+      continue;
+    }
+
     double      best     = 0.0;
     int64_t     bestDim  = 0;
     std::string firstErr;
@@ -379,6 +507,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int     actDtype = ONNX_DT_UINT8;
     int     wgtDtype = ONNX_DT_INT8;
     const char *schemeName = "";
+    bool    castedActs = false;   // provider converted the activations first
     // A provider can implement the matmul for a datatype and not the reduction
     // that keeps the result on the device: the CUDA EP multiplies bf16 and has
     // no bf16 ReduceMax.  Retried once, lazily, so a provider that needs
@@ -393,11 +522,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // a perfectly good number that is not an int8 number.  One profiled run
     // per scheme at the smallest size answers it, and doing it first means a
     // provider that fuses neither is not swept at all.
-    if (v.qdq)
+    // Both quantized shapes need the same question answered before they are
+    // swept: did the provider fuse, or did it unpack the weights into floats
+    // and run an ordinary multiply?  For weight-only the unfused form pays for
+    // a full dequantize of the matrix on every single run, so it is not the
+    // rate a 4-bit deployment would ever see.
+    if (v.qdq || v.blockSize > 0)
     {
       std::string tried;
       QuantScheme schemes[2];
-      const size_t nSchemes = schemesFor(v.dtype, schemes);
+      const size_t nSchemes = schemesFor(v, schemes);
       for (size_t si = 0; si < nSchemes; si++)
       {
         const QuantScheme &qs = schemes[si];
@@ -430,6 +564,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           actDtype   = qs.actDtype;
           wgtDtype   = qs.wDtype;
           schemeName = qs.name;
+          for (const auto &o : ops)
+            if (o == "Cast")
+              castedActs = true;
           // A provider that compiles the whole subgraph names its kernel
           // after itself, and that name carries a hash of the graph -- it
           // would differ between runs and has no place in a saved result.
@@ -467,8 +604,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       // Would this size fit, and would one iteration finish in reasonable
       // time at the rate the previous size managed?
+      // Weight-only carries fp16 activations, packed nibbles and a scale per
+      // block, not two equal operands -- and on a phone an under-estimate here
+      // is an out-of-memory kill rather than a slow row.
+      const uint64_t elems = (uint64_t)D * (uint64_t)D;
       const uint64_t weightBytes =
-          2ull * (uint64_t)D * (uint64_t)D * (uint64_t)dtypeSize(v.dtype);
+          (v.blockSize > 0)
+              ? (elems * 2ull                                  // fp16 A
+                 + onnxElemBytes(v.dtype, (int64_t)elems)      // packed weights
+                 + elems / (uint64_t)v.blockSize * 2ull)       // fp16 scales
+              : 2ull * elems * (uint64_t)dtypeSize(v.dtype);
       if (weightBytes > maxWeightBytes())
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
@@ -624,6 +769,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         o.description += "  The provider ran the multiply as " + ranAs +
                          " with " + schemeName +
                          ", confirming it really ran in " + v.label + ".";
+      if (castedActs)
+        o.description += "  This provider does not take the activations in the "
+                         "width they were given, so it converts them first: "
+                         "that is a full pass over them on every run and it is "
+                         "inside this figure.";
       if (reduceInFloat)
         o.description += "  This provider has no reduction for the datatype, "
                          "so the product is cast to fp32 before being reduced; "

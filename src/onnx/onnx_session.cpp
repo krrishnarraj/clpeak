@@ -288,6 +288,9 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
 static const char *kQuantMarkers[] = {
   "QLinearMatMul", "MatMulInteger", "QGemm", "QLinearGemm",
   "MatMulIntegerToFloat", "QuantizeLinearMatMul", "QOrderedMatMul",
+  // Weight-only: ORT's own kernel for narrow blocked weights against
+  // floating-point activations, and what a quantized language model runs on.
+  "MatMulNBits",
 };
 
 std::string onnxQuantizedKernelName(const std::vector<std::string> &ops)
