@@ -150,6 +150,63 @@ void OnnxGraph::shapeInitializer(const std::string &name, const OnnxDims &shape)
   initializer(name, ONNX_DT_INT64, {(int64_t)shape.size()}, raw);
 }
 
+int onnxOpsetForDtype(int dtype)
+{
+  switch (dtype)
+  {
+  // Everything the backend measured before the low-precision work: expressible
+  // in opset 17, which is where every recipe stays unless a type forces it up.
+  case ONNX_DT_FLOAT:
+  case ONNX_DT_FLOAT16:
+  case ONNX_DT_BFLOAT16:
+  case ONNX_DT_INT8:
+  case ONNX_DT_UINT8:
+  case ONNX_DT_INT32:
+  case ONNX_DT_INT64:
+  default:
+    return 17;
+  }
+}
+
+uint32_t onnxMinOrtApiForOpset(int opset)
+{
+  // ORT numbers its API after its own minor version, so these are ORT minor
+  // releases: 1.15 was the first to parse opset 19, 1.18 opset 21, 1.22
+  // opset 23.  Anything at or below 17 predates the oldest runtime this
+  // backend loads at all, so it never gates.
+  if (opset >= 23) return 22;
+  if (opset >= 21) return 18;
+  if (opset >= 19) return 15;
+  return 0;
+}
+
+void OnnxGraph::setOpset(int opset)
+{
+  m_opset = opset;
+}
+
+void OnnxGraph::reduceMax(const std::string &in, const std::string &out,
+                          const OnnxDims &axes)
+{
+  // Opset 18 moved `axes` from an attribute to an optional input.  Both
+  // spellings mean the same thing; which one is legal depends only on the
+  // opset the model declares, so the choice belongs here rather than in every
+  // recipe.  Without this, raising a recipe's opset to reach a new datatype
+  // would break its reduction -- a node with nothing to do with the datatype.
+  if (m_opset < 18)
+  {
+    node("ReduceMax", {in}, {out},
+         {OnnxAttr::list("axes", axes), OnnxAttr::num("keepdims", 0)});
+    return;
+  }
+
+  // The axes input is named after the output so several reductions can
+  // coexist in one graph.
+  const std::string axesName = out + "_axes";
+  shapeInitializer(axesName, axes);
+  node("ReduceMax", {in, axesName}, {out}, {OnnxAttr::num("keepdims", 0)});
+}
+
 std::string OnnxGraph::build() const
 {
   // A block's initializers run to hundreds of megabytes, so the graph body is
@@ -163,11 +220,21 @@ std::string OnnxGraph::build() const
                            m_inputs.size() + m_outputs.size();
 
   Pb opset;
-  opset.vint(2, 17);                // OperatorSetIdProto.version (default domain)
+  opset.vint(2, (uint64_t)m_opset); // OperatorSetIdProto.version (default domain)
+
+  // The IR version gates which TensorProto datatypes may appear at all, and
+  // it moves with the opset rather than independently: float8 needs IR 9,
+  // int4 and the blocked quantization scales need 10, float4 needs 11.
+  // Declaring a higher IR version than the types require costs nothing but
+  // compatibility with older runtimes, so it tracks the opset exactly.
+  const uint64_t irVersion = (m_opset >= 23) ? 11
+                           : (m_opset >= 21) ? 10
+                           : (m_opset >= 19) ? 9
+                                             : 8;
 
   Pb m;
   m.b.reserve(graphSize + 64);
-  m.vint(1, 8);                     // ModelProto.ir_version
+  m.vint(1, irVersion);             // ModelProto.ir_version
   m.str(2, "clpeak");               // producer_name
   m.tag(7, 2);                      // ModelProto.graph, length-delimited
   m.varint(graphSize);
@@ -188,6 +255,7 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                             const std::string &weightRaw)
 {
   OnnxGraph g;
+  g.setOpset(onnxOpsetForDtype(dtype));
   g.input("A", dtype, {M, K});
   g.initializer("B", dtype, {K, N}, weightRaw);
   g.node("MatMul", {"A", "B"}, {"C"});
@@ -235,6 +303,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                     const std::string &bRaw)
 {
   OnnxGraph g;
+  g.setOpset(onnxOpsetForDtype(dtype));
   // The runtime scalar multiplies the *result*, leaving the matmul itself a
   // product of two constants -- so this graph runs correctly only while
   // constant folding stays disabled, and ONNX Runtime 1.17 accepts the
@@ -255,10 +324,8 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // summed rows of A, a rewrite an optimiser is free to make and which would
   // quietly turn this matrix multiply into a matrix-vector one.  Max does not
   // distribute over the product, so the full result has to be computed.
-  // At opset 17 its axes are an attribute; ReduceSum takes them as an input.
   g.node("MatMul",    {"A", "B"}, {"C"});
-  g.node("ReduceMax", {"C"}, {"R"},
-         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.reduceMax("C", "R", {0});
   g.node("Mul",       {"R", "S"}, {"Y"});
   g.output("Y", dtype, {N});
   return g.build();
@@ -318,8 +385,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // node before n4."  The standard pattern costs one full-width pass, about a
   // fifth of the measured rate, and is what real quantized layers do anyway.
   g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C_d"});
-  g.node("ReduceMax",        {"C_d"}, {"R"},
-         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.reduceMax("C_d", "R", {0});
   g.node("Mul",              {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
@@ -349,8 +415,7 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
   // Down to one value per output channel: the result is otherwise as large as
   // the input and would be measured crossing the host boundary rather than
   // being computed.
-  g.node("ReduceMax", {"Y"}, {"R"},
-         {OnnxAttr::list("axes", {0, 2, 3}), OnnxAttr::num("keepdims", 0)});
+  g.reduceMax("Y", "R", {0, 2, 3});
   g.output("R", dtype, {channels});
   return g.build();
 }
@@ -402,8 +467,7 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
   }
   }
 
-  g.node("ReduceMax", {out}, {"R"},
-         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.reduceMax(out, "R", {0});
   g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT16, {cols});
   return g.build();
@@ -579,8 +643,7 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   // ReduceMax rather than ReduceSum: summing rows of a product equals
   // multiplying the summed rows, a rewrite that would let an optimiser shrink
   // the work.  See onnxResidentMatMulModel.
-  g.node("ReduceMax", {"Y"}, {"Yr"},
-         {OnnxAttr::list("axes", {0}), OnnxAttr::num("keepdims", 0)});
+  g.reduceMax("Y", "Yr", {0});
   g.output("Yr", ONNX_DT_FLOAT16, {d});
   if (decode)
   {
@@ -627,6 +690,16 @@ float halfToFloat(uint16_t h)
 
   float f;
   std::memcpy(&f, &x, 4);
+  return f;
+}
+
+float bf16ToFloat(uint16_t h)
+{
+  // bfloat16 is the top half of an fp32, so widening is a shift -- exact for
+  // every value including the NaNs and infinities.
+  const uint32_t bits = (uint32_t)h << 16;
+  float f;
+  std::memcpy(&f, &bits, 4);
   return f;
 }
 

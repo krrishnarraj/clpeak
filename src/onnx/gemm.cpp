@@ -277,6 +277,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "away from the matrix hardware -- that is a finding, not a failure."},
     {ONNX_DT_FLOAT16, false, "fp16",
      "16-bit floats, the native currency of most NPU matrix hardware."},
+    {ONNX_DT_BFLOAT16, false, "bf16",
+     "The 16-bit float with fp32's exponent range and three fewer mantissa "
+     "bits.  Modern matrix hardware usually runs it at the fp16 rate; a "
+     "provider that falls well short of its own fp16 row is emulating it, "
+     "and one that refuses it outright has no bf16 path at all."},
   };
   static const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
@@ -285,8 +290,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "TOPS figure is quoted for."},
   };
 
-  const Variant *variants = isInt ? kIntVariants : kFpVariants;
-  const size_t   nVariants = isInt ? 1 : 2;
+  const Variant *variants  = isInt ? kIntVariants : kFpVariants;
+  const size_t   nVariants = isInt ? 1
+                                   : sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 
   auto test = currentDeviceScope->beginTest(
       {isInt ? "onnx-gemm-int" : "onnx-gemm-fp",

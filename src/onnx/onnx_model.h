@@ -24,6 +24,20 @@ enum OnnxDtype : int
   ONNX_DT_BFLOAT16 = 16,
 };
 
+// The lowest opset that can express `dtype` at all.  Datatypes arrived in the
+// standard in waves and a model has to declare an opset high enough for the
+// ones it names, so every recipe asks this rather than hard-coding a number.
+// 17 is the floor: it is what the oldest runtime this backend speaks to
+// understands, and everything expressible there stays there.
+int onnxOpsetForDtype(int dtype);
+
+// The oldest ONNX Runtime that parses a model at `opset`, as an OrtApi
+// version -- ORT numbers its API after its own minor version, so this is
+// directly comparable with OrtRuntime::apiVersion.  A model handed to an
+// older runtime fails to load with a message about the opset, which is a
+// confusing way to learn that a datatype is simply newer than the install.
+uint32_t onnxMinOrtApiForOpset(int opset);
+
 using OnnxDims = std::vector<int64_t>;   // empty = scalar
 
 // One node attribute.  Only the two forms clpeak's graphs need: a single
@@ -63,6 +77,20 @@ public:
             const std::vector<std::string> &outputs,
             const std::vector<OnnxAttr> &attrs = {});
 
+  // Opset this model declares; the IR version follows from it.  Defaults to
+  // 17, which every recipe that predates the low-precision datatypes uses and
+  // which the oldest supported runtime understands.  Raising it is per model
+  // on purpose: a global bump would make every row fail on a runtime that is
+  // merely old, rather than the one row whose datatype is genuinely newer.
+  void setOpset(int opset);
+
+  // ReduceMax over `axes`, spelled for whatever opset this graph declares.
+  // Opset 18 moved `axes` from an attribute to an input, so a recipe that
+  // raises its opset for a datatype would otherwise break on a node that has
+  // nothing to do with that datatype.  Every reduction here goes through this.
+  void reduceMax(const std::string &in, const std::string &out,
+                 const OnnxDims &axes);
+
   // Convenience for the int64 shape tensors Reshape takes as an input.
   void shapeInitializer(const std::string &name, const OnnxDims &shape);
 
@@ -71,6 +99,7 @@ public:
 private:
   std::string m_nodes, m_inits, m_inputs, m_outputs;
   int         m_nodeCount = 0;
+  int         m_opset     = 17;
 };
 
 // C[M,N] = MatMul(A[M,K], B[K,N]) in `dtype`.  A is a graph input; B is an
@@ -209,5 +238,6 @@ std::string onnxBlockModel(const OnnxBlockShape &s);
 uint16_t floatToHalf(float f);
 uint16_t floatToBf16(float f);
 float    halfToFloat(uint16_t h);
+float    bf16ToFloat(uint16_t h);
 
 #endif // CLPEAK_ONNX_MODEL_H

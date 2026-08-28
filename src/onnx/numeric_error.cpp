@@ -89,23 +89,46 @@ float qdqOutputScale(int64_t K)
 // Exact widening of a stored tensor to fp32 -- these are the values the
 // reduced-precision run actually saw, so the reference must use them and not
 // the fp32 originals they were rounded from.
+//
+// The switch is exhaustive and sits outside the loop.  It used to be inside
+// with the integer path as `default:`, which meant any float type it had not
+// been taught -- bfloat16 was the first -- was silently read as int8 and
+// scaled, producing an error figure for a tensor that had been reinterpreted
+// rather than widened.  An unknown type now returns empty and the caller says
+// so.
 std::vector<float> widen(const std::string &raw, int dtype, int64_t count,
                          float scale)
 {
-  std::vector<float> out((size_t)count);
+  std::vector<float> out;
   const float    *f = reinterpret_cast<const float *>(raw.data());
   const uint16_t *h = reinterpret_cast<const uint16_t *>(raw.data());
   const int8_t   *q = reinterpret_cast<const int8_t *>(raw.data());
   const uint8_t  *u = reinterpret_cast<const uint8_t *>(raw.data());
-  for (int64_t i = 0; i < count; i++)
+
+  switch (dtype)
   {
-    switch (dtype)
-    {
-    case ONNX_DT_FLOAT:   out[i] = f[i]; break;
-    case ONNX_DT_FLOAT16: out[i] = halfToFloat(h[i]); break;
-    case ONNX_DT_UINT8:   out[i] = ((float)u[i] - 128.0f) * scale; break;
-    default:              out[i] = (float)q[i] * scale; break;
-    }
+  case ONNX_DT_FLOAT:
+    out.assign(f, f + count);
+    break;
+  case ONNX_DT_FLOAT16:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++) out[i] = halfToFloat(h[i]);
+    break;
+  case ONNX_DT_BFLOAT16:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++) out[i] = bf16ToFloat(h[i]);
+    break;
+  case ONNX_DT_UINT8:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++)
+      out[i] = ((float)u[i] - 128.0f) * scale;   // zero point 128
+    break;
+  case ONNX_DT_INT8:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++) out[i] = (float)q[i] * scale;
+    break;
+  default:
+    break;   // empty: caller reports the type as unhandled
   }
   return out;
 }
@@ -208,6 +231,11 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {ONNX_DT_FLOAT16, false, "fp16",
      "What half precision costs: fp16 inputs and fp16 accumulation against "
      "the fp32 answer."},
+    {ONNX_DT_BFLOAT16, false, "bf16",
+     "The other 16-bit float: three fewer mantissa bits than fp16 in exchange "
+     "for fp32's exponent range.  Expect a larger error than fp16 on values "
+     "like these, which all sit comfortably inside both ranges -- bf16 buys "
+     "headroom against overflow, not precision, and this shows the price."},
     {ONNX_DT_INT8, true, "int8_qdq",
      "What quantization costs, end to end -- quantizing the inputs, the "
      "matmul, and re-quantizing the result.  Whether the multiply itself ran "
@@ -335,6 +363,13 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // multiplied on the CPU EP.
     std::vector<float> aRef = widen(aRaw, aDtype, kDim * kDim, qScale);
     std::vector<float> bRef = widen(bRaw, v.dtype, kDim * kDim, qScale);
+    if (got.empty() || aRef.empty() || bRef.empty())
+    {
+      test.skip(v.label, ResultStatus::Error,
+                "this datatype has no widening to fp32 here, so no reference "
+                "can be built for it", o.description);
+      continue;
+    }
 
     std::string refWeights(reinterpret_cast<const char *>(bRef.data()),
                            bRef.size() * sizeof(float));

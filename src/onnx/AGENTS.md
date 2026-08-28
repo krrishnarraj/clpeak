@@ -33,8 +33,8 @@ backend.
 | `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()`, `runAll()`, `enumerate()`, `printInventory()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime once per process and resolves the `OrtApi` table |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
-| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
@@ -151,6 +151,55 @@ Weight/input values are small deterministic floats in `[-0.5, 0.5)`, not raw
 random bits: fp16 accumulation over a 2048-deep dot product overflows with
 larger magnitudes, and random bit patterns hit NaN/denormal slow paths that
 would understate the hardware.
+
+## Opsets are per model, and never bumped globally
+
+Every recipe declares its own opset, defaulting to **17**. That is not a
+historical accident: 17 is what ONNX Runtime 1.17 understands, and
+`kMinApiVersion` says 1.17 is the oldest runtime this backend loads at all. A
+model declaring a newer opset fails to *load* on an older runtime, so a global
+bump would take down every row on a machine whose runtime is merely old,
+rather than the one row whose datatype is genuinely newer than the install.
+
+Datatypes arrived in the standard in waves, and the newer ones cannot be named
+below their opset: float8 needs 19, int4/uint4 and the blocked quantization
+scales need 21, float4e2m1 and the MX scale types need 23. `onnxOpsetForDtype()`
+holds that mapping and `onnxMinOrtApiForOpset()` turns an opset into the oldest
+ORT that parses it — comparable directly against `OrtRuntime::apiVersion`,
+since ORT numbers its API after its own minor version. A recipe taking a
+datatype parameter calls `setOpset(onnxOpsetForDtype(dtype))` before adding
+anything, and the IR version follows the opset in `build()`: the IR version is
+what actually gates which `TensorProto` datatypes may appear.
+
+**Never emit `ReduceMax` directly — call `OnnxGraph::reduceMax()`.** Opset 18
+moved its `axes` from an attribute to an input. Both spellings mean the same
+thing and which one is legal depends only on the declared opset, so a recipe
+that raised its opset to reach a new datatype would otherwise break on a
+reduction node that has nothing to do with that datatype. Putting the choice
+in one helper is what makes raising an opset a one-line change. `setOpset()`
+must be called before any node is added, because `reduceMax()` reads the opset
+at the moment it emits.
+
+## What the datatype rows cover
+
+`onnx-gemm-fp` measures fp32, fp16 and bf16; `onnx-gemm-int` measures int8 QDQ.
+Every one of them also has an `onnx-numeric-error` row, and they are meant to
+stay in step — a rate without its accuracy is half a number here.
+
+bf16 is the row that separates hardware with a real bf16 path from hardware
+emulating one. It is expressible at opset 17, so it needs no version gate; what
+it does need is a provider with the kernel. Two ways it comes back unsupported,
+both worth reading rather than skipping past: the CoreML EP fails the
+CPU-fallback guard, because it has no bf16 matmul to offer and ORT would have
+run the node on the CPU; the ARM CPU EP says `Could not find an implementation
+for MatMul(13)` outright. Neither is a defect in the graph.
+
+**`widen()` in `numeric_error.cpp` must know every dtype the rows use.** Its
+switch used to treat the integer path as `default:`, so the first float type it
+had not been taught — bf16 — would have been reinterpreted as int8 and scaled,
+yielding a confident error figure for a tensor that was never widened at all.
+It is exhaustive now and returns empty for anything unknown, which the caller
+reports. Any new dtype needs a case there in the same change that adds its row.
 
 ## The CPU-fallback guard
 
