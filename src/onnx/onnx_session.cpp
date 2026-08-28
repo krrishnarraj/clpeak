@@ -164,6 +164,28 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
     OrtTensorRTProviderOptionsV2 *trt = nullptr;
     if (OrtStatus *st = api->CreateTensorRTProviderOptions(&trt))
       return onnxStatusText(rt, st);
+
+    // Stop the partitioner bisecting a graph it cannot take.
+    //
+    // When TensorRT fails to parse a graph it does not give up: it splits it
+    // and retries, up to trt_max_partition_iterations (1000 by default),
+    // hunting for the largest subgraph it can claim.  Every attempt logs the
+    // same import failure, which is where the flood of "cannot be imported
+    // into TensorRT" lines comes from -- four seconds and dozens of identical
+    // errors for one float8 E5M2 graph it was never going to accept.
+    //
+    // None of that search can help here.  Every session in this backend runs
+    // with CPU fallback disabled, so a partition TensorRT only partly claims
+    // fails the session exactly as a rejected one does.  One attempt answers
+    // the only question clpeak asks: all of it, or none.
+    {
+      const char *keys[] = {"trt_max_partition_iterations"};
+      const char *vals[] = {"1"};
+      if (OrtStatus *st = api->UpdateTensorRTProviderOptions(trt, keys, vals, 1))
+        CLPEAK_VLOG("onnx: trt_max_partition_iterations rejected: %s\n",
+                    onnxStatusText(rt, st).c_str());
+    }
+
     std::string err = onnxStatusText(
         rt, api->SessionOptionsAppendExecutionProvider_TensorRT_V2(so, trt));
     api->ReleaseTensorRTProviderOptions(trt);

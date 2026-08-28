@@ -34,7 +34,7 @@ backend.
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime once per process and resolves the `OrtApi` table |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + int4 weight-only) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
@@ -127,6 +127,21 @@ Two details cost time to find and are easy to get wrong again:
   check then passes everything.
 - The profile is written to a file, so the prefix points at the system
   temp directory. A benchmark should not leave files where it was run from.
+
+## TensorRT will hunt for a subgraph it can claim; stop it
+
+When TensorRT cannot parse a graph it does not give up — it splits it and
+retries, up to `trt_max_partition_iterations` (**1000** by default), looking for
+the largest subgraph it can take. Every attempt logs the same import failure,
+which is where a flood of `ONNX initializer A_q cannot be imported into
+TensorRT` comes from: dozens of identical errors and four seconds of wall time
+for one float8 E5M2 graph it was never going to accept.
+
+None of that search can help here. Every session in this backend disables CPU
+fallback, so a partition TensorRT only partly claims fails the session exactly
+as a rejected one does. `onnx_session.cpp` sets the limit to **1**, which
+answers the only question clpeak asks — all of it, or none — and turns a
+four-second scroll of noise into a single refusal.
 
 ## Vendor console spam is muted, not tolerated
 
@@ -375,6 +390,48 @@ matrix coprocessor, not the Neural Engine, an internal routing decision ORT
 never reports. The size curves above agree: the fp32 row behaves like AMX
 (faster the bigger it gets) and the fp16 row like the ANE (a cliff once it
 outgrows on-chip memory).
+
+## Float4, and the two shapes it is worth trying in
+
+E2M1 is one sign bit, two of exponent and one of mantissa: **eight magnitudes
+in total** — 0, 0.5, 1, 1.5, 2, 3, 4, 6 — no infinity and no NaN, every bit
+pattern a number. Opset 23, packed two to a byte exactly like int4.
+
+Two rows, because there are two questions:
+
+- **`fp4_e2m1`** puts four bits on *both* operands with a per-tensor scale.
+  Unlike int4, which ONNX can never express as a multiply, this one has a real
+  chance of fusing: current tensor cores implement E2M1 and a provider that
+  builds engines from QDQ patterns may reach them. The fusion check says which
+  happened.
+- **`fp4_weight`** is the blocked weight-only form, identical to `int4_weight`
+  in every respect — same geometry, same block of 32, same fp16 activations —
+  except whether the four bits are spent on a float or an integer. That is the
+  comparison worth having, and it is only fair because nothing else differs.
+
+**The output scale has to know the format's largest magnitude.** `qdqOutputScale`
+maps four sigma of a K-deep dot product onto the widest code the output type
+has. For the 8-bit types that is 127; float8 reaches further, but its precision
+is scale-invariant so the choice does not matter and the established figures
+stay comparable. Float4 tops out at **6**, and dividing by 127 there would
+saturate nearly every value it was handed — a row measuring a badly chosen
+scale rather than a format.
+
+For the same reason the operands are stored spending float4's whole range:
+`onnxQuantScaleFor` returns 1/6, so [-1, 1] uses all eight magnitudes rather
+than the five a scale of one would reach.
+
+ONNX Runtime 1.29's CPU EP has no float4 kernel at all — `Could not find an
+implementation for DequantizeLinear(23)` — which is the correct answer and the
+expected one. Float4 is very new.
+
+**MXFP4 and NVFP4 are not here yet.** Both need a float8 *scale* type, and the
+vendored header says `FLOAT8E8M0` arrived in ONNX **1.21**, well after float4's
+1.18 — a different and much newer opset than the one `fp4_e2m1` needs. NVFP4
+needs more than that: its second, global scale has to become an extra `Mul`,
+and nothing may sit between the dequantize and the matmul without ORT losing
+track of the quantized pattern. Probe what a runtime accepts before committing
+to either.
 
 ## int4 is a memory format here, not a compute one
 

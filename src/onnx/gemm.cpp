@@ -153,7 +153,9 @@ size_t dtypeSize(int dtype)
 void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
 {
   uint32_t s = seed;
-  raw.resize((size_t)count * dtypeSize(dtype));
+  // assign, not resize: the sub-byte types write one nibble at a time over
+  // whatever is already there, so the buffer has to start at zero.
+  raw.assign((size_t)onnxElemBytes(dtype, count), '\0');
   float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
   for (int64_t i = 0; i < count; i++)
@@ -211,9 +213,13 @@ float weightAt(int64_t i, int64_t j, uint32_t seed)
 // block of `blockSize` rows per column.  Symmetric, so the scale is the block
 // maximum over 7 and there is no zero point.
 void fillBlockedWeights(std::string &packed, std::string &scales,
-                        int64_t K, int64_t N, int64_t blockSize, uint32_t seed)
+                        int64_t K, int64_t N, int64_t blockSize, uint32_t seed,
+                        int wDtype)
 {
-  packed.assign((size_t)onnxElemBytes(ONNX_DT_INT4, K * N), '\0');
+  // int4 spends its block on [-7, 7]; float4's widest magnitude is 6.
+  const bool  isFp4 = (wDtype == ONNX_DT_FLOAT4E2M1);
+  const float top   = isFp4 ? 6.0f : 7.0f;
+  packed.assign((size_t)onnxElemBytes(wDtype, K * N), '\0');
   const int64_t blocks = K / blockSize;
   scales.assign((size_t)blocks * (size_t)N * 2, '\0');
   uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
@@ -231,15 +237,19 @@ void fillBlockedWeights(std::string &packed, std::string &scales,
       }
       // A block of identical zeros cannot happen with this generator, but a
       // zero scale would produce NaNs on dequantize rather than a bad number.
-      const float scale = (maxAbs > 0.0f) ? maxAbs / 7.0f : 1.0f;
+      const float scale = (maxAbs > 0.0f) ? maxAbs / top : 1.0f;
       sc[b * N + j] = floatToHalf(scale);
 
       for (int64_t r = 0; r < blockSize; r++)
       {
         const int64_t i = b * blockSize + r;
         const float   w = weightAt(i, j, seed);
-        const int     q = (int)(w / scale + (w < 0.0f ? -0.5f : 0.5f));
-        onnxStoreInt4(&packed[0], i * N + j, q);
+        const float   t = w / scale;
+        if (isFp4)
+          onnxStoreNibble(&packed[0], i * N + j, floatToFp4E2M1(t));
+        else
+          onnxStoreInt4(&packed[0], i * N + j,
+                        (int)(t + (t < 0.0f ? -0.5f : 0.5f)));
       }
     }
   }
@@ -249,9 +259,15 @@ void fillBlockedWeights(std::string &packed, std::string &scales,
 // values in [-1, 1], so a K-deep dot product has standard deviation
 // sqrt(K)/3; four sigma keeps nearly every output inside int8 without
 // compressing the useful range into a handful of codes.
-float qdqOutputScale(int64_t K)
+float qdqOutputScale(int64_t K, int outDtype)
 {
-  return (float)(4.0 * std::sqrt((double)K) / 3.0 / 127.0);
+  // Four sigma of a K-deep dot product mapped onto the widest code the output
+  // type has.  For the 8-bit types that is 127 -- float8 reaches further but
+  // its precision is scale-invariant, so the choice does not matter and the
+  // established figures stay comparable.  Float4 tops out at 6, and using 127
+  // there would saturate almost every value it was handed.
+  const double top = (outDtype == ONNX_DT_FLOAT4E2M1) ? 6.0 : 127.0;
+  return (float)(4.0 * std::sqrt((double)K) / 3.0 / top);
 }
 
 void destroySetup(const OrtRuntime &rt, GemmSetup &g)
@@ -340,7 +356,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // tensor anywhere near the graph boundary.
     std::string aRaw, wPacked, wScales;
     fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
-    fillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u);
+    fillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
+                       v.dtype);
     modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
                                                    v.blockSize, aRaw, wPacked,
                                                    wScales);
@@ -361,7 +378,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     modelBytes = onnxResidentQdqMatMulModel(
         D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
-        onnxQuantScaleFor(wDtype), qdqOutputScale(D), actDtype, wDtype);
+        onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
+        actDtype, wDtype);
   }
   else
   {
@@ -371,15 +389,14 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   aRaw.clear(); aRaw.shrink_to_fit();
   bRaw.clear(); bRaw.shrink_to_fit();
 
-  const bool float8 = (actDtype == ONNX_DT_FLOAT8E4M3FN ||
-                       actDtype == ONNX_DT_FLOAT8E5M2 ||
-                       wDtype   == ONNX_DT_FLOAT8E4M3FN ||
-                       wDtype   == ONNX_DT_FLOAT8E5M2);
+  // Anything QLinearMatMul cannot carry must not be fused into it.
+  const bool unfusable = !onnxQdqFusionIsLegal(actDtype) ||
+                         !onnxQdqFusionIsLegal(wDtype);
   // The QDQ graph reduces in float, and so does a plain one whose reduction
   // had to be cast; otherwise the tail keeps the matmul's dtype.
   const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
   finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile,
-              /*keepQdqUnfused=*/v.qdq && float8);
+              /*keepQdqUnfused=*/v.qdq && unfusable);
   return g;
 }
 
@@ -434,6 +451,19 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "reaches 57344 and rounds more coarsely.  Hardware usually runs both at "
      "the same rate, so a difference between these two rows is the provider "
      "choosing different machinery, and the accuracy rows say what each costs."},
+    {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1",
+     "4-bit floating point on both operands: two exponent bits, one of "
+     "mantissa, eight magnitudes in all and a largest value of 6.  This is the "
+     "narrowest format current tensor cores implement, and unlike int4 there "
+     "is a chance a provider fuses it into a real 4-bit multiply rather than "
+     "unpacking it -- the row says which happened."},
+    {ONNX_DT_FLOAT4E2M1, false, "fp4_weight",
+     "The same 4-bit float used only for the weights, one scale per 32 of "
+     "them, against 16-bit activations.  Directly comparable with the int4 "
+     "row above it: identical geometry, identical block size, and the only "
+     "difference is whether those four bits are spent on a float or an "
+     "integer.",
+     /*blockSize=*/32},
     {ONNX_DT_INT4, false, "int4_weight",
      "4-bit weights with one scale per 32 of them, against 16-bit activations "
      "-- the form quantized language models actually ship in.  The arithmetic "
@@ -613,7 +643,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               ? (elems * 2ull                                  // fp16 A
                  + onnxElemBytes(v.dtype, (int64_t)elems)      // packed weights
                  + elems / (uint64_t)v.blockSize * 2ull)       // fp16 scales
-              : 2ull * elems * (uint64_t)dtypeSize(v.dtype);
+              : 2ull * onnxElemBytes(v.dtype, (int64_t)elems);
       if (weightBytes > maxWeightBytes())
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "

@@ -179,6 +179,10 @@ int onnxOpsetForDtype(int dtype)
   case ONNX_DT_UINT4:
   case ONNX_DT_INT4:
     return 21;
+
+  // Float4 arrived with ONNX 1.18, opset 23.
+  case ONNX_DT_FLOAT4E2M1:
+    return 23;
   }
 }
 
@@ -777,22 +781,33 @@ float halfToFloat(uint16_t h)
   return f;
 }
 
-void onnxStoreInt4(void *dst, int64_t index, int q)
+void onnxStoreNibble(void *dst, int64_t index, uint8_t nib)
 {
-  if (q < -8) q = -8;
-  if (q >  7) q =  7;
   uint8_t *b = static_cast<uint8_t *>(dst) + (index >> 1);
-  const uint8_t nib = (uint8_t)(q & 0x0F);
+  nib &= 0x0F;
   if (index & 1)
     *b = (uint8_t)((*b & 0x0F) | (nib << 4));   // odd elements: high nibble
   else
     *b = (uint8_t)((*b & 0xF0) | nib);          // even elements: low nibble
 }
 
-int onnxLoadInt4(const void *src, int64_t index)
+uint8_t onnxLoadNibble(const void *src, int64_t index)
 {
   const uint8_t b = static_cast<const uint8_t *>(src)[index >> 1];
-  const uint8_t nib = (index & 1) ? (uint8_t)(b >> 4) : (uint8_t)(b & 0x0F);
+  return (index & 1) ? (uint8_t)(b >> 4) : (uint8_t)(b & 0x0F);
+}
+
+void onnxStoreInt4(void *dst, int64_t index, int q)
+{
+  if (q < -8) q = -8;
+  if (q >  7) q =  7;
+  const uint8_t nib = (uint8_t)(q & 0x0F);
+  onnxStoreNibble(dst, index, nib);
+}
+
+int onnxLoadInt4(const void *src, int64_t index)
+{
+  const uint8_t nib = onnxLoadNibble(src, index);
   return (nib & 0x8) ? (int)nib - 16 : (int)nib;   // sign-extend from 4 bits
 }
 
@@ -802,7 +817,7 @@ uint64_t onnxElemBytes(int dtype, int64_t count)
   {
   case ONNX_DT_FLOAT:                          return (uint64_t)count * 4;
   case ONNX_DT_FLOAT16: case ONNX_DT_BFLOAT16: return (uint64_t)count * 2;
-  case ONNX_DT_UINT4:   case ONNX_DT_INT4:
+  case ONNX_DT_UINT4:   case ONNX_DT_INT4:   case ONNX_DT_FLOAT4E2M1:
     return (uint64_t)((count + 1) / 2);        // two to a byte, last one padded
   default:                                     return (uint64_t)count;
   }
@@ -811,7 +826,13 @@ uint64_t onnxElemBytes(int dtype, int64_t count)
 bool onnxIsQuantElem(int dtype)
 {
   return dtype == ONNX_DT_INT8 || dtype == ONNX_DT_UINT8 ||
-         dtype == ONNX_DT_FLOAT8E4M3FN || dtype == ONNX_DT_FLOAT8E5M2;
+         dtype == ONNX_DT_FLOAT8E4M3FN || dtype == ONNX_DT_FLOAT8E5M2 ||
+         dtype == ONNX_DT_FLOAT4E2M1;
+}
+
+bool onnxQdqFusionIsLegal(int dtype)
+{
+  return dtype == ONNX_DT_INT8 || dtype == ONNX_DT_UINT8;
 }
 
 float onnxQuantScaleFor(int dtype)
@@ -825,6 +846,12 @@ float onnxQuantScaleFor(int dtype)
   case ONNX_DT_FLOAT8E4M3FN:
   case ONNX_DT_FLOAT8E5M2:
     return 1.0f;
+  // Float4's largest magnitude is 6, and it has eight of them in total.  A
+  // scale of one would leave [-1, 1] using five codes out of sixteen; spending
+  // the whole range and scaling back by a sixth is what makes the row a
+  // measurement of the format rather than of a badly chosen scale.
+  case ONNX_DT_FLOAT4E2M1:
+    return 1.0f / 6.0f;
   default:
     return 1.0f / 127.0f;
   }
@@ -843,6 +870,9 @@ void onnxStoreQuantElem(void *dst, int64_t index, int dtype, float v)
   case ONNX_DT_FLOAT8E5M2:
     static_cast<uint8_t *>(dst)[index] = floatToFp8E5M2(v);
     break;
+  case ONNX_DT_FLOAT4E2M1:
+    onnxStoreNibble(dst, index, floatToFp4E2M1(v * 6.0f));
+    break;
   default:
     static_cast<int8_t *>(dst)[index] = (int8_t)(v * 127.0f);
     break;
@@ -852,6 +882,44 @@ void onnxStoreQuantElem(void *dst, int64_t index, int dtype, float v)
 // E4M3FN: sign, 4 exponent bits biased by 7, 3 mantissa bits, no infinity.
 // Exponent 15 with mantissa 7 is the only NaN, so the largest finite value is
 // 2^8 * 1.75 = 448.
+// Float4 E2M1 has eight magnitudes and nothing else, so rounding is a search
+// over them rather than bit surgery.  Ties go to the even code, as IEEE
+// rounding does: 0.25 lands on 0 rather than 0.5, and 5.0 on 4 rather than 6.
+static const float kFp4Magnitudes[8] = {
+  0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f,
+};
+
+uint8_t floatToFp4E2M1(float f)
+{
+  const uint32_t sign = (f < 0.0f) ? 8u : 0u;
+  float a = f < 0.0f ? -f : f;
+  if (!(a == a))                       // NaN: E2M1 has none, so saturate
+    a = kFp4Magnitudes[7];
+
+  uint32_t best = 7;                   // saturating, since there is no infinity
+  for (uint32_t i = 0; i < 7; i++)
+  {
+    const float mid = 0.5f * (kFp4Magnitudes[i] + kFp4Magnitudes[i + 1]);
+    if (a < mid || (a == mid && (i & 1u) == 0u))
+    {
+      best = i;
+      break;
+    }
+    if (a < kFp4Magnitudes[i + 1])
+    {
+      best = i + 1;
+      break;
+    }
+  }
+  return (uint8_t)(sign | best);
+}
+
+float fp4E2M1ToFloat(uint8_t code)
+{
+  const float mag = kFp4Magnitudes[code & 0x7u];
+  return (code & 0x8u) ? -mag : mag;
+}
+
 uint8_t floatToFp8E4M3(float f)
 {
   uint32_t b;

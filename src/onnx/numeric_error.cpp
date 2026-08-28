@@ -47,13 +47,17 @@ struct Variant
   const char *note;
 };
 
+// Only ever asked about the types that cross the graph boundary, which are
+// fp32 and the plain float widths -- the quantized ones are handed over as
+// fp32 and quantized on device.  Sub-byte types need onnxElemBytes(), which
+// can express a half; this cannot.
 size_t dtypeSize(int dtype)
 {
   switch (dtype)
   {
   case ONNX_DT_FLOAT:                          return 4;
   case ONNX_DT_FLOAT16: case ONNX_DT_BFLOAT16: return 2;
-  default:                                     return 1;  // int8 / uint8 / float8
+  default:                                     return 1;
   }
 }
 
@@ -61,7 +65,7 @@ size_t dtypeSize(int dtype)
 void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
 {
   uint32_t s = seed;
-  raw.resize((size_t)count * dtypeSize(dtype));
+  raw.assign((size_t)onnxElemBytes(dtype, count), '\0');
   float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
   for (int64_t i = 0; i < count; i++)
@@ -79,9 +83,10 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   }
 }
 
-float qdqOutputScale(int64_t K)
+float qdqOutputScale(int64_t K, int outDtype)
 {
-  return (float)(4.0 * std::sqrt((double)K) / 3.0 / 127.0);
+  const double top = (outDtype == ONNX_DT_FLOAT4E2M1) ? 6.0 : 127.0;
+  return (float)(4.0 * std::sqrt((double)K) / 3.0 / top);
 }
 
 // Exact widening of a stored tensor to fp32 -- these are the values the
@@ -132,6 +137,11 @@ std::vector<float> widen(const std::string &raw, int dtype, int64_t count,
   case ONNX_DT_FLOAT8E5M2:
     out.resize((size_t)count);
     for (int64_t i = 0; i < count; i++) out[i] = fp8E5M2ToFloat(u[i]) * scale;
+    break;
+  case ONNX_DT_FLOAT4E2M1:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++)
+      out[i] = fp4E2M1ToFloat(onnxLoadNibble(raw.data(), i)) * scale;
     break;
   default:
     break;   // empty: caller reports the type as unhandled
@@ -253,6 +263,10 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
      "The same in the range-favouring variant, with one fewer mantissa bit.  "
      "It should be about twice fp8_e4m3's error on data like this."},
+    {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1",
+     "The same for 4-bit floating point, which has eight magnitudes to hold "
+     "the answer in.  Expect roughly four times fp8_e4m3's error: two fewer "
+     "mantissa bits."},
     {ONNX_DT_INT8, true, "int8_qdq",
      "What the integer path costs once the operands are already quantized: "
      "the multiply, and storing the result back in 8 bits.  Rounding the "
@@ -291,7 +305,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     logger::EmitOptions o;
     o.description = v.note;
 
-    const float cScale = qdqOutputScale(kDim);
+    const float cScale = qdqOutputScale(kDim, v.dtype);
 
     // Quantized activations may be signed or unsigned; providers disagree
     // about which they accept, so try both.
@@ -303,8 +317,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // multiply and report the mild error of one, hiding what unsigned int8
     // actually costs on that hardware -- the 18% loss from int16 accumulators
     // saturating, which is the whole reason this row exists.
-    // int8 alone has two spellings to choose between; the float8 formats use
-    // their own type for both operands.
+    // int8 alone has two spellings to choose between; every other quantized
+    // format uses its own type for both operands.
     const int kInt8Acts[] = {ONNX_DT_UINT8, ONNX_DT_INT8};
     const int kSameAct[]  = {v.dtype};
     const int   *actCands = (v.dtype == ONNX_DT_INT8) ? kInt8Acts : kSameAct;
@@ -341,15 +355,16 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         outName = "C";
         err.clear();
         ranOps.clear();
-        const bool float8 = (v.dtype == ONNX_DT_FLOAT8E4M3FN ||
-                             v.dtype == ONNX_DT_FLOAT8E5M2);
+        // Anything QLinearMatMul cannot carry must not be fused into it.
+        const bool unfusable = !onnxQdqFusionIsLegal(aDtype) ||
+                               !onnxQdqFusionIsLegal(v.dtype);
         // What the device is given is the dequantized form of what was
         // quantized here, so the reference below and the run see one set of
         // values.
         aDeq = widen(aRaw, aDtype, kDim * kDim, onnxQuantScaleFor(aDtype));
         raw = runOnce(rt, ep, model, inName, outName, aDeq.data(),
                       aDeq.size() * sizeof(float), ONNX_DT_FLOAT, kDim, kDim,
-                      err, &ranOps, float8);
+                      err, &ranOps, unfusable);
         if (!raw.empty())
           break;
       }

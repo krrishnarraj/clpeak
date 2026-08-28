@@ -35,6 +35,11 @@ enum OnnxDtype : int
   // dequantized on the way into a floating-point multiply.
   ONNX_DT_UINT4 = 21,
   ONNX_DT_INT4  = 22,
+  // Float4, ONNX 1.18 / opset 23.  One sign bit, two exponent, one mantissa,
+  // and therefore eight magnitudes in total: 0, 0.5, 1, 1.5, 2, 3, 4, 6.  No
+  // infinity and no NaN -- every bit pattern is a number.  Packed two to a
+  // byte like int4.
+  ONNX_DT_FLOAT4E2M1 = 23,
 };
 
 // The lowest opset that can express `dtype` at all.  Datatypes arrived in the
@@ -300,6 +305,8 @@ float    bf16ToFloat(uint16_t h);
 // infinity -- the values these graphs carry sit inside [-1, 1] so the extreme
 // paths are unreachable in practice, but a quantization helper that silently
 // produced a NaN would poison an accuracy row rather than fail it.
+uint8_t floatToFp4E2M1(float f);   // returns the 4-bit code, 0..15
+float   fp4E2M1ToFloat(uint8_t code);
 uint8_t floatToFp8E4M3(float f);
 uint8_t floatToFp8E5M2(float f);
 float   fp8E4M3ToFloat(uint8_t v);
@@ -307,6 +314,15 @@ float   fp8E5M2ToFloat(uint8_t v);
 
 // Is `dtype` one of the quantized element types the QDQ recipes accept?
 bool onnxIsQuantElem(int dtype);
+
+// Can ORT's QDQ selector legally fuse a graph over this element type?
+//
+// The fusion target is QLinearMatMul, which is an 8-bit *integer* operator: it
+// carries int8 and uint8 and nothing else.  Let the selector fire on any other
+// quantized type and it rewrites a valid model into one that fails its own type
+// check.  A provider with real hardware for such a type consumes the QDQ nodes
+// itself and never wanted the rewrite, so holding it off costs nothing.
+bool onnxQdqFusionIsLegal(int dtype);
 
 // The scale that maps this quantized type's stored values back onto [-1, 1],
 // which is the range every QDQ recipe here dequantizes into.  Keeping the
@@ -320,6 +336,8 @@ void onnxStoreQuantElem(void *dst, int64_t index, int dtype, float v);
 // Store one signed 4-bit value at `index` of a packed nibble array.  ONNX packs
 // two elements per byte in flattened order with the first in the low nibble.
 // `q` is clamped to [-8, 7].
+void    onnxStoreNibble(void *dst, int64_t index, uint8_t nib);
+uint8_t onnxLoadNibble(const void *src, int64_t index);
 void onnxStoreInt4(void *dst, int64_t index, int q);
 int  onnxLoadInt4(const void *src, int64_t index);
 
