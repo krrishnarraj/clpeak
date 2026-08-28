@@ -1168,6 +1168,53 @@ unintended is the thing this backend must not do. The CPU EP is implicit in
 every session and is the one provider that registers nothing and keeps its
 fallback.
 
+## A datatype needs a runtime, not just an opset
+
+`onnxDtypeUnsupportedReason()` gates both `onnx-gemm` and `onnx-numeric-error`,
+and it answers two questions rather than one:
+
+- **The opset.** A type cannot be spelled below the version that introduced it,
+  and a model declaring a newer opset fails to *load*. ONNX Runtime 1.17 answers
+  `Unsupported model IR version: 11, max supported IR version: 9` — true, and it
+  names neither the datatype nor what to do about it.
+- **The optimizer.** A quantized type `QLinearMatMul` cannot carry additionally
+  needs a runtime that honours `disable_specified_optimizers`, or the QDQ
+  selector rewrites the graph into one that fails its own type check. **1.18 is
+  the first release that honours it** — the same defect the constant-folding
+  guard reports, and the reason float8 on 1.17 answers
+  `Type 'tensor(float8e4m3fn)' ... of operator (QLinearMatMul) ... is invalid`
+  rather than anything about the runtime being old.
+
+Both were found by running against a stock Windows ONNX Runtime 1.17, where the
+gate existed in `gemm.cpp` and not in `numeric_error.cpp`, so the same datatype
+explained itself in one test and not the other. It lives in one place now.
+
+## The four-bit ratio is architectural; the sixteen-bit one is a choice
+
+Windows and Linux, the same RTX 5060, the same graphs:
+
+| | fp16 | int8 | nvfp4 | nvfp4/fp16 | nvfp4/int8 |
+|---|---|---|---|---|---|
+| Linux, ORT 1.30 | 66.27 | 124.93 | 238.76 | 3.60x | **1.91x** |
+| Windows, ORT 1.29 | 20.35 | 124.50 | 236.99 | 11.65x | **1.90x** |
+
+**The ratio against int8 is identical to two figures; the ratio against fp16
+differs by more than threefold.** Nothing about the silicon changed. Windows
+TensorRT accumulates fp16 in fp32 and Linux TensorRT accumulates it in fp16 —
+the accuracy rows say so, 207 ppm against 1185 — so the fp16 row moves and every
+comparison drawn against it moves with it. int8 accumulates the same way on both
+and the four-bit-over-eight-bit doubling stays put.
+
+Quote `nvfp4` against `int8` and the number means something on any machine.
+Quote it against fp16 and it means whatever that provider decided about
+accumulation that day.
+
+Two more differences from the same pair of runs, both correctly reported rather
+than papered over: Windows TensorRT refuses the blocked weight-only graphs that
+Linux runs at 65.9 TFLOPS, and Windows dispatch costs about four times as much
+(115 µs against 30), which is enough to lose the 8 MB rung of both
+`onnx-activation` and `onnx-tensor-bw` to their own noise guards.
+
 ## Never report a refusal with an empty reason
 
 A skip row's whole value is the message in it, and two paths could hand back an

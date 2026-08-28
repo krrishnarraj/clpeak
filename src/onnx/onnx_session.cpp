@@ -1,6 +1,7 @@
 #ifdef ENABLE_ONNX
 
 #include "onnx_session.h"
+#include "onnx_model.h"
 
 #include <common/common.h>
 #include <common/console_mute.h>
@@ -12,6 +13,26 @@
 #include <iterator>
 #include <mutex>
 #include <vector>
+
+std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
+{
+  const int      opset  = onnxOpsetForDtype(dtype);
+  const uint32_t needApi = onnxMinOrtApiForOpset(opset);
+  if (needApi && rt.apiVersion < needApi)
+    return "needs opset " + std::to_string(opset) +
+           ", which arrived in ONNX Runtime 1." + std::to_string(needApi) +
+           "; this runtime is " + rt.versionString;
+
+  // 1.18 is the first release that honours the request not to fuse.
+  if (onnxIsQuantElem(dtype) && !onnxQdqFusionIsLegal(dtype) &&
+      rt.apiVersion < 18)
+    return "needs ONNX Runtime 1.18 or newer, the first that honours the "
+           "request not to fuse a quantized matmul into QLinearMatMul -- which "
+           "is an 8-bit integer operator and cannot carry this type; this "
+           "runtime is " + rt.versionString;
+
+  return std::string();
+}
 
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 {

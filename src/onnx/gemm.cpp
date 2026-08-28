@@ -528,20 +528,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       break;
     const Variant &v = variants[i];
 
-    // A datatype newer than the installed runtime fails to *load*, with a
-    // message about opsets that says nothing about the datatype.  Name it.
-    const int      needOpset = onnxOpsetForDtype(v.dtype);
-    const uint32_t needApi   = onnxMinOrtApiForOpset(needOpset);
-    if (needApi && rt.apiVersion < needApi)
+    // A datatype the runtime cannot be asked for fails to *load*, with a
+    // message about opsets or a rewritten graph that says nothing about the
+    // datatype.  Name it instead.
+    if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
     {
       logger::EmitOptions o;
       o.description = v.note;
-      test.skip(v.label, ResultStatus::Unsupported,
-                "needs opset " + std::to_string(needOpset) +
-                    ", which arrived in ONNX Runtime 1." +
-                    std::to_string(needApi) + "; this runtime is " +
-                    rt.versionString,
-                o.description);
+      test.skip(v.label, ResultStatus::Unsupported, why, o.description);
       continue;
     }
 

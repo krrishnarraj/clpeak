@@ -305,6 +305,15 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     logger::EmitOptions o;
     o.description = v.note;
 
+    // The same gate onnx-gemm applies.  Without it a datatype newer than the
+    // runtime reports whatever ORT says about IR versions, which names neither
+    // the datatype nor the fix.
+    if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
+    {
+      test.skip(v.label, ResultStatus::Unsupported, why, o.description);
+      continue;
+    }
+
     const float cScale = qdqOutputScale(kDim, v.dtype);
 
     // Quantized activations may be signed or unsigned; providers disagree

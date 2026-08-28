@@ -77,6 +77,19 @@ bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops);
 // The recognisable quantized kernel among `ops`, or an empty string when the
 // provider fused everything into a kernel of its own naming.
 std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
+// Empty when this runtime can be asked to run `dtype` at all; otherwise the
+// reason it cannot, phrased for a skip row.
+//
+// Two constraints, and the binding one is named.  A datatype cannot be spelled
+// below the opset that introduced it, and a model declaring a newer opset fails
+// to *load*, with a message about IR versions that says nothing about the
+// datatype.  And a quantized type QLinearMatMul cannot carry additionally needs
+// a runtime that honours `disable_specified_optimizers`, since the QDQ selector
+// would otherwise rewrite the graph into one that fails its own type check --
+// ONNX Runtime before 1.18 accepts that request and ignores it, the same defect
+// the constant-folding guard in gemm.cpp reports.
+std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
+
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
 
