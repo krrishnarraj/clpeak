@@ -66,7 +66,19 @@ constexpr double   kMaxIterUs      = 2.0e6;        // one iteration, predicted
 // Both operands together, capped at a quarter of physical memory.  A fixed
 // ceiling here would be a crash on a phone and a needless limit on a
 // workstation; see clpeak::memoryBudget.
-static uint64_t maxWeightBytes() { return clpeak::memoryBudget(3ull << 30); }
+//
+// And capped again by protobuf.  An ONNX model is a protobuf message, whose
+// serialized size cannot exceed 2 GiB, and both operands live inside it as
+// initializers -- so a size the machine has memory for can still be
+// unbuildable.  fp32 at 16384 needs exactly 2 GiB of operands and ORT answers
+// "Model data size exceeds maximum supported size (2GB)", which is a property
+// of the format rather than of the device and does not belong in a memory
+// budget.  The slack leaves room for the graph around the weights.
+static uint64_t maxWeightBytes()
+{
+  const uint64_t protobufCeiling = (2ull << 30) - (64ull << 20);
+  return std::min(clpeak::memoryBudget(3ull << 30), protobufCeiling);
+}
 
 // Per-size budget for the timed phase.  Lower than the 5 s a single-size test
 // would use, since the ladder measures several.

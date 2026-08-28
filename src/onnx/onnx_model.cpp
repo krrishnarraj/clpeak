@@ -340,7 +340,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // in fp32 -- the half-precision row came back equal to the single-precision
   // one, measuring the wrong arithmetic entirely.  A guarded fold beats a
   // silent upcast.
-  g.input("S", dtype, {});
+  g.input("S", tailDtype, {});
   g.initializer("A", dtype, {M, K}, aRaw);
   g.initializer("B", dtype, {K, N}, bRaw);
 
@@ -348,10 +348,20 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // summed rows of A, a rewrite an optimiser is free to make and which would
   // quietly turn this matrix multiply into a matrix-vector one.  Max does not
   // distribute over the product, so the full result has to be computed.
-  g.node("MatMul",    {"A", "B"}, {"C"});
-  g.reduceMax("C", "R", {0});
-  g.node("Mul",       {"R", "S"}, {"Y"});
-  g.output("Y", dtype, {N});
+  g.node("MatMul", {"A", "B"}, {"C"});
+  // The cast sits after the multiply, so it cannot change the arithmetic being
+  // measured -- and the numeric-error row is the independent check on that: a
+  // matmul quietly promoted to fp32 would report fp32's rate as well as fp32's
+  // error.
+  const char *reduceIn = "C";
+  if (reduceInFloat)
+  {
+    g.node("Cast", {"C"}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
+    reduceIn = "Cf";
+  }
+  g.reduceMax(reduceIn, "R", {0});
+  g.node("Mul",    {"R", "S"}, {"Y"});
+  g.output("Y", tailDtype, {N});
   return g.build();
 }
 

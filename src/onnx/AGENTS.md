@@ -349,6 +349,34 @@ never reports. The size curves above agree: the fp32 row behaves like AMX
 (faster the bigger it gets) and the fp16 row like the ANE (a cliff once it
 outgrows on-chip memory).
 
+**TensorRT reaches float8 and clpeak's own numbers say what it costs.** RTX 5060,
+ONNX Runtime 1.30: fp8_e4m3 fuses into a `TRTKernel_...` at **75.4 TFLOPS**,
+against 66.5 for fp16, 38.1 for bf16, 19.2 for fp32 and 124.6 TOPS for int8.
+Read against the accuracy rows that is a coherent picture of one card: fp16 at
+66.5 accumulates in fp16, everything accumulating in fp32 sits near 40, and
+fp8 at 75.4 is the doubled-rate path. The row worth pausing on is int8, which
+beats fp8 by **1.65x** on the same silicon — narrower is not automatically
+faster, and on this part the integer tensor cores are simply wider than the
+float8 ones.
+
+Two TensorRT limits came out of the same run, both reported as unsupported
+rather than guessed at:
+
+- **E5M2 weights are refused outright** — *"ONNX initializer A_q cannot be
+  imported into TensorRT"*. It implements E4M3 and not the range-favouring
+  format, so the pair of rows is doing exactly its job: one number, one
+  refusal, and the refusal is the finding.
+- **A float8 tensor cannot cross the EP boundary** — *"TensorRT EP input onnx
+  tensor data type: 17 not supported"*. Initializers are fine, which is why
+  `onnx-gemm` works: both its operands are baked into the model.
+  `onnx-numeric-error` hands its input in at run time, so its float8 rows are
+  unmeasurable on TensorRT. Their values are known from the CUDA and CPU
+  providers, and the format's rounding cost is device-independent — every
+  provider that accumulates in fp32 reports the same figure to the last
+  decimal — but what cannot be checked on TensorRT specifically is whether it
+  accumulates float8 differently, the way it does fp16. Closing that needs the
+  accuracy model to take a fp32 input and quantize on device.
+
 **A float8 QDQ graph must not be fused into `QLinearMatMul`.** ORT's QDQ
 selector rewrites DequantizeLinear/MatMul/QuantizeLinear into `QLinearMatMul`,
 which is what makes an int8 row an int8 row — but `QLinearMatMul` is an integer
@@ -528,6 +556,14 @@ rung for its working set, which does not expire either:
   it is what makes the comparison this test exists for a division rather than an
   argument: `silu_32mb` over `onnx-tensor-bw`'s `32mb` is one number about one
   working set.
+
+**One ceiling does not come from memory: an ONNX model is a protobuf message,
+and protobuf cannot serialize more than 2 GiB.** Both GEMM operands live inside
+the model as initializers, so a size the machine has ample memory for can still
+be unbuildable — fp32 at 16384 needs exactly 2 GiB of operands and ORT answers
+"Model data size exceeds maximum supported size (2GB)". That is a property of
+the file format rather than of the device, so it is a hard cap in `gemm.cpp`
+alongside the memory budget rather than folded into it.
 
 **Every byte ceiling comes from `clpeak::memoryBudget()`** (`common.h`), a
 fraction of physical RAM rather than a constant. The difference between a
