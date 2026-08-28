@@ -7,12 +7,22 @@
 #include <common/console_mute.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <mutex>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
 {
@@ -263,6 +273,54 @@ static std::string profilePrefixPath()
 #endif
 }
 
+// ORT appends a timestamp to the prefix when it writes the profile. Make the
+// prefix itself unique so a failed session can remove only its own file.
+static std::string uniqueProfilePrefixPath()
+{
+  static std::atomic<uint64_t> serial{0};
+  const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+#ifdef _WIN32
+  const uint64_t pid = static_cast<uint64_t>(_getpid());
+#else
+  const uint64_t pid = static_cast<uint64_t>(getpid());
+#endif
+  return profilePrefixPath() + "_" + std::to_string(pid) + "_" +
+         std::to_string(now) + "_" +
+         std::to_string(serial.fetch_add(1, std::memory_order_relaxed));
+}
+
+// SessionEndProfiling gives us the exact path on success. A provider can
+// reject the model while creating the session, though, after ORT has already
+// opened a profile file and before there is a session to end. The unique
+// prefix above gives that failure path a safe cleanup target.
+static void removeProfileArtifacts(const std::string &prefix)
+{
+  if (prefix.empty())
+    return;
+
+  const std::filesystem::path prefixPath(prefix);
+  const std::filesystem::path dir = prefixPath.parent_path().empty()
+      ? std::filesystem::path(".") : prefixPath.parent_path();
+  const std::string namePrefix = prefixPath.filename().string();
+
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dir, ec), end;
+  for (; !ec && it != end; it.increment(ec))
+  {
+    const std::string name = it->path().filename().string();
+    if (name.compare(0, namePrefix.size(), namePrefix) != 0)
+      continue;
+
+    std::error_code removeEc;
+    std::filesystem::remove(it->path(), removeEc);
+    if (removeEc)
+      CLPEAK_VLOG("onnx: could not remove profile %s: %s\n",
+                  it->path().string().c_str(), removeEc.message().c_str());
+  }
+}
+
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
                                                 OrtSession *session)
 {
@@ -393,14 +451,15 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     return res;
   }
 
+  std::string profilePrefix;
   if (profile)
   {
-    const std::string prefix = profilePrefixPath();
+    profilePrefix = uniqueProfilePrefixPath();
 #ifdef _WIN32
-    std::wstring wide(prefix.begin(), prefix.end());
+    std::wstring wide(profilePrefix.begin(), profilePrefix.end());
     st = api->EnableProfiling(so, wide.c_str());
 #else
-    st = api->EnableProfiling(so, prefix.c_str());
+    st = api->EnableProfiling(so, profilePrefix.c_str());
 #endif
     if (st)
       CLPEAK_VLOG("onnx: EnableProfiling rejected: %s\n",
@@ -445,6 +504,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     if (!res.error.empty())
     {
       api->ReleaseSessionOptions(so);
+      removeProfileArtifacts(profilePrefix);
       return res;
     }
 
@@ -471,6 +531,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   if (st)
   {
     res.error = onnxStatusText(rt, st);
+    removeProfileArtifacts(profilePrefix);
     return res;
   }
   // Success and no session is a combination the API does not promise but has
@@ -478,6 +539,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   if (!session)
   {
     res.error = "the runtime returned no session and no error";
+    removeProfileArtifacts(profilePrefix);
     return res;
   }
 

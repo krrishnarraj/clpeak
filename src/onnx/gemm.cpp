@@ -447,8 +447,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   static const Variant kFpVariants[] = {
     {ONNX_DT_FLOAT,   false, "fp32",
-     "Full 32-bit precision.  Many NPUs cannot run this at all, or route it "
-     "away from the matrix hardware -- that is a finding, not a failure."},
+     "FP32 graph inputs and outputs.  A provider may use a narrower internal "
+     "format; read the fp32 numeric-error row beside this one to see whether "
+     "it did.  Many NPUs cannot run this at all, or route it away from the "
+     "matrix hardware -- that is a finding, not a failure."},
     {ONNX_DT_FLOAT16, false, "fp16",
      "16-bit floats, the native currency of most NPU matrix hardware."},
     {ONNX_DT_BFLOAT16, false, "bf16",

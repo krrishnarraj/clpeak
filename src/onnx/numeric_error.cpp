@@ -205,7 +205,9 @@ std::vector<uint8_t> runOnce(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     error = onnxStatusText(rt, st);
     out.clear();
   }
-  if (ops && !out.empty())
+  // End profiling even after a failed Run: otherwise ORT leaves its profile
+  // file behind when the benchmark turns that failure into an unsupported row.
+  if (ops)
     *ops = onnxCollectExecutedOps(rt, ses.session);
 
   if (inVal)  rt.api->ReleaseValue(inVal);
