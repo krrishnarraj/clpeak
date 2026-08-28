@@ -53,7 +53,7 @@ size_t dtypeSize(int dtype)
   {
   case ONNX_DT_FLOAT:                          return 4;
   case ONNX_DT_FLOAT16: case ONNX_DT_BFLOAT16: return 2;
-  default:                                     return 1;
+  default:                                     return 1;  // int8 / uint8 / float8
   }
 }
 
@@ -64,8 +64,6 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   raw.resize((size_t)count * dtypeSize(dtype));
   float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-  int8_t   *q = reinterpret_cast<int8_t *>(&raw[0]);
-  uint8_t  *u = reinterpret_cast<uint8_t *>(&raw[0]);
   for (int64_t i = 0; i < count; i++)
   {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
@@ -75,8 +73,8 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
     case ONNX_DT_FLOAT:    f[i] = v; break;
     case ONNX_DT_FLOAT16:  h[i] = floatToHalf(v); break;
     case ONNX_DT_BFLOAT16: h[i] = floatToBf16(v); break;
-    case ONNX_DT_UINT8:    u[i] = (uint8_t)(v * 254.0f + 128.0f); break;
-    default:               q[i] = (int8_t)(v * 254.0f); break;
+    default:               onnxStoreQuantElem(&raw[0], i, dtype, v * 2.0f);
+                           break;
     }
   }
 }
@@ -127,6 +125,14 @@ std::vector<float> widen(const std::string &raw, int dtype, int64_t count,
     out.resize((size_t)count);
     for (int64_t i = 0; i < count; i++) out[i] = (float)q[i] * scale;
     break;
+  case ONNX_DT_FLOAT8E4M3FN:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++) out[i] = fp8E4M3ToFloat(u[i]) * scale;
+    break;
+  case ONNX_DT_FLOAT8E5M2:
+    out.resize((size_t)count);
+    for (int64_t i = 0; i < count; i++) out[i] = fp8E5M2ToFloat(u[i]) * scale;
+    break;
   default:
     break;   // empty: caller reports the type as unhandled
   }
@@ -143,13 +149,14 @@ std::vector<uint8_t> runOnce(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                              const void *inData, size_t inBytes,
                              int ioDtype, int64_t rows, int64_t cols,
                              std::string &error,
-                             std::vector<std::string> *ops = nullptr)
+                             std::vector<std::string> *ops = nullptr,
+                             bool keepQdqUnfused = false)
 {
   std::vector<uint8_t> out;
 
   auto ses = onnxCreateSession(rt, ep, modelBytes,
                                /*keepConstantsUnfolded=*/false,
-                               /*profile=*/ops != nullptr);
+                               /*profile=*/ops != nullptr, keepQdqUnfused);
   if (!ses.session)
   {
     error = ses.error;
@@ -236,6 +243,16 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "for fp32's exponent range.  Expect a larger error than fp16 on values "
      "like these, which all sit comfortably inside both ranges -- bf16 buys "
      "headroom against overflow, not precision, and this shows the price."},
+    {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
+     "What 8 bits of floating point costs, in the precision-favouring variant. "
+     " Read it beside int8: both are eight bits over the same operands, and "
+     "which one loses less depends entirely on how the values are spread.  "
+     "These are uniform over a fixed range, which is int8's best case and "
+     "float8's worst -- float8 buys dynamic range, and uniform data has none "
+     "to spend."},
+    {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
+     "The same in the range-favouring variant, with one fewer mantissa bit.  "
+     "It should be about twice fp8_e4m3's error on data like this."},
     {ONNX_DT_INT8, true, "int8_qdq",
      "What quantization costs, end to end -- quantizing the inputs, the "
      "matmul, and re-quantizing the result.  Whether the multiply itself ran "
@@ -267,7 +284,6 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     logger::EmitOptions o;
     o.description = v.note;
 
-    const float qScale = 1.0f / 127.0f;
     const float cScale = qdqOutputScale(kDim);
 
     // Quantized activations may be signed or unsigned; providers disagree
@@ -280,7 +296,12 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // multiply and report the mild error of one, hiding what unsigned int8
     // actually costs on that hardware -- the 18% loss from int16 accumulators
     // saturating, which is the whole reason this row exists.
-    static const int kActDtypes[] = {ONNX_DT_UINT8, ONNX_DT_INT8};
+    // int8 alone has two spellings to choose between; the float8 formats use
+    // their own type for both operands.
+    const int kInt8Acts[] = {ONNX_DT_UINT8, ONNX_DT_INT8};
+    const int kSameAct[]  = {v.dtype};
+    const int   *actCands = (v.dtype == ONNX_DT_INT8) ? kInt8Acts : kSameAct;
+    const size_t nActCands = (v.dtype == ONNX_DT_INT8) ? 2u : 1u;
 
     int aDtype = v.dtype;
     std::string aRaw, bRaw, err;
@@ -290,19 +311,22 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     if (v.qdq)
     {
-      for (int cand : kActDtypes)
+      for (size_t ci = 0; ci < nActCands; ci++)
       {
-        aDtype = cand;
+        aDtype = actCands[ci];
         fillTensor(aRaw, aDtype, kDim * kDim, 0x9e3779b9u);
         fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
-        std::string model = onnxQdqMatMulModel(kDim, kDim, kDim, bRaw,
-                                               qScale, qScale, cScale, aDtype);
+        std::string model = onnxQdqMatMulModel(
+            kDim, kDim, kDim, bRaw, onnxQuantScaleFor(aDtype),
+            onnxQuantScaleFor(v.dtype), cScale, aDtype, v.dtype);
         inName  = "A_q";
         outName = "C_q";
         err.clear();
         ranOps.clear();
+        const bool float8 = (v.dtype == ONNX_DT_FLOAT8E4M3FN ||
+                             v.dtype == ONNX_DT_FLOAT8E5M2);
         raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
-                      aDtype, kDim, kDim, err, &ranOps);
+                      aDtype, kDim, kDim, err, &ranOps, float8);
         if (!raw.empty())
           break;
       }
@@ -317,9 +341,10 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     }
     if (v.qdq)
     {
-      o.description += (aDtype == ONNX_DT_UINT8)
-                           ? "  Measured with unsigned activations."
-                           : "  Measured with signed activations.";
+      if (v.dtype == ONNX_DT_INT8)
+        o.description += (aDtype == ONNX_DT_UINT8)
+                             ? "  Measured with unsigned activations."
+                             : "  Measured with signed activations.";
       // Whether the provider fused a quantized matmul decides what this row
       // is the error *of*.  onnx-gemm-int refuses to publish a rate when the
       // fusion did not happen, because a float multiply is not an int8 rate;
@@ -329,7 +354,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // arithmetic took place.  The scheme here is chosen by which one runs
       // rather than which one fuses (see above), so the two tests can and do
       // disagree on the same provider.
-      if (!raw.empty() && !ranOps.empty() && !onnxOpsRanIntegerMatMul(ranOps))
+      if (!raw.empty() && !ranOps.empty() && !onnxOpsRanQuantizedMatMul(ranOps))
       {
         std::string joined;
         for (const auto &op : ranOps)
@@ -338,9 +363,9 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             "  This provider did not fuse a quantized matmul: it dequantized "
             "the operands and multiplied in floating point (ran: " + joined +
             "), so this is what the quantization scheme costs rather than "
-            "what integer arithmetic costs on this hardware.";
-        CLPEAK_VLOG("onnx-numeric-error[%s/int8_qdq]: no fused integer "
-                    "matmul, executed %s\n", ep.providerKey.c_str(),
+            "what this hardware's own quantized arithmetic costs.";
+        CLPEAK_VLOG("onnx-numeric-error[%s/%s]: no fused quantized matmul, "
+                    "executed %s\n", ep.providerKey.c_str(), v.label,
                     joined.c_str());
       }
     }
@@ -361,8 +386,10 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     // The reference: the same values the provider saw, widened to fp32 and
     // multiplied on the CPU EP.
-    std::vector<float> aRef = widen(aRaw, aDtype, kDim * kDim, qScale);
-    std::vector<float> bRef = widen(bRaw, v.dtype, kDim * kDim, qScale);
+    std::vector<float> aRef = widen(aRaw, aDtype, kDim * kDim,
+                                    onnxQuantScaleFor(aDtype));
+    std::vector<float> bRef = widen(bRaw, v.dtype, kDim * kDim,
+                                    onnxQuantScaleFor(v.dtype));
     if (got.empty() || aRef.empty() || bRef.empty())
     {
       test.skip(v.label, ResultStatus::Error,

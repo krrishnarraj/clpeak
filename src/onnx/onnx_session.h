@@ -32,11 +32,20 @@ struct OnnxSessionResult
 // creation and every timed run measures nothing.
 // `profile` records which kernels the provider actually runs; collect them
 // afterwards with onnxCollectExecutedOps().
+// `keepQdqUnfused` additionally holds off the QDQ selector, which rewrites
+// DequantizeLinear/MatMul/QuantizeLinear into QLinearMatMul.  That fusion is
+// what makes an int8 row an int8 row, but QLinearMatMul is an integer operator
+// and has no float8 type constraint, so on a float8 graph the rewrite produces
+// a model that fails its own type check -- "Type 'tensor(float8e4m3fn)' of
+// input parameter (A_q) of operator (QLinearMatMul) is invalid".  A provider
+// with real float8 matmul hardware consumes the QDQ nodes itself and never
+// wanted the rewrite.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded = false,
-                                    bool profile = false);
+                                    bool profile = false,
+                                    bool keepQdqUnfused = false);
 
 // Names of the kernels a profiled session executed, distinct, in first-seen
 // order.  Empty when profiling was off or unavailable.
@@ -63,7 +72,7 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
 // what a provider that declined to fuse leaves behind.  Anything else ran as
 // the provider's own quantized kernel, and it cannot have quietly run on the
 // CPU instead, because the fallback guard would have failed the session.
-bool onnxOpsRanIntegerMatMul(const std::vector<std::string> &ops);
+bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops);
 
 // The recognisable quantized kernel among `ops`, or an empty string when the
 // provider fused everything into a kernel of its own naming.

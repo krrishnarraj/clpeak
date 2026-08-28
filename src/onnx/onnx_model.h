@@ -22,6 +22,13 @@ enum OnnxDtype : int
   ONNX_DT_INT64    = 7,
   ONNX_DT_FLOAT16  = 10,
   ONNX_DT_BFLOAT16 = 16,
+  // Float8, ONNX 1.14 / opset 19.  FN means "finite": E4M3FN has no infinity,
+  // spending that encoding on one more magnitude instead, so its maximum is
+  // 448.  E5M2 keeps IEEE's infinities and reaches 57344 with one fewer
+  // mantissa bit.  Which of the two a device prefers is the whole question the
+  // pair of rows exists to answer.
+  ONNX_DT_FLOAT8E4M3FN = 17,
+  ONNX_DT_FLOAT8E5M2   = 19,
 };
 
 // The lowest opset that can express `dtype` at all.  Datatypes arrived in the
@@ -116,10 +123,13 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 //
 // Input and output are int8, so no float conversion sits in the timed path.
 // ORT's QDQ handling fuses this into the EP's own quantized matmul.
+// `wDtype` is the weight element type and `actDtype` the activation one.  Both
+// may be int8/uint8 or one of the float8 formats; the model's opset follows
+// whichever is newer.
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
-                               const std::string &weightRawInt8,
+                               const std::string &weightRaw,
                                float aScale, float bScale, float cScale,
-                               int actDtype);
+                               int actDtype, int wDtype = ONNX_DT_INT8);
 
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each
@@ -162,9 +172,10 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // caller picks by trying, and `gemm.cpp` uses the fusion check to decide.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
-                                       const std::string &bRawInt8,
+                                       const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
-                                       int actDtype);
+                                       int actDtype,
+                                       int wDtype = ONNX_DT_INT8);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per
@@ -249,5 +260,26 @@ uint16_t floatToHalf(float f);
 uint16_t floatToBf16(float f);
 float    halfToFloat(uint16_t h);
 float    bf16ToFloat(uint16_t h);
+
+// Float8, round-to-nearest-even, saturating rather than overflowing to
+// infinity -- the values these graphs carry sit inside [-1, 1] so the extreme
+// paths are unreachable in practice, but a quantization helper that silently
+// produced a NaN would poison an accuracy row rather than fail it.
+uint8_t floatToFp8E4M3(float f);
+uint8_t floatToFp8E5M2(float f);
+float   fp8E4M3ToFloat(uint8_t v);
+float   fp8E5M2ToFloat(uint8_t v);
+
+// Is `dtype` one of the quantized element types the QDQ recipes accept?
+bool onnxIsQuantElem(int dtype);
+
+// The scale that maps this quantized type's stored values back onto [-1, 1],
+// which is the range every QDQ recipe here dequantizes into.  Keeping the
+// dequantized range identical across types is what makes their accuracy rows
+// comparable: the operands differ only in how they were rounded.
+float onnxQuantScaleFor(int dtype);
+
+// Encode `v` (already in [-1, 1]) into one element of `dtype`, little-endian.
+void onnxStoreQuantElem(void *dst, int64_t index, int dtype, float v);
 
 #endif // CLPEAK_ONNX_MODEL_H

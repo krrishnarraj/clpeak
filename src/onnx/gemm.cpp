@@ -88,13 +88,29 @@ struct Variant
 struct QuantScheme
 {
   int         actDtype;
+  int         wDtype;
   const char *name;
 };
 
-const QuantScheme kQuantSchemes[] = {
-  {ONNX_DT_INT8,  "signed activations"},     // TensorRT, ARM
-  {ONNX_DT_UINT8, "unsigned activations"},   // x86 without VNNI
+// int8 has two spellings and no provider takes both.  The float8 formats have
+// one: activations and weights share the type, and there is no signed/unsigned
+// question because they are signed floats.
+const QuantScheme kInt8Schemes[] = {
+  {ONNX_DT_INT8,  ONNX_DT_INT8, "signed activations"},     // TensorRT, ARM
+  {ONNX_DT_UINT8, ONNX_DT_INT8, "unsigned activations"},   // x86 without VNNI
 };
+
+size_t schemesFor(int dtype, QuantScheme out[2])
+{
+  if (dtype == ONNX_DT_INT8)
+  {
+    out[0] = kInt8Schemes[0];
+    out[1] = kInt8Schemes[1];
+    return 2;
+  }
+  out[0] = {dtype, dtype, "matching activations and weights"};
+  return 1;
+}
 
 struct GemmSetup
 {
@@ -111,7 +127,7 @@ size_t dtypeSize(int dtype)
   {
   case ONNX_DT_FLOAT:                     return 4;
   case ONNX_DT_FLOAT16: case ONNX_DT_BFLOAT16: return 2;
-  default:                                return 1;   // int8 / uint8
+  default:                                return 1;   // int8 / uint8 / float8
   }
 }
 
@@ -125,8 +141,6 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   raw.resize((size_t)count * dtypeSize(dtype));
   float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-  int8_t   *q = reinterpret_cast<int8_t *>(&raw[0]);
-  uint8_t  *u = reinterpret_cast<uint8_t *>(&raw[0]);
   for (int64_t i = 0; i < count; i++)
   {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
@@ -136,8 +150,11 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
     case ONNX_DT_FLOAT:    f[i] = v; break;
     case ONNX_DT_FLOAT16:  h[i] = floatToHalf(v); break;
     case ONNX_DT_BFLOAT16: h[i] = floatToBf16(v); break;
-    case ONNX_DT_UINT8:    u[i] = (uint8_t)(v * 254.0f + 128.0f); break;  // zp 128
-    default:               q[i] = (int8_t)(v * 254.0f); break;   // [-127, 127]
+    // Quantized types all store a value already spread over [-1, 1], so the
+    // dequantized operands match whatever the format's rounding leaves of
+    // them and nothing else differs between the rows.
+    default:               onnxStoreQuantElem(&raw[0], i, dtype, v * 2.0f);
+                           break;
     }
   }
 }
@@ -169,21 +186,22 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile = false,
                     int actDtype = ONNX_DT_UINT8,
-                    bool reduceInFloat = false)
+                    bool reduceInFloat = false,
+                    int wgtDtype = ONNX_DT_INT8)
 {
   GemmSetup g;
 
   std::string aRaw, bRaw;
-  // Quantized: `actDtype` activations against int8 weights.
+  const int wDtype = v.qdq ? wgtDtype : v.dtype;
   fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
-  fillTensor(bRaw, v.dtype, D * D, 0x243f6a88u);
+  fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
 
   std::string modelBytes;
   if (v.qdq)
   {
-    const float s = 1.0f / 127.0f;
-    modelBytes = onnxResidentQdqMatMulModel(D, D, D, aRaw, bRaw, s, s,
-                                            qdqOutputScale(D), actDtype);
+    modelBytes = onnxResidentQdqMatMulModel(
+        D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
+        onnxQuantScaleFor(wDtype), qdqOutputScale(D), actDtype, wDtype);
   }
   else
   {
@@ -195,8 +213,15 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   // Both models hold their operands as constants and need folding held off,
   // or the whole multiply is evaluated once at load time.
+  // A float8 QDQ graph must not be fused into QLinearMatMul, which is an
+  // integer operator: the rewrite makes the model fail its own type check.
+  const bool float8 = (actDtype == ONNX_DT_FLOAT8E4M3FN ||
+                       actDtype == ONNX_DT_FLOAT8E5M2 ||
+                       wDtype   == ONNX_DT_FLOAT8E4M3FN ||
+                       wDtype   == ONNX_DT_FLOAT8E5M2);
   auto ses = onnxCreateSession(rt, ep, modelBytes,
-                               /*keepConstantsUnfolded=*/true, profile);
+                               /*keepConstantsUnfolded=*/true, profile,
+                               /*keepQdqUnfused=*/v.qdq && float8);
   if (!ses.session)
   {
     g.error = ses.error;
@@ -285,6 +310,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "bits.  Modern matrix hardware usually runs it at the fp16 rate; a "
      "provider that falls well short of its own fp16 row is emulating it, "
      "and one that refuses it outright has no bf16 path at all."},
+    {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
+     "8-bit floats in QDQ form, in the variant that spends its bits on "
+     "precision: four exponent bits and three of mantissa, reaching 448.  "
+     "This is the format quantized inference actually uses when it moves below "
+     "16 bits without going to integers."},
+    {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
+     "The other 8-bit float, trading a mantissa bit for an exponent one: it "
+     "reaches 57344 and rounds more coarsely.  Hardware usually runs both at "
+     "the same rate, so a difference between these two rows is the provider "
+     "choosing different machinery, and the accuracy rows say what each costs."},
   };
   static const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
@@ -330,6 +365,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int     strikes = 0;
     std::string ranAs;      // kernel the provider actually used (quantized only)
     int     actDtype = ONNX_DT_UINT8;
+    int     wgtDtype = ONNX_DT_INT8;
     const char *schemeName = "";
     // A provider can implement the matmul for a datatype and not the reduction
     // that keeps the result on the device: the CUDA EP multiplies bf16 and has
@@ -348,12 +384,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (v.qdq)
     {
       std::string tried;
-      for (const QuantScheme &qs : kQuantSchemes)
+      QuantScheme schemes[2];
+      const size_t nSchemes = schemesFor(v.dtype, schemes);
+      for (size_t si = 0; si < nSchemes; si++)
       {
+        const QuantScheme &qs = schemes[si];
         if (clpeak::cancelRequested())
           break;
         GemmSetup probe = makeSetup(rt, ep, v, kMinDim, /*profile=*/true,
-                                    qs.actDtype);
+                                    qs.actDtype, /*reduceInFloat=*/false,
+                                    qs.wDtype);
         if (!probe.session)
         {
           if (firstErr.empty())
@@ -373,9 +413,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %s executed %s\n",
                     ep.providerKey.c_str(), v.label, qs.name, joined.c_str());
 
-        if (onnxOpsRanIntegerMatMul(ops))
+        if (onnxOpsRanQuantizedMatMul(ops))
         {
           actDtype   = qs.actDtype;
+          wgtDtype   = qs.wDtype;
           schemeName = qs.name;
           // A provider that compiles the whole subgraph names its kernel
           // after itself, and that name carries a hash of the graph -- it
@@ -398,10 +439,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   tried.empty()
                       ? (firstErr.empty() ? "no supported quantization scheme"
                                           : firstErr)
-                      : "provider did not fuse a quantized matmul with either "
-                        "signed or unsigned activations -- it dequantized the "
-                        "operands and multiplied in floating point, so this is "
-                        "not an int8 rate (ran: " + tried + ")",
+                      : std::string("provider did not fuse a quantized matmul "
+                        "-- it dequantized the operands and multiplied in "
+                        "floating point, so this is not a ") + v.label +
+                        " rate (ran: " + tried + ")",
                   o.description);
         continue;
       }
@@ -437,7 +478,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
-                              reduceInFloat);
+                              reduceInFloat, wgtDtype);
       if (!g.session && !v.qdq && !triedFloatReduce)
       {
         triedFloatReduce = true;
@@ -450,7 +491,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     ep.providerKey.c_str(), v.label, nativeErr.c_str());
         destroySetup(rt, g);
         g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
-                      /*reduceInFloat=*/true);
+                      /*reduceInFloat=*/true, wgtDtype);
         if (g.session)
           reduceInFloat = true;
         else
@@ -570,7 +611,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!ranAs.empty())
         o.description += "  The provider ran the multiply as " + ranAs +
                          " with " + schemeName +
-                         ", confirming it really was integer arithmetic.";
+                         ", confirming it really ran in " + v.label + ".";
       if (reduceInFloat)
         o.description += "  This provider has no reduction for the datatype, "
                          "so the product is cast to fp32 before being reduced; "

@@ -34,7 +34,7 @@ backend.
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime once per process and resolves the `OrtApi` table |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2) and `onnx-gemm-int` (tops, int8 QDQ) |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
@@ -182,9 +182,12 @@ at the moment it emits.
 
 ## What the datatype rows cover
 
-`onnx-gemm-fp` measures fp32, fp16 and bf16; `onnx-gemm-int` measures int8 QDQ.
-Every one of them also has an `onnx-numeric-error` row, and they are meant to
-stay in step — a rate without its accuracy is half a number here.
+`onnx-gemm-fp` measures fp32, fp16, bf16 and both float8 formats;
+`onnx-gemm-int` measures int8 QDQ. The split is by **unit**, not by whether a
+row is quantized — float8 is a floating-point format and reports TFLOPS, so it
+belongs beside fp16 even though its graph is the QDQ shape. Every one of them
+also has an `onnx-numeric-error` row, and they are meant to stay in step: a
+rate without its accuracy is half a number here.
 
 bf16 is the row that separates hardware with a real bf16 path from hardware
 emulating one. It is expressible at opset 17, so it needs no version gate; what
@@ -233,9 +236,12 @@ widened, not re-generated — and computed on the CPU EP.
 The fp32 row doubles as a precision-downgrade detector, and on Apple silicon
 it resolves which engine actually ran the work. Reference readings, M1 Pro:
 
+Float8, M1 Pro CPU EP (quantized correctly, multiplied in float): e4m3
+26546 ppm, e5m2 52824 ppm.
+
 | Row | fp32 | fp16 | bf16 | int8 QDQ |
 |-----|------|------|------|----------|
-| CPU EP (M1 Pro) | 0.0 ppm | 207 ppm | (no kernel) | 9463 ppm |
+| CPU EP (M1 Pro) | 0.0 ppm | 207 ppm | (no kernel) | 9443 ppm |
 | CoreML EP | 0.4 ppm | 214 ppm | (unsupported) | (unsupported) |
 | CUDA EP (RTX 5060) | **261 ppm** | 207 ppm | 1659 ppm | 9447 ppm |
 | TensorRT EP (RTX 5060) | 261 ppm | **1185 ppm** | 1659 ppm | 9463 ppm |
@@ -249,6 +255,22 @@ is input rounding and nothing else, the ratio has to be 2³ — and it is, to fo
 figures, across two providers that agree on nothing else. Alongside CPU-EP fp32
 reading exactly 0.0, that is the second place this test proves itself rather
 than merely reporting.
+
+The float8 pair says it a third time. On the M1 Pro CPU EP, which quantizes
+correctly and then multiplies in floating point (the fusion check says so), the
+two formats read 26546 and 52824 ppm — a ratio of **1.990**, and E5M2 has
+exactly one fewer mantissa bit than E4M3FN. Three independent confirmations
+now, on three different pairs of formats, that what this test measures is
+rounding and nothing else.
+
+That same pair carries the finding worth reading twice: **int8 beats both float8
+formats on this data**, 9443 ppm against 26546. That is not a defect in float8,
+it is what the operands are. `fillTensor` draws uniformly over a fixed range,
+which is int8's best case and float8's worst — float8 buys dynamic range, and
+uniform data has none to spend. A model's real activations do, which is why
+float8 wins in practice and loses here. The row descriptions say so, and anyone
+quoting these numbers as "int8 is more accurate than fp8" is quoting the data
+distribution rather than the formats.
 
 It also settles what TensorRT does with each format. Its fp16 error is 1185 and
 its bf16 error is 1659 — the same as the CUDA EP's bf16 — so it accumulates
@@ -326,6 +348,21 @@ matrix coprocessor, not the Neural Engine, an internal routing decision ORT
 never reports. The size curves above agree: the fp32 row behaves like AMX
 (faster the bigger it gets) and the fp16 row like the ANE (a cliff once it
 outgrows on-chip memory).
+
+**A float8 QDQ graph must not be fused into `QLinearMatMul`.** ORT's QDQ
+selector rewrites DequantizeLinear/MatMul/QuantizeLinear into `QLinearMatMul`,
+which is what makes an int8 row an int8 row — but `QLinearMatMul` is an integer
+operator with no float8 type constraint, so on a float8 graph the rewrite turns
+a valid model into one that fails its own type check: *"Type
+'tensor(float8e4m3fn)' of input parameter (A_q) of operator (QLinearMatMul) in
+node (n2) is invalid"*. The message reads like clpeak emitted a broken graph and
+it did not; the graph was correct until ORT changed it. `onnxCreateSession`
+takes `keepQdqUnfused` for exactly this, adding
+`QDQSelectorActionTransformer` to the disabled list, and only float8 graphs ask
+for it — int8 still fuses and still reports 1.50 TOPS on the M1 Pro CPU EP.
+Hardware with real float8 matmul consumes the QDQ nodes itself and never wanted
+the rewrite. This is the general lesson again: check what ORT rewrote the graph
+into before believing the provider lacks the operator.
 
 **A provider can have a matmul for a datatype and no reduction for it.** The
 CUDA EP multiplies bf16 perfectly well — the error row above was measured on it

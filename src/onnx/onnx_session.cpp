@@ -299,7 +299,7 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops)
   return std::string();
 }
 
-bool onnxOpsRanIntegerMatMul(const std::vector<std::string> &ops)
+bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops)
 {
   if (ops.empty())
     return true;          // no profile to judge by; do not reject on silence
@@ -321,7 +321,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded,
-                                    bool profile)
+                                    bool profile,
+                                    bool keepQdqUnfused)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -371,11 +372,15 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // operands are both constants and would otherwise be multiplied once at
   // load time.
   {
-    const char *disabled = keepConstantsUnfolded
-                               ? "MatMulAddFusion;ConstantFolding"
-                               : "MatMulAddFusion";
+    std::string disabled = "MatMulAddFusion";
+    if (keepConstantsUnfolded)
+      disabled += ";ConstantFolding";
+    // See the header: QLinearMatMul cannot carry float8, so letting the QDQ
+    // selector fire on a float8 graph turns a valid model into an invalid one.
+    if (keepQdqUnfused)
+      disabled += ";QDQSelectorActionTransformer";
     st = api->AddSessionConfigEntry(
-        so, "optimization.disable_specified_optimizers", disabled);
+        so, "optimization.disable_specified_optimizers", disabled.c_str());
     if (st)
       CLPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
                   onnxStatusText(rt, st).c_str());

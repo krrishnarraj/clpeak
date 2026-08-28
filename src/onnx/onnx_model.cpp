@@ -2,8 +2,10 @@
 
 #include "onnx_model.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 // ---------------------------------------------------------------------------
 // Minimal protobuf wire-format writer.  Everything a GraphProto needs is
@@ -165,6 +167,12 @@ int onnxOpsetForDtype(int dtype)
   case ONNX_DT_INT64:
   default:
     return 17;
+
+  // Float8 arrived with ONNX 1.14, which is opset 19.  Anything older cannot
+  // name the type at all, so the model will not load rather than run slowly.
+  case ONNX_DT_FLOAT8E4M3FN:
+  case ONNX_DT_FLOAT8E5M2:
+    return 19;
   }
 }
 
@@ -263,29 +271,41 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   return g.build();
 }
 
-std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
-                               const std::string &weightRawInt8,
-                               float aScale, float bScale, float cScale,
-                               int actDtype)
+// Zero point for a quantized element type, as its own one-byte encoding.
+// int8 and the float8 types are symmetric so it is a literal zero; uint8
+// centres on 128.  ONNX requires the float8 zero point to be zero, which 0x00
+// is in both E4M3FN and E5M2.
+static std::string quantZeroPoint(int dtype)
 {
-  const std::string zeroI8(1, '\0');
-  const std::string zp128(1, (char)(unsigned char)128);
-  const std::string &actZp =
-      (actDtype == ONNX_DT_UINT8) ? zp128 : zeroI8;
+  if (dtype == ONNX_DT_UINT8)
+    return std::string(1, (char)(unsigned char)128);
+  return std::string(1, '\0');
+}
+
+std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
+                               const std::string &weightRaw,
+                               float aScale, float bScale, float cScale,
+                               int actDtype, int wDtype)
+{
   auto f32 = [](float v) {
     std::string s(4, '\0');
     std::memcpy(&s[0], &v, 4);
     return s;
   };
+  const std::string actZp = quantZeroPoint(actDtype);
+  const std::string wZp   = quantZeroPoint(wDtype);
 
   OnnxGraph g;
+  // The opset follows whichever operand type is newer: float8 cannot be named
+  // below 19, int8 needs nothing beyond 17.
+  g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
   g.input("A_q", actDtype, {M, K});
 
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
-  g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, weightRawInt8);
+  g.initializer("B_q",     wDtype,   {K, N}, weightRaw);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
-  g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("b_zp",    wDtype,   {}, wZp);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
   g.initializer("c_zp",    actDtype, {}, actZp);
 
@@ -337,16 +357,14 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
-                                       const std::string &bRawInt8,
+                                       const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
-                                       int actDtype)
+                                       int actDtype, int wDtype)
 {
-  const std::string zeroI8(1, '\0');
-  const std::string zp128(1, (char)(unsigned char)128);
   // Signed activations are symmetric (zero point 0); unsigned ones centre on
   // 128.  TensorRT accepts only the former, x86 MLAS only fuses the latter.
-  const bool unsignedAct = (actDtype == ONNX_DT_UINT8);
-  const std::string &actZp = unsignedAct ? zp128 : zeroI8;
+  const std::string actZp = quantZeroPoint(actDtype);
+  const std::string wZp   = quantZeroPoint(wDtype);
   auto f32 = [](float v) {
     std::string s(4, '\0');
     std::memcpy(&s[0], &v, 4);
@@ -366,13 +384,14 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // reads 125 TOPS, 1.9x the fp16 rate, which is what int8 tensor cores are
   // supposed to do.  The cost is one disabled optimizer, see
   // `keepConstantsUnfolded`.
+  g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
   g.input("S", ONNX_DT_FLOAT, {});
   g.initializer("A_q",     actDtype, {M, K}, aRaw);
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
-  g.initializer("B_q",     ONNX_DT_INT8,  {K, N}, bRawInt8);
+  g.initializer("B_q",     wDtype,   {K, N}, bRaw);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
-  g.initializer("b_zp",    ONNX_DT_INT8,  {}, zeroI8);
+  g.initializer("b_zp",    wDtype,   {}, wZp);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
   g.initializer("c_zp",    actDtype, {}, actZp);
 
@@ -695,6 +714,127 @@ float halfToFloat(uint16_t h)
   float f;
   std::memcpy(&f, &x, 4);
   return f;
+}
+
+bool onnxIsQuantElem(int dtype)
+{
+  return dtype == ONNX_DT_INT8 || dtype == ONNX_DT_UINT8 ||
+         dtype == ONNX_DT_FLOAT8E4M3FN || dtype == ONNX_DT_FLOAT8E5M2;
+}
+
+float onnxQuantScaleFor(int dtype)
+{
+  // int8 stores [-127, 127] and needs 1/127 to come back to [-1, 1]; the
+  // float8 types store the value itself, so their scale is one.  Both land in
+  // the same dequantized range on purpose -- the accuracy rows then differ
+  // only by how each format rounded, which is the comparison worth having.
+  switch (dtype)
+  {
+  case ONNX_DT_FLOAT8E4M3FN:
+  case ONNX_DT_FLOAT8E5M2:
+    return 1.0f;
+  default:
+    return 1.0f / 127.0f;
+  }
+}
+
+void onnxStoreQuantElem(void *dst, int64_t index, int dtype, float v)
+{
+  switch (dtype)
+  {
+  case ONNX_DT_UINT8:
+    static_cast<uint8_t *>(dst)[index] = (uint8_t)(v * 127.0f + 128.0f);
+    break;
+  case ONNX_DT_FLOAT8E4M3FN:
+    static_cast<uint8_t *>(dst)[index] = floatToFp8E4M3(v);
+    break;
+  case ONNX_DT_FLOAT8E5M2:
+    static_cast<uint8_t *>(dst)[index] = floatToFp8E5M2(v);
+    break;
+  default:
+    static_cast<int8_t *>(dst)[index] = (int8_t)(v * 127.0f);
+    break;
+  }
+}
+
+// E4M3FN: sign, 4 exponent bits biased by 7, 3 mantissa bits, no infinity.
+// Exponent 15 with mantissa 7 is the only NaN, so the largest finite value is
+// 2^8 * 1.75 = 448.
+uint8_t floatToFp8E4M3(float f)
+{
+  uint32_t b;
+  std::memcpy(&b, &f, 4);
+  const uint32_t sign = (b >> 31) & 1u;
+  const uint32_t rawE = (b >> 23) & 0xFFu;
+  const uint32_t man  = b & 0x7FFFFFu;
+
+  if (rawE == 0xFFu)                       // inf or NaN: E4M3FN has only NaN
+    return (uint8_t)((sign << 7) | 0x7Fu);
+
+  int32_t  e = (int32_t)rawE - 127 + 7;
+  uint32_t m;
+  if (e >= 1)
+  {
+    m = man >> 20;                         // keep 3 mantissa bits
+    const uint32_t rem = man & 0xFFFFFu;
+    if (rem > 0x80000u || (rem == 0x80000u && (m & 1u)))
+    {
+      if (++m == 8u) { m = 0; e++; }
+    }
+  }
+  else
+  {
+    // Subnormal: shift the implicit one down into the stored mantissa.
+    const int32_t shift = 1 - e;
+    if (shift > 24)
+      return (uint8_t)(sign << 7);         // underflows to a signed zero
+    const uint32_t full  = (1u << 23) | man;
+    const uint32_t drop  = (uint32_t)(20 + shift);
+    m = (drop >= 32) ? 0u : (full >> drop);
+    const uint32_t rem   = (drop >= 32) ? full : (full & ((1u << drop) - 1u));
+    const uint32_t half  = (drop >= 32) ? 0u : (1u << (drop - 1));
+    if (rem > half || (rem == half && (m & 1u)))
+      m++;
+    e = 0;
+    if (m == 8u) { m = 0; e = 1; }
+  }
+
+  if (e > 15 || (e == 15 && m > 6))        // saturate rather than signal
+    return (uint8_t)((sign << 7) | 0x7Eu); // 448, the largest finite
+  return (uint8_t)((sign << 7) | ((uint32_t)e << 3) | m);
+}
+
+float fp8E4M3ToFloat(uint8_t v)
+{
+  const uint32_t sign = (v >> 7) & 1u;
+  const uint32_t e    = (v >> 3) & 0xFu;
+  const uint32_t m    = v & 0x7u;
+  float mag;
+  if (e == 0)
+    mag = std::ldexp((float)m, -9);        // 2^-6 * m/8
+  else if (e == 15u && m == 7u)
+    mag = std::numeric_limits<float>::quiet_NaN();
+  else
+    mag = std::ldexp((float)(8u + m), (int)e - 10);   // 2^(e-7) * (8+m)/8
+  return sign ? -mag : mag;
+}
+
+// E5M2 has fp16's exponent field exactly, so it is fp16 with eight mantissa
+// bits rounded away -- no separate exponent handling needed.
+uint8_t floatToFp8E5M2(float f)
+{
+  const uint16_t h  = floatToHalf(f);
+  const uint16_t lo = h & 0xFFu;
+  uint8_t        hi = (uint8_t)(h >> 8);
+  const bool     isNaNOrInf = ((h & 0x7C00u) == 0x7C00u);
+  if (!isNaNOrInf && (lo > 0x80u || (lo == 0x80u && (hi & 1u))))
+    hi++;                                  // may carry into the exponent, correctly
+  return hi;
+}
+
+float fp8E5M2ToFloat(uint8_t v)
+{
+  return halfToFloat((uint16_t)((uint16_t)v << 8));
 }
 
 float bf16ToFloat(uint16_t h)
