@@ -404,9 +404,34 @@ more: a provider without a fused kernel dequantizes the entire weight matrix
 into floats on **every run**, which is a real measurement of a shape nobody
 deploys. `MatMulNBits` joins the recognised kernel names.
 
-**Watch for an inserted `Cast`.** The M1 Pro CPU EP fuses to `MatMulNBits` and
-also casts the fp16 activations to fp32 first, because that is the width its
-kernel wants — a full pass over the activations on every run, inside the
+Measured, RTX 5060 and M1 Pro, ONNX Runtime 1.29/1.30:
+
+| provider | fp16 | `int4_weight` | fused as |
+|---|---|---|---|
+| TensorRT | 66.4 | **65.9** | `TRTKernel_...` |
+| CUDA EP | 40.0 | **39.7** | `MatMulNBits` |
+| CPU EP (x86) | 0.03 | **1.25** | `MatMulNBits` + `Cast` |
+| CPU EP (M1 Pro) | 0.09 | **0.52** | `MatMulNBits` + `Cast` |
+
+**On hardware with a real fp16 path the two rows agree to within 1%, and that
+is the finding.** Unpacking four-bit weights on the way into a 16-bit multiply
+costs nothing measurable on either NVIDIA provider — but it also gains nothing
+here, because a square GEMM at this size is thoroughly compute-bound: 16384
+cubed is 8.8 TFLOP against 128 MB of weights, so the 384 MB of traffic that
+four bits saves is lost in the noise. **The row proves the unpack is free; it
+does not and cannot show what four-bit weights are for.** That lives in a
+decode-shaped workload, where one token reads every weight and nothing else
+happens — `onnx-tensor-bw` and `onnx-block-decode` are where a four-bit model
+would actually pull ahead, and neither measures a narrow weight type yet.
+
+The CPU providers invert it. Their fp16 matmul has no optimised kernel at all,
+so `MatMulNBits` beats it by 42x on x86 and 5.7x on the M1 — and beats plain
+fp32 as well. A narrow-weight row above its own fp16 row is not a paradox, it
+is a provider that tuned one path and not the other.
+
+**Watch for an inserted `Cast`.** Both CPU providers fuse to `MatMulNBits` and
+also cast the fp16 activations to fp32 first, because that is the width their
+kernel wants — neither NVIDIA provider does — a full pass over the activations on every run, inside the
 figure. The row says so when it happens, which is the same discipline the
 throughput models already needed: adding anything to a half-precision graph
 risks a silent conversion, so read the executed kernels before believing a
