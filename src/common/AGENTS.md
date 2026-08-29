@@ -46,6 +46,31 @@ test and emits a `Note` naming both tags; `TestScope::end()` only emits
 flushes rather than clears. Still prefer calling `end()` explicitly (see
 `runCacheBandwidth`) — it is the intent-revealing form and avoids the note.
 
+## The global-bandwidth working set must outgrow the cache
+
+Every backend warms one buffer and then re-reads that same buffer for the whole
+timed phase, so anything that stays cache-resident is counted as memory traffic
+it never was. `benchmark_config_t::forDevice()` owns the sizing for all of them;
+the reasoning for each constant is at the constant.
+
+A backend passes what its API knows, and nothing more:
+
+| passes | why |
+|---|---|
+| CUDA, oneAPI, OpenCL | cache size only — their query returns the true last level |
+| ROCm | cache size **and** board memory — HIP's `l2CacheSize` excludes the MALL / Infinity Cache |
+| Vulkan | device-local heap only, and only for a discrete GPU — Vulkan has no cache query at all |
+| Metal, ONNX | neither — unified memory, so the memory proxy would be system RAM |
+
+Never pass memory that is not the device's own (an iGPU heap, a unified-memory
+part): the proxy assumes the last level is a fixed fraction of board memory, and
+that ratio only holds for discrete parts.
+
+Every backend prints the working set it settled on under `--verbose`. That line
+is the first thing to look at when a bandwidth number comes in above what the
+memory can physically do — see `src/cpu/AGENTS.md` for the same rule applied to
+the CPU's own STREAM arrays, which are sized separately.
+
 ## When You Change This Directory
 
 - If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.

@@ -68,7 +68,14 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(spec);
 
   const int maxT = pool->maxThreads();
-  const bool appleCpu = info.vendor == "Apple" || info.name.rfind("Apple", 0) == 0;
+  // Is the L2 a per-core private cache, or shared by a cluster?  Asked of the
+  // topology, not of the vendor string: Apple is not the only one -- Qualcomm's
+  // Oryon shares 12 MB across each cluster of 4, and Intel's E-core modules
+  // share one L2 as well.  If every core had its own, the aggregate would be
+  // per-core x cores; anything less means cores are sharing, and the MT row has
+  // to split the working set or it overflows the level it names.
+  const int cores = info.physicalCores > 0 ? info.physicalCores : maxT;
+  const bool l2Shared = info.l2TotalBytes < info.l2CacheBytes * (uint64_t)cores;
   const uint64_t cap = 32ull * 1024 * 1024; // bound the per-thread allocation
   // Per-thread buffer must hold the largest single-thread working set we stream.
   // That is usually the L3 set, but on Apple Silicon the per-cluster L2 (e.g.
@@ -90,26 +97,45 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   std::vector<uint64_t> sink((size_t)maxT, 0);
 
   // Notes ride the table so a level's name and explanation stay adjacent.
+  // `bytes` is the ST working set: half of ONE instance of the level, which is
+  // all a single core can reach.  `totalBytes` is what the MT row splits across
+  // threads -- the AGGREGATE of the level, which on a multi-instance cache is
+  // not the same number.  Dividing the per-instance size by every thread in the
+  // machine shrinks the slice by the instance count twice over: on a 16C/32T
+  // Threadripper (4 CCX x 16 MB L3) it left 256 KB per thread, inside the
+  // 512 KB per-core L2, and "L3 MT" came back at 1758 GB/s against "L2 MT" at
+  // 1744 -- two different levels reporting the same bandwidth, which is the
+  // tell.  0 means the level is absent and the row skips.
+  // `mtFloor` is twice one instance of the level BELOW, and it is what keeps a
+  // split slice from falling out of the level it names: divide too far and the
+  // row quietly re-measures the faster cache underneath.  It also covers the
+  // case where the aggregate could not be detected and fell back to the
+  // per-instance size, which would otherwise divide a single instance by every
+  // thread in the machine.
   struct Level
   {
     const char *name;
     uint64_t bytes;
+    uint64_t totalBytes;
+    uint64_t mtFloor;
     bool sharedForMt;
     const char *stNote;
     const char *mtNote;
   };
   const Level levels[] = {
-      {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false,
+      {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), info.l1dTotalBytes,
+       0, false,
        "One thread reading from the small cache inside its own core.",
        "Every core reading from its own L1 at the same time."},
-      {"L2", std::max<uint64_t>(info.l2CacheBytes / 2, 16384), appleCpu,
+      {"L2", std::max<uint64_t>(info.l2CacheBytes / 2, 16384), info.l2TotalBytes,
+       info.l1dCacheBytes * 2, l2Shared,
        "One thread reading from the mid-level cache, the next step out.",
        "Every core reading from L2 at once; where L2 is shared, the data is "
        "split between them so it still fits."},
       {"L3", info.l3CacheBytes
                  ? std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes)
                  : 0, // 0 = this CPU has no L3; the loop skips the row
-       true,
+       info.l3TotalBytes, info.l2CacheBytes * 2, true,
        "One thread reading from the large cache shared by all cores.",
        "Every core reading from that shared cache at once, each taking a slice "
        "of it."},
@@ -138,9 +164,10 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     if (M1 < 64)
       M1 = 64;
 
-    uint64_t mtBytes = lvl.sharedForMt
-                           ? std::max<uint64_t>(lvl.bytes / (uint64_t)maxT, 4096)
-                           : lvl.bytes;
+    uint64_t mtBytes =
+        lvl.sharedForMt
+            ? std::max<uint64_t>({lvl.totalBytes / 2 / (uint64_t)maxT, lvl.mtFloor, 4096})
+            : lvl.bytes;
     size_t MN = (size_t)(mtBytes / sizeof(float));
     if (MN > allocFloats)
       MN = allocFloats;

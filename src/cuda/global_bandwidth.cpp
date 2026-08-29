@@ -16,6 +16,15 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (numBlocks == 0)
     numBlocks = 1;
 
+  // The one number that decides whether this test measured memory or cache:
+  // the timed phase re-reads the same buffer, so a working set that fits behind
+  // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
+  // globalBWMaxSize to clear it; print both so an implausible reading can be
+  // checked against them without a rebuild.
+  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
+              (unsigned long long)(numItems * sizeof(float) >> 20),
+              (unsigned long long)(dev.info.l2CacheSize >> 20));
+
   auto test = currentDeviceScope->beginTest(
     {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
      Category::Unknown,

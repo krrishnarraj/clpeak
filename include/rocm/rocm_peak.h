@@ -36,6 +36,10 @@ struct rocm_device_info_t {
   // front of device memory (the MALL / Infinity Cache is not included).  0 when
   // the driver does not report one.
   uint64_t l2CacheSize = 0;
+  // hipDeviceProp_t::integrated -- an APU whose "device memory" is system RAM.
+  // The global-bandwidth working set must not be sized off it (see
+  // benchmark_config_t::forDevice).
+  bool integrated = false;
   int warpSize = 0;
 
   bool fp16Supported = false;

@@ -54,6 +54,7 @@ bool RocmDevice::init(int devIndex)
   info.totalGlobalMem = props.totalGlobalMem;
   info.clockRateKHz = props.clockRate;
   info.l2CacheSize = props.l2CacheSize > 0 ? (uint64_t)props.l2CacheSize : 0;
+  info.integrated = props.integrated != 0;
   info.warpSize = props.warpSize;
   info.deviceType = DeviceType::Gpu;
 

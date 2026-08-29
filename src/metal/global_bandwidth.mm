@@ -26,6 +26,15 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (numItems > cfg.globalBWMaxSize / sizeof(float))
         numItems = (cfg.globalBWMaxSize / sizeof(float) / align) * align;
 
+    // The one number that decides whether this test measured memory or cache:
+    // the timed phase re-reads the same buffer, so a working set that fits
+    // behind the last-level cache reports the cache.  Metal exposes no cache
+    // size and the SLC is memory-side, so this stays on the shared default --
+    // print the working set so an implausible reading can be checked without
+    // a rebuild.
+    CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB (Metal reports no cache size)\n",
+                (unsigned long long)(numItems * sizeof(float) >> 20));
+
     id<MTLBuffer> inBuf  = [dev.impl->device newBufferWithLength:numItems * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:numItems * sizeof(float)

@@ -187,6 +187,16 @@ changing a kernel.
   margin covers both; `pickStreamFloats` (`bandwidth.cpp`) and the DRAM
   pointer-chase (`latency.cpp`) both use it. Single-threaded init puts every
   page on one NUMA node and collapses the number.
+- **An MT cache row splits the AGGREGATE of its level, and never below the
+  level under it.** Two ways it degenerates into re-measuring the faster cache.
+  Dividing the *per-instance* size by every thread shrinks the slice by the
+  instance count twice over — on a 4-CCX Threadripper the L3 MT slice came out
+  at 256 KB per thread, inside the 512 KB per-core L2, and "L3 MT" read 1758
+  GB/s against "L2 MT" at 1744. Two levels reporting the same bandwidth is the
+  tell. And whether a level is shared at all is a question for the topology
+  (`l2Total < l2PerInstance × cores`), not for the vendor string: Apple is not
+  the only one with a cluster L2 — Qualcomm's Oryon and Intel's E-core modules
+  share theirs too. `mtFloor` in `bandwidth.cpp` is the backstop for both.
 - **No L3 is a real answer — never fabricate one.** `detectCpuInfo` leaves
   `l3CacheBytes` at 0 when the OS reports no L3, and the L3 cache-bandwidth and
   latency rows skip as Unsupported rather than measure a made-up working set

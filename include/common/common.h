@@ -376,10 +376,17 @@ struct benchmark_config_t {
   // `lastLevelCacheBytes` is the device's last-level cache -- OpenCL's
   // CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, CUDA/HIP's L2 size, SYCL's
   // global_mem_cache_size.  Pass 0 when the API has no such query (Vulkan,
-  // Metal) or the driver leaves it unset; it can only grow globalBWMaxSize,
-  // never shrink it.  See forDevice() for why the working set has to outgrow it.
+  // Metal) or the driver leaves it unset.
+  //
+  // `dedicatedMemBytes` is a stand-in for the cache levels no API reports, and
+  // is used only when it asks for a larger working set than the reported cache
+  // does.  Pass it ONLY for memory that is the device's own: on an iGPU or a
+  // unified-memory part it is system RAM and the ratio forDevice() applies is
+  // meaningless.  Both can only grow globalBWMaxSize, never shrink it.  See
+  // forDevice() for why the working set has to outgrow the cache at all.
   static benchmark_config_t forDevice(DeviceType type,
-                                      uint64_t lastLevelCacheBytes = 0);
+                                      uint64_t lastLevelCacheBytes = 0,
+                                      uint64_t dedicatedMemBytes = 0);
 };
 
 // ---------------------------------------------------------------------------

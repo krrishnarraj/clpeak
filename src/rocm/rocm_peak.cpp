@@ -149,7 +149,11 @@ int RocmPeak::runAll()
       continue;
     }
 
-    benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Gpu, dev.info.l2CacheSize);
+    // HIP's l2CacheSize excludes the MALL / Infinity Cache, so board memory is
+    // passed as the stand-in for it -- see benchmark_config_t::forDevice.
+    benchmark_config_t cfg = benchmark_config_t::forDevice(
+        DeviceType::Gpu, dev.info.l2CacheSize,
+        dev.info.integrated ? 0 : dev.info.totalGlobalMem);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;

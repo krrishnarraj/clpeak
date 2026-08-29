@@ -449,8 +449,14 @@ int vkPeak::runAll()
     }
 #endif
 
+    // Vulkan has no cache-size query at all, so the device-local heap is the
+    // only handle on the cache the working set has to outgrow -- and only on a
+    // discrete part, where that heap is really the board's own memory.  See
+    // benchmark_config_t::forDevice.
     benchmark_config_t cfg = benchmark_config_t::forDevice(
-            (dev.info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? DeviceType::Cpu : DeviceType::Gpu);
+            (dev.info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? DeviceType::Cpu : DeviceType::Gpu,
+            /*lastLevelCacheBytes=*/0,
+            (dev.info.vkDeviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ? dev.info.heapSize : 0);
     cfg.targetTimeUs = targetTimeUs;
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;

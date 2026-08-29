@@ -1,4 +1,5 @@
 #include <common/common.h>
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 
@@ -27,8 +28,23 @@ void resetCancel()     { g_cancelRequested.store(false, std::memory_order_relaxe
 static const uint64_t GLOBAL_BW_CACHE_ESCAPE     = 8;
 static const uint64_t GLOBAL_BW_MAX_WORKING_SET  = 4ULL << 30;
 
+// Fraction of a discrete device's own memory to use when the reported cache
+// size is missing or known to be incomplete.  Two APIs need it.  AMD's MALL /
+// Infinity Cache sits in front of memory but is excluded from what HIP and
+// OpenCL report as the cache -- 96 MB on an RX 7900 XTX, 256 MB on MI300X --
+// so the reported figure escapes an L2 that was never the last level, and the
+// working set falls back to the 512 MB floor: twice the MALL on MI300X, not
+// eight times it.  Vulkan has no cache query at all and would sit on that same
+// floor everywhere.  Board memory is the one number both APIs do report, and
+// across current discrete parts the last level runs about 1/256 of it, so
+// memory/32 reproduces the 8x escape -- on an RTX 5090 (128 MB L2, 32 GB) the
+// two rules agree on 1 GB exactly.  It is a proxy, not a measurement: it only
+// ever raises the working set, and the ceiling below still caps it.
+static const uint64_t GLOBAL_BW_MEM_FRACTION     = 32;
+
 benchmark_config_t benchmark_config_t::forDevice(DeviceType type,
-                                                 uint64_t lastLevelCacheBytes)
+                                                 uint64_t lastLevelCacheBytes,
+                                                 uint64_t dedicatedMemBytes)
 {
     benchmark_config_t cfg;
     if (type == DeviceType::Cpu) {
@@ -48,8 +64,9 @@ benchmark_config_t benchmark_config_t::forDevice(DeviceType type,
         cfg.transferBWMaxSize = 1 << 29;
     }
 
-    if (lastLevelCacheBytes) {
-        uint64_t escape = lastLevelCacheBytes * GLOBAL_BW_CACHE_ESCAPE;
+    uint64_t escape = std::max(lastLevelCacheBytes * GLOBAL_BW_CACHE_ESCAPE,
+                               dedicatedMemBytes / GLOBAL_BW_MEM_FRACTION);
+    if (escape) {
         if (escape > GLOBAL_BW_MAX_WORKING_SET)
             escape = GLOBAL_BW_MAX_WORKING_SET;
         if (escape > cfg.globalBWMaxSize)
