@@ -1,6 +1,6 @@
 import 'package:clpeak/src/ffi/clpeak_events.dart';
 import 'package:clpeak/src/model/catalog.dart';
-import 'package:clpeak/src/model/result_entry.dart';
+import 'package:clpeak/src/model/result_model.dart';
 import 'package:clpeak/src/model/run_config.dart';
 import 'package:clpeak/src/model/run_document.dart';
 import 'package:clpeak/src/model/run_summary.dart';
@@ -133,44 +133,62 @@ void main() {
   });
 
   group('event decoding', () {
-    test('metric event carries a full entry', () {
+    Map<String, dynamic> testHeader({
+      String test = 'single_precision_compute',
+      String title = 'Single-precision compute',
+      String category = 'fp_compute',
+      String shape = 'homogeneous',
+      String unit = 'GFLOPS',
+      String quantity = 'flops',
+      double scale = 1e9,
+      String direction = 'higher_is_better',
+      String variant = '',
+      String axis = '',
+      String desc = '',
+    }) =>
+        {
+          'test': test,
+          'title': title,
+          'variant': variant,
+          'axis': axis,
+          'category': category,
+          'shape': shape,
+          'direction': direction,
+          'quantity': quantity,
+          'unit': unit,
+          'scale': scale,
+          'desc': desc,
+        };
+
+    test('test_begin carries the resolved header', () {
       final e = ClpeakEvent.fromJson({
-        't': 'metric',
+        't': 'test_begin',
         'backend': 'CPU',
         'platform': 'CPU',
         'device': 'M1',
         'driver': '',
-        'category': 'fp_compute',
-        'test': 'single_precision_compute',
-        'display': 'Single-precision compute',
-        'metric': 'float MT',
-        'unit': 'gflops',
-        'value': 4480.5,
-        'status': 'ok',
-        'reason': '',
-        'sub': false,
+        ...testHeader(
+          test: 'memory_latency',
+          title: 'Memory latency (pointer-chase)',
+          category: 'latency',
+          shape: 'heterogeneous',
+          unit: 'ns',
+          quantity: 'seconds',
+          scale: 1e-9,
+          direction: 'lower_is_better',
+          axis: 'cache level',
+          desc: 'How long the core waits for one memory read.',
+        ),
+        'reopened': false,
       });
-      expect(e, isA<MetricEvent>());
-      final m = (e as MetricEvent).entry;
-      expect(m.value, 4480.5);
-      expect(m.benchCategory, BenchCategory.fpCompute);
-      expect(m.status, ResultStatus.ok);
-      expect(m.key, 'CPU/CPU/M1/fp_compute/single_precision_compute/float MT');
-    });
-
-    test('test_begin carries what the test measures', () {
-      final e = ClpeakEvent.fromJson({
-        't': 'test_begin',
-        'backend': 'CPU',
-        'device': 'M1',
-        'test': 'memory_latency',
-        'display': 'Memory latency (pointer-chase)',
-        'unit': 'ns',
-        'category': 'latency',
-        'desc': 'How long the core waits for one memory read.',
-      });
-      final b = e as TestBeginEvent;
-      expect(b.description, 'How long the core waits for one memory read.');
+      final h = (e as TestBeginEvent).header;
+      expect(h.id, 'memory_latency');
+      expect(h.title, 'Memory latency (pointer-chase)');
+      expect(h.shape, TestShape.heterogeneous);
+      expect(h.direction, Direction.lowerIsBetter);
+      expect(h.axis, 'cache level');
+      expect(h.units.quantity, Quantity.seconds);
+      expect(h.description, 'How long the core waits for one memory read.');
     });
 
     test('an undocumented test decodes with empty documentation', () {
@@ -178,36 +196,74 @@ void main() {
         't': 'test_begin',
         'backend': 'CPU',
         'device': 'M1',
-        'test': 'atomics',
-        'display': 'Atomic fetch-add latency',
-        'unit': 'ns',
-        'category': 'latency',
+        ...testHeader(test: 'atomics', title: 'Atomic fetch-add latency'),
       });
-      expect((e as TestBeginEvent).description, isEmpty);
+      expect((e as TestBeginEvent).header.description, isEmpty);
     });
 
-    test('metric event carries the test and reading notes', () {
+    test('metric event carries the reading and its note', () {
       final e = ClpeakEvent.fromJson({
         't': 'metric',
         'backend': 'CPU',
         'platform': 'CPU',
         'device': 'M1',
         'driver': '',
-        'category': 'latency',
         'test': 'memory_latency',
-        'display': 'Memory latency (pointer-chase)',
+        'variant': '',
         'metric': 'DRAM x8',
-        'unit': 'ns',
+        'label': '',
         'value': 16.15,
-        'status': 'ok',
-        'reason': '',
-        'sub': false,
-        'desc': 'How long the core waits for one memory read.',
         'minfo': 'Eight independent chases at once.',
       });
-      final m = (e as MetricEvent).entry;
-      expect(m.description, 'How long the core waits for one memory read.');
-      expect(m.metricDescription, 'Eight independent chases at once.');
+      final m = e as MetricEvent;
+      expect(m.testKey, 'memory_latency');
+      expect(m.metric.value, 16.15);
+      expect(m.metric.status, ResultStatus.ok);
+      expect(m.metric.description, 'Eight independent chases at once.');
+    });
+
+    test('a reading with a variant keys off id@variant', () {
+      final e = ClpeakEvent.fromJson({
+        't': 'metric',
+        'backend': 'CPU',
+        'test': 'single_precision_compute',
+        'variant': 'AVX2+FMA',
+        'metric': 'float MT',
+        'value': 900.0,
+      });
+      expect((e as MetricEvent).testKey, 'single_precision_compute@AVX2+FMA');
+    });
+
+    test('a reading that overrides its unit keeps its own', () {
+      final e = ClpeakEvent.fromJson({
+        't': 'metric',
+        'backend': 'CUDA',
+        'test': 'cublas_gemm',
+        'metric': 'int8',
+        'value': 74.2,
+        'unit': 'TOPS',
+        'quantity': 'ops',
+        'scale': 1e12,
+      });
+      final m = (e as MetricEvent).metric;
+      expect(m.units, isNotNull);
+      expect(m.units!.symbol, 'TOPS');
+      expect(m.units!.quantity, Quantity.ops);
+    });
+
+    test('a failed reading carries status and reason, not a value', () {
+      final e = ClpeakEvent.fromJson({
+        't': 'metric',
+        'backend': 'Metal',
+        'test': 'mps-gemm-fp',
+        'metric': 'bf16',
+        'status': 'unsupported',
+        'reason': 'requires M3+',
+      });
+      final m = (e as MetricEvent).metric;
+      expect(m.status, ResultStatus.unsupported);
+      expect(m.isOk, isFalse);
+      expect(m.reason, 'requires M3+');
     });
 
     test('done event', () {
@@ -217,320 +273,350 @@ void main() {
       expect((e as DoneEvent).cancelled, isTrue);
     });
 
-    test('test_skipped maps to an unsupported entry', () {
+    test('test_skipped names every reading it stands in for', () {
       final e = ClpeakEvent.fromJson({
         't': 'test_skipped',
         'backend': 'Metal',
         'platform': 'Metal',
         'device': 'M1',
         'driver': 'macOS',
-        'test': 'simdgroup_matrix_bf16',
-        'display': 'Simdgroup matrix bf16',
-        'unit': 'tflops',
-        'category': 'fp_compute',
+        ...testHeader(
+            test: 'coopmat',
+            title: 'Cooperative matrix',
+            unit: 'TFLOPS',
+            scale: 1e12),
+        'metrics': ['fp16', 'bf16'],
         'status': 'unsupported',
         'reason': 'requires M3+',
       });
-      final entry = (e as TestSkippedEvent).toEntry();
-      expect(entry.status, ResultStatus.unsupported);
-      expect(entry.benchCategory, BenchCategory.fpCompute);
-      expect(entry.reason, 'requires M3+');
+      final s = e as TestSkippedEvent;
+      final metrics = s.toMetrics();
+      expect(metrics.map((m) => m.id), ['fp16', 'bf16']);
+      expect(metrics.every((m) => m.status == ResultStatus.unsupported), isTrue);
+      expect(metrics.first.reason, 'requires M3+');
     });
   });
 
   group('RunDocument', () {
-    ResultEntry entry({
-      String backend = 'Metal',
-      String device = 'M1',
-      String category = 'fp_compute',
-      String test = 'single_precision_compute',
-      String metric = 'float',
-      String unit = 'gflops',
-      double value = 100,
-      ResultStatus status = ResultStatus.ok,
+    TestHeader header({
+      String id = 'single_precision_compute',
+      String title = 'Single-precision compute',
+      BenchCategory category = BenchCategory.fpCompute,
+      TestShape shape = TestShape.homogeneous,
+      Direction direction = Direction.higherIsBetter,
+      String variant = '',
+      String axis = '',
       String description = '',
-      String metricDescription = '',
+      Units units = const Units(
+          symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9),
     }) =>
-        ResultEntry(
-          backend: backend,
-          platform: backend,
-          device: device,
-          driver: 'd',
+        TestHeader(
+          id: id,
+          title: title,
           category: category,
-          test: test,
-          display: test,
-          metric: metric,
-          unit: unit,
-          status: status,
-          value: value,
-          reason: status == ResultStatus.ok ? '' : 'nope',
+          shape: shape,
+          direction: direction,
+          variant: variant,
+          axis: axis,
           description: description,
-          metricDescription: metricDescription,
+          units: units,
         );
+
+    const nsUnits =
+        Units(symbol: 'ns', quantity: Quantity.seconds, scale: 1e-9);
 
     test('groups by run, category, test', () {
       final doc = RunDocument();
-      doc.addEntry(entry(metric: 'float', value: 100));
-      doc.addEntry(entry(metric: 'float2', value: 120));
-      doc.addEntry(entry(
-          category: 'bandwidth',
-          test: 'global_memory_bandwidth',
-          unit: 'gbps',
-          metric: 'float',
-          value: 200));
-      doc.addEntry(entry(backend: 'CPU', device: 'M1', value: 50));
+      final metal = doc.runFor('Metal', 'Metal', 'M1', 'd');
+      metal.openTest(header())
+        ..metrics.add(const MetricResult(id: 'float', value: 100))
+        ..metrics.add(const MetricResult(id: 'float2', value: 120));
+      metal
+          .openTest(header(
+              id: 'global_memory_bandwidth',
+              title: 'Global memory bandwidth',
+              category: BenchCategory.bandwidth,
+              units: const Units(
+                  symbol: 'GB/s',
+                  quantity: Quantity.bytesPerSecond,
+                  scale: 1e9)))
+          .metrics
+          .add(const MetricResult(id: 'float', value: 200));
+      doc
+          .runFor('CPU', 'CPU', 'M1', 'd')
+          .openTest(header())
+          .metrics
+          .add(const MetricResult(id: 'float', value: 50));
 
       expect(doc.runs, hasLength(2));
-      final metal = doc.runs.first;
-      expect(metal.categories, hasLength(2));
-      final fp = metal.categories.first;
+      final run = doc.runs.first;
+      expect(run.categories, hasLength(2));
+      final fp = run.categories.first;
       expect(fp.category, BenchCategory.fpCompute);
       expect(fp.tests.single.metrics, hasLength(2));
       expect(fp.tests.single.peakValue, 120);
     });
 
-    test('documentation is gathered off the rows', () {
+    test('a reopened test appends rather than duplicating', () {
       final doc = RunDocument();
-      doc.addEntry(entry(
-          category: 'latency',
-          test: 'memory_latency',
-          unit: 'ns',
-          metric: 'L1',
-          value: 1.26,
-          description: 'What the wait for one memory read costs.',
-          metricDescription: 'The small cache inside the core.'));
-      // A later row repeats the test description and brings its own note.
-      doc.addEntry(entry(
-          category: 'latency',
-          test: 'memory_latency',
-          unit: 'ns',
-          metric: 'DRAM x8',
-          value: 16.15,
-          description: 'What the wait for one memory read costs.',
-          metricDescription: 'Eight independent chases at once.'));
-      // Undocumented variants contribute nothing.
-      doc.addEntry(entry(
-          category: 'latency',
-          test: 'memory_latency',
-          unit: 'ns',
-          metric: 'TLB miss',
-          value: 16.28,
-          description: 'What the wait for one memory read costs.'));
+      final run = doc.runFor('CUDA', 'CUDA', 'RTX', 'd');
+      run
+          .openTest(header(id: 'cublas_gemm', title: 'cuBLASLt GEMM peak'))
+          .metrics
+          .add(const MetricResult(id: 'fp32', value: 14.87));
+      // The int phase reopens the same test with the same header.
+      run
+          .openTest(header(id: 'cublas_gemm', title: 'cuBLASLt GEMM peak'))
+          .metrics
+          .add(const MetricResult(id: 'int8', value: 74.2));
 
-      final t = doc.runs.single.categories.single.tests.single;
+      expect(run.categories.single.tests, hasLength(1));
+      expect(run.categories.single.tests.single.metrics, hasLength(2));
+    });
+
+    test('variants of one test are separate rows', () {
+      final doc = RunDocument();
+      final run = doc.runFor('CPU', 'CPU', 'M1', 'd');
+      run.openTest(header(variant: 'SSE2'));
+      run.openTest(header(variant: 'AVX2+FMA'));
+      expect(run.categories.single.tests, hasLength(2));
+      expect(run.categories.single.tests.map((t) => t.key), [
+        'single_precision_compute@SSE2',
+        'single_precision_compute@AVX2+FMA',
+      ]);
+      expect(run.categories.single.tests.first.displayTitle,
+          contains('SSE2'));
+    });
+
+    test('a heterogeneous test never collapses', () {
+      final doc = RunDocument();
+      final t = doc.runFor('CUDA', 'CUDA', 'RTX', 'd').openTest(header(
+          id: 'cublas_gemm',
+          title: 'cuBLASLt GEMM peak',
+          shape: TestShape.heterogeneous,
+          axis: 'data type'));
+      t.metrics.addAll(const [
+        MetricResult(id: 'fp32', value: 14.87),
+        MetricResult(id: 'nvf4_e2m1', value: 300.43),
+      ]);
+      expect(t.collapsible, isFalse);
+    });
+
+    test('a single-reading test collapses whatever its shape', () {
+      final doc = RunDocument();
+      final t = doc.runFor('Metal', 'Metal', 'M1', 'd').openTest(header(
+          id: 'mps-attention',
+          title: 'MPS attention',
+          shape: TestShape.heterogeneous));
+      t.metrics.add(const MetricResult(id: 'fp16', value: 2.9));
+      expect(t.collapsible, isTrue);
+      expect(t.peakValue, 2.9);
+    });
+
+    test('documentation rides the header and the readings', () {
+      final doc = RunDocument();
+      final t = doc.runFor('CPU', 'CPU', 'M1', 'd').openTest(header(
+            id: 'memory_latency',
+            title: 'Memory latency (pointer-chase)',
+            category: BenchCategory.latency,
+            shape: TestShape.heterogeneous,
+            direction: Direction.lowerIsBetter,
+            units: nsUnits,
+            description: 'What the wait for one memory read costs.',
+          ));
+      t.metrics.addAll(const [
+        MetricResult(
+            id: 'L1', value: 1.26, description: 'The small cache inside the core.'),
+        MetricResult(
+            id: 'DRAM x8',
+            value: 16.15,
+            description: 'Eight independent chases at once.'),
+        MetricResult(id: 'TLB miss', value: 16.28),
+      ]);
+
       expect(t.hasInfo, isTrue);
-      expect(t.description, 'What the wait for one memory read costs.');
-      // Each reading keeps its own note, on its own row.
       expect(t.hasMetricNotes, isTrue);
       expect(
           t.metrics
-              .where((m) => m.metricDescription.isNotEmpty)
-              .map((m) => m.metric),
+              .where((m) => m.description.isNotEmpty)
+              .map((m) => m.id),
           ['L1', 'DRAM x8']);
     });
 
     test('an undocumented test offers no info', () {
       final doc = RunDocument();
-      doc.addEntry(entry());
-      final t = doc.runs.single.categories.single.tests.single;
+      final t = doc.runFor('Metal', 'Metal', 'M1', 'd').openTest(header());
+      t.metrics.add(const MetricResult(id: 'float', value: 100));
       expect(t.hasInfo, isFalse);
-      expect(t.description, isEmpty);
       expect(t.hasMetricNotes, isFalse);
     });
 
-    test('a test can document its readings but not itself', () {
+    test('lower-is-better picks the minimum, and fills its bar', () {
       final doc = RunDocument();
-      doc.addEntry(entry(metric: 'float ST', metricDescription: 'One core.'));
-      final t = doc.runs.single.categories.single.tests.single;
-      // No test-level glyph, but the reading still has its own.
-      expect(t.hasInfo, isFalse);
-      expect(t.hasMetricNotes, isTrue);
-    });
-
-    test('latency picks minimum as peak', () {
-      final doc = RunDocument();
-      doc.addEntry(entry(
-          category: 'latency',
-          test: 'kernel_launch_latency',
-          unit: 'us',
-          metric: 'dispatch',
-          value: 5.2));
-      doc.addEntry(entry(
-          category: 'latency',
-          test: 'kernel_launch_latency',
-          unit: 'us',
-          metric: 'roundtrip',
-          value: 188.0));
-      final t = doc.runs.single.categories.single.tests.single;
+      final t = doc.runFor('Metal', 'Metal', 'M1', 'd').openTest(header(
+          id: 'kernel_launch_latency',
+          title: 'Kernel launch latency',
+          category: BenchCategory.latency,
+          shape: TestShape.homogeneous,
+          direction: Direction.lowerIsBetter,
+          units: const Units(
+              symbol: 'µs', quantity: Quantity.seconds, scale: 1e-6)));
+      t.metrics.addAll(const [
+        MetricResult(id: 'dispatch', value: 5.2),
+        MetricResult(id: 'roundtrip', value: 188.0),
+      ]);
       expect(t.peakValue, 5.2);
+      // The fastest reading is the full bar, not the slowest.
+      expect(t.barFraction(t.metrics.first), 1.0);
+      expect(t.barFraction(t.metrics.last), closeTo(5.2 / 188.0, 1e-9));
     });
 
     test('all-skipped tests partition into unsupported', () {
       final doc = RunDocument();
-      doc.addEntry(entry(value: 100));
-      doc.addEntry(entry(
-          test: 'double_precision_compute',
-          metric: 'double',
-          status: ResultStatus.unsupported,
-          value: 0));
-      final group = doc.runs.single.categories.single;
+      final run = doc.runFor('Metal', 'Metal', 'M1', 'd');
+      run.openTest(header()).metrics.add(const MetricResult(id: 'float', value: 100));
+      run
+          .openTest(header(
+              id: 'double_precision_compute', title: 'Double-precision compute'))
+          .metrics
+          .add(const MetricResult(
+              id: 'double',
+              status: ResultStatus.unsupported,
+              reason: 'nope'));
+      final group = run.categories.single;
       expect(group.supported, hasLength(1));
       expect(group.unsupported, hasLength(1));
       expect(group.unsupported.single.skipReason, 'nope');
     });
 
-    test('builds from a loaded saveJson document', () {
-      final doc = RunDocument.fromEntriesJson({
-        'format_version': 2,
-        'entries': [
-          {
-            'backend': 'CPU',
-            'platform': 'CPU',
-            'device': 'X',
-            'driver': '',
-            'category': 'fp_compute',
-            'test': 'single_precision_compute',
-            'display': 'Single-precision compute (NEON)',
-            'metric': 'float ST',
-            'unit': 'gflops',
-            'value': 251.0,
-          },
-          {
-            'backend': 'CPU',
-            'platform': 'CPU',
-            'device': 'X',
-            'driver': '',
-            'category': 'fp_compute',
-            'test': 'amx',
-            'metric': 'bf16',
-            'unit': 'tflops',
-            'status': 'unsupported',
-            'reason': 'no AMX',
-          },
-        ]
-      });
-      final run = doc.runs.single;
-      final group = run.categories.single;
-      expect(group.supported, hasLength(1));
-      expect(group.unsupported, hasLength(1));
-      // Saved files carry the human-readable name; the tag is only a fallback
-      // (it cannot be un-slugged back into "… (NEON)").
-      expect(group.supported.single.display, 'Single-precision compute (NEON)');
-      // The row without one still renders as something.
-      expect(group.unsupported.single.display, 'amx');
+    test('unavailable collects whole tests and individual readings', () {
+      final doc = RunDocument();
+      final run = doc.runFor('CUDA', 'CUDA', 'RTX', 'd');
+      // A test that measured most of its readings, missing one.
+      run.openTest(header(
+          id: 'cublas_gemm',
+          title: 'cuBLASLt GEMM peak',
+          shape: TestShape.heterogeneous))
+        ..metrics.add(const MetricResult(id: 'fp32', value: 14.87))
+        ..metrics.add(const MetricResult(
+            id: 'mxf4_e2m1',
+            status: ResultStatus.unsupported,
+            reason: 'requires Blackwell'));
+      // A test that measured nothing at all.
+      run.openTest(header(id: 'wmma_fp64', title: 'WMMA fp64')).metrics.add(
+          const MetricResult(
+              id: 'wmma_fp64',
+              status: ResultStatus.unsupported,
+              reason: 'no fp64 tensor cores'));
+
+      final items = run.unavailable;
+      expect(items, hasLength(2));
+      // The whole-test one is named by the test alone.
+      expect(items.map((i) => i.title),
+          ['cuBLASLt GEMM peak › mxf4_e2m1', 'WMMA fp64']);
+      // The measured test still shows up top with only its measurement.
+      final gemm = run.categories.single.tests.first;
+      expect(gemm.okMetrics.map((m) => m.id), ['fp32']);
     });
 
-    test('recovers documentation from a loaded document', () {
-      final doc = RunDocument.fromEntriesJson({
-        'format_version': 2,
-        'entries': [
-          {
-            'backend': 'CPU',
-            'platform': 'CPU',
-            'device': 'X',
-            'driver': '',
-            'category': 'latency',
-            'test': 'memory_latency',
-            'display': 'Memory latency (pointer-chase)',
-            'metric': 'DRAM x8',
-            'unit': 'ns',
-            'value': 16.15,
-            'description': 'What the wait for one memory read costs.',
-            'metric_description': 'Eight independent chases at once.',
-          },
-        ]
-      });
-      final t = doc.runs.single.categories.single.tests.single;
-      expect(t.description, 'What the wait for one memory read costs.');
-      expect(t.metrics.single.metricDescription,
-          'Eight independent chases at once.');
-    });
-
-    test('attaches device props from a loaded document', () {
-      Map<String, dynamic> entry(String device) => {
-            'backend': 'CPU',
-            'platform': 'CPU',
-            'device': device,
-            'driver': '',
-            'category': 'fp_compute',
-            'test': 't',
-            'metric': 'm',
-            'unit': 'gflops',
-            'value': 1.0,
-          };
-      final doc = RunDocument.fromEntriesJson({
-        'format_version': 2,
+    test('builds from a saved document', () {
+      final doc = RunDocument.fromJson({
+        'format_version': 3,
+        'clpeak_version': '3.0.0',
+        'generated_at': '2026-08-29T14:03:11Z',
+        'duration_s': 12.5,
+        'cancelled': true,
+        'host': {'os': 'Macintosh', 'cpu': 'Apple M1 Pro'},
+        'notes': [
+          {'backend': 'ONNX', 'message': 'QNN EP not found'}
+        ],
         'devices': [
           {
             'backend': 'CPU',
             'platform': 'CPU',
-            'device': 'X',
+            'name': 'X',
             'driver': '',
-            'props': [
-              {'k': 'Cores', 'v': '10'},
-              {'k': 'RAM', 'v': '32.0 GB'},
+            'type': 'cpu',
+            'properties': [
+              {'key': 'Cores', 'value': '10'},
+              {'key': 'RAM', 'value': '32.0 GB'},
             ],
-          },
-          // No matching run: must not invent an empty one.
-          {
-            'backend': 'CUDA',
-            'platform': 'CUDA',
-            'device': 'Absent',
-            'driver': '',
-            'props': [
-              {'k': 'SMs', 'v': '84'},
+            'tests': [
+              {
+                'id': 'single_precision_compute',
+                'title': 'Single-precision compute',
+                'variant': 'NEON',
+                'category': 'fp_compute',
+                'shape': 'homogeneous',
+                'direction': 'higher_is_better',
+                'quantity': 'flops',
+                'unit': 'GFLOPS',
+                'scale': 1e9,
+                'description': 'Peak arithmetic speed.',
+                'metrics': [
+                  {
+                    'id': 'float ST',
+                    'value': 251.0,
+                    'description': 'One core.'
+                  },
+                ],
+              },
+              {
+                'id': 'cpu_matrix_fp',
+                'title': 'CPU matrix engine',
+                'category': 'fp_compute',
+                'shape': 'heterogeneous',
+                'direction': 'higher_is_better',
+                'quantity': 'flops',
+                'unit': 'GFLOPS',
+                'scale': 1e9,
+                'metrics': [
+                  {'id': 'bf16', 'status': 'unsupported', 'reason': 'no AMX'},
+                ],
+              },
             ],
           },
         ],
-        'entries': [entry('X'), entry('Y')],
       });
-      expect(doc.runs, hasLength(2));
-      expect(doc.runs.first.props.map((p) => p.key), ['Cores', 'RAM']);
-      expect(doc.runs.first.props.last.value, '32.0 GB');
-      // Runs the devices block doesn't mention keep empty props.
-      expect(doc.runs.last.props, isEmpty);
+
+      final run = doc.runs.single;
+      expect(doc.meta!.cancelled, isTrue);
+      expect(doc.meta!.host['cpu'], 'Apple M1 Pro');
+      expect(doc.notes.single.message, 'QNN EP not found');
+      expect(run.props.map((p) => p.key), ['Cores', 'RAM']);
+
+      final group = run.categories.single;
+      expect(group.supported, hasLength(1));
+      expect(group.unsupported, hasLength(1));
+
+      final sp = group.supported.single;
+      // The variant is metadata now, not part of the name -- and shows beside
+      // it rather than being un-slugged out of the tag.
+      expect(sp.id, 'single_precision_compute');
+      expect(sp.variant, 'NEON');
+      expect(sp.displayTitle, contains('NEON'));
+      expect(sp.description, 'Peak arithmetic speed.');
+      expect(sp.metrics.single.description, 'One core.');
+      expect(sp.units.quantity, Quantity.flops);
     });
 
-    test('a document without a devices block still loads', () {
-      final doc = RunDocument.fromEntriesJson({
-        'format_version': 2,
-        'entries': [
-          {
-            'backend': 'CPU',
-            'platform': 'CPU',
-            'device': 'X',
-            'driver': '',
-            'category': 'fp_compute',
-            'test': 't',
-            'metric': 'm',
-            'unit': 'gflops',
-            'value': 1.0,
-          },
-        ],
-      });
-      expect(doc.runs.single.props, isEmpty);
+    test('a document with no devices loads empty', () {
+      final doc = RunDocument.fromJson({'format_version': 3});
+      expect(doc.isEmpty, isTrue);
     });
   });
 
   group('RunSummary', () {
     test('rename round-trips through json', () {
-      final doc = RunDocument()
-        ..addEntry(ResultEntry(
-          backend: 'CPU',
-          platform: 'CPU',
-          device: 'M1',
-          driver: '',
-          category: 'fp_compute',
-          test: 't',
-          metric: 'm',
-          unit: 'gflops',
-          status: ResultStatus.ok,
-          value: 1,
-          reason: '',
-        ));
+      final doc = RunDocument();
+      doc
+          .runFor('CPU', 'CPU', 'M1', '')
+          .openTest(const TestHeader(id: 't', title: 't'))
+          .metrics
+          .add(const MetricResult(id: 'm', value: 1));
       final summary = RunSummary.fromDocument(
         id: '20260712_094501',
-        fileName: '20260712_094501.xml',
+        fileName: '20260712_094501.clpeak.json',
         doc: doc,
         startedAt: DateTime(2026, 7, 12, 9, 45, 1),
         durationMs: 100,
@@ -548,12 +634,30 @@ void main() {
     });
   });
 
-  group('formatMetric', () {
-    test('scales gflops to TFLOPS', () {
-      expect(formatMetric(12500, 'gflops'),
-          (value: '12.5', unit: 'TFLOPS'));
-      expect(formatMetric(950, 'gflops'), (value: '950', unit: 'GFLOPS'));
-      expect(formatMetric(5.2083, 'us'), (value: '5.21', unit: 'µs'));
+  group('formatValue', () {
+    const gflops =
+        Units(symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9);
+    const us = Units(symbol: 'µs', quantity: Quantity.seconds, scale: 1e-6);
+    const gbps =
+        Units(symbol: 'GB/s', quantity: Quantity.bytesPerSecond, scale: 1e9);
+    const ppm = Units(symbol: 'ppm', quantity: Quantity.ratio, scale: 1e-6);
+
+    test('slides the SI prefix instead of switching on the unit', () {
+      expect(formatValue(12500, gflops), (value: '12.5', unit: 'TFLOPS'));
+      expect(formatValue(950, gflops), (value: '950', unit: 'GFLOPS'));
+      expect(formatValue(5.2083, us), (value: '5.21', unit: 'µs'));
+      // Sub-microsecond latency reads in nanoseconds, not "0.12 µs".
+      expect(formatValue(0.125, us), (value: '125', unit: 'ns'));
+      expect(formatValue(183.4, gbps), (value: '183', unit: 'GB/s'));
+    });
+
+    test('a quantity with no ladder prints as measured', () {
+      expect(formatValue(4.5, ppm), (value: '4.50', unit: 'ppm'));
+    });
+
+    test('zero and unknown units survive', () {
+      expect(formatValue(0, gflops), (value: '0.00', unit: 'GFLOPS'));
+      expect(formatValue(3, Units.empty), (value: '3.00', unit: ''));
     });
   });
 }

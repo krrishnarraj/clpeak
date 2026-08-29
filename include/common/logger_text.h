@@ -14,8 +14,14 @@
 // (defaults to std::cout), so the same formatting drives the desktop CLI and
 // any future text channel (file export, …).
 //
-// Accumulated ResultEntry rows are stored in the base-class `results` member
-// for later file dump (JSON / CSV / XML) — see result_store.h.
+// Unavailable readings stay inline here, as `[unsupported] reason` in the
+// table where they were measured: a terminal is read top to bottom, and the
+// gap is most informative next to the readings that surround it.  The GUI
+// collects them into a section of their own instead, where a scrollable page
+// makes that the better read.
+//
+// The results tree itself is accumulated by the base class in `doc` — see
+// run_document.h — for the host to save.
 
 class LoggerText : public logger
 {
@@ -58,13 +64,20 @@ private:
     // ── Metric buffering (for aligned columns within a test) ─────────────
 
     struct MetricLine {
-        std::string  metric;
-        float        value;        // valid when status == Ok
+        std::string  label;        // what to print in the name column
+        double       value;        // valid when status == Ok
         ResultStatus status;
         std::string  reason;       // valid when status != Ok
-        bool         subMetric;
-        std::string  baselineKey;  // ResultEntry::key() for compare lookups
+        std::string  baselineKey;  // --compare lookup
         std::string  description;  // --describe: what this reading measures
+
+        // Printed after the value when this reading overrides its test's
+        // unit, so a TOPS row inside a TFLOPS test is not read as TFLOPS.
+        std::string  unitSuffix;
+
+        // Which way is better for this reading, so a compare delta can say
+        // so rather than leaving a signed percentage to be misread.
+        Direction    direction;
     };
 
     std::vector<MetricLine> metricLines;
@@ -76,7 +89,8 @@ private:
     std::string indentStr(int level) const;
     void writeLine(int level, const std::string &text);
     void writeLine(const std::string &text);  // uses current indentLevel
-    void printBaselineDelta(const std::string &key, float value);
+    void printBaselineDelta(const std::string &key, double value,
+                            Direction direction);
 
     /// Write `text` as prose, word-wrapped to the output width and left-aligned
     /// at `column` spaces (a raw column, not an indent level, so a reading's
@@ -84,4 +98,4 @@ private:
     void writeWrapped(int column, const std::string &text);
 };
 
-#endif // LOGGER_TEXT_HPP
+#endif  // LOGGER_TEXT_HPP

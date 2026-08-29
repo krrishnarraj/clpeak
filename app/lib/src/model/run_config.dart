@@ -1,5 +1,5 @@
 import 'catalog.dart';
-import 'result_entry.dart';
+import 'result_model.dart';
 
 /// Time-budget presets.  Custom keeps whatever the user configured.
 enum RunPreset { full, custom }

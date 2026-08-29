@@ -3,36 +3,31 @@
 // breakdown for what that reading means — each opening only its own text.
 //
 // Pure Dart — ResultsBody takes a RunDocument, so no native bridge is needed.
-import 'package:clpeak/src/model/result_entry.dart';
+import 'package:clpeak/src/model/result_model.dart';
 import 'package:clpeak/src/model/run_document.dart';
 import 'package:clpeak/src/theme/clpeak_theme.dart';
 import 'package:clpeak/src/ui/results/results_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-ResultEntry _entry({
-  required String test,
-  required String display,
-  required String metric,
-  required double value,
+const _ns = Units(symbol: 'ns', quantity: Quantity.seconds, scale: 1e-9);
+
+TestHeader _header({
+  required String id,
+  required String title,
   String description = '',
-  String metricDescription = '',
+  BenchCategory category = BenchCategory.latency,
+  TestShape shape = TestShape.homogeneous,
+  Units units = _ns,
 }) =>
-    ResultEntry(
-      backend: 'CPU',
-      platform: 'CPU',
-      device: 'M1 Pro',
-      driver: '',
-      category: 'latency',
-      test: test,
-      display: display,
-      metric: metric,
-      unit: 'ns',
-      status: ResultStatus.ok,
-      value: value,
-      reason: '',
+    TestHeader(
+      id: id,
+      title: title,
       description: description,
-      metricDescription: metricDescription,
+      category: category,
+      shape: shape,
+      direction: Direction.lowerIsBetter,
+      units: units,
     );
 
 Widget _host(RunDocument doc) => MaterialApp(
@@ -44,20 +39,22 @@ void main() {
   testWidgets('a documented test offers info; an undocumented one does not',
       (tester) async {
     final doc = RunDocument();
-    doc.addEntry(_entry(
-      test: 'memory_latency',
-      display: 'Memory latency (pointer-chase)',
-      metric: 'DRAM x8',
-      value: 16.15,
-      description: 'What the wait for one memory read costs.',
-      metricDescription: 'Eight independent chases at once.',
-    ));
-    doc.addEntry(_entry(
-      test: 'atomics',
-      display: 'Atomic fetch-add latency',
-      metric: 'uncontended ST',
-      value: 2.2,
-    ));
+    final run = doc.runFor('CPU', 'CPU', 'M1 Pro', '');
+    run
+        .openTest(_header(
+          id: 'memory_latency',
+          title: 'Memory latency (pointer-chase)',
+          description: 'What the wait for one memory read costs.',
+        ))
+        .metrics
+        .add(const MetricResult(
+            id: 'DRAM x8',
+            value: 16.15,
+            description: 'Eight independent chases at once.'));
+    run
+        .openTest(_header(id: 'atomics', title: 'Atomic fetch-add latency'))
+        .metrics
+        .add(const MetricResult(id: 'uncontended ST', value: 2.2));
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
@@ -85,22 +82,17 @@ void main() {
 
   testWidgets('each documented reading carries its own info', (tester) async {
     final doc = RunDocument();
-    doc.addEntry(_entry(
-      test: 'memory_latency',
-      display: 'Memory latency (pointer-chase)',
-      metric: 'DRAM x8',
-      value: 16.15,
-      description: 'What the wait for one memory read costs.',
-      metricDescription: 'Eight independent chases at once.',
-    ));
-    // A second reading of the same test, undocumented.
-    doc.addEntry(_entry(
-      test: 'memory_latency',
-      display: 'Memory latency (pointer-chase)',
-      metric: 'L1',
-      value: 1.26,
-      description: 'What the wait for one memory read costs.',
-    ));
+    doc.runFor('CPU', 'CPU', 'M1 Pro', '').openTest(_header(
+          id: 'memory_latency',
+          title: 'Memory latency (pointer-chase)',
+          description: 'What the wait for one memory read costs.',
+        ))
+      ..metrics.add(const MetricResult(
+          id: 'DRAM x8',
+          value: 16.15,
+          description: 'Eight independent chases at once.'))
+      // A second reading of the same test, undocumented.
+      ..metrics.add(const MetricResult(id: 'L1', value: 1.26));
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
@@ -120,34 +112,95 @@ void main() {
     expect(find.text('DRAM X8'), findsOneWidget);
   });
 
-  testWidgets('an unsupported test can still be explained', (tester) async {
+  testWidgets('a heterogeneous test shows every reading without a headline',
+      (tester) async {
     final doc = RunDocument();
-    doc.addEntry(ResultEntry(
-      backend: 'CPU',
-      platform: 'CPU',
-      device: 'M1 Pro',
-      driver: '',
-      category: 'fp_compute',
-      test: 'amx',
-      display: 'Matrix engine (AMX)',
-      metric: 'bf16',
-      unit: 'tflops',
-      status: ResultStatus.unsupported,
-      value: 0,
-      reason: 'no AMX on this CPU',
-      description: 'Throughput of the dedicated matrix-multiply unit.',
-    ));
+    doc.runFor('CUDA', 'CUDA', 'RTX 5060', '').openTest(const TestHeader(
+          id: 'cublas_gemm',
+          title: 'cuBLASLt GEMM peak',
+          category: BenchCategory.fpCompute,
+          shape: TestShape.heterogeneous,
+          axis: 'data type',
+          units: Units(
+              symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
+        ))
+      ..metrics.add(const MetricResult(id: 'fp32', value: 14.87))
+      ..metrics.add(const MetricResult(id: 'nvf4_e2m1', value: 300.43));
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
 
-    // The unsupported panel starts collapsed; open it, then the test's info.
-    await tester.tap(find.text('NOT SUPPORTED ON THIS DEVICE (1)'));
+    // No tap needed: both readings are already on screen, headed by what
+    // varies across them.
+    expect(find.text('DATA TYPE'), findsOneWidget);
+    expect(find.text('fp32'), findsOneWidget);
+    expect(find.text('nvf4_e2m1'), findsOneWidget);
+    // The largest reading is shown as one reading among several, never as the
+    // test's own number — it appears once, in the table, not in the header.
+    expect(find.text('300 TFLOPS'), findsOneWidget);
+  });
+
+  testWidgets('an unavailable test can still be explained', (tester) async {
+    final doc = RunDocument();
+    doc
+        .runFor('CPU', 'CPU', 'M1 Pro', '')
+        .openTest(const TestHeader(
+          id: 'cpu_matrix_fp',
+          title: 'Matrix engine (AMX)',
+          category: BenchCategory.fpCompute,
+          description: 'Throughput of the dedicated matrix-multiply unit.',
+          units: Units(
+              symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
+        ))
+        .metrics
+        .add(const MetricResult(
+            id: 'bf16',
+            status: ResultStatus.unsupported,
+            reason: 'no AMX on this CPU'));
+
+    await tester.pumpWidget(_host(doc));
+    await tester.pump();
+
+    // The unavailable panel starts collapsed; open it, then the test's info.
+    await tester.tap(find.text('NOT AVAILABLE ON THIS DEVICE (1)'));
     await tester.pump();
     await tester.tap(find.byIcon(Icons.info_outline));
     await tester.pump();
 
     expect(find.text('Throughput of the dedicated matrix-multiply unit.'),
         findsOneWidget);
+  });
+
+  testWidgets('one missing reading leaves the measured table alone',
+      (tester) async {
+    final doc = RunDocument();
+    doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(const TestHeader(
+          id: 'mps-gemm-fp',
+          title: 'MPS GEMM peak',
+          category: BenchCategory.fpCompute,
+          shape: TestShape.heterogeneous,
+          axis: 'data type',
+          units: Units(
+              symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
+        ))
+      ..metrics.add(const MetricResult(id: 'fp32', value: 4.06))
+      ..metrics.add(const MetricResult(id: 'fp16', value: 3.95))
+      ..metrics.add(const MetricResult(
+          id: 'bf16',
+          status: ResultStatus.unsupported,
+          reason: 'requires M3+'));
+
+    await tester.pumpWidget(_host(doc));
+    await tester.pump();
+
+    // The measured readings are in the table; the missing one is not.
+    expect(find.text('fp32'), findsOneWidget);
+    expect(find.text('fp16'), findsOneWidget);
+    expect(find.text('bf16'), findsNothing);
+
+    await tester.tap(find.text('NOT AVAILABLE ON THIS DEVICE (1)'));
+    await tester.pump();
+    expect(find.textContaining('MPS GEMM peak › bf16'), findsOneWidget);
+    expect(find.text('requires M3+'), findsOneWidget);
   });
 }

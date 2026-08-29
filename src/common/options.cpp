@@ -28,10 +28,8 @@ static const char *helpStr =
     "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
     "\n  --describe                  explain what each test and each reading measures"
     "\n  --list-devices              list available devices for every backend and exit"
-    "\n  --xml-file file             save results to an XML file"
-    "\n  --json-file file            save results to a JSON file"
-    "\n  --csv-file file             save results to a CSV file"
-    "\n  --compare file              compare results against a baseline (JSON / CSV / XML)"
+    "\n  -o, --output file           save results to a JSON file"
+    "\n  --compare file              compare results against a saved run"
     "\n"
     "\n BACKEND SELECTION (default: run every available backend):"
 #ifdef ENABLE_OPENCL
@@ -54,6 +52,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CPU
     "\n  --cpu                       run only the native CPU backend"
+#endif
+#ifdef ENABLE_ONNX
+    "\n  --onnx                      run only the ONNX Runtime backend"
 #endif
     "\n  (multiple --<backend> flags can be combined)"
 #ifdef ENABLE_OPENCL
@@ -681,29 +682,13 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     }
 
     // ---- Output ---------------------------------------------------------
-    else if (!strcmp(a, "--xml-file"))
+    else if (!strcmp(a, "-o") || !strcmp(a, "--output"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
         return missingArg(err, a);
-      out.xmlFile    = v;
-      out.enableXml  = true;
-    }
-    else if (!strcmp(a, "--json-file"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      out.jsonFile   = v;
-      out.enableJson = true;
-    }
-    else if (!strcmp(a, "--csv-file"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      out.csvFile    = v;
-      out.enableCsv  = true;
+      out.outputFile   = v;
+      out.enableOutput = true;
     }
     else if (!strcmp(a, "--compare"))
     {
@@ -799,4 +784,39 @@ bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
   default:
     return false;
   }
+}
+
+// ---- Invocation record ----------------------------------------------------
+
+Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
+{
+  Invocation inv;
+
+  for (int i = 0; i < argc; i++)
+    if (argv[i]) inv.argv.push_back(argv[i]);
+
+  inv.targetTimeUs    = opts.targetTimeUs;
+  inv.targetTimeUsCpu = opts.targetTimeUsCpu;
+  inv.warmup          = opts.warmupCount;
+  // Only when pinned with -i.  Left at 0 the run calibrated each test to a
+  // time budget instead, which is the normal mode and the comparable one.
+  inv.iters           = opts.forceIters ? opts.iters : 0;
+
+  for (int c = 0; c < numCategoryFlags; c++)
+    if (opts.enabledCategories.test(static_cast<size_t>(categoryFlags[c].cat)))
+      inv.categories.push_back(categoryString(categoryFlags[c].cat));
+
+  // Recorded only when the run was narrowed.  A full run would list every
+  // test in the build, which says nothing and would differ between builds
+  // that enable different backends.
+  bool allTests = true;
+  for (int t = 0; t < numTestFlags; t++)
+    if (!opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
+      allTests = false;
+  if (!allTests)
+    for (int t = 0; t < numTestFlags; t++)
+      if (opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
+        inv.tests.push_back(testFlags[t].name);
+
+  return inv;
 }

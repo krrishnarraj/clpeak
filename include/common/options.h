@@ -6,6 +6,7 @@
 #include <vector>
 #include <common/benchmark_enums.h>  // Benchmark, Category
 #include <common/common.h>           // DEFAULT_TARGET_TIME_US
+#include <common/run_document.h>     // Invocation
 
 // Shared CLI options populated once in entry.cpp and consumed by every
 // backend.  Each backend's applyOptions() copies the relevant fields into
@@ -61,13 +62,12 @@ struct CliOptions {
   // OpenCL-only timing knob.
   bool useEventTimer = false;
 
-  // Output / compare
-  bool        enableXml  = false;
-  std::string xmlFile;
-  bool        enableJson = false;
-  std::string jsonFile;
-  bool        enableCsv  = false;
-  std::string csvFile;
+  // Output / compare.  One format, one flag: `-o file` writes the v3 JSON
+  // document (run_document.h).  The XML and CSV writers are gone -- XML's
+  // only advantage over JSON was nesting, and CSV could carry neither device
+  // metadata nor the per-test documentation.
+  bool        enableOutput = false;
+  std::string outputFile;
   std::string compareFile;
 
   // Listing mode (no benchmarks run; just print devices).
@@ -89,6 +89,13 @@ struct CliOptions {
   }
 
 };
+
+// Describe how clpeak was asked to run, for the result document's `invocation`
+// block.  Every number in a run is sensitive to this -- a shorter --max-time
+// measures a different thing, and a selective run is not a full one even though
+// the file looks the same shape -- so it is recorded rather than inferred.
+// Lives here because the category and test flag-name tables do.
+Invocation invocationFrom(const CliOptions &opts, int argc, char **argv);
 
 // Parse argv into out.  On --help / --version / parse error this calls
 // exit() directly (matching the previous behavior).  Returns 0 on success.

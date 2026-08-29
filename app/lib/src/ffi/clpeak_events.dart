@@ -1,4 +1,4 @@
-import '../model/result_entry.dart';
+import '../model/result_model.dart';
 
 /// Decoded native run events — a 1:1 mirror of the JSON documents emitted by
 /// LoggerFfi / clpeak_launch (see src/ffi/clpeak_ffi.h for the schema).
@@ -16,6 +16,7 @@ sealed class ClpeakEvent {
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
+          type: s('type'),
           platformIndex: (m['platform_index'] as num?)?.toInt() ?? -1,
           deviceIndex: (m['device_index'] as num?)?.toInt() ?? -1,
           props: [
@@ -26,43 +27,35 @@ sealed class ClpeakEvent {
       case 'test_begin':
         return TestBeginEvent(
           backend: s('backend'),
+          platform: s('platform'),
           device: s('device'),
-          test: s('test'),
-          display: s('display'),
-          unit: s('unit'),
-          category: BenchCategory.fromTag(s('category')),
-          description: s('desc'),
+          driver: s('driver'),
+          header: TestHeader.fromEvent(m),
         );
       case 'metric':
-        return MetricEvent(ResultEntry(
+        return MetricEvent(
           backend: s('backend'),
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
-          category: s('category'),
-          test: s('test'),
-          display: s('display'),
-          metric: s('metric'),
-          unit: s('unit'),
-          status: ResultStatus.fromString(s('status')),
-          value: (m['value'] as num?)?.toDouble() ?? 0,
-          reason: s('reason'),
-          description: s('desc'),
-          metricDescription: s('minfo'),
-        ));
+          testKey: s('variant').isEmpty
+              ? s('test')
+              : '${s('test')}@${s('variant')}',
+          metric: MetricResult.fromJson(m),
+        );
       case 'test_skipped':
         return TestSkippedEvent(
           backend: s('backend'),
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
-          test: s('test'),
-          display: s('display'),
-          unit: s('unit'),
-          category: s('category'),
+          header: TestHeader.fromEvent(m),
+          metricNames: [
+            for (final n in (m['metrics'] as List? ?? const []))
+              n as String? ?? ''
+          ],
           status: ResultStatus.fromString(s('status')),
           reason: s('reason'),
-          description: s('desc'),
         );
       case 'test_end':
         return const TestEndEvent();
@@ -71,7 +64,7 @@ sealed class ClpeakEvent {
       case 'backend_end':
         return const BackendEndEvent();
       case 'note':
-        return NoteEvent(s('message'));
+        return NoteEvent(s('message'), backend: s('backend'), device: s('device'));
       case 'done':
         return DoneEvent(
           status: (m['status'] as num?)?.toInt() ?? 0,
@@ -94,6 +87,7 @@ class DeviceEvent extends ClpeakEvent {
     required this.platform,
     required this.device,
     required this.driver,
+    required this.type,
     required this.platformIndex,
     required this.deviceIndex,
     required this.props,
@@ -103,83 +97,84 @@ class DeviceEvent extends ClpeakEvent {
   final String platform;
   final String device;
   final String driver;
+  final String type; // "gpu" | "cpu" | "accelerator" | "unknown"
   final int platformIndex;
   final int deviceIndex;
   final List<({String key, String value})> props;
 }
 
+/// A test opened.  Carries the whole resolved header — title, shape,
+/// direction, unit, scale — so the test's row exists before its first reading
+/// and nothing has to be back-filled off the readings later.
 class TestBeginEvent extends ClpeakEvent {
   const TestBeginEvent({
-    required this.backend,
-    required this.device,
-    required this.test,
-    required this.display,
-    required this.unit,
-    required this.category,
-    this.description = '',
-  });
-
-  final String backend;
-  final String device;
-  final String test;
-  final String display;
-  final String unit;
-  final BenchCategory category;
-
-  /// What the test measures, delivered when it opens.  Empty for tests with
-  /// no description authored yet.  Notes for individual readings are not here
-  /// — they arrive with the readings, on [ResultEntry.metricDescription].
-  final String description;
-}
-
-class MetricEvent extends ClpeakEvent {
-  const MetricEvent(this.entry);
-  final ResultEntry entry;
-}
-
-class TestSkippedEvent extends ClpeakEvent {
-  const TestSkippedEvent({
     required this.backend,
     required this.platform,
     required this.device,
     required this.driver,
-    required this.test,
-    required this.display,
-    required this.unit,
-    required this.category,
-    required this.status,
-    required this.reason,
-    this.description = '',
+    required this.header,
   });
 
   final String backend;
   final String platform;
   final String device;
   final String driver;
-  final String test;
-  final String display;
-  final String unit;
-  final String category;
+  final TestHeader header;
+}
+
+class MetricEvent extends ClpeakEvent {
+  const MetricEvent({
+    required this.backend,
+    required this.platform,
+    required this.device,
+    required this.driver,
+    required this.testKey,
+    required this.metric,
+  });
+
+  final String backend;
+  final String platform;
+  final String device;
+  final String driver;
+
+  /// Which open test this reading belongs to — `id` or `id@variant`, matching
+  /// TestResult.key.
+  final String testKey;
+
+  final MetricResult metric;
+}
+
+/// A whole test that could not run.  Unlike a per-reading skip it names every
+/// reading that would have been taken, so the unavailable section can list
+/// them instead of showing one nameless placeholder.
+class TestSkippedEvent extends ClpeakEvent {
+  const TestSkippedEvent({
+    required this.backend,
+    required this.platform,
+    required this.device,
+    required this.driver,
+    required this.header,
+    required this.metricNames,
+    required this.status,
+    required this.reason,
+  });
+
+  final String backend;
+  final String platform;
+  final String device;
+  final String driver;
+  final TestHeader header;
+  final List<String> metricNames;
   final ResultStatus status;
   final String reason;
-  final String description;
 
-  /// As an unsupported ResultEntry (one representative row).
-  ResultEntry toEntry() => ResultEntry(
-        backend: backend,
-        platform: platform,
-        device: device,
-        driver: driver,
-        category: category,
-        test: test,
-        display: display,
-        metric: '',
-        unit: unit,
-        status: status,
-        reason: reason,
-        value: 0,
-        description: description,
-      );
+  /// One reading per named metric, all carrying the same status and reason.
+  /// Mirrors what the native side records, so a live run and a reopened file
+  /// show the same rows.
+  List<MetricResult> toMetrics() => [
+        for (final name in metricNames)
+          MetricResult(id: name, status: status, reason: reason),
+      ];
 }
 
 class TestEndEvent extends ClpeakEvent {
@@ -195,8 +190,10 @@ class BackendEndEvent extends ClpeakEvent {
 }
 
 class NoteEvent extends ClpeakEvent {
-  const NoteEvent(this.message);
+  const NoteEvent(this.message, {this.backend = '', this.device = ''});
   final String message;
+  final String backend;
+  final String device;
 }
 
 class DoneEvent extends ClpeakEvent {

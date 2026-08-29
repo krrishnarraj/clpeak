@@ -255,7 +255,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       }
     }
 
-    test.emit(v.label, value, {false, note(v.description)});
+    test.emit(v.label, value, note(v.description).c_str());
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

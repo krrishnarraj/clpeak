@@ -28,8 +28,6 @@ typedef ClpeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
     Pointer<Void> userData);
 typedef _RequestCancelNative = Void Function();
 typedef ClpeakRequestCancel = void Function();
-typedef _LoadResultNative = Pointer<Utf8> Function(Pointer<Utf8> path);
-typedef _LoadResult = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
 typedef _OnnxStatusNative = Pointer<Utf8> Function();
@@ -48,8 +46,6 @@ class ClpeakBindings {
         requestCancel =
             lib.lookupFunction<_RequestCancelNative, ClpeakRequestCancel>(
                 'clpeak_request_cancel'),
-        _loadResultFile = lib.lookupFunction<_LoadResultNative, _LoadResult>(
-            'clpeak_load_result_file_json'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'clpeak_set_onnx_library'),
         _onnxStatus = lib.lookupFunction<_OnnxStatusNative, _OnnxStatusNative>(
@@ -62,7 +58,6 @@ class ClpeakBindings {
   final _FreeString _freeString;
   final ClpeakLaunch launch;
   final ClpeakRequestCancel requestCancel;
-  final _LoadResult _loadResultFile;
   final _SetOnnxLib _setOnnxLibrary;
   final _OnnxStatusNative _onnxStatus;
 
@@ -108,18 +103,6 @@ class ClpeakBindings {
     return OnnxStatus.fromJson(jsonDecode(json) as Map<String, dynamic>);
   }
 
-  /// Load a saved result file; returns the saveJson document or null when
-  /// the file is unreadable/rejected.
-  Map<String, dynamic>? loadResultFile(String path) {
-    final pathPtr = path.toNativeUtf8();
-    try {
-      final json = takeString(_loadResultFile(pathPtr));
-      if (json == null) return null;
-      return jsonDecode(json) as Map<String, dynamic>;
-    } finally {
-      malloc.free(pathPtr);
-    }
-  }
 }
 
 /// State of the ONNX Runtime, as clpeak_copy_onnx_status_json() reports it.

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../model/result_entry.dart';
+import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/clpeak_theme.dart';
 import '../common/kit.dart';
@@ -78,8 +78,8 @@ class _ResultsBodyState extends State<ResultsBody> {
               last: i == group.supported.length - 1,
             ),
         ],
-      if (selected.categories.any((g) => g.unsupported.isNotEmpty))
-        _WidgetRow(_UnsupportedSection(run: selected), padTop: 22),
+      if (selected.unavailable.isNotEmpty)
+        _WidgetRow(_UnavailableSection(run: selected), padTop: 22),
     ];
 
     return ListView.builder(
@@ -144,7 +144,7 @@ class _TestRow extends _Row {
         // Keyed by test tag: rows are inserted as results stream in during a
         // live run, and without a key a row's expansion state would follow
         // the index and land on the wrong test.
-        key: ValueKey(test.test),
+        key: ValueKey(test.key),
         test: test,
         color: ClpeakTheme.categoryColor(group.category,
             brightness: brightness),
@@ -266,7 +266,16 @@ class _DeviceHeader extends StatelessWidget {
   }
 }
 
-/// One test: name, peak reading, and — when opened — a metric breakdown.
+/// One test.
+///
+/// A homogeneous test collapses to its best reading, with the breakdown a tap
+/// away: its readings are interchangeable variants of one measurement, so one
+/// number really is the answer.
+///
+/// A heterogeneous test never collapses — its readings measure different
+/// things, and the largest of them is not the test's result but merely its
+/// largest number.  It renders as a small always-open table instead, headed by
+/// what varies across the readings ("DATA TYPE", "CACHE LEVEL").
 ///
 /// Draws its own top/bottom rules and side borders so a run of these reads as
 /// a single bordered table even though each is an independent list row.
@@ -295,7 +304,45 @@ class _TestLineState extends State<_TestLine> {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final test = widget.test;
-    final peak = formatMetric(test.peakValue, test.unit);
+    final collapsible = test.collapsible;
+    // A heterogeneous test is its readings, so they are always on screen; a
+    // homogeneous one shows its answer and opens on demand.
+    final showBreakdown = collapsible ? _expanded : true;
+
+    final header = Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      child: Row(
+        children: [
+          Container(width: 3, height: 15, color: widget.color),
+          const SizedBox(width: 10),
+          // The title wraps rather than ellipsizing: the row is as tall as
+          // its name needs, which on a phone is the difference between
+          // "Half-precision compute fp1…" and knowing which
+          // half-precision test this is.
+          Expanded(
+            child: _NameWithInfo(
+              name: test.displayTitle,
+              description: test.description,
+              style: t.mono,
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (collapsible) ...[
+            Builder(builder: (context) {
+              final peak = formatValue(test.peakValue, test.units);
+              return CValue(
+                  value: peak.value, unit: peak.unit, color: widget.color);
+            }),
+            const SizedBox(width: 6),
+            Icon(_expanded ? Icons.remove : Icons.add, size: 13, color: t.faint),
+          ] else if (test.axis.isNotEmpty)
+            // No number here on purpose: naming what varies is the honest
+            // answer to "what did this test measure?", where any single
+            // reading would misrepresent the other eight.
+            Text(test.axis.toUpperCase(), style: t.micro),
+        ],
+      ),
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -315,44 +362,19 @@ class _TestLineState extends State<_TestLine> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CTap(
-            onTap: () => setState(() => _expanded = !_expanded),
-            builder: (context, hovered, pressed) => Container(
-              color: hovered || pressed ? t.hover : Colors.transparent,
-              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-              child: Row(
-                children: [
-                  Container(width: 3, height: 15, color: widget.color),
-                  const SizedBox(width: 10),
-                  // The title wraps rather than ellipsizing: the row is as
-                  // tall as its name needs, which on a phone is the
-                  // difference between "Half-precision compute fp1…" and
-                  // knowing which half-precision test this is.
-                  Expanded(
-                    child: _NameWithInfo(
-                      name: test.display,
-                      description: test.description,
-                      style: t.mono,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  CValue(
-                      value: peak.value,
-                      unit: peak.unit,
-                      color: widget.color),
-                  const SizedBox(width: 6),
-                  Icon(
-                    _expanded ? Icons.remove : Icons.add,
-                    size: 13,
-                    color: t.faint,
-                  ),
-                ],
+          if (collapsible)
+            CTap(
+              onTap: () => setState(() => _expanded = !_expanded),
+              builder: (context, hovered, pressed) => Container(
+                color: hovered || pressed ? t.hover : Colors.transparent,
+                child: header,
               ),
-            ),
-          ),
+            )
+          else
+            header,
           // Instant, not a cross-fade: expansion happens mid-run, and an
           // animated one would cost the benchmark a burst of frames.
-          if (_expanded)
+          if (showBreakdown)
             Container(
               decoration: BoxDecoration(
                 color: t.isDark
@@ -363,10 +385,13 @@ class _TestLineState extends State<_TestLine> {
               padding: const EdgeInsets.fromLTRB(25, 9, 12, 10),
               child: Column(
                 children: [
-                  for (final metric in test.metrics)
+                  // Only measurements: a reading that could not be taken is
+                  // listed once, at the bottom of the page, rather than
+                  // sitting in the middle of a table of numbers.
+                  for (final metric in test.okMetrics)
                     _MetricLine(
-                      entry: metric,
-                      maxValue: test.maxValue,
+                      test: test,
+                      metric: metric,
                       color: widget.color,
                       glyphColumn: test.hasMetricNotes,
                     ),
@@ -508,14 +533,14 @@ class _InfoDialog extends StatelessWidget {
 
 class _MetricLine extends StatelessWidget {
   const _MetricLine({
-    required this.entry,
-    required this.maxValue,
+    required this.test,
+    required this.metric,
     required this.color,
     required this.glyphColumn,
   });
 
-  final ResultEntry entry;
-  final double maxValue;
+  final TestResult test;
+  final MetricResult metric;
   final Color color;
 
   /// Some reading of this test is documented, so every row of it leaves room
@@ -525,10 +550,7 @@ class _MetricLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final ok = entry.status == ResultStatus.ok;
-    final fraction =
-        ok && maxValue > 0 ? (entry.value / maxValue).clamp(0.0, 1.0) : 0.0;
-    final f = ok ? formatMetric(entry.value, entry.unit) : null;
+    final f = formatValue(metric.value, test.unitsOf(metric));
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3.5),
@@ -539,50 +561,46 @@ class _MetricLine extends StatelessWidget {
             // than it wraps inside that width rather than being cut.
             width: glyphColumn ? 121 : 104,
             child: _NameWithInfo(
-              name: entry.metric,
-              description: entry.metricDescription,
+              name: metric.displayLabel,
+              description: metric.description,
               style: t.monoSmallDim,
               small: true,
             ),
           ),
           const SizedBox(width: 10),
+          // Direction-aware: on a latency test the fastest reading draws the
+          // full bar, where a plain value/max filled the slowest one.
           Expanded(
-            child: ok
-                ? CMeter(fraction: fraction, color: color)
-                : Text(
-                    '${entry.status.name} — ${entry.reason}',
-                    style: t.monoSmall.copyWith(color: t.faint),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+            child: CMeter(fraction: test.barFraction(metric), color: color),
           ),
-          if (f != null) ...[
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 94,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: CValue(value: f.value, unit: f.unit, small: true),
-              ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 94,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: CValue(value: f.value, unit: f.unit, small: true),
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _UnsupportedSection extends StatelessWidget {
-  const _UnsupportedSection({required this.run});
+/// Everything the device could not measure, in one place at the foot of the
+/// page: whole tests it does not support, and the individual readings missing
+/// from tests that otherwise ran.  Both answer the same question, and keeping
+/// a dead row out of the table above is what lets that table be nothing but
+/// measurements.
+class _UnavailableSection extends StatelessWidget {
+  const _UnavailableSection({required this.run});
 
   final DeviceRun run;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final items = <TestResult>[
-      for (final g in run.categories) ...g.unsupported,
-    ];
+    final items = run.unavailable;
     if (items.isEmpty) return const SizedBox.shrink();
 
     return CPanel(
@@ -595,7 +613,7 @@ class _UnsupportedSection extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  'NOT SUPPORTED ON THIS DEVICE (${items.length})',
+                  'NOT AVAILABLE ON THIS DEVICE (${items.length})',
                   style: t.micro,
                 ),
               ),
@@ -607,7 +625,7 @@ class _UnsupportedSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(height: 1, color: t.line),
-            for (final test in items)
+            for (final item in items)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
                 child: Row(
@@ -616,17 +634,17 @@ class _UnsupportedSection extends StatelessWidget {
                     Expanded(
                       flex: 4,
                       child: _NameWithInfo(
-                        name: test.display,
-                        description: test.description,
+                        name: item.title,
+                        description: item.description,
                         style: t.monoSmall.copyWith(color: t.dim),
                         small: true,
                       ),
                     ),
-                    if (test.skipReason.isNotEmpty) ...[
+                    if (item.reason.isNotEmpty) ...[
                       const SizedBox(width: 12),
                       Expanded(
                         flex: 5,
-                        child: Text(test.skipReason,
+                        child: Text(item.reason,
                             style: t.monoSmall.copyWith(color: t.faint),
                             textAlign: TextAlign.right),
                       ),

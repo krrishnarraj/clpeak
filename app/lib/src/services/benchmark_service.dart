@@ -176,8 +176,8 @@ class BenchmarkService extends ChangeNotifier {
     // it closes on the native `done` event and on a failed launch alike.
     ScreenWake.acquire();
 
-    final xmlPath = await _history.xmlPathFor(_runId!);
-    final args = [..._config.toArgs(_catalog), '--xml-file', xmlPath];
+    final resultPath = await _history.filePathFor(_runId!);
+    final args = [..._config.toArgs(_catalog), '-o', resultPath];
 
     final run = ClpeakRunner(_bindings).start(args);
     _run = run;
@@ -220,19 +220,40 @@ class BenchmarkService extends ChangeNotifier {
         _document
             .runFor(event.backend, event.platform, event.device, event.driver)
             .props = event.props;
-      case TestBeginEvent(:final display):
-        currentTest = display;
-      case MetricEvent(:final entry):
-        _document.addEntry(entry);
-      case TestSkippedEvent():
-        // Record one unsupported row so the results view can show it.
-        _document.addEntry(event.toEntry());
+      case TestBeginEvent(:final header):
+        // The test's row is created here, from the header the native side
+        // resolved: shape, direction and unit are known before the first
+        // reading arrives, so nothing has to be back-filled off the rows.
+        _document
+            .runFor(event.backend, event.platform, event.device, event.driver)
+            .openTest(header);
+        currentTest = header.title;
+      case MetricEvent(:final testKey, :final metric):
+        _document
+            .runFor(event.backend, event.platform, event.device, event.driver)
+            .findTest(testKey)
+            ?.metrics
+            .add(metric);
+      case TestSkippedEvent(:final header):
+        // One row per named reading, as the file records them -- a whole-test
+        // skip used to collapse to a single nameless placeholder.
+        _document
+            .runFor(event.backend, event.platform, event.device, event.driver)
+            .openTest(header)
+            .metrics
+            .addAll(event.toMetrics());
       case TestEndEvent():
         completedTests++;
         currentTest = '';
       case NoteEvent(:final message):
         final trimmed = message.trim();
-        if (trimmed.isNotEmpty) notes.add(trimmed);
+        if (trimmed.isNotEmpty) {
+          notes.add(trimmed);
+          _document.notes.add(RunNote(
+              backend: event.backend,
+              device: event.device,
+              message: trimmed));
+        }
       case DoneEvent():
         break; // handled via onDone/result
       case DeviceEndEvent():
@@ -249,7 +270,7 @@ class BenchmarkService extends ChangeNotifier {
     if (!_document.isEmpty) {
       final summary = RunSummary.fromDocument(
         id: _runId!,
-        fileName: '$_runId.xml',
+        fileName: RunHistoryStore.fileNameFor(_runId!),
         doc: _document,
         startedAt: startedAt,
         durationMs: DateTime.now().difference(startedAt).inMilliseconds,

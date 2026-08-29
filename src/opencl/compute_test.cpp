@@ -164,7 +164,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           }
         }
 
-        test.emit(labels[w], throughput, {false, clWidthNote(widths[w])});
+        test.emit(labels[w], throughput, clWidthNote(widths[w]));
       }
       catch (cl::Error &error)
       {

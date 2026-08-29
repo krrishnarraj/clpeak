@@ -218,12 +218,12 @@ cmake --build build --target clpeak-gui       # app bundle
 ./clpeak --atomics --branch-penalty   # CPU sync + branch-mispredict cost probes (ns)
 ./clpeak --coopmat                    # Vulkan tensor-core tests
 ./clpeak --describe                   # explain what each test and reading measures
-./clpeak --xml-file out.xml           # save results (also --json-file / --csv-file)
-./clpeak --compare baseline.json      # diff this run against a saved baseline JSON
+./clpeak -o out.clpeak.json           # save results (one JSON document)
+./clpeak --compare baseline.clpeak.json   # diff this run against a saved baseline
 ./clpeak --list-devices               # enumerate devices for every backend, no benchmarks
 ```
 
-`--compare baseline.json` re-runs the selected tests and prints each result next to the value saved earlier with `--json-file`, so regressions or driver/SDK upgrades show up as a per-test delta.
+`--compare baseline.clpeak.json` re-runs the selected tests and prints each result next to the value saved earlier with `-o`, saying whether the change was better or worse for that reading — so a latency regression reads as one, not as a cheerful `+3%`.
 
 ### Selecting a specific device
 

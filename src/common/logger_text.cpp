@@ -116,23 +116,31 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
-    // Build header: display name + unit in caps, e.g. "Global memory bandwidth (GBPS)"
-    std::string header = e.testDisplay;
-    if (!e.unit.empty())
-    {
-        std::string u = e.unit;
-        for (auto &c : u)
-            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        header += " (" + u + ")";
-    }
+    // "Single-precision compute [AVX2+FMA] (GFLOPS)".  The unit is the symbol
+    // the unit table resolved, printed as written: "GB/s" and "µs" are not
+    // words to upper-case.  The variant is shown because it is no longer part
+    // of the name -- a CPU test's ISA is the difference between two otherwise
+    // identical headers.
+    std::string header = e.testTitle;
+    if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
+    if (!e.unit.empty())        header += " (" + e.unit + ")";
+    // A test reopened to append readings measured in a later phase already
+    // printed this header once; say so rather than look like a duplicate.
+    if (e.reopened)             header += "  (continued)";
 
     writeLine(header);
 
     // What the test measures, under its own header and one step in from it,
     // then a blank line so the readings below still read as a block.
-    if (describe && !e.testDescription.empty())
+    if (describe && (!e.testDescription.empty() || !e.testAxis.empty()))
     {
-        writeWrapped(metricIndent * 2, e.testDescription);
+        if (!e.testDescription.empty())
+            writeWrapped(metricIndent * 2, e.testDescription);
+        // The axis is the shortest possible answer to "why are there eight of
+        // these?", and the one line that tells a reader whether the readings
+        // below are variants of one measurement or separate measurements.
+        if (!e.testAxis.empty())
+            writeWrapped(metricIndent * 2, "Readings vary by " + e.testAxis + ".");
         out << "\n";
     }
 
@@ -144,15 +152,30 @@ void LoggerText::renderTestBegin(const LogEvent &e)
 
 void LoggerText::renderMetric(const LogEvent &e)
 {
-    metricLines.push_back({e.entry.metric, e.entry.value, e.entry.status,
-                           e.entry.reason, e.subMetric, e.entry.key(),
-                           e.entry.metricDescription});
+    MetricLine ml;
+    ml.label       = e.metric.displayLabel();
+    ml.value       = e.metric.value;
+    ml.status      = e.metric.status;
+    ml.reason      = e.metric.reason;
+    ml.description = e.metric.description;
+    ml.baselineKey = baselineKey(e.backend, e.platform, e.device,
+                                 e.testKey(), e.metric.id);
+    // Only when it actually differs: repeating the test's own unit on every
+    // row would just be noise under a header that already says it.
+    if (e.metric.hasUnit && e.metric.unit != e.unit)
+        ml.unitSuffix = e.metric.unit;
+    ml.direction = (e.metric.direction == Direction::FromUnit) ? e.direction
+                                                               : e.metric.direction;
+    metricLines.push_back(std::move(ml));
 }
 
 // ── TestSkippedAll ─────────────────────────────────────────────────────────
 
 void LoggerText::renderTestSkippedAll(const LogEvent &e)
 {
+    // One line, not one per metric: a whole-test skip is a single fact, and
+    // the reason is identical on every reading it stands in for.  The document
+    // still records each named reading, so the file is complete.
     writeLine(metricIndent, "[" + statusTag(e.status) + "] " + e.reason);
     out.flush();
 }
@@ -197,21 +220,16 @@ void LoggerText::flushMetrics()
     int maxWidth = MIN_METRIC_PAD;
     for (const auto &ml : metricLines)
     {
-        int w = static_cast<int>(ml.metric.size());
+        int w = static_cast<int>(ml.label.size());
         if (w > maxWidth)
             maxWidth = w;
     }
 
     for (const auto &ml : metricLines)
     {
-        int lineIndent = ml.subMetric ? metricIndent + 1 : metricIndent;
-        int padTarget  = ml.subMetric ? maxWidth - 2 : maxWidth;
-        if (padTarget < MIN_METRIC_PAD)
-            padTarget = MIN_METRIC_PAD;
-
         // Build padded metric name
-        std::string padded = ml.metric;
-        while (static_cast<int>(padded.size()) < padTarget)
+        std::string padded = ml.label;
+        while (static_cast<int>(padded.size()) < maxWidth)
             padded += ' ';
 
         if (ml.status == ResultStatus::Ok)
@@ -221,17 +239,19 @@ void LoggerText::flushMetrics()
             ss << std::fixed << std::setprecision(2) << ml.value;
 
             // Print metric line without trailing newline (baseline delta may follow)
-            out << indentStr(lineIndent) << padded << " : " << ss.str();
+            out << indentStr(metricIndent) << padded << " : " << ss.str();
+            if (!ml.unitSuffix.empty())
+                out << " " << ml.unitSuffix;
 
             // Baseline delta on the same line (if enabled)
             if (compareEnabled)
-                printBaselineDelta(ml.baselineKey, ml.value);
+                printBaselineDelta(ml.baselineKey, ml.value, ml.direction);
 
             out << "\n";
         }
         else
         {
-            out << indentStr(lineIndent) << padded << " : ["
+            out << indentStr(metricIndent) << padded << " : ["
                 << statusTag(ml.status) << "] " << ml.reason << "\n";
         }
 
@@ -239,7 +259,7 @@ void LoggerText::flushMetrics()
         // value column: one straight edge for every note in the test, and
         // clearly subordinate to the row it belongs to.
         if (describe && !ml.description.empty())
-            writeWrapped(lineIndent * 2 + padTarget + 3, ml.description);
+            writeWrapped(metricIndent * 2 + maxWidth + 3, ml.description);
     }
 
     metricLines.clear();
@@ -296,18 +316,30 @@ void LoggerText::writeWrapped(int column, const std::string &text)
         out << pad << line << "\n";
 }
 
-void LoggerText::printBaselineDelta(const std::string &key, float value)
+void LoggerText::printBaselineDelta(const std::string &key, double value,
+                                    Direction direction)
 {
     auto it = baseline.find(key);
     if (it == baseline.end())
         return;
 
-    float base  = it->second;
-    float delta = (base != 0.0f) ? 100.0f * (value - base) / base : 0.0f;
+    const double base  = it->second;
+    const double delta = (base != 0.0) ? 100.0 * (value - base) / base : 0.0;
 
-    char  sign     = (delta >= 0.0f) ? '+' : '-';
-    float absDelta = (delta < 0.0f)  ? -delta : delta;
+    const char   sign     = (delta >= 0.0) ? '+' : '-';
+    const double absDelta = (delta < 0.0)  ? -delta : delta;
+
+    // Which way a reading moved is not which way is better: on a latency or
+    // numeric-error row, +3% is a regression.  A bare signed percentage has
+    // always read as good news, so say which it is.
+    const bool improved = (direction == Direction::LowerIsBetter) ? (delta < 0.0)
+                                                                  : (delta > 0.0);
 
     out << "  (was " << std::fixed << std::setprecision(2) << base
-        << ", " << sign << std::setprecision(1) << absDelta << "%)";
+        << ", " << sign << std::setprecision(1) << absDelta << "%";
+    // Below this the figure prints as 0.0%, and calling run-to-run noise
+    // "better" or "worse" would be inventing a result.
+    if (absDelta >= 0.05)
+        out << (improved ? " better" : " worse");
+    out << ")";
 }

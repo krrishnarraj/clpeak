@@ -7,16 +7,20 @@ shared library / Apple framework.
 ## Quick Lookups
 
 - The C ABI? → `clpeak_ffi.h` (catalog JSON, blocking `clpeak_launch` with a
-  streaming event callback, `clpeak_request_cancel`, saved-result loader)
+  streaming event callback, `clpeak_request_cancel`). There is no saved-result
+  loader: result files are JSON in the shape the GUI renders, so it reads them
+  with `dart:convert` and history survives a native library that won't load
 - Event JSON schema? → documented in `clpeak_ffi.h`; produced in
   `logger_ffi.cpp` (1:1 mirror of `LogEvent` in `include/common/logger.h`);
   decoded in `app/lib/src/ffi/clpeak_events.dart`
 - Test documentation (`desc` / `minfo`)? → authored natively, the test's at its
   `beginTest()` and each reading's at its own `emit()`
-  (`include/common/AGENTS.md`); the GUI reads both off the metric rows, since a
-  reopened file has no event stream
+  (`include/common/AGENTS.md`).  The test's arrives once on `test_begin`, with
+  the rest of the resolved header (`shape`, `axis`, `direction`, `unit`,
+  `scale`); each reading's rides the reading
 - Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: same order,
-  result merge, centralized `--xml-file` save)
+  `RunDocument::append` merge, centralized `-o` save — which also stamps
+  `cancelled` so a partial run does not read as a complete one)
 - Desktop build + `clpeak-gui` target? → `CMakeLists.txt` (gated on
   `CLPEAK_ENABLE_GUI` + detected Flutter SDK; assembles the final bundle at
   `<build>/clpeak-gui/` so Flutter-generated runner projects stay untouched)
@@ -37,7 +41,7 @@ shared library / Apple framework.
 | File | Purpose |
 |------|---------|
 | `clpeak_ffi.h` | `extern "C"` surface + event schema + `CLPEAK_RUN_*` codes |
-| `clpeak_ffi.cpp` | launch loop, catalog, cancel, `clpeak_load_result_file_json` |
+| `clpeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save |
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
 | `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |

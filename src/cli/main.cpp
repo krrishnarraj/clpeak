@@ -2,8 +2,11 @@
 #include <common/common.h>
 #include <common/options.h>
 #include <common/inventory.h>
-#include <common/result_store.h>
+#include <common/run_document.h>
 #include <common/logger_text.h>
+#include <common/host_info.h>
+#include <version.h>
+#include <chrono>
 #include <functional>
 #include <iostream>
 
@@ -31,11 +34,6 @@
 #ifdef ENABLE_ONNX
 #include <onnx/onnx_peak.h>
 #endif
-
-static void mergeResults(ResultStore &dst, const ResultStore &src)
-{
-    dst.insert(dst.end(), src.begin(), src.end());
-}
 
 // A thin wrapper that captures everything we need per backend so the rest of
 // main() can iterate instead of repeating #ifdef-guarded blocks.
@@ -191,8 +189,12 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    ResultStore     combined;
-    DeviceInfoStore combinedDevices;
+    RunDocument combined;
+    combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
+    combined.meta.generatedAt   = isoTimestampUtc();
+    combined.meta.host          = probeHost();
+    combined.meta.invocation    = invocationFrom(opts, argc, argv);
+    const auto runStart = std::chrono::steady_clock::now();
 
     // Run every enabled backend in order.  No devices is not an error
     // (normal in VM/CI environments).  Only real failures (driver init,
@@ -210,22 +212,19 @@ int main(int argc, char **argv)
             new LoggerText(std::cout, opts.compareFile, opts.describe));
         peak->applyOptions(opts);
         int status = peak->runAll();
-        mergeResults(combined, peak->log->results);
-        combinedDevices.insert(combinedDevices.end(),
-                               peak->log->devices.begin(),
-                               peak->log->devices.end());
+        combined.append(peak->log->doc);
 
         if (status != 0)
             lastError |= status;
     }
 
-    // Centralized file dump: one file per enabled format.  A failed dump
-    // surfaces in the exit code like any backend failure.
-    if (opts.enableJson && !saveJson(combined, opts.jsonFile, combinedDevices))
-        lastError |= 1;
-    if (opts.enableCsv && !saveCsv(combined, opts.csvFile))
-        lastError |= 1;
-    if (opts.enableXml && !saveXml(combined, opts.xmlFile, combinedDevices))
+    combined.meta.durationS = std::chrono::duration<double>(
+                                  std::chrono::steady_clock::now() - runStart)
+                                  .count();
+
+    // Centralized file dump.  A failed dump surfaces in the exit code like any
+    // backend failure.
+    if (opts.enableOutput && !saveRunJson(combined, opts.outputFile))
         lastError |= 1;
 
     return lastError;

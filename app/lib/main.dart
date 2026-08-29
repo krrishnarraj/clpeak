@@ -22,7 +22,7 @@ Future<void> main() async {
   final settings = await SettingsService.load();
   bindings.setOnnxLibrary(settings.onnxLibraryPath);
 
-  final history = RunHistoryStore(bindings);
+  final history = RunHistoryStore();
   final service = BenchmarkService(bindings, history);
 
   // On quit during a run: cancel and let the native side save partial

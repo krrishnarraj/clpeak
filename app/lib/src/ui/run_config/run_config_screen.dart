@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../model/catalog.dart';
-import '../../model/result_entry.dart';
+import '../../model/result_model.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../theme/clpeak_theme.dart';

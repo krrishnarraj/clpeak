@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../model/result_entry.dart';
+import '../model/result_model.dart';
 
 /// clpeak's design language — an *instrument console*, not a Material app.
 ///

@@ -135,8 +135,8 @@ class _ExportButton extends StatelessWidget {
         final export = context.read<ExportService>();
         final messenger = ScaffoldMessenger.of(context);
         try {
-          final xml = await history.xmlFile(summary);
-          await export.exportXml(xml, suggestedName: summary.fileName);
+          final file = await history.documentFile(summary);
+          await export.exportRun(file, suggestedName: summary.fileName);
         } catch (e) {
           messenger.showSnackBar(
               SnackBar(content: Text('Export failed: $e')));

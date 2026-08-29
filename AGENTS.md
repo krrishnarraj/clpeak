@@ -52,11 +52,11 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` (C API — no library needed to build) |
 | `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` — refresh the vendored ONNX Runtime headers) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
-| `results/` | Saved reference runs (`--xml-file` output) per vendor — the baselines a suspicious number gets checked against |
+| `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 | `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
-| `docs/` | GitHub Pages site (Jekyll, built natively by Pages from this folder — no plugins). Also holds the app screenshots the README links to, in `docs/assets/img/` |
+| `docs/` | GitHub Pages site (Jekyll, built natively by Pages from this folder — no plugins). `format-v3.md` is the published result-format schema. Also holds the app screenshots the README links to, in `docs/assets/img/` |
 
 ## Build
 
@@ -78,7 +78,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 - **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h`
 - **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface
 - **Explaining what a test measures?** → `include/common/AGENTS.md` § Test documentation
-- **Result output format?** → `include/common/result_store.h` + `src/common/AGENTS.md`
+- **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
 

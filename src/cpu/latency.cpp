@@ -2,7 +2,7 @@
 
 #include <cpu/cpu_peak.h>
 #include <common/common.h>
-#include <common/result_store.h>
+#include <common/run_document.h>
 
 #include <algorithm>
 #include <chrono>

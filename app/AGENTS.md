@@ -52,19 +52,31 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   name's edge was tried and dropped, since on a wide desktop window it left a
   visible gap between a short name and its glyph.  In tests that makes a
   documented name's plain text `name + U+FFFC`: match it with
-  `find.textContaining`, not `find.text`.  Text comes off the result rows
-  (`ResultEntry.description` / `.metricDescription`), **not** off the
-  `test_begin` event — that would create a `TestResult` before its first
-  measurement, which `CategoryGroup` reads as fully-skipped and files under
-  "not supported".
+  `find.textContaining`, not `find.text`.  A test's own text arrives on
+  `test_begin`, inside the `TestHeader` a `TestResult` is built from; each
+  reading's rides the reading.
+- Collapsed number, or a table of readings? → `TestResult.shape` /
+  `.collapsible` (`lib/src/model/run_document.dart`).  A **homogeneous** test
+  collapses to its best reading — its readings are variants of one measurement.
+  A **heterogeneous** one never does: its readings measure different things,
+  and the largest is not the test's result but merely its largest number, so it
+  renders as an always-open mini-table headed by its `axis` ("DATA TYPE").  A
+  single-reading test collapses whatever its shape, since a one-row table says
+  nothing the row does not.  `shape` is authored natively and cannot be
+  inferred — see `docs/format-v3.md`.
+- Readings that could not be taken? → `DeviceRun.unavailable`, rendered by
+  `_UnavailableSection` at the foot of the page.  It collects whole
+  unsupported tests **and** the individual readings missing from tests that
+  otherwise ran, so the tables above hold nothing but measurements.
 - History persistence? → `lib/src/services/run_history_store.dart`
-  (`<base>/runs/<id>.xml` written natively via `--xml-file`, `index.json`
-  sidecar; viewing goes XML → native loader → JSON).  `<base>` is
-  `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a macOS TCC
-  consent prompt — and `<app documents>/clpeak` on Android/iOS, where that
-  directory is inside the sandbox and is what the Files app shows.  Device
-  properties reach a reopened run through the file's `devices` block, not the
-  event stream — see `RunDocument.fromEntriesJson`.
+  (`<base>/runs/<id>.clpeak.json` written natively via `-o`, `index.json`
+  sidecar).  Viewing is a plain `jsonDecode` — the saved document is already
+  the shape the UI renders, so there is no native loader in the path and
+  history stays readable when the native library cannot be loaded at all.
+  `<base>` is `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a
+  macOS TCC consent prompt — and `<app documents>/clpeak` on Android/iOS,
+  where that directory is inside the sandbox and is what the Files app shows.
+  Files from an older `format_version` are skipped, not half-parsed.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
 - Which ONNX Runtime is loaded, and how a user changes it? →
   `lib/src/ui/settings/settings_screen.dart` + `SettingsService.onnxLibraryPath`.

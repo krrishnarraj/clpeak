@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../ffi/clpeak_bindings.dart';
-import '../../model/result_entry.dart';
+import '../../model/result_model.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';

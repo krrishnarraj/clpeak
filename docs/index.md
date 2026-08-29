@@ -162,7 +162,7 @@ whichever API is doing the work.
 ./clpeak --cuda --vulkan            # or several
 ./clpeak --single-precision-compute # one test, everywhere
 ./clpeak --describe                 # explain what each reading measures
-./clpeak --json-file out.json       # save results (also --xml-file / --csv-file)
+./clpeak -o out.clpeak.json         # save results (one JSON document)
 ./clpeak --compare baseline.json    # diff this run against a saved baseline
 ```
 

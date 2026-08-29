@@ -404,7 +404,7 @@ fp16 error matching the CPU's says both accumulate in fp16 — combined with
 6.2 TFLOPS (1.5x this machine's MPS GEMM fp16 peak) that row is the ANE.
 CoreML's fp32 row is the interesting one: 0.4 ppm rules out fp16 arithmetic,
 and its 2.3 TFLOPS sits in the Accelerate sgemm band (2.18 best over a size
-sweep, `results/Apple/M1_Pro.xml`) — so CoreML serves fp32 from the CPU
+sweep, the Metal reference run in `results/Apple/`) — so CoreML serves fp32 from the CPU
 matrix coprocessor, not the Neural Engine, an internal routing decision ORT
 never reports. The size curves above agree: the fp32 row behaves like AMX
 (faster the bigger it gets) and the fp16 row like the ANE (a cliff once it

@@ -4,24 +4,33 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import '../ffi/clpeak_bindings.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
 
 /// Persists every run under `<base>/runs/`:
-///   `<id>.xml`   canonical schema-v2 XML written by the NATIVE side
-///                (clpeak_launch --xml-file) — also the export artifact
-///   index.json   {"runs":[RunSummary...]} for a fast history list
+///   `<id>.clpeak.json`  the run document, written by the NATIVE side
+///                       (clpeak_launch -o) — also the export artifact
+///   index.json          {"runs":[RunSummary...]} for a fast history list
 ///
-/// Orphan XMLs (present on disk but missing from the index, e.g. after an
-/// app kill mid-finalize) are re-adopted on load via the native loader.
+/// Orphan documents (present on disk but missing from the index, e.g. after
+/// an app kill mid-finalize) are re-adopted on load.
+///
+/// Files are read here with dart:convert rather than through the native
+/// library: the saved document is already the shape the UI renders, so a
+/// round trip through FFI would buy nothing — and history stays readable even
+/// when the native library cannot be loaded at all.
 class RunHistoryStore {
-  RunHistoryStore(this._bindings, {Directory? directoryOverride})
-      : _override = directoryOverride;
+  RunHistoryStore({Directory? directoryOverride}) : _override = directoryOverride;
 
-  final ClpeakBindings _bindings;
   final Directory? _override;
   Directory? _dir;
+
+  /// Suffix rather than plain `.json`: it names the format at a glance in a
+  /// directory a user is expected to browse, and keeps the index sidecar
+  /// (index.json) out of the orphan scan.
+  static const fileSuffix = '.clpeak.json';
+
+  static String fileNameFor(String id) => '$id$fileSuffix';
 
   Future<Directory> runsDirectory() async {
     if (_dir != null) return _dir!;
@@ -57,9 +66,9 @@ class RunHistoryStore {
 
   File _indexFile(Directory dir) => File(p.join(dir.path, 'index.json'));
 
-  /// Absolute path a new run's XML should be written to.
-  Future<String> xmlPathFor(String id) async =>
-      p.join((await runsDirectory()).path, '$id.xml');
+  /// Absolute path a new run's document should be written to.
+  Future<String> filePathFor(String id) async =>
+      p.join((await runsDirectory()).path, fileNameFor(id));
 
   Future<List<RunSummary>> _readIndex(Directory dir) async {
     final f = _indexFile(dir);
@@ -81,7 +90,7 @@ class RunHistoryStore {
         .writeAsString(const JsonEncoder.withIndent(' ').convert(doc));
   }
 
-  /// History rows, newest first, adopting any orphan XML files.
+  /// History rows, newest first, adopting any orphan documents.
   Future<List<RunSummary>> list() async {
     final dir = await runsDirectory();
     final runs = await _readIndex(dir);
@@ -89,19 +98,19 @@ class RunHistoryStore {
 
     var adopted = false;
     await for (final f in dir.list()) {
-      if (f is! File || !f.path.endsWith('.xml')) continue;
+      if (f is! File || !f.path.endsWith(fileSuffix)) continue;
       final name = p.basename(f.path);
       if (known.contains(name)) continue;
-      final doc = _bindings.loadResultFile(f.path);
+      final doc = await _readDocument(f);
       if (doc == null) continue;
       final stat = await f.stat();
       runs.add(RunSummary.fromDocument(
-        id: p.basenameWithoutExtension(name),
+        id: name.substring(0, name.length - fileSuffix.length),
         fileName: name,
-        doc: RunDocument.fromEntriesJson(doc),
+        doc: doc,
         startedAt: stat.modified,
         durationMs: 0,
-        cancelled: false,
+        cancelled: doc.meta?.cancelled ?? false,
       ));
       adopted = true;
     }
@@ -131,23 +140,38 @@ class RunHistoryStore {
 
   Future<void> delete(RunSummary summary) async {
     final dir = await runsDirectory();
-    final xml = File(p.join(dir.path, summary.fileName));
-    if (await xml.exists()) await xml.delete();
+    final file = File(p.join(dir.path, summary.fileName));
+    if (await file.exists()) await file.delete();
     final runs = await _readIndex(dir)
       ..removeWhere((r) => r.id == summary.id);
     await _writeIndex(dir, runs);
   }
 
-  /// Load a saved run for viewing (XML → native loader → document).
+  /// Load a saved run for viewing.
   Future<RunDocument?> load(RunSummary summary) async {
     final dir = await runsDirectory();
-    final doc = _bindings.loadResultFile(p.join(dir.path, summary.fileName));
-    if (doc == null) return null;
-    return RunDocument.fromEntriesJson(doc);
+    return _readDocument(File(p.join(dir.path, summary.fileName)));
   }
 
-  Future<File> xmlFile(RunSummary summary) async {
+  /// Parse one saved document, or null when it is unreadable, not JSON, or
+  /// written by a clpeak whose format this build does not know.
+  Future<RunDocument?> _readDocument(File f) async {
+    try {
+      final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      if ((doc['format_version'] as num?)?.toInt() != formatVersion) return null;
+      return RunDocument.fromJson(doc);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<File> documentFile(RunSummary summary) async {
     final dir = await runsDirectory();
     return File(p.join(dir.path, summary.fileName));
   }
 }
+
+/// Dump-format version this build reads — must match RESULT_FORMAT_VERSION in
+/// include/common/run_document.h.  A file from another version is skipped
+/// rather than half-parsed.
+const int formatVersion = 3;

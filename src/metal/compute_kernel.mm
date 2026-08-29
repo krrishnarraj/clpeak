@@ -178,7 +178,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
             }
         }
 
-        test.emit(metricTag(v.label), value, {false, note(v.description)});
+        test.emit(metricTag(v.label), value, note(v.description).c_str());
     }
 
     return 0;

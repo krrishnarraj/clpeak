@@ -3,12 +3,14 @@
 //   CLPEAK_FFI_PATH=$PWD/../build-gui/clpeak_ffi.framework/clpeak_ffi \
 //     flutter test test/ffi_integration_test.dart
 // Skipped automatically when the variable is unset (pure-Dart CI).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:clpeak/src/ffi/clpeak_bindings.dart';
 import 'package:clpeak/src/ffi/clpeak_events.dart';
 import 'package:clpeak/src/ffi/clpeak_runner.dart';
-import 'package:clpeak/src/model/result_entry.dart';
+import 'package:clpeak/src/model/result_model.dart';
+import 'package:clpeak/src/model/run_document.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -38,14 +40,14 @@ void main() {
     // default.  Overrunning here is not a local failure: clpeak_launch
     // guards on a process-global flag, so the still-running sweep makes
     // every later launch in this file return CLPEAK_RUN_BUSY.
-    test('cpu quick run streams events and saves xml',
+    test('cpu quick run streams events and saves a document',
         timeout: const Timeout(Duration(minutes: 5)), () async {
-      final xml = File(
-          '${Directory.systemTemp.path}/clpeak_dart_ffi_test.xml');
-      if (xml.existsSync()) xml.deleteSync();
+      final out = File(
+          '${Directory.systemTemp.path}/clpeak_dart_ffi_test.clpeak.json');
+      if (out.existsSync()) out.deleteSync();
 
-      final run = ClpeakRunner(bindings)
-          .start(['--cpu', '-i', '1', '--xml-file', xml.path]);
+      final run =
+          ClpeakRunner(bindings).start(['--cpu', '-i', '1', '-o', out.path]);
       final events = await run.events.toList();
       final rc = await run.result;
 
@@ -53,42 +55,41 @@ void main() {
       expect(events.last, isA<DoneEvent>());
       final metrics = events.whereType<MetricEvent>().toList();
       expect(metrics, isNotEmpty);
-      expect(metrics.first.entry.backend, 'CPU');
-      expect(
-          metrics.any((m) =>
-              m.entry.status == ResultStatus.ok && m.entry.value > 0),
-          isTrue);
-      expect(xml.existsSync(), isTrue);
+      expect(metrics.first.backend, 'CPU');
+      expect(metrics.any((m) => m.metric.isOk && m.metric.value > 0), isTrue);
+      expect(out.existsSync(), isTrue);
 
-      // What the test measures reaches the GUI live, on the test_begin event…
+      // The whole resolved header reaches the GUI live, on test_begin — shape
+      // and direction included, so the row exists before its first reading.
       final latency = events
           .whereType<TestBeginEvent>()
-          .firstWhere((e) => e.test == 'memory_latency');
-      expect(latency.description, isNotEmpty);
+          .firstWhere((e) => e.header.id == 'memory_latency');
+      expect(latency.header.description, isNotEmpty);
+      expect(latency.header.direction, Direction.lowerIsBetter);
+      expect(latency.header.units.quantity, Quantity.seconds);
 
-      // …and the readings' own notes ride the rows, which is also all a
+      // Each reading's own note rides the reading, which is also all a
       // reopened file has to go on.
-      final documented = metrics
-          .where((m) => m.entry.test == 'memory_latency')
-          .toList();
-      expect(documented.every((m) => m.entry.description.isNotEmpty), isTrue);
       expect(
-          documented.any((m) =>
-              m.entry.metric == 'DRAM x8' &&
-              m.entry.metricDescription.isNotEmpty),
+          metrics.any((m) =>
+              m.testKey == 'memory_latency' &&
+              m.metric.id == 'DRAM x8' &&
+              m.metric.description.isNotEmpty),
           isTrue);
 
-      // Round-trip the saved file through the native loader.
-      final doc = bindings.loadResultFile(xml.path);
-      expect(doc, isNotNull);
-      expect((doc!['entries'] as List).length, metrics.length);
-      final reloaded = (doc['entries'] as List)
-          .cast<Map<String, dynamic>>()
-          .firstWhere((e) =>
-              e['test'] == 'memory_latency' && e['metric'] == 'DRAM x8');
-      expect(reloaded['description'], latency.description);
-      expect(reloaded['metric_description'], isNotEmpty);
-      xml.deleteSync();
+      // Round-trip the saved document straight through dart:convert — the GUI
+      // reads history this way, with no native loader involved.
+      final doc = RunDocument.fromJson(
+          jsonDecode(out.readAsStringSync()) as Map<String, dynamic>);
+      final reloaded = doc.runs.single.findTest('memory_latency')!;
+      expect(reloaded.description, latency.header.description);
+      expect(reloaded.shape, latency.header.shape);
+      expect(
+          reloaded.metrics
+              .firstWhere((m) => m.id == 'DRAM x8')
+              .description,
+          isNotEmpty);
+      out.deleteSync();
     });
 
     test('bad args are rejected without side effects', () async {

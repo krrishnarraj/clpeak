@@ -4,7 +4,7 @@
 #ifdef ENABLE_CPU
 
 #include <cpu/cpu_peak.h>
-#include <common/result_store.h>
+#include <common/run_document.h>
 #include "cpu_kernels.h"
 
 #include <cctype>

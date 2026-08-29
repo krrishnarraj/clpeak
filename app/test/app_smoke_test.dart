@@ -30,7 +30,7 @@ void main() {
     final bindings = ClpeakBindings.open();
     final tmp = Directory.systemTemp.createTempSync('clpeak_smoke');
     addTearDown(() => tmp.deleteSync(recursive: true));
-    final history = RunHistoryStore(bindings, directoryOverride: tmp);
+    final history = RunHistoryStore(directoryOverride: tmp);
     final service = BenchmarkService(bindings, history);
 
     await tester.pumpWidget(MultiProvider(

@@ -1,7 +1,7 @@
 #include "logger_ffi.h"
 
 #include <common/common.h>
-#include <common/result_store.h>
+#include <common/run_document.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -39,14 +39,34 @@ void appendStr(std::ostringstream &ss, const char *key, const std::string &value
 // hosts this library inside a toolkit that sets the locale for us (GTK's
 // gtk_init calls setlocale(LC_ALL, "")), so on a comma-decimal desktop a
 // printf("%.4f") emitted `"value":1234,5678` -- malformed JSON that the Dart
-// side dropped, leaving the live results view empty while the XML dump (which
-// never went through the C locale) stayed correct.
-std::string fmtFloat(float v)
+// side dropped, leaving the live results view empty while the file dump
+// (which never went through the C locale) stayed correct.
+//
+// Seven significant digits, matching the file writer, so a reading looks the
+// same live as it does after a reload.
+std::string fmtNum(double v)
 {
     std::ostringstream ss;
     ss.imbue(std::locale::classic());
-    ss << std::fixed << std::setprecision(4) << v;
+    ss << std::setprecision(7) << v;
     return ss.str();
+}
+
+// The resolved test header, identical on test_begin and test_skipped: the GUI
+// builds its test node from either, and both must describe the same thing.
+void appendTestHeader(std::ostringstream &ss, const LogEvent &e)
+{
+    appendStr(ss, "test",    e.testId);
+    appendStr(ss, "title",   e.testTitle);
+    appendStr(ss, "variant", e.testVariant);
+    appendStr(ss, "axis",    e.testAxis);
+    appendStr(ss, "category", categoryString(e.category));
+    appendStr(ss, "shape",     shapeString(e.shape));
+    appendStr(ss, "direction", directionString(e.direction));
+    appendStr(ss, "quantity",  quantityString(e.quantity));
+    appendStr(ss, "unit",      e.unit);
+    ss << ",\"scale\":" << fmtNum(e.scale);
+    appendStr(ss, "desc", e.testDescription);
 }
 
 } // namespace
@@ -54,7 +74,7 @@ std::string fmtFloat(float v)
 std::string ffiEventToJson(const LogEvent &e)
 {
     std::ostringstream ss;
-    ss.imbue(std::locale::classic());  // see fmtFloat -- the indices too
+    ss.imbue(std::locale::classic());  // see fmtNum -- the indices too
     ss << "{\"t\":\"" << kindTag(e.kind) << "\"";
 
     // Scope context — present on every scoped event.
@@ -66,6 +86,7 @@ std::string ffiEventToJson(const LogEvent &e)
     switch (e.kind)
     {
     case LogEvent::Kind::DeviceBegin:
+        appendStr(ss, "type", deviceTypeString(e.type));
         ss << ",\"platform_index\":" << e.platformIndex
            << ",\"device_index\":"   << e.deviceIndex
            << ",\"props\":[";
@@ -79,33 +100,43 @@ std::string ffiEventToJson(const LogEvent &e)
         break;
 
     case LogEvent::Kind::TestBegin:
-        appendStr(ss, "test",     e.testTag);
-        appendStr(ss, "display",  e.testDisplay);
-        appendStr(ss, "unit",     e.unit);
-        appendStr(ss, "category", categoryString(e.category));
-        appendStr(ss, "desc",     e.testDescription);
+        appendTestHeader(ss, e);
+        // A reopened test already has a node on the consumer's side; saying so
+        // keeps it from being rebuilt and losing the readings already in it.
+        ss << ",\"reopened\":" << (e.reopened ? "true" : "false");
         break;
 
     case LogEvent::Kind::Metric:
-        appendStr(ss, "category", e.entry.category);
-        appendStr(ss, "test",     e.entry.test);
-        appendStr(ss, "display",  e.testDisplay);
-        appendStr(ss, "metric",   e.entry.metric);
-        appendStr(ss, "unit",     e.entry.unit);
-        ss << ",\"value\":" << fmtFloat(e.entry.value);
-        appendStr(ss, "status", statusString(e.entry.status));
-        appendStr(ss, "reason", e.entry.reason);
-        ss << ",\"sub\":" << (e.subMetric ? "true" : "false");
-        appendStr(ss, "desc",  e.entry.description);
-        appendStr(ss, "minfo", e.entry.metricDescription);
+        // Enough to find the open test's node, and no more: its header
+        // arrived on test_begin and does not change per reading.
+        appendStr(ss, "test",    e.testId);
+        appendStr(ss, "variant", e.testVariant);
+        appendStr(ss, "metric",  e.metric.id);
+        appendStr(ss, "label",   e.metric.label);
+        if (e.metric.status == ResultStatus::Ok)
+        {
+            ss << ",\"value\":" << fmtNum(e.metric.value);
+        }
+        else
+        {
+            appendStr(ss, "status", statusString(e.metric.status));
+            appendStr(ss, "reason", e.metric.reason);
+        }
+        // Unit fields ride along only when this reading overrides its test's,
+        // which is what lets one test carry both TFLOPS and TOPS readings.
+        if (e.metric.hasUnit)
+        {
+            appendStr(ss, "unit",     e.metric.unit);
+            appendStr(ss, "quantity", quantityString(e.metric.quantity));
+            ss << ",\"scale\":" << fmtNum(e.metric.scale);
+        }
+        if (e.metric.direction != Direction::FromUnit)
+            appendStr(ss, "direction", directionString(e.metric.direction));
+        appendStr(ss, "minfo", e.metric.description);
         break;
 
     case LogEvent::Kind::TestSkippedAll:
-        appendStr(ss, "test",     e.testTag);
-        appendStr(ss, "display",  e.testDisplay);
-        appendStr(ss, "unit",     e.unit);
-        appendStr(ss, "category", categoryString(e.category));
-        appendStr(ss, "desc",     e.testDescription);
+        appendTestHeader(ss, e);
         ss << ",\"metrics\":[";
         for (size_t i = 0; i < e.metricNames.size(); i++)
         {
