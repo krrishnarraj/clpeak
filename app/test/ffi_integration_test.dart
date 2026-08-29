@@ -32,7 +32,14 @@ void main() {
       expect(backends.any((b) => b['name'] == 'CPU'), isTrue);
     });
 
-    test('cpu quick run streams events and saves xml', () async {
+    // A single `--cpu -i 1` sweep is ~35s on an M1 Pro and grows with the
+    // CPU test list (cache bandwidth, DRAM chase, SMT scaling, crypto,
+    // string, AMX, Apple BLAS), so it needs more than flutter_test's 30s
+    // default.  Overrunning here is not a local failure: clpeak_launch
+    // guards on a process-global flag, so the still-running sweep makes
+    // every later launch in this file return CLPEAK_RUN_BUSY.
+    test('cpu quick run streams events and saves xml',
+        timeout: const Timeout(Duration(minutes: 5)), () async {
       final xml = File(
           '${Directory.systemTemp.path}/clpeak_dart_ffi_test.xml');
       if (xml.existsSync()) xml.deleteSync();
@@ -86,8 +93,15 @@ void main() {
 
     test('bad args are rejected without side effects', () async {
       final run = ClpeakRunner(bindings).start(['--bogus-flag']);
+      final rc = await run.result;
+      // A busy launch emits no events at all, so the drain below would hang
+      // until this test's own timeout and blame the wrong run.  Say plainly
+      // that an earlier run is still holding the process-global guard.
+      expect(rc, isNot(clpeakRunBusy),
+          reason: 'a previous run is still in flight (CLPEAK_RUN_BUSY) — it '
+              'overran its timeout rather than this test misbehaving');
+      expect(rc, clpeakRunBadArgs);
       final events = await run.events.toList();
-      expect(await run.result, clpeakRunBadArgs);
       expect(events.whereType<NoteEvent>(), isNotEmpty);
       final done = events.last as DoneEvent;
       expect(done.status, clpeakRunBadArgs);
