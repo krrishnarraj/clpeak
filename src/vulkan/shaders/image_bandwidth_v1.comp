@@ -1,56 +1,85 @@
 #version 450
 
-// Image (texture) bandwidth.  Each WI reads 16 RGBA-float pixels using
-// the combined image-sampler with nearest + unnormalized coordinates,
-// measuring the full Vulkan texture pipeline (sampler → cache → data).
+// Image (texture) bandwidth.  Each WI reads 16 RGBA-float texels with
+// texelFetch -- an integer-coordinate load that bypasses the sampler
+// altogether, which is what OpenCL's read_imagef(int2) and SYCL's unsampled
+// read() also compile to.  Sampling instead (texture(), which glslang turns
+// into OpImageSampleExplicitLod) binds the VkSampler, and because that sampler
+// is a runtime descriptor the shader compiler cannot fold away the filter and
+// address-mode resolution -- the texture unit does it per request.  NVIDIA does
+// not care; Mali and llvmpipe cap far below their DRAM roof for it.  See the
+// image-bandwidth block in include/common/common.h.
 //
 // Bytes = IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs.
 
 layout(local_size_x = 256) in;
 
+// The image extent as specialization constants rather than textureSize(): the
+// host picks the extent and sizes the dispatch from it anyway, and handing the
+// driver the literals lets every divide and modulo below fold into a shift and
+// a mask.  GPUs without an integer-divide unit -- Mali, and llvmpipe's scalar
+// path -- pay for those on every fetch otherwise.
+layout(constant_id = 0) const int IMG_W = 4096;
+layout(constant_id = 1) const int IMG_H = 4096;
+
+// The block shape the walk covers the image in.  TILE_W = IMG_W with TILE_H = 1
+// is the plain row-major sweep -- consecutive lanes run along x.  Anything
+// smaller hands each run of TILE_W*TILE_H consecutive lanes a 2D block instead,
+// which is what a driver-swizzled image wants: see image_bandwidth.cpp.  Must
+// divide the extent exactly, or the walk stops being a bijection.
+layout(constant_id = 2) const int TILE_W = 4096;
+layout(constant_id = 3) const int TILE_H = 1;
+
+// texelFetch ignores the sampler half of the descriptor; the binding stays a
+// combined image sampler because that is what GLSL's sampler2D is.
 layout(set = 0, binding = 0) uniform sampler2D img;
 layout(set = 0, binding = 1) writeonly buffer Output {
     float data[];
 } outputBuf;
 
-// walk == 0 gives each warp 32 texels consecutive along x; walk == 1 gives it
-// 32 texels consecutive along y, one row pitch apart.  Both cover every pixel
-// exactly once (the map is a transpose), so the byte count is the same and the
-// two rates are directly comparable.  The pair is a --verbose-only probe of how
-// the driver laid the image out -- see image_bandwidth.cpp.
+// walk == 0 walks the TILE_W x TILE_H blocking above; walk == 1 transposes the
+// whole image, giving each warp texels consecutive along y, one row pitch
+// apart.  Every shape covers each pixel exactly once (each map is a bijection),
+// so the byte count is identical and the rates are directly comparable.
 layout(push_constant) uniform PushConstants {
     int walk;
 } pc;
+
+// Pixel index -> texel coordinate, in TILE_W x TILE_H blocks walked row-major,
+// row-major within a block.
+ivec2 blocked(int pixel)
+{
+    int tilesX  = IMG_W / TILE_W;
+    int perTile = TILE_W * TILE_H;
+    int t  = pixel / perTile;
+    int it = pixel - t * perTile;
+    return ivec2((t % tilesX) * TILE_W + (it % TILE_W),
+                 (t / tilesX) * TILE_H + (it / TILE_W));
+}
 
 void main()
 {
     int gid    = int(gl_GlobalInvocationID.x);
     int gsize  = int(gl_NumWorkGroups.x * gl_WorkGroupSize.x);
-    ivec2 sz   = textureSize(img, 0);
-    int width  = sz.x;
-    int height = sz.y;
-    int total  = width * height;
 
-    // The two walks are spelled as separate loops, not a select on the
-    // coordinate, so the row-major path stays exactly the shape it had before
-    // the probe existed.
+    // No wrap on the pixel index.  The host sizes the dispatch so that
+    // globalWIs * IMAGE_FETCH_PER_WI <= IMG_W * IMG_H, so the largest index a
+    // work-item can form is already the last texel -- the modulo that used to
+    // guard this never fired, and cost a runtime division per fetch to prove it.
+    // The walks are spelled as separate loops, not a select inside one, so
+    // neither carries a branch the other's shape would have to pay for.
     vec4 sum = vec4(0.0);
     if (pc.walk == 0)
     {
         for (int i = 0; i < 16; i++)
-        {
-            int pixel = (gid + i * gsize) % total;
-            sum += texture(img, vec2(float(pixel % width),
-                                     float(pixel / width)));
-        }
+            sum += texelFetch(img, blocked(gid + i * gsize), 0);
     }
     else
     {
         for (int i = 0; i < 16; i++)
         {
-            int pixel = (gid + i * gsize) % total;
-            sum += texture(img, vec2(float(pixel / height),
-                                     float(pixel % height)));
+            int pixel = gid + i * gsize;
+            sum += texelFetch(img, ivec2(pixel / IMG_H, pixel % IMG_H), 0);
         }
     }
     outputBuf.data[gid] = sum.x + sum.y + sum.z + sum.w;

@@ -60,21 +60,56 @@ static const unsigned int LMEM_REPS = 64;
 // image_bandwidth_kernels.cl
 static const unsigned int IMAGE_FETCH_PER_WI = 16;
 
-// Image bandwidth races two walk orders, the same way the compute tests race
-// two MAD-chain shapes and for the same reason: no single shape is best on
-// every vendor.  Here the variable is the image's memory layout, which is the
-// driver's choice and not visible through any of these APIs.  A row-major walk
-// gives a warp 32 texels along x -- ideal for a linear surface, but 8 scattered
-// chunks of a block-linear one -- and the transposed walk is the mirror image.
-// On an RTX 5060 that is worth 270 vs 419 GBPS through CUDA (whose CUarray is
-// always block-linear) while Vulkan reads ~415 either way, so a row-major-only
-// test reported the same texture path 1.5x apart across APIs.  Racing the pair
-// brings CUDA, Vulkan and OpenCL within 1.3% of each other, all at ~99% of the
-// card's global bandwidth.
+// The image read must never go through a sampler the shader compiler cannot
+// see.  Vulkan's VkSampler is a descriptor bound at dispatch time, so a shader
+// that samples through it compiles to OpImageSampleExplicitLod and the compiler
+// cannot fold away filter and address-mode resolution it will not know until
+// the descriptor is bound -- the texture unit redoes that on every request.
+// NVIDIA is indifferent and hid this for a long time; while Vulkan sampled, a
+// Mali G615 read 6.25 GBPS against the 14.4 OpenCL got through the same memory
+// path, and llvmpipe split 20.1 vs 32.7 the same way.  texelFetch is the fix,
+// and is what OpenCL's read_imagef(int2) and SYCL's unsampled read() already
+// compile to.  The samplers the other backends use are compile-time constants
+// -- Metal's constexpr sampler, OpenCL's inline sampler_t, CUDA's
+// CU_TR_FILTER_MODE_POINT texture descriptor -- so those compilers do know the
+// filter mode and none of them pays this.
 //
-// Unlike the MAD chains, neither walk can flatter the result and no ratio guard
-// is needed: both read every pixel exactly once, so the byte count is identical
-// and only the access order differs.
+// The filtered path is worth measuring, but it is a different quantity and has
+// its own row -- Metal's texture_sample_rate, where the texture is deliberately
+// cache-resident so the filter units, not DRAM, are the limiter.
+//
+// Image bandwidth races walk shapes, the same way the compute tests race two
+// MAD-chain shapes and for the same reason: no single shape is best on every
+// vendor.  Here the variable is the image's memory layout, which is the
+// driver's choice and not visible through any of these APIs.
+//
+// Two of the shapes are 1D runs.  A row-major walk gives a warp 32 texels along
+// x -- ideal for a linear surface, but 8 scattered chunks of a block-linear one
+// -- and the transposed walk is the mirror image.  On an RTX 5060 that is worth
+// 270 vs 419 GBPS through CUDA (whose CUarray is always block-linear) while
+// Vulkan reads ~415 either way, so a row-major-only test reported the same
+// texture path 1.5x apart across APIs.
+//
+// A 1D run of either orientation still loses half of a *swizzled* layout.  Mali
+// stores an optimal-tiled image in 16x16 u-order blocks, where a 64-byte line
+// holds a 2x2 quad of RGBA32F texels, so a walk along x takes two texels from
+// each line and drops the other two -- and the transpose fails identically on
+// the other axis.  Racing only those two hid it: a Mali G615 read 7.29 and 6.53
+// GBPS against a 14.2 GBPS global roof.  So the Vulkan backend also races
+// blocked shapes, where a run of TILE_W*TILE_H consecutive lanes covers a 2D
+// block and one line is consumed by one warp.  That is worth 2x on Mali (14.9)
+// and 14% on an M1 Pro (154 -> 176, its global roof), and Apple turns out to
+// swizzle too.  Which block size wins is the swizzle granularity and the two
+// disagree -- Mali climbs to 16x16, Apple peaks at 2x2 -- so both ends run.
+//
+// The other five backends carry the two 1D shapes alone.  On an M1 Pro that
+// leaves OpenCL at 164 and Metal at 160 where Vulkan's blocked walk reaches
+// 176, so porting it is worth real bandwidth on Apple; Mali's OpenCL images are
+// evidently linear, since they sit at the roof on the row-major walk already.
+//
+// Unlike the MAD chains, no walk can flatter the result and no ratio guard is
+// needed: every shape reads every pixel exactly once, so the byte count is
+// identical and only the access order differs.
 //
 // Global bandwidth does NOT race, and that is deliberate.  OpenCL carries two
 // shapes -- `_local_offset`, where each work-group owns a contiguous
