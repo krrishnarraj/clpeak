@@ -14,6 +14,29 @@
 struct CliOptions;
 struct OrtRuntime;
 
+// Ceiling on the iteration count of a timed batch, for every throughput test
+// in this backend.  It is not a time budget -- each test keeps its own of
+// those -- it is the point past which more samples stop buying anything.
+//
+// Without it the budget alone sizes the batch, and at the small end of a
+// sweep that runs away: a 1x1 convolution over a 32x32 feature map takes
+// 166 us on an M1 Pro's Neural Engine, so a 2 s budget asks for twelve
+// thousand repetitions of it.  The mean stopped moving after a few hundred,
+// and the extra eleven thousand are the difference between measuring the
+// device and waiting for it.  The effect grows with the hardware: the faster
+// the provider, the more of the ladder lands in this regime, so an RTX 5060
+// under TensorRT spends more of its run here than a phone does.
+//
+// 500 leaves the search's own tolerance (3%) far above the sampling noise at
+// every rung measured, and it binds only where a rung is already fast enough
+// for the count to be meaningless.  Slow rungs never reach it and are
+// governed by the time budget exactly as before.
+//
+// The dispatch-latency test is the deliberate exception: there the
+// per-submission overhead *is* the measurement, one submission is
+// microseconds, and it passes its own far larger cap.
+constexpr unsigned int kOnnxMaxIters = 500;
+
 // One benchmarkable "device" of this backend: an ONNX Runtime execution
 // provider (EP).  NPUs are reachable only through such vendor runtimes --
 // the EP is the closest thing to an ISA they expose -- so each EP the

@@ -224,7 +224,7 @@ double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
 
   double per_iter_us = -1.0;
   if (timeRuns(rt, r, 1 + warmup) > 0.0)      // graph compile + warmup
-    per_iter_us = timeRuns(rt, r, 3);         // calibration probe
+    per_iter_us = timeRuns(rt, r, 1);         // calibration probe
   if (per_iter_us <= 0.0)
   {
     error  = r.error.empty() ? "run failed" : r.error;
@@ -234,8 +234,10 @@ double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, bool decode,
   }
 
   unsigned int iters = pickIters(per_iter_us, kBlockBudgetUs,
-                                 forceIters ? forced : 0);
-  double mean_us = timeRuns(rt, r, iters);
+                                 forceIters ? forced : 0, kOnnxMaxIters);
+  // The probe was one whole block; when the budget affords only one, it
+  // already is the measurement.
+  double mean_us = (iters > 1) ? timeRuns(rt, r, iters) : per_iter_us;
   if (mean_us <= 0.0)
   {
     error  = r.error.empty() ? "run failed" : r.error;

@@ -719,7 +719,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       double per_iter_us = -1.0;
       if (timeRuns(rt, g, 1 + warmupCount) > 0.0)   // compile + warmup
-        per_iter_us = timeRuns(rt, g, 3);           // calibration probe
+        per_iter_us = timeRuns(rt, g, 1);           // calibration probe
       if (per_iter_us <= 0.0)
       {
         if (firstErr.empty())
@@ -732,8 +732,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       unsigned int iters = pickIters(per_iter_us, kSizeBudgetUs,
-                                     forceIters ? specifiedIters : 0);
-      double mean_us = timeRuns(rt, g, iters);
+                                     forceIters ? specifiedIters : 0,
+                                     kOnnxMaxIters);
+      // The probe was one whole iteration, so when the budget affords only
+      // one, it already is the measurement -- and at that end of the ladder
+      // repeating it is the most expensive thing the sweep does.
+      double mean_us = (iters > 1) ? timeRuns(rt, g, iters) : per_iter_us;
       if (mean_us <= 0.0 && firstErr.empty())
       {
         firstErr  = g.error.empty() ? "run failed" : g.error;
@@ -778,6 +782,28 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       ep.providerKey.c_str(), v.label, (long long)bestDim);
           break;
         }
+      }
+
+      // A rung that measured slower than the ceiling ends the ladder here.
+      //
+      // The gate at the top of the loop asks the same question of the *next*
+      // size, but it has to answer it by extrapolating from the rate of the
+      // size before -- and an extrapolation cannot see a cliff, which is
+      // exactly what it is being asked to look for.  A provider that falls
+      // off one reads as fast right up to the rung that collapses: Core ML
+      // runs fp16 at 6.1 TFLOPS at 4096 and 0.34 at 8192, so the prediction
+      // for 8192 came out nineteen times short of the truth.
+      //
+      // This one is not a prediction.  The rung has been measured, it took
+      // longer than a whole iteration is allowed to take, and the next size
+      // is eight times the work -- so there is nothing above this worth the
+      // wait, whatever the rate did.
+      if (per_iter_us > kMaxIterUs)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 measured %.1f s per iteration, "
+                    "stopping\n", ep.providerKey.c_str(), v.label,
+                    (long long)D, per_iter_us / 1.0e6);
+        break;
       }
     }
 

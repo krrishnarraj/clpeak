@@ -245,7 +245,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       double per_iter_us = -1.0;
       if (timeRuns(rt, c, 1 + warmupCount) > 0.0)
-        per_iter_us = timeRuns(rt, c, 3);
+        per_iter_us = timeRuns(rt, c, 1);
       if (per_iter_us <= 0.0)
       {
         if (firstErr.empty())
@@ -258,8 +258,11 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       unsigned int iters = pickIters(per_iter_us, kSizeBudgetUs,
-                                     forceIters ? specifiedIters : 0);
-      double mean_us = timeRuns(rt, c, iters);
+                                     forceIters ? specifiedIters : 0,
+                                     kOnnxMaxIters);
+      // The probe was one whole pass; when the budget affords only one, it
+      // already is the measurement.
+      double mean_us = (iters > 1) ? timeRuns(rt, c, iters) : per_iter_us;
       if (mean_us <= 0.0 && firstErr.empty())
       {
         firstErr  = c.error.empty() ? "run failed" : c.error;
@@ -286,6 +289,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (rate > best) { best = rate; bestSpatial = sp; }
         if (++strikes >= kMaxStrikes)
           break;
+      }
+
+      // Measured, not predicted.  The gate at the top of the loop extrapolates
+      // the next size's cost from this one's rate, which is blind to a
+      // provider that falls off a cliff between rungs; this one asks only
+      // whether the pass just timed took longer than a pass is allowed to,
+      // and the next feature map is four times the work.
+      if (per_iter_us > kMaxIterUs)
+      {
+        CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.1f s per pass, "
+                    "stopping\n", ep.providerKey.c_str(), v.label,
+                    (long long)sp, (long long)sp, per_iter_us / 1.0e6);
+        break;
       }
     }
 

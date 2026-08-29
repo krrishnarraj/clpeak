@@ -116,9 +116,15 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
   if (!st && warmed > 0.0)
   {
-    double probe = run(3);
+    double probe = run(1);
     if (probe > 0.0)
-      r.us = run(pickIters(probe, kSizeBudgetUs, forceIters ? forced : 0));
+    {
+      unsigned int iters = pickIters(probe, kSizeBudgetUs,
+                                     forceIters ? forced : 0, kOnnxMaxIters);
+      // The probe was one whole copy; when the budget affords only one, it
+      // already is the measurement.
+      r.us = (iters > 1) ? run(iters) : probe;
+    }
   }
   if (st)
     r.error = onnxStatusText(rt, st);

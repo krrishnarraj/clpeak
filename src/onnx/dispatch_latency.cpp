@@ -144,6 +144,10 @@ Timed timeGraph(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   if (!st && run(1 + warmup) > 0.0)
   {
+    // Five runs, where every other test here probes with one: this is the
+    // one measurement that *is* the per-submission overhead, a submission
+    // costs microseconds, and five of them cost nothing.  Probing with one
+    // would buy no time and size the batch off a single noisy sample.
     double probe = run(5);
     if (probe > 0.0)
     {

@@ -805,6 +805,55 @@ not depend on constant folding being disabled.
 `numeric_error.cpp` keeps using the plain, non-resident models: it compares
 actual output values, so it needs the real result rather than a reduction.
 
+## Three phases per rung, and only one of them is the measurement
+
+Every timed test here follows the shape the GPU backends use
+(`src/opencl/cl_peak.cpp`), and it is worth stating because this backend spent
+a long time not following it:
+
+1. **warmup** — `1 + warmupCount` runs, untimed. The extra `1` is not a spare:
+   several providers compile lazily on first inference, so run one is a
+   different event from run two.
+2. **probe** — exactly **one** timed run. It exists to size the next batch and
+   nothing else, so one is enough, and on a provider where a run costs seconds
+   the difference between one and three is most of the test. Probing with three
+   is how the fp16 matmul row came to spend 20 of its 24 seconds at 8192³
+   before any budget had a say.
+3. **timed** — `pickIters(probe, budget, forced, kOnnxMaxIters)` runs.
+
+Two consequences fall out of that shape and both are load-bearing:
+
+**When the budget affords one iteration, the probe already is the
+measurement.** `iters == 1` means the timed phase would re-run exactly what the
+probe just ran, at the most expensive rung of the ladder, for a second sample
+of the same thing. Every test here uses the probe's own timing instead.
+
+**A rung is capped in iterations as well as in time** — `kOnnxMaxIters` in
+`include/onnx/onnx_peak.h`, with the reasoning there. The time budget alone
+sizes a batch from the *device's* speed, which at the bottom of a ladder asks
+for thousands of repetitions of something that took microseconds. The faster
+the provider, the more of its ladder lands in that regime.
+
+`onnx-dispatch-latency` is the one deliberate exception, and its own comment
+says why: there the per-submission overhead is the measurement rather than a
+thing to divide out, so it probes with five and carries a far larger cap.
+
+## Bound a ladder on what it measured, not on what it predicts
+
+Each sweep gates the next rung on a per-iteration time predicted from the
+previous rung's rate. That gate is worth keeping — it is free, and it stops a
+hopeless size before a session is built for it — but it cannot do the job on
+its own, because the failure it is watching for is exactly the one an
+extrapolation cannot see. Core ML runs fp16 at 6.1 TFLOPS at 4096³ and 0.34 at
+8192³; the prediction for 8192³ came out nineteen times short.
+
+So `gemm.cpp` and `conv.cpp` also stop **after** a rung whose measured
+per-iteration time exceeded `kMaxIterUs`. That one is not a forecast: the rung
+has been timed, it took longer than an iteration is allowed to take, and the
+next size is four or eight times the work. Anything new that sweeps sizes here
+needs the same pair — a cheap predicted gate before the session, and a measured
+one after the timing.
+
 ## Report asymptotes, not readings at a size someone picked
 
 A number tied to a fixed problem size has an expiry date. Whatever size looks
@@ -817,9 +866,11 @@ rung for its working set, which does not expire either:
 - **`onnx-gemm`** doubles from 1024 until the rate stops improving, and reports
   the peak with the size that produced it. "The best this device can do at any
   size" means the same thing in ten years as it does now; "the rate at 4096"
-  does not. The search is bounded by a predicted per-iteration time and an
-  operand-memory ceiling, both of which scale themselves — hardware fast enough
-  to make a bigger size cheap is exactly the hardware that should try it. A
+  does not. The search is bounded by an operand-memory ceiling and by a
+  per-iteration time, predicted before each rung and re-checked against what
+  the rung actually measured (see above). Both scale themselves — hardware fast
+  enough to make a bigger size cheap is exactly the hardware that should try
+  it. A
   slow provider stops after two or three rungs; the M1 Pro's fp16 curve peaks
   at 2048 and collapses to 0.3 TFLOPS by 8192, which the strikes rule catches.
 - **`onnx-tensor-bw`** measures three fixed rungs, then climbs while the rate
