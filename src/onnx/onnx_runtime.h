@@ -27,8 +27,8 @@ struct OrtRuntime
   std::string       path;            // what was loaded; empty when static
 };
 
-// Point the loader at a specific library, ahead of $CLPEAK_ONNXRUNTIME_LIB and
-// the platform's conventional names.  Backs `--onnx-lib` and the FFI's
+// Point the loader at a specific library, ahead of the platform's conventional
+// names.  Backs `--onnx-lib` and the FFI's
 // clpeak_set_onnx_library(), which is how the GUI's settings screen chooses
 // between installed runtimes.  An empty path clears the override.
 //

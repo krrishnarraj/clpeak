@@ -162,8 +162,8 @@ int OnnxPeak::runAll()
       hasAccelerator = true;
   if (!hasAccelerator)
     log->note("ONNX: this onnxruntime build exposes CPU providers only -- "
-              "install a GPU/NPU-enabled build and point "
-              "CLPEAK_ONNXRUNTIME_LIB at it to benchmark accelerators\n");
+              "install a GPU/NPU-enabled build and point --onnx-lib at it "
+              "to benchmark accelerators\n");
 
   auto backendScope = log->beginBackend("ONNX");
 

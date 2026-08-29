@@ -53,8 +53,7 @@ missing GPU driver.
 **Choosing a runtime.** `--onnx-lib PATH`, `clpeak_set_onnx_library()` on the
 C ABI (what the GUI's settings screen calls, since
 `clpeak_copy_backend_catalog_json()` takes no arguments and enumeration is
-what loads the runtime), then `CLPEAK_ONNXRUNTIME_LIB`, then the platform's
-conventional names.  **A named library is authoritative**: if it will not
+what loads the runtime), then the platform's conventional names.  **A named library is authoritative**: if it will not
 load, the backend reports itself unavailable rather than falling through to
 whatever else is installed — a run labelled with one runtime and measured on
 another is the mistake the setting exists to prevent.  `onnxLoadDiagnostic()`

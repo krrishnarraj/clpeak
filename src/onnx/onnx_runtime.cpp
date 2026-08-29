@@ -6,7 +6,6 @@
 #include <common/dynlib.h>
 
 #include <cstdio>
-#include <cstdlib>
 #include <mutex>
 #include <string>
 
@@ -88,15 +87,13 @@ static std::string g_override;  // --onnx-lib / clpeak_set_onnx_library
 
 static void loadRuntime()
 {
-  // A library the user named -- by --onnx-lib, by the FFI setter, or in the
-  // environment -- is the library to measure, and nothing else will do.  The
-  // conventional names are searched only when nobody named one: quietly
-  // falling back would report a different runtime's version and a different
-  // runtime's numbers under the name of the one that was asked for, which is
-  // the one mistake this setting exists to prevent.
-  const char *ovr   = g_override.empty() ? nullptr : g_override.c_str();
-  const char *env   = std::getenv("CLPEAK_ONNXRUNTIME_LIB");
-  const char *named = ovr ? ovr : ((env && *env) ? env : nullptr);
+  // A library the user named -- by --onnx-lib or by the FFI setter -- is the
+  // library to measure, and nothing else will do.  The conventional names are
+  // searched only when nobody named one: quietly falling back would report a
+  // different runtime's version and a different runtime's numbers under the
+  // name of the one that was asked for, which is the one mistake this setting
+  // exists to prevent.
+  const char *named = g_override.empty() ? nullptr : g_override.c_str();
 
   void *lib = nullptr;
   if (named)

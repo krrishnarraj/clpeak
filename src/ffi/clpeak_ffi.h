@@ -36,7 +36,7 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_backend_catalog_json(void);
 CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 
 // Choose which onnxruntime shared library the ONNX backend loads, ahead of
-// $CLPEAK_ONNXRUNTIME_LIB and the platform's conventional names.  Pass an
+// the platform's conventional names.  Pass an
 // absolute path, or NULL/"" to go back to searching.  This is the settings-
 // screen entry point: the CLI grammar's `--onnx-lib` cannot serve it, because
 // clpeak_copy_backend_catalog_json() takes no arguments and enumeration is

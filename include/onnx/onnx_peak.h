@@ -67,8 +67,8 @@ public:
 // (accelerators first, CPU last).  Shared by enumerate() and runAll().
 std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt);
 
-// Choose which onnxruntime library to load, ahead of $CLPEAK_ONNXRUNTIME_LIB
-// and the platform's conventional names; empty clears the choice.  Backs
+// Choose which onnxruntime library to load, ahead of the platform's
+// conventional names; empty clears the choice.  Backs
 // `--onnx-lib` and the FFI's clpeak_set_onnx_library().  Re-declared here so
 // the CLI and the FFI can set it without reaching into the backend's private
 // loader header (and its ONNX Runtime include).  Details, including the

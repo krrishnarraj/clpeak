@@ -1,7 +1,9 @@
-import 'dart:io' show Platform;
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../ffi/clpeak_bindings.dart';
@@ -59,7 +61,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
       acceptedTypeGroups: const [XTypeGroup(label: 'Shared library')],
     );
     if (file == null) return;
-    await _applyLibrary(file.path);
+    await _applyLibrary(await _durablePath(file.path));
+  }
+
+  /// Where the chosen library should live so it is still there next launch.
+  ///
+  /// Android's picker goes through the storage-access framework and hands back
+  /// a copy it made under `{cacheDir}/{uuid}/`, which the OS is free to evict
+  /// whenever it wants the space — a runtime chosen today would simply be gone
+  /// tomorrow, and the setting would look like it had forgotten itself.  So
+  /// the file is copied somewhere durable inside the sandbox, which is also
+  /// the only place Android will dlopen from.  One library is kept at a time;
+  /// it is ~27 MB.
+  ///
+  /// Desktop pickers return the real file, already stable and not ours to
+  /// duplicate.
+  Future<String> _durablePath(String picked) async {
+    if (!Platform.isAndroid) return picked;
+    final dir = Directory(
+        p.join((await getApplicationSupportDirectory()).path, 'onnxruntime'));
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+    dir.createSync(recursive: true);
+    final dest = p.join(dir.path, p.basename(picked));
+    await File(picked).copy(dest);
+    return dest;
+  }
+
+  /// Back to the bundled/system runtime, and drop the imported copy with it —
+  /// leaving 27 MB stranded in the sandbox would be its own small bug.
+  Future<void> _resetLibrary() async {
+    await _applyLibrary('');
+    if (!Platform.isAndroid) return;
+    final dir = Directory(
+        p.join((await getApplicationSupportDirectory()).path, 'onnxruntime'));
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
   }
 
   @override
@@ -105,7 +140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     savedPath: settings.onnxLibraryPath,
                     locked: running,
                     onPick: _pickLibrary,
-                    onReset: () => _applyLibrary(''),
+                    onReset: _resetLibrary,
                   ),
                 ],
               ),

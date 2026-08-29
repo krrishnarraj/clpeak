@@ -105,7 +105,7 @@ static const char *helpStr =
 #ifdef ENABLE_ONNX
     "\n  --onnx-device list          ONNX Runtime execution-provider index/indices"
     "\n  --onnx-lib path             onnxruntime shared library to load"
-    "\n                              (overrides $CLPEAK_ONNXRUNTIME_LIB)"
+    "\n                              (default: the platform's conventional names)"
 #endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
