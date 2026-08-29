@@ -178,10 +178,22 @@ changing a kernel.
   glibc's switch to non-temporal stores above a size threshold, bypassing the
   cache under test — the first "L1 write" landed exactly at DRAM bandwidth. The
   DRAM STREAM copy keeps libc memcpy on purpose.
-- **Size DRAM arrays off the AGGREGATE LLC and first-touch them in parallel.**
-  On multi-CCX/CCD AMD, `cpu0`'s L3 is one slice; sizing off it let a 64 MB array
-  sit entirely in a 64 MB aggregate L3 and report ~550 GB/s "DRAM" read.
-  Single-threaded init puts every page on one NUMA node and collapses the number.
+- **Size DRAM working sets off the SUM of every cache level, and first-touch
+  them in parallel.** Not "the LLC": that name fails twice over. On
+  multi-CCX/CCD AMD `cpu0`'s L3 is one slice, and on a chip whose last level
+  *is* the L2 (Apple Silicon, Snapdragon X, most phone SoCs) there is no L3 to
+  size off at all — a Snapdragon X Elite has 36 MB of aggregate L2 and reports
+  none. `l1dTotalBytes + l2TotalBytes + l3Total` at the classic STREAM 4x
+  margin covers both; `pickStreamFloats` (`bandwidth.cpp`) and the DRAM
+  pointer-chase (`latency.cpp`) both use it. Single-threaded init puts every
+  page on one NUMA node and collapses the number.
+- **No L3 is a real answer — never fabricate one.** `detectCpuInfo` leaves
+  `l3CacheBytes` at 0 when the OS reports no L3, and the L3 cache-bandwidth and
+  latency rows skip as Unsupported rather than measure a made-up working set
+  that still fits in L2. An invented 8 MB there put an "L3" in the device
+  header of every Apple part, reported an L3 *faster* than the L2 next to it,
+  and undersized the STREAM arrays. Apple additionally needs its L2 total
+  summed over `hw.perflevel*.cpusperl2` — one sysctl reports one cluster.
 - **macOS has no hard thread affinity**, so `ST` numbers vary run-to-run as the
   kernel lands on a P- or E-core; `MT` is stable. Pinning is real on
   Linux/Windows. This is also why SMT scaling reports Unsupported on macOS —
@@ -213,9 +225,16 @@ Numbers to sanity-check a change against; anything far off is a bug, not a win.
   when validating on a new x86 host or on real SVE silicon.
 - Expect write MT to scale far worse than read MT on Apple (~2.5× vs ~7.7×):
   the store path has a shared ceiling, reproduced outside clpeak.
+- **DRAM `read` above the memory's rated peak is always a sizing bug**, never a
+  win — the arrays are partly cache-resident. `--verbose` prints the array size
+  and the total cache it has to clear. `copy`/`triad` landing well *below*
+  `read` is not the mirror-image bug: they count only the bytes asked for while
+  most CPUs also fetch each line before overwriting it, so ~1.5x of copy's
+  traffic and ~1.33x of triad's goes uncounted. Apple is the outlier that makes
+  `copy` come out *above* `read` (M1 Pro: read ~119, copy ~158, triad ~132).
 - The STREAM triad row **is** vectorised on both arm64 and x86 — do not
-  re-investigate that. It reads below copy everywhere (uncounted RFO traffic),
-  but collapses specifically on Windows (triad/copy 0.32–0.38 vs 0.60–0.92
+  re-investigate that. It reads below copy everywhere, but collapses
+  specifically on Windows (triad/copy 0.32–0.38 vs 0.60–0.92
   elsewhere), which tracks page-size/TLB pressure over three concurrent 256 MB
   streams, not codegen.
 

@@ -106,7 +106,10 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
        "One thread reading from the mid-level cache, the next step out.",
        "Every core reading from L2 at once; where L2 is shared, the data is "
        "split between them so it still fits."},
-      {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true,
+      {"L3", info.l3CacheBytes
+                 ? std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes)
+                 : 0, // 0 = this CPU has no L3; the loop skips the row
+       true,
        "One thread reading from the large cache shared by all cores.",
        "Every core reading from that shared cache at once, each taking a slice "
        "of it."},
@@ -116,6 +119,19 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
   for (const auto &lvl : levels)
   {
+    // A CPU with no L3 (Apple Silicon, Snapdragon X, most phone SoCs) gets the
+    // row as Unsupported rather than a measurement: without a real size the
+    // working set falls back to something that still fits in L2, and the row
+    // silently reports L2 a second time.
+    if (lvl.bytes == 0)
+    {
+      test.skip(std::string(lvl.name) + " ST", ResultStatus::Unsupported,
+                "no L3 on this CPU", lvl.stNote);
+      test.skip(std::string(lvl.name) + " MT", ResultStatus::Unsupported,
+                "no L3 on this CPU", lvl.mtNote);
+      continue;
+    }
+
     size_t M1 = (size_t)(lvl.bytes / sizeof(float));
     if (M1 > allocFloats)
       M1 = allocFloats;
@@ -243,18 +259,26 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   return 0;
 }
 
-// Number of floats per STREAM array.  Must exceed the *aggregate* LLC (on
-// multi-CCX/CCD AMD the per-instance L3 is only a slice — sizing off it would
-// let the whole array sit in cache and report cache, not DRAM, bandwidth), and
-// is bounded so we don't hog memory.  Even split across threads.
+// Number of floats per STREAM array.  Must exceed *every cache the stream can
+// land in*, summed — not the L3 alone.  Two ways that goes wrong if you size
+// off L3 by name: on multi-CCX/CCD AMD the per-instance L3 is only a slice, and
+// on a chip whose last level IS the L2 (Apple Silicon, Snapdragon X, most ARM
+// parts) there is no L3 to size off at all.  A Snapdragon X Elite has 36 MB of
+// aggregate L2 and reports no L3, so the old L3-only rule left the array at the
+// 64 MB floor — under 2x the cache — and the "DRAM" read row came back at
+// 149 GB/s on memory whose theoretical peak is 135.  Under-sizing never fails
+// loudly: it just serves part of the read out of cache and reports a number
+// above what the DIMMs can physically do.  4x total cache is the classic STREAM
+// margin; the cap keeps us from hogging memory.  Even split across threads.
 static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 {
-  uint64_t llc = std::max(info.l3TotalBytes, info.l3CacheBytes);
-  uint64_t arrayBytes = std::max<uint64_t>(llc * 4, 64ull << 20);
+  uint64_t cache = info.l1dTotalBytes + info.l2TotalBytes +
+                   std::max(info.l3TotalBytes, info.l3CacheBytes);
+  uint64_t arrayBytes = std::max<uint64_t>(cache * 4, 64ull << 20);
   uint64_t cap = info.totalMemBytes ? std::min<uint64_t>(512ull << 20, info.totalMemBytes / 16)
                                     : (512ull << 20);
-  if (cap < llc * 2)
-    cap = llc * 2; // always large enough to miss the LLC
+  if (cap < cache * 2)
+    cap = cache * 2; // always large enough to miss every level
   arrayBytes = std::min(arrayBytes, cap);
   size_t N = (size_t)(arrayBytes / sizeof(float));
   N = (N / (size_t)maxT) * (size_t)maxT;
@@ -276,10 +300,21 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
       {"global_memory_bandwidth", "DRAM bandwidth", "gbps", Category::Unknown,
        "How many bytes per second all cores together can move to and from main "
        "memory.  The arrays are far too big for any cache, so every access goes "
-       "out to RAM."});
+       "out to RAM.  The two rows that write count only the bytes the program "
+       "asked for, the usual STREAM convention; most CPUs must also fetch each "
+       "line before overwriting it, so copy and triad move about half again as "
+       "much as they count and normally land below the read row."});
 
   const int maxT = pool->maxThreads();
   const size_t N = pickStreamFloats(info, maxT);
+  // The one number that decides whether this test measures DRAM at all, so it
+  // is worth being able to read it back off a suspicious run: a "DRAM" figure
+  // above the memory's rated peak means the array was not big enough.
+  CLPEAK_VLOG("[cpu] STREAM array %llu MB x3, %llu MB total cache, %d threads\n",
+              (unsigned long long)((uint64_t)N * sizeof(float) >> 20),
+              (unsigned long long)((info.l1dTotalBytes + info.l2TotalBytes +
+                                    std::max(info.l3TotalBytes, info.l3CacheBytes)) >> 20),
+              maxT);
 
   auto chunk = [&](int tid, size_t &lo, size_t &hi)
   {

@@ -229,14 +229,20 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(spec);
 
   struct Level { const char *name; uint64_t bytes; const char *note; };
+  // The DRAM walk must clear every cache, not just the L3: where the last
+  // level is the L2 (Apple Silicon, Snapdragon X) there is no L3 to size off.
+  const uint64_t cacheTotal = info.l1dTotalBytes + info.l2TotalBytes +
+                              std::max(info.l3TotalBytes, info.l3CacheBytes);
   const Level levels[] = {
     {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192),
      "Reading from the small cache inside the core."},
     {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536),
      "Reading from the mid-level cache, after an L1 miss."},
-    {"L3",   std::max<uint64_t>(info.l3CacheBytes  / 2, 1u << 20),
+    // 0 when the CPU has no L3 at all — that row is then Unsupported, not a
+    // second reading of L2 taken over a made-up working set.
+    {"L3",   info.l3CacheBytes ? std::max<uint64_t>(info.l3CacheBytes / 2, 1u << 20) : 0,
      "Reading from the last-level cache shared between cores."},
-    {"DRAM", std::max<uint64_t>(info.l3CacheBytes  * 4, 256ull << 20),
+    {"DRAM", std::max<uint64_t>(cacheTotal * 4, 256ull << 20),
      "Reading from main memory at random -- the worst case."},
   };
 
@@ -245,12 +251,17 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   for (int i = 0; i < 4; i++)
   {
     uint64_t bytes = levels[i].bytes;
+    if (!bytes)
+      continue;
     pool->run(1, [&, bytes, i](int) { ns[(size_t)i] = chaseLatencyNs(bytes); });
   }
 
   for (int i = 0; i < 4; i++)
   {
-    if (ns[(size_t)i] > 0)
+    if (!levels[i].bytes)
+      test.skip(levels[i].name, ResultStatus::Unsupported, "no L3 on this CPU",
+                levels[i].note);
+    else if (ns[(size_t)i] > 0)
       test.emit(levels[i].name, (float)ns[(size_t)i], levels[i].note);
     else
       test.skip(levels[i].name, ResultStatus::Error, "latency walk failed",
