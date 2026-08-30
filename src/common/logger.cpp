@@ -29,6 +29,20 @@ std::string oneLine(const std::string &s)
     return out;
 }
 
+// Driver-reported names come as the driver spells them, padding included:
+// Intel's OpenCL runtime returns "AMD Ryzen Threadripper PRO 3955WX 16-Cores"
+// with five trailing spaces.  That padding reached the document, the device's
+// identity key and the GUI, where it is at best untidy and at worst two names
+// for one device if a driver ever changes how much of it there is.  Trimmed
+// once here rather than in eight backends.
+std::string trimmed(const std::string &s)
+{
+    const char *ws = " \t\n\r";
+    const size_t b = s.find_first_not_of(ws);
+    if (b == std::string::npos) return "";
+    return s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
+
 } // namespace
 
 // ── Constructor ────────────────────────────────────────────────────────────
@@ -160,10 +174,11 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
 {
     assert(log->contextDepth == 1);
 
-    log->curPlatform = spec.platform.empty() ? log->curBackend : spec.platform;
-    log->curDevice      = spec.name;
-    log->curDriver       = spec.driver_version;
-    log->curDeviceIndex  = spec.device_index;
+    log->curPlatform    = spec.platform.empty() ? log->curBackend
+                                                : trimmed(spec.platform);
+    log->curDevice      = trimmed(spec.name);
+    log->curDriver      = trimmed(spec.driver_version);
+    log->curDeviceIndex = spec.device_index;
     log->contextDepth = 2;
     log->curTestIdx   = logger::kNoIndex;
 

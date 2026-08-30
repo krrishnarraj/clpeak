@@ -289,9 +289,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "4-bit floats, the narrowest format the hardware "
-                            "handles, with no shared scale factor.  Blackwell "
-                            "and newer only.  mma.sync m16n8k32.";
+      d.metricDescription = "4-bit floats with no shared scale factor.  Read "
+                            "it against the mxf4 and nvf4 rows below, which "
+                            "are the same width with a scale: where those are "
+                            "faster, the hardware only accelerates 4-bit "
+                            "arithmetic when it carries one.  Blackwell and "
+                            "newer only.  mma.sync m16n8k32.";
       d.unit = "tflops";
       d.unitDivider = 1e12;
       d.metricLabel = "fp4_e2m1";
