@@ -104,8 +104,8 @@ kernel via `kernels()`, and the device-header `ISA:` property is the widest
 active ISA (`isaName()`).
 
 **Families share a test.** `emitFamily()` runs several related kernels as one
-test per ISA rather than one test per kernel — the matrix engine's six data
-types, the divider's four operations. It groups by ISA because the ISA is what
+test per ISA rather than one test per kernel — the matrix engine's data types,
+the divider's four operations, the two integer dot-product widths. It groups by ISA because the ISA is what
 makes two readings incomparable (bf16 on AMX vs on SME is different hardware;
 bf16 vs fp16 on one AMX is not), and a row this host cannot run still appears
 as a skip, so the reader sees which formats the engine lacks. A row measured in

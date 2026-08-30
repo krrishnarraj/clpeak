@@ -331,11 +331,14 @@ static void finalizeTiles(std::vector<JmTile> &tiles)
 
     // Bare stem for the first tile of each stem, MxNxK suffix for any further
     // tile of the same stem — Alchemist advertises bf16 at both 8x8x16 and
-    // 32x32x16, and the two need distinct row names.  Devices that advertise
-    // one tile per dtype (every part before that one) keep the old names.
+    // 32x32x16, and the two need distinct row names.
+    //
+    // No "joint_matrix_" prefix: the test is called joint_matrix, so every
+    // reading repeating it said nothing.  The prefix went when the fp and int
+    // halves became one test.
     const std::string base = jmBaseName(t.at, t.bt);
     const bool dup = (i > 0) && jmBaseName(tiles[i - 1].at, tiles[i - 1].bt) == base;
-    t.metric = "joint_matrix_" + base + (dup ? "_" + t.shape : "");
+    t.metric = base + (dup ? " " + t.shape : "");
   }
 }
 
@@ -518,21 +521,28 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     return o;
   };
 
-  // Note for the historical int8 row, used by the paths that skip before any
-  // enumeration has happened.  The FP equivalents go through skipAll, which
-  // carries no per-reading notes, so they have nothing to declare here.
+  // Note for the int8 row, used by the paths that skip before any enumeration
+  // has happened.  The FP equivalents go through skipAll, which carries no
+  // per-reading notes, so they have nothing to declare here.
   const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
                          "quantized neural networks use.";
 
   // Nothing to enumerate (no toolchain support, no matrix engine, no table):
-  // record the historical row set so a device that has never been able to run
-  // this still produces the rows it always did.
+  // record the row set a device with an engine would have produced, so the
+  // reader sees what was looked for rather than an empty test.
   auto skipEverything = [&](ResultStatus status, const char *reason) {
     if (isInt)
-      test.skip("joint_matrix_int8", status, reason, int8Note);
+    {
+      logger::EmitOptions o;
+      o.description = int8Note;
+      o.unit = "tops";
+      // jmBaseName spells the signed/signed pair "int8"; the mixed-sign
+      // forms only exist once a table has been enumerated, which by
+      // definition has not happened here.
+      test.skip("int8", status, reason, o);
+    }
     else
-      test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
-                   status, reason);
+      test.skipAll({"bf16", "fp16", "tf32"}, status, reason);
   };
 
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX

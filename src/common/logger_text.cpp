@@ -45,6 +45,9 @@ void LoggerText::onEvent(const LogEvent &e)
     case LogEvent::Kind::DeviceEnd:      renderDeviceEnd();       break;
     case LogEvent::Kind::BackendEnd:     renderBackendEnd();      break;
     case LogEvent::Kind::Note:
+        // Before the message, or it would appear above rows that were measured
+        // before it.
+        flushMetrics();
         out << e.message;
         out.flush();
         break;
@@ -108,24 +111,22 @@ void LoggerText::renderDeviceBegin(const LogEvent &e)
 
 void LoggerText::renderTestBegin(const LogEvent &e)
 {
-    // Defence in depth: rows are buffered until TestEnd, so anything still
-    // pending here belongs to a test that was not closed.  The scope layer
-    // now closes it for us (logger::closeOpenTest), but flush rather than
-    // clear so no measured row can ever be discarded silently.
-    flushMetrics();
-
     // The unit this opening declared, which on a reopen need not be the
     // test's: the integer phase of a GEMM test reports ops, not flops.
     const std::string openUnit = e.openedUnit.empty() ? e.unit : e.openedUnit;
 
-    // Reopening the test that just closed, in the same unit: keep writing into
-    // the same stanza, under the header already printed for it.  A different
-    // unit means a different kind of reading and gets its own header.
+    // Reopening the test that just closed, in the same unit: keep accumulating
+    // into the same stanza, under the header already printed for it.  Rows
+    // pending from the previous block are deliberately NOT flushed here -- the
+    // whole point is that the stanza's label column is computed once, over all
+    // of its readings together.
     if (e.reopened && e.testKey() == lastClosedTest && openUnit == stanzaUnit)
-    {
-        metricLines.clear();
         return;
-    }
+
+    // A different test, or the same one measuring something else: the previous
+    // stanza is finished.  Flush rather than clear, so no measured row can be
+    // discarded silently by a test that was never closed.
+    flushMetrics();
     mergedPad  = 0;
     stanzaUnit = openUnit;
 
@@ -199,7 +200,15 @@ void LoggerText::renderTestSkippedAll(const LogEvent &e)
 
 void LoggerText::renderTestEnd()
 {
-    flushMetrics();
+    // Deliberately does NOT flush.  A merged family closes and immediately
+    // reopens its test once per data type, and flushing each block separately
+    // computed the label column from that block alone -- so a fifteen-reading
+    // tensor-core test widened its column three times down the page.  Holding
+    // the rows until the stanza is finished aligns them as one table.
+    //
+    // It costs nothing to wait: the next beginTest() runs microseconds after
+    // this TestEnd (the measuring happens after it), so the rows still appear
+    // as soon as the test that produced them is over.
     indentLevel = propIndent;
 }
 
@@ -225,6 +234,9 @@ void LoggerText::renderDeviceEnd()
 
 void LoggerText::renderBackendEnd()
 {
+    // Rows are held until the stanza ends (see renderTestEnd), so the last
+    // test of the last device flushes here.
+    flushMetrics();
     indentLevel = 0;
     out.flush();
 }

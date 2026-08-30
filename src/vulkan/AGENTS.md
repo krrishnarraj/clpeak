@@ -53,10 +53,12 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   width".
 - **Every coopmat data type is one reading of ONE test** (`coopmat`), not a
   test each.  Each `#ifdef` block in `coopmat.cpp` opens the same tag, so the
-  logger reopens it and appends; `bindCoopTile` names the reading with the data
-  type and the tile the driver actually advertised for it (`fp16 16x16x16`),
-  since different types land on different shapes on one device.  The prose goes
-  on `metricDescription` — the test's own description covers the family.  int8
+  logger reopens it and appends.  The reading is named by its data type alone;
+  the driver-advertised tile goes in its NOTE, appended by `bindCoopTile`,
+  because a shape in the name would differ between a device that measured the
+  reading and one that skipped it — the same reading under two ids.  The prose
+  goes on `metricDescription` — the test's own description covers the family.
+  int8
   arrives in the integer phase and carries `metricUnit = "tops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.
 

@@ -99,10 +99,10 @@ private:
     // TFLOPS.  `stanzaUnit` is what that header said, so it is also what a
     // reading's unit is compared against before printing a suffix.
     //
-    // Rows are still flushed at each TestEnd rather than held to the end of
-    // the merged test: the CLI is watched live, and holding them would stop
-    // readings appearing as they are measured.  `mergedPad` carries the label
-    // column across those flushes so the stanza stays one aligned table.
+    // Rows are held until the stanza ends rather than flushed per block, so
+    // the label column is computed once over all of them — see renderTestEnd
+    // for why that costs no latency.  `mergedPad` covers the one case that
+    // still splits a stanza across flushes: a Note arriving mid-test.
     std::string lastClosedTest;
     std::string stanzaUnit;
     int         mergedPad = 0;

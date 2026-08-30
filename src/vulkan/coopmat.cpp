@@ -46,17 +46,23 @@ struct CoopTileRun {
   VkSpecializationMapEntry entries[4];
   VkSpecializationInfo     specInfo;
   CoopPush                 push;
-  std::string              label;
+  std::string              note;
 };
 
 // Bind a selected tile into a desc: build the spec constants, scale the trip
 // count so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
-// and label the reading with the data type and the actual MxNxK that runs.
+// and record the actual MxNxK that runs.
 //
-// The caller has already set r.push.A to the fill this dtype wants.
+// The shape goes on the reading's NOTE, not its name.  Different data types
+// land on different shapes on one device (NVIDIA gives the 8-bit types K=32
+// where fp16 gets K=16), so a name carrying the shape would differ between a
+// device that measured the reading and one that skipped it -- the same reading
+// under two ids.  The name stays the data type, which is what identifies it.
+//
+// The caller has already set r.push.A to the fill this dtype wants, and
+// d.metricLabel / d.metricDescription to what this reading is.
 void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
-                  const coopmat_tile_t &t, uint32_t wgSize,
-                  const char *dtypeLabel)
+                  const coopmat_tile_t &t, uint32_t wgSize)
 {
   const uint64_t volume = (uint64_t)t.M * t.N * t.K;   // MACs per coopMatMulAdd
   uint64_t mmas  = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
@@ -74,15 +80,12 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
   r.specInfo.dataSize      = sizeof(r.data);
   r.specInfo.pData         = &r.data;
   r.push.trips = (int32_t)trips;
-  // "fp16 16x16x16": the data type, then the tile the driver actually
-  // advertised for it.  Different types land on different shapes on the same
-  // device (NVIDIA gives the 8-bit types K=32 where fp16 gets K=16), so the
-  // shape belongs on the reading rather than on the test they share.
-  r.label  = std::string(dtypeLabel) + " " +
-             std::to_string(t.M) + "x" + std::to_string(t.N) + "x" + std::to_string(t.K);
+  r.note = std::string(d.metricDescription ? d.metricDescription : "") +
+           "  Runs at the " + std::to_string(t.M) + "x" + std::to_string(t.N) +
+           "x" + std::to_string(t.K) + " tile this driver advertises for it.";
 
-  d.specInfo      = &r.specInfo;
-  d.metricLabel   = r.label.c_str();
+  d.specInfo          = &r.specInfo;
+  d.metricDescription = r.note.c_str();
   d.wgSize        = wgSize;
   d.outElemsPerWG = t.M * t.N;
   d.pushData      = &r.push;
@@ -147,7 +150,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.spirv     = vk_shaders::coopmat_fp32;
         d.spirvSize = vk_shaders::coopmat_fp32_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP32);
-        bindCoopTile(r, d, dev.info.coopmatFP32, tileWG(dev.info.coopmatFP32), "fp32xfp32+fp32");
+        bindCoopTile(r, d, dev.info.coopmatFP32, tileWG(dev.info.coopmatFP32));
       } else {
         d.skip    = true;
         d.skipMsg = "No fp32xfp32+fp32 coopmat property! Skipped";
@@ -185,7 +188,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.spirv     = vk_shaders::coopmat_fp16;
         d.spirvSize = vk_shaders::coopmat_fp16_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16);
-        bindCoopTile(r, d, dev.info.coopmatFP16, tileWG(dev.info.coopmatFP16), "fp16xfp16+fp32");
+        bindCoopTile(r, d, dev.info.coopmatFP16, tileWG(dev.info.coopmatFP16));
       } else {
         d.skip    = true;
         d.skipMsg = "No fp16xfp16+fp32 coopmat support (shaderFloat16 or property)! Skipped";
@@ -222,7 +225,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.spirv     = vk_shaders::coopmat_fp16_f16acc;
         d.spirvSize = vk_shaders::coopmat_fp16_f16acc_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16F16);
-        bindCoopTile(r, d, dev.info.coopmatFP16F16, tileWG(dev.info.coopmatFP16F16), "fp16xfp16+fp16");
+        bindCoopTile(r, d, dev.info.coopmatFP16F16, tileWG(dev.info.coopmatFP16F16));
       } else {
         d.skip    = true;
         d.skipMsg = "No fp16xfp16+fp16 coopmat support (shaderFloat16 or property)! Skipped";
@@ -258,7 +261,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.spirv     = vk_shaders::coopmat_bf16;
         d.spirvSize = vk_shaders::coopmat_bf16_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatBF16);
-        bindCoopTile(r, d, dev.info.coopmatBF16, tileWG(dev.info.coopmatBF16), "bf16xbf16+fp32");
+        bindCoopTile(r, d, dev.info.coopmatBF16, tileWG(dev.info.coopmatBF16));
       } else {
         d.skip    = true;
         d.skipMsg = "No bf16xbf16+fp32 coopmat support (shaderBFloat16Type or property)! Skipped";
@@ -296,7 +299,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.spirv     = vk_shaders::coopmat_fp8_e4m3;
         d.spirvSize = vk_shaders::coopmat_fp8_e4m3_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP8E4M3);
-        bindCoopTile(r, d, dev.info.coopmatFP8E4M3, tileWG(dev.info.coopmatFP8E4M3), "fp8(E4M3)xfp8(E4M3)+fp32");
+        bindCoopTile(r, d, dev.info.coopmatFP8E4M3, tileWG(dev.info.coopmatFP8E4M3));
       } else {
         d.skip    = true;
         d.skipMsg = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
@@ -332,7 +335,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.spirv     = vk_shaders::coopmat_fp8_e5m2;
         d.spirvSize = vk_shaders::coopmat_fp8_e5m2_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP8E5M2);
-        bindCoopTile(r, d, dev.info.coopmatFP8E5M2, tileWG(dev.info.coopmatFP8E5M2), "fp8(E5M2)xfp8(E5M2)+fp32");
+        bindCoopTile(r, d, dev.info.coopmatFP8E5M2, tileWG(dev.info.coopmatFP8E5M2));
       } else {
         d.skip    = true;
         d.skipMsg = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
@@ -377,7 +380,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.spirv     = vk_shaders::coopmat_int8;
       d.spirvSize = vk_shaders::coopmat_int8_size;
       d.requiredSubgroupSize = tileSub(dev.info.coopmatINT8);
-      bindCoopTile(r, d, dev.info.coopmatINT8, tileWG(dev.info.coopmatINT8), "int8xint8+int32");
+      bindCoopTile(r, d, dev.info.coopmatINT8, tileWG(dev.info.coopmatINT8));
     } else {
       d.skip    = true;
       d.skipMsg = "No int8xint8+int32 coopmat support (shaderInt8 or property)! Skipped";
