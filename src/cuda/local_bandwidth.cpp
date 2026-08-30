@@ -10,7 +10,8 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
      Category::Unknown,
      "How many bytes per second the GPU moves through shared memory -- the "
      "small on-chip scratchpad a block of threads passes data through, which "
-     "never goes out to the card's main memory."});
+     "never goes out to the card's main memory.",
+     TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numSMs);

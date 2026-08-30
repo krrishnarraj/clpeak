@@ -6,29 +6,31 @@
 int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
 {
   const bool isInt = category == Category::IntCompute;
+  // One test for both phases: the library is the same software whether the
+  // numbers are whole or not, and the integer reading carries its own unit.
   auto test = currentDeviceScope->beginTest(
-    {isInt ? "rocwmma-int" : "rocwmma-fp",
-     isInt ? "rocWMMA int8xint8+int32 16x16x32"
-           : "rocWMMA fp16xfp16+fp32 16x16x16",
+    {"rocwmma", "rocWMMA matrix multiply",
      isInt ? "tops" : "tflops", Category::Unknown,
-     isInt ? "Matrix-core speed on 8-bit whole numbers reached through AMD's "
-             "rocWMMA library rather than the raw instructions.  Compare it "
-             "with the WMMA or MFMA row for the same format to see what the "
-             "library layer costs."
-           : "Matrix-core speed on 16-bit numbers reached through AMD's "
-             "rocWMMA library rather than the raw instructions.  Compare it "
-             "with the WMMA or MFMA row for the same format to see what the "
-             "library layer costs."});
+     "Matrix-core speed reached through AMD's rocWMMA library rather than the "
+     "raw instructions.  Compare each reading with the WMMA or MFMA row for "
+     "the same format to see what the library layer costs.",
+     TestShape::Heterogeneous, "data type"});
 
-  const char *metric = isInt ? "rocwmma_int8" : "rocwmma_fp16";
+  const char *metric = isInt ? "int8" : "fp16";
+  const char *metricNote =
+      isInt ? "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."
+            : "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
+  logger::EmitOptions metricOpts;
+  metricOpts.description = metricNote;
+  if (isInt) metricOpts.unit = "tops";
 
 #ifndef CLPEAK_ROCM_HAS_ROCWMMA
-  test.skip(metric, ResultStatus::Unsupported, "rocWMMA headers not found at configure time");
+  test.skip(metric, ResultStatus::Unsupported, "rocWMMA headers not found at configure time", metricNote);
   return 0;
 #else
   if (!dev.info.rocwmmaSupported)
   {
-    test.skip(metric, ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture");
+    test.skip(metric, ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", metricNote);
     return 0;
   }
 
@@ -54,7 +56,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   void *outBuf = nullptr;
   if (hipMalloc(&outBuf, outBytes) != hipSuccess)
   {
-    test.skip(metric, ResultStatus::Error, "Failed to allocate output buffer");
+    test.skip(metric, ResultStatus::Error, "Failed to allocate output buffer", metricNote);
     return -1;
   }
 
@@ -63,7 +65,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
                      isInt ? "rocwmma_int8" : "rocwmma_fp16", fn))
   {
     (void)hipFree(outBuf);
-    test.skip(metric, ResultStatus::Error, "Kernel compile failed");
+    test.skip(metric, ResultStatus::Error, "Kernel compile failed", metricNote);
     return 0;
   }
 
@@ -73,14 +75,14 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   if (us <= 0.0f)
   {
     (void)hipFree(outBuf);
-    test.skip(metric, ResultStatus::Error, "kernel launch failed");
+    test.skip(metric, ResultStatus::Error, "kernel launch failed", metricNote);
     return 0;
   }
 
   const double ops = (double)numBlocks * (double)M * (double)N *
                      (double)K * 2.0 * (double)Iters;
   float value = (float)(ops * 1.0e6 / us / 1.0e12);
-  test.emit(metric, value);
+  test.emit(metric, value, metricOpts);
 
   (void)hipFree(outBuf);
   return 0;

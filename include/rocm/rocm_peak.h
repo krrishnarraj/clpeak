@@ -105,6 +105,14 @@ struct rocm_compute_desc_t
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
 
+  // Whether the variants below are interchangeable forms of one measurement
+  // (Homogeneous -- a vector-width sweep) or separate measurements sharing a
+  // kernel shape (Heterogeneous).  See include/common/AGENTS.md.
+  TestShape   shape;
+
+  // What varies across the readings: "vector width", "data type".  Optional.
+  const char *axis;
+
   const char *metricLabel;
   const char *kernelName;
   const rocm_kernels::Blob *blob;

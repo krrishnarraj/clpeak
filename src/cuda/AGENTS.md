@@ -52,9 +52,17 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
 - `cudaWidthNote()` (`cuda_peak.h`) covers `half`/`half2` and the
   `float`/`float2`/`float4` bandwidth sweeps.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
-  *independent chains* (see `compute_int8_dp.cu`).  They carry their own notes.
-- WMMA rows are one reading each, named after the test, so they document the
-  test only.
+  *independent chains* (see `compute_int8_dp.cu`).  They carry their own notes,
+  and their axis is "chains in flight".
+- **Every tensor-core row is one reading of ONE test** (`wmma`), not a test
+  each.  Each block in `wmma.cpp` sets the same `resultTag`, so the logger
+  reopens the test and appends; the block's prose goes on `metricDescription`
+  and the exact instruction (`mma.sync m16n8k32`) ends the sentence, since the
+  metric label is the data type alone.  The integer rows arrive in the integer
+  phase and carry `metricUnit = "tops"` — that override is what makes a
+  `wmma_int` twin unnecessary.
+- `cublas_gemm` is likewise one test across both phases; `blasOpts()` attaches
+  the note and, in the integer phase, the unit.
 - `cuda_blas.cpp` threads a `note` next to `label` through `runVariantAB` /
   `runVariant` / `runVariantFp4`.
 

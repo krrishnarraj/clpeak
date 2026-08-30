@@ -140,8 +140,24 @@ struct cuda_compute_desc_t
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
 
+  // Whether the variants below are interchangeable forms of one measurement
+  // (Homogeneous -- a vector-width sweep) or separate measurements sharing a
+  // kernel shape (Heterogeneous -- a family of data types).  See
+  // include/common/AGENTS.md.
+  TestShape   shape;
+
+  // What varies across the readings: "vector width", "data type".  Optional.
+  const char *axis;
+
   // Single-variant fallback (used when variants==nullptr).
   const char *metricLabel;
+
+  // Single-variant path only: what this one reading means, and the unit it is
+  // measured in when that differs from the test's.  The unit override is what
+  // lets the integer members of a data-type family share the test with the
+  // floating-point ones instead of living in a `-int` twin.
+  const char *metricDescription;
+  const char *metricUnit;
   const char *kernelName;
   const cuda_kernels::Blob *blob;
 

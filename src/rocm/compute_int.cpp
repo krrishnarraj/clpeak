@@ -16,6 +16,8 @@ int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "Integer compute (32-bit IMAD)";
   d.resultTag = "integer_compute";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
   d.unit = "gops";
   d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                   "indexing, addressing and bit manipulation, which shaders do "
@@ -50,6 +52,10 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "INT8 dot-product compute (DP4a)";
   d.resultTag = "integer_compute_int8_dp";
+  d.shape = TestShape::Homogeneous;
+  // Independent DP4a chains, not wider vectors: each reading gives the
+  // hardware more dot products to have in flight at once.
+  d.axis = "chains in flight";
   d.unit = "gops";
   d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
                   "four pairs of small whole numbers and sums them in one step -- the "

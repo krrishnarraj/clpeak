@@ -178,7 +178,8 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
      "Matrix-multiply speed through AMD's hipBLASLt library on the narrowest "
      "number formats -- 8-bit and 4-bit.  These are the formats large models "
      "are compressed into to fit and run fast, and the library is how real "
-     "code reaches them."});
+     "code reaches them.",
+     TestShape::Heterogeneous, "data type"});
 
   // One note per dtype row, shared by every emit and skip path below.
   const char *e4m3Note = "8-bit inputs, in the variant that spends its bits on "
@@ -341,7 +342,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
     if (meanUs <= 0.0)
       test.skip(label, ResultStatus::Error, "hipBLASLt GEMM failed", note);
     else
-      test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), {false, note});
+      test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), note);
 
     (void)hipblasLtMatmulDescDestroy(opDesc);
     (void)hipblasLtMatrixLayoutDestroy(Adesc);
@@ -456,7 +457,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
               if (meanUs <= 0.0)
                 test.skip("mxf4_e2m1", ResultStatus::Error, "hipBLASLt GEMM failed", mxf4Note);
               else
-                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs / 1.0e12), {false, mxf4Note});
+                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs / 1.0e12), mxf4Note);
             }
           }
         }

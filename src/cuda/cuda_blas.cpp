@@ -197,12 +197,14 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     {
         const bool isInt = category == Category::IntCompute;
         auto t = currentDeviceScope->beginTest(
-            {isInt ? "cublas-int" : "cublas-fp", "cuBLASLt GEMM peak",
+            {"cublas_gemm", "cuBLASLt GEMM peak",
              isInt ? "tops" : "tflops", Category::Unknown,
              "Matrix-multiply speed through NVIDIA's own tuned library, on a "
-             "large square problem.  Where the WMMA rows show what the tensor "
-             "cores can do in principle, this shows what shipping code reaches "
-             "on the operation most AI work is built from."});
+             "large square problem.  Where the tensor-core rows show what the "
+             "hardware can do in principle, this shows what shipping code "
+             "reaches on the operation most AI work is built from.  Each "
+             "reading is a different input format.",
+             TestShape::Heterogeneous, "data type"});
         t.skip(isInt ? "int8" : "fp32", ResultStatus::Unsupported,
                "cuBLASLt library not found; GEMM skipped");
         return 0;
@@ -260,6 +262,16 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     }
 
     logger::TestScope *blasTest = nullptr;
+
+    // The integer readings share the test with the floating-point ones and
+    // carry their own unit, which is what makes a `cublas-int` twin
+    // unnecessary -- the library is the same software either way.
+    auto blasOpts = [&](const char *note) {
+        logger::EmitOptions o;
+        if (note) o.description = note;
+        if (category == Category::IntCompute) o.unit = "tops";
+        return o;
+    };
 
     auto runVariantAB = [&](const char *label, const char *note,
                             cudaDataType_t aType, cudaDataType_t bType,
@@ -384,7 +396,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             &heurs[bestIdx].algo, (void*)dWS, wsBytes, iters);
 
         double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
-        blasTest->emit(label, (float)tops, {false, note});
+        blasTest->emit(label, (float)tops, blasOpts(note));
 
         cublasLtMatmulDescDestroy(opDesc);
         cublasLtMatrixLayoutDestroy(Adesc);
@@ -545,7 +557,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             &heurs[bestIdx].algo, (void*)dWS, wsBytes, iters);
 
         double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
-        blasTest->emit(label, (float)tops, {false, note});
+        blasTest->emit(label, (float)tops, blasOpts(note));
         cleanup();
         return 0;
     };
@@ -557,11 +569,13 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         // Floating-point variants -- reported in TFLOPS.
         // -----------------------------------------------------------------------
         auto testFp = currentDeviceScope->beginTest(
-            {"cublas-fp", "cuBLASLt GEMM peak", "tflops", Category::Unknown,
-             "Matrix-multiply speed through NVIDIA's own tuned library, on a large "
-             "square problem.  Where the WMMA rows show what the tensor cores can "
-             "do in principle, this shows what shipping code reaches on the "
-             "operation most AI work is built from."});
+            {"cublas_gemm", "cuBLASLt GEMM peak", "tflops", Category::Unknown,
+             "Matrix-multiply speed through NVIDIA's own tuned library, on a "
+             "large square problem.  Where the tensor-core rows show what the "
+             "hardware can do in principle, this shows what shipping code "
+             "reaches on the operation most AI work is built from.  Each "
+             "reading is a different input format.",
+             TestShape::Heterogeneous, "data type"});
         blasTest = &testFp;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
@@ -688,10 +702,17 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     // -----------------------------------------------------------------------
     // Integer variants -- reported in TOPS
     // -----------------------------------------------------------------------
+    // The same test, reopened: the library does not become a different piece
+    // of software because the numbers are whole.  The integer readings carry
+    // their own unit (see runVariant), which is what lets them share it.
     auto testInt = currentDeviceScope->beginTest(
-        {"cublas-int", "cuBLASLt GEMM peak", "tops", Category::Unknown,
-         "The same tuned-library matrix multiply on whole-number formats, which "
-         "is how a quantized (compressed) model actually runs."});
+        {"cublas_gemm", "cuBLASLt GEMM peak", "tops", Category::Unknown,
+         "Matrix-multiply speed through NVIDIA's own tuned library, on a "
+         "large square problem.  Where the tensor-core rows show what the "
+         "hardware can do in principle, this shows what shipping code "
+         "reaches on the operation most AI work is built from.  Each "
+         "reading is a different input format.",
+         TestShape::Heterogeneous, "data type"});
     blasTest = &testInt;
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute

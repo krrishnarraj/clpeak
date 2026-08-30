@@ -16,6 +16,8 @@ int RocmPeak::runComputeSP(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "Single-precision compute";
   d.resultTag = "single_precision_compute";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
   d.unit = "gflops";
   d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
                   "fractional numbers -- the ordinary float type.  Nothing touches "
@@ -39,6 +41,8 @@ int RocmPeak::runComputeHP(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "Half-precision compute";
   d.resultTag = "half_precision_compute";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
   d.unit = "gflops";
   d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                   "size of a normal float, and what graphics and on-device AI mostly "
@@ -68,6 +72,8 @@ int RocmPeak::runComputeDP(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "Double-precision compute";
   d.resultTag = "double_precision_compute";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
   d.unit = "gflops";
   d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
                   "high-accuracy type scientific computing relies on.  Radeon "
@@ -88,6 +94,8 @@ int RocmPeak::runComputeMP(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "Mixed-precision compute fp16xfp16+fp32";
   d.resultTag = "mixed_precision_compute";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
   d.unit = "gflops";
   d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
                   "running total in 32 bits -- the accuracy-preserving pattern AI "
@@ -110,6 +118,8 @@ int RocmPeak::runComputeBF16(RocmDevice &dev, benchmark_config_t &cfg)
   rocm_compute_desc_t d = {};
   d.title = "BF16 compute bf16xbf16+fp32";
   d.resultTag = "bfloat16_compute";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
   d.unit = "gflops";
   d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
                   "digits of accuracy for the number range of a full float.  Again "

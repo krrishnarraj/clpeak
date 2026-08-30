@@ -59,11 +59,21 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
   forwards both on every path, skips included.
 - The matrix-core runners (`wmma.cpp`, `mfma.cpp`, `sparse_mfma.cpp`) walk
   `WmmaEntry` / `MfmaEntry` / `SparseEntry` tables, so the description is a
-  field on the entry.  Add one whenever you add an entry.
+  field on the entry.  Add one whenever you add an entry — it is the
+  *reading's* note now, carried on every emit and skip by `unitOpts()`.
+- **Each of those three tables is ONE test**, not one per entry: `wmma`,
+  `mfma`, `smfmac`.  The entry's `label` is the data type; the family tag,
+  title and description are constants at the `beginTest` call inside the loop,
+  which reopens the same test for each entry.  The three stay separate from one
+  another because they are different instructions on different hardware (RDNA
+  vs CDNA), not different formats on one unit.  `en.isInt` drives the `tops`
+  unit override that lets the integer entry share the test.
 - `rocmWidthNote()` (`rocm_peak.h`) covers `float`/`float2`/`float4`,
   `half`/`half2` and `int`/`int2`/`int4`.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
   *independent chains*.  They carry their own notes.
+- `rocblas_gemm` and `rocwmma` are each one test across both category phases,
+  with the integer reading carrying its own unit.
 - `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
   through `runTimed` / `runVariant`.
 

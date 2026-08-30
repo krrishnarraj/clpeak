@@ -12,7 +12,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
      "How many bytes per second the GPU reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
      "pixel of the image is read exactly once, so caching cannot flatter the "
-     "number."});
+     "number.",
+     TestShape::Homogeneous});
 
   // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
   // hence the metric name.

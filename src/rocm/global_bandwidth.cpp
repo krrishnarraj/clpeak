@@ -33,7 +33,8 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
      "How many bytes per second the GPU can stream out of its own memory, "
      "reading a buffer far too large to cache.  Each reading fetches a "
      "different number of values per instruction, since wider fetches usually "
-     "pull more through before the memory system saturates."});
+     "pull more through before the memory system saturates.",
+     TestShape::Homogeneous, "vector width"});
 
   void *inBuf = nullptr;
   void *outBuf = nullptr;

@@ -139,15 +139,23 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
 
   auto test = fpPhase
     ? currentDeviceScope->beginTest(
-        {"rocblas-fp", "rocBLAS GEMM peak", "tflops", Category::Unknown,
+        {"rocblas_gemm", "rocBLAS GEMM peak", "tflops", Category::Unknown,
          "Matrix-multiply speed through AMD's own tuned library, on a large "
          "square problem.  Where the matrix-core rows show what the hardware "
          "can do in principle, this shows what shipping code reaches on the "
-         "operation most AI work is built from."})
+         "operation most AI work is built from.  Each reading is a different "
+         "input format.",
+         TestShape::Heterogeneous, "data type"})
+    // The same test, reopened: the library does not become a different piece
+    // of software because the numbers are whole.
     : currentDeviceScope->beginTest(
-        {"rocblas-int", "rocBLAS GEMM peak", "tops", Category::Unknown,
-         "The same tuned-library matrix multiply on whole-number formats, "
-         "which is how a quantized (compressed) model actually runs."});
+        {"rocblas_gemm", "rocBLAS GEMM peak", "tops", Category::Unknown,
+         "Matrix-multiply speed through AMD's own tuned library, on a large "
+         "square problem.  Where the matrix-core rows show what the hardware "
+         "can do in principle, this shows what shipping code reaches on the "
+         "operation most AI work is built from.  Each reading is a different "
+         "input format.",
+         TestShape::Heterogeneous, "data type"});
 
 #ifndef CLPEAK_ROCM_HAS_ROCBLAS
   if (fpPhase)
@@ -237,7 +245,12 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
       test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", note);
       return;
     }
-    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), {false, note});
+    logger::EmitOptions opts;
+    opts.description = note;
+    // The integer readings carry their own unit, which is what lets them share
+    // the test with the floating-point ones.
+    if (!fpPhase) opts.unit = "tops";
+    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), opts);
   };
 
   if (fpPhase)

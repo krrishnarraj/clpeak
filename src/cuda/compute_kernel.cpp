@@ -15,7 +15,8 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
 {
   auto test = currentDeviceScope->beginTest(
     {d.resultTag, d.title, d.unit, Category::Unknown,
-     d.description ? d.description : ""});
+     d.description ? d.description : "",
+     d.shape, d.axis ? d.axis : ""});
 
   struct Variant
   {
@@ -30,11 +31,22 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
                           d.variants[i].blob, d.variants[i].description});
   else
-    // Single-variant tests: the metric name restates the title, so the
-    // test-level description covers it.
-    variants.push_back({d.metricLabel, d.kernelName, d.blob, nullptr});
+    // Single-variant tests: one reading, documented by d.metricDescription.
+    // The tensor-core tests use this path once per data type, all into the
+    // same test.
+    variants.push_back({d.metricLabel, d.kernelName, d.blob,
+                        d.metricDescription});
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+
+  // Unit override for the single-variant path: an integer member of an
+  // otherwise floating-point family carries its own.
+  auto emitOpts = [&](const char *description) {
+    logger::EmitOptions o;
+    o.description = note(description);
+    if (d.metricUnit) o.unit = d.metricUnit;
+    return o;
+  };
 
   if (d.skip)
   {
@@ -85,7 +97,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
     float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
 
-    test.emit(v.label, value, {false, note(v.description)});
+    test.emit(v.label, value, emitOpts(v.description));
   }
 
   cuMemFree(outputBuf);
