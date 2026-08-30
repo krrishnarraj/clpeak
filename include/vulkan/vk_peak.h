@@ -311,6 +311,14 @@ struct vk_compute_desc_t
   // nullptr => none.
   const VkSpecializationInfo *specInfo;
 
+
+  // Test to write into.  nullptr means "open one from the fields above" --
+  // the ordinary case.  A family measured in several descs (every data type
+  // its own #ifdef block) passes one scope instead, so the test opens and
+  // closes once rather than once per reading.  `resultTag` is still read then,
+  // as the name the runner's --verbose lines report themselves under.
+  logger::TestScope *scope;
+
   // Optional feature gate.  If skip==true, emit skipMsg and close the tag.
   bool skip;
   const char *skipMsg;

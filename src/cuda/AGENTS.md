@@ -55,8 +55,9 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
   *independent chains* (see `compute_int8_dp.cu`).  They carry their own notes,
   and their axis is "chains in flight".
 - **Every tensor-core row is one reading of ONE test** (`wmma`), not a test
-  each.  Each block in `wmma.cpp` sets the same `resultTag`, so the logger
-  reopens the test and appends; the block's prose goes on `metricDescription`
+  each.  `runWmma` opens one scope per category phase and every block writes
+  into it via `cuda_compute_desc_t::scope`; the block's prose goes on
+  `metricDescription`
   and the exact instruction (`mma.sync m16n8k32`) ends the sentence, since the
   metric label is the data type alone.  The integer rows arrive in the integer
   phase and carry `metricUnit = "tops"` — that override is what makes a

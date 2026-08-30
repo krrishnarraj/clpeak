@@ -114,17 +114,21 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     return o;
   };
 
-  for (size_t e = 0; e < numEntries; e++)
-  {
-    const MfmaEntry &me = entries[e];
-    auto test = currentDeviceScope->beginTest(
-      {"mfma", "Matrix cores (MFMA)", me.unit, Category::Unknown,
+  // One scope for the whole family, not one per entry: the loop below
+  // measures each data type on the same engine, and opening the test
+  // inside it closed and reopened the test once per reading.
+  auto test = currentDeviceScope->beginTest(
+    {"mfma", "Matrix cores (MFMA)", entries[0].unit, Category::Unknown,
        "Peak speed of the matrix cores on AMD's compute cards -- dedicated "
        "units that multiply whole blocks of numbers in one step rather than "
        "one value at a time.  Each reading is a different input format, at "
        "the tile shape that format uses; the narrow ones run several times "
        "faster, which is why quantized models are worth the trouble.",
        TestShape::Heterogeneous, "data type"});
+
+  for (size_t e = 0; e < numEntries; e++)
+  {
+    const MfmaEntry &me = entries[e];
 
     if (!cdna)
     {

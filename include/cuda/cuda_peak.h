@@ -179,6 +179,13 @@ struct cuda_compute_desc_t
   const void *scalarArg;
   uint32_t    scalarSize;        // 0 => no scalar arg
 
+
+  // Test to write into.  nullptr means "open one from the fields above" --
+  // the ordinary case.  A family measured in several descs (every data type
+  // its own #ifdef block) passes one scope instead, so the test opens and
+  // closes once rather than once per reading.
+  logger::TestScope *scope;
+
   // Optional gates / attributes
   bool        skip;
   const char *skipMsg;

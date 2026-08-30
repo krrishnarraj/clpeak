@@ -113,11 +113,11 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     return o;
   };
 
-  for (size_t e = 0; e < numEntries; e++)
-  {
-    const WmmaEntry &me = entries[e];
-    auto test = currentDeviceScope->beginTest(
-      {"wmma", "Matrix cores (WMMA)", me.unit, Category::Unknown,
+  // One scope for the whole family, not one per entry: the loop below
+  // measures each data type on the same engine, and opening the test
+  // inside it closed and reopened the test once per reading.
+  auto test = currentDeviceScope->beginTest(
+    {"wmma", "Matrix cores (WMMA)", entries[0].unit, Category::Unknown,
        "Peak speed of the matrix cores -- dedicated units that multiply whole "
        "16x16 blocks of numbers in one step rather than one value at a time. "
        "Each reading is a different input format; which of them the hardware "
@@ -125,6 +125,10 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
        "separates one generation from the next.  RDNA3 (gfx11) and RDNA4 "
        "(gfx12) only -- the compute cards use MFMA instead.",
        TestShape::Heterogeneous, "data type"});
+
+  for (size_t e = 0; e < numEntries; e++)
+  {
+    const WmmaEntry &me = entries[e];
 
     if (!rdna)
     {

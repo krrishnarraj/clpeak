@@ -21,23 +21,26 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   // ---------------------------------------------------------------------
   if (category == Category::FpCompute)
   {
+    // One scope for the whole family, opened here rather than per data type:
+    // nineteen descs each opening the same test worked, but closed and
+    // reopened it nineteen times, which no channel should have to stitch back
+    // together.
+    auto test = currentDeviceScope->beginTest(
+      {"wmma", "Tensor cores (WMMA / mma.sync)", "tflops", Category::Unknown,
+       "Peak speed of the tensor cores -- dedicated units that "
+       "multiply whole blocks of numbers in one step rather than one value at "
+       "a time.  Each reading is a different input format, and several are one "
+       "format run a second way: with the running total kept narrower, or with "
+       "half the values skipped as known zeros.  Which of them exist at all, "
+       "and how much faster the narrow ones go, is most of what separates one "
+       "generation of NVIDIA hardware from the next.",
+       TestShape::Heterogeneous, "data type"});
+
     // FP16 WMMA
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "16-bit inputs with a 32-bit running total -- the "
                             "everyday precision of AI work.  Uses the "
                             "portable WMMA 16x16x16 tile.";
@@ -62,19 +65,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "The same 16-bit maths, keeping the running total "
                             "in 16 bits too.  On GeForce cards the 32-bit- "
                             "total form is deliberately capped at half rate, "
@@ -99,19 +90,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "bfloat16 -- 16 bits arranged for AI work, "
                             "trading digits of accuracy for the number range "
                             "of a full float, which makes training far more "
@@ -137,19 +116,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "NVIDIA's trimmed-down stand-in for 32-bit float: "
                             "the full number range, with accuracy dropped to "
                             "fit the tensor cores.  mma.sync m16n8k8.";
@@ -172,19 +139,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       double A = 1.3;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "Full 64-bit numbers, for scientific computing "
                             "rather than AI.  Only the datacenter parts carry "
                             "this hardware.  WMMA 8x8x4.";
@@ -207,19 +162,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "8-bit floats spending their bits on accuracy "
                             "rather than range.  Half the data of 16-bit per "
                             "value, so roughly twice the rate.  mma.sync "
@@ -243,19 +186,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "The other 8-bit float, spending its bits on "
                             "range rather than accuracy -- the one that copes "
                             "with very large and very small values.  mma.sync "
@@ -281,19 +212,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "8-bit inputs with the running total kept in 16 "
                             "bits rather than 32.  As with fp16, GeForce caps "
                             "the 32-bit-total form at half rate, so this is "
@@ -318,19 +237,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "8-bit floats with structured sparsity: half the "
                             "values in each group of four are known to be "
                             "zero and are skipped, so the hardware does twice "
@@ -357,19 +264,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "Both tricks at once -- zeros skipped and the "
                             "running total kept at 16 bits.  The fastest "
                             "arrangement these tensor cores offer for 8 bits. "
@@ -393,19 +288,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "4-bit floats, the narrowest format the hardware "
                             "handles, with no shared scale factor.  Blackwell "
                             "and newer only.  mma.sync m16n8k32.";
@@ -428,19 +311,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "4-bit floats with a scale factor shared by each "
                             "block of 32 values, the open MX format.  The "
                             "scale is what makes 4 bits usable for real "
@@ -465,19 +336,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "NVIDIA's own 4-bit block format, with a finer "
                             "scale shared by every 16 values instead of every "
                             "32 -- more accurate than MX at the same width. "
@@ -501,19 +360,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "The MX 4-bit path with zeros skipped as well, "
                             "two per group of four.  mma.sp m16n8k128.";
       d.unit = "tflops";
@@ -535,19 +382,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "Tensor cores (WMMA / mma.sync)";
-      d.resultTag = "wmma";
-      d.shape = TestShape::Heterogeneous;
-      d.axis = "data type";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole blocks of numbers in one step rather "
-                      "than one value at a time.  Each reading is a different "
-                      "input format, and several are one format run a second "
-                      "way: with the running total kept narrower, or with "
-                      "half the values skipped as known zeros.  Which of them "
-                      "exist at all, and how much faster the narrow ones go, "
-                      "is most of what separates one generation of NVIDIA "
-                      "hardware from the next.";
+      d.scope = &test;
       d.metricDescription = "NVIDIA's 4-bit block format with zeros skipped "
                             "too -- the fastest arrangement these tensor "
                             "cores offer.  mma.sp m16n8k128.";
@@ -578,23 +413,25 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   if (category != Category::IntCompute)
     return 0;
 
+  // The same test, reopened for the integer phase: the tensor cores do not
+  // become different hardware because the numbers are whole.  Its readings are
+  // measured in ops, so this opening declares that unit and each carries it.
+  auto test = currentDeviceScope->beginTest(
+    {"wmma", "Tensor cores (WMMA / mma.sync)", "tops", Category::Unknown,
+     "Peak speed of the tensor cores -- dedicated units that "
+       "multiply whole blocks of numbers in one step rather than one value at "
+       "a time.  Each reading is a different input format, and several are one "
+       "format run a second way: with the running total kept narrower, or with "
+       "half the values skipped as known zeros.  Which of them exist at all, "
+       "and how much faster the narrow ones go, is most of what separates one "
+       "generation of NVIDIA hardware from the next.",
+     TestShape::Heterogeneous, "data type"});
+
   // INT8 WMMA
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "Tensor cores (WMMA / mma.sync)";
-    d.resultTag = "wmma";
-    d.shape = TestShape::Heterogeneous;
-    d.axis = "data type";
-    d.description = "Peak speed of the tensor cores -- dedicated units that "
-                    "multiply whole blocks of numbers in one step rather than "
-                    "one value at a time.  Each reading is a different input "
-                    "format, and several are one format run a second way: "
-                    "with the running total kept narrower, or with half the "
-                    "values skipped as known zeros.  Which of them exist at "
-                    "all, and how much faster the narrow ones go, is most of "
-                    "what separates one generation of NVIDIA hardware from "
-                    "the next.";
+    d.scope = &test;
     d.metricDescription = "8-bit whole numbers with a 32-bit running total -- "
                           "the format quantized neural networks use when they "
                           "are squeezed down to run fast on cheaper hardware. "
@@ -619,19 +456,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "Tensor cores (WMMA / mma.sync)";
-    d.resultTag = "wmma";
-    d.shape = TestShape::Heterogeneous;
-    d.axis = "data type";
-    d.description = "Peak speed of the tensor cores -- dedicated units that "
-                    "multiply whole blocks of numbers in one step rather than "
-                    "one value at a time.  Each reading is a different input "
-                    "format, and several are one format run a second way: "
-                    "with the running total kept narrower, or with half the "
-                    "values skipped as known zeros.  Which of them exist at "
-                    "all, and how much faster the narrow ones go, is most of "
-                    "what separates one generation of NVIDIA hardware from "
-                    "the next.";
+    d.scope = &test;
     d.metricDescription = "The same 8-bit whole-number maths on NVIDIA's "
                           "native tile shape rather than the portable one, "
                           "which the hardware feeds more efficiently. "
@@ -658,19 +483,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "Tensor cores (WMMA / mma.sync)";
-    d.resultTag = "wmma";
-    d.shape = TestShape::Heterogeneous;
-    d.axis = "data type";
-    d.description = "Peak speed of the tensor cores -- dedicated units that "
-                    "multiply whole blocks of numbers in one step rather than "
-                    "one value at a time.  Each reading is a different input "
-                    "format, and several are one format run a second way: "
-                    "with the running total kept narrower, or with half the "
-                    "values skipped as known zeros.  Which of them exist at "
-                    "all, and how much faster the narrow ones go, is most of "
-                    "what separates one generation of NVIDIA hardware from "
-                    "the next.";
+    d.scope = &test;
     d.metricDescription = "8-bit whole numbers with zeros skipped, two per "
                           "group of four, so the hardware does twice the "
                           "useful work per step.  mma.sp m16n8k64.";
@@ -694,19 +507,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "Tensor cores (WMMA / mma.sync)";
-    d.resultTag = "wmma";
-    d.shape = TestShape::Heterogeneous;
-    d.axis = "data type";
-    d.description = "Peak speed of the tensor cores -- dedicated units that "
-                    "multiply whole blocks of numbers in one step rather than "
-                    "one value at a time.  Each reading is a different input "
-                    "format, and several are one format run a second way: "
-                    "with the running total kept narrower, or with half the "
-                    "values skipped as known zeros.  Which of them exist at "
-                    "all, and how much faster the narrow ones go, is most of "
-                    "what separates one generation of NVIDIA hardware from "
-                    "the next.";
+    d.scope = &test;
     d.metricDescription = "4-bit whole numbers.  Turing through Ada only -- "
                           "NVIDIA dropped the integer 4-bit path afterwards "
                           "in favour of the 4-bit float formats above. "

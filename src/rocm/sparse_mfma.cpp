@@ -100,17 +100,21 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     return o;
   };
 
-  for (size_t e = 0; e < numEntries; e++)
-  {
-    const SparseEntry &se = entries[e];
-    auto test = currentDeviceScope->beginTest(
-      {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", se.unit, Category::Unknown,
+  // One scope for the whole family, not one per entry: the loop below
+  // measures each data type on the same engine, and opening the test
+  // inside it closed and reopened the test once per reading.
+  auto test = currentDeviceScope->beginTest(
+    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", entries[0].unit, Category::Unknown,
        "The matrix cores with structured sparsity: half the values in each "
        "group of four are known to be zero and are skipped, so the hardware "
        "does twice the useful work per step.  Each reading is a different "
        "input format -- compare them against the dense MFMA rows to see what "
        "the trick is actually worth.",
        TestShape::Heterogeneous, "data type"});
+
+  for (size_t e = 0; e < numEntries; e++)
+  {
+    const SparseEntry &se = entries[e];
 
     if (!cdna)
     {

@@ -122,22 +122,26 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
   };
 
   if (!intPart) {
+    // One scope for the whole family: each data type is measured in its own
+    // #ifdef block, and opening the test in each would close and reopen it
+    // seven times over.
+    auto test = currentDeviceScope->beginTest(
+      {"coopmat", "Cooperative matrix", "tflops", Category::Unknown,
+       "The device's matrix engine -- its tensor cores -- which "
+       "multiplies whole small blocks of numbers in one step instead of one "
+       "value at a time.  Each reading is a different input format, run at the "
+       "block shape the driver advertises for it; which formats the engine "
+       "supports, and how much faster the narrow ones go, is most of what "
+       "separates one generation of hardware from the next.",
+       TestShape::Heterogeneous, "data type"});
+
 #ifdef VK_HAS_COOPMAT_FP32
     {
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat";
-      d.title       = "Cooperative matrix";
-      d.shape       = TestShape::Heterogeneous;
-      d.axis        = "data type";
-      d.description = "The device's matrix engine -- its tensor cores -- which "
-                      "multiplies whole small blocks of numbers in one step instead "
-                      "of one value at a time.  Each reading is a different input "
-                      "format, run at the block shape the driver advertises for it; "
-                      "which formats the engine supports, and how much faster the "
-                      "narrow ones go, is most of what separates one generation of "
-                      "hardware from the next.";
+      d.scope = &test;
+      d.resultTag = "coopmat";
       d.metricLabel = "fp32";
       d.unit        = "tflops";
       d.metricDescription = "Peak speed of the device's matrix engine (its tensor cores) on "
@@ -163,17 +167,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat";
-      d.title       = "Cooperative matrix";
-      d.shape       = TestShape::Heterogeneous;
-      d.axis        = "data type";
-      d.description = "The device's matrix engine -- its tensor cores -- which "
-                      "multiplies whole small blocks of numbers in one step instead "
-                      "of one value at a time.  Each reading is a different input "
-                      "format, run at the block shape the driver advertises for it; "
-                      "which formats the engine supports, and how much faster the "
-                      "narrow ones go, is most of what separates one generation of "
-                      "hardware from the next.";
+      d.scope = &test;
+      d.resultTag = "coopmat";
       d.metricLabel = "fp16";
       d.unit        = "tflops";
       d.metricDescription = "The matrix engine on 16-bit inputs with a 32-bit running "
@@ -201,17 +196,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat";
-      d.title       = "Cooperative matrix";
-      d.shape       = TestShape::Heterogeneous;
-      d.axis        = "data type";
-      d.description = "The device's matrix engine -- its tensor cores -- which "
-                      "multiplies whole small blocks of numbers in one step instead "
-                      "of one value at a time.  Each reading is a different input "
-                      "format, run at the block shape the driver advertises for it; "
-                      "which formats the engine supports, and how much faster the "
-                      "narrow ones go, is most of what separates one generation of "
-                      "hardware from the next.";
+      d.scope = &test;
+      d.resultTag = "coopmat";
       d.metricLabel = "fp16 f16acc";
       d.unit        = "tflops";
       d.metricDescription = "The matrix engine on 16-bit inputs with the running total also "
@@ -238,17 +224,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat";
-      d.title       = "Cooperative matrix";
-      d.shape       = TestShape::Heterogeneous;
-      d.axis        = "data type";
-      d.description = "The device's matrix engine -- its tensor cores -- which "
-                      "multiplies whole small blocks of numbers in one step instead "
-                      "of one value at a time.  Each reading is a different input "
-                      "format, run at the block shape the driver advertises for it; "
-                      "which formats the engine supports, and how much faster the "
-                      "narrow ones go, is most of what separates one generation of "
-                      "hardware from the next.";
+      d.scope = &test;
+      d.resultTag = "coopmat";
       d.metricLabel = "bf16";
       d.unit        = "tflops";
       d.metricDescription = "The matrix engine on bfloat16 -- 16 bits arranged for AI work, "
@@ -274,17 +251,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat";
-      d.title       = "Cooperative matrix";
-      d.shape       = TestShape::Heterogeneous;
-      d.axis        = "data type";
-      d.description = "The device's matrix engine -- its tensor cores -- which "
-                      "multiplies whole small blocks of numbers in one step instead "
-                      "of one value at a time.  Each reading is a different input "
-                      "format, run at the block shape the driver advertises for it; "
-                      "which formats the engine supports, and how much faster the "
-                      "narrow ones go, is most of what separates one generation of "
-                      "hardware from the next.";
+      d.scope = &test;
+      d.resultTag = "coopmat";
       d.metricLabel = "fp8_e4m3";
       d.unit        = "tflops";
       d.metricDescription = "The matrix engine on 8-bit numbers, in the variant that spends "
@@ -312,17 +280,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat";
-      d.title       = "Cooperative matrix";
-      d.shape       = TestShape::Heterogeneous;
-      d.axis        = "data type";
-      d.description = "The device's matrix engine -- its tensor cores -- which "
-                      "multiplies whole small blocks of numbers in one step instead "
-                      "of one value at a time.  Each reading is a different input "
-                      "format, run at the block shape the driver advertises for it; "
-                      "which formats the engine supports, and how much faster the "
-                      "narrow ones go, is most of what separates one generation of "
-                      "hardware from the next.";
+      d.scope = &test;
+      d.resultTag = "coopmat";
       d.metricLabel = "fp8_e5m2";
       d.unit        = "tflops";
       d.metricDescription = "The same 8-bit matrix path in the other variant, which spends "
@@ -347,20 +306,24 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
 
 #ifdef VK_HAS_COOPMAT_INT8
   if (intPart) {
+    // The same test, reopened for the integer phase: the engine does not
+    // become different hardware because the numbers are whole.  This opening
+    // declares ops, so its readings are not headed as flops.
+    auto test = currentDeviceScope->beginTest(
+      {"coopmat", "Cooperative matrix", "tops", Category::Unknown,
+       "The device's matrix engine -- its tensor cores -- which "
+       "multiplies whole small blocks of numbers in one step instead of one "
+       "value at a time.  Each reading is a different input format, run at the "
+       "block shape the driver advertises for it; which formats the engine "
+       "supports, and how much faster the narrow ones go, is most of what "
+       "separates one generation of hardware from the next.",
+       TestShape::Heterogeneous, "data type"});
+
     CoopTileRun r;
     r.push.A.i = 3;
     vk_compute_desc_t d = {};
-    d.resultTag   = "coopmat";
-    d.title       = "Cooperative matrix";
-    d.shape       = TestShape::Heterogeneous;
-    d.axis        = "data type";
-    d.description = "The device's matrix engine -- its tensor cores -- which "
-                    "multiplies whole small blocks of numbers in one step instead "
-                    "of one value at a time.  Each reading is a different input "
-                    "format, run at the block shape the driver advertises for it; "
-                    "which formats the engine supports, and how much faster the "
-                    "narrow ones go, is most of what separates one generation of "
-                    "hardware from the next.";
+    d.scope = &test;
+    d.resultTag = "coopmat";
     d.metricLabel = "int8";
     // Measured in ops, not flops.  The reading carries that itself, which is
     // what lets it join the floating-point family instead of needing a test of

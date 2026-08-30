@@ -75,6 +75,15 @@ Two things are easy to get wrong here:
   that block declared, so the integer phase of a GEMM test prints
   `(TOPS)` rather than repeating `(TFLOPS)`.
 
+**Reopen across phases, not within one.** A family whose data types are each
+measured in their own block should open ONE scope and pass it down, not open
+the test per block — see the tensor-core and cooperative-matrix runners, whose
+descriptors take a `logger::TestScope *`. Reopening per reading works, but the
+CLI flushes a test's rows when it ends, so each block would size the label
+column from its own rows alone and the column would widen down the page. The
+genuine use for a reopen is the integer phase arriving after the rest of the
+run, where a new header is what you want anyway.
+
 ## Test documentation
 
 Two levels, each authored where its own code lives — never collected into a

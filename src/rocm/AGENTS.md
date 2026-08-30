@@ -63,8 +63,9 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
   *reading's* note now, carried on every emit and skip by `unitOpts()`.
 - **Each of those three tables is ONE test**, not one per entry: `wmma`,
   `mfma`, `smfmac`.  The entry's `label` is the data type; the family tag,
-  title and description are constants at the `beginTest` call inside the loop,
-  which reopens the same test for each entry.  The three stay separate from one
+  title and description are constants at a single `beginTest` above the loop.
+  Opening it inside the loop instead would close and reopen the test per
+  reading, which the CLI renders as a column that widens down the page.  The three stay separate from one
   another because they are different instructions on different hardware (RDNA
   vs CDNA), not different formats on one unit.  `en.isInt` drives the `tops`
   unit override that lets the integer entry share the test.

@@ -2,6 +2,7 @@
 
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
+#include <memory>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -20,14 +21,22 @@
 int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                              const vk_compute_desc_t &d)
 {
-  logger::TestSpec testSpec;
-  testSpec.tag = d.resultTag;
-  testSpec.display = d.title;
-  testSpec.unit = d.unit;
-  if (d.description) testSpec.description = d.description;
-  testSpec.shape = d.shape;
-  if (d.axis) testSpec.axis = d.axis;
-  auto test = currentDeviceScope->beginTest(testSpec);
+  // The spec is built only when this desc opens its own test.  A desc that
+  // writes into a caller's scope leaves the header fields null -- assigning
+  // one of those to the spec's std::string is undefined, and did crash.
+  std::unique_ptr<logger::TestScope> ownTest;
+  if (!d.scope)
+  {
+    logger::TestSpec testSpec;
+    testSpec.tag = d.resultTag;
+    testSpec.display = d.title;
+    testSpec.unit = d.unit;
+    if (d.description) testSpec.description = d.description;
+    testSpec.shape = d.shape;
+    if (d.axis) testSpec.axis = d.axis;
+    ownTest.reset(new logger::TestScope(currentDeviceScope->beginTest(testSpec)));
+  }
+  logger::TestScope &test = d.scope ? *d.scope : *ownTest;
 
   // Collect variants.  Multi-variant path (e.g. fp16 v1/v2/v4) shares one
   // buffer + descriptor set and swaps only the pipeline between dispatches;

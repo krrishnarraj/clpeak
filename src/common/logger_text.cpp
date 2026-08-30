@@ -200,15 +200,15 @@ void LoggerText::renderTestSkippedAll(const LogEvent &e)
 
 void LoggerText::renderTestEnd()
 {
-    // Deliberately does NOT flush.  A merged family closes and immediately
-    // reopens its test once per data type, and flushing each block separately
-    // computed the label column from that block alone -- so a fifteen-reading
-    // tensor-core test widened its column three times down the page.  Holding
-    // the rows until the stanza is finished aligns them as one table.
+    // A test's rows print when it ends, before anything the next test does.
+    // Holding them any longer lets that next test's --verbose setup lines
+    // (which go to stderr, unbuffered) land between a header and its readings.
     //
-    // It costs nothing to wait: the next beginTest() runs microseconds after
-    // this TestEnd (the measuring happens after it), so the rows still appear
-    // as soon as the test that produced them is over.
+    // This is only safe because a merged family opens ONE scope for all its
+    // readings -- see the tensor-core and cooperative-matrix runners.  Were it
+    // to close and reopen per data type, each block would flush separately and
+    // the label column would widen down the page.
+    flushMetrics();
     indentLevel = propIndent;
 }
 

@@ -1,6 +1,7 @@
 #ifdef ENABLE_CUDA
 
 #include <cuda/cuda_peak.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,10 +14,13 @@
 int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
                                const cuda_compute_desc_t &d)
 {
-  auto test = currentDeviceScope->beginTest(
-    {d.resultTag, d.title, d.unit, Category::Unknown,
-     d.description ? d.description : "",
-     d.shape, d.axis ? d.axis : ""});
+  std::unique_ptr<logger::TestScope> ownTest;
+  if (!d.scope)
+    ownTest.reset(new logger::TestScope(currentDeviceScope->beginTest(
+      {d.resultTag, d.title, d.unit, Category::Unknown,
+       d.description ? d.description : "",
+       d.shape, d.axis ? d.axis : ""})));
+  logger::TestScope &test = d.scope ? *d.scope : *ownTest;
 
   struct Variant
   {

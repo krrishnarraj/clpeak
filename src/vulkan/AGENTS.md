@@ -52,8 +52,11 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   them onto `vkWidthNote()`, and their axis is "chains in flight", not "vector
   width".
 - **Every coopmat data type is one reading of ONE test** (`coopmat`), not a
-  test each.  Each `#ifdef` block in `coopmat.cpp` opens the same tag, so the
-  logger reopens it and appends.  The reading is named by its data type alone;
+  test each.  `runCoopMatrix` opens one scope per category phase and every
+  `#ifdef` block writes into it via `vk_compute_desc_t::scope` — a desc that
+  does still sets `resultTag`, which the runner's --verbose lines report
+  themselves under, but leaves the other header fields null.  The reading is
+  named by its data type alone;
   the driver-advertised tile goes in its NOTE, appended by `bindCoopTile`,
   because a shape in the name would differ between a device that measured the
   reading and one that skipped it — the same reading under two ids.  The prose
