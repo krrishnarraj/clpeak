@@ -64,6 +64,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   single-reading test collapses whatever its shape, since a one-row table says
   nothing the row does not.  `shape` is authored natively and cannot be
   inferred — see `docs/format-v3.md`.
+- Why is the shortest latency the longest bar? → `TestResult.barFraction` is
+  direction-aware: the meter shows how *good* a reading is, not how large, so
+  the fastest time fills it.  A plain value/max filled the slowest one instead,
+  which said the opposite of the truth.  The breakdown captions itself
+  `LOWER IS BETTER — LONGEST BAR IS BEST` whenever the test runs that way,
+  because a bar beside a number is otherwise read as the number's size.
 - Readings that could not be taken? → `DeviceRun.unavailable`, rendered by
   `_UnavailableSection` at the foot of the page.  It collects whole
   unsupported tests **and** the individual readings missing from tests that

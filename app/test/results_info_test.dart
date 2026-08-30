@@ -140,6 +140,51 @@ void main() {
     expect(find.text('300 TFLOPS'), findsOneWidget);
   });
 
+  testWidgets('a lower-is-better test says its meters run backwards',
+      (tester) async {
+    // The fastest reading draws the fullest bar, which reads as an error
+    // unless the view says which way round it is.
+    final doc = RunDocument();
+    doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(_header(
+          id: 'kernel_launch_latency',
+          title: 'Kernel launch latency',
+          shape: TestShape.heterogeneous,
+          units: const Units(
+              symbol: 'µs', quantity: Quantity.seconds, scale: 1e-6),
+        ))
+      ..metrics.add(const MetricResult(id: 'dispatch', value: 5.24))
+      ..metrics.add(const MetricResult(id: 'roundtrip', value: 184.0));
+
+    await tester.pumpWidget(_host(doc));
+    await tester.pump();
+
+    expect(find.text('LOWER IS BETTER — LONGEST BAR IS BEST'), findsOneWidget);
+
+    // And the bars really do run that way: fastest full, slowest a sliver.
+    final t = doc.runs.single.categories.single.tests.single;
+    expect(t.barFraction(t.metrics.first), 1.0);
+    expect(t.barFraction(t.metrics.last), closeTo(5.24 / 184.0, 1e-9));
+  });
+
+  testWidgets('a higher-is-better test carries no such caption',
+      (tester) async {
+    final doc = RunDocument();
+    doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(const TestHeader(
+          id: 'single_precision_compute',
+          title: 'Single-precision compute',
+          category: BenchCategory.fpCompute,
+          shape: TestShape.heterogeneous,
+          units: Units(
+              symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9),
+        ))
+      ..metrics.add(const MetricResult(id: 'float', value: 100))
+      ..metrics.add(const MetricResult(id: 'float2', value: 200));
+
+    await tester.pumpWidget(_host(doc));
+    await tester.pump();
+    expect(find.textContaining('LOWER IS BETTER'), findsNothing);
+  });
+
   testWidgets('an unavailable test can still be explained', (tester) async {
     final doc = RunDocument();
     doc
