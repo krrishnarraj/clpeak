@@ -77,9 +77,15 @@ struct LogEvent {
   double      scale     = 1.0;
 
   // True when this TestBegin reopened an already-recorded test to append more
-  // readings to it, rather than starting a new one.  Channels that render a
-  // test header skip it the second time round.
+  // readings to it, rather than starting a new one.
   bool reopened = false;
+
+  // The unit THIS opening declared, which on a reopen need not be the test's:
+  // a GEMM test opens in the floating-point phase reporting TFLOPS and reopens
+  // in the integer phase reporting TOPS.  `unit` above stays the test's, from
+  // its first open, since that is what the document records; a channel that
+  // heads a block of readings uses this one, or it labels ops as flops.
+  std::string openedUnit;
 
   // DeviceBegin
   std::vector<LogProp> props;
@@ -342,6 +348,13 @@ public:
   /// the reading that would have been, exactly as in emit().
   void skip(std::string metric, ResultStatus status, std::string reason,
             std::string description = "");
+
+  /// Same, for a reading that carries more than a note — above all the unit
+  /// it would have been measured in.  A skipped integer reading inside an
+  /// otherwise floating-point test still has to say it is ops and not flops,
+  /// or it reads as the test's unit and claims something false.
+  void skip(std::string metric, ResultStatus status, std::string reason,
+            EmitOptions opts);
 
   /// Entire test unavailable — records one skip per named metric and
   /// dispatches a single TestSkippedAll event.

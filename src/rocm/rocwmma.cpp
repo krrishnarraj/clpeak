@@ -25,12 +25,12 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   if (isInt) metricOpts.unit = "tops";
 
 #ifndef CLPEAK_ROCM_HAS_ROCWMMA
-  test.skip(metric, ResultStatus::Unsupported, "rocWMMA headers not found at configure time", metricNote);
+  test.skip(metric, ResultStatus::Unsupported, "rocWMMA headers not found at configure time", metricOpts);
   return 0;
 #else
   if (!dev.info.rocwmmaSupported)
   {
-    test.skip(metric, ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", metricNote);
+    test.skip(metric, ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", metricOpts);
     return 0;
   }
 
@@ -56,7 +56,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   void *outBuf = nullptr;
   if (hipMalloc(&outBuf, outBytes) != hipSuccess)
   {
-    test.skip(metric, ResultStatus::Error, "Failed to allocate output buffer", metricNote);
+    test.skip(metric, ResultStatus::Error, "Failed to allocate output buffer", metricOpts);
     return -1;
   }
 
@@ -65,7 +65,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
                      isInt ? "rocwmma_int8" : "rocwmma_fp16", fn))
   {
     (void)hipFree(outBuf);
-    test.skip(metric, ResultStatus::Error, "Kernel compile failed", metricNote);
+    test.skip(metric, ResultStatus::Error, "Kernel compile failed", metricOpts);
     return 0;
   }
 
@@ -75,7 +75,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category cate
   if (us <= 0.0f)
   {
     (void)hipFree(outBuf);
-    test.skip(metric, ResultStatus::Error, "kernel launch failed", metricNote);
+    test.skip(metric, ResultStatus::Error, "kernel launch failed", metricOpts);
     return 0;
   }
 

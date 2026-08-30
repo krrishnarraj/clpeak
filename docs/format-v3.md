@@ -173,7 +173,9 @@ invented word for that pair would read worse than none.
 
 The unit override is what lets one heterogeneous test hold both TFLOPS and
 TOPS readings, instead of being split into the `-fp` / `-int` twins that older
-clpeak emitted purely so the unit string could differ.
+clpeak emitted purely so the unit string could differ.  It is set on skipped
+readings too: an unsupported int8 row still has to say it would have been ops
+and not flops, or it reads as its test's unit and claims something false.
 
 ## Units
 

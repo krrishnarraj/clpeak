@@ -205,8 +205,10 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
              "reaches on the operation most AI work is built from.  Each "
              "reading is a different input format.",
              TestShape::Heterogeneous, "data type"});
+        logger::EmitOptions o;
+        if (isInt) o.unit = "tops";
         t.skip(isInt ? "int8" : "fp32", ResultStatus::Unsupported,
-               "cuBLASLt library not found; GEMM skipped");
+               "cuBLASLt library not found; GEMM skipped", o);
         return 0;
     }
 
@@ -298,7 +300,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             cublasLtMatrixLayoutCreate(&Bdesc, bType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, cType, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", note);
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", blasOpts(note));
             if (opDesc) cublasLtMatmulDescDestroy(opDesc);
             if (Adesc)  cublasLtMatrixLayoutDestroy(Adesc);
             if (Bdesc)  cublasLtMatrixLayoutDestroy(Bdesc);
@@ -333,7 +335,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
         {
             blasTest->skip(label, ResultStatus::Unsupported,
-                          std::string("unsupported on ") + dev.info.archName, note);
+                          std::string("unsupported on ") + dev.info.archName, blasOpts(note));
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -359,7 +361,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         }
         if (bestIdx < 0)
         {
-            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", note);
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", blasOpts(note));
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -377,7 +379,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
 
         if (per_iter_us <= 0.0)
         {
-            blasTest->skip(label, ResultStatus::Error, "timing probe failed", note);
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -454,7 +456,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (cuMemAlloc(&dSA, scaleABytes) != CUDA_SUCCESS ||
             cuMemAlloc(&dSB, scaleBBytes) != CUDA_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed", note);
+            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed", blasOpts(note));
             if (dSA) cuMemFree(dSA);
             if (dSB) cuMemFree(dSB);
             return -1;
@@ -470,7 +472,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_4F_E2M1, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_16BF, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", note);
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", blasOpts(note));
             if (opDesc) cublasLtMatmulDescDestroy(opDesc);
             if (Adesc)  cublasLtMatrixLayoutDestroy(Adesc);
             if (Bdesc)  cublasLtMatrixLayoutDestroy(Bdesc);
@@ -514,7 +516,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
         {
             blasTest->skip(label, ResultStatus::Unsupported,
-                          std::string("unsupported on ") + dev.info.archName, note);
+                          std::string("unsupported on ") + dev.info.archName, blasOpts(note));
             cleanup();
             return 0;
         }
@@ -532,7 +534,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         }
         if (bestIdx < 0)
         {
-            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", note);
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", blasOpts(note));
             cleanup();
             return -1;
         }
@@ -544,7 +546,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             &heurs[bestIdx].algo, (void*)dWS, wsBytes, warmup);
         if (per_iter_us <= 0.0)
         {
-            blasTest->skip(label, ResultStatus::Error, "timing probe failed", note);
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
             cleanup();
             return -1;
         }
@@ -676,19 +678,15 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         else
         {
             blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
-                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName,
-                           mxf4Note);
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName, blasOpts(mxf4Note));
             blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
-                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName,
-                           nvf4Note);
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName, blasOpts(nvf4Note));
         }
 #else
         blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
-                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)",
-                       mxf4Note);
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(mxf4Note));
         blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
-                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)",
-                       nvf4Note);
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(nvf4Note));
 #endif
     }
 

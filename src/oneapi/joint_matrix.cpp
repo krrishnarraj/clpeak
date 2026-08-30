@@ -603,7 +603,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
 
   auto skipRows = [&](ResultStatus status, const std::string &reason) {
     for (const auto &t : tiles)
-      test.skip(t.metric, status, reason, jmNote(t));
+      test.skip(t.metric, status, reason, jmOpts(t));
   };
 
   void *out = isInt ? (void *)sycl::malloc_device<int32_t>(outElems, dev.stream)
@@ -623,7 +623,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     {
       test.skip(t.metric, ResultStatus::Unsupported,
                 t.label + " not in this device's matrix-engine combinations",
-                jmNote(t));
+                jmOpts(t));
       continue;
     }
 
@@ -645,12 +645,12 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
       test.skip(t.metric, ResultStatus::Unsupported,
                 "tile " + t.label + " " + t.shape +
                   " has no compiled instantiation in this build",
-                jmNote(t));
+                jmOpts(t));
       continue;
     }
     if (us <= 0.0f)
     {
-      test.skip(t.metric, ResultStatus::Error, "kernel launch failed", jmNote(t));
+      test.skip(t.metric, ResultStatus::Error, "kernel launch failed", jmOpts(t));
       continue;
     }
 

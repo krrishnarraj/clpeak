@@ -543,7 +543,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       logger::EmitOptions o;
       o.description = v.note;
-      test.skip(v.label, ResultStatus::Unsupported, why, o.description);
+      if (isInt) o.unit = "tops";
+      test.skip(v.label, ResultStatus::Unsupported, why, o);
       continue;
     }
 
@@ -638,6 +639,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         logger::EmitOptions o;
         o.description = std::string("Peak over a doubling sweep of square "
                                     "sizes.  ") + v.note;
+        if (isInt) o.unit = "tops";
         test.skip(v.label,
                   tried.empty() ? errStatus : ResultStatus::Unsupported,
                   tried.empty()
@@ -649,7 +651,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         "-- it dequantized the operands and multiplied in "
                         "floating point, so this is not a ") + v.label +
                         " rate (ran: " + tried + ")",
-                  o.description);
+                  o);
         continue;
       }
     }
@@ -872,9 +874,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       o.description = std::string("Peak over a doubling sweep of square sizes.  ")
                       + v.note;
+      if (isInt) o.unit = "tops";
       test.skip(v.label, errStatus,
-                firstErr.empty() ? "no supported datatype" : firstErr,
-                o.description);
+                firstErr.empty() ? "no supported datatype" : firstErr, o);
     }
   }
 

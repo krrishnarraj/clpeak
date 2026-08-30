@@ -91,13 +91,20 @@ private:
     // readings — Vulkan measures each cooperative-matrix data type in its own
     // #ifdef block, all of them into one test.  Printing the header again for
     // each would turn one test into seven look-alike stanzas, so a reopen of
-    // the test that just closed continues the block instead.
+    // the test that just closed, in the same unit, continues the block.
+    //
+    // A reopen in a DIFFERENT unit starts a fresh stanza with its own header:
+    // a GEMM test measures floating point in one phase and integers in the
+    // next, and its integer readings must not sit under a header that says
+    // TFLOPS.  `stanzaUnit` is what that header said, so it is also what a
+    // reading's unit is compared against before printing a suffix.
     //
     // Rows are still flushed at each TestEnd rather than held to the end of
     // the merged test: the CLI is watched live, and holding them would stop
     // readings appearing as they are measured.  `mergedPad` carries the label
     // column across those flushes so the stanza stays one aligned table.
     std::string lastClosedTest;
+    std::string stanzaUnit;
     int         mergedPad = 0;
 
     // ── Helpers ──────────────────────────────────────────────────────────

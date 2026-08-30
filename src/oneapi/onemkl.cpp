@@ -76,17 +76,27 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
          "input format.",
          TestShape::Heterogeneous, "data type"});
 
+  // The integer readings carry their own unit, which is what lets them share
+  // the test with the floating-point ones -- skips included, or an
+  // unsupported int8 row reads as flops.
+  auto mklOpts = [&](const char *note) {
+    logger::EmitOptions o;
+    if (note) o.description = note;
+    if (!fpPhase) o.unit = "tops";
+    return o;
+  };
+
 #ifndef CLPEAK_ONEAPI_HAS_ONEMKL
   if (fpPhase)
   {
-    test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", fp32Note);
-    test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", fp64Note);
-    test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", fp16Note);
-    test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time", bf16Note);
+    test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp32Note));
+    test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp64Note));
+    test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp16Note));
+    test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(bf16Note));
   }
   else
   {
-    test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time", int8Note);
+    test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(int8Note));
   }
   return 0;
 #else
@@ -142,7 +152,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     };
     if (!dA || !dB || !dC || !dCo)
     {
-      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", note);
+      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", mklOpts(note));
       freeAll();
       return;
     }
@@ -173,20 +183,15 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
     double probeUs = runBatch(warm);
     if (probeUs <= 0.0)
-      test.skip(label, ResultStatus::Error, "timing probe failed", note);
+      test.skip(label, ResultStatus::Error, "timing probe failed", mklOpts(note));
     else
     {
       unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
       double meanUs = runBatch(iters);
       if (meanUs <= 0.0)
-        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", note);
+        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", mklOpts(note));
       else
-        logger::EmitOptions opts;
-        opts.description = note;
-        // The integer readings carry their own unit, which is what lets them
-        // share the test with the floating-point ones.
-        if (!fpPhase) opts.unit = "tops";
-        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), opts);
+        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), mklOpts(note));
     }
     freeAll();
     // q and its private context are destroyed here.
@@ -211,7 +216,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
           (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
       });
     else
-      test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", fp64Note);
+      test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", mklOpts(fp64Note));
 
     if (dev.info.fp16Supported)
       measure("fp16", fp16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
@@ -223,7 +228,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
           sycl::half(0.0f), (sycl::half *)dC, n);
       });
     else
-      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", fp16Note);
+      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", mklOpts(fp16Note));
 
     // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
     // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
@@ -238,10 +243,10 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
           (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
       });
     else
-      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", bf16Note);
+      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", mklOpts(bf16Note));
 #else
     test.skip("bf16", ResultStatus::Unsupported,
-              "SYCL bfloat16 header not available in this oneAPI toolchain", bf16Note);
+              "SYCL bfloat16 header not available in this oneAPI toolchain", mklOpts(bf16Note));
 #endif
   }
   else
@@ -253,7 +258,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     // measure() reports a clean skip.
     if (!dev.info.xmxSupported)
       test.skip("int8", ResultStatus::Unsupported,
-                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", int8Note);
+                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", mklOpts(int8Note));
     else
       measure("int8", int8Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
                              std::int64_t n) {

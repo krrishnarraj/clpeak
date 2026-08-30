@@ -125,7 +125,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     if (!dev.getKernel(*se.blob, se.kernelName, fn))
     {
       test.skip(se.label, ResultStatus::Unsupported,
-                "Sparse MFMA instruction for this datatype not available on this GPU", se.description);
+                "Sparse MFMA instruction for this datatype not available on this GPU", unitOpts(se));
       continue;
     }
 
@@ -141,7 +141,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
     {
       test.skip(se.label, ResultStatus::Error,
-                "Failed to allocate output buffer", se.description);
+                "Failed to allocate output buffer", unitOpts(se));
       continue;
     }
 
@@ -152,7 +152,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     {
       (void)hipFree(outBuf);
       test.skip(se.label, ResultStatus::Error,
-                "kernel launch failed", se.description);
+                "kernel launch failed", unitOpts(se));
       continue;
     }
 

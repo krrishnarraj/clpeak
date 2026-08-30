@@ -310,7 +310,9 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
     log->curTestSeq = seq;
 
     LogEvent e = log->makeEvent(LogEvent::Kind::TestBegin);
-    e.reopened = reopened;
+    e.reopened   = reopened;
+    // What this opening asked for, not what the test settled on at its first.
+    e.openedUnit = u.symbol;
     log->onEvent(e);
 }
 
@@ -376,6 +378,38 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
     m.status      = status;
     m.reason      = std::move(reason);
     m.description = oneLine(description);
+
+    LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
+    e.metric   = log->record(std::move(m));
+    log->onEvent(e);
+}
+
+void logger::TestScope::skip(std::string metric, ResultStatus status,
+                             std::string reason, EmitOptions opts)
+{
+    assert(!closed);
+    assert(log->contextDepth == 3);
+
+    MetricResult m;
+    m.id          = std::move(metric);
+    m.status      = status;
+    m.reason      = std::move(reason);
+    m.description = oneLine(opts.description);
+    m.label       = opts.label;
+    m.direction   = opts.direction;
+    // A reading that never ran still records the unit it would have been in:
+    // that is what tells a reader an unsupported int8 row was never going to
+    // be flops, and what keeps the row honest when the test it sits in
+    // reports something else.
+    if (!opts.unit.empty())
+    {
+        const UnitInfo u = unitInfo(opts.unit);
+        m.hasUnit  = true;
+        m.unit     = u.symbol;
+        m.quantity = u.quantity;
+        m.scale    = u.scale;
+        if (m.direction == Direction::FromUnit) m.direction = u.direction;
+    }
 
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));

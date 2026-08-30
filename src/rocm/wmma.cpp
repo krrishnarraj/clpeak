@@ -136,7 +136,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     if (!wave32)
     {
       test.skip(me.label, ResultStatus::Unsupported,
-                "WMMA peak measured only in wave32 mode on this build", me.description);
+                "WMMA peak measured only in wave32 mode on this build", unitOpts(me));
       continue;
     }
 
@@ -146,7 +146,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     if (!dev.getKernel(*me.blob, me.kernelName, fn))
     {
       test.skip(me.label, ResultStatus::Unsupported,
-                "WMMA instruction for this datatype not available on this GPU", me.description);
+                "WMMA instruction for this datatype not available on this GPU", unitOpts(me));
       continue;
     }
 
@@ -162,7 +162,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
     {
       test.skip(me.label, ResultStatus::Error,
-                "Failed to allocate output buffer", me.description);
+                "Failed to allocate output buffer", unitOpts(me));
       continue;
     }
 
@@ -173,7 +173,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     {
       (void)hipFree(outBuf);
       test.skip(me.label, ResultStatus::Error,
-                "kernel launch failed", me.description);
+                "kernel launch failed", unitOpts(me));
       continue;
     }
 

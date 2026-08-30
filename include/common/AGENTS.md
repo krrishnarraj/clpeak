@@ -64,6 +64,17 @@ differ. `DeviceScope::beginTest()` on a tag already recorded for the device
 *reopens* it and appends, so the two halves can be measured in different
 category phases and still land in one test.
 
+Two things are easy to get wrong here:
+
+- **Skips need the unit as much as measurements do.** `skip()` has an
+  `EmitOptions` overload for exactly this. An unsupported int8 row with no unit
+  inherits its test's, and then claims to be flops.
+- **The reopening `TestSpec` still carries the unit of the readings it is about
+  to produce.** The test keeps the unit of its *first* open — that is what the
+  document records — but the CLI heads each block of readings with the unit
+  that block declared, so the integer phase of a GEMM test prints
+  `(TOPS)` rather than repeating `(TFLOPS)`.
+
 ## Test documentation
 
 Two levels, each authored where its own code lives — never collected into a

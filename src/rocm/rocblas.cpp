@@ -157,17 +157,27 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
          "input format.",
          TestShape::Heterogeneous, "data type"});
 
+  // The integer readings carry their own unit, which is what lets them share
+  // the test with the floating-point ones -- on the skip paths as much as the
+  // measured one, or an unsupported int8 row reads as flops.
+  auto blasOpts = [&](const char *note) {
+    logger::EmitOptions o;
+    if (note) o.description = note;
+    if (!fpPhase) o.unit = "tops";
+    return o;
+  };
+
 #ifndef CLPEAK_ROCM_HAS_ROCBLAS
   if (fpPhase)
   {
-    test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time", fp32Note);
-    test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time", fp64Note);
-    test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time", fp16Note);
-    test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time", bf16Note);
+    test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp32Note));
+    test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp64Note));
+    test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp16Note));
+    test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(bf16Note));
   }
   else
   {
-    test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time", int8Note);
+    test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(int8Note));
   }
   return 0;
 #else
@@ -186,14 +196,14 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
   auto skipPhase = [&](ResultStatus status, const char *msg) {
     if (fpPhase)
     {
-      test.skip("fp32", status, msg, fp32Note);
-      test.skip("fp64", status, msg, fp64Note);
-      test.skip("fp16", status, msg, fp16Note);
-      test.skip("bf16", status, msg, bf16Note);
+      test.skip("fp32", status, msg, blasOpts(fp32Note));
+      test.skip("fp64", status, msg, blasOpts(fp64Note));
+      test.skip("fp16", status, msg, blasOpts(fp16Note));
+      test.skip("bf16", status, msg, blasOpts(bf16Note));
     }
     else
     {
-      test.skip("int8", status, msg, int8Note);
+      test.skip("int8", status, msg, blasOpts(int8Note));
     }
   };
 
@@ -234,7 +244,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     double probeUs = timeRocblas(dev.stream, gemmFn, warm);
     if (probeUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "timing probe failed", note);
+      test.skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
       return;
     }
     unsigned int iters = pickIters(probeUs, 5000000u,
@@ -242,15 +252,10 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     double meanUs = timeRocblas(dev.stream, gemmFn, iters);
     if (meanUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", note);
+      test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", blasOpts(note));
       return;
     }
-    logger::EmitOptions opts;
-    opts.description = note;
-    // The integer readings carry their own unit, which is what lets them share
-    // the test with the floating-point ones.
-    if (!fpPhase) opts.unit = "tops";
-    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), opts);
+    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), blasOpts(note));
   };
 
   if (fpPhase)
@@ -295,7 +300,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     }
     else
     {
-      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device", fp16Note);
+      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device", blasOpts(fp16Note));
     }
 
     if (dev.info.bf16Supported)
@@ -314,7 +319,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     }
     else
     {
-      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device", bf16Note);
+      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device", blasOpts(bf16Note));
     }
   }
   else
@@ -340,8 +345,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category categor
     // here -- report it as Unsupported rather than Error.
     if (int8Gemm() != rocblas_status_success)
       test.skip("int8", ResultStatus::Unsupported,
-                std::string("int8 GEMM not supported on ") + dev.info.archName,
-                int8Note);
+                std::string("int8 GEMM not supported on ") + dev.info.archName, blasOpts(int8Note));
     else
       runTimed("int8", int8Note, int8Gemm);
   }

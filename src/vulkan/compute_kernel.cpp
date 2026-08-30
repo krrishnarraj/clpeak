@@ -66,7 +66,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   {
     const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
     for (const auto &v : variants)
-      test.skip(v.label, ResultStatus::Unsupported, msg, note(v.description));
+      test.skip(v.label, ResultStatus::Unsupported, msg, emitOpts(v.description));
     return 0;
   }
 
@@ -236,13 +236,13 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     if (!built)
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
-                note(v.description));
+                emitOpts(v.description));
       continue;
     }
     if (timed <= 0.0f)
     {
       test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                note(v.description));
+                emitOpts(v.description));
       continue;
     }
     float value = toValue(timed);

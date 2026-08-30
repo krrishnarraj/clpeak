@@ -63,11 +63,11 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
 
   if (us1 > 0.0) test.emit(label + " ST", giga(opsPerIterPerThread, 1, us1), opts(stNote));
   else           test.skip(label + " ST", ResultStatus::Error, "workload failed",
-                           opts(stNote).description);
+                           opts(stNote));
 
   if (usN > 0.0) test.emit(label + " MT", giga(opsPerIterPerThread, maxT, usN), opts(mtNote));
   else           test.skip(label + " MT", ResultStatus::Error, "workload failed",
-                           opts(mtNote).description);
+                           opts(mtNote));
 }
 
 // Run EVERY supported ISA variant of one compute kernel.  Each ISA is its own
@@ -138,6 +138,30 @@ static void emitFamily(CpuPeak &peak, const logger::TestSpec &base,
   logger::TestSpec spec = base;
   spec.shape = TestShape::Heterogeneous;
 
+  // When every row of THIS call shares one unit override, it is the unit of
+  // the readings this opening produces, so it heads them.  cpu_matrix opens in
+  // the floating-point phase reporting flops and reopens in the integer phase
+  // reporting ops; without this the integer readings would sit under a GFLOPS
+  // header.  A mixed-unit call keeps the family's unit and the rows carry
+  // their own.
+  {
+    const char *shared = rows.empty() ? nullptr : rows.front().unit;
+    bool uniform = shared != nullptr;
+    for (const FamilyRow &r : rows)
+      if (!r.unit || std::string(r.unit) != shared) { uniform = false; break; }
+    if (uniform) spec.unit = shared;
+  }
+
+  // A row that never ran still names the unit it would have been measured in:
+  // an unsupported int8 row inside a floating-point test must not read as
+  // flops.
+  auto rowOpts = [](const FamilyRow &r) {
+    logger::EmitOptions o;
+    if (r.description) o.description = r.description;
+    if (r.unit) o.unit = r.unit;
+    return o;
+  };
+
   // Ordered union of the ISAs any row supports, first-seen order (the menus
   // are built baseline-first, so this stays low-ISA to high-ISA).
   std::vector<const char *> isas;
@@ -156,8 +180,7 @@ static void emitFamily(CpuPeak &peak, const logger::TestSpec &base,
   {
     auto test = peak.currentDeviceScope->beginTest(spec);
     for (const FamilyRow &r : rows)
-      test.skip(r.metric, ResultStatus::Unsupported, r.unsupReason,
-                r.description ? r.description : "");
+      test.skip(r.metric, ResultStatus::Unsupported, r.unsupReason, rowOpts(r));
     return;
   }
 
@@ -173,8 +196,7 @@ static void emitFamily(CpuPeak &peak, const logger::TestSpec &base,
 
       if (!match)
       {
-        test.skip(r.metric, ResultStatus::Unsupported, r.unsupReason,
-                  r.description ? r.description : "");
+        test.skip(r.metric, ResultStatus::Unsupported, r.unsupReason, rowOpts(r));
         continue;
       }
       emitCompute(peak, test, r.metric, match->v.opsPerIter, match->v.fn, cfg,

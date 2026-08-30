@@ -52,7 +52,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   {
     for (const auto &v : variants)
       test.skip(v.label, ResultStatus::Unsupported,
-                d.skipMsg ? d.skipMsg : "Skipped", note(v.description));
+                d.skipMsg ? d.skipMsg : "Skipped", emitOpts(v.description));
     return 0;
   }
 
@@ -73,7 +73,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   {
     for (const auto &v : variants)
       test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer",
-                note(v.description));
+                emitOpts(v.description));
     return -1;
   }
 
@@ -83,7 +83,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     if (!dev.getKernel(*v.blob, v.kernelName, fn))
     {
       test.skip(v.label, ResultStatus::Error, "compile/load failed",
-                note(v.description));
+                emitOpts(v.description));
       continue;
     }
 

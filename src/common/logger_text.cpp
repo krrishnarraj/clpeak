@@ -114,14 +114,20 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     // clear so no measured row can ever be discarded silently.
     flushMetrics();
 
-    // Reopening the test that just closed: keep writing into the same stanza,
-    // under the header already printed for it.
-    if (e.reopened && e.testKey() == lastClosedTest)
+    // The unit this opening declared, which on a reopen need not be the
+    // test's: the integer phase of a GEMM test reports ops, not flops.
+    const std::string openUnit = e.openedUnit.empty() ? e.unit : e.openedUnit;
+
+    // Reopening the test that just closed, in the same unit: keep writing into
+    // the same stanza, under the header already printed for it.  A different
+    // unit means a different kind of reading and gets its own header.
+    if (e.reopened && e.testKey() == lastClosedTest && openUnit == stanzaUnit)
     {
         metricLines.clear();
         return;
     }
-    mergedPad = 0;
+    mergedPad  = 0;
+    stanzaUnit = openUnit;
 
     out << "\n";
 
@@ -135,11 +141,7 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     // identical headers.
     std::string header = e.testTitle;
     if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
-    if (!e.unit.empty())        header += " (" + e.unit + ")";
-    // A test reopened later in the run -- after other tests came and went, as
-    // when a GEMM test's integer readings arrive in the integer phase -- does
-    // start a new stanza, so it says which one it is continuing.
-    if (e.reopened)             header += "  (continued)";
+    if (!openUnit.empty())      header += " (" + openUnit + ")";
 
     writeLine(header);
 
@@ -173,9 +175,9 @@ void LoggerText::renderMetric(const LogEvent &e)
     ml.description = e.metric.description;
     ml.baselineKey = baselineKey(e.backend, e.platform, e.deviceKey(),
                                  e.testKey(), e.metric.id);
-    // Only when it actually differs: repeating the test's own unit on every
-    // row would just be noise under a header that already says it.
-    if (e.metric.hasUnit && e.metric.unit != e.unit)
+    // Only when it actually differs from the header above these rows:
+    // repeating what the header already says would just be noise.
+    if (e.metric.hasUnit && e.metric.unit != stanzaUnit)
         ml.unitSuffix = e.metric.unit;
     ml.direction = (e.metric.direction == Direction::FromUnit) ? e.direction
                                                                : e.metric.direction;
