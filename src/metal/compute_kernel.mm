@@ -77,20 +77,23 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 {
     auto test = currentDeviceScope->beginTest(
         {d.resultTag, d.title, d.unit, Category::Unknown,
-         d.description ? d.description : ""});
+         d.description ? d.description : "",
+         d.shape, d.axis ? d.axis : ""});
 
     struct Variant { const char *label; const char *kernelName; const char *src;
                      const char *srcName; const char *description;
-                     const char *altKernelName; };
+                     const char *altKernelName; const char *skipMsg; };
     std::vector<Variant> variants;
     if (d.variants && d.numVariants > 0)
         for (uint32_t i = 0; i < d.numVariants; i++)
             variants.push_back({d.variants[i].label, d.variants[i].kernelName,
                                 d.variants[i].src,   d.variants[i].srcName,
                                 d.variants[i].description,
-                                d.variants[i].altKernelName});
+                                d.variants[i].altKernelName,
+                                d.variants[i].skipMsg});
     else
-        variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName, nullptr, nullptr});
+        variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName, nullptr,
+                            nullptr, nullptr});
 
     // Labels carry right-padding for stdout column alignment; the metric tag
     // stored in the dump (and shown in the GUI) must be the clean label.
@@ -134,6 +137,16 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
 
     for (const auto &v : variants)
     {
+        // One reading the hardware cannot take, in a test the rest of which it
+        // can: the family stays one test and this row moves to the GUI's
+        // unavailable section.
+        if (v.skipMsg)
+        {
+            test.skip(metricTag(v.label), ResultStatus::Unsupported, v.skipMsg,
+                      note(v.description));
+            continue;
+        }
+
         id<MTLComputePipelineState> pso = mtlGetPipeline(dev, v.src, v.srcName, v.kernelName);
         if (!pso)
         {

@@ -59,7 +59,8 @@ int CpuPeak::runComputeIntDiv(benchmark_config_t &cfg)
                         "How many 64-bit whole-number divisions the CPU sustains per "
                         "second.  No CPU has a vector integer divide, so this is one "
                         "narrow scalar unit and usually the slowest instruction on "
-                        "the chip."};
+                        "the chip.",
+                        TestShape::Homogeneous, "threads"};
   auto test = currentDeviceScope->beginTest(spec);
   if (v.fn)
     emitCompute(*this, test, "u64", v.opsPerIter, v.fn, cfg);

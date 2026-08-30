@@ -14,7 +14,10 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
          "The overhead of asking the GPU to do anything at all, measured with a "
          "kernel that does no work.  It is what small, frequent GPU jobs pay "
-         "before any of their own work begins."});
+         "before any of their own work begins.",
+         // Two different waits, not one measured two ways: the one-way cost
+         // and the full round trip answer different questions.
+         TestShape::Heterogeneous});
 
     const char *dispatchNote = "One way only: from the moment the CPU submits the "
                                "work to the moment the GPU starts running it.";

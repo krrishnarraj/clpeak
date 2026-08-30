@@ -111,7 +111,7 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
 {
   (void)cfg;
 #if defined(__aarch64__)
-  const char *engine = " (AMX/SME)";
+  const char *engine = "AMX/SME";
 #else
   const char *engine = "";
 #endif
@@ -119,12 +119,15 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
   // ---- Accelerate BLAS GEMM: fp32 + fp64 ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"accelerate_gemm", std::string("Accelerate GEMM") + engine, "gflops",
+        {"accelerate_gemm", "Accelerate GEMM", "gflops",
          Category::Unknown,
          "Matrix-multiply speed through Apple's Accelerate library, the only way "
          "to reach the matrix coprocessor Apple ships but does not expose as "
          "instructions.  The library uses every core itself, so there is no "
-         "single-thread row."});
+         "single-thread row.",
+         // Precision and problem size both vary, so no one noun heads the
+         // column -- but none of the three readings stands for the others.
+         TestShape::Heterogeneous, "", Direction::FromUnit, engine});
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -175,10 +178,11 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
   // ---- BNNS matmul: fp16 / bf16 (+ int8 unsupported row) ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"bnns_matmul", std::string("BNNS matmul") + engine, "gflops",
+        {"bnns_matmul", "BNNS matmul", "gflops",
          Category::Unknown,
          "Matrix-multiply speed through Apple's BNNS library, the only public "
-         "route to reduced-precision (16-bit) matrix maths on Apple Silicon."});
+         "route to reduced-precision (16-bit) matrix maths on Apple Silicon.",
+         TestShape::Heterogeneous, "data type", Direction::FromUnit, engine});
 
     const char *fp16Note = "16-bit float inputs.";
     const char *bf16Note = "bfloat16 inputs, the AI-oriented 16-bit format.  On "

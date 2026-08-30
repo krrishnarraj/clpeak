@@ -144,15 +144,17 @@ public:
     // inferred.  Heterogeneous by default: verbose, never wrong.
     TestShape shape = TestShape::Heterogeneous;
 
+    // What varies from one reading to the next: "vector width", "data type",
+    // "cache level", "direction", "threads", "pixel format".  Optional; the
+    // GUI heads a heterogeneous test's readings with it.  Ordered right after
+    // `shape` because the two are authored together — a shape without the
+    // noun that justifies it is half an answer.
+    std::string axis;
+
     // Which way is better.  FromUnit (the default) takes the unit table's
     // answer — higher for throughput, lower for latency and error — which is
     // right for every test that measures what its unit suggests.
     Direction direction = Direction::FromUnit;
-
-    // What varies from one reading to the next: "vector width", "data type",
-    // "cache level", "direction", "threads", "pixel format".  Optional; the
-    // GUI heads a heterogeneous test's readings with it.
-    std::string axis;
 
     // Runtime qualifier that is not part of the test's identity — the CPU
     // backend's detected ISA, a GPU arch, a library version.  Keeping it here

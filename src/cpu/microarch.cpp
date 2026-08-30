@@ -42,7 +42,8 @@ int CpuPeak::runAtomics(benchmark_config_t &cfg)
                         "How long one all-or-nothing counter update takes.  This is "
                         "the operation behind locks, reference counts and every "
                         "shared data structure, so it sets the cost of coordinating "
-                        "between threads."};
+                        "between threads.",
+                        TestShape::Heterogeneous, "contention"};
   auto test = currentDeviceScope->beginTest(spec);
 
   struct alignas(64) PaddedAtomic { std::atomic<uint64_t> v{0}; };
@@ -146,7 +147,10 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
                         "What it costs when the CPU guesses the wrong way at an "
                         "if-statement.  The same loop runs over sorted data (easy to "
                         "guess) and shuffled data (a coin flip), and the difference "
-                        "is the price of a wrong guess."};
+                        "is the price of a wrong guess.",
+                        // The third reading is the difference between the other
+                        // two, so nothing here is a variant of anything else.
+                        TestShape::Heterogeneous};
   auto test = currentDeviceScope->beginTest(spec);
 
   // Pinned single-thread, like the pointer-chase.
@@ -254,7 +258,8 @@ int CpuPeak::runStoreForward(benchmark_config_t &cfg)
       "store_forward", "Store-to-load forwarding", "ns",
       Category::Latency,
       "How fast the core can read back a value it just wrote, without the "
-      "write having reached the cache yet."};
+      "write having reached the cache yet.",
+      TestShape::Homogeneous};
   auto test = currentDeviceScope->beginTest(spec);
 
   double ns = -1.0;
@@ -342,7 +347,8 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
                         "Whether the CPU's extra hardware threads (SMT, or Intel's "
                         "Hyper-Threading) actually add throughput: the same maths "
                         "kernel run once with one thread per physical core, then "
-                        "again on every thread the chip offers."};
+                        "again on every thread the chip offers.",
+                        TestShape::Heterogeneous, "threads"};
   auto test = currentDeviceScope->beginTest(spec);
 
   if (info.logicalCores <= info.physicalCores || info.physicalCores < 1)

@@ -44,7 +44,12 @@ See `include/common/AGENTS.md` § Test documentation.  Metal specifics:
 
 - `mtl_compute_desc_t::description` (test) and
   `mtl_compute_variant_t::description` (one reading); `runComputeKernel()`
-  forwards both on every path, skips included.
+  forwards both on every path, skips included.  `shape` / `axis` ride the same
+  descriptor and are forwarded the same way.
+- A data-type family is ONE descriptor with a variant per type, gated
+  individually by `mtl_compute_variant_t::skipMsg` — `simdgroup.mm` is the
+  worked example: fp16 and bf16 are one test, and an M1 (no bf16) skips that
+  one reading instead of losing the test.
 - `mtlWidthNote()` (`mtl_internal.h`) is the shared wording for the
   `float`/`float2`/`float4`/… readings.
 - The `V` tables in `global_bandwidth.mm` / `local_bandwidth.mm` /

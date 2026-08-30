@@ -18,7 +18,7 @@ local memory, DRAM ↔ global memory.
 - Pinned barrier thread pool? → `thread_pool.cpp`
 - SIMD abstraction (per-ISA vector wrappers, `NACC`, unroll macros)? → `cpu_simd.h`
 - Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
-- Shared 1T/NT compute runner + per-ISA test emit (`emitVariants`)? → `compute_common.h`
+- Shared 1T/NT compute runner, per-ISA emit (`emitVariants`) and merged families (`emitFamily`)? → `compute_common.h`
 - FP compute (fp32/fp64/fp16/bf16/mixed/fp8 dot, divide/sqrt)? → `compute_float.cpp`
 - INT compute (int32, int8 dot, int16 dot, u64 divide)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
@@ -51,7 +51,7 @@ local memory, DRAM ↔ global memory.
 | `cpu_tu_registry.h` | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
 | `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `clpeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
 | `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — runs every ISA variant of a `kernelMenu()` slot as its own test (ISA slugged into the tag), or one `Unsupported` test. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
@@ -94,11 +94,24 @@ feature it was compiled with is present. The rationale for each TU's flags and
 platform gating lives in `CMakeLists.txt`.
 
 **Compute tests run EVERY supported ISA variant, not just the best.** The
-compute methods iterate `kernelMenu()` and emit one test per ISA — decorated
-with the canonical label, e.g. `Single-precision compute (AVX-512)` — so users
-can compare instruction sets, with the ISA slugged into the tag so dump/baseline
-rows stay unique. Bandwidth still uses the single best kernel via `kernels()`,
-and the device-header `ISA:` property is the widest active ISA (`isaName()`).
+compute methods iterate `kernelMenu()` and emit one test per ISA so users can
+compare instruction sets. The ISA goes in `logger::TestSpec::variant`, **never
+into the tag**: the tag is the test's identity and must be the same string on
+every machine, or `--compare` cannot match a run against one taken elsewhere.
+The GUI shows the variant beside the title, and the CLI in brackets —
+`Single-precision compute [AVX-512]`. Bandwidth still uses the single best
+kernel via `kernels()`, and the device-header `ISA:` property is the widest
+active ISA (`isaName()`).
+
+**Families share a test.** `emitFamily()` runs several related kernels as one
+test per ISA rather than one test per kernel — the matrix engine's six data
+types, the divider's four operations. It groups by ISA because the ISA is what
+makes two readings incomparable (bf16 on AMX vs on SME is different hardware;
+bf16 vs fp16 on one AMX is not), and a row this host cannot run still appears
+as a skip, so the reader sees which formats the engine lacks. A row measured in
+another unit carries it (`FamilyRow::unit`) — that is how `cpu_matrix`'s int8
+row lives in an otherwise floating-point test, reopening the same test in the
+integer phase.
 
 TU tags (`cpu_tu_registry.h`):
 

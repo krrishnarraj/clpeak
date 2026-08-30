@@ -225,7 +225,8 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
       Category::Latency,
       "How long the core waits for one memory read when it has nothing else "
       "to do -- each read's address comes from the previous read, so the "
-      "hardware cannot start the next one early."};
+      "hardware cannot start the next one early.",
+      TestShape::Heterogeneous, "memory level"};
   auto test = currentDeviceScope->beginTest(spec);
 
   struct Level { const char *name; uint64_t bytes; const char *note; };

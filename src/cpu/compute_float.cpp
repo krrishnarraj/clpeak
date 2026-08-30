@@ -72,25 +72,28 @@ int CpuPeak::runComputeDivSqrt(benchmark_config_t &cfg)
   // Divider/sqrt-unit throughput -- ops are divides (or sqrts) per second, so
   // the numbers are far below the FMA rows by design (the units are narrow,
   // partially pipelined, and this is where CPU generations differ 5-10x).
-  const char *divNote =
-      "How many divisions per second the CPU sustains.  Division has its own "
-      "narrow unit rather than the wide multiply-add pipeline, so it lands far "
-      "below the compute rows and differs hugely between CPU generations.";
-  const char *sqrtNote =
-      "How many square roots per second the CPU sustains.  Like divide, this "
-      "runs on a narrow dedicated unit instead of the main vector pipeline.";
-  emitVariants(*this, {"single_precision_divide", "Single-precision divide", "gflops",
-                       Category::Unknown, divNote},
-               "fdiv", kernelMenu().div32, "no SIMD fp32 divide path for this CPU", cfg);
-  emitVariants(*this, {"double_precision_divide", "Double-precision divide", "gflops",
-                       Category::Unknown, divNote},
-               "fdiv", kernelMenu().div64, "no SIMD fp64 divide path for this CPU", cfg);
-  emitVariants(*this, {"single_precision_sqrt", "Single-precision sqrt", "gflops",
-                       Category::Unknown, sqrtNote},
-               "fsqrt", kernelMenu().sqrt32, "no SIMD fp32 sqrt path for this CPU", cfg);
-  emitVariants(*this, {"double_precision_sqrt", "Double-precision sqrt", "gflops",
-                       Category::Unknown, sqrtNote},
-               "fsqrt", kernelMenu().sqrt64, "no SIMD fp64 sqrt path for this CPU", cfg);
+  //
+  // One test, four readings: divide and square root run on the same narrow
+  // unit, and its profile across the two operations and both precisions is
+  // one fact about the CPU, not four.
+  emitFamily(*this,
+             {"divide_sqrt", "Divide and square-root throughput", "gflops",
+              Category::Unknown,
+              "How many divisions and square roots per second the CPU sustains. "
+              "Both run on their own narrow unit rather than the wide "
+              "multiply-add pipeline, so these land far below the compute rows "
+              "-- and the gap between CPU generations here is much larger.",
+              TestShape::Heterogeneous, "operation"},
+             {{ "fdiv fp32", "Division on 32-bit floats.",
+                "no SIMD fp32 divide path for this CPU", &kernelMenu().div32 },
+              { "fdiv fp64", "Division on 64-bit floats, usually around half "
+                             "the 32-bit rate.",
+                "no SIMD fp64 divide path for this CPU", &kernelMenu().div64 },
+              { "fsqrt fp32", "Square root on 32-bit floats.",
+                "no SIMD fp32 sqrt path for this CPU", &kernelMenu().sqrt32 },
+              { "fsqrt fp64", "Square root on 64-bit floats.",
+                "no SIMD fp64 sqrt path for this CPU", &kernelMenu().sqrt64 }},
+             cfg);
   return 0;
 }
 

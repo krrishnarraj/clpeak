@@ -57,10 +57,13 @@ enum class ResultStatus {
 // beginTest() call site, next to the description (include/common/AGENTS.md).
 //
 // Heterogeneous is the default: it never invents a headline number.  A test
-// that has not been visited yet is therefore verbose, never wrong.
+// that has not been visited yet is therefore verbose, never wrong.  It is also
+// deliberately the zero value, so a C-style descriptor a backend clears with
+// `= {}` and forgets to classify lands on the conservative answer rather than
+// on a headline nobody chose.
 enum class TestShape {
-    Homogeneous,
-    Heterogeneous
+    Heterogeneous,
+    Homogeneous
 };
 
 // Canonical lower-snake names used in the dump format.

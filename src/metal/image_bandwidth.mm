@@ -13,7 +13,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
          "How many bytes per second the GPU reads through its texture units, "
          "which take a different path to memory than plain buffer reads.  Each "
          "reading uses a different pixel format, so they differ in how many "
-         "bytes one pixel costs."});
+         "bytes one pixel costs.",
+         TestShape::Heterogeneous, "pixel format"});
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
@@ -180,7 +181,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
          "hardware performs.  Every lookup falls between pixels, so the hardware "
          "must blend four of them -- the basic operation of drawing any textured "
          "surface.  The texture is small enough to stay cached, so this measures "
-         "the sampling units rather than memory."});
+         "the sampling units rather than memory.",
+         TestShape::Heterogeneous, "pixel format"});
 
     const unsigned int SAMPLES_PER_WI = 64;   // must match texture_sample.metal
     const NSUInteger imgW = 1024, imgH = 1024;  // 4 MB rgba8 -- SLC-resident

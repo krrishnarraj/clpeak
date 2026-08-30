@@ -67,6 +67,12 @@ struct mtl_compute_variant_t
   // runComputeKernel times both and reports the faster: no single chain shape
   // reaches peak on every vendor.  nullptr = this variant races nothing.
   const char *altKernelName;
+
+  // Why this one reading could not be taken, when the rest of the test can
+  // still run.  nullptr = measure it.  This is what lets a family of data
+  // types live in one test on hardware that supports only some of them --
+  // `mtl_compute_desc_t::skip` gates the whole test, this gates one reading.
+  const char *skipMsg;
 };
 
 struct mtl_compute_desc_t
@@ -79,6 +85,15 @@ struct mtl_compute_desc_t
   // One or two plain-language sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
+
+  // Whether the variants below are interchangeable forms of one measurement
+  // (Homogeneous -- a vector-width sweep) or separate measurements that only
+  // share a kernel shape (Heterogeneous -- a family of data types).  See
+  // include/common/AGENTS.md.
+  TestShape   shape;
+
+  // What varies across the variants: "vector width", "data type".  Optional.
+  const char *axis;
 
   // Single-variant fallback.
   const char *metricLabel;

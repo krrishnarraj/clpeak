@@ -15,7 +15,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
          "How many bytes per second the GPU can stream out of main memory, "
          "reading a buffer far too large to cache.  Each reading fetches a "
          "different number of values per instruction, since wider fetches "
-         "usually pull more through before the memory system saturates."});
+         "usually pull more through before the memory system saturates.",
+         TestShape::Homogeneous, "vector width"});
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).

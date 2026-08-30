@@ -26,6 +26,8 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
     d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
                     "fractional numbers -- the ordinary float type.  Nothing "
                     "touches memory, so only the arithmetic units limit the rate.";
+    d.shape       = TestShape::Homogeneous;
+    d.axis        = "vector width";
     d.variants    = variants;
     d.numVariants = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -54,6 +56,8 @@ int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
     d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                     "size of a normal float, and what graphics and on-device AI "
                     "mostly run on.";
+    d.shape       = TestShape::Homogeneous;
+    d.axis        = "vector width";
     d.variants    = variants;
     d.numVariants = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -78,6 +82,8 @@ int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
     d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
                     "running total in 32 bits -- the accuracy-preserving pattern AI "
                     "code uses.";
+    d.shape       = TestShape::Homogeneous;
+    d.axis        = "vector width";
     d.variants    = variants;
     d.numVariants = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI   = COMPUTE_FP_WORK_PER_WI;

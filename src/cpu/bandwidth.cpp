@@ -64,7 +64,8 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                         "How many bytes per second the CPU can read out of each "
                         "cache, from the tiny fast one next to the core to the big "
                         "slow one shared by all of them.  Each reading uses a working "
-                        "set sized to stay inside the cache it names."};
+                        "set sized to stay inside the cache it names.",
+                        TestShape::Heterogeneous, "cache level"};
   auto test = currentDeviceScope->beginTest(spec);
 
   const int maxT = pool->maxThreads();
@@ -226,7 +227,8 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                            "How many bytes per second a core can write into its "
                            "nearest cache, and copy within it.  Cores have fewer "
                            "paths out to memory than in, so writing usually lands "
-                           "below the matching read row."};
+                           "below the matching read row.",
+                           TestShape::Heterogeneous, "operation"};
     auto wtest = currentDeviceScope->beginTest(wspec);
 
     // A QUARTER of the L1, not half like the read row: on a hybrid chip
@@ -330,7 +332,8 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
        "out to RAM.  The two rows that write count only the bytes the program "
        "asked for, the usual STREAM convention; most CPUs must also fetch each "
        "line before overwriting it, so copy and triad move about half again as "
-       "much as they count and normally land below the read row."});
+       "much as they count and normally land below the read row.",
+       TestShape::Heterogeneous, "operation"});
 
   const int maxT = pool->maxThreads();
   const size_t N = pickStreamFloats(info, maxT);

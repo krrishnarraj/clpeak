@@ -218,11 +218,12 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"mps-gemm-fp", "MPS GEMM peak", "tflops", Category::Unknown,
+        {"mps_gemm", "MPS GEMM peak", "tflops", Category::Unknown,
          "Matrix-multiply speed through Apple's own tuned GPU library, on a "
          "large square problem.  Where the compute rows show what the hardware "
          "can do in principle, this shows what Apple's shipping code actually "
-         "reaches on the operation most graphics and AI work is built from."});
+         "reaches on the operation most graphics and AI work is built from.",
+         TestShape::Heterogeneous, "data type"});
 
     if (!dev.info.isAppleSilicon)
     {
@@ -425,12 +426,13 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t H = 16, N = 4096, F = 128;
 
     auto test = currentDeviceScope->beginTest(
-        {"mps-attention", "MPS attention SDPA (H16 S4096 D128)", "tflops",
+        {"mps_attention", "MPS attention SDPA (H16 S4096 D128)", "tflops",
          Category::Unknown,
          "Speed of the attention step -- the operation a language model spends "
          "most of its time in, deciding which earlier words each word should "
          "look at.  Apple's library runs it as one fused unit; the shape is "
-         "fixed at a small-LLM size so the number compares across devices."});
+         "fixed at a small-LLM size so the number compares across devices.",
+         TestShape::Homogeneous});
 
     if (!dev.info.isAppleSilicon)
     {

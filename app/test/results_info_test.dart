@@ -175,7 +175,7 @@ void main() {
       (tester) async {
     final doc = RunDocument();
     doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(const TestHeader(
-          id: 'mps-gemm-fp',
+          id: 'mps_gemm',
           title: 'MPS GEMM peak',
           category: BenchCategory.fpCompute,
           shape: TestShape.heterogeneous,

@@ -255,7 +255,7 @@ void main() {
       final e = ClpeakEvent.fromJson({
         't': 'metric',
         'backend': 'Metal',
-        'test': 'mps-gemm-fp',
+        'test': 'mps_gemm',
         'metric': 'bf16',
         'status': 'unsupported',
         'reason': 'requires M3+',
