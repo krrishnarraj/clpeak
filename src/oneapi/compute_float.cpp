@@ -187,7 +187,7 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
       value = affValue;
   }
 
-  test.emit(label, value, {false, note});
+  test.emit(label, value, note);
 }
 
 // Drive the {1,2,4,8,16} sweep for one FP family.
@@ -216,7 +216,8 @@ int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
      Category::Unknown,
      "Peak arithmetic speed of the device's compute units on 32-bit fractional "
      "numbers -- the ordinary float type.  Nothing touches memory, so only the "
-     "arithmetic units limit the rate."});
+     "arithmetic units limit the rate.",
+     TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
@@ -247,7 +248,8 @@ int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
     {"half_precision_compute", "Half-precision compute", "gflops",
      Category::Unknown,
      "Peak arithmetic speed on 16-bit fractional numbers -- half the size of a "
-     "normal float, and what graphics and on-device AI mostly run on."});
+     "normal float, and what graphics and on-device AI mostly run on.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.fp16Supported)
   {
@@ -287,7 +289,8 @@ int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
      Category::Unknown,
      "Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type "
      "scientific computing relies on.  Consumer graphics parts run these far "
-     "slower than 32-bit; the datacenter parts do not."});
+     "slower than 32-bit; the datacenter parts do not.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.fp64Supported)
   {
@@ -331,7 +334,8 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
      Category::Unknown,
      "Peak speed when the device multiplies 16-bit numbers but keeps the running "
      "total in 32 bits -- the accuracy-preserving pattern AI code uses.  This is "
-     "the general compute units, not the matrix engine."});
+     "the general compute units, not the matrix engine.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.fp16Supported)
   {
@@ -437,7 +441,8 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
      Category::Unknown,
      "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of "
      "accuracy for the number range of a full float.  Integrated graphics "
-     "without bf16 hardware emulate it, and the rate drops accordingly."});
+     "without bf16 hardware emulate it, and the rate drops accordingly.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.bf16Supported)
   {
@@ -531,7 +536,8 @@ int OneapiPeak::runComputeBF16(OneapiDevice &, benchmark_config_t &)
      Category::Unknown,
      "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of "
      "accuracy for the number range of a full float.  Integrated graphics "
-     "without bf16 hardware emulate it, and the rate drops accordingly."});
+     "without bf16 hardware emulate it, and the rate drops accordingly.",
+     TestShape::Homogeneous, "vector width"});
   test.skip("bf16", ResultStatus::Unsupported,
             "SYCL bfloat16 header not available in this oneAPI toolchain");
   return 0;

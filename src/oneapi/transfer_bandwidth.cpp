@@ -19,7 +19,8 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
      "How fast data crosses between the host's memory and the device's.  On a "
      "discrete card that means the PCIe link, which is far narrower than "
      "either side's own memory; on integrated graphics the two share one pool "
-     "and the numbers are much higher."});
+     "and the numbers are much higher.",
+     TestShape::Heterogeneous, "direction"});
 
   const char *h2dNote = "Host to device: sending data across to the device.";
   const char *d2hNote = "Device to host: reading results back.  Often a little "

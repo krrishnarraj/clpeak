@@ -58,15 +58,23 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
 
   auto test = fpPhase
     ? currentDeviceScope->beginTest(
-        {"onemkl-fp", "oneMKL GEMM peak", "tflops", Category::Unknown,
+        {"onemkl_gemm", "oneMKL GEMM peak", "tflops", Category::Unknown,
          "Matrix-multiply speed through Intel's own tuned library, on a large "
          "square problem.  Where the joint_matrix rows show what the hardware "
          "can do in principle, this shows what shipping code reaches on the "
-         "operation most AI work is built from."})
+         "operation most AI work is built from.  Each reading is a different "
+         "input format.",
+         TestShape::Heterogeneous, "data type"})
+    // The same test, reopened: the library is the same software whether the
+    // numbers are whole or not.
     : currentDeviceScope->beginTest(
-        {"onemkl-int", "oneMKL GEMM peak", "tops", Category::Unknown,
-         "The same tuned-library matrix multiply on whole-number formats, "
-         "which is how a quantized (compressed) model actually runs."});
+        {"onemkl_gemm", "oneMKL GEMM peak", "tops", Category::Unknown,
+         "Matrix-multiply speed through Intel's own tuned library, on a large "
+         "square problem.  Where the joint_matrix rows show what the hardware "
+         "can do in principle, this shows what shipping code reaches on the "
+         "operation most AI work is built from.  Each reading is a different "
+         "input format.",
+         TestShape::Heterogeneous, "data type"});
 
 #ifndef CLPEAK_ONEAPI_HAS_ONEMKL
   if (fpPhase)
@@ -173,7 +181,12 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
       if (meanUs <= 0.0)
         test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", note);
       else
-        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), {false, note});
+        logger::EmitOptions opts;
+        opts.description = note;
+        // The integer readings carry their own unit, which is what lets them
+        // share the test with the floating-point ones.
+        if (!fpPhase) opts.unit = "tops";
+        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), opts);
     }
     freeAll();
     // q and its private context are destroyed here.

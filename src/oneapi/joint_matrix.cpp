@@ -496,21 +496,27 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category)
 {
   const bool isInt = (category == Category::IntCompute);
+  // One test across both phases: the engine does not become different
+  // hardware because the numbers are whole, and the integer readings carry
+  // their own unit.
   auto test = currentDeviceScope->beginTest(
-    {isInt ? "joint-matrix-int" : "joint-matrix-fp",
-     isInt ? "joint_matrix integer peak (every combination the device advertises)"
-           : "joint_matrix float peak (every combination the device advertises)",
+    {"joint_matrix", "joint_matrix peak",
      isInt ? "tops" : "tflops", Category::Unknown,
-     isInt ? "Peak speed of Intel's XMX matrix engine on 8-bit whole numbers -- "
-             "dedicated units that multiply whole blocks of numbers in one step "
-             "rather than one value at a time.  This is the format quantized "
-             "neural networks use.  One row per A/B sign combination and tile "
-             "shape the device advertises."
-           : "Peak speed of Intel's XMX matrix engine -- dedicated units that "
-             "multiply whole blocks of numbers in one step rather than one "
-             "value at a time -- across the reduced-precision formats AI work "
-             "runs on.  One row per input-type and tile shape the device "
-             "advertises."});
+     "Peak speed of Intel's XMX matrix engine -- dedicated units that multiply "
+     "whole blocks of numbers in one step rather than one value at a time.  "
+     "One reading per input type, sign combination and tile shape the device "
+     "advertises, so the set of readings is itself a description of the "
+     "hardware.",
+     TestShape::Heterogeneous, "data type"});
+
+  // The integer readings are measured in ops, not flops.  Carrying that on the
+  // reading is what lets both phases share one test.
+  auto jmOpts = [&](const JmTile &t) {
+    logger::EmitOptions o;
+    o.description = jmNote(t);
+    if (isInt) o.unit = "tops";
+    return o;
+  };
 
   // Note for the historical int8 row, used by the paths that skip before any
   // enumeration has happened.  The FP equivalents go through skipAll, which
@@ -671,7 +677,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
 
     const double ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() *
                        2.0 * (double)JM_ITERS;
-    test.emit(t.metric, (float)(ops * 1.0e6 / us / 1.0e12), {false, jmNote(t)});
+    test.emit(t.metric, (float)(ops * 1.0e6 / us / 1.0e12), jmOpts(t));
   }
 
   sycl::free(out, dev.stream);

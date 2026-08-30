@@ -10,10 +10,12 @@
 // peak was measuring PCIe.  On unified-memory devices the difference is
 // small, but the graph is identical everywhere so the rows stay comparable.
 //
-// Two scopes, because a test carries one unit: onnx-gemm-fp reports TFLOPS
-// for the float dtypes, onnx-gemm-int reports TOPS for the int8 QDQ form.
-// int8 is the dtype most NPUs are actually built for, so an NPU that only
-// shows up in the int scope is the expected shape, not a gap.
+// One test, `onnx_gemm`, across both category phases: the same
+// single-operation model on whichever formats the provider accepts.  The int8
+// QDQ reading is measured in ops rather than flops and carries that unit
+// itself, which is what removed the second scope this used to need.
+// int8 is the dtype most NPUs are actually built for, so an NPU whose only
+// measured reading is the int8 one is the expected shape, not a gap.
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
@@ -511,8 +513,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                    : sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 
   auto test = currentDeviceScope->beginTest(
-      {isInt ? "onnx-gemm-int" : "onnx-gemm-fp",
-       isInt ? "ONNX MatMul peak (int8)" : "ONNX MatMul peak",
+      // One test across both phases: the same single-operation model, run on
+      // whichever formats the provider accepts.  The integer readings carry
+      // their own unit, which is what lets them share it.
+      {"onnx_gemm", "ONNX MatMul peak",
        isInt ? "tops" : "tflops",
        Category::Unknown,
        "Matrix-multiply speed through ONNX Runtime on this execution "
@@ -521,7 +525,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "rows are directly comparable -- and the gap against a vendor's "
        "advertised TOPS is real, not an artifact of different test code.  "
        "Providers that cannot run an operation entirely on their device "
-       "report it as unsupported instead of quietly measuring the CPU."});
+       "report it as unsupported instead of quietly measuring the CPU.  "
+       "Each reading is a different input format.",
+       TestShape::Heterogeneous, "data type"});
 
   // ---- Sweep every size, keep each datatype's best ----------------------
   for (size_t i = 0; i < nVariants; i++)
@@ -859,6 +865,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                          "so the product is cast to fp32 before being reduced; "
                          "the multiply itself is unaffected, but the cast is a "
                          "full pass over the result and costs a few percent.";
+      if (isInt) o.unit = "tops";
       test.emit(v.label, (float)best, o);
     }
     else

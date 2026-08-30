@@ -212,7 +212,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-activation", "ONNX activation throughput", "gbps",
+      {"onnx_activation", "ONNX activation throughput", "gbps",
        Category::Bandwidth,
        "How fast this provider runs the operations between the matrix "
        "multiplies -- normalisation, softmax, the feed-forward gate.  They do "
@@ -226,7 +226,10 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "applies nothing, and is measured at the same three working-set sizes "
        "as the resident-tensor rows, so the two divide row for row.  Where a "
        "row drops sharply against the one above it, the activations have "
-       "outgrown the memory the provider keeps close."});
+       "outgrown the memory the provider keeps close.",
+       // Three operations across three working-set sizes: nine separate
+       // measurements, no one of which stands for the rest.
+       TestShape::Heterogeneous, "operation and size"});
 
   // The reference: same tensor, same read and reduction, no operation.  It
   // depends only on the size, so it is measured once per size and reused by

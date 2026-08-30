@@ -11,7 +11,7 @@
 // quantized matmul at all.  A provider that declined dequantizes the operands
 // and multiplies in floating point, and the error that comes back is then the
 // quantization scheme's rather than the integer unit's -- the same distinction
-// onnx-gemm-int refuses to publish a rate without, and the two tests can
+// onnx_gemm refuses to publish a rate without, and the two tests can
 // disagree because they choose the activation signedness on different grounds.
 //
 // The fp32 row does a second job.  clpeak's CPU-fallback guard works at
@@ -279,7 +279,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   };
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-numeric-error", "ONNX MatMul numeric error", "ppm",
+      {"onnx_numeric_error", "ONNX MatMul numeric error", "ppm",
        Category::FpCompute,
        "How far each datatype's answer drifts from a full-precision one, in "
        "parts per million, on a fixed 1024x1024x1024 matrix multiply.  Speed "
@@ -290,7 +290,9 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "in -- not the rounding of the inputs, which is a property of the "
        "format rather than of the hardware and would be identical everywhere.  "
        "The fp32 row also catches a provider that accepts a full-precision "
-       "graph and then computes it at lower precision behind your back."});
+       "graph and then computes it at lower precision behind your back.",
+       // Lower is better, which the `ppm` unit already says.
+       TestShape::Heterogeneous, "data type"});
 
   // The reference always runs on the CPU EP in fp32 -- it is the one path
   // present on every machine and the one whose arithmetic is not in question.
@@ -395,7 +397,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                              ? "  Measured with unsigned activations."
                              : "  Measured with signed activations.";
       // Whether the provider fused a quantized matmul decides what this row
-      // is the error *of*.  onnx-gemm-int refuses to publish a rate when the
+      // is the error *of*.  onnx_gemm refuses to publish a rate when the
       // fusion did not happen, because a float multiply is not an int8 rate;
       // the error is still worth reporting either way -- quantizing and
       // dequantizing costs precision whatever the multiply ran as -- but it

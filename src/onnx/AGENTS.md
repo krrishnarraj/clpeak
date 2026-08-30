@@ -34,7 +34,7 @@ backend.
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. Two scopes, because a test carries one unit: `onnx-gemm-fp` (tflops, fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only) and `onnx-gemm-int` (tops, int8 QDQ) |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`, reopened in the integer phase: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in tflops, int8 QDQ carrying its own `tops` unit |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
@@ -214,10 +214,27 @@ in one helper is what makes raising an opset a one-line change. `setOpset()`
 must be called before any node is added, because `reduceMax()` reads the opset
 at the moment it emits.
 
+## Test shape and ids
+
+Test ids are lower_snake (`onnx_gemm`, `onnx_tensor_bw`) — the `--onnx-*` CLI
+flags are a separate namespace and keep their hyphens.
+
+Every ONNX test is heterogeneous bar one: each reading is a different data
+type, operation, working-set size or context length, and for several of them
+the *shape of the curve* is the finding — where `onnx_tensor_bw` drops is where
+a model stopped fitting in fast memory, and the fastest rung alone would hide
+it.  `onnx_block_decode`, with its single reading, is the exception.
+
+The three `onnx_block_*` tests stay separate from each other on purpose: they
+report a rate, a bandwidth and a time, so there is no axis along which their
+readings could sit in one table.
+
 ## What the datatype rows cover
 
-`onnx-gemm-fp` measures fp32, fp16, bf16 and both float8 formats;
-`onnx-gemm-int` measures int8 QDQ. The split is by **unit**, not by whether a
+`onnx_gemm` measures fp32, fp16, bf16 and both float8 formats in the
+floating-point phase and int8 QDQ in the integer one, into the same test — the
+int8 reading carries its own `tops` unit, which is what removed the second
+scope this used to need. It runs in both phases by **unit**, not by whether a
 row is quantized — float8 is a floating-point format and reports TFLOPS, so it
 belongs beside fp16 even though its graph is the QDQ shape. Every one of them
 also has an `onnx-numeric-error` row, and they are meant to stay in step: a
@@ -531,7 +548,7 @@ is the blocked quantize. TensorRT consumes NVFP4 weights that arrive already
 quantized, and nothing else here asks it to *produce* NVFP4 with block scales
 inside a graph.
 
-So `onnx-gemm-fp`'s `nvfp4` row publishes a rate with no accuracy figure beside
+So `onnx_gemm`'s `nvfp4` row publishes a rate with no accuracy figure beside
 it, which this backend otherwise refuses to do. That is the honest outcome
 rather than a preferred one: a number nobody can trust would be worse, and a
 crash that ends the run is worse still. It becomes buildable the moment any

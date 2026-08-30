@@ -135,7 +135,7 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
       value = rotValue;
   }
 
-  test.emit(label, value, {false, note});
+  test.emit(label, value, note);
 }
 
 // --------------------------------------------------------------------------
@@ -147,7 +147,8 @@ int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
     {"integer_compute", "Integer compute (32-bit IMAD)", "gops", Category::Unknown,
      "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, "
      "addressing and bit manipulation, which kernels do alongside their "
-     "fractional maths."});
+     "fractional maths.",
+     TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));

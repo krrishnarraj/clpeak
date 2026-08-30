@@ -64,7 +64,8 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
      Category::Unknown,
      "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
-     "which never goes out to main memory."});
+     "which never goes out to main memory.",
+     TestShape::Homogeneous, "vector width"});
 
   // local_mem_type == global: the device has no scratchpad and the runtime
   // carves local memory out of ordinary global memory -- every CPU device.

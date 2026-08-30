@@ -275,9 +275,9 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // rather than finding a gap where a test should have been.
       struct Scope { const char *tag, *display, *unit; };
       static const Scope kScopes[] = {
-        {"onnx-block-prefill",     "Transformer block, prefill",           "tflops"},
-        {"onnx-block-decode",      "Transformer block, decode",            "gbps"},
-        {"onnx-block-latency",     "Transformer block latency",            "us"},
+        {"onnx_block_prefill",     "Transformer block, prefill",           "tflops"},
+        {"onnx_block_decode",      "Transformer block, decode",            "gbps"},
+        {"onnx_block_latency",     "Transformer block latency",            "us"},
       };
       for (const Scope &sc : kScopes)
       {
@@ -382,7 +382,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // ---- Prefill: compute-bound, so report the rate it sustains ------------
   {
     auto test = currentDeviceScope->beginTest(
-        {"onnx-block-prefill", "Transformer block, prefill", "tflops",
+        {"onnx_block_prefill", "Transformer block, prefill", "tflops",
          Category::Ai,
          "Speed of one whole transformer layer while it is chewing through a "
          "prompt, at three prompt lengths.  This is the phase that decides "
@@ -393,7 +393,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
          "silicon could do in principle.  A short prompt cannot fill wide "
          "hardware, so the rate climbs with the prompt and then flattens; "
          "where it flattens is how much text has to arrive together before "
-         "batching requests stops helping."});
+         "batching requests stops helping.",
+         // Three prompt lengths: the rate climbs then flattens, and where it
+         // flattens is the finding.  The fastest rung alone would hide it.
+         TestShape::Heterogeneous, "prompt length"});
 
     for (int64_t seq : kPromptLadder)
     {
@@ -424,7 +427,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // question and is answered in the latency scope below.
   {
     auto test = currentDeviceScope->beginTest(
-        {"onnx-block-decode", "Transformer block, decode", "gbps",
+        {"onnx_block_decode", "Transformer block, decode", "gbps",
          Category::Ai,
          "How fast the same layer streams its weights while generating one "
          "token with 2048 tokens of context behind it.  Generating text one "
@@ -432,7 +435,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
          "has to be read to produce a single word.  This is the number that "
          "actually sets how quickly words appear, and comparing it with the "
          "device's plain memory-bandwidth rows shows how much of that "
-         "bandwidth the AI stack manages to use."});
+         "bandwidth the AI stack manages to use.",
+         TestShape::Homogeneous});
 
     const double weightBytes = (double)weightParams() * 2.0;
     const double kvBytes     = 2.0 * (double)kHeads * (double)kDecodeKv *
@@ -461,7 +465,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // conversation answers more slowly than a short one.
   {
     auto test = currentDeviceScope->beginTest(
-        {"onnx-block-latency", "Transformer block latency", "us",
+        {"onnx_block_latency", "Transformer block latency", "us",
          Category::Ai,
          "How long one layer takes, in microseconds.  Multiply by a model's "
          "layer count for a floor on that model's time-to-first-token and "
@@ -472,7 +476,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
          "attention takes the same time at every context length, so whatever "
          "they add as the context grows is attention.  A device whose time "
          "barely moves is reading its cached context efficiently; one that "
-         "climbs steeply will feel fine in a demo and poor in use."});
+         "climbs steeply will feel fine in a demo and poor in use.",
+         TestShape::Heterogeneous, "phase and context length"});
 
     {
       const Point &pt = prefill[kPrefillSeq];

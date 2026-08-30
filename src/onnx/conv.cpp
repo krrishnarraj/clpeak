@@ -194,13 +194,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-conv", "ONNX convolution peak", "tflops", Category::FpCompute,
+      {"onnx_conv", "ONNX convolution peak", "tflops", Category::FpCompute,
        "Convolution speed in half precision, swept over feature-map sizes and "
        "reported at its best.  Neural accelerators were built for this "
        "operation before they were asked to do anything else, and many reach "
        "a higher share of their arithmetic peak here than on a plain matrix "
        "multiply.  Read alongside the matmul rows: the gap between them says "
-       "what the hardware was shaped for."});
+       "what the hardware was shaped for.",
+       TestShape::Heterogeneous, "convolution shape"});
 
   for (const Variant &v : kVariants)
   {

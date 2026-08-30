@@ -186,14 +186,15 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        specifiedIters);
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-dispatch-latency", "ONNX dispatch latency", "us",
+      {"onnx_dispatch_latency", "ONNX dispatch latency", "us",
        Category::Latency,
        "The fixed cost of handing one piece of work to this execution "
        "provider, with the arithmetic made deliberately negligible.  Reaching "
        "an accelerator means crossing a runtime, a driver and sometimes an "
        "on-device compiler, and each crossing is charged per submission.  "
        "This is why a chip advertising tens of TOPS can still lose to the CPU "
-       "on small work, and none of the throughput rows can show it."});
+       "on small work, and none of the throughput rows can show it.",
+       TestShape::Heterogeneous, "what is submitted"});
 
   if (trivial.perRunUs > 0.0)
     test.emit("trivial_op", (float)trivial.perRunUs,

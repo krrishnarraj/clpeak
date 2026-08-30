@@ -217,7 +217,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-tensor-bw", "ONNX resident-tensor bandwidth", "gbps",
+      {"onnx_tensor_bw", "ONNX resident-tensor bandwidth", "gbps",
        Category::Bandwidth,
        "How fast this provider streams model weights out of its own memory, "
        "measured on the exact operation that generating a token performs -- "
@@ -231,7 +231,10 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "so these are transfer rates rather than round-trip times.  A rate "
        "that is flat across every size, and low, means the provider is "
        "limited by its own arithmetic rather than by memory -- read it as "
-       "what this provider can stream, not as what the memory could do."});
+       "what this provider can stream, not as what the memory could do.",
+       // The point of the ladder is where the rate drops, so the rungs are
+       // not interchangeable and the fastest of them is not the answer.
+       TestShape::Heterogeneous, "weight size"});
 
   // The floor first: every rung is reported net of it.
   Result floor = measure(rt, ep, kFloorDim, warmupCount, forceIters,

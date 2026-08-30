@@ -146,7 +146,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx-transfer-bw", "ONNX host transfer bandwidth", "gbps",
+      {"onnx_transfer_bw", "ONNX host transfer bandwidth", "gbps",
        Category::Bandwidth,
        "How fast data reaches this provider and comes back.  Every other test "
        "here keeps its tensors on the device on purpose, because otherwise a "
@@ -157,7 +157,8 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
        "vendors never quote it.  A device that shares memory with the host has "
        "no real transfer to make and should read near memory speed; a "
        "discrete one reports what its link actually delivers, which is "
-       "usually far below the number on the box."});
+       "usually far below the number on the box.",
+       TestShape::Heterogeneous, "direction"});
 
   // ---- Trip out ----------------------------------------------------------
   //

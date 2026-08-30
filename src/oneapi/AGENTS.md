@@ -107,13 +107,19 @@ Gates:
 See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
 
 - No descriptor struct: the description is the 5th field of the braced
-  `TestSpec` at each `beginTest()` call site.
+  `TestSpec` at each `beginTest()` call site, with `shape` and `axis` the two
+  after it.
 - The width note comes off the **template parameter**, not a call site:
   `runFpWidth<…,W>` / `runIntWidth<…,W>` call `oneapiWidthNote(W)` once inside
   the function.  The helper lives in `oneapi_peak.h`.
 - `joint_matrix.cpp`: `jmNote()` composes each row's note from its dtype pair
-  and tile shape, so a row documents the shape it actually ran.
-- `onemkl.cpp` threads a `note` next to `label` through `measure()`.
+  and tile shape, so a row documents the shape it actually ran.  All of them
+  land in ONE test (`joint_matrix`), reopened in the integer phase — the engine
+  is the same hardware either way, and `jmOpts()` gives the integer readings
+  their own `tops` unit.  The readings are discovered from what the device
+  advertises, so the set of them is itself a description of the hardware.
+- `onemkl.cpp` threads a `note` next to `label` through `measure()`, likewise
+  into one `onemkl_gemm` across both phases.
 
 ## Chain shapes
 
