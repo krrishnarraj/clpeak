@@ -207,52 +207,6 @@ size_t schemesFor(const Variant &v, QuantScheme out[2])
   return 1;
 }
 
-// Quantize a [K, N] weight matrix into packed int4 plus one fp16 scale per
-// block of `blockSize` rows per column.  Symmetric, so the scale is the block
-// maximum over 7 and there is no zero point.
-void fillBlockedWeights(std::string &packed, std::string &scales,
-                        int64_t K, int64_t N, int64_t blockSize, uint32_t seed,
-                        int wDtype)
-{
-  // int4 spends its block on [-7, 7]; float4's widest magnitude is 6.
-  const bool  isFp4 = (wDtype == ONNX_DT_FLOAT4E2M1);
-  const float top   = isFp4 ? 6.0f : 7.0f;
-  packed.assign((size_t)onnxElemBytes(wDtype, K * N), '\0');
-  const int64_t blocks = K / blockSize;
-  scales.assign((size_t)blocks * (size_t)N * 2, '\0');
-  uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
-
-  for (int64_t b = 0; b < blocks; b++)
-  {
-    for (int64_t j = 0; j < N; j++)
-    {
-      float maxAbs = 0.0f;
-      for (int64_t r = 0; r < blockSize; r++)
-      {
-        const float w = onnxWeightAt(b * blockSize + r, j, seed);
-        const float a = w < 0.0f ? -w : w;
-        if (a > maxAbs) maxAbs = a;
-      }
-      // A block of identical zeros cannot happen with this generator, but a
-      // zero scale would produce NaNs on dequantize rather than a bad number.
-      const float scale = (maxAbs > 0.0f) ? maxAbs / top : 1.0f;
-      sc[b * N + j] = floatToHalf(scale);
-
-      for (int64_t r = 0; r < blockSize; r++)
-      {
-        const int64_t i = b * blockSize + r;
-        const float   w = onnxWeightAt(i, j, seed);
-        const float   t = w / scale;
-        if (isFp4)
-          onnxStoreNibble(&packed[0], i * N + j, floatToFp4E2M1(t));
-        else
-          onnxStoreInt4(&packed[0], i * N + j,
-                        (int)(t + (t < 0.0f ? -0.5f : 0.5f)));
-      }
-    }
-  }
-}
-
 // Output scale for the QDQ form.  Each dequantized product is a pair of
 // values in [-1, 1], so a K-deep dot product has standard deviation
 // sqrt(K)/3; four sigma keeps nearly every output inside int8 without
@@ -373,7 +327,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // tensor anywhere near the graph boundary.
     std::string aRaw, wPacked, wScales;
     fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
-    fillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
+    onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
                        v.dtype);
     modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
                                                    v.blockSize, aRaw, wPacked,

@@ -663,20 +663,70 @@ std::string onnxTransferModel(OnnxTransfer dir, int64_t elems)
 namespace
 {
 
-// Deterministic fp16 weights in [-0.5, 0.5).  Small magnitudes keep fp16
-// accumulation over thousands of terms far from overflow, and avoid the
-// NaN/denormal slow paths raw random bit patterns would hit.
-std::string blockWeights(int64_t count, uint32_t seed)
+// Deterministic weights in [-0.5, 0.5), in `dtype`.  Small magnitudes keep
+// accumulation over thousands of terms away from the NaN/denormal slow paths
+// raw random bit patterns would hit.
+//
+// Position-hashed rather than a running sequence, because onnxFillBlockedWeights
+// has to visit each block twice -- once for its maximum, once to quantize
+// against it -- and drawing from the same generator is what makes every
+// precision row multiply the *same* matrix, differing only in how it is stored.
+std::string blockWeights(int64_t rows, int64_t cols, uint32_t seed, int dtype)
 {
-  std::string raw((size_t)count * 2, '\0');
+  std::string raw((size_t)onnxElemBytes(dtype, rows * cols), '\0');
+  float    *f = reinterpret_cast<float *>(&raw[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-  uint32_t s = seed;
-  for (int64_t i = 0; i < count; i++)
-  {
-    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
-  }
+  for (int64_t i = 0; i < rows; i++)
+    for (int64_t j = 0; j < cols; j++)
+    {
+      const float   v = onnxWeightAt(i, j, seed);
+      const int64_t k = i * cols + j;
+      switch (dtype)
+      {
+      case ONNX_DT_FLOAT:    f[k] = v; break;
+      case ONNX_DT_BFLOAT16: h[k] = floatToBf16(v); break;
+      default:               h[k] = floatToHalf(v); break;
+      }
+    }
   return raw;
+}
+
+// One scalar of `dtype` (fp32, fp16 or bf16), as raw bytes.
+std::string floatScalar(float v, int dtype)
+{
+  if (dtype == ONNX_DT_FLOAT)
+  {
+    std::string s(4, '\0');
+    std::memcpy(&s[0], &v, 4);
+    return s;
+  }
+  std::string s(2, '\0');
+  uint16_t h = (dtype == ONNX_DT_BFLOAT16) ? floatToBf16(v) : floatToHalf(v);
+  std::memcpy(&s[0], &h, 2);
+  return s;
+}
+
+// The KV cache, quantized per tensor.  Values are stored spending the whole
+// range and the scale halves them back, so the dequantized cache holds the
+// same [-0.5, 0.5) the floating-point one does -- the row then differs from
+// its fp16 sibling in how the cache was *stored* and in nothing else.
+std::string quantBlockWeights(int64_t rows, int64_t cols, uint32_t seed,
+                              int dtype)
+{
+  std::string raw((size_t)onnxElemBytes(dtype, rows * cols), '\0');
+  for (int64_t i = 0; i < rows; i++)
+    for (int64_t j = 0; j < cols; j++)
+      onnxStoreQuantElem(&raw[0], i * cols + j, dtype,
+                         onnxWeightAt(i, j, seed) * 2.0f);
+  return raw;
+}
+
+// Quantization scale for a K-deep dot product's result: four sigma of the sum
+// mapped onto the widest 8-bit code, exactly as gemm.cpp's qdqOutputScale
+// does.  Each projection has its own K, so each gets its own.
+float blockQdqScale(int64_t K)
+{
+  return (float)(4.0 * std::sqrt((double)K) / 3.0 / 127.0);
 }
 
 } // namespace
@@ -690,47 +740,182 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   const int64_t S    = sh.seq;
   const bool    decode = sh.kvLen > 0;
   const int64_t ctx  = decode ? sh.kvLen : S;   // keys/values attended over
+  const int     act  = sh.actDtype;
 
   OnnxGraph g;
+
+  // The opset is the highest any part of this graph needs, and a narrow weight
+  // type or DequantizeLinear's block_size attribute (opset 21) can raise it
+  // independently of the arithmetic being measured.
+  {
+    int opset = std::max(onnxOpsetForDtype(act), onnxOpsetForDtype(sh.wDtype));
+    if (sh.qdq)
+      opset = std::max(opset, onnxOpsetForDtype(sh.qActDtype));
+    // A quantized cache dequantized by a *half-precision* scale needs opset 19
+    // on the strength of the scale alone.  int8 is expressible at 17 and
+    // onnxOpsetForDtype says so, but DequantizeLinear did not accept anything
+    // but an fp32 scale until 19, and a graph that declares 17 is refused with
+    // "Type 'tensor(float16)' of input parameter (kv_scale) ... is invalid" --
+    // a message about the scale, in a graph whose point is the cache.  The
+    // weight-only path never hit this because its own block_size attribute
+    // already forces 21.
+    if (sh.kvDtype)
+    {
+      opset = std::max(opset, onnxOpsetForDtype(sh.kvDtype));
+      if (act != ONNX_DT_FLOAT) opset = std::max(opset, 19);
+    }
+    if (sh.wBlock > 0) opset = std::max(opset, 21);
+    g.setOpset(opset);
+  }
 
   // The activations are a constant scaled by a runtime scalar, and the result
   // leaves as one reduced row.  Passing a [S, d] tensor in and out each run
   // costs a discrete GPU two host transfers it does not otherwise need -- 4 MB
   // against a 1.9 ms layer on an RTX 5060, about 15% -- while the weights, the
   // thing the layer is actually made of, are resident either way.  Scaling by
-  // a runtime value also keeps every node downstream non-constant, so nothing
-  // here depends on constant folding being disabled.
-  g.input("S", ONNX_DT_FLOAT16, {});
-  g.initializer("X0", ONNX_DT_FLOAT16, {S, d},
-                blockWeights(S * d, 0xa5a5a5a5u));
+  // a runtime value also keeps every node downstream of it non-constant, which
+  // is what the floating-point variants rely on.  The quantized ones need more
+  // than that -- a weight dequantize has nothing but constants on its inputs --
+  // so block.cpp disables constant folding for all of them alike.
+  g.input("S", act, {});
+  g.initializer("X0", act, {S, d}, blockWeights(S, d, 0xa5a5a5a5u, act));
   g.node("Mul", {"X0", "S"}, {"X"});
 
-  // ---- Weights ----------------------------------------------------------
+  // ---- Quantization constants, shared by every projection ----------------
+  //
+  // Present only in the W8A8 form.  Every scale is a build-time constant: a
+  // runtime one keeps the dequantize out of constant folding's reach without
+  // disabling an optimizer, and ONNX Runtime accepts it, but TensorRT bakes
+  // quantization into the engine when it builds and a scale it cannot see
+  // until the run leaves it unable to commit to integer arithmetic.  See
+  // onnxResidentQdqMatMulModel, where the same choice cost 6x.
+  if (sh.qdq)
+  {
+    // One activation scale for all seven projections, sized for the tensors
+    // that actually reach them: a d-deep dot product of [-0.5, 0.5) operands.
+    // The feed-forward's second input runs larger and saturates, which costs
+    // nothing here -- int8 saturation is finite and takes no slow path, and
+    // this row measures rate, not accuracy.  What a real deployment does
+    // instead is calibrate per tensor, which no fixed graph can do.
+    //
+    // **The scales are fp32 and cannot be anything else.**  QuantizeLinear has
+    // taken half-precision scales since opset 19, and spelling them that way
+    // in a half-precision block is the obvious move -- it keeps the whole graph
+    // at one width.  It produces a model that is valid right up until ORT
+    // rewrites it: the QDQ selector fuses DequantizeLinear/MatMul/Quantize into
+    // QLinearMatMul, which carries fp32 scales and nothing else, and the
+    // rewritten graph then fails its own type check with "Type
+    // 'tensor(float16)' of input parameter (U_cs) of operator (QLinearMatMul)
+    // is invalid".  The message reads as though the emitted graph were broken
+    // and it was not -- the same trap float8 hit from the other direction, and
+    // the same lesson: check what ORT rewrote the graph into.
+    //
+    // Holding the fusion off with keepQdqUnfused is the wrong answer here.
+    // Fusing is the entire point of an int8 row; a graph that stays unfused
+    // dequantizes and multiplies in float, which the caller's fusion check
+    // rejects anyway.  So the scales are fp32 and `projection` casts across
+    // the boundary instead.
+    g.initializer("qa_scale", ONNX_DT_FLOAT, {},
+                  floatScalar(blockQdqScale(d), ONNX_DT_FLOAT));
+    g.initializer("qa_zp", sh.qActDtype, {}, quantZeroPoint(sh.qActDtype));
+    g.initializer("qw_scale", ONNX_DT_FLOAT, {},
+                  floatScalar(onnxQuantScaleFor(sh.wDtype), ONNX_DT_FLOAT));
+    g.initializer("qw_zp", sh.wDtype, {}, quantZeroPoint(sh.wDtype));
+  }
+
+  // ---- One projection, in whichever precision the shape asks for ---------
+  //
+  // The three forms differ here and nowhere else.  Attention, softmax, the
+  // SwiGLU and the residuals stay in `actDtype` in all of them, which is both
+  // what quantized inference does in practice and what keeps the rows
+  // comparable: whatever separates two of them is the projection precision,
+  // because nothing else moved.
+  //
   // Distinct seeds so no two projections share a matrix; a repeated weight
-  // matrix would let a runtime cache or fold work that a real model cannot.
-  g.initializer("Wq", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x11111111u));
-  g.initializer("Wk", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x22222222u));
-  g.initializer("Wv", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x33333333u));
-  g.initializer("Wo", ONNX_DT_FLOAT16, {d, d},     blockWeights(d * d, 0x44444444u));
-  g.initializer("Wg", ONNX_DT_FLOAT16, {d, ffn},   blockWeights(d * ffn, 0x55555555u));
-  g.initializer("Wu", ONNX_DT_FLOAT16, {d, ffn},   blockWeights(d * ffn, 0x66666666u));
-  g.initializer("Wd", ONNX_DT_FLOAT16, {ffn, d},   blockWeights(ffn * d, 0x77777777u));
+  // would let a runtime cache or fold work that a real model cannot.
+  auto projection = [&](const std::string &out, const std::string &in,
+                        const std::string &w, int64_t K, int64_t N,
+                        uint32_t seed)
+  {
+    if (sh.qdq)
+    {
+      // Canonical QDQ: quantize the activations, dequantize both operands
+      // into the multiply, quantize the result and dequantize it back out.
+      // Nothing may sit between a DequantizeLinear and the MatMul or ORT
+      // stops recognising a quantized matmul, and the closing Q must be
+      // followed by a DQ or TensorRT refuses to build the engine -- both
+      // learned the hard way in onnxResidentQdqMatMulModel.
+      std::string packed;
+      packed.assign((size_t)K * (size_t)N, '\0');
+      for (int64_t i = 0; i < K; i++)
+        for (int64_t j = 0; j < N; j++)
+          onnxStoreQuantElem(&packed[0], i * N + j, sh.wDtype,
+                             onnxWeightAt(i, j, seed) * 2.0f);
+      g.initializer(w + "_q", sh.wDtype, {K, N}, packed);
+
+      const std::string cs = out + "_cs";
+      g.initializer(cs, ONNX_DT_FLOAT, {},
+                    floatScalar(blockQdqScale(K), ONNX_DT_FLOAT));
+
+      // The quantization boundary is fp32 because QLinearMatMul's scales are
+      // (see above), so a half-precision block casts into it and back out.
+      // The casts sit *outside* the Q/DQ pattern -- before the first
+      // QuantizeLinear and after the last DequantizeLinear -- so the
+      // DequantizeLinear-to-MatMul adjacency ORT matches on is untouched.
+      //
+      // They are two passes over an activation tensor per projection, which is
+      // 2 MB at the 512-token prompt against 54 GFLOP of layer, and 4 KB while
+      // decoding.  Neither is measurable.  Casting the *weights* would be, and
+      // is why they are quantized offline into the initializer instead.
+      const std::string src = (act == ONNX_DT_FLOAT) ? in : out + "_i32";
+      if (act != ONNX_DT_FLOAT)
+        g.node("Cast", {in}, {src}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
+
+      const std::string dst = (act == ONNX_DT_FLOAT) ? out : out + "_o32";
+      g.node("QuantizeLinear",   {src, "qa_scale", "qa_zp"},         {out + "_aq"});
+      g.node("DequantizeLinear", {out + "_aq", "qa_scale", "qa_zp"}, {out + "_af"});
+      g.node("DequantizeLinear", {w + "_q", "qw_scale", "qw_zp"},    {w + "_f"});
+      g.node("MatMul",           {out + "_af", w + "_f"},            {out + "_mm"});
+      g.node("QuantizeLinear",   {out + "_mm", cs, "qa_zp"},         {out + "_cq"});
+      g.node("DequantizeLinear", {out + "_cq", cs, "qa_zp"},         {dst});
+      if (act != ONNX_DT_FLOAT)
+        g.node("Cast", {dst}, {out}, {OnnxAttr::num("to", act)});
+      return;
+    }
+
+    if (sh.wBlock > 0)
+    {
+      // Blocked weight-only: one scale per `wBlock` rows per column, along the
+      // reduction axis, which is the form AWQ, GPTQ and ORT's own MatMulNBits
+      // all have.  The arithmetic stays `actDtype` -- the weights are unpacked
+      // on the way into the multiply -- so what the narrow type buys is weight
+      // traffic, which is why the decode rows are where it shows and the
+      // compute-bound prefill rows mostly are not.
+      std::string packed, scales;
+      onnxFillBlockedWeights(packed, scales, K, N, sh.wBlock, seed, sh.wDtype);
+      g.initializer(w + "_q", sh.wDtype, {K, N}, packed);
+      g.initializer(w + "_s", act, {K / sh.wBlock, N}, scales);
+      g.node("DequantizeLinear", {w + "_q", w + "_s"}, {w + "_f"},
+             {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", sh.wBlock)});
+      g.node("MatMul", {in, w + "_f"}, {out});
+      return;
+    }
+
+    g.initializer(w, act, {K, N}, blockWeights(K, N, seed, act));
+    g.node("MatMul", {in, w}, {out});
+  };
 
   // 1/sqrt(head_dim), the standard attention scale.
-  {
-    std::string sc(2, '\0');
-    uint16_t v = floatToHalf(1.0f / std::sqrt((float)Dh));
-    std::memcpy(&sc[0], &v, 2);
-    g.initializer("scale", ONNX_DT_FLOAT16, {}, sc);
-  }
+  g.initializer("scale", act, {},
+                floatScalar(1.0f / std::sqrt((float)Dh), act));
 
   g.shapeInitializer("sh_heads", {S, H, Dh});
   g.shapeInitializer("sh_flat",  {S, d});
 
   // ---- QKV projection ----------------------------------------------------
-  g.node("MatMul", {"X", "Wq"}, {"Q"});
-  g.node("MatMul", {"X", "Wk"}, {"Knew"});
-  g.node("MatMul", {"X", "Wv"}, {"Vnew"});
+  projection("Q",    "X", "Wq", d, d, 0x11111111u);
+  projection("Knew", "X", "Wk", d, d, 0x22222222u);
+  projection("Vnew", "X", "Wv", d, d, 0x33333333u);
 
   g.node("Reshape",   {"Q", "sh_heads"}, {"Qr"});
   g.node("Transpose", {"Qr"}, {"Qh"}, {OnnxAttr::list("perm", {1, 0, 2})});
@@ -739,12 +924,36 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   // Decode reads a constant cache; prefill builds K/V from this pass.  The
   // K side is stored/produced already transposed to [H, Dh, ctx] so the
   // score matmul needs no extra transpose at run time.
-  if (decode)
+  //
+  // The cache stays in `actDtype` in every variant.  Quantizing it is a third
+  // axis and a different measurement -- an unfused dequantize would read the
+  // whole cache back at full width on every token, which is the shape nobody
+  // deploys.
+  if (decode && sh.kvDtype && sh.kvDtype != act)
   {
-    g.initializer("Kc", ONNX_DT_FLOAT16, {H, Dh, ctx},
-                  blockWeights(H * Dh * ctx, 0x88888888u));
-    g.initializer("Vc", ONNX_DT_FLOAT16, {H, ctx, Dh},
-                  blockWeights(H * ctx * Dh, 0x99999999u));
+    // A quantized cache, dequantized on the way into attention.  Nothing sits
+    // between the DequantizeLinear and the MatMul, the arrangement ORT needs
+    // to recognise a quantized matmul at all -- but there is no quantized
+    // *batched* matmul for it to recognise, which is the question this row
+    // exists to ask rather than an oversight.  Whether the provider folds the
+    // dequantize into its attention kernel or reads the whole cache back at
+    // full width every token is what the caller's fusion check reports.
+    g.initializer("kv_scale", act, {},
+                  floatScalar(onnxQuantScaleFor(sh.kvDtype) / 2.0f, act));
+    g.initializer("kv_zp", sh.kvDtype, {}, quantZeroPoint(sh.kvDtype));
+    g.initializer("Kc_q", sh.kvDtype, {H, Dh, ctx},
+                  quantBlockWeights(H * Dh, ctx, 0x88888888u, sh.kvDtype));
+    g.initializer("Vc_q", sh.kvDtype, {H, ctx, Dh},
+                  quantBlockWeights(H * ctx, Dh, 0x99999999u, sh.kvDtype));
+    g.node("DequantizeLinear", {"Kc_q", "kv_scale", "kv_zp"}, {"Kc"});
+    g.node("DequantizeLinear", {"Vc_q", "kv_scale", "kv_zp"}, {"Vc"});
+  }
+  else if (decode)
+  {
+    g.initializer("Kc", act, {H, Dh, ctx},
+                  blockWeights(H * Dh, ctx, 0x88888888u, act));
+    g.initializer("Vc", act, {H, ctx, Dh},
+                  blockWeights(H * ctx, Dh, 0x99999999u, act));
   }
   else
   {
@@ -761,29 +970,29 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
 
   g.node("Transpose", {"Ctx"}, {"CtxT"}, {OnnxAttr::list("perm", {1, 0, 2})});
   g.node("Reshape",   {"CtxT", "sh_flat"}, {"CtxF"});
-  g.node("MatMul",    {"CtxF", "Wo"}, {"AttnOut"});
+  projection("AttnOut", "CtxF", "Wo", d, d, 0x44444444u);
   g.node("Add",       {"X", "AttnOut"}, {"R1"});
 
   // ---- SwiGLU feed-forward ----------------------------------------------
-  g.node("MatMul",  {"R1", "Wg"}, {"G"});
-  g.node("MatMul",  {"R1", "Wu"}, {"U"});
+  projection("G", "R1", "Wg", d, ffn, 0x55555555u);
+  projection("U", "R1", "Wu", d, ffn, 0x66666666u);
   g.node("Sigmoid", {"G"}, {"Gs"});
   g.node("Mul",     {"G", "Gs"}, {"Act"});      // SiLU
   g.node("Mul",     {"Act", "U"}, {"Hh"});
-  g.node("MatMul",  {"Hh", "Wd"}, {"Down"});
+  projection("Down", "Hh", "Wd", ffn, d, 0x77777777u);
   g.node("Add",     {"R1", "Down"}, {"Y"});
 
   // ReduceMax rather than ReduceSum: summing rows of a product equals
   // multiplying the summed rows, a rewrite that would let an optimiser shrink
   // the work.  See onnxResidentMatMulModel.
   g.reduceMax("Y", "Yr", {0});
-  g.output("Yr", ONNX_DT_FLOAT16, {d});
+  g.output("Yr", act, {d});
   if (decode)
   {
     // Keeps the K/V projections live, and mirrors the cache write a real
     // decode step performs.  Both are one row, so they cost nothing to return.
-    g.output("Knew", ONNX_DT_FLOAT16, {S, d});
-    g.output("Vnew", ONNX_DT_FLOAT16, {S, d});
+    g.output("Knew", act, {S, d});
+    g.output("Vnew", act, {S, d});
   }
   return g.build();
 }
@@ -873,6 +1082,55 @@ float onnxWeightAt(int64_t i, int64_t j, uint32_t seed)
   uint32_t s = seed ^ (uint32_t)(i * 0x9E3779B1u) ^ (uint32_t)(j * 0x85EBCA77u);
   s ^= s << 13; s ^= s >> 17; s ^= s << 5;
   return (float)(s >> 8) / 16777216.0f - 0.5f;
+}
+
+void onnxFillBlockedWeights(std::string &packed, std::string &scales,
+                            int64_t K, int64_t N, int64_t blockSize,
+                            uint32_t seed, int wDtype)
+{
+  // Each format spends its block on its own widest magnitude: int4 reaches 7,
+  // int8 reaches 127, and float4's largest code is 6.
+  const bool  isFp4 = (wDtype == ONNX_DT_FLOAT4E2M1);
+  const bool  isI4  = (wDtype == ONNX_DT_INT4);
+  const float top   = isFp4 ? 6.0f : (isI4 ? 7.0f : 127.0f);
+
+  packed.assign((size_t)onnxElemBytes(wDtype, K * N), '\0');
+  const int64_t blocks = K / blockSize;
+  scales.assign((size_t)blocks * (size_t)N * 2, '\0');
+  uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
+
+  for (int64_t b = 0; b < blocks; b++)
+  {
+    for (int64_t j = 0; j < N; j++)
+    {
+      float maxAbs = 0.0f;
+      for (int64_t r = 0; r < blockSize; r++)
+      {
+        const float w = onnxWeightAt(b * blockSize + r, j, seed);
+        const float a = w < 0.0f ? -w : w;
+        if (a > maxAbs) maxAbs = a;
+      }
+      // A block of identical zeros cannot happen with this generator, but a
+      // zero scale would produce NaNs on dequantize rather than a bad number.
+      const float scale = (maxAbs > 0.0f) ? maxAbs / top : 1.0f;
+      sc[b * N + j] = floatToHalf(scale);
+
+      for (int64_t r = 0; r < blockSize; r++)
+      {
+        const int64_t i = b * blockSize + r;
+        const float   w = onnxWeightAt(i, j, seed);
+        const float   t = w / scale;
+        const int     q = (int)(t + (t < 0.0f ? -0.5f : 0.5f));
+        if (isFp4)
+          onnxStoreNibble(&packed[0], i * N + j, floatToFp4E2M1(t));
+        else if (isI4)
+          onnxStoreInt4(&packed[0], i * N + j, q);
+        else
+          packed[(size_t)(i * N + j)] =
+              (char)(signed char)(q < -127 ? -127 : (q > 127 ? 127 : q));
+      }
+    }
+  }
 }
 
 void onnxFillNvfp4(std::string &packed, std::string &blockScales,

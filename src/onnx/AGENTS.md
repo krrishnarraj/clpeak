@@ -39,7 +39,7 @@ backend.
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes. Three scopes off six timings, one unit each: `onnx-block-prefill` (tflops, prompt ladder), `onnx-block-decode` (gbps), `onnx-block-latency` (us, prefill pass + context ladder) |
+| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (tflops, or tops per reading; prompt ladder), `onnx-block-decode` (gbps), `onnx-block-latency` (us, prefill pass + context ladder) |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (us) |
 
@@ -219,11 +219,13 @@ at the moment it emits.
 Test ids are lower_snake (`onnx_gemm`, `onnx_tensor_bw`) — the `--onnx-*` CLI
 flags are a separate namespace and keep their hyphens.
 
-Every ONNX test is heterogeneous bar one: each reading is a different data
-type, operation, working-set size or context length, and for several of them
-the *shape of the curve* is the finding — where `onnx_tensor_bw` drops is where
-a model stopped fitting in fast memory, and the fastest rung alone would hide
-it.  `onnx_block_decode`, with its single reading, is the exception.
+Every ONNX test here is heterogeneous: each reading is a different data type,
+operation, working-set size or context length, and for several of them the
+*shape of the curve* is the finding — where `onnx_tensor_bw` drops is where a
+model stopped fitting in fast memory, and the fastest rung alone would hide it.
+`onnx_block_decode` was the one homogeneous test while it had a single fp16
+reading; a precision per reading is not a variant of one measurement, so it is
+heterogeneous like the rest now.
 
 The three `onnx_block_*` tests stay separate from each other on purpose: they
 report a rate, a bandwidth and a time, so there is no axis along which their
@@ -733,28 +735,211 @@ bytes at 1.7 TOPS, 3.7x its own fp32.
 ## The AI scope: what `Category::Ai` is for
 
 `onnx-block` is the rung above a raw GEMM peak and below tokens/second: one
-fixed decoder block, run in the two regimes that bound all LLM inference.
-Prefill (512 tokens at once) is compute-bound and reports effective TFLOPS;
-decode (1 token, 2048 of context) is memory-bound and reports the GB/s of
-weights plus KV cache that must move per token. Both come out of the whole
-stack — attention, softmax, SwiGLU, the layout shuffles between them — so
-they are what a device delivers, not what its silicon could do in principle.
-The latency scope carries both ladders in microseconds, so any of them can be
-multiplied by a model's layer count to check a tokens/second claim.
+fixed decoder block, run in the two regimes that bound all LLM inference, at
+each precision a model actually ships in. Prefill (a prompt in one pass) is
+compute-bound and reports effective TFLOPS; decode (one token against a
+context) is memory-bound and reports the GB/s of weights plus KV cache that
+must move per token. Both come out of the whole stack — attention, softmax,
+SwiGLU, the layout shuffles between them — so they are what a device delivers,
+not what its silicon could do in principle. The latency scope carries both
+ladders in microseconds, so any of them can be multiplied by a model's layer
+count to check a tokens/second claim.
 
 Geometry is fixed in `block.cpp` (2048-wide, 16 heads, SwiGLU 5504, 50.6M
 parameters) and deliberately *not* 7B-shaped: the weights must overflow every
 cache while still compiling in seconds on NPU toolchains, which build graphs
 ahead of time. A 7B block is 4x the size for no extra insight and minutes of
-AOT compile. fp16 only — nobody serves an LLM in fp32, so a full-precision
-block would measure a configuration that does not exist.
+AOT compile. Nothing large crosses the host boundary — the activations are an
+initializer scaled by a runtime scalar and the result leaves as one reduced
+row, the arrangement `onnx-gemm` uses and for the same reason.
 
-M1 Pro reference: prefill 4.8 TFLOPS against an 8.8 TFLOPS raw fp16 MatMul
-peak, so a complete layer retains ~55% of the pure-matmul rate; decode
-48 GB/s; 2.5 ms per layer per token. The block still passes its activations
-across the host boundary each run (2 MB in, 2 MB out), so on a discrete GPU
-its numbers carry a transfer component the GEMM rows no longer do — worth
-fixing the same way if the two are ever compared closely.
+### Precision is a pair, not a datatype
+
+A GEMM has one operand pair, so "dtype" is one word. A layer has weights *and*
+an arithmetic width, and real deployments vary them independently — which is
+exactly why the fp16-only version of this test could not say what its TFLOPS
+figure was a figure *of*. What models ship as are pairs, and those are the rows:
+W16A16 in both 16-bit floats, W4A16, W8A16, W8A8 in int8 and in float8, and
+full precision as a control. The KV cache is a third axis on top of those, and
+has its own row.
+
+**Only the seven projection matmuls change.** Attention, the softmax, the
+SwiGLU and the KV cache stay at the arithmetic width in every variant, which is
+both what quantized inference does in practice — nobody quantizes a softmax —
+and what makes the rows comparable: whatever separates two of them is the
+projection format, because nothing else moved.
+
+Labels are `onnx-gemm`'s on purpose. `int4_weight` there and `int4_weight` here
+are the same format under the same name, so a block reading divides by a GEMM
+reading and the quotient is how much of the raw matmul rate a whole layer keeps.
+
+Three graph forms, in `onnxBlockModel`'s `projection` lambda: a plain MatMul, a
+blocked weight-only dequantize (one fp16 scale per 32 weights along the
+reduction axis, the AWQ/GPTQ/`MatMulNBits` shape), and canonical QDQ.
+
+**Which rows sweep is a cost decision.** Every point is a session and a session
+is where an ahead-of-time provider spends its minute, so the full cross product
+would be 36 of them. `fp16` sweeps because it is the reference; `int4_weight`
+sweeps because its prompt ladder is a measurement rather than a repetition —
+at 64 tokens the layer is not yet compute-bound and narrow weights still help,
+by 2048 it is and they do not, and where that crossover falls is the finding.
+Everything else takes the headline rung of each regime. The affordability gate
+seeds each variant from the last measured rate, so a provider that has already
+proved slow is not asked to prove it six more times.
+
+### The W8A8 scales are fp32, and cannot be otherwise
+
+`QuantizeLinear` has accepted half-precision scales since opset 19, so spelling
+them fp16 in a half-precision block is the obvious move and it produces a model
+that is valid — right up until ORT rewrites it. The QDQ selector fuses
+DequantizeLinear/MatMul/QuantizeLinear into `QLinearMatMul`, which carries fp32
+scales and nothing else, and the rewritten graph then fails its own type check:
+*"Type 'tensor(float16)' of input parameter (U_cs) of operator (QLinearMatMul)
+is invalid"*. The message reads as though clpeak emitted a broken graph. It did
+not. This is the float8 trap from the opposite direction, and the same lesson:
+**check what ORT rewrote the graph into before believing anything.**
+
+`keepQdqUnfused` is the wrong answer here — fusing *is* the int8 row, and an
+unfused graph is refused by the fusion check anyway. So the scales are fp32 and
+`projection` casts fp16 in and out around each one. The casts sit *outside* the
+Q/DQ pattern, leaving the DequantizeLinear-to-MatMul adjacency ORT matches on
+untouched, and they cost two passes over an activation tensor per projection:
+2 MB against 54 GFLOP at the 512-token prompt, 4 KB while decoding.
+
+### The single-op fusion check does not work on a block
+
+`onnxOpsRanQuantizedMatMul` reads a failed fusion as "a bare floating-point
+MatMul beside the dequantize nodes". A transformer block has two plain MatMuls
+that are *supposed* to be there — attention is not quantized in any variant —
+so that test rejects every block unconditionally. `projectionsRanQuantized` in
+`block.cpp` inverts it the other way instead: a provider that fused either
+names a quantized kernel or swallowed the subgraph whole, in which case no
+`DequantizeLinear` kernel runs at all; a provider that did not fuse has no
+choice but to execute one, a full pass over 101 MB of weights on every run.
+
+### Two more things the dtype axis forced
+
+**Constant folding is off for every variant now.** A weight `DequantizeLinear`
+has nothing but constants on its inputs, so folding it bakes fp16 weights into
+the model at load time and every quantized row silently becomes the fp16 row.
+The floating-point variants have nothing foldable — the runtime scalar makes
+everything downstream non-constant — so disabling it uniformly costs them
+nothing and keeps all the rows under one optimizer setting. Verified: the fp16
+readings are unchanged by it.
+
+**The memory gate is per variant**, not once for the whole test. The weights
+are the bulk of it and they are four times smaller in the four-bit rows, so a
+device that cannot hold the fp16 block can still measure the one a quantized
+model would actually run — which is the more interesting row on a small device
+anyway.
+
+### The decode row counts bytes that moved, and that is the whole point
+
+The numerator is what the precision actually streams, not what fp16 would have.
+A narrow-weight row reading the *same* GB/s as fp16 means the weights arrived
+four times faster and the unpack cost nothing; the win itself is a duration and
+lives in the latency scope. Reporting fp16-equivalent bytes would inflate the
+four-bit row four-fold and hide the failure the row exists to catch.
+
+Measured, M1 Pro, ONNX Runtime 1.29 — prefill at 512 tokens, decode at 2048 of
+context. The CPU-EP figures are from a `--onnx-device 1` run: measured straight
+after Core ML's session compiles they come out about 30% lower across the board,
+with every ordering below intact, so only same-run comparisons mean anything.
+
+| CPU EP | prefill | decode | per token | ran as |
+|---|---|---|---|---|
+| fp16 | 0.18 | 11.15 GB/s | 10582 µs | no fp16 kernel — cast to fp32 |
+| int4_weight | 0.43 | 12.32 GB/s | **3672 µs** | `MatMulNBits` + `Cast` |
+| int8_weight | 0.55 | 17.46 GB/s | 4040 µs | `MatMulNBits` + `Cast` |
+| int8_qdq | **0.78 TOPS** | 17.78 GB/s | 3790 µs | `QLinearMatMul`, signed |
+| fp32 | 0.41 | **78.73 GB/s** | **2997 µs** | — |
+| fp4_weight | — | — | — | no float4 `DequantizeLinear` |
+| bf16 | — | — | — | no bf16 `Mul` — fails at node 0 |
+| fp8_e4m3 | — | — | — | no float8 matmul; dequantized instead |
+| int8_kv | — | — | — | cache dequantized to full width |
+
+`MatMulNBits` covering the 8-bit row as well as the 4-bit one is worth knowing:
+ORT's narrow-weight kernel is not 4-bit-only, so `int8_weight` measures a real
+fused path rather than a dequantize.
+
+**The finding is that the quantized rows on this CPU are not memory-bound at
+all.** fp32 moves 235 MB in 2997 µs while `int8_qdq` moves 67 MB in 3790 µs —
+full precision is faster in wall time while moving 3.5x the bytes. The narrower
+the weights, the *worse* the achieved bandwidth, because unpacking costs more
+per byte than the byte saved. Only the byte accounting above makes that legible:
+with fp16-equivalent bytes `int4_weight` would read about 49 GB/s and look
+competitive with fp32's 78.73 rather than revealing that it is arithmetic-bound.
+
+It also warns against reading the flat `fp16`/`int4_weight` pair (11.15 against
+12.32) as "the unpack is free". On this provider it is not — those two numbers
+are different bottlenecks landing near each other, and it takes the fp32 control
+to say so. The latency column still shows what four-bit weights buy a user:
+10582 µs down to 3672. Both readings are true and they answer different
+questions, which is why the two scopes stay separate.
+
+| CoreML EP | prefill | decode | per token |
+|---|---|---|---|
+| fp16 | **4.83** | 48.20 GB/s | 2448 µs |
+| fp32 | 1.74 | 46.41 GB/s | 5084 µs |
+| every other row | refused by the fallback guard | | |
+
+fp16 at 4.83 TFLOPS against an 8.8 TFLOPS raw fp16 MatMul peak means a complete
+layer retains ~55% of the pure-matmul rate. The fp32 row behaves as the GEMM
+rows say it should — 1.60 TFLOPS is the AMX band, not the ANE, and it is 2.6x
+slower per token than fp16 despite the same graph.
+
+### bf16, float8 and the cache: what the harder rows found
+
+All three are refused on both providers of the reference machine, and each
+refusal says something a working number could not.
+
+**bf16 fails at node zero.** Not at a matmul — at `Mul(14)`, the scalar that
+scales the activations, before the layer has multiplied anything. A block needs
+bf16 kernels for every operation in it, and ORT's CPU EP has not got the
+elementwise multiply, never mind the softmax. This is the row's whole argument:
+`onnx-gemm`'s bf16 row asks only for a matmul, and hardware can advertise bf16,
+pass that row, and still be unable to run a layer in it.
+
+**float8 needs `keepQdqUnfused`, and only float8 does.** `QLinearMatMul` is an
+8-bit *integer* operator, so letting the QDQ selector fire on a float8 graph
+rewrites a valid model into one that fails its own type check — the trap
+`onnx-gemm` documents. `makeRun` asks for it whenever either quantized type is
+one `QLinearMatMul` cannot carry, which is `onnxQdqFusionIsLegal`'s job, and
+int8 still fuses and still reports. On the CPU EP the row is then refused for
+the honest reason: there is no float8 matmul, so it dequantized and multiplied
+in float.
+
+**The cache row can only ever come from a whole-subgraph compiler.** ONNX has a
+quantized matrix multiply (`QLinearMatMul`) and a quantized narrow-weight one
+(`MatMulNBits`); it has nothing at all for a *batched* matmul with one
+quantized operand, which is what attention against a quantized cache is. So a
+provider that executes ONNX operators one at a time has no choice but to
+dequantize the whole cache to full width on every token — slower than not
+quantizing it, and refused. A provider that compiles subgraphs (TensorRT, QNN,
+Core ML, OpenVINO) can implement it internally, and then the row is real.
+
+That distinction is why the row exists rather than being dropped the way a
+symmetric int4 GEMM was. That one is refused *by the standard*, permanently and
+on every provider, so it could never be anything but a refusal. This one is
+refused by a provider's architecture, and whether a given AOT compiler
+implements int8-KV attention is an unpublished fact worth asking for. The probe
+costs one session and no ladder is built when it fails.
+
+**A half-precision dequantize scale is opset 19.** int8 is expressible at 17 and
+`onnxOpsetForDtype` correctly says so, but `DequantizeLinear` accepted only an
+fp32 scale until 19, so the cache graph declared 17 and was refused with *"Type
+'tensor(float16)' of input parameter (kv_scale) of operator (DequantizeLinear)
+is invalid"* — a message about the scale, in a graph whose entire point is the
+cache. The weight-only rows never hit it because `block_size` already forces
+them to 21. `onnxBlockModel` raises the opset for the scale's sake, separately
+from the datatype's.
+
+**Core ML's refusals are the guard working, not a defect.** ORT 1.29's Core ML
+EP has no `DequantizeLinear`, so every quantized variant would have handed
+nodes back to the CPU and the session fails instead. An NPU that cannot run the
+format its vendor quotes TOPS for is the single most useful thing this table
+can report, and it only reports it because the guard refuses to measure the CPU
+under an NPU heading.
 
 ## Throughput graphs keep both operands resident
 

@@ -302,10 +302,36 @@ struct OnnxBlockShape
   int64_t ffnHidden;
   int64_t seq;      // tokens processed this pass (prefill: many, decode: 1)
   int64_t kvLen;    // decode only: length of the cached context (0 = prefill)
+
+  // Precision, and it is a *pair* rather than a datatype.  A GEMM has one
+  // operand pair so "dtype" is one word; a layer has weights and an
+  // arithmetic width, and real deployments vary them independently -- W16A16,
+  // W8A8, W4A16 are the forms models actually ship in.
+  //
+  // Only the seven projection matmuls (Wq/Wk/Wv/Wo/Wg/Wu/Wd) change: they are
+  // what a quantized model shrinks.  Attention, softmax, SwiGLU, the
+  // residuals and the KV cache stay in `actDtype` throughout, which is what
+  // quantized inference does in practice -- nobody quantizes the softmax.
+  int     actDtype = ONNX_DT_FLOAT16;  // everything that is not a projection
+  int     wDtype   = ONNX_DT_FLOAT16;  // how the projection weights are stored
+  int64_t wBlock   = 0;                // >0: blocked weight-only dequantize
+  bool    qdq      = false;            // quantize the activations too (W8A8)
+
+  // Activation element type for the QDQ form.  int8 has two spellings and no
+  // provider takes both -- see kInt8Schemes in gemm.cpp -- so the caller
+  // probes and keeps whichever fuses.  Ignored unless `qdq`.
+  int     qActDtype = ONNX_DT_INT8;
+
+  // How the decode KV cache is stored.  0 means `actDtype`, which is what
+  // every other row uses; a quantized type puts a DequantizeLinear in front of
+  // both attention matmuls.  This is a third axis, independent of the
+  // projections: serving stacks quantize the cache separately because at long
+  // context it outweighs the weights.
+  int     kvDtype = 0;
 };
 
-// One fp16 decoder block: QKV projection, multi-head attention, output
-// projection + residual, SwiGLU feed-forward + residual.
+// One decoder block: QKV projection, multi-head attention, output projection
+// + residual, SwiGLU feed-forward + residual, at the precision `s` names.
 //
 //   prefill (kvLen == 0): attention is self-attention over `seq` tokens.
 //   decode  (kvLen  > 0): `seq` is 1 and attention reads a constant KV cache,
@@ -371,6 +397,17 @@ int  onnxLoadInt4(const void *src, int64_t index);
 // without holding the matrix in floats.  At 16384 square that would be a
 // gigabyte of scratch to produce 128 MB of weights.
 float onnxWeightAt(int64_t i, int64_t j, uint32_t seed);
+
+// Quantize a [K, N] weight matrix into `wDtype` plus one fp16 scale per block
+// of `blockSize` rows per column -- the axis a group-quantized model groups on,
+// because it is the axis the reduction runs along.  Symmetric, so the scale is
+// the block maximum over the format's widest magnitude and there is no zero
+// point.  Values come from onnxWeightAt(), so a block can be visited twice --
+// once to find its maximum, once to quantize against it -- without holding the
+// matrix in floats.
+void onnxFillBlockedWeights(std::string &packed, std::string &scales,
+                            int64_t K, int64_t N, int64_t blockSize,
+                            uint32_t seed, int wDtype);
 
 // Quantize a [rows, cols] matrix into NVFP4: packed E2M1 values plus one E4M3
 // scale per block of `blockSize` along the blocked axis, with `globalScale`
