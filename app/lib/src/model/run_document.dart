@@ -48,9 +48,8 @@ class TestResult {
   /// The reason shown for a fully-unavailable test.
   String get skipReason => metrics.isEmpty ? '' : metrics.first.reason;
 
-  /// Unit and direction for one reading, honouring its overrides.
+  /// Unit for one reading, honouring its override.
   Units unitsOf(MetricResult m) => m.units ?? units;
-  Direction directionOf(MetricResult m) => m.direction ?? header.direction;
 
   /// Whether one number can stand for the whole test.
   ///
@@ -71,21 +70,23 @@ class TestResult {
         : ok.map((m) => m.value).reduce((a, b) => a > b ? a : b);
   }
 
-  /// How full to draw one reading's meter, relative to the best reading of
-  /// the test.  Direction-aware: on a latency test the *fastest* reading is
-  /// the full bar, where a plain value/max would have filled the slowest.
+  /// How full to draw one reading's meter: its size relative to the largest
+  /// reading in the test, whichever direction is better.
+  ///
+  /// The meter is a picture of the number printed beside it and nothing more.
+  /// Scaling it by which reading is *best* instead was tried and is worse: on
+  /// a latency test it drew the shortest time as the longest bar, and a bar
+  /// next to a number is read as that number's size, so it looked simply
+  /// wrong.  Direction still decides what it should — which reading a
+  /// homogeneous test collapses to, and whether a `--compare` delta is
+  /// better or worse.
   double barFraction(MetricResult m) {
     if (!m.isOk) return 0;
     final ok = okMetrics.map((x) => x.value).where((v) => v > 0).toList();
     if (ok.isEmpty) return 0;
-    if (directionOf(m) == Direction.lowerIsBetter) {
-      final best = ok.reduce((a, b) => a < b ? a : b);
-      if (m.value <= 0) return 0;
-      return (best / m.value).clamp(0.0, 1.0);
-    }
-    final best = ok.reduce((a, b) => a > b ? a : b);
-    if (best <= 0) return 0;
-    return (m.value / best).clamp(0.0, 1.0);
+    final largest = ok.reduce((a, b) => a > b ? a : b);
+    if (largest <= 0) return 0;
+    return (m.value / largest).clamp(0.0, 1.0);
   }
 }
 

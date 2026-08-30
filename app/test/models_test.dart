@@ -451,7 +451,7 @@ void main() {
       expect(t.hasMetricNotes, isFalse);
     });
 
-    test('lower-is-better picks the minimum, and fills its bar', () {
+    test('lower-is-better picks the minimum; bars stay magnitude', () {
       final doc = RunDocument();
       final t = doc.runFor('Metal', 'Metal', 'M1', 'd').openTest(header(
           id: 'kernel_launch_latency',
@@ -466,9 +466,11 @@ void main() {
         MetricResult(id: 'roundtrip', value: 188.0),
       ]);
       expect(t.peakValue, 5.2);
-      // The fastest reading is the full bar, not the slowest.
-      expect(t.barFraction(t.metrics.first), 1.0);
-      expect(t.barFraction(t.metrics.last), closeTo(5.2 / 188.0, 1e-9));
+      // The meter is a picture of the number beside it, so the larger reading
+      // draws the longer bar even though it is the worse one.  Direction
+      // decides the collapsed value above, not the bars.
+      expect(t.barFraction(t.metrics.first), closeTo(5.2 / 188.0, 1e-9));
+      expect(t.barFraction(t.metrics.last), 1.0);
     });
 
     test('all-skipped tests partition into unsupported', () {

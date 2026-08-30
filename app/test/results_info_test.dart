@@ -140,10 +140,11 @@ void main() {
     expect(find.text('300 TFLOPS'), findsOneWidget);
   });
 
-  testWidgets('a lower-is-better test says its meters run backwards',
+  testWidgets('meters are magnitude, even where lower is better',
       (tester) async {
-    // The fastest reading draws the fullest bar, which reads as an error
-    // unless the view says which way round it is.
+    // A bar beside a number is read as that number's size.  Scaling it by
+    // which reading is best instead drew the fastest time as the longest bar,
+    // which looked simply wrong.
     final doc = RunDocument();
     doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(_header(
           id: 'kernel_launch_latency',
@@ -158,31 +159,12 @@ void main() {
     await tester.pumpWidget(_host(doc));
     await tester.pump();
 
-    expect(find.text('LOWER IS BETTER — LONGEST BAR IS BEST'), findsOneWidget);
-
-    // And the bars really do run that way: fastest full, slowest a sliver.
-    final t = doc.runs.single.categories.single.tests.single;
-    expect(t.barFraction(t.metrics.first), 1.0);
-    expect(t.barFraction(t.metrics.last), closeTo(5.24 / 184.0, 1e-9));
-  });
-
-  testWidgets('a higher-is-better test carries no such caption',
-      (tester) async {
-    final doc = RunDocument();
-    doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(const TestHeader(
-          id: 'single_precision_compute',
-          title: 'Single-precision compute',
-          category: BenchCategory.fpCompute,
-          shape: TestShape.heterogeneous,
-          units: Units(
-              symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9),
-        ))
-      ..metrics.add(const MetricResult(id: 'float', value: 100))
-      ..metrics.add(const MetricResult(id: 'float2', value: 200));
-
-    await tester.pumpWidget(_host(doc));
-    await tester.pump();
+    // Nothing tells the reader to invert the bars, because they are not.
     expect(find.textContaining('LOWER IS BETTER'), findsNothing);
+
+    final t = doc.runs.single.categories.single.tests.single;
+    expect(t.barFraction(t.metrics.first), closeTo(5.24 / 184.0, 1e-9));
+    expect(t.barFraction(t.metrics.last), 1.0);
   });
 
   testWidgets('an unavailable test can still be explained', (tester) async {

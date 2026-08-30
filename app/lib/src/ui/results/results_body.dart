@@ -384,19 +384,7 @@ class _TestLineState extends State<_TestLine> {
               ),
               padding: const EdgeInsets.fromLTRB(25, 9, 12, 10),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // The meters show how good a reading is, not how large it
-                  // is, so on a latency test the shortest time draws the
-                  // fullest bar.  That is the right way round and reads as
-                  // backwards without being told, since a bar beside a number
-                  // is otherwise taken for the number's size.
-                  if (test.header.direction == Direction.lowerIsBetter)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Text('LOWER IS BETTER — LONGEST BAR IS BEST',
-                          style: t.micro, textAlign: TextAlign.right),
-                    ),
                   // Only measurements: a reading that could not be taken is
                   // listed once, at the bottom of the page, rather than
                   // sitting in the middle of a table of numbers.
