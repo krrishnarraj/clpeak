@@ -17,7 +17,8 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
      Category::Unknown,
      "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
-     "which never goes out to main memory."});
+     "which never goes out to main memory.",
+     TestShape::Homogeneous, "vector width"});
 
   const int widths[] = {1, 2, 4, 8};
   const char *labels[] = {"float", "float2", "float4", "float8"};

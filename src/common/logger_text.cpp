@@ -38,7 +38,10 @@ void LoggerText::onEvent(const LogEvent &e)
     case LogEvent::Kind::TestBegin:      renderTestBegin(e);      break;
     case LogEvent::Kind::Metric:         renderMetric(e);         break;
     case LogEvent::Kind::TestSkippedAll: renderTestSkippedAll(e); break;
-    case LogEvent::Kind::TestEnd:        renderTestEnd();         break;
+    case LogEvent::Kind::TestEnd:
+        renderTestEnd();
+        noteClosedTest(e.testKey());
+        break;
     case LogEvent::Kind::DeviceEnd:      renderDeviceEnd();       break;
     case LogEvent::Kind::BackendEnd:     renderBackendEnd();      break;
     case LogEvent::Kind::Note:
@@ -111,6 +114,15 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     // clear so no measured row can ever be discarded silently.
     flushMetrics();
 
+    // Reopening the test that just closed: keep writing into the same stanza,
+    // under the header already printed for it.
+    if (e.reopened && e.testKey() == lastClosedTest)
+    {
+        metricLines.clear();
+        return;
+    }
+    mergedPad = 0;
+
     out << "\n";
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
@@ -124,8 +136,9 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     std::string header = e.testTitle;
     if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
     if (!e.unit.empty())        header += " (" + e.unit + ")";
-    // A test reopened to append readings measured in a later phase already
-    // printed this header once; say so rather than look like a duplicate.
+    // A test reopened later in the run -- after other tests came and went, as
+    // when a GEMM test's integer readings arrive in the integer phase -- does
+    // start a new stanza, so it says which one it is continuing.
     if (e.reopened)             header += "  (continued)";
 
     writeLine(header);
@@ -158,7 +171,7 @@ void LoggerText::renderMetric(const LogEvent &e)
     ml.status      = e.metric.status;
     ml.reason      = e.metric.reason;
     ml.description = e.metric.description;
-    ml.baselineKey = baselineKey(e.backend, e.platform, e.device,
+    ml.baselineKey = baselineKey(e.backend, e.platform, e.deviceKey(),
                                  e.testKey(), e.metric.id);
     // Only when it actually differs: repeating the test's own unit on every
     // row would just be noise under a header that already says it.
@@ -186,6 +199,11 @@ void LoggerText::renderTestEnd()
 {
     flushMetrics();
     indentLevel = propIndent;
+}
+
+void LoggerText::noteClosedTest(const std::string &key)
+{
+    lastClosedTest = key;
 }
 
 // ── DeviceEnd ──────────────────────────────────────────────────────────────
@@ -216,14 +234,17 @@ void LoggerText::flushMetrics()
     if (metricLines.empty())
         return;
 
-    // Compute the maximum metric name width in this test
-    int maxWidth = MIN_METRIC_PAD;
+    // Compute the maximum metric name width in this test.  `mergedPad` is the
+    // widest label already printed in this stanza, so a test written in
+    // several blocks stays one aligned table.
+    int maxWidth = MIN_METRIC_PAD > mergedPad ? MIN_METRIC_PAD : mergedPad;
     for (const auto &ml : metricLines)
     {
         int w = static_cast<int>(ml.label.size());
         if (w > maxWidth)
             maxWidth = w;
     }
+    mergedPad = maxWidth;
 
     for (const auto &ml : metricLines)
     {

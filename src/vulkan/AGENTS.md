@@ -49,9 +49,16 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   `float`/`float2`/`float4` readings.
 - **`int8_dp`/`int8_dp2`/`int8_dp4` are NOT a width sweep** — one, two and four
   *independent dot-product chains*.  They carry their own notes; do not unify
-  them onto `vkWidthNote()`.
-- Coopmat tests are single-reading and their metric name restates the title, so
-  they document the test only (`nullptr` on the single-variant path).
+  them onto `vkWidthNote()`, and their axis is "chains in flight", not "vector
+  width".
+- **Every coopmat data type is one reading of ONE test** (`coopmat`), not a
+  test each.  Each `#ifdef` block in `coopmat.cpp` opens the same tag, so the
+  logger reopens it and appends; `bindCoopTile` names the reading with the data
+  type and the tile the driver actually advertised for it (`fp16 16x16x16`),
+  since different types land on different shapes on one device.  The prose goes
+  on `metricDescription` — the test's own description covers the family.  int8
+  arrives in the integer phase and carries `metricUnit = "tops"`, which is what
+  lets it share the test instead of needing a `coopmat_int8` twin.
 
 ## When You Change This Directory
 

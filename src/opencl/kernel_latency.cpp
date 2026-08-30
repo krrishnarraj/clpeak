@@ -28,7 +28,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   auto test = currentDeviceScope->beginTest(
     {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
      "The overhead of asking the device to do anything at all.  It is what "
-     "small, frequent jobs pay before any of their own work begins."});
+     "small, frequent jobs pay before any of their own work begins.",
+     TestShape::Heterogeneous});
 
   const char *dispatchNote = "One way only: from the moment the host queues the "
                              "work to the moment the device starts running it.";

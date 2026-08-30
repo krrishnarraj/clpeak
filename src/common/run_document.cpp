@@ -137,6 +137,12 @@ void RunDocument::append(const RunDocument &other)
 
 // ── Baselines ──────────────────────────────────────────────────────────────
 
+std::string deviceKey(const std::string &name, int deviceIndex)
+{
+    if (deviceIndex < 0) return name;
+    return name + "#" + std::to_string(deviceIndex);
+}
+
 std::string baselineKey(const std::string &backend, const std::string &platform,
                         const std::string &device, const std::string &testKey,
                         const std::string &metricId)
@@ -152,8 +158,9 @@ BaselineMap buildBaselineMap(const RunDocument &doc)
         for (const TestResult &t : d.tests)
             for (const MetricResult &r : t.metrics)
                 if (r.status == ResultStatus::Ok)
-                    m[baselineKey(d.backend, d.platform, d.name, t.key(), r.id)] =
-                        r.value;
+                    m[baselineKey(d.backend, d.platform,
+                                  deviceKey(d.name, d.deviceIndex),
+                                  t.key(), r.id)] = r.value;
     return m;
 }
 

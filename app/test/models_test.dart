@@ -600,6 +600,36 @@ void main() {
       expect(sp.units.quantity, Quantity.flops);
     });
 
+    test('two devices of the same name stay two runs', () {
+      // MoltenVK exposes one GPU twice, and a multi-GPU box has N identical
+      // cards.  Keyed on the name alone they folded into one run, and every
+      // test came out with two of every reading.
+      final doc = RunDocument();
+      doc.runFor('Vulkan', 'Vulkan', 'Apple M1 Pro', '26.1.99', 0)
+          .openTest(header())
+          .metrics
+          .add(const MetricResult(id: 'float', value: 100));
+      doc.runFor('Vulkan', 'Vulkan', 'Apple M1 Pro', '26.1.99', 1)
+          .openTest(header())
+          .metrics
+          .add(const MetricResult(id: 'float', value: 90));
+
+      expect(doc.runs, hasLength(2));
+      expect(doc.runs.map((r) => r.index), [0, 1]);
+      for (final r in doc.runs) {
+        expect(r.categories.single.tests.single.metrics, hasLength(1));
+      }
+    });
+
+    test('a driver update does not split a run', () {
+      // Driver is metadata, not identity: a baseline stays comparable across
+      // one, which is exactly the comparison people want.
+      final doc = RunDocument();
+      doc.runFor('CUDA', 'CUDA', 'RTX 5060', '580.65', 0);
+      doc.runFor('CUDA', 'CUDA', 'RTX 5060', '581.00', 0);
+      expect(doc.runs, hasLength(1));
+    });
+
     test('a document with no devices loads empty', () {
       final doc = RunDocument.fromJson({'format_version': 3});
       expect(doc.isEmpty, isTrue);

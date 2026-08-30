@@ -31,6 +31,8 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak arithmetic speed of the device's compute units on 32-bit "
                   "fractional numbers -- the ordinary float type.  Nothing touches "
                   "memory, so only the arithmetic units limit the rate.";
+  d.shape       = TestShape::Homogeneous;
+  d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -63,6 +65,8 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                   "size of a normal float, and what graphics and on-device AI mostly "
                   "run on.  Both the inputs and the running total stay 16-bit here.";
+  d.shape       = TestShape::Homogeneous;
+  d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -99,6 +103,8 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
                   "high-accuracy type scientific computing relies on.  Consumer "
                   "graphics parts deliberately run these many times slower than "
                   "32-bit.";
+  d.shape       = TestShape::Homogeneous;
+  d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_DP_WORK_PER_WI;
@@ -138,6 +144,8 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak speed when the device multiplies 16-bit numbers but keeps "
                   "the running total in 32 bits -- the accuracy-preserving pattern "
                   "AI code uses.";
+  d.shape       = TestShape::Homogeneous;
+  d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
@@ -175,6 +183,8 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
                   "digits of accuracy for the same number range as a full float.  "
                   "The running total is kept in 32 bits.";
+  d.shape       = TestShape::Homogeneous;
+  d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;

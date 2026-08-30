@@ -46,12 +46,12 @@ struct CoopTileRun {
   VkSpecializationMapEntry entries[4];
   VkSpecializationInfo     specInfo;
   CoopPush                 push;
-  std::string              title;
+  std::string              label;
 };
 
 // Bind a selected tile into a desc: build the spec constants, scale the trip
 // count so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
-// and label the row with the actual MxNxK that runs.
+// and label the reading with the data type and the actual MxNxK that runs.
 //
 // The caller has already set r.push.A to the fill this dtype wants.
 void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
@@ -74,11 +74,15 @@ void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
   r.specInfo.dataSize      = sizeof(r.data);
   r.specInfo.pData         = &r.data;
   r.push.trips = (int32_t)trips;
-  r.title  = std::string("Cooperative-matrix ") + dtypeLabel + " " +
+  // "fp16 16x16x16": the data type, then the tile the driver actually
+  // advertised for it.  Different types land on different shapes on the same
+  // device (NVIDIA gives the 8-bit types K=32 where fp16 gets K=16), so the
+  // shape belongs on the reading rather than on the test they share.
+  r.label  = std::string(dtypeLabel) + " " +
              std::to_string(t.M) + "x" + std::to_string(t.N) + "x" + std::to_string(t.K);
 
   d.specInfo      = &r.specInfo;
-  d.title         = r.title.c_str();
+  d.metricLabel   = r.label.c_str();
   d.wgSize        = wgSize;
   d.outElemsPerWG = t.M * t.N;
   d.pushData      = &r.push;
@@ -120,10 +124,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat_fp32";
-      d.metricLabel = "coopmat_fp32";
+      d.resultTag   = "coopmat";
+      d.title       = "Cooperative matrix";
+      d.shape       = TestShape::Heterogeneous;
+      d.axis        = "data type";
+      d.description = "The device's matrix engine -- its tensor cores -- which "
+                      "multiplies whole small blocks of numbers in one step instead "
+                      "of one value at a time.  Each reading is a different input "
+                      "format, run at the block shape the driver advertises for it; "
+                      "which formats the engine supports, and how much faster the "
+                      "narrow ones go, is most of what separates one generation of "
+                      "hardware from the next.";
+      d.metricLabel = "fp32";
       d.unit        = "tflops";
-      d.description = "Peak speed of the device's matrix engine (its tensor cores) on "
+      d.metricDescription = "Peak speed of the device's matrix engine (its tensor cores) on "
                       "full 32-bit numbers.  These units multiply whole small blocks "
                       "of numbers in one step instead of one value at a time.";
       d.unitDivider = 1e12;
@@ -135,7 +149,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP32);
         bindCoopTile(r, d, dev.info.coopmatFP32, tileWG(dev.info.coopmatFP32), "fp32xfp32+fp32");
       } else {
-        d.title   = "Cooperative-matrix fp32xfp32+fp32";
         d.skip    = true;
         d.skipMsg = "No fp32xfp32+fp32 coopmat property! Skipped";
       }
@@ -147,10 +160,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat_fp16";
-      d.metricLabel = "coopmat_fp16";
+      d.resultTag   = "coopmat";
+      d.title       = "Cooperative matrix";
+      d.shape       = TestShape::Heterogeneous;
+      d.axis        = "data type";
+      d.description = "The device's matrix engine -- its tensor cores -- which "
+                      "multiplies whole small blocks of numbers in one step instead "
+                      "of one value at a time.  Each reading is a different input "
+                      "format, run at the block shape the driver advertises for it; "
+                      "which formats the engine supports, and how much faster the "
+                      "narrow ones go, is most of what separates one generation of "
+                      "hardware from the next.";
+      d.metricLabel = "fp16";
       d.unit        = "tflops";
-      d.description = "The matrix engine on 16-bit inputs with a 32-bit running "
+      d.metricDescription = "The matrix engine on 16-bit inputs with a 32-bit running "
                       "total -- the everyday precision of AI inference, and the "
                       "widest-supported row here.  Keeping the total at 32 bits "
                       "costs accuracy nothing and, on consumer graphics cards, "
@@ -164,7 +187,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16);
         bindCoopTile(r, d, dev.info.coopmatFP16, tileWG(dev.info.coopmatFP16), "fp16xfp16+fp32");
       } else {
-        d.title   = "Cooperative-matrix fp16xfp16+fp32";
         d.skip    = true;
         d.skipMsg = "No fp16xfp16+fp32 coopmat support (shaderFloat16 or property)! Skipped";
       }
@@ -176,10 +198,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat_fp16_f16acc";
-      d.metricLabel = "coopmat_fp16_f16acc";
+      d.resultTag   = "coopmat";
+      d.title       = "Cooperative matrix";
+      d.shape       = TestShape::Heterogeneous;
+      d.axis        = "data type";
+      d.description = "The device's matrix engine -- its tensor cores -- which "
+                      "multiplies whole small blocks of numbers in one step instead "
+                      "of one value at a time.  Each reading is a different input "
+                      "format, run at the block shape the driver advertises for it; "
+                      "which formats the engine supports, and how much faster the "
+                      "narrow ones go, is most of what separates one generation of "
+                      "hardware from the next.";
+      d.metricLabel = "fp16 f16acc";
       d.unit        = "tflops";
-      d.description = "The matrix engine on 16-bit inputs with the running total also "
+      d.metricDescription = "The matrix engine on 16-bit inputs with the running total also "
                       "kept at 16 bits.  Consumer graphics cards run this at twice the "
                       "rate of the 32-bit total above, which is why a card's headline "
                       "AI figure is usually this one; server parts run both alike.";
@@ -192,7 +224,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16F16);
         bindCoopTile(r, d, dev.info.coopmatFP16F16, tileWG(dev.info.coopmatFP16F16), "fp16xfp16+fp16");
       } else {
-        d.title   = "Cooperative-matrix fp16xfp16+fp16";
         d.skip    = true;
         d.skipMsg = "No fp16xfp16+fp16 coopmat support (shaderFloat16 or property)! Skipped";
       }
@@ -204,10 +235,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat_bf16";
-      d.metricLabel = "coopmat_bf16";
+      d.resultTag   = "coopmat";
+      d.title       = "Cooperative matrix";
+      d.shape       = TestShape::Heterogeneous;
+      d.axis        = "data type";
+      d.description = "The device's matrix engine -- its tensor cores -- which "
+                      "multiplies whole small blocks of numbers in one step instead "
+                      "of one value at a time.  Each reading is a different input "
+                      "format, run at the block shape the driver advertises for it; "
+                      "which formats the engine supports, and how much faster the "
+                      "narrow ones go, is most of what separates one generation of "
+                      "hardware from the next.";
+      d.metricLabel = "bf16";
       d.unit        = "tflops";
-      d.description = "The matrix engine on bfloat16 -- 16 bits arranged for AI work, "
+      d.metricDescription = "The matrix engine on bfloat16 -- 16 bits arranged for AI work, "
                       "trading digits of accuracy for the number range of a full "
                       "float, which makes training far more forgiving.";
       d.unitDivider = 1e12;
@@ -219,7 +260,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.requiredSubgroupSize = tileSub(dev.info.coopmatBF16);
         bindCoopTile(r, d, dev.info.coopmatBF16, tileWG(dev.info.coopmatBF16), "bf16xbf16+fp32");
       } else {
-        d.title   = "Cooperative-matrix bf16xbf16+fp32";
         d.skip    = true;
         d.skipMsg = "No bf16xbf16+fp32 coopmat support (shaderBFloat16Type or property)! Skipped";
       }
@@ -231,10 +271,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat_fp8_e4m3";
-      d.metricLabel = "coopmat_fp8_e4m3";
+      d.resultTag   = "coopmat";
+      d.title       = "Cooperative matrix";
+      d.shape       = TestShape::Heterogeneous;
+      d.axis        = "data type";
+      d.description = "The device's matrix engine -- its tensor cores -- which "
+                      "multiplies whole small blocks of numbers in one step instead "
+                      "of one value at a time.  Each reading is a different input "
+                      "format, run at the block shape the driver advertises for it; "
+                      "which formats the engine supports, and how much faster the "
+                      "narrow ones go, is most of what separates one generation of "
+                      "hardware from the next.";
+      d.metricLabel = "fp8_e4m3";
       d.unit        = "tflops";
-      d.description = "The matrix engine on 8-bit numbers, in the variant that spends "
+      d.metricDescription = "The matrix engine on 8-bit numbers, in the variant that spends "
                       "its bits on accuracy rather than range.  Half the data of fp16 "
                       "per value, so the newest hardware runs it at roughly twice the rate.";
       d.unitDivider = 1e12;
@@ -248,7 +298,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP8E4M3);
         bindCoopTile(r, d, dev.info.coopmatFP8E4M3, tileWG(dev.info.coopmatFP8E4M3), "fp8(E4M3)xfp8(E4M3)+fp32");
       } else {
-        d.title   = "Cooperative-matrix fp8(E4M3)xfp8(E4M3)+fp32";
         d.skip    = true;
         d.skipMsg = "No fp8-E4M3 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
       }
@@ -260,10 +309,20 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       CoopTileRun r;
       r.push.A.f = 1.3f;
       vk_compute_desc_t d = {};
-      d.resultTag   = "coopmat_fp8_e5m2";
-      d.metricLabel = "coopmat_fp8_e5m2";
+      d.resultTag   = "coopmat";
+      d.title       = "Cooperative matrix";
+      d.shape       = TestShape::Heterogeneous;
+      d.axis        = "data type";
+      d.description = "The device's matrix engine -- its tensor cores -- which "
+                      "multiplies whole small blocks of numbers in one step instead "
+                      "of one value at a time.  Each reading is a different input "
+                      "format, run at the block shape the driver advertises for it; "
+                      "which formats the engine supports, and how much faster the "
+                      "narrow ones go, is most of what separates one generation of "
+                      "hardware from the next.";
+      d.metricLabel = "fp8_e5m2";
       d.unit        = "tflops";
-      d.description = "The same 8-bit matrix path in the other variant, which spends "
+      d.metricDescription = "The same 8-bit matrix path in the other variant, which spends "
                       "its bits on range rather than accuracy -- the one that copes "
                       "with very large and very small values.";
       d.unitDivider = 1e12;
@@ -275,7 +334,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP8E5M2);
         bindCoopTile(r, d, dev.info.coopmatFP8E5M2, tileWG(dev.info.coopmatFP8E5M2), "fp8(E5M2)xfp8(E5M2)+fp32");
       } else {
-        d.title   = "Cooperative-matrix fp8(E5M2)xfp8(E5M2)+fp32";
         d.skip    = true;
         d.skipMsg = "No fp8-E5M2 coopmat support (VK_EXT_shader_float8 or property)! Skipped";
       }
@@ -289,12 +347,27 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     CoopTileRun r;
     r.push.A.i = 3;
     vk_compute_desc_t d = {};
-    d.resultTag   = "coopmat_int8";
-    d.metricLabel = "coopmat_int8";
+    d.resultTag   = "coopmat";
+    d.title       = "Cooperative matrix";
+    d.shape       = TestShape::Heterogeneous;
+    d.axis        = "data type";
+    d.description = "The device's matrix engine -- its tensor cores -- which "
+                    "multiplies whole small blocks of numbers in one step instead "
+                    "of one value at a time.  Each reading is a different input "
+                    "format, run at the block shape the driver advertises for it; "
+                    "which formats the engine supports, and how much faster the "
+                    "narrow ones go, is most of what separates one generation of "
+                    "hardware from the next.";
+    d.metricLabel = "int8";
+    // Measured in ops, not flops.  The reading carries that itself, which is
+    // what lets it join the floating-point family instead of needing a test of
+    // its own; `unit` only heads the test when this reading is the one that
+    // opens it, which happens on an integer-only run.
     d.unit        = "tops";
-    d.description = "The matrix engine on 8-bit whole numbers with a 32-bit running "
-                    "total -- the format quantized neural networks use when they are "
-                    "squeezed down to run fast on cheaper hardware.";
+    d.metricUnit  = "tops";
+    d.metricDescription = "8-bit whole numbers with a 32-bit running total -- the "
+                    "format quantized neural networks use when they are squeezed "
+                    "down to run fast on cheaper hardware.";
     d.unitDivider = 1e12;
 
     d.elemSize    = sizeof(int32_t);
@@ -306,7 +379,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.requiredSubgroupSize = tileSub(dev.info.coopmatINT8);
       bindCoopTile(r, d, dev.info.coopmatINT8, tileWG(dev.info.coopmatINT8), "int8xint8+int32");
     } else {
-      d.title   = "Cooperative-matrix int8xint8+int32";
       d.skip    = true;
       d.skipMsg = "No int8xint8+int32 coopmat support (shaderInt8 or property)! Skipped";
     }

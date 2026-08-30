@@ -43,6 +43,8 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       "discrete card that means the PCIe link, which is usually far narrower "
       "than either side's own memory and is what makes moving data to the "
       "device worth avoiding.";
+  testSpec.shape = TestShape::Heterogeneous;
+  testSpec.axis  = "direction";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   VkBuffer hostBuf = VK_NULL_HANDLE;

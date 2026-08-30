@@ -25,6 +25,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   testSpec.display = d.title;
   testSpec.unit = d.unit;
   if (d.description) testSpec.description = d.description;
+  testSpec.shape = d.shape;
+  if (d.axis) testSpec.axis = d.axis;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   // Collect variants.  Multi-variant path (e.g. fp16 v1/v2/v4) shares one
@@ -43,12 +45,22 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   }
   else
   {
-    // Single-variant tests (coopmat): the metric name restates the title, so
-    // the test-level description covers it.
-    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr, nullptr, 0});
+    // Single-variant tests: one reading, documented by d.metricDescription.
+    // Coopmat uses this path once per data type, all into the same test.
+    variants.push_back({d.metricLabel, d.spirv, d.spirvSize,
+                        d.metricDescription, nullptr, 0});
   }
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+
+  // Unit override for the single-variant path: an integer member of an
+  // otherwise floating-point family carries its own.
+  auto emitOpts = [&](const char *description) {
+    logger::EmitOptions o;
+    o.description = note(description);
+    if (d.metricUnit) o.unit = d.metricUnit;
+    return o;
+  };
 
   if (d.skip)
   {
@@ -255,7 +267,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       }
     }
 
-    test.emit(v.label, value, note(v.description).c_str());
+    test.emit(v.label, value, emitOpts(v.description));
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

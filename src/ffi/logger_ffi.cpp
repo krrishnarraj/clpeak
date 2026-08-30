@@ -82,13 +82,15 @@ std::string ffiEventToJson(const LogEvent &e)
     appendStr(ss, "platform", e.platform);
     appendStr(ss, "device",   e.device);
     appendStr(ss, "driver",   e.driver);
+    // Scope, not a DeviceBegin detail: a device name is not unique (MoltenVK
+    // exposes one GPU twice), so every event has to say which one it is on.
+    ss << ",\"device_index\":" << e.deviceIndex;
 
     switch (e.kind)
     {
     case LogEvent::Kind::DeviceBegin:
         appendStr(ss, "type", deviceTypeString(e.type));
         ss << ",\"platform_index\":" << e.platformIndex
-           << ",\"device_index\":"   << e.deviceIndex
            << ",\"props\":[";
         for (size_t i = 0; i < e.props.size(); i++)
         {

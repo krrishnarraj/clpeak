@@ -7,6 +7,7 @@ sealed class ClpeakEvent {
 
   static ClpeakEvent fromJson(Map<String, dynamic> m) {
     String s(String key) => m[key] as String? ?? '';
+    int deviceIndex() => (m['device_index'] as num?)?.toInt() ?? -1;
     switch (m['t'] as String? ?? '') {
       case 'backend_begin':
         return BackendBeginEvent(s('backend'));
@@ -16,9 +17,9 @@ sealed class ClpeakEvent {
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
+          deviceIndex: deviceIndex(),
           type: s('type'),
           platformIndex: (m['platform_index'] as num?)?.toInt() ?? -1,
-          deviceIndex: (m['device_index'] as num?)?.toInt() ?? -1,
           props: [
             for (final p in (m['props'] as List? ?? const []))
               (key: (p['k'] as String? ?? ''), value: (p['v'] as String? ?? ''))
@@ -30,6 +31,7 @@ sealed class ClpeakEvent {
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
+          deviceIndex: deviceIndex(),
           header: TestHeader.fromEvent(m),
         );
       case 'metric':
@@ -38,6 +40,7 @@ sealed class ClpeakEvent {
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
+          deviceIndex: deviceIndex(),
           testKey: s('variant').isEmpty
               ? s('test')
               : '${s('test')}@${s('variant')}',
@@ -49,6 +52,7 @@ sealed class ClpeakEvent {
           platform: s('platform'),
           device: s('device'),
           driver: s('driver'),
+          deviceIndex: deviceIndex(),
           header: TestHeader.fromEvent(m),
           metricNames: [
             for (final n in (m['metrics'] as List? ?? const []))
@@ -87,9 +91,9 @@ class DeviceEvent extends ClpeakEvent {
     required this.platform,
     required this.device,
     required this.driver,
+    required this.deviceIndex,
     required this.type,
     required this.platformIndex,
-    required this.deviceIndex,
     required this.props,
   });
 
@@ -97,9 +101,9 @@ class DeviceEvent extends ClpeakEvent {
   final String platform;
   final String device;
   final String driver;
+  final int deviceIndex;
   final String type; // "gpu" | "cpu" | "accelerator" | "unknown"
   final int platformIndex;
-  final int deviceIndex;
   final List<({String key, String value})> props;
 }
 
@@ -112,6 +116,7 @@ class TestBeginEvent extends ClpeakEvent {
     required this.platform,
     required this.device,
     required this.driver,
+    required this.deviceIndex,
     required this.header,
   });
 
@@ -119,6 +124,7 @@ class TestBeginEvent extends ClpeakEvent {
   final String platform;
   final String device;
   final String driver;
+  final int deviceIndex;
   final TestHeader header;
 }
 
@@ -128,6 +134,7 @@ class MetricEvent extends ClpeakEvent {
     required this.platform,
     required this.device,
     required this.driver,
+    required this.deviceIndex,
     required this.testKey,
     required this.metric,
   });
@@ -136,6 +143,7 @@ class MetricEvent extends ClpeakEvent {
   final String platform;
   final String device;
   final String driver;
+  final int deviceIndex;
 
   /// Which open test this reading belongs to — `id` or `id@variant`, matching
   /// TestResult.key.
@@ -153,6 +161,7 @@ class TestSkippedEvent extends ClpeakEvent {
     required this.platform,
     required this.device,
     required this.driver,
+    required this.deviceIndex,
     required this.header,
     required this.metricNames,
     required this.status,
@@ -163,6 +172,7 @@ class TestSkippedEvent extends ClpeakEvent {
   final String platform;
   final String device;
   final String driver;
+  final int deviceIndex;
   final TestHeader header;
   final List<String> metricNames;
   final ResultStatus status;

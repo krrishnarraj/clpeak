@@ -21,6 +21,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       "How many bytes per second the device moves through shared local memory "
       "-- the small on-chip scratchpad a group of threads passes data through, "
       "which never goes out to main memory.";
+  testSpec.shape = TestShape::Homogeneous;
+  testSpec.axis  = "vector width";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t wgSize = 256;

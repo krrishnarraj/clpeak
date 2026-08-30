@@ -96,11 +96,13 @@ calibrated to a time budget, which is the normal and comparable mode).
 
 ## Device
 
-`backend` / `platform` / `name` identify it; `driver` is metadata and
-deliberately **not** part of that identity, so a baseline stays comparable
-across a driver update. `type` is `gpu` | `cpu` | `accelerator` | `unknown`.
-`properties` are free-form facts the backend chose to report (compute units,
-VRAM, clocks).
+`backend` / `platform` / `name` / `device_index` identify it. The index is
+part of that identity because a name is not unique — MoltenVK exposes one GPU
+twice, and a multi-GPU box has N identical cards; without it their readings
+fold into one block and every test ends up with two of everything. `driver` is
+deliberately **not** identity, so a baseline stays comparable across a driver
+update. `type` is `gpu` | `cpu` | `accelerator` | `unknown`. `properties` are
+free-form facts the backend chose to report (compute units, VRAM, clocks).
 
 ## Test
 
@@ -111,7 +113,7 @@ VRAM, clocks).
 | `variant` | runtime qualifier that is *not* part of the identity — a CPU ISA (`AVX2+FMA`), a GPU arch, a library version. Two variants of one test are two tests; their key is `id@variant` |
 | `category` | `fp_compute` \| `int_compute` \| `crypto` \| `string` \| `bandwidth` \| `latency` \| `ai` \| `unknown` |
 | `shape` | `homogeneous` \| `heterogeneous` — see below |
-| `axis` | what varies across the readings: `"vector width"`, `"data type"`, `"cache level"`, `"direction"`, `"threads"`. Optional |
+| `axis` | what varies across the readings (see below). Optional |
 | `direction` | `higher_is_better` \| `lower_is_better` |
 | `quantity`, `unit`, `scale` | see *Units* |
 | `description` | what the test measures, in plain language |
@@ -120,23 +122,37 @@ VRAM, clocks).
 ### `shape` — the one thing that cannot be inferred
 
 - **`homogeneous`** — the readings are interchangeable variants of one
-  measurement: `float` / `float2` / `float4`, `int8_dp` chain depths, or a test
-  with a single reading. The best of them *is* the test's answer, so a
-  presenter may collapse the test to that number.
+  measurement: `float` / `float2` / `float4`, `int8_dp` chain depths, a CPU
+  kernel at one thread and at all of them, or a test with a single reading. The
+  best of them *is* the test's answer, so a presenter may collapse the test to
+  that number.
 
 - **`heterogeneous`** — each reading is its own measurement: cuBLASLt's nine
-  datatypes, `memory_latency`'s L1/L2/L3/DRAM, transfer's h2d vs d2h, a CPU
-  test's ST vs MT. There is no single answer, and picking the largest reading
-  invents one.
+  datatypes, `memory_latency`'s L1/L2/L3/DRAM, transfer's h2d vs d2h,
+  `smt_scaling`'s two thread counts (where the *comparison* is the result).
+  There is no single answer, and picking the largest reading invents one.
 
-Nothing else in the document determines it. `wmma_fp16` has one metric and is
-homogeneous; `mps-gemm-fp` has three and is not; both are TFLOPS. The same tag
+Nothing else in the document determines it. `mps_attention` has one reading and
+is homogeneous; `mps_gemm` has three and is not; both are TFLOPS. The same tag
 even differs by backend — a GPU's `global_memory_bandwidth` is a vector-width
 sweep, the CPU's is read/copy/triad. So it is authored in the backend, at the
 `beginTest()` call site, next to the description.
 
 `heterogeneous` is the default, which means an unclassified test is verbose
 rather than wrong.
+
+### `axis` — what varies
+
+A short noun phrase, shown by the GUI as the header over a heterogeneous test's
+readings and by `--describe` as "Readings vary by …". The vocabulary in use:
+
+`vector width` · `chains in flight` · `data type` · `pixel format` ·
+`cache level` · `memory level` · `operation` · `threads` · `contention` ·
+`direction`
+
+It is optional, and left empty where no single noun covers the readings —
+kernel-launch latency measures a one-way cost and a full round trip, and an
+invented word for that pair would read worse than none.
 
 ## Metric
 

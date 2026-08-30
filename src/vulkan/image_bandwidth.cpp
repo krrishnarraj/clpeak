@@ -30,6 +30,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       "which take a different path to memory than plain buffer reads.  Each "
       "pixel of the image is read exactly once, so caching cannot flatter the "
       "number.";
+  testSpec.shape = TestShape::Homogeneous;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t imgW = 4096, imgH = 4096;

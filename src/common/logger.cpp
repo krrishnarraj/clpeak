@@ -61,8 +61,9 @@ LogEvent logger::makeEvent(LogEvent::Kind kind) const
     e.kind     = kind;
     e.backend  = curBackend;
     e.platform = curPlatform;
-    e.device   = curDevice;
-    e.driver   = curDriver;
+    e.device      = curDevice;
+    e.driver      = curDriver;
+    e.deviceIndex = curDeviceIndex;
 
     if (const TestResult *t = openTest())
     {
@@ -160,8 +161,9 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
     assert(log->contextDepth == 1);
 
     log->curPlatform = spec.platform.empty() ? log->curBackend : spec.platform;
-    log->curDevice   = spec.name;
-    log->curDriver   = spec.driver_version;
+    log->curDevice      = spec.name;
+    log->curDriver       = spec.driver_version;
+    log->curDeviceIndex  = spec.device_index;
     log->contextDepth = 2;
     log->curTestIdx   = logger::kNoIndex;
 
@@ -221,6 +223,7 @@ void logger::DeviceScope::end()
     log->curDevice.clear();
     log->curDriver.clear();
     log->curPlatform.clear();
+    log->curDeviceIndex = -1;
     log->curDeviceIdx = logger::kNoIndex;
     log->contextDepth = 1;
 }

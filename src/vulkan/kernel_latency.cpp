@@ -37,6 +37,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
       "The overhead of asking the device to do anything at all, measured with "
       "a shader that does no work.  It is what small, frequent jobs pay before "
       "any of their own work begins.";
+  testSpec.shape = TestShape::Heterogeneous;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const char *dispatchNote = "One way only: from the moment the host submits the "

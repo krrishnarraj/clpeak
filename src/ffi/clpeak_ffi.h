@@ -68,7 +68,13 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // The documents mirror LogEvent (include/common/logger.h).  Kinds ("t"):
 //   backend_begin {backend}
 //   device        {backend, platform, device, driver, platform_index,
-//                  device_index, props:[{k,v}...]}
+//                  type, props:[{k,v}...]}
+//
+// Every event carries `backend`, `platform`, `device`, `driver` and
+// `device_index`.  The index is part of the device's identity, not a detail of
+// the device event: a name does not identify a device on its own (MoltenVK
+// exposes one GPU twice, and a multi-GPU box has N identical cards), and two
+// devices whose readings merge produce a test with two of everything.
 //   test_begin    {..., test, title, variant, axis, category, shape,
 //                  direction, quantity, unit, scale, desc, reopened}
 //   metric        {..., test, variant, metric, label,

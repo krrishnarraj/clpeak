@@ -107,6 +107,11 @@ struct LogEvent {
   {
     return testVariant.empty() ? testId : (testId + "@" + testVariant);
   }
+
+  // Identity of the open device within its backend+platform.  Carried on every
+  // event, not just DeviceBegin, because a name alone does not identify a
+  // device: MoltenVK exposes one GPU twice.
+  std::string deviceKey() const { return ::deviceKey(device, deviceIndex); }
 };
 
 class logger
@@ -228,6 +233,7 @@ protected:
   std::string curPlatform;
   std::string curDevice;
   std::string curDriver;
+  int         curDeviceIndex = -1;
   int         contextDepth = 0;   // 0=none, 1=backend, 2=device, 3=test
 
   // Where the open scopes live in `doc`.  Indices, not pointers: appending a

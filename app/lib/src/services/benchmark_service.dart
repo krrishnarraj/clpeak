@@ -218,19 +218,22 @@ class BenchmarkService extends ChangeNotifier {
         currentTest = '';
       case DeviceEvent():
         _document
-            .runFor(event.backend, event.platform, event.device, event.driver)
+            .runFor(event.backend, event.platform, event.device, event.driver,
+                event.deviceIndex)
             .props = event.props;
       case TestBeginEvent(:final header):
         // The test's row is created here, from the header the native side
         // resolved: shape, direction and unit are known before the first
         // reading arrives, so nothing has to be back-filled off the rows.
         _document
-            .runFor(event.backend, event.platform, event.device, event.driver)
+            .runFor(event.backend, event.platform, event.device, event.driver,
+                event.deviceIndex)
             .openTest(header);
         currentTest = header.title;
       case MetricEvent(:final testKey, :final metric):
         _document
-            .runFor(event.backend, event.platform, event.device, event.driver)
+            .runFor(event.backend, event.platform, event.device, event.driver,
+                event.deviceIndex)
             .findTest(testKey)
             ?.metrics
             .add(metric);
@@ -238,7 +241,8 @@ class BenchmarkService extends ChangeNotifier {
         // One row per named reading, as the file records them -- a whole-test
         // skip used to collapse to a single nameless placeholder.
         _document
-            .runFor(event.backend, event.platform, event.device, event.driver)
+            .runFor(event.backend, event.platform, event.device, event.driver,
+                event.deviceIndex)
             .openTest(header)
             .metrics
             .addAll(event.toMetrics());

@@ -31,7 +31,9 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
 
   auto test = currentDeviceScope->beginTest(
-    {resultTag, displayName, unit, Category::Unknown, description});
+    {resultTag, displayName, unit, Category::Unknown, description,
+     // Every test routed through here is one kernel at five vector widths.
+     TestShape::Homogeneous, "vector width"});
 
   // Feature gates
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)

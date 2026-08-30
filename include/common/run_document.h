@@ -161,6 +161,12 @@ struct TestResult {
 
 // ---- Device ---------------------------------------------------------------
 
+// One device's identity within a backend+platform: its name, plus the
+// enumeration index when the backend reports one.  Shared by the document's
+// own key and by the --compare baseline so the two never disagree.
+std::string deviceKey(const std::string &name, int deviceIndex);
+
+
 // Free-form per-device fact (compute units, VRAM, clocks, driver internals)
 // captured once when the device is opened.  Not fields of a reading: they
 // describe the device, not a measurement.
@@ -183,10 +189,14 @@ struct DeviceResult {
     std::vector<TestResult> tests;
 
     // `driver` is metadata, not identity: a baseline stays comparable across
-    // a driver update, which is exactly the comparison people want.
+    // a driver update, which is exactly the comparison people want.  The
+    // enumeration index IS identity, because a name is not unique -- MoltenVK
+    // exposes one GPU twice, and a multi-GPU box has N identical cards.  Left
+    // out, their readings fold into a single block and each test ends up with
+    // two of every reading.
     std::string key() const
     {
-        return backend + "/" + platform + "/" + name;
+        return backend + "/" + platform + "/" + deviceKey(name, deviceIndex);
     }
 
     // Find an already-recorded test by TestResult::key(), or nullptr.  This is

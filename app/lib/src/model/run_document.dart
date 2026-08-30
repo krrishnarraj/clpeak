@@ -134,6 +134,7 @@ class DeviceRun {
     required this.platform,
     required this.device,
     required this.driver,
+    this.index = -1,
   });
 
   final String backend;
@@ -141,13 +142,21 @@ class DeviceRun {
   final String device;
   final String driver;
 
+  /// Enumeration index within the backend, or -1 where the backend reports
+  /// none.  Part of the identity, because a name is not one: MoltenVK exposes
+  /// the same GPU twice, and a multi-GPU box has N identical cards.
+  final int index;
+
   /// Device props — from the live event stream during a run, and from the
   /// file's device object when a saved run is reopened.
   List<({String key, String value})> props = [];
 
   final List<CategoryGroup> categories = [];
 
-  String get key => '$backend|$platform|$device|$driver';
+  /// Driver is metadata, not identity — a saved run stays comparable across a
+  /// driver update — but the index is, so two same-named devices stay two rows
+  /// instead of folding into one test with two of every reading.
+  String get key => '$backend|$platform|$device|#$index';
 
   CategoryGroup _category(BenchCategory c) =>
       categories.firstWhere((g) => g.category == c, orElse: () {
@@ -266,14 +275,18 @@ class RunDocument {
 
   bool get isEmpty => runs.isEmpty;
 
-  DeviceRun runFor(
-      String backend, String platform, String device, String driver) {
-    final key = '$backend|$platform|$device|$driver';
+  DeviceRun runFor(String backend, String platform, String device,
+      String driver, [int index = -1]) {
+    final key = '$backend|$platform|$device|#$index';
     for (final r in runs) {
       if (r.key == key) return r;
     }
     final r = DeviceRun(
-        backend: backend, platform: platform, device: device, driver: driver);
+        backend: backend,
+        platform: platform,
+        device: device,
+        driver: driver,
+        index: index);
     runs.add(r);
     return r;
   }
@@ -292,6 +305,7 @@ class RunDocument {
         dm['platform'] as String? ?? dm['backend'] as String? ?? '',
         dm['name'] as String? ?? '',
         dm['driver'] as String? ?? '',
+        (dm['device_index'] as num?)?.toInt() ?? -1,
       );
       run.props = [
         for (final p in (dm['properties'] as List? ?? const []))

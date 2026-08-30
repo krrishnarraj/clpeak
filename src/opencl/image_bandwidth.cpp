@@ -15,7 +15,8 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
      "How many bytes per second the device reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
      "pixel of the image is read exactly once, so caching cannot flatter the "
-     "number."});
+     "number.",
+     TestShape::Homogeneous});
 
   // The image is RGBA float, so one fetch returns a whole pixel: four 32-bit
   // values, hence the metric name.

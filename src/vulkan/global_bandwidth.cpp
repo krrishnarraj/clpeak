@@ -39,6 +39,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       "reading a buffer far too large to cache.  Each reading fetches a "
       "different number of values per instruction, since wider fetches usually "
       "pull more through before the memory system saturates.";
+  testSpec.shape = TestShape::Homogeneous;
+  testSpec.axis  = "vector width";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   // Create input + output buffers

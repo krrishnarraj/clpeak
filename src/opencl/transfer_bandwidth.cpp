@@ -56,7 +56,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
      "discrete card that means the PCIe link, which is far narrower than "
      "either side's own memory and is what makes moving data to the device "
      "worth avoiding; where the two share one pool of memory the numbers are much "
-     "higher.  Both readings use pinned host memory, the fast path."});
+     "higher.  Both readings use pinned host memory, the fast path.",
+     TestShape::Heterogeneous, "direction"});
 
   const char *h2dNote = "Host to device: sending data across to the device.";
   const char *d2hNote = "Device to host: reading results back.  Often a little "

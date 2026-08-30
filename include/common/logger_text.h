@@ -52,6 +52,7 @@ private:
     void renderMetric(const LogEvent &e);
     void renderTestSkippedAll(const LogEvent &e);
     void renderTestEnd();
+    void noteClosedTest(const std::string &key);
     void renderDeviceEnd();
     void renderBackendEnd();
 
@@ -83,6 +84,21 @@ private:
     std::vector<MetricLine> metricLines;
 
     void flushMetrics();
+
+    // ── Continuing a reopened test ───────────────────────────────────────
+    //
+    // A backend may close a test and immediately reopen it to add more
+    // readings — Vulkan measures each cooperative-matrix data type in its own
+    // #ifdef block, all of them into one test.  Printing the header again for
+    // each would turn one test into seven look-alike stanzas, so a reopen of
+    // the test that just closed continues the block instead.
+    //
+    // Rows are still flushed at each TestEnd rather than held to the end of
+    // the merged test: the CLI is watched live, and holding them would stop
+    // readings appearing as they are measured.  `mergedPad` carries the label
+    // column across those flushes so the stanza stays one aligned table.
+    std::string lastClosedTest;
+    int         mergedPad = 0;
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
