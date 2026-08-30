@@ -21,15 +21,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   uint32_t numGroups = (uint32_t)(numItems / FETCH_PER_WI / wgSize);
   if (numGroups == 0) numGroups = 1;
 
-  // The one number that decides whether this test measured memory or cache:
-  // the timed phase re-reads the same buffer, so a working set that fits behind
-  // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
-  // globalBWMaxSize to clear it; print both so an implausible reading can be
-  // checked against them without a rebuild.
-  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device-local heap %llu MB\n",
-              (unsigned long long)(numItems * sizeof(float) >> 20),
-              (unsigned long long)(dev.info.heapSize >> 20));
-
+  // Opened before the sizing diagnostic below, so that line lands under
+  // this test's header rather than under the previous test's readings.
   logger::TestSpec testSpec;
   testSpec.tag = "global_memory_bandwidth";
   testSpec.display = "Global memory bandwidth";
@@ -42,6 +35,15 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.shape = TestShape::Homogeneous;
   testSpec.axis  = "vector width";
   auto test = currentDeviceScope->beginTest(testSpec);
+
+  // The one number that decides whether this test measured memory or cache:
+  // the timed phase re-reads the same buffer, so a working set that fits behind
+  // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
+  // globalBWMaxSize to clear it; print both so an implausible reading can be
+  // checked against them without a rebuild.
+  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device-local heap %llu MB\n",
+              (unsigned long long)(numItems * sizeof(float) >> 20),
+              (unsigned long long)(dev.info.heapSize >> 20));
 
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;

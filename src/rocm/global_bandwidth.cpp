@@ -16,6 +16,17 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   if (numBlocks == 0)
     numBlocks = 1;
 
+  // Opened before the sizing diagnostic below, so that line lands under
+  // this test's header rather than under the previous test's readings.
+  auto test = currentDeviceScope->beginTest(
+    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+     Category::Unknown,
+     "How many bytes per second the GPU can stream out of its own memory, "
+     "reading a buffer far too large to cache.  Each reading fetches a "
+     "different number of values per instruction, since wider fetches usually "
+     "pull more through before the memory system saturates.",
+     TestShape::Homogeneous, "vector width"});
+
   // The one number that decides whether this test measured memory or cache:
   // the timed phase re-reads the same buffer, so a working set that fits behind
   // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
@@ -26,15 +37,6 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
               (unsigned long long)(numItems * sizeof(float) >> 20),
               (unsigned long long)(dev.info.l2CacheSize >> 20),
               (unsigned long long)(dev.info.totalGlobalMem >> 20));
-
-  auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
-     Category::Unknown,
-     "How many bytes per second the GPU can stream out of its own memory, "
-     "reading a buffer far too large to cache.  Each reading fetches a "
-     "different number of values per instruction, since wider fetches usually "
-     "pull more through before the memory system saturates.",
-     TestShape::Homogeneous, "vector width"});
 
   void *inBuf = nullptr;
   void *outBuf = nullptr;
