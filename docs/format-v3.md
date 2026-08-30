@@ -146,9 +146,13 @@ rather than wrong.
 A short noun phrase, shown by the GUI as the header over a heterogeneous test's
 readings and by `--describe` as "Readings vary by …". The vocabulary in use:
 
-`vector width` · `chains in flight` · `data type` · `pixel format` ·
-`cache level` · `memory level` · `operation` · `threads` · `contention` ·
-`direction`
+| | |
+|---|---|
+| what the instruction is fed | `data type` · `pixel format` · `convolution shape` |
+| how much work is in flight | `vector width` · `chains in flight` · `threads` · `contention` |
+| where the data is | `cache level` · `memory level` · `weight size` · `direction` |
+| what is being done | `operation` · `operation and size` · `what is submitted` |
+| how much context | `prompt length` · `phase and context length` |
 
 It is optional, and left empty where no single noun covers the readings —
 kernel-launch latency measures a one-way cost and a full round trip, and an

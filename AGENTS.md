@@ -77,7 +77,8 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 
 - **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h`
 - **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface
-- **Explaining what a test measures?** → `include/common/AGENTS.md` § Test documentation
+- **Classifying or explaining a test?** → `include/common/AGENTS.md`
+  § What a backend authors at `beginTest()` (shape, axis, variant, prose)
 - **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
