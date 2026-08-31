@@ -19,11 +19,14 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `CLPEAK_FFI_PATH=<build>/clpeak_ffi.framework/clpeak_ffi flutter run -d macos`
   (a plain `flutter build macos` does NOT embed the framework — the
   clpeak-gui target owns final assembly).
-- Android: `flutter build apk --release` (Gradle drives
-  `src/ffi/android/CMakeLists.txt`; needs `git submodule update --init`).
-  The APK bundles ONNX Runtime for **arm64-v8a only** — see the packaging
-  block in `android/app/build.gradle.kts` for the arithmetic; it is the
-  difference between an 86 MB and a 107 MB fat APK.
+- Android: `flutter build apk --release` / `flutter build appbundle --release`
+  (Gradle drives `src/ffi/android/CMakeLists.txt`; needs
+  `git submodule update --init`). The bundle includes ONNX Runtime for
+  **arm64-v8a** (devices) and **x86_64** (emulator / Chromebooks) —
+  `armeabi-v7a`/`x86` are excluded as legacy 32-bit ABIs; see the packaging
+  block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
+  per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
+  107 MB for every slice).
 - iOS: `tool/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX
