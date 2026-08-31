@@ -209,7 +209,7 @@ int main(int argc, char **argv)
 
         auto peak = be.create();
         peak->log.reset(
-            new LoggerText(std::cout, opts.compareFile, opts.describe));
+            new LoggerText(std::cout, opts.compareFile, opts.describe, opts.verbose));
         peak->applyOptions(opts);
         int status = peak->runAll();
         combined.append(peak->log->doc);

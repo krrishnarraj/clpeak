@@ -31,8 +31,9 @@ public:
     // and each reading; without it the output is the bare table.
     explicit LoggerText(std::ostream &out = std::cout,
                         std::string compareFileName = "",
-                        bool describe = false)
-        : logger(std::move(compareFileName)), out(out), describe(describe) {}
+                        bool describe = false,
+                        bool verbose = false)
+        : logger(std::move(compareFileName)), out(out), describe(describe), verbose(verbose) {}
 
 protected:
     void onEvent(const LogEvent &e) override;
@@ -42,6 +43,10 @@ protected:
 
     // --describe: render the documentation alongside the readings.
     bool describe = false;
+
+    // --verbose: print skipped/unsupported/error readings in default
+    // mode they are hidden; only shown when --verbose is passed.
+    bool verbose = false;
 
 private:
     // ── Per-event renderers ──────────────────────────────────────────────
@@ -106,6 +111,11 @@ private:
     std::string lastClosedTest;
     std::string stanzaUnit;
     int         mergedPad = 0;
+
+    // Header deferred until we know there are actual metric lines to
+    // print (i.e. not all readings were skipped/unsupported in the
+    // default non-verbose mode).
+    std::string mPendingHeader;
 
     // ── Helpers ──────────────────────────────────────────────────────────
 

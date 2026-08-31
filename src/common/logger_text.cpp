@@ -123,28 +123,20 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     if (e.reopened && e.testKey() == lastClosedTest && openUnit == stanzaUnit)
         return;
 
-    // A different test, or the same one measuring something else: the previous
-    // stanza is finished.  Flush rather than clear, so no measured row can be
-    // discarded silently by a test that was never closed.
     flushMetrics();
     mergedPad  = 0;
     stanzaUnit = openUnit;
 
-    out << "\n";
-
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
-    // "Single-precision compute [AVX2+FMA] (GFLOPS)".  The unit is the symbol
-    // the unit table resolved, printed as written: "GB/s" and "µs" are not
-    // words to upper-case.  The variant is shown because it is no longer part
-    // of the name -- a CPU test's ISA is the difference between two otherwise
-    // identical headers.
+    // Build the header but defer printing until flushMetrics confirms
+    // there are actual metric lines to display (not all readings were
+    // skipped/unsupported in the default non-verbose mode).
     std::string header = e.testTitle;
     if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
     if (!openUnit.empty())      header += " (" + openUnit + ")";
-
-    writeLine(header);
+    mPendingHeader = header;
 
     // What the test measures, under its own header and one step in from it,
     // then a blank line so the readings below still read as a block.
@@ -168,6 +160,11 @@ void LoggerText::renderTestBegin(const LogEvent &e)
 
 void LoggerText::renderMetric(const LogEvent &e)
 {
+    // In non-verbose mode, skip unsupported/skipped/error readings —
+    // they clutter the table and are only useful when debugging.
+    if (!verbose && e.metric.status != ResultStatus::Ok)
+        return;
+
     MetricLine ml;
     ml.label       = e.metric.displayLabel();
     ml.value       = e.metric.value;
@@ -189,6 +186,9 @@ void LoggerText::renderMetric(const LogEvent &e)
 
 void LoggerText::renderTestSkippedAll(const LogEvent &e)
 {
+    if (!verbose)
+        return;
+
     // One line, not one per metric: a whole-test skip is a single fact, and
     // the reason is identical on every reading it stands in for.  The document
     // still records each named reading, so the file is complete.
@@ -246,7 +246,18 @@ void LoggerText::renderBackendEnd()
 void LoggerText::flushMetrics()
 {
     if (metricLines.empty())
+    {
+        mPendingHeader.clear();
         return;
+    }
+
+    // Print the deferred test header if we have one.
+    if (!mPendingHeader.empty())
+    {
+        out << "\n";
+        writeLine(mPendingHeader);
+        mPendingHeader.clear();
+    }
 
     // Compute the maximum metric name width in this test.  `mergedPad` is the
     // widest label already printed in this stanza, so a test written in
