@@ -134,44 +134,25 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
-    // Build the header but defer printing until flushMetrics confirms
-    // there are actual metric lines to display (not all readings were
-    // skipped/unsupported in the default non-verbose mode).
+    // Build the header but defer printing until we know the test has
+    // visible output.  Both header and --describe prose are deferred
+    // so a fully-skipped test in default (non-verbose) mode leaves no
+    // orphan header or description behind, and so the header always
+    // precedes its description.
     std::string header = e.testTitle;
     if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
     if (!openUnit.empty())      header += " (" + openUnit + ")";
     mPendingHeader = header;
 
-    if (mStreaming)
+    if (describe)
     {
-        if (describe)
-        {
-            mPendingDescription = e.testDescription;
-            mPendingAxis        = e.testAxis;
-        }
-        else
-        {
-            mPendingDescription.clear();
-            mPendingAxis.clear();
-        }
+        mPendingDescription = e.testDescription;
+        mPendingAxis        = e.testAxis;
     }
     else
     {
         mPendingDescription.clear();
         mPendingAxis.clear();
-        // What the test measures, under its own header and one step in from it,
-        // then a blank line so the readings below still read as a block.
-        if (describe && (!e.testDescription.empty() || !e.testAxis.empty()))
-        {
-            if (!e.testDescription.empty())
-                writeWrapped(metricIndent * 2, e.testDescription);
-            // The axis is the shortest possible answer to "why are there eight of
-            // these?", and the one line that tells a reader whether the readings
-            // below are variants of one measurement or separate measurements.
-            if (!e.testAxis.empty())
-                writeWrapped(metricIndent * 2, "Readings vary by " + e.testAxis + ".");
-            out << "\n";
-        }
     }
 
     metricLines.clear();
@@ -213,6 +194,29 @@ void LoggerText::renderTestSkippedAll(const LogEvent &e)
 {
     if (!verbose)
         return;
+
+    // Flush the deferred header (and its --describe prose) first so the
+    // skip line appears under its own test, not orphaned under the
+    // previous one.
+    if (!mPendingHeader.empty())
+    {
+        out << "\n";
+        writeLine(mPendingHeader);
+        if (!mPendingDescription.empty())
+            writeWrapped(metricIndent * 2, mPendingDescription);
+        if (!mPendingAxis.empty())
+            writeWrapped(metricIndent * 2, "Readings vary by " + mPendingAxis + ".");
+        if (!mPendingDescription.empty() || !mPendingAxis.empty())
+            out << "\n";
+        mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+    else
+    {
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
 
     // One line, not one per metric: a whole-test skip is a single fact, and
     // the reason is identical on every reading it stands in for.  The document
