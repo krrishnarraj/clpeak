@@ -134,25 +134,44 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
-    // Build the header but defer printing until we know the test has
-    // visible output.  Both header and --describe prose are deferred
-    // so a fully-skipped test in default (non-verbose) mode leaves no
-    // orphan header or description behind, and so the header always
-    // precedes its description.
+    // Build the header.  In verbose mode the header is printed
+    // immediately so that backend CLPEAK_VLOG lines (stderr) land
+    // under it, not above it.  In default mode the header is deferred
+    // until we know the test has visible output, so a fully-skipped
+    // test leaves no orphan header behind.  The header always
+    // precedes its --describe prose.
     std::string header = e.testTitle;
     if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
     if (!openUnit.empty())      header += " (" + openUnit + ")";
-    mPendingHeader = header;
-
-    if (describe)
+    if (verbose)
     {
-        mPendingDescription = e.testDescription;
-        mPendingAxis        = e.testAxis;
+        out << "\n";
+        writeLine(header);
+        if (describe && (!e.testDescription.empty() || !e.testAxis.empty()))
+        {
+            if (!e.testDescription.empty())
+                writeWrapped(metricIndent * 2, e.testDescription);
+            if (!e.testAxis.empty())
+                writeWrapped(metricIndent * 2, "Readings vary by " + e.testAxis + ".");
+            out << "\n";
+        }
+        mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
     }
     else
     {
-        mPendingDescription.clear();
-        mPendingAxis.clear();
+        mPendingHeader = header;
+        if (describe)
+        {
+            mPendingDescription = e.testDescription;
+            mPendingAxis        = e.testAxis;
+        }
+        else
+        {
+            mPendingDescription.clear();
+            mPendingAxis.clear();
+        }
     }
 
     metricLines.clear();
