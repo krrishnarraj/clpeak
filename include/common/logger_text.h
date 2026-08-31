@@ -117,6 +117,18 @@ private:
     // default non-verbose mode).
     std::string mPendingHeader;
 
+    // In streaming mode the header (and its --describe prose) is also
+    // deferred until the first visible metric arrives, so a fully-skipped
+    // test does not leave an empty header behind.
+    std::string mPendingDescription;
+    std::string mPendingAxis;
+
+    // Streaming mode: the open test asked for metrics to print as they
+    // arrive rather than buffer until TestEnd.  Column alignment is per-line
+    // rather than computed over all readings, but the run no longer looks
+    // hung for minutes before anything appears.
+    bool mStreaming = false;
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     std::string indentStr(int level) const;

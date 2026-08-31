@@ -326,6 +326,7 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
 
     LogEvent e = log->makeEvent(LogEvent::Kind::TestBegin);
     e.reopened   = reopened;
+    e.streaming  = spec.streaming;
     // What this opening asked for, not what the test settled on at its first.
     e.openedUnit = u.symbol;
     log->onEvent(e);

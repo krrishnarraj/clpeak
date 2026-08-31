@@ -204,7 +204,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
              "hardware can do in principle, this shows what shipping code "
              "reaches on the operation most AI work is built from.  Each "
              "reading is a different input format.",
-             TestShape::Heterogeneous, "data type"});
+             TestShape::Heterogeneous, "data type",
+             Direction::FromUnit, "", /*streaming=*/true});
         logger::EmitOptions o;
         if (isInt) o.unit = "tops";
         t.skip(isInt ? "int8" : "fp32", ResultStatus::Unsupported,
@@ -577,7 +578,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
              "hardware can do in principle, this shows what shipping code "
              "reaches on the operation most AI work is built from.  Each "
              "reading is a different input format.",
-             TestShape::Heterogeneous, "data type"});
+             TestShape::Heterogeneous, "data type",
+             Direction::FromUnit, "", /*streaming=*/true});
         blasTest = &testFp;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
@@ -710,7 +712,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
          "hardware can do in principle, this shows what shipping code "
          "reaches on the operation most AI work is built from.  Each "
          "reading is a different input format.",
-         TestShape::Heterogeneous, "data type"});
+         TestShape::Heterogeneous, "data type",
+         Direction::FromUnit, "", /*streaming=*/true});
     blasTest = &testInt;
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute

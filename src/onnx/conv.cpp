@@ -28,163 +28,176 @@
 namespace
 {
 
-// Channel count is fixed and the feature map grows, so every variant keeps
-// the same weights and only the work per weight changes.  256 channels is
-// wide enough to fill an accelerator's array and narrow enough that the 3x3
-// weights stay a couple of megabytes.
-constexpr int64_t kChannels   = 256;
-constexpr int64_t kMinSpatial = 32;
+  // Channel count is fixed and the feature map grows, so every variant keeps
+  // the same weights and only the work per weight changes.  256 channels is
+  // wide enough to fill an accelerator's array and narrow enough that the 3x3
+  // weights stay a couple of megabytes.
+  constexpr int64_t kChannels = 256;
+  constexpr int64_t kMinSpatial = 32;
 
-// No fixed upper size: the sweep stops when the rate stops improving, when
-// one pass would take too long, or when the feature map stops fitting -- the
-// same self-scaling bounds the matmul ladder uses, so a faster device climbs
-// further without the number changing meaning.
-constexpr int64_t kMaxSpatial = 4096;
-static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+  // No fixed upper size: the sweep stops when the rate stops improving, when
+  // one pass would take too long, or when the feature map stops fitting -- the
+  // same self-scaling bounds the matmul ladder uses, so a faster device climbs
+  // further without the number changing meaning.
+  constexpr int64_t kMaxSpatial = 4096;
+  static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
 
-constexpr double  kImproveFactor  = 1.03;
-constexpr int     kMaxStrikes     = 2;
-constexpr double  kMaxIterUs      = 2.0e6;
-constexpr unsigned int kSizeBudgetUs = 2000000;
+  constexpr double kImproveFactor = 1.03;
+  constexpr int kMaxStrikes = 2;
+  constexpr double kMaxIterUs = 2.0e6;
+  constexpr unsigned int kSizeBudgetUs = 2000000;
 
-struct Variant
-{
-  int64_t     kernel;
-  bool        depthwise;
-  const char *label;
-  const char *note;
-};
-
-const Variant kVariants[] = {
-  {3, false, "conv3x3",
-   "A 3x3 convolution over 256 channels -- the shape most vision networks are "
-   "built from, and the one neural accelerators were designed around."},
-  {1, false, "conv1x1",
-   "A 1x1 convolution: arithmetically a matrix multiply applied at every "
-   "pixel, so it should land near the matmul rows.  Where it does not, the "
-   "provider is handling the two shapes with different machinery."},
-  {3, true,  "depthwise3x3",
-   "A depthwise 3x3 convolution -- the same shape as the first but with each "
-   "channel kept separate, so there is far less arithmetic per value loaded.  "
-   "Hardware built around dense multiply-accumulate arrays usually collapses "
-   "here, which is why efficient mobile networks are often slower than their "
-   "arithmetic suggests."},
-};
-
-// Multiply-accumulates x2 for one pass at this size.
-double convFlops(const Variant &v, int64_t spatial)
-{
-  const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
-  return 2.0 * (double)kChannels * (double)spatial * (double)spatial *
-         inPerGroup * (double)v.kernel * (double)v.kernel;
-}
-
-void fillHalf(std::string &raw, int64_t count, uint32_t seed)
-{
-  raw.assign((size_t)count * 2, '\0');
-  uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-  uint32_t s = seed;
-  for (int64_t i = 0; i < count; i++)
+  struct Variant
   {
-    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
+    int64_t kernel;
+    bool depthwise;
+    const char *label;
+    const char *note;
+  };
+
+  const Variant kVariants[] = {
+      {3, false, "conv3x3",
+       "A 3x3 convolution over 256 channels -- the shape most vision networks are "
+       "built from, and the one neural accelerators were designed around."},
+      {1, false, "conv1x1",
+       "A 1x1 convolution: arithmetically a matrix multiply applied at every "
+       "pixel, so it should land near the matmul rows.  Where it does not, the "
+       "provider is handling the two shapes with different machinery."},
+      {3, true, "depthwise3x3",
+       "A depthwise 3x3 convolution -- the same shape as the first but with each "
+       "channel kept separate, so there is far less arithmetic per value loaded.  "
+       "Hardware built around dense multiply-accumulate arrays usually collapses "
+       "here, which is why efficient mobile networks are often slower than their "
+       "arithmetic suggests."},
+  };
+
+  // Multiply-accumulates x2 for one pass at this size.
+  double convFlops(const Variant &v, int64_t spatial)
+  {
+    const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
+    return 2.0 * (double)kChannels * (double)spatial * (double)spatial *
+           inPerGroup * (double)v.kernel * (double)v.kernel;
   }
-}
 
-struct ConvSetup
-{
-  OrtSession *session = nullptr;
-  OrtValue   *inVal   = nullptr;
-  OrtValue   *outVal  = nullptr;
-  std::vector<uint8_t> inBuf, outBuf;
-  std::string error;
-};
-
-void destroySetup(const OrtRuntime &rt, ConvSetup &c)
-{
-  if (c.inVal)   rt.api->ReleaseValue(c.inVal);
-  if (c.outVal)  rt.api->ReleaseValue(c.outVal);
-  if (c.session) rt.api->ReleaseSession(c.session);
-  c.inVal = nullptr; c.outVal = nullptr; c.session = nullptr;
-  c.inBuf.clear();  c.inBuf.shrink_to_fit();
-  c.outBuf.clear(); c.outBuf.shrink_to_fit();
-}
-
-ConvSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                    const Variant &v, int64_t spatial)
-{
-  ConvSetup c;
-  const int64_t group      = v.depthwise ? kChannels : 1;
-  const int64_t inPerGroup = kChannels / group;
-
+  void fillHalf(std::string &raw, int64_t count, uint32_t seed)
   {
-    std::string xRaw, wRaw;
-    fillHalf(xRaw, kChannels * spatial * spatial, 0x9e3779b9u);
-    fillHalf(wRaw, kChannels * inPerGroup * v.kernel * v.kernel, 0x243f6a88u);
-    std::string model = onnxResidentConvModel(kChannels, spatial, v.kernel,
-                                              group, ONNX_DT_FLOAT16,
-                                              xRaw, wRaw);
-    xRaw.clear(); xRaw.shrink_to_fit();
-    wRaw.clear(); wRaw.shrink_to_fit();
-
-    auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
-    model.clear(); model.shrink_to_fit();
-    if (!ses.session)
+    raw.assign((size_t)count * 2, '\0');
+    uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
+    uint32_t s = seed;
+    for (int64_t i = 0; i < count; i++)
     {
-      c.error = ses.error;
-      return c;
+      s ^= s << 13;
+      s ^= s >> 17;
+      s ^= s << 5;
+      h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
     }
-    c.session = ses.session;
   }
 
+  struct ConvSetup
   {
-    uint16_t one = floatToHalf(1.0009765625f);
-    c.inBuf.assign(2, 0);
-    std::memcpy(c.inBuf.data(), &one, 2);
+    OrtSession *session = nullptr;
+    OrtValue *inVal = nullptr;
+    OrtValue *outVal = nullptr;
+    std::vector<uint8_t> inBuf, outBuf;
+    std::string error;
+  };
+
+  void destroySetup(const OrtRuntime &rt, ConvSetup &c)
+  {
+    if (c.inVal)
+      rt.api->ReleaseValue(c.inVal);
+    if (c.outVal)
+      rt.api->ReleaseValue(c.outVal);
+    if (c.session)
+      rt.api->ReleaseSession(c.session);
+    c.inVal = nullptr;
+    c.outVal = nullptr;
+    c.session = nullptr;
+    c.inBuf.clear();
+    c.inBuf.shrink_to_fit();
+    c.outBuf.clear();
+    c.outBuf.shrink_to_fit();
   }
-  c.outBuf.assign((size_t)kChannels * 2, 0);
 
-  OrtMemoryInfo *mi = nullptr;
-  OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
-                                              OrtMemTypeDefault, &mi);
-  const int64_t outShape[1] = {kChannels};
-  if (!st)
-    st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, c.inBuf.data(), c.inBuf.size(), nullptr, 0,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &c.inVal);
-  if (!st)
-    st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, c.outBuf.data(), c.outBuf.size(), outShape, 1,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &c.outVal);
-  if (mi) rt.api->ReleaseMemoryInfo(mi);
-  if (st)
+  ConvSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                      const Variant &v, int64_t spatial)
   {
-    c.error = onnxStatusText(rt, st);
-    destroySetup(rt, c);
-  }
-  return c;
-}
+    ConvSetup c;
+    const int64_t group = v.depthwise ? kChannels : 1;
+    const int64_t inPerGroup = kChannels / group;
 
-double timeRuns(const OrtRuntime &rt, ConvSetup &c, unsigned int n)
-{
-  static const char *inNames[]  = {"S"};
-  static const char *outNames[] = {"R"};
+    {
+      std::string xRaw, wRaw;
+      fillHalf(xRaw, kChannels * spatial * spatial, 0x9e3779b9u);
+      fillHalf(wRaw, kChannels * inPerGroup * v.kernel * v.kernel, 0x243f6a88u);
+      std::string model = onnxResidentConvModel(kChannels, spatial, v.kernel,
+                                                group, ONNX_DT_FLOAT16,
+                                                xRaw, wRaw);
+      xRaw.clear();
+      xRaw.shrink_to_fit();
+      wRaw.clear();
+      wRaw.shrink_to_fit();
 
-  auto t0 = std::chrono::steady_clock::now();
-  for (unsigned int i = 0; i < n; i++)
-  {
-    OrtStatus *st = rt.api->Run(c.session, nullptr,
-                                inNames, (const OrtValue *const *)&c.inVal, 1,
-                                outNames, 1, &c.outVal);
+      auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
+      model.clear();
+      model.shrink_to_fit();
+      if (!ses.session)
+      {
+        c.error = ses.error;
+        return c;
+      }
+      c.session = ses.session;
+    }
+
+    {
+      uint16_t one = floatToHalf(1.0009765625f);
+      c.inBuf.assign(2, 0);
+      std::memcpy(c.inBuf.data(), &one, 2);
+    }
+    c.outBuf.assign((size_t)kChannels * 2, 0);
+
+    OrtMemoryInfo *mi = nullptr;
+    OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
+                                                OrtMemTypeDefault, &mi);
+    const int64_t outShape[1] = {kChannels};
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, c.inBuf.data(), c.inBuf.size(), nullptr, 0,
+          ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &c.inVal);
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, c.outBuf.data(), c.outBuf.size(), outShape, 1,
+          ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &c.outVal);
+    if (mi)
+      rt.api->ReleaseMemoryInfo(mi);
     if (st)
     {
       c.error = onnxStatusText(rt, st);
-      return -1.0;
+      destroySetup(rt, c);
     }
+    return c;
   }
-  auto t1 = std::chrono::steady_clock::now();
-  return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
-}
+
+  double timeRuns(const OrtRuntime &rt, ConvSetup &c, unsigned int n)
+  {
+    static const char *inNames[] = {"S"};
+    static const char *outNames[] = {"R"};
+
+    auto t0 = std::chrono::steady_clock::now();
+    for (unsigned int i = 0; i < n; i++)
+    {
+      OrtStatus *st = rt.api->Run(c.session, nullptr,
+                                  inNames, (const OrtValue *const *)&c.inVal, 1,
+                                  outNames, 1, &c.outVal);
+      if (st)
+      {
+        c.error = onnxStatusText(rt, st);
+        return -1.0;
+      }
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
+  }
 
 } // namespace
 
@@ -201,18 +214,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "a higher share of their arithmetic peak here than on a plain matrix "
        "multiply.  Read alongside the matmul rows: the gap between them says "
        "what the hardware was shaped for.",
-       TestShape::Heterogeneous, "convolution shape"});
+       TestShape::Heterogeneous, "convolution shape",
+       Direction::FromUnit, "", /*streaming=*/true});
 
   for (const Variant &v : kVariants)
   {
     if (clpeak::cancelRequested())
       break;
 
-    double       best = 0.0;
-    int64_t      bestSpatial = 0;
-    double       lastRate = 0.0;
-    int          strikes = 0;
-    std::string  firstErr;
+    double best = 0.0;
+    int64_t bestSpatial = 0;
+    double lastRate = 0.0;
+    int strikes = 0;
+    std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
 
     for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
@@ -224,7 +238,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (tensorBytes > maxTensorBytes())
       {
         CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld needs %llu MB per tensor, "
-                    "stopping\n", ep.providerKey.c_str(), v.label,
+                    "stopping\n",
+                    ep.providerKey.c_str(), v.label,
                     (long long)sp, (long long)sp,
                     (unsigned long long)(tensorBytes >> 20));
         break;
@@ -251,7 +266,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         if (firstErr.empty())
         {
-          firstErr  = c.error.empty() ? "run failed" : c.error;
+          firstErr = c.error.empty() ? "run failed" : c.error;
           errStatus = ResultStatus::Error;
         }
         destroySetup(rt, c);
@@ -266,7 +281,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       double mean_us = (iters > 1) ? timeRuns(rt, c, iters) : per_iter_us;
       if (mean_us <= 0.0 && firstErr.empty())
       {
-        firstErr  = c.error.empty() ? "run failed" : c.error;
+        firstErr = c.error.empty() ? "run failed" : c.error;
         errStatus = ResultStatus::Error;
       }
       destroySetup(rt, c);
@@ -274,7 +289,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
 
       const double flops = convFlops(v, sp);
-      const double rate  = flops * 1.0e6 / mean_us / 1.0e12;
+      const double rate = flops * 1.0e6 / mean_us / 1.0e12;
       lastRate = flops / mean_us;
       CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld -> %.3f\n", ep.providerKey.c_str(),
                   v.label, (long long)sp, (long long)sp, rate);
@@ -287,7 +302,11 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       else
       {
-        if (rate > best) { best = rate; bestSpatial = sp; }
+        if (rate > best)
+        {
+          best = rate;
+          bestSpatial = sp;
+        }
         if (++strikes >= kMaxStrikes)
           break;
       }
@@ -300,7 +319,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (per_iter_us > kMaxIterUs)
       {
         CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.1f s per pass, "
-                    "stopping\n", ep.providerKey.c_str(), v.label,
+                    "stopping\n",
+                    ep.providerKey.c_str(), v.label,
                     (long long)sp, (long long)sp, per_iter_us / 1.0e6);
         break;
       }
@@ -310,14 +330,13 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (best > 0.0)
     {
       o.description = "Peak over a doubling sweep of feature-map sizes; "
-                      "fastest at " + std::to_string(bestSpatial) + " square.  "
-                      + v.note;
+                      "fastest at " +
+                      std::to_string(bestSpatial) + " square.  " + v.note;
       test.emit(v.label, (float)best, o);
     }
     else
     {
-      o.description = std::string("Peak over a doubling sweep of feature-map sizes.  ")
-                      + v.note;
+      o.description = std::string("Peak over a doubling sweep of feature-map sizes.  ") + v.note;
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "convolution unsupported" : firstErr,
                 o.description);

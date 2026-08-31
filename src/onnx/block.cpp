@@ -538,12 +538,89 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   constexpr size_t kNVariants = sizeof(kVariants) / sizeof(kVariants[0]);
   std::vector<VariantResult> results(kNVariants);
 
+  // What this precision's weights weigh, and how it actually ran -- appended
+  // to every reading it produced, since that is where a reader meets it.
+  // Defined early so the streaming prefill test can emit as it measures.
+  auto provenanceEarly = [](const Variant &v, const VariantResult &vr)
+  {
+    std::string s = "  " +
+                    std::to_string((unsigned long long)(weightBytes(v) >> 20)) +
+                    " MB of weights";
+    if (!vr.ranAs.empty())
+    {
+      s += ", run as " + vr.ranAs;
+      if (vr.schemeName[0])
+        s += " with " + std::string(vr.schemeName);
+      if (vr.castedActs)
+        s += ", after casting the activations to the width its kernel wanted "
+             "-- a full pass over them inside this figure";
+    }
+    return s + ".";
+  };
+
+  const char *geometryEarly =
+      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
+      "(50.6M parameters).  ";
+
   // The affordability seed, carried across variants.  Each one's first point
   // has no measurement of its own to predict from, and letting all six pay
   // full price on a provider that has already proved itself slow is how this
   // test would come to take tens of minutes.  The most recent measured rate
   // is the estimate: precisions differ by a factor of a few, not orders.
   double refPrefillRate = 0.0, refDecodeRate = 0.0;
+
+  // Prefill is streaming so each variant appears as it is measured, rather
+  // than buffering until every variant has been swept.  The test must be open
+  // while the measurements happen, otherwise all of its emits land back-to-
+  // back after minutes of silence.
+  auto prefillTest = currentDeviceScope->beginTest(
+      {"onnx_block_prefill", "Transformer block, prefill", "tflops",
+       Category::Ai,
+       "Speed of one whole transformer layer while it is chewing through a "
+       "prompt, at each precision a model ships in.  This is the phase that "
+       "decides how long you wait before the first word appears.  Unlike "
+       "the raw matmul rows, everything a real layer does is in here: "
+       "attention, softmax, the feed-forward network and the data shuffling "
+       "between them, so it is what a device actually delivers rather than "
+       "what its silicon could do in principle.  Only the seven projection "
+       "matmuls change precision -- attention and the softmax stay 16-bit, "
+       "as they do in every real deployment -- so whatever separates two "
+       "rows is the projection format and nothing else.  A short prompt "
+       "cannot fill wide hardware, so the fp16 rate climbs with the prompt "
+       "and then flattens; where it flattens is how much text has to arrive "
+       "together before batching requests stops helping.",
+       TestShape::Heterogeneous, "data type and prompt length",
+       Direction::FromUnit, "", /*streaming=*/true});
+
+  auto emitPrefillFor = [&](const Variant &vv, const VariantResult &vvr)
+  {
+    const std::string prov = provenanceEarly(vv, vvr);
+    for (int64_t sseq : promptsFor(vv))
+    {
+      const std::string metric = std::string(vv.label) + "_s" + std::to_string(sseq);
+      logger::EmitOptions o;
+      o.description = std::string(geometryEarly) + vv.note + "  A prompt of " +
+                      std::to_string(sseq) +
+                      " tokens in one pass, counting every multiply in the "
+                      "layer." +
+                      prov;
+      if (vv.unit)
+        o.unit = vv.unit;
+      if (!vvr.usable)
+      {
+        prefillTest.skip(metric, vvr.skipStatus, vvr.skipReason, o);
+        continue;
+      }
+      auto it = vvr.prefill.find(sseq);
+      if (it == vvr.prefill.end())
+        continue;
+      if (it->second.us > 0.0)
+        prefillTest.emit(metric,
+                         (float)(blockFlops(sseq, sseq) * 1.0e6 / it->second.us / 1.0e12), o);
+      else
+        prefillTest.skip(metric, it->second.status, it->second.error, o);
+    }
+  };
 
   for (size_t vi = 0; vi < kNVariants; vi++)
   {
@@ -572,6 +649,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!why.empty())
       {
         vr.skipReason = why;
+        emitPrefillFor(v, vr);
         continue;
       }
     }
@@ -598,6 +676,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     ep.providerKey.c_str(), v.label,
                     (unsigned long long)(needed >> 20),
                     (unsigned long long)(budget >> 20));
+        emitPrefillFor(v, vr);
         continue;
       }
     }
@@ -680,6 +759,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       " to full width and multiplied in floating point, a "
                       "complete pass over them on every run, so this is not a " +
                       v.label + " rate (ran: " + tried + ")";
+        emitPrefillFor(v, vr);
         continue;
       }
     }
@@ -756,7 +836,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       vr.decode[kv] = pt;
     }
+
+    // Streaming emit for this variant as soon as its ladders are done.
+    emitPrefillFor(v, vr);
   }
+
+  prefillTest.end();
 
   // What this precision's weights weigh, and how it actually ran -- appended
   // to every reading it produced, since that is where a reader meets it.
@@ -779,61 +864,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
       "(50.6M parameters).  ";
 
-  // ---- Prefill: compute-bound, so report the rate it sustains ------------
-  {
-    auto test = currentDeviceScope->beginTest(
-        {"onnx_block_prefill", "Transformer block, prefill", "tflops",
-         Category::Ai,
-         "Speed of one whole transformer layer while it is chewing through a "
-         "prompt, at each precision a model ships in.  This is the phase that "
-         "decides how long you wait before the first word appears.  Unlike "
-         "the raw matmul rows, everything a real layer does is in here: "
-         "attention, softmax, the feed-forward network and the data shuffling "
-         "between them, so it is what a device actually delivers rather than "
-         "what its silicon could do in principle.  Only the seven projection "
-         "matmuls change precision -- attention and the softmax stay 16-bit, "
-         "as they do in every real deployment -- so whatever separates two "
-         "rows is the projection format and nothing else.  A short prompt "
-         "cannot fill wide hardware, so the fp16 rate climbs with the prompt "
-         "and then flattens; where it flattens is how much text has to arrive "
-         "together before batching requests stops helping.",
-         TestShape::Heterogeneous, "data type and prompt length"});
-
-    for (size_t vi = 0; vi < kNVariants; vi++)
-    {
-      const Variant &v  = kVariants[vi];
-      const VariantResult &vr = results[vi];
-      const std::string prov = provenance(v, vr);
-
-      for (int64_t seq : promptsFor(v))
-      {
-        const std::string metric = std::string(v.label) + "_s" +
-                                   std::to_string(seq);
-        logger::EmitOptions o;
-        o.description = std::string(geometry) + v.note + "  A prompt of " +
-                        std::to_string(seq) +
-                        " tokens in one pass, counting every multiply in the "
-                        "layer." + prov;
-        if (v.unit) o.unit = v.unit;
-
-        if (!vr.usable)
-        {
-          test.skip(metric, vr.skipStatus, vr.skipReason, o);
-          continue;
-        }
-        auto it = vr.prefill.find(seq);
-        if (it == vr.prefill.end())
-          continue;                       // cancelled before it was reached
-        if (it->second.us > 0.0)
-          test.emit(metric,
-                    (float)(blockFlops(seq, seq) * 1.0e6 / it->second.us / 1.0e12),
-                    o);
-        else
-          test.skip(metric, it->second.status, it->second.error, o);
-      }
-    }
-    test.end();
-  }
+  // Prefill already emitted streaming above.
 
   // ---- Decode: memory-bound, so report how fast bytes move ---------------
   //

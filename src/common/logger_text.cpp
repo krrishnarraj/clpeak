@@ -121,11 +121,15 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     // whole point is that the stanza's label column is computed once, over all
     // of its readings together.
     if (e.reopened && e.testKey() == lastClosedTest && openUnit == stanzaUnit)
+    {
+        mStreaming = e.streaming;
         return;
+    }
 
     flushMetrics();
     mergedPad  = 0;
     stanzaUnit = openUnit;
+    mStreaming = e.streaming;
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
@@ -138,18 +142,36 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     if (!openUnit.empty())      header += " (" + openUnit + ")";
     mPendingHeader = header;
 
-    // What the test measures, under its own header and one step in from it,
-    // then a blank line so the readings below still read as a block.
-    if (describe && (!e.testDescription.empty() || !e.testAxis.empty()))
+    if (mStreaming)
     {
-        if (!e.testDescription.empty())
-            writeWrapped(metricIndent * 2, e.testDescription);
-        // The axis is the shortest possible answer to "why are there eight of
-        // these?", and the one line that tells a reader whether the readings
-        // below are variants of one measurement or separate measurements.
-        if (!e.testAxis.empty())
-            writeWrapped(metricIndent * 2, "Readings vary by " + e.testAxis + ".");
-        out << "\n";
+        if (describe)
+        {
+            mPendingDescription = e.testDescription;
+            mPendingAxis        = e.testAxis;
+        }
+        else
+        {
+            mPendingDescription.clear();
+            mPendingAxis.clear();
+        }
+    }
+    else
+    {
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+        // What the test measures, under its own header and one step in from it,
+        // then a blank line so the readings below still read as a block.
+        if (describe && (!e.testDescription.empty() || !e.testAxis.empty()))
+        {
+            if (!e.testDescription.empty())
+                writeWrapped(metricIndent * 2, e.testDescription);
+            // The axis is the shortest possible answer to "why are there eight of
+            // these?", and the one line that tells a reader whether the readings
+            // below are variants of one measurement or separate measurements.
+            if (!e.testAxis.empty())
+                writeWrapped(metricIndent * 2, "Readings vary by " + e.testAxis + ".");
+            out << "\n";
+        }
     }
 
     metricLines.clear();
@@ -179,7 +201,10 @@ void LoggerText::renderMetric(const LogEvent &e)
         ml.unitSuffix = e.metric.unit;
     ml.direction = (e.metric.direction == Direction::FromUnit) ? e.direction
                                                                : e.metric.direction;
+
     metricLines.push_back(std::move(ml));
+    if (mStreaming)
+        flushMetrics();
 }
 
 // ── TestSkippedAll ─────────────────────────────────────────────────────────
@@ -209,6 +234,7 @@ void LoggerText::renderTestEnd()
     // to close and reopen per data type, each block would flush separately and
     // the label column would widen down the page.
     flushMetrics();
+    mStreaming  = false;
     indentLevel = propIndent;
 }
 
@@ -248,15 +274,33 @@ void LoggerText::flushMetrics()
     if (metricLines.empty())
     {
         mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
         return;
     }
 
-    // Print the deferred test header if we have one.
+    // Print the deferred test header if we have one.  In streaming mode the
+    // --describe prose was deferred with it so a fully-skipped test does not
+    // leave an empty header behind; in buffered mode it was already printed
+    // at TestBegin.
     if (!mPendingHeader.empty())
     {
         out << "\n";
         writeLine(mPendingHeader);
+        if (!mPendingDescription.empty())
+            writeWrapped(metricIndent * 2, mPendingDescription);
+        if (!mPendingAxis.empty())
+            writeWrapped(metricIndent * 2, "Readings vary by " + mPendingAxis + ".");
+        if (!mPendingDescription.empty() || !mPendingAxis.empty())
+            out << "\n";
         mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+    else
+    {
+        mPendingDescription.clear();
+        mPendingAxis.clear();
     }
 
     // Compute the maximum metric name width in this test.  `mergedPad` is the

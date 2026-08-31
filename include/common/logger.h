@@ -80,6 +80,10 @@ struct LogEvent {
   // readings to it, rather than starting a new one.
   bool reopened = false;
 
+  // True when the test asked for streaming output (metrics printed as they
+  // arrive rather than buffered until the test ends).
+  bool streaming = false;
+
   // The unit THIS opening declared, which on a reopen need not be the test's:
   // a GEMM test opens in the floating-point phase reporting TFLOPS and reopens
   // in the integer phase reporting TOPS.  `unit` above stays the test's, from
@@ -172,6 +176,12 @@ public:
     // rather than slugged onto `tag` is what keeps tags stable across
     // machines, and so keeps --compare working across them.
     std::string variant;
+
+    // Print each metric as it arrives instead of buffering until the test
+    // ends.  Column alignment takes a hit (the label width is fixed per line
+    // rather than computed over all readings), but a test whose variants take
+    // seconds each no longer looks hung for minutes before anything appears.
+    bool streaming = false;
   };
 
   struct EmitOptions {

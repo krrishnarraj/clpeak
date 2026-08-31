@@ -481,7 +481,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "Providers that cannot run an operation entirely on their device "
        "report it as unsupported instead of quietly measuring the CPU.  "
        "Each reading is a different input format.",
-       TestShape::Heterogeneous, "data type"});
+       TestShape::Heterogeneous, "data type",
+       Direction::FromUnit, "", /*streaming=*/true});
 
   // ---- Sweep every size, keep each datatype's best ----------------------
   for (size_t i = 0; i < nVariants; i++)
