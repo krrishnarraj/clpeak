@@ -181,10 +181,13 @@ cross-vendor comparison meaningful.  Weights are embedded as an initializer
 so the EP sees them as constant model weights it may pre-pack, matching how
 real inference runs.
 
-Weight/input values are small deterministic floats in `[-0.5, 0.5)`, not raw
-random bits: fp16 accumulation over a 2048-deep dot product overflows with
-larger magnitudes, and random bit patterns hit NaN/denormal slow paths that
-would understate the hardware.
+Weight/input values are small deterministic floats in `[-0.5, 0.5)` -- fine
+for a single GEMM, which is all the GEMM and numeric-error recipes do -- but
+a chained layer re-derives its own range.  `onnx-block` halves that to
+`[-0.25, 0.25)` (`blockWeights` in `onnx_model.cpp`) because the SwiGLU
+feed-forward squares the magnitudes and the down projection over 5504 terms
+overflowed fp16 at the original range.  Raw random bits are never used: NaN
+and denormal slow paths would understate the hardware.
 
 ## Opsets are per model, and never bumped globally
 
@@ -826,6 +829,19 @@ The floating-point variants have nothing foldable — the runtime scalar makes
 everything downstream non-constant — so disabling it uniformly costs them
 nothing and keeps all the rows under one optimizer setting. Verified: the fp16
 readings are unchanged by it.
+
+**The block's operand range is not the GEMM range.** A single projection of
+`[-0.5, 0.5)` operands is comfortably inside fp16, so that is what the GEMM
+recipes use; a full block is not.  Downstream of attention the SwiGLU squares
+the magnitudes (`G * sigmoid(G) * U`) and the 5504-deep down projection raised
+the walk to infinity in fp16 at the original range, so every fp16-arithmetic
+variant (`fp16`, `int4_weight`, `int8_weight`, `fp4_weight`) ReduceMax'd `inf`.
+`onnx_model.cpp` halves the weight range to `[-0.25, 0.25)` and folds the same
+constant into the quantized-cache, QDQ and blocked-weight recovery scales,
+which brings the worst stage well below fp16 max and keeps every row
+multiplying the same matrix.  Timings were verified unchanged on the CPU EP -- infinity propagates
+at full speed, unlike denormals -- so this is a cross-row comparability fix,
+not a performance fix.
 
 **The memory gate is per variant**, not once for the whole test. The weights
 are the bulk of it and they are four times smaller in the four-bit rows, so a

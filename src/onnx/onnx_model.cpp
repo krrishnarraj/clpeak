@@ -663,9 +663,18 @@ std::string onnxTransferModel(OnnxTransfer dir, int64_t elems)
 namespace
 {
 
-// Deterministic weights in [-0.5, 0.5), in `dtype`.  Small magnitudes keep
-// accumulation over thousands of terms away from the NaN/denormal slow paths
-// raw random bit patterns would hit.
+// Deterministic weights in [-0.25, 0.25), halved from the GEMM recipe's
+// [-0.5, 0.5).  A single projection is fine with the full range, but the
+// block chains seven of them and downstream of attention the SwiGLU squares
+// the magnitudes (`G * sigmoid(G) * U`): at [-0.5, 0.5) the 5504-deep down
+// projection reached absmax 174k, which is infinity in fp16 -- every
+// fp16-arithmetic variant (fp16, int4_weight, int8_weight, fp4_weight)
+// ReduceMax'd into inf and stopped doing arithmetic comparable to the fp32
+// control and the saturating int8_qdq row.  The deterministic generator
+// makes the absmax walk exhaustive rather than sampled: at the halved range
+// the walk tops out at ~21.8k against fp16's 65504 ceiling.  Small
+// magnitudes remain the point -- accumulation over thousands of terms stays
+// away from the NaN/denormal slow paths raw random bit patterns would hit.
 //
 // Position-hashed rather than a running sequence, because onnxFillBlockedWeights
 // has to visit each block twice -- once for its maximum, once to quantize
@@ -679,7 +688,7 @@ std::string blockWeights(int64_t rows, int64_t cols, uint32_t seed, int dtype)
   for (int64_t i = 0; i < rows; i++)
     for (int64_t j = 0; j < cols; j++)
     {
-      const float   v = onnxWeightAt(i, j, seed);
+      const float   v = onnxWeightAt(i, j, seed) * 0.5f;
       const int64_t k = i * cols + j;
       switch (dtype)
       {
@@ -707,8 +716,8 @@ std::string floatScalar(float v, int dtype)
 }
 
 // The KV cache, quantized per tensor.  Values are stored spending the whole
-// range and the scale halves them back, so the dequantized cache holds the
-// same [-0.5, 0.5) the floating-point one does -- the row then differs from
+// range and the scale quarters them back, so the dequantized cache holds the
+// same [-0.25, 0.25) the floating-point one does -- the row then differs from
 // its fp16 sibling in how the cache was *stored* and in nothing else.
 std::string quantBlockWeights(int64_t rows, int64_t cols, uint32_t seed,
                               int dtype)
@@ -792,7 +801,7 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   if (sh.qdq)
   {
     // One activation scale for all seven projections, sized for the tensors
-    // that actually reach them: a d-deep dot product of [-0.5, 0.5) operands.
+    // that actually reach them: a d-deep dot product of [-0.25, 0.25) operands.
     // The feed-forward's second input runs larger and saturates, which costs
     // nothing here -- int8 saturation is finite and takes no slow path, and
     // this row measures rate, not accuracy.  What a real deployment does
@@ -818,8 +827,14 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
     g.initializer("qa_scale", ONNX_DT_FLOAT, {},
                   floatScalar(blockQdqScale(d), ONNX_DT_FLOAT));
     g.initializer("qa_zp", sh.qActDtype, {}, quantZeroPoint(sh.qActDtype));
+    // Weights are packed to spend the type's full code range (see the `packed`
+    // loop in `projection`), so the dequantize scale must fold in both the
+    // format's native step (1/127, 1/6, ...) and the block's 0.25 magnitude
+    // shrink so that every row -- fp16, QDQ, blocked-weight, fp32 -- multiplies
+    // the same matrix of [-0.25, 0.25) weights.
     g.initializer("qw_scale", ONNX_DT_FLOAT, {},
-                  floatScalar(onnxQuantScaleFor(sh.wDtype), ONNX_DT_FLOAT));
+                  floatScalar(onnxQuantScaleFor(sh.wDtype) * 0.25f,
+                              ONNX_DT_FLOAT));
     g.initializer("qw_zp", sh.wDtype, {}, quantZeroPoint(sh.wDtype));
   }
 
@@ -893,6 +908,16 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
       // compute-bound prefill rows mostly are not.
       std::string packed, scales;
       onnxFillBlockedWeights(packed, scales, K, N, sh.wBlock, seed, sh.wDtype);
+      // onnxFillBlockedWeights quantizes against the raw onnxWeightAt values;
+      // fold the block's magnitude shrink into the per-block fp16 scales so this
+      // row also multiplies the same [-0.25, 0.25) matrix.  Halving is exact in
+      // fp16 (an exponent decrement), so the stored codes are untouched.
+      {
+        uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
+        const size_t n = (size_t)(K / sh.wBlock) * (size_t)N;
+        for (size_t i = 0; i < n; i++)
+          sc[i] = floatToHalf(halfToFloat(sc[i]) * 0.5f);
+      }
       g.initializer(w + "_q", sh.wDtype, {K, N}, packed);
       g.initializer(w + "_s", act, {K / sh.wBlock, N}, scales);
       g.node("DequantizeLinear", {w + "_q", w + "_s"}, {w + "_f"},
@@ -939,7 +964,7 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
     // dequantize into its attention kernel or reads the whole cache back at
     // full width every token is what the caller's fusion check reports.
     g.initializer("kv_scale", act, {},
-                  floatScalar(onnxQuantScaleFor(sh.kvDtype) / 2.0f, act));
+                  floatScalar(onnxQuantScaleFor(sh.kvDtype) / 4.0f, act));
     g.initializer("kv_zp", sh.kvDtype, {}, quantZeroPoint(sh.kvDtype));
     g.initializer("Kc_q", sh.kvDtype, {H, Dh, ctx},
                   quantBlockWeights(H * Dh, ctx, 0x88888888u, sh.kvDtype));
