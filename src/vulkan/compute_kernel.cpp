@@ -31,9 +31,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     testSpec.tag = d.resultTag;
     testSpec.display = d.title;
     testSpec.unit = d.unit;
-    if (d.description) testSpec.description = d.description;
+    if (d.description)
+      testSpec.description = d.description;
     testSpec.shape = d.shape;
-    if (d.axis) testSpec.axis = d.axis;
+    if (d.axis)
+      testSpec.axis = d.axis;
     ownTest.reset(new logger::TestScope(currentDeviceScope->beginTest(testSpec)));
   }
   logger::TestScope &test = d.scope ? *d.scope : *ownTest;
@@ -41,9 +43,15 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Collect variants.  Multi-variant path (e.g. fp16 v1/v2/v4) shares one
   // buffer + descriptor set and swaps only the pipeline between dispatches;
   // single-variant benchmarks materialize a one-entry list.
-  struct Variant { const char *label; const uint32_t *spirv; size_t spirvSize;
-                   const char *description;
-                   const uint32_t *altSpirv; size_t altSpirvSize; };
+  struct Variant
+  {
+    const char *label;
+    const uint32_t *spirv;
+    size_t spirvSize;
+    const char *description;
+    const uint32_t *altSpirv;
+    size_t altSpirvSize;
+  };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
   {
@@ -60,14 +68,17 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         d.metricDescription, nullptr, 0});
   }
 
-  auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+  auto note = [](const char *text)
+  { return text ? std::string(text) : std::string(); };
 
   // Unit override for the single-variant path: an integer member of an
   // otherwise floating-point family carries its own.
-  auto emitOpts = [&](const char *description) {
+  auto emitOpts = [&](const char *description)
+  {
     logger::EmitOptions o;
     o.description = note(description);
-    if (d.metricUnit) o.unit = d.metricUnit;
+    if (d.metricUnit)
+      o.unit = d.metricUnit;
     return o;
   };
 
@@ -191,19 +202,15 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Time one shader, returning microseconds per dispatch (<= 0 on failure).
   // *built distinguishes "the driver rejected the stage" from "the dispatch
   // failed", which the caller reports differently.
-  CLPEAK_VLOG("%s: %u groups x %u threads, %llu KB output buffer\n",
-              d.resultTag, numGroups, wgSize,
-              (unsigned long long)(bufferBytes / 1024));
 
   // Phase markers.  A driver that faults inside its own shader compiler or on
   // submit takes the process with it, so the last line printed is the only
   // evidence of where it went -- which of the two below appears last says
   // whether pipeline creation or the dispatch was fatal.
   auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
-                       bool *built) -> float {
+                       bool *built) -> float
+  {
     VkPipeline pipeline;
-    CLPEAK_VLOG("%s: creating pipeline (subgroup %u)\n",
-                d.resultTag, d.requiredSubgroupSize);
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                        pipeline, d.specInfo, d.requiredSubgroupSize);
     // A pinned subgroup width is a preference, not a requirement: if the
@@ -220,9 +227,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
     }
-    if (!*built) return -1.0f;
+    if (!*built)
+      return -1.0f;
 
-    CLPEAK_VLOG("%s: pipeline built, dispatching\n", d.resultTag);
     // No barrier between dispatches: a compute peak reads nothing twice, so
     // overlapping launches cannot flatter it, and forbidding the overlap costs
     // ~2% of the reading.
@@ -234,7 +241,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   };
 
   double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-  auto toValue = [&](float timed) {
+  auto toValue = [&](float timed)
+  {
     return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
   };
 
@@ -270,7 +278,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                     d.resultTag, v.label, value, altValue, d.unit);
         if (altValue > value * MAX_ALT_CHAIN_RATIO)
           CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
-                      "compiler fold\n", d.resultTag, v.label, altValue / value);
+                      "compiler fold\n",
+                      d.resultTag, v.label, altValue / value);
         else if (altValue > value)
           value = altValue;
       }
