@@ -37,7 +37,7 @@ backend.
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`, reopened in the integer phase: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in tflops, int8 QDQ carrying its own `tops` unit |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
-| `conv.cpp` | `runConv` (`--onnx-conv`) — fp16 convolution peak: 3×3, 1×1 and depthwise 3×3, each swept over feature-map size |
+| `conv.cpp` | `runConv` (`--onnx-conv`) — convolution peak, fp32/fp16/bf16 × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 | `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` split by unit like `onnx_gemm` — fp variants (tflops, int4/int8_weight stay tflops) and `int8_qdq` (tops) same id reopened, prompt ladder; `onnx-block-decode` (gbps), `onnx-block-latency` (us, prefill pass + context ladder) |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
@@ -1336,13 +1336,13 @@ the CPU EP the rows are correspondingly noisier than the accelerator ones.
 
 Accelerators were built for convolution before they were asked to do anything
 else, and the gap between `onnx-conv` and `onnx-gemm` is an architectural
-number in its own right. M1 Pro, CoreML EP:
+number in its own right. M1 Pro, CoreML EP (fp16 rows):
 
 | | rate | vs its own fp16 matmul peak (8.7) |
 |---|---|---|
-| conv 3×3 | 9.5 TFLOPS | **109%** |
-| conv 1×1 | 5.1 TFLOPS | 58% |
-| depthwise 3×3 | 0.17 TFLOPS | 2% |
+| fp16_conv3x3 | 9.5 TFLOPS | **109%** |
+| fp16_conv1x1 | 5.1 TFLOPS | 58% |
+| fp16_depthwise3x3 | 0.17 TFLOPS | 2% |
 
 The ANE convolves faster than it multiplies, which is what "built for
 convolution" looks like in a measurement. The 1×1 row is arithmetically a

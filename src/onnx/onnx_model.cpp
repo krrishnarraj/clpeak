@@ -533,6 +533,7 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
   const int64_t inPerGroup = channels / group;
 
   OnnxGraph g;
+  g.setOpset(onnxOpsetForDtype(dtype));
   g.input("S", dtype, {});
   g.initializer("X0", dtype, {1, channels, spatial, spatial}, xRaw);
   g.initializer("W",  dtype, {channels, inPerGroup, kernel, kernel}, wRaw);
