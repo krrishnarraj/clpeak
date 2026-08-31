@@ -59,8 +59,6 @@ struct CliOptions {
   // category is enabled AND its own bit is set (see isAllowed).
   std::bitset<static_cast<size_t>(Benchmark::COUNT)>  enabledTests;
   std::bitset<static_cast<size_t>(Category::Unknown)> enabledCategories;
-  // OpenCL-only timing knob.
-  bool useEventTimer = false;
 
   // Output / compare.  One format, one flag: `-o file` writes the v3 JSON
   // document (run_document.h).  The XML and CSV writers are gone -- XML's

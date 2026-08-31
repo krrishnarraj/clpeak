@@ -45,7 +45,4 @@ struct device_info_t
 
 device_info_t getDeviceInfo(cl::Device &d);
 
-// Return time in us for the given event.
-float timeInUS(cl::Event &timeEvent);
-
 #endif // CL_COMMON_H

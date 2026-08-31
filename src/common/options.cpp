@@ -200,11 +200,6 @@ static const char *helpStr =
     "\n  --onnx-dispatch-latency           | --no-onnx-dispatch-latency     [ONNX: submission overhead]"
 #endif
     "\n"
-#ifdef ENABLE_OPENCL
-    "\n OPENCL-SPECIFIC:"
-    "\n  --use-event-timer           time using cl events instead of std chrono"
-    "\n"
-#endif
 ;
 
 // ---- Flag tables ----------------------------------------------------------
@@ -664,14 +659,6 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!v)
         return missingArg(err, a);
       out.onnxLibPath = v;
-    }
-#endif
-
-    // ---- OpenCL-specific timer ------------------------------------------
-#ifdef ENABLE_OPENCL
-    else if (!strcmp(a, "--use-event-timer"))
-    {
-      out.useEventTimer = true;
     }
 #endif
 

@@ -12,7 +12,7 @@
 //   transfer_bandwidth.cpp kernel_latency.cpp
 //   cl_common.cpp         cl_utils.cpp
 
-clPeak::clPeak() : useEventTimer(false)
+clPeak::clPeak()
 {
 }
 
@@ -24,7 +24,6 @@ void clPeak::applyOptions(const CliOptions &opts)
     // OpenCL-specific device selection
     platformIndices = opts.platformIndices;
     deviceIndices   = opts.deviceIndices;
-    useEventTimer   = opts.useEventTimer;
 }
 
 int clPeak::runAll()
@@ -79,9 +78,6 @@ int clPeak::runAll()
         cfg.targetTimeUs = targetTimeUs;
         if (forceIters)
           cfg.kernelLatencyIters = specifiedIters;
-
-        if (useEventTimer)
-          log->note("  Note: --use-event-timer accuracy depends on platform OpenCL profiling implementation\n");
 
         auto deviceScope = backendScope.beginDevice({
           devInfo.deviceName,
@@ -151,16 +147,6 @@ int clPeak::runAll()
 
         cl_command_queue_properties queueCreateProps = supportsProfilingQueue ? CL_QUEUE_PROFILING_ENABLE : 0;
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], queueCreateProps);
-
-        bool savedUseEventTimer = useEventTimer;
-        if (!supportsProfilingQueue)
-        {
-          if (useEventTimer)
-          {
-            log->note("  NOTE: Device does not support profiling queue, --use-event-timer disabled\n");
-          }
-          useEventTimer = false;
-        }
 
         // ---- Phase 1: floating-point compute ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
@@ -259,8 +245,6 @@ int clPeak::runAll()
                        "No profiling queue support");
         }
 
-        useEventTimer = savedUseEventTimer;
-
         currentDeviceScope = nullptr;
       }
     }
@@ -332,18 +316,6 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
   // Used for both the calibration probe and the real timed run so the timing
   // methodology matches in both phases.
   auto runBatch = [&](unsigned int n) -> float {
-    if (useEventTimer)
-    {
-      float total = 0;
-      for (unsigned int i = 0; i < n; i++)
-      {
-        cl::Event timeEvent;
-        queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, nullptr, &timeEvent);
-        queue.finish();
-        total += timeInUS(timeEvent);
-      }
-      return total;
-    }
     auto t1 = std::chrono::high_resolution_clock::now();
     for (unsigned int i = 0; i < n; i++)
       queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);

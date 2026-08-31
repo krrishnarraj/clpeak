@@ -119,12 +119,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     // the batch is drained once, so the driver can keep the link busy -- the
     // same shape as the async memcpy loops in the CUDA/ROCm/oneAPI backends.
     //
-    // Always wall-clock, even under --use-event-timer: CL profiling events
-    // time the device's command processing, which on a unified-memory device
-    // is near zero for a copy that moves nothing (Apple M1 reports ~70x the
-    // real rate).  The host clock over a ~targetTimeUs window is both accurate
-    // enough and the number a caller actually pays.  oneAPI times this the
-    // same way.
+    // Always wall-clock: CL profiling events time the device's command
+    // processing, which on a unified-memory device is near zero for a copy that
+    // moves nothing (Apple M1 reports ~70x the real rate).  The host clock over
+    // a ~targetTimeUs window is both accurate enough and the number a caller
+    // actually pays.  oneAPI times this the same way.
     auto runTransfer = [&](std::function<void()> op) -> float
     {
       for (unsigned int w = 0; w < warmupCount; w++)
