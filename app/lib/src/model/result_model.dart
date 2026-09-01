@@ -140,11 +140,12 @@ const List<(int, String)> _siPrefixes = [
   (-6, 'µ'),
   (-3, 'm'),
   (0, ''),
-  (3, 'k'),
+  (3, 'K'),
   (6, 'M'),
   (9, 'G'),
   (12, 'T'),
   (15, 'P'),
+  (18, 'E'),
 ];
 
 /// Strip a leading SI prefix off a unit symbol: "TFLOPS" → (12, "FLOPS").
