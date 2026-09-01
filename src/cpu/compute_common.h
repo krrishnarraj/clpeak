@@ -75,7 +75,7 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
 // they share one tag and are told apart by `variant`, so the ISA never gets
 // slugged into the tag.  That keeps the tag identical across machines, which
 // is what makes `--compare` work between them.
-static void emitVariants(CpuPeak &peak, const logger::TestSpec &base,
+[[maybe_unused]] static void emitVariants(CpuPeak &peak, const logger::TestSpec &base,
                          const std::string &metric,
                          const std::vector<clpeak_cpu::IsaVariant> &vars,
                          const char *unsupReason, benchmark_config_t &cfg)
@@ -131,7 +131,7 @@ struct FamilyRow {
 // different hardware, while bf16 and fp16 on the same AMX are the same unit
 // asked for a different format.  A row the host cannot run at all still
 // appears, as a skip, so the reader sees which formats the engine lacks.
-static void emitFamily(CpuPeak &peak, const logger::TestSpec &base,
+[[maybe_unused]] static void emitFamily(CpuPeak &peak, const logger::TestSpec &base,
                        const std::vector<FamilyRow> &rows,
                        benchmark_config_t &cfg)
 {

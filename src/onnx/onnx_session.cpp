@@ -291,11 +291,28 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
 static std::string profilePrefixPath()
 {
 #ifdef _WIN32
+#ifdef _MSC_VER
+  char *tmpBuf = nullptr;
+  size_t tmpLen = 0;
+  if (_dupenv_s(&tmpBuf, &tmpLen, "TEMP") != 0) tmpBuf = nullptr;
+  std::string out = std::string(tmpBuf ? tmpBuf : ".") + "\\clpeak_onnx_prof";
+  free(tmpBuf);
+  return out;
+#else
   const char *tmp = std::getenv("TEMP");
   return std::string(tmp ? tmp : ".") + "\\clpeak_onnx_prof";
+#endif
+#else
+#ifdef _MSC_VER
+  char *tmpBuf = nullptr;
+  size_t tmpLen = 0;
+  if (_dupenv_s(&tmpBuf, &tmpLen, "TMPDIR") != 0) tmpBuf = nullptr;
+  std::string dir = tmpBuf ? tmpBuf : "/tmp";
+  free(tmpBuf);
 #else
   const char *tmp = std::getenv("TMPDIR");
   std::string dir = tmp ? tmp : "/tmp";
+#endif
   if (!dir.empty() && dir.back() == '/')
     dir.pop_back();
   return dir + "/clpeak_onnx_prof";

@@ -39,8 +39,13 @@ static bool adoptApiBase(const OrtApiBase *base)
   if (verStr)
   {
     unsigned major = 0, minor = 0;
+#ifdef _MSC_VER
+    if (sscanf_s(verStr, "%u.%u", &major, &minor) == 2 && major == 1 &&
+        minor < wanted)
+#else
     if (sscanf(verStr, "%u.%u", &major, &minor) == 2 && major == 1 &&
         minor < wanted)
+#endif
       wanted = minor;
   }
 

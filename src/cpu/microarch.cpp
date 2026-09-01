@@ -106,6 +106,7 @@ static double branchPassNs(const uint8_t *v, size_t n, uint64_t passes)
   double ns = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(
                   clock::now() - t0).count();
   sink = s1 + s2;
+  (void)sink;
   return ns / (double)(passes * n);
 }
 
