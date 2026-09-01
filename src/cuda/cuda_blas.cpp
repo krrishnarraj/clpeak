@@ -221,7 +221,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
              "reading is a different input format.",
              TestShape::Heterogeneous, "data type"});
         t.skip("fp32", ResultStatus::Unsupported,
-               "cuBLASLt library not found; GEMM skipped", {});
+                "cuBLASLt library not found; GEMM skipped");
         logger::EmitOptions o; o.unit = "ops";
         t.skip("int8", ResultStatus::Unsupported,
                "cuBLASLt library not found; GEMM skipped", o);

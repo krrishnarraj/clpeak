@@ -92,10 +92,6 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
      "fast on cheaper hardware."},
   };
 
-  const MfmaEntry *entries = isInt ? intEntries : fpEntries;
-  const size_t numEntries = isInt ? (sizeof(intEntries) / sizeof(intEntries[0]))
-                                  : (sizeof(fpEntries) / sizeof(fpEntries[0]));
-
   const bool cdna = isCdnaFamily(archBaseOf(dev.info.archName));
 
   const uint32_t waveSize = dev.info.warpSize > 0 ? (uint32_t)dev.info.warpSize : 64;

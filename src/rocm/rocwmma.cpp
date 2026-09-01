@@ -14,14 +14,6 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
      "the same format to see what the library layer costs.",
      TestShape::Heterogeneous, "data type"});
 
-  const char *metric = isInt ? "int8" : "fp16";
-  const char *metricNote =
-      isInt ? "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."
-            : "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
-  logger::EmitOptions metricOpts;
-  metricOpts.description = metricNote;
-  if (isInt) metricOpts.unit = "ops";
-
 #ifndef CLPEAK_ROCM_HAS_ROCWMMA
   {
     logger::EmitOptions o; o.description = "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
