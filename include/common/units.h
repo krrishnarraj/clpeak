@@ -66,6 +66,27 @@ struct UnitInfo {
 // the output before anyone gets round to adding it here.
 UnitInfo unitInfo(const std::string &token);
 
+// ── Magnitude-scaled display ────────────────────────────────────────────────
+//
+// Whether a quantity has an SI ladder to slide along.  A ratio or a bare
+// count does not: "4000 ppm" is not "4 kppm", and an unknown quantity has no
+// described magnitude to rescale by.
+bool quantityIsScalable(Quantity q);
+
+// A reading's value and unit as they should be printed together.
+struct ScaledValue {
+    std::string text;   // the mantissa, decimals chosen for its width
+    std::string unit;   // the symbol with the prefix that mantissa wants
+};
+
+// Auto-scaled display form of a reading: 4476 GFLOPS -> ("4.48", "TFLOPS"),
+// 1.5e-7 s -> ("150", "ns").  This is the ladder the GUI's value column
+// slides along (formatValue in app/lib/src/model/result_model.dart) — the
+// two are kept identical so a reading prints the same in either presenter.
+// Quantities without a ladder, a zero, and a non-finite value print as
+// measured, in the authored unit.
+ScaledValue formatScaledValue(double value, const UnitInfo &unit);
+
 // Derive a test's category from its unit when the author did not name one.
 // Units that several categories share (gbps is Bandwidth *and* the crypto and
 // string tests; ns is Latency) cannot be resolved here -- those call sites

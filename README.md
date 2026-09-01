@@ -21,19 +21,19 @@ Apple M1 Pro, Metal backend:
 Backend: Metal
   Device 0: Apple M1 Pro
 
-    Single-precision compute (GFLOPS)
-      float    : 4487.56
-      half     : 4989.62
+    Single-precision compute
+      float    : 4.49 TFLOPS
+      half     : 4.99 TFLOPS
 
-    simdgroup_matrix fp16xfp16+fp32 8x8x8 (TFLOPS)
-      simdgroup_fp16 : 5.14
+    simdgroup_matrix fp16xfp16+fp32 8x8x8
+      simdgroup_fp16 : 5.14 TFLOPS
 
-    MPS GEMM peak (TFLOPS)
-      fp32     : 4.09
-      fp16     : 3.97
+    MPS GEMM peak
+      fp32     : 4.09 TFLOPS
+      fp16     : 3.97 TFLOPS
 
-    Global memory bandwidth (GBPS)
-      float    : 184.49
+    Global memory bandwidth
+      float    : 184 GB/s
 ```
 
 NVIDIA RTX 5060, CUDA backend:
@@ -42,58 +42,56 @@ NVIDIA RTX 5060, CUDA backend:
 Backend: CUDA
   Device 0: NVIDIA GeForce RTX 5060
 
-    Single-precision compute (GFLOPS)
-      float    : 21100.20
-      half     : 21077.21
-      bf16     : 20042.78
+    Single-precision compute
+      float    : 21.1 TFLOPS
+      half     : 21.1 TFLOPS
+      bf16     : 20.0 TFLOPS
 
-    FP16 mma.sync m16n8k16+fp16 (TFLOPS)
-      fp16_f16acc : 83.36
+    FP16 mma.sync m16n8k16+fp16
+      fp16_f16acc : 83.4 TFLOPS
 
-    FP8(E4M3) mma.sync m16n8k32+fp16 (TFLOPS)
-      fp8_e4m3_f16acc : 166.81
+    FP8(E4M3) mma.sync m16n8k32+fp16
+      fp8_e4m3_f16acc : 167 TFLOPS
 
-    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp32 (TFLOPS)
-      fp8_sparse : 169.74
+    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp32
+      fp8_sparse : 170 TFLOPS
 
-    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp16 (TFLOPS)
-      fp8_sparse_f16acc : 326.15
+    FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp16
+      fp8_sparse_f16acc : 326 TFLOPS
 
-    INT8 mma.sync m16n8k32+int32 (TOPS)
-      int8_k32 : 164.68
+    INT8 mma.sync m16n8k32+int32
+      int8_k32 : 165 TOPS
 
-    INT8 mma.sp 2:4 sparsity m16n8k64+int32 (TOPS)
-      int8_sparse : 327.30
+    INT8 mma.sp 2:4 sparsity m16n8k64+int32
+      int8_sparse : 327 TOPS
 
-    MXFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
-      mxf4_e2m1 : 324.54
+    MXFP4(E2M1) mma.sync m16n8k64+fp32
+      mxf4_e2m1 : 325 TFLOPS
 
-    NVFP4(E2M1) mma.sync m16n8k64+fp32 (TFLOPS)
-      nvf4_e2m1 : 327.00
+    NVFP4(E2M1) mma.sync m16n8k64+fp32
+      nvf4_e2m1 : 327 TFLOPS
 
-    MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32 (TFLOPS)
-      mxf4_sparse : 630.37
+    MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32
+      mxf4_sparse : 630 TFLOPS
 
-    NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32 (TFLOPS)
-      nvf4_sparse : 630.45
+    NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32
+      nvf4_sparse : 630 TFLOPS
 
-    INT8 dot-product compute (__dp4a) (GOPS)
-      int8_dp8 : 41683.39
+    INT8 dot-product compute (__dp4a)
+      int8_dp8 : 41.7 TOPS
 
-    cuBLASLt GEMM peak (TFLOPS)
-      fp16     : 77.54
-      bf16     : 41.14
-      fp8_e4m3 : 143.89
-      nvf4_e2m1 : 298.99
+    cuBLASLt GEMM peak
+      fp16     : 77.5 TFLOPS
+      bf16     : 41.1 TFLOPS
+      fp8_e4m3 : 144 TFLOPS
+      nvf4_e2m1 : 299 TFLOPS
+      int8     : 149 TOPS
 
-    cuBLASLt GEMM peak (TOPS)
-      int8     : 149.18
+    Global memory bandwidth
+      float4   : 419 GB/s
 
-    Global memory bandwidth (GBPS)
-      float4   : 418.82
-
-    Kernel launch latency (US)
-      roundtrip : 6.24
+    Kernel launch latency
+      roundtrip : 6.24 µs
 ```
 
 AMD Instinct MI300X, ROCm backend:
@@ -102,46 +100,46 @@ AMD Instinct MI300X, ROCm backend:
 Backend: ROCm
   Device 0: AMD Instinct MI300X
 
-    Single-precision compute (GFLOPS)
-      float    : 134624.47
-      half     : 151388.55
-      double   : 62886.77
-      bf16     : 117266.34
+    Single-precision compute
+      float    : 135 TFLOPS
+      half     : 151 TFLOPS
+      double   : 62.9 TFLOPS
+      bf16     : 117 TFLOPS
 
-    MFMA fp16xfp16+fp32 16x16x16 (TFLOPS)
-      mfma_fp16 : 1128.18
+    MFMA fp16xfp16+fp32 16x16x16
+      mfma_fp16 : 1.13 TFLOPS
 
-    MFMA bf16xbf16+fp32 16x16x16 (TFLOPS)
-      mfma_bf16 : 1124.29
+    MFMA bf16xbf16+fp32 16x16x16
+      mfma_bf16 : 1.12 TFLOPS
 
-    MFMA fp8xfp8+fp32 16x16x32 (TFLOPS)
-      mfma_fp8 : 2166.78
+    MFMA fp8xfp8+fp32 16x16x32
+      mfma_fp8 : 2.17 TFLOPS
 
-    MFMA int8xint8+int32 16x16x32 (TOPS)
-      mfma_int8 : 2339.26
+    MFMA int8xint8+int32 16x16x32
+      mfma_int8 : 2.34 TOPS
 
-    Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)
-      smfmac_fp16 : 2154.45
+    Sparse MFMA fp16 2:4 16x16x32
+      smfmac_fp16 : 2.15 TFLOPS
 
-    Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)
-      smfmac_fp8 : 4138.86
+    Sparse MFMA fp8 2:4 16x16x64
+      smfmac_fp8 : 4.14 TFLOPS
 
-    Sparse MFMA int8 2:4 16x16x64 (TOPS)
-      smfmac_int8 : 4499.68
+    Sparse MFMA int8 2:4 16x16x64
+      smfmac_int8 : 4.50 TOPS
 
-    rocBLAS GEMM peak (TFLOPS)
-      fp32     : 129.70
-      fp64     : 100.48
-      fp16     : 840.05
+    rocBLAS GEMM peak
+      fp32     : 130 TFLOPS
+      fp64     : 100 TFLOPS
+      fp16     : 840 TFLOPS
 
-    hipBLASLt FP8 GEMM peak (TFLOPS)
-      fp8_e4m3 : 1588.02
+    hipBLASLt FP8 GEMM peak
+      fp8_e4m3 : 1.59 TFLOPS
 
-    Global memory bandwidth (GBPS)
-      float4   : 3577.33
+    Global memory bandwidth
+      float4   : 3.58 TB/s
 
-    Kernel launch latency (US)
-      roundtrip : 8.66
+    Kernel launch latency
+      roundtrip : 8.66 µs
 ```
 
 ## Desktop app

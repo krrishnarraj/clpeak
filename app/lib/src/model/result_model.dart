@@ -170,8 +170,10 @@ String _prefixFor(int exp) =>
     _siPrefixes.firstWhere((p) => p.$1 == exp, orElse: () => (0, '')).$2;
 
 /// Auto-scaled display value, e.g. 4476 GFLOPS → "4.48 TFLOPS", 1.5e-7 s →
-/// "150 ns".  Mirrors the value column the CLI prints, and replaces the
-/// hard-coded per-unit switch this used to be.
+/// "150 ns".  The same ladder as `formatScaledValue()` in
+/// `src/common/units.cpp`, which is what the CLI's value column prints —
+/// one algorithm, two presenters — and replaces the hard-coded per-unit
+/// switch this used to be.
 ({String value, String unit}) formatValue(double value, Units units) {
   String fmt(double v) => v.abs() >= 100
       ? v.toStringAsFixed(0)

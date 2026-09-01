@@ -111,18 +111,17 @@ void LoggerText::renderDeviceBegin(const LogEvent &e)
 
 void LoggerText::renderTestBegin(const LogEvent &e)
 {
-    // The unit this opening declared, which on a reopen need not be the
-    // test's: the integer phase of a GEMM test reports ops, not flops.
-    const std::string openUnit = e.openedUnit.empty() ? e.unit : e.openedUnit;
-
-    // Reopening the test that just closed, in the same unit: keep accumulating
-    // into the same stanza, under the header already printed for it.
-    if (e.reopened && e.testKey() == lastClosedTest && openUnit == stanzaUnit)
+    // Reopening the test that just closed, with its header still standing:
+    // keep accumulating into the same stanza, under the header already
+    // printed for it.  Rows carry their own units, so a reopen in a different
+    // one (a GEMM test's integer phase) joins the same table rather than
+    // starting a look-alike stanza beside it.
+    if (e.reopened && e.testKey() == lastClosedTest && stanzaHasHeader)
         return;
 
     flushMetrics();
-    mergedPad  = 0;
-    stanzaUnit = openUnit;
+    mergedPad       = 0;
+    stanzaHasHeader = true;
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
@@ -135,7 +134,6 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     // precedes its --describe prose.
     std::string header = e.testTitle;
     if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
-    if (!openUnit.empty())      header += " (" + openUnit + ")";
     if (verbose)
     {
         out << "\n";
@@ -188,10 +186,22 @@ void LoggerText::renderMetric(const LogEvent &e)
     ml.description = e.metric.description;
     ml.baselineKey = baselineKey(e.backend, e.platform, e.deviceKey(),
                                  e.testKey(), e.metric.id);
-    // Only when it actually differs from the header above these rows:
-    // repeating what the header already says would just be noise.
-    if (e.metric.hasUnit && e.metric.unit != stanzaUnit)
-        ml.unitSuffix = e.metric.unit;
+    // The unit context this row prints in: the reading's own when it
+    // overrides its test's (an int8 row in ops inside a GEMM test in flops),
+    // else the test's.  Resolved here so the print path does no unit-table
+    // lookups.
+    if (e.metric.hasUnit)
+    {
+        ml.unit.symbol   = e.metric.unit;
+        ml.unit.quantity = e.metric.quantity;
+        ml.unit.scale    = e.metric.scale;
+    }
+    else
+    {
+        ml.unit.symbol   = e.unit;
+        ml.unit.quantity = e.quantity;
+        ml.unit.scale    = e.scale;
+    }
     ml.direction = (e.metric.direction == Direction::FromUnit) ? e.direction
                                                                : e.metric.direction;
 
@@ -279,6 +289,11 @@ void LoggerText::flushMetrics()
 {
     if (metricLines.empty())
     {
+        // The stanza produced nothing visible, so its deferred header goes —
+        // and with it the header a reopen would otherwise continue under (a
+        // reopened test re-heads itself instead: see renderTestBegin).
+        if (!mPendingHeader.empty())
+            stanzaHasHeader = false;
         mPendingHeader.clear();
         mPendingDescription.clear();
         mPendingAxis.clear();
@@ -329,18 +344,23 @@ void LoggerText::flushMetrics()
 
         if (ml.status == ResultStatus::Ok)
         {
-            // Format value
-            std::stringstream ss;
-            ss << std::fixed << std::setprecision(2) << ml.value;
+            // Value and unit are chosen together: the mantissa is scaled to
+            // the reading's magnitude and the unit beside it is the one that
+            // matches (4476 GFLOPS prints as "4.48 TFLOPS") — the same pair
+            // the GUI's value column shows.  The unit lives on the row, not
+            // the test header, because a heterogeneous test's rows need not
+            // share one (a GEMM test holds TFLOPS and TOPS alike).
+            const ScaledValue sv = formatScaledValue(ml.value, ml.unit);
 
             // Print metric line without trailing newline (baseline delta may follow)
-            out << indentStr(metricIndent) << padded << " : " << ss.str();
-            if (!ml.unitSuffix.empty())
-                out << " " << ml.unitSuffix;
+            out << indentStr(metricIndent) << padded << " : " << sv.text;
+            if (!sv.unit.empty())
+                out << " " << sv.unit;
 
             // Baseline delta on the same line (if enabled)
             if (compareEnabled)
-                printBaselineDelta(ml.baselineKey, ml.value, ml.direction);
+                printBaselineDelta(ml.baselineKey, ml.value, ml.direction,
+                                   ml.unit);
 
             out << "\n";
         }
@@ -412,7 +432,7 @@ void LoggerText::writeWrapped(int column, const std::string &text)
 }
 
 void LoggerText::printBaselineDelta(const std::string &key, double value,
-                                    Direction direction)
+                                    Direction direction, const UnitInfo &unit)
 {
     auto it = baseline.find(key);
     if (it == baseline.end())
@@ -430,8 +450,11 @@ void LoggerText::printBaselineDelta(const std::string &key, double value,
     const bool improved = (direction == Direction::LowerIsBetter) ? (delta < 0.0)
                                                                   : (delta > 0.0);
 
-    out << "  (was " << std::fixed << std::setprecision(2) << base
-        << ", " << sign << std::setprecision(1) << absDelta << "%";
+    // The baseline prints through the row's own scaling: "was 4476" beside a
+    // row that says 4.48 TFLOPS reads as a collapse that did not happen.
+    const ScaledValue sv = formatScaledValue(base, unit);
+    out << "  (was " << sv.text << ", " << sign << std::fixed
+        << std::setprecision(1) << absDelta << "%";
     // Below this the figure prints as 0.0%, and calling run-to-run noise
     // "better" or "worse" would be inventing a result.
     if (absDelta >= 0.05)

@@ -80,13 +80,6 @@ struct LogEvent {
   // readings to it, rather than starting a new one.
   bool reopened = false;
 
-  // The unit THIS opening declared, which on a reopen need not be the test's:
-  // a GEMM test opens in the floating-point phase reporting TFLOPS and reopens
-  // in the integer phase reporting TOPS.  `unit` above stays the test's, from
-  // its first open, since that is what the document records; a channel that
-  // heads a block of readings uses this one, or it labels ops as flops.
-  std::string openedUnit;
-
   // DeviceBegin
   std::vector<LogProp> props;
   DeviceType type              = DeviceType::Unknown;

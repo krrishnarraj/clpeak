@@ -77,9 +77,12 @@ private:
         std::string  baselineKey;  // --compare lookup
         std::string  description;  // --describe: what this reading measures
 
-        // Printed after the value when this reading overrides its test's
-        // unit, so a TOPS row inside a TFLOPS test is not read as TFLOPS.
-        std::string  unitSuffix;
+        // The unit context this row prints in: its own when the reading
+        // overrides its test's (an int8 row in ops inside a GEMM test in
+        // flops), else the test's.  The unit is printed beside the value,
+        // auto-scaled to the magnitude, so a TOPS row is never read as
+        // TFLOPS no matter which test it sits in.
+        UnitInfo     unit;
 
         // Which way is better for this reading, so a compare delta can say
         // so rather than leaving a signed percentage to be misread.
@@ -96,18 +99,20 @@ private:
     // readings — Vulkan measures each cooperative-matrix data type in its own
     // #ifdef block, all of them into one test.  Printing the header again for
     // each would turn one test into seven look-alike stanzas, so a reopen of
-    // the test that just closed, in the same unit, continues the block.
+    // the test that just closed continues the block.
     //
-    // A reopen in a DIFFERENT unit starts a fresh stanza with its own header:
-    // a GEMM test measures floating point in one phase and integers in the
-    // next, and its integer readings must not sit under a header that says
-    // TFLOPS.  `stanzaUnit` is what that header said, so it is also what a
-    // reading's unit is compared against before printing a suffix.
+    // Every row carries its own unit, so a reopen in a DIFFERENT unit (a GEMM
+    // test's floating-point phase then its integer one) continues the same
+    // stanza too: one aligned table, each row labelled with what it was
+    // measured in.  `stanzaHasHeader` guards the one reopen that must not
+    // continue — a stanza whose deferred header was dropped because none of
+    // its readings were visible (non-verbose, all skipped) re-heads on
+    // reopen, or its rows would sit orphaned under the previous test's.
     //
     // Each metric flushes immediately; `mergedPad` tracks the widest label
     // seen so far in the stanza so the column widens incrementally.
     std::string lastClosedTest;
-    std::string stanzaUnit;
+    bool        stanzaHasHeader = false;
     int         mergedPad = 0;
 
     // Header deferred until we know there are actual metric lines to
@@ -123,7 +128,7 @@ private:
     void writeLine(int level, const std::string &text);
     void writeLine(const std::string &text);  // uses current indentLevel
     void printBaselineDelta(const std::string &key, double value,
-                            Direction direction);
+                            Direction direction, const UnitInfo &unit);
 
     /// Write `text` as prose, word-wrapped to the output width and left-aligned
     /// at `column` spaces (a raw column, not an indent level, so a reading's

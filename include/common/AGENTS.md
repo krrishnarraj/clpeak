@@ -71,9 +71,10 @@ Two things are easy to get wrong here:
   inherits its test's, and then claims to be flops.
 - **The reopening `TestSpec` still carries the unit of the readings it is about
   to produce.** The test keeps the unit of its *first* open — that is what the
-  document records — but the CLI heads each block of readings with the unit
-  that block declared, so the integer phase of a GEMM test prints
-  `(TOPS)` rather than repeating `(TFLOPS)`.
+  document records — and on a category-filtered run the integer phase's open
+  *is* the first, so a `tops` reopen that declared no unit would record the
+  whole test in flops. Both presenters print the unit per row, so no row is
+  mislabelled by the test header.
 
 **A test's `CLPEAK_VLOG` lines belong after its `beginTest()`.** The table
 streams per metric; a diagnostic emitted during the *setup* that precedes
@@ -161,7 +162,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
 | `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
-| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, SI `scale` and which way is better |
+| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, SI `scale` and which way is better; `formatScaledValue()` picks the display SI prefix |
 | `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, single `onEvent()` hook, accumulated `results` |
