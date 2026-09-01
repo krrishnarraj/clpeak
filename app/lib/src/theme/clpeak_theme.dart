@@ -291,23 +291,23 @@ class ClpeakTheme {
       brightness == Brightness.light
           ? switch (c) {
               BenchCategory.fpCompute => const Color(0xFF1F63C8), // blue
-              BenchCategory.intCompute => const Color(0xFF7038D4), // violet
-              BenchCategory.crypto => const Color(0xFFB65413), // orange
-              BenchCategory.string => const Color(0xFF00806A), // teal
-              BenchCategory.bandwidth => const Color(0xFF23803B), // green
-              BenchCategory.latency => const Color(0xFF9A6B00), // amber
-              BenchCategory.ai => const Color(0xFFB0247C), // magenta
-              BenchCategory.unknown => const Color(0xFF5E6870), // neutral
+              BenchCategory.intCompute => const Color(0xFF1F63C8),
+              BenchCategory.crypto => const Color(0xFF1F63C8),
+              BenchCategory.string => const Color(0xFF1F63C8),
+              BenchCategory.bandwidth => const Color(0xFF1F63C8),
+              BenchCategory.latency => const Color(0xFF1F63C8),
+              BenchCategory.ai => const Color(0xFF1F63C8),
+              BenchCategory.unknown => const Color(0xFF1F63C8),
             }
           : switch (c) {
               BenchCategory.fpCompute => const Color(0xFF4FA8FF), // blue
-              BenchCategory.intCompute => const Color(0xFFB08CFF), // violet
-              BenchCategory.crypto => const Color(0xFFFF9D5C), // orange
-              BenchCategory.string => const Color(0xFF34E0C2), // teal
-              BenchCategory.bandwidth => const Color(0xFF6FDD75), // green
-              BenchCategory.latency => const Color(0xFFFFD35C), // amber
-              BenchCategory.ai => const Color(0xFFFF86C8), // magenta
-              BenchCategory.unknown => const Color(0xFF9AA7B0), // neutral
+              BenchCategory.intCompute => const Color(0xFF4FA8FF),
+              BenchCategory.crypto => const Color(0xFF4FA8FF),
+              BenchCategory.string => const Color(0xFF4FA8FF),
+              BenchCategory.bandwidth => const Color(0xFF4FA8FF),
+              BenchCategory.latency => const Color(0xFF4FA8FF),
+              BenchCategory.ai => const Color(0xFF4FA8FF),
+              BenchCategory.unknown => const Color(0xFF4FA8FF),
             };
 
   static IconData categoryIcon(BenchCategory c) => switch (c) {

@@ -14,10 +14,10 @@
 // a 1x1 (pointwise) one -- arithmetically a matmul over pixels, so it should
 // track the GEMM rows -- and a depthwise 3x3, which has the same shape as the
 // first but a fraction of the multiply-accumulates, and is where hardware
-// built around dense arrays tends to fall over.  Each runs in each of the
-// floating-point precisions a model ships in -- fp32, fp16 and bf16 -- as a
-// separate row, so this test's dtype axis double-checks any one-precision
-// claim the same way the gemm rows do.
+// built around dense arrays tends to fall over.  Each runs in the full- and
+// half-precision floating formats (fp32, fp16; see kDTypes for why bf16 is
+// not here), so this test's dtype axis double-checks any one-precision claim
+// the way the gemm rows do.
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
@@ -65,6 +65,14 @@ namespace
     const char *note;
   };
 
+  // bf16 is deliberately absent, unlike the gemm rows: Conv is still at
+  // opset 11 and constrains its operands to fp16, fp32 and fp64, so a bf16
+  // convolution fails the schema check identically on every provider, long
+  // before any provider sees it -- "Type 'tensor(bfloat16)' of input
+  // parameter (X) of operator (Conv) is invalid".  A row declined by the
+  // standard itself could only ever be a refusal, and that is the same
+  // reason the symmetric int4 GEMM row does not exist.  MatMul gained
+  // bfloat16 among its types at opset 14, which is why gemm keeps its row.
   const DType kDTypes[] = {
       {ONNX_DT_FLOAT, "fp32",
        "FP32 inputs and outputs, like the fp32 matmul row.  An accelerator "
@@ -72,10 +80,6 @@ namespace
        "precision convolution path."},
       {ONNX_DT_FLOAT16, "fp16",
        "16-bit floats, the native currency of most convolution engines."},
-      {ONNX_DT_BFLOAT16, "bf16",
-       "The 16-bit float with fp32's exponent range.  A provider whose bf16 "
-       "row lands near its fp16 row has a real bf16 path; one that refuses it "
-       "outright does not."},
   };
 
   const Shape kShapes[] = {
