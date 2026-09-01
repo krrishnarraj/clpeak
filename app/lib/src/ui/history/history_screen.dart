@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -36,6 +39,92 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  Future<void> _import() async {
+    try {
+      const typeGroup = XTypeGroup(
+        label: 'clpeak results',
+        extensions: ['clpeak.json', 'json'],
+      );
+      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      if (file == null) return;
+      if (!mounted) return;
+      final raw = await file.readAsString();
+      if (!mounted) return;
+      final history = context.read<RunHistoryStore>();
+      final messenger = ScaffoldMessenger.of(context);
+      final name = file.name;
+
+      Future<void> doImport(String rawContent, String fileName,
+          {bool overwrite = false}) async {
+        try {
+          final summary = await history.importContent(rawContent,
+              fileName: fileName, overwrite: overwrite);
+          _refresh();
+          messenger.showSnackBar(
+            SnackBar(content: Text('Imported ${summary.fileName}')),
+          );
+        } on FileSystemException {
+          final choice = await _showImportConflictDialog(fileName);
+          if (!mounted) return;
+          if (choice == _ImportConflictChoice.cancel) return;
+          if (choice == _ImportConflictChoice.overwrite) {
+            await doImport(rawContent, fileName, overwrite: true);
+          } else {
+            final unique = await history.nextAvailableFileName(fileName);
+            await doImport(rawContent, unique, overwrite: false);
+          }
+        }
+      }
+
+      await doImport(raw, name);
+    } on FormatException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Import failed: ${e.message}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Import failed: $e')),
+      );
+    }
+  }
+
+  Future<_ImportConflictChoice> _showImportConflictDialog(
+      String fileName) async {
+    final result = await showDialog<_ImportConflictChoice>(
+      context: context,
+      builder: (context) => CDialog(
+        title: 'File already exists',
+        actions: [
+          CButton(
+            label: 'Cancel',
+            kind: CButtonKind.quiet,
+            onPressed: () =>
+                Navigator.pop(context, _ImportConflictChoice.cancel),
+          ),
+          CButton(
+            label: 'Rename',
+            onPressed: () =>
+                Navigator.pop(context, _ImportConflictChoice.rename),
+          ),
+          CButton(
+            label: 'Overwrite',
+            danger: true,
+            onPressed: () =>
+                Navigator.pop(context, _ImportConflictChoice.overwrite),
+          ),
+        ],
+        child: Text(
+          'A run named "$fileName" already exists in history. '
+          'Overwrite it or import as a new file?',
+          style: CP.of(context).body,
+        ),
+      ),
+    );
+    return result ?? _ImportConflictChoice.cancel;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Re-read the index whenever a run finishes (the summary is written to
@@ -51,7 +140,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            const CHeader(title: 'History', subtitle: 'saved runs'),
+            CHeader(
+              title: 'History',
+              subtitle: 'saved runs',
+              actions: [
+                CIconButton(
+                  icon: Icons.file_upload,
+                  tooltip: 'Import',
+                  onPressed: _import,
+                ),
+              ],
+            ),
             Expanded(
               child: FutureBuilder<List<RunSummary>>(
                 // Recreate the future on every finished run / manual refresh.
@@ -63,11 +162,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     return const CEmpty(title: 'Reading index…');
                   }
                   if (runs.isEmpty) {
-                    return const CEmpty(
-                      icon: Icons.history,
-                      title: 'No saved runs yet',
-                      detail:
-                          'Every benchmark run is saved here automatically.',
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CEmpty(
+                            icon: Icons.history,
+                            title: 'No saved runs yet',
+                            detail:
+                                'Every benchmark run is saved here automatically.',
+                          ),
+                          const SizedBox(height: 16),
+                          CButton(
+                            label: 'Import',
+                            icon: Icons.file_upload,
+                            onPressed: _import,
+                          ),
+                        ],
+                      ),
                     );
                   }
                   return RefreshIndicator(
@@ -93,6 +205,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 }
+
+enum _ImportConflictChoice { overwrite, rename, cancel }
 
 class _RunTile extends StatelessWidget {
   const _RunTile({required this.summary, required this.onChanged});
@@ -264,6 +378,29 @@ class _RunTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (summary.clpeakVersion.isNotEmpty ||
+                  summary.hostOs.isNotEmpty ||
+                  summary.hostArch.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    [
+                      if (summary.hostOs.isNotEmpty)
+                        [
+                          summary.hostOs,
+                          summary.hostOsVersion,
+                        ].where((s) => s.isNotEmpty).join(' '),
+                      if (summary.hostArch.isNotEmpty) summary.hostArch,
+                      if (summary.clpeakVersion.isNotEmpty)
+                        'v${summary.clpeakVersion}',
+                    ].join('  ·  '),
+                    style: t.monoSmallDim,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
               const SizedBox(height: 9),
               Row(
                 children: [

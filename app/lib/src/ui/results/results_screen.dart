@@ -67,6 +67,7 @@ class SavedResultsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final meta = document.meta;
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -79,9 +80,104 @@ class SavedResultsScreen extends StatelessWidget {
               onBack: () => Navigator.of(context).pop(),
               actions: [_ExportButton(summary: summary)],
             ),
+            if (meta != null &&
+                (meta.clpeakVersion.isNotEmpty ||
+                    meta.generatedAt.isNotEmpty ||
+                    meta.host.isNotEmpty))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: _RunMetaPanel(meta: meta),
+              ),
             Expanded(child: ResultsBody(document: document)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RunMetaPanel extends StatelessWidget {
+  const _RunMetaPanel({required this.meta});
+
+  final RunMeta meta;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final entries = <({String key, String value})>[];
+
+    if (meta.clpeakVersion.isNotEmpty) {
+      entries.add((key: 'CLPEAK VERSION', value: meta.clpeakVersion));
+    }
+    if (meta.generatedAt.isNotEmpty) {
+      final dt = DateTime.tryParse(meta.generatedAt);
+      final display =
+          dt != null ? formatDate(dt) : meta.generatedAt;
+      entries.add((key: 'GENERATED', value: display));
+    }
+    if (meta.durationSeconds > 0) {
+      entries.add((
+        key: 'DURATION',
+        value: formatDuration(
+            Duration(milliseconds: (meta.durationSeconds * 1000).round()))
+      ));
+    }
+    for (final e in meta.host.entries) {
+      final k = e.key.toString().trim();
+      final v = e.value?.toString().trim() ?? '';
+      if (k.isEmpty || v.isEmpty) continue;
+      // Pretty-print memory_bytes as GB/MB
+      if (k == 'memory_bytes') {
+        final bytes = int.tryParse(v);
+        if (bytes != null) {
+          entries.add((key: k.toUpperCase(), value: formatBytes(bytes)));
+          continue;
+        }
+      }
+      entries.add((key: k.toUpperCase(), value: v));
+    }
+
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+            decoration: BoxDecoration(
+              color: t.isDark ? t.hover : t.hover.withValues(alpha: 0.7),
+              border: Border(bottom: BorderSide(color: t.line)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 13, color: t.faint),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text('RUN INFO', style: t.micro),
+                ),
+                if (meta.cancelled)
+                  CTag(text: 'cancelled', color: t.danger),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            child: Wrap(
+              spacing: 22,
+              runSpacing: 7,
+              children: [
+                for (final e in entries)
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: '${e.key}  ', style: t.micro),
+                      TextSpan(text: e.value, style: t.monoSmall),
+                    ]),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

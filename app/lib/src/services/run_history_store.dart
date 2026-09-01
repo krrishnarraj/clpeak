@@ -104,12 +104,19 @@ class RunHistoryStore {
       final doc = await _readDocument(f);
       if (doc == null) continue;
       final stat = await f.stat();
+      DateTime startedAt;
+      if (doc.meta?.generatedAt.isNotEmpty ?? false) {
+        startedAt = DateTime.tryParse(doc.meta!.generatedAt) ?? stat.modified;
+      } else {
+        startedAt = stat.modified;
+      }
+      final durationMs = ((doc.meta?.durationSeconds ?? 0) * 1000).toInt();
       runs.add(RunSummary.fromDocument(
         id: name.substring(0, name.length - fileSuffix.length),
         fileName: name,
         doc: doc,
-        startedAt: stat.modified,
-        durationMs: 0,
+        startedAt: startedAt,
+        durationMs: durationMs,
         cancelled: doc.meta?.cancelled ?? false,
       ));
       adopted = true;
@@ -168,6 +175,97 @@ class RunHistoryStore {
   Future<File> documentFile(RunSummary summary) async {
     final dir = await runsDirectory();
     return File(p.join(dir.path, summary.fileName));
+  }
+
+  Future<bool> fileExists(String fileName) async {
+    final dir = await runsDirectory();
+    return File(p.join(dir.path, p.basename(fileName))).exists();
+  }
+
+  Future<String> nextAvailableFileName(String desiredName) async {
+    final dir = await runsDirectory();
+    var base = p.basename(desiredName);
+    if (!base.endsWith(fileSuffix)) {
+      final dot = base.lastIndexOf('.');
+      base = (dot > 0 ? base.substring(0, dot) : base) + fileSuffix;
+    }
+    var candidate = base;
+    var i = 1;
+    while (await File(p.join(dir.path, candidate)).exists()) {
+      final without = base.substring(0, base.length - fileSuffix.length);
+      candidate = '${without}_$i$fileSuffix';
+      i++;
+    }
+    return candidate;
+  }
+
+  /// Import a run document from outside the runs directory.
+  ///
+  /// Validates the JSON, checks `format_version`, copies the file into the
+  /// store and updates the index.  When [overwrite] is false and a file with
+  /// the same name already exists a [FileSystemException] is thrown so the
+  /// caller can prompt the user (overwrite vs. rename).
+  Future<RunSummary> importExternalFile(
+    File sourceFile, {
+    String? targetFileName,
+    bool overwrite = false,
+  }) async {
+    final raw = await sourceFile.readAsString();
+    return importContent(raw,
+        fileName: targetFileName ?? p.basename(sourceFile.path),
+        overwrite: overwrite);
+  }
+
+  /// Import from an in-memory JSON string (e.g. an `XFile` picked via
+  /// `file_selector` where the path may not be a normal file).
+  Future<RunSummary> importContent(
+    String raw, {
+    required String fileName,
+    bool overwrite = false,
+  }) async {
+    late Map<String, dynamic> json;
+    try {
+      json = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      throw FormatException('Not valid JSON: $e');
+    }
+    if ((json['format_version'] as num?)?.toInt() != formatVersion) {
+      throw FormatException(
+          'Unsupported format version ${json['format_version']} – expected $formatVersion');
+    }
+    final doc = RunDocument.fromJson(json);
+    final dir = await runsDirectory();
+    var targetName = p.basename(fileName);
+    if (!targetName.endsWith(fileSuffix)) {
+      final dot = targetName.lastIndexOf('.');
+      targetName =
+          (dot > 0 ? targetName.substring(0, dot) : targetName) + fileSuffix;
+    }
+    final targetFile = File(p.join(dir.path, targetName));
+    if (await targetFile.exists() && !overwrite) {
+      throw FileSystemException('File already exists', targetFile.path);
+    }
+    await targetFile.writeAsString(raw);
+    final id = targetName.substring(0, targetName.length - fileSuffix.length);
+    DateTime startedAt;
+    final generated = doc.meta?.generatedAt ?? '';
+    if (generated.isNotEmpty) {
+      startedAt =
+          DateTime.tryParse(generated) ?? (await targetFile.stat()).modified;
+    } else {
+      startedAt = (await targetFile.stat()).modified;
+    }
+    final durationMs = ((doc.meta?.durationSeconds ?? 0) * 1000).toInt();
+    final summary = RunSummary.fromDocument(
+      id: id,
+      fileName: targetName,
+      doc: doc,
+      startedAt: startedAt,
+      durationMs: durationMs,
+      cancelled: doc.meta?.cancelled ?? false,
+    );
+    await add(summary);
+    return summary;
   }
 }
 
