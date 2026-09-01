@@ -604,8 +604,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       test.skip(t.metric, status, reason, jmOpts(t));
   };
 
-  void *out = isInt ? (void *)sycl::malloc_device<int32_t>(outElems, dev.stream)
-                    : (void *)sycl::malloc_device<float>(outElems, dev.stream);
+  void *out = (void *)sycl::malloc_device<float>(outElems, dev.stream);
   uint32_t *sgCount = sycl::malloc_device<uint32_t>(1, dev.stream);
   if (!out || !sgCount)
   {
