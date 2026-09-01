@@ -116,20 +116,13 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     const std::string openUnit = e.openedUnit.empty() ? e.unit : e.openedUnit;
 
     // Reopening the test that just closed, in the same unit: keep accumulating
-    // into the same stanza, under the header already printed for it.  Rows
-    // pending from the previous block are deliberately NOT flushed here -- the
-    // whole point is that the stanza's label column is computed once, over all
-    // of its readings together.
+    // into the same stanza, under the header already printed for it.
     if (e.reopened && e.testKey() == lastClosedTest && openUnit == stanzaUnit)
-    {
-        mStreaming = e.streaming;
         return;
-    }
 
     flushMetrics();
     mergedPad  = 0;
     stanzaUnit = openUnit;
-    mStreaming = e.streaming;
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
@@ -203,8 +196,7 @@ void LoggerText::renderMetric(const LogEvent &e)
                                                                : e.metric.direction;
 
     metricLines.push_back(std::move(ml));
-    if (mStreaming)
-        flushMetrics();
+    flushMetrics();
 }
 
 // ── TestSkippedAll ─────────────────────────────────────────────────────────
@@ -248,16 +240,7 @@ void LoggerText::renderTestSkippedAll(const LogEvent &e)
 
 void LoggerText::renderTestEnd()
 {
-    // A test's rows print when it ends, before anything the next test does.
-    // Holding them any longer lets that next test's --verbose setup lines
-    // (which go to stderr, unbuffered) land between a header and its readings.
-    //
-    // This is only safe because a merged family opens ONE scope for all its
-    // readings -- see the tensor-core and cooperative-matrix runners.  Were it
-    // to close and reopen per data type, each block would flush separately and
-    // the label column would widen down the page.
     flushMetrics();
-    mStreaming  = false;
     indentLevel = propIndent;
 }
 
@@ -302,10 +285,9 @@ void LoggerText::flushMetrics()
         return;
     }
 
-    // Print the deferred test header if we have one.  In streaming mode the
-    // --describe prose was deferred with it so a fully-skipped test does not
-    // leave an empty header behind; in buffered mode it was already printed
-    // at TestBegin.
+    // Print the deferred test header if we have one.  The --describe prose
+    // was deferred with it so a fully-skipped test does not leave an empty
+    // header behind.
     if (!mPendingHeader.empty())
     {
         out << "\n";

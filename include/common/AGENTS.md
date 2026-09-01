@@ -75,11 +75,11 @@ Two things are easy to get wrong here:
   that block declared, so the integer phase of a GEMM test prints
   `(TOPS)` rather than repeating `(TFLOPS)`.
 
-**A test's `CLPEAK_VLOG` lines belong after its `beginTest()`.** The table is
-buffered and printed when a test ends; a diagnostic emitted during the *setup*
-that precedes `beginTest()` therefore appears under the previous test's
-readings, where it reads as belonging to them. Open the scope first — it needs
-nothing from the setup — and let the diagnostic land under its own header. The
+**A test's `CLPEAK_VLOG` lines belong after its `beginTest()`.** The table
+streams per metric; a diagnostic emitted during the *setup* that precedes
+`beginTest()` therefore appears under the previous test's readings, where it
+reads as belonging to them. Open the scope first — it needs nothing from the
+setup — and let the diagnostic land under its own header. The
 global-bandwidth working-set line is the worked example, in all five GPU
 backends. Device-scope diagnostics (a failed program build, an enumeration
 dump) are the exception and correctly precede every test.
@@ -87,11 +87,10 @@ dump) are the exception and correctly precede every test.
 **Reopen across phases, not within one.** A family whose data types are each
 measured in their own block should open ONE scope and pass it down, not open
 the test per block — see the tensor-core and cooperative-matrix runners, whose
-descriptors take a `logger::TestScope *`. Reopening per reading works, but the
-CLI flushes a test's rows when it ends, so each block would size the label
-column from its own rows alone and the column would widen down the page. The
-genuine use for a reopen is the integer phase arriving after the rest of the
-run, where a new header is what you want anyway.
+descriptors take a `logger::TestScope *`. Reopening per reading works, but
+each metric flushes immediately so the label column widens down the page
+(via `mergedPad`). The genuine use for a reopen is the integer phase arriving
+after the rest of the run, where a new header is what you want anyway.
 
 ## Test documentation
 

@@ -38,11 +38,10 @@ used by the Flutter GUI on every platform).
 
 ## Scope invariant: one open test at a time
 
-A `TestScope` must be closed before a sibling one opens. `LoggerText` buffers a
-test's metric rows until `TestEnd` (it needs them all to align the column), so
-an overlapping `beginTest` silently drops the pending rows from the text output
-while the `RunDocument` keeps them — the saved file looks complete, the
-table doesn't.
+A `TestScope` must be closed before a sibling one opens. `LoggerText` streams
+each metric as it arrives (with `mergedPad` for incremental alignment), so an
+overlapping `beginTest` would interleave rows from two tests — the saved file
+would still be complete in the `RunDocument`, the table wouldn't.
 
 Three guards make that impossible now: `beginTest()` implicitly closes an open
 test and emits a `Note` naming both tags; `TestScope::end()` only emits

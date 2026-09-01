@@ -34,8 +34,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
          "half the values skipped as known zeros.  Which of them exist at all, "
          "and how much faster the narrow ones go, is most of what separates one "
          "generation of NVIDIA hardware from the next.",
-         TestShape::Heterogeneous, "data type",
-         Direction::FromUnit, "", /*streaming=*/true});
+         TestShape::Heterogeneous, "data type"});
 
     // FP16 WMMA
     {
@@ -429,8 +428,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
        "half the values skipped as known zeros.  Which of them exist at all, "
        "and how much faster the narrow ones go, is most of what separates one "
        "generation of NVIDIA hardware from the next.",
-       TestShape::Heterogeneous, "data type",
-       Direction::FromUnit, "", /*streaming=*/true});
+       TestShape::Heterogeneous, "data type"});
 
   // INT8 WMMA
   {

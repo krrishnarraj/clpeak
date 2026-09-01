@@ -151,8 +151,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
          "block shape the driver advertises for it; which formats the engine "
          "supports, and how much faster the narrow ones go, is most of what "
          "separates one generation of hardware from the next.",
-         TestShape::Heterogeneous, "data type",
-         Direction::FromUnit, "", /*streaming=*/true});
+         TestShape::Heterogeneous, "data type"});
 
 #ifdef VK_HAS_COOPMAT_FP32
     {
@@ -355,8 +354,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
          "block shape the driver advertises for it; which formats the engine "
          "supports, and how much faster the narrow ones go, is most of what "
          "separates one generation of hardware from the next.",
-         TestShape::Heterogeneous, "data type",
-         Direction::FromUnit, "", /*streaming=*/true});
+         TestShape::Heterogeneous, "data type"});
 
     CoopTileRun r;
     r.push.A.i = 3;

@@ -67,7 +67,7 @@ private:
     int propIndent   = 0;    // indent for device properties
     int metricIndent = 0;    // indent for metric lines
 
-    // ── Metric buffering (for aligned columns within a test) ─────────────
+    // ── Metric formatting ────────────────────────────────────────────────
 
     struct MetricLine {
         std::string  label;        // what to print in the name column
@@ -104,10 +104,8 @@ private:
     // TFLOPS.  `stanzaUnit` is what that header said, so it is also what a
     // reading's unit is compared against before printing a suffix.
     //
-    // Rows are held until the stanza ends rather than flushed per block, so
-    // the label column is computed once over all of them — see renderTestEnd
-    // for why that costs no latency.  `mergedPad` covers the one case that
-    // still splits a stanza across flushes: a Note arriving mid-test.
+    // Each metric flushes immediately; `mergedPad` tracks the widest label
+    // seen so far in the stanza so the column widens incrementally.
     std::string lastClosedTest;
     std::string stanzaUnit;
     int         mergedPad = 0;
@@ -116,18 +114,8 @@ private:
     // print (i.e. not all readings were skipped/unsupported in the
     // default non-verbose mode).
     std::string mPendingHeader;
-
-    // In streaming mode the header (and its --describe prose) is also
-    // deferred until the first visible metric arrives, so a fully-skipped
-    // test does not leave an empty header behind.
     std::string mPendingDescription;
     std::string mPendingAxis;
-
-    // Streaming mode: the open test asked for metrics to print as they
-    // arrive rather than buffer until TestEnd.  Column alignment is per-line
-    // rather than computed over all readings, but the run no longer looks
-    // hung for minutes before anything appears.
-    bool mStreaming = false;
 
     // ── Helpers ──────────────────────────────────────────────────────────
 

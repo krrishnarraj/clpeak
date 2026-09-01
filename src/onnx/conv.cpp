@@ -52,7 +52,7 @@ namespace
 
   struct DType
   {
-    int         dtype;
+    int dtype;
     const char *label;
     const char *note;
   };
@@ -60,7 +60,7 @@ namespace
   struct Shape
   {
     int64_t kernel;
-    bool    depthwise;
+    bool depthwise;
     const char *label;
     const char *note;
   };
@@ -102,7 +102,7 @@ namespace
   void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
   {
     raw.assign((size_t)onnxElemBytes(dtype, count), '\0');
-    float    *f = reinterpret_cast<float *>(&raw[0]);
+    float *f = reinterpret_cast<float *>(&raw[0]);
     uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
     uint32_t s = seed;
     for (int64_t i = 0; i < count; i++)
@@ -113,9 +113,15 @@ namespace
       float v = (float)(s >> 8) / 16777216.0f - 0.5f;
       switch (dtype)
       {
-      case ONNX_DT_FLOAT:    f[i] = v;                break;
-      case ONNX_DT_FLOAT16:  h[i] = floatToHalf(v);   break;
-      case ONNX_DT_BFLOAT16: h[i] = floatToBf16(v);   break;
+      case ONNX_DT_FLOAT:
+        f[i] = v;
+        break;
+      case ONNX_DT_FLOAT16:
+        h[i] = floatToHalf(v);
+        break;
+      case ONNX_DT_BFLOAT16:
+        h[i] = floatToBf16(v);
+        break;
       }
     }
   }
@@ -191,7 +197,7 @@ namespace
       // The runtime scalar "S" = 1.0 in the row's own dtype.
       c.inBuf.assign((size_t)onnxElemBytes(dtype, 1), '\0');
       uint16_t h16 = dtype == ONNX_DT_FLOAT16 ? floatToHalf(1.0f)
-                                               : floatToBf16(1.0f);
+                                              : floatToBf16(1.0f);
       if (dtype == ONNX_DT_FLOAT)
       {
         float one = 1.0f;
@@ -259,8 +265,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "and many reach a higher share of their arithmetic peak here than on a "
        "plain matrix multiply.  Read alongside the matmul rows: the gap "
        "between them says what the hardware was shaped for.",
-       TestShape::Heterogeneous, "convolution shape and data type",
-       Direction::FromUnit, "", /*streaming=*/true});
+       TestShape::Heterogeneous, "convolution shape and data type"});
 
   for (const DType &dt : kDTypes)
   {
@@ -391,7 +396,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       else
       {
         o.description = std::string("Peak over a doubling sweep of "
-                                    "feature-map sizes.  ") + dt.note + "  " +
+                                    "feature-map sizes.  ") +
+                        dt.note + "  " +
                         v.note;
         test.skip(row, errStatus,
                   firstErr.empty() ? "convolution unsupported" : firstErr,

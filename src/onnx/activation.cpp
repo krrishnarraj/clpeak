@@ -239,8 +239,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "outgrown the memory the provider keeps close.",
        // Three operations across three working-set sizes: nine separate
        // measurements, no one of which stands for the rest.
-       TestShape::Heterogeneous, "operation and size",
-       Direction::FromUnit, "", /*streaming=*/true});
+       TestShape::Heterogeneous, "operation and size"});
 
   // The reference: same tensor, same read and reduction, no operation.  It
   // depends only on the size, so it is measured once per size and reused by

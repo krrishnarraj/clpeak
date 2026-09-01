@@ -257,13 +257,12 @@ logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
     assert(!closed);
     assert(log->contextDepth == 2);
     // Overlapping TestScopes are a caller bug: the previous test's readings
-    // are still pending in buffering channels (LoggerText renders a whole test
-    // at TestEnd).  Rather than let them be dropped -- which is silent,
-    // because the document keeps them and only the text output loses rows --
-    // close the open test first so its output is complete and correctly
-    // attributed, and say so.  The assert above catches this in debug builds;
-    // the note and the implicit close are what make release builds behave
-    // sanely.
+    // may still be pending (LoggerText streams per metric).  Rather than let
+    // them be dropped -- which is silent, because the document keeps them and
+    // only the text output loses rows -- close the open test first so its
+    // output is complete and correctly attributed, and say so.  The assert
+    // above catches this in debug builds; the note and the implicit close are
+    // what make release builds behave sanely.
     if (log->contextDepth == 3)
     {
         std::string prev = log->openTest() ? log->openTest()->id : std::string();
@@ -326,7 +325,6 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
 
     LogEvent e = log->makeEvent(LogEvent::Kind::TestBegin);
     e.reopened   = reopened;
-    e.streaming  = spec.streaming;
     // What this opening asked for, not what the test settled on at its first.
     e.openedUnit = u.symbol;
     log->onEvent(e);
