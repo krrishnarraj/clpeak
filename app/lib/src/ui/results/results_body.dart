@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/clpeak_theme.dart';
+import '../common/format.dart';
 import '../common/kit.dart';
 
 /// Renders one RunDocument: run-selector chips (when a session covered
@@ -69,6 +70,7 @@ class _ResultsBodyState extends State<ResultsBody> {
     final brightness = Theme.of(context).brightness;
     final hasTests =
         selected.categories.any((g) => g.supported.isNotEmpty);
+    final meta = widget.document.meta;
 
     // Flattened one level: category sections used to be non-lazy Columns
     // holding every test card, so all of them were built, laid out and
@@ -89,6 +91,11 @@ class _ResultsBodyState extends State<ResultsBody> {
           ),
           padBottom: 16,
         ),
+      if (meta != null &&
+          (meta.clpeakVersion.isNotEmpty ||
+              meta.generatedAt.isNotEmpty ||
+              meta.host.isNotEmpty))
+        _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
       _WidgetRow(_DeviceHeader(run: selected)),
       if (hasTests)
         _WidgetRow(
@@ -299,6 +306,91 @@ class _DeviceHeader extends StatelessWidget {
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RunMetaPanel extends StatelessWidget {
+  const _RunMetaPanel({required this.meta});
+
+  final RunMeta meta;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final entries = <({String key, String value})>[];
+
+    if (meta.clpeakVersion.isNotEmpty) {
+      entries.add((key: 'CLPEAK VERSION', value: meta.clpeakVersion));
+    }
+    if (meta.generatedAt.isNotEmpty) {
+      final dt = DateTime.tryParse(meta.generatedAt);
+      final display = dt != null ? formatDate(dt) : meta.generatedAt;
+      entries.add((key: 'GENERATED', value: display));
+    }
+    if (meta.durationSeconds > 0) {
+      entries.add((
+        key: 'DURATION',
+        value: formatDuration(
+            Duration(milliseconds: (meta.durationSeconds * 1000).round()))
+      ));
+    }
+    for (final e in meta.host.entries) {
+      final k = e.key.toString().trim();
+      final v = e.value?.toString().trim() ?? '';
+      if (k.isEmpty || v.isEmpty) continue;
+      if (k == 'memory_bytes') {
+        final bytes = int.tryParse(v);
+        if (bytes != null) {
+          entries.add((key: k.toUpperCase(), value: formatBytes(bytes)));
+          continue;
+        }
+      }
+      entries.add((key: k.toUpperCase(), value: v));
+    }
+
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+            decoration: BoxDecoration(
+              color: t.isDark ? t.hover : t.hover.withValues(alpha: 0.7),
+              border: Border(bottom: BorderSide(color: t.line)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 13, color: t.faint),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text('RUN INFO', style: t.micro),
+                ),
+                if (meta.cancelled)
+                  CTag(text: 'cancelled', color: t.danger),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            child: Wrap(
+              spacing: 22,
+              runSpacing: 7,
+              children: [
+                for (final e in entries)
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: '${e.key}  ', style: t.micro),
+                      TextSpan(text: e.value, style: t.monoSmall),
+                    ]),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

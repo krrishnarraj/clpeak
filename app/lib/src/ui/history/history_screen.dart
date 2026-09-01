@@ -144,9 +144,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
               title: 'History',
               subtitle: 'saved runs',
               actions: [
-                CIconButton(
+                CButton(
+                  label: 'Import',
                   icon: Icons.file_upload,
-                  tooltip: 'Import',
                   onPressed: _import,
                 ),
               ],
