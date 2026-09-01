@@ -280,7 +280,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_numeric_error", "ONNX MatMul numeric error", "ppm",
-       Category::FpCompute,
+       Category::Compute,
        "How far each datatype's answer drifts from a full-precision one, in "
        "parts per million, on a fixed 1024x1024x1024 matrix multiply.  Speed "
        "rows alone cannot be compared honestly across datatypes: a format is "

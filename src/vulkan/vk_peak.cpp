@@ -477,7 +477,7 @@ int vkPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) ---------
+    // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef VK_HAS_COMPUTE_HP_V1
     if (isAllowed(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
@@ -491,11 +491,6 @@ int vkPeak::runAll()
 #ifdef VK_HAS_COMPUTE_BF16_V1
     if (isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
-#ifdef VK_HAS_ANY_COOPMAT
-    if (isAllowedAs(Benchmark::CoopMatrix, Category::FpCompute))
-        runCoopMatrix(dev, cfg, /*intPart=*/false);
-#endif
-    // ---- Phase 2: integer compute (GOPS / TOPS) --------------------
 #ifdef VK_HAS_COMPUTE_INT32_V1
     if (isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
 #endif
@@ -503,8 +498,10 @@ int vkPeak::runAll()
     if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (isAllowedAs(Benchmark::CoopMatrix, Category::IntCompute))
+    if (isAllowed(Benchmark::CoopMatrix)) {
+        runCoopMatrix(dev, cfg, /*intPart=*/false);
         runCoopMatrix(dev, cfg, /*intPart=*/true);
+    }
 #endif
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
     if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);

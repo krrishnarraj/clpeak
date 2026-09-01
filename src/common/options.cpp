@@ -110,8 +110,7 @@ static const char *helpStr =
 #endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
-    "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
-    "\n  --int-compute / --no-int-compute     integer compute (gops / tops)"
+    "\n  --compute     / --no-compute         compute (gflops / tflops / gops / tops)"
 #ifdef ENABLE_CPU
     "\n  --crypto      / --no-crypto          crypto/hash silicon (gbps)     [CPU]"
     "\n  --string      / --no-string          string/text processing (gbps)  [CPU]"
@@ -296,13 +295,12 @@ struct CategoryFlag {
 };
 
 static const CategoryFlag categoryFlags[] = {
-  {"fp-compute",  Category::FpCompute},
-  {"int-compute", Category::IntCompute},
-  {"crypto",      Category::Crypto},
-  {"string",      Category::String},
-  {"bandwidth",   Category::Bandwidth},
-  {"latency",     Category::Latency},
-  {"ai",          Category::Ai},
+  {"compute",   Category::Compute},
+  {"crypto",    Category::Crypto},
+  {"string",    Category::String},
+  {"bandwidth", Category::Bandwidth},
+  {"latency",   Category::Latency},
+  {"ai",        Category::Ai},
 };
 static const int numCategoryFlags = sizeof(categoryFlags) / sizeof(categoryFlags[0]);
 

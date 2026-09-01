@@ -40,7 +40,7 @@ void _add(
         id: test,
         title: title,
         description: description,
-        category: BenchCategory.fpCompute,
+        category: BenchCategory.compute,
         shape: TestShape.homogeneous,
         units: _gflops,
       ))

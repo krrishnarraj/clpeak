@@ -57,7 +57,7 @@ bool isCdnaFamily(const std::string &base)
 
 int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
 {
-  const bool isInt = category == Category::IntCompute;
+  (void)category;
 
   static const MfmaEntry fpEntries[] = {
     {"fp16", "MFMA fp16xfp16+fp32 16x16x16", "tflops",
@@ -114,11 +114,9 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     return o;
   };
 
-  // One scope for the whole family, not one per entry: the loop below
-  // measures each data type on the same engine, and opening the test
-  // inside it closed and reopened the test once per reading.
+  // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
-    {"mfma", "Matrix cores (MFMA)", entries[0].unit, Category::Unknown,
+    {"mfma", "Matrix cores (MFMA)", "tflops", Category::Unknown,
        "Peak speed of the matrix cores on AMD's compute cards -- dedicated "
        "units that multiply whole blocks of numbers in one step rather than "
        "one value at a time.  Each reading is a different input format, at "
@@ -126,9 +124,9 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
        "faster, which is why quantized models are worth the trouble.",
        TestShape::Heterogeneous, "data type"});
 
-  for (size_t e = 0; e < numEntries; e++)
+  for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)
   {
-    const MfmaEntry &me = entries[e];
+    const MfmaEntry &me = fpEntries[e];
 
     if (!cdna)
     {
@@ -178,6 +176,59 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     }
 
     // Each wave issues kMfmaPerWave MFMA ops, each doing 2*M*N*K flops/ops.
+    const double ops = (double)numBlocks * (double)kMfmaPerWave *
+                       2.0 * (double)me.M * (double)me.N * (double)me.K;
+    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    test.emit(me.label, value, unitOpts(me));
+
+    (void)hipFree(outBuf);
+  }
+  for (size_t e = 0; e < sizeof(intEntries)/sizeof(intEntries[0]); e++)
+  {
+    const MfmaEntry &me = intEntries[e];
+
+    if (!cdna)
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", me.description);
+      continue;
+    }
+
+    hipFunction_t fn;
+    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "MFMA instruction for this datatype not available on this GPU", unitOpts(me));
+      continue;
+    }
+
+    const uint32_t elemSize = me.isInt ? (uint32_t)sizeof(int) : (uint32_t)sizeof(float);
+    uint64_t bytesPerBlock = (uint64_t)blockSize * elemSize;
+    uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock;
+    uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
+    if (pickBlocks == 0)
+      pickBlocks = 1;
+    uint32_t numBlocks = (uint32_t)pickBlocks;
+
+    void *outBuf = nullptr;
+    if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
+    {
+      test.skip(me.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(me));
+      continue;
+    }
+
+    void *args[1] = {&outBuf};
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    if (us <= 0.0f)
+    {
+      (void)hipFree(outBuf);
+      test.skip(me.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(me));
+      continue;
+    }
+
     const double ops = (double)numBlocks * (double)kMfmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
     float value = (float)(ops * 1.0e6 / us / 1.0e12);

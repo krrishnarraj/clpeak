@@ -161,7 +161,7 @@ int CudaPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -------------
+    // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (isAllowed(Benchmark::ComputeSP))
       runComputeSP(dev, cfg);
     if (isAllowed(Benchmark::ComputeHP))
@@ -172,21 +172,14 @@ int CudaPeak::runAll()
       runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))
       runComputeBF16(dev, cfg);
-    if (isAllowedAs(Benchmark::Wmma, Category::FpCompute))
-      runWmma(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Cublas, Category::FpCompute))
-      runCublas(dev, cfg, Category::FpCompute);
-
-    // ---- Phase 2: integer compute (GOPS / TOPS) ------------------------
     if (isAllowed(Benchmark::ComputeInt))
       runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-
-    if (isAllowedAs(Benchmark::Wmma, Category::IntCompute))
-      runWmma(dev, cfg, Category::IntCompute);
-    if (isAllowedAs(Benchmark::Cublas, Category::IntCompute))
-      runCublas(dev, cfg, Category::IntCompute);
+    if (isAllowed(Benchmark::Wmma))
+      runWmma(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::Cublas))
+      runCublas(dev, cfg, Category::Compute);
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
     if (isAllowed(Benchmark::GlobalBW))
       runGlobalBandwidth(dev, cfg);

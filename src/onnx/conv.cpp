@@ -262,7 +262,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx_conv", "ONNX convolution peak", "tflops", Category::FpCompute,
+      {"onnx_conv", "ONNX convolution peak", "tflops", Category::Compute,
        "Convolution speed at the precision each row names, swept over "
        "feature-map sizes and reported at its best.  Neural accelerators were "
        "built for this operation before they were asked to do anything else, "

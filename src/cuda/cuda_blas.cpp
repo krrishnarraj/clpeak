@@ -209,23 +209,23 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
 {
     (void)cfg;
 
+    (void)category;
     // cuBLASLt is an optional runtime dependency (not part of the driver).
     if (!g_lt.load())
     {
-        const bool isInt = category == Category::IntCompute;
         auto t = currentDeviceScope->beginTest(
             {"cublas_gemm", "cuBLASLt GEMM peak",
-             isInt ? "tops" : "tflops", Category::Unknown,
+             "tflops", Category::Unknown,
              "Matrix-multiply speed through NVIDIA's own tuned library, on a "
              "large square problem.  Where the tensor-core rows show what the "
              "hardware can do in principle, this shows what shipping code "
              "reaches on the operation most AI work is built from.  Each "
              "reading is a different input format.",
              TestShape::Heterogeneous, "data type"});
-        logger::EmitOptions o;
-        if (isInt)
-            o.unit = "tops";
-        t.skip(isInt ? "int8" : "fp32", ResultStatus::Unsupported,
+        t.skip("fp32", ResultStatus::Unsupported,
+               "cuBLASLt library not found; GEMM skipped", {});
+        logger::EmitOptions o; o.unit = "tops";
+        t.skip("int8", ResultStatus::Unsupported,
                "cuBLASLt library not found; GEMM skipped", o);
         return 0;
     }
@@ -291,16 +291,19 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
 
     logger::TestScope *blasTest = nullptr;
 
-    // The integer readings share the test with the floating-point ones and
-    // carry their own unit, which is what makes a `cublas-int` twin
-    // unnecessary -- the library is the same software either way.
     auto blasOpts = [&](const char *note)
     {
         logger::EmitOptions o;
         if (note)
             o.description = note;
-        if (category == Category::IntCompute)
-            o.unit = "tops";
+        return o;
+    };
+    auto intOpts = [&](const char *note)
+    {
+        logger::EmitOptions o;
+        if (note)
+            o.description = note;
+        o.unit = "tops";
         return o;
     };
 
@@ -312,6 +315,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
                             const void *alphaPtr, const void *betaPtr,
                             bool useTN) -> int
     {
+        const bool isIntLabel = (label[0]=='i' && label[1]=='n' && label[2]=='t');
+        auto curOpts = isIntLabel ? intOpts(note) : curOpts;
         cublasLtMatmulDesc_t opDesc = nullptr;
         cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
 
@@ -329,7 +334,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             cublasLtMatrixLayoutCreate(&Bdesc, bType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, cType, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", curOpts);
             if (opDesc)
                 cublasLtMatmulDescDestroy(opDesc);
             if (Adesc)
@@ -368,7 +373,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
         {
             blasTest->skip(label, ResultStatus::Unsupported,
-                           std::string("unsupported on ") + dev.info.archName, blasOpts(note));
+                           std::string("unsupported on ") + dev.info.archName, curOpts);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -398,7 +403,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         }
         if (bestIdx < 0)
         {
-            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", curOpts);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -416,7 +421,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
 
         if (per_iter_us <= 0.0)
         {
-            blasTest->skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed", curOpts);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -435,7 +440,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
                                       &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
         double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
-        blasTest->emit(label, (float)tops, blasOpts(note));
+        blasTest->emit(label, (float)tops, curOpts);
 
         cublasLtMatmulDescDestroy(opDesc);
         cublasLtMatrixLayoutDestroy(Adesc);
@@ -615,20 +620,16 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     };
 #endif // CLPEAK_CUBLASLT_HAS_FP4
 
-    if (category == Category::FpCompute)
-    {
-        // -----------------------------------------------------------------------
-        // Floating-point variants -- reported in TFLOPS.
-        // -----------------------------------------------------------------------
-        auto testFp = currentDeviceScope->beginTest(
-            {"cublas_gemm", "cuBLASLt GEMM peak", "tflops", Category::Unknown,
-             "Matrix-multiply speed through NVIDIA's own tuned library, on a "
-             "large square problem.  Where the tensor-core rows show what the "
-             "hardware can do in principle, this shows what shipping code "
-             "reaches on the operation most AI work is built from.  Each "
-             "reading is a different input format.",
-             TestShape::Heterogeneous, "data type"});
-        blasTest = &testFp;
+    // One test for all data types -- integer readings carry their own unit.
+    auto test = currentDeviceScope->beginTest(
+        {"cublas_gemm", "cuBLASLt GEMM peak", "tflops", Category::Unknown,
+         "Matrix-multiply speed through NVIDIA's own tuned library, on a "
+         "large square problem.  Where the tensor-core rows show what the "
+         "hardware can do in principle, this shows what shipping code "
+         "reaches on the operation most AI work is built from.  Each "
+         "reading is a different input format.",
+         TestShape::Heterogeneous, "data type"});
+    blasTest = &test;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
         // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
@@ -738,33 +739,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
                        "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(nvf4Note));
 #endif
-    }
 
-    if (category != Category::IntCompute)
-    {
-        cublasLtDestroy(lt);
-        cuMemFree(dA);
-        cuMemFree(dB);
-        cuMemFree(dC);
-        cuMemFree(dWS);
-        return 0;
-    }
-
-    // -----------------------------------------------------------------------
-    // Integer variants -- reported in TOPS
-    // -----------------------------------------------------------------------
-    // The same test, reopened: the library does not become a different piece
-    // of software because the numbers are whole.  The integer readings carry
-    // their own unit (see runVariant), which is what lets them share it.
-    auto testInt = currentDeviceScope->beginTest(
-        {"cublas_gemm", "cuBLASLt GEMM peak", "tops", Category::Unknown,
-         "Matrix-multiply speed through NVIDIA's own tuned library, on a "
-         "large square problem.  Where the tensor-core rows show what the "
-         "hardware can do in principle, this shows what shipping code "
-         "reaches on the operation most AI work is built from.  Each "
-         "reading is a different input format.",
-         TestShape::Heterogeneous, "data type"});
-    blasTest = &testInt;
+    // Integer variants -- same test, each reading carries its own unit (tops).
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
     // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.

@@ -194,16 +194,12 @@ int OnnxPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // ---- Phase 1: floating-point compute --------------------------------
-    if (isAllowedAs(Benchmark::OnnxGemm, Category::FpCompute))
-      runGemm(*rt, ep, cfg, Category::FpCompute);
+    // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
+    if (isAllowed(Benchmark::OnnxGemm))
+      runGemm(*rt, ep, cfg, Category::Compute);
 
     if (isAllowed(Benchmark::OnnxConv))
       runConv(*rt, ep, cfg);
-
-    // ---- Phase 2: integer compute (int8 QDQ) -----------------------------
-    if (isAllowedAs(Benchmark::OnnxGemm, Category::IntCompute))
-      runGemm(*rt, ep, cfg, Category::IntCompute);
 
     // ---- Phase 3: what the speed rows above cost in accuracy -------------
     if (isAllowed(Benchmark::OnnxNumericError))

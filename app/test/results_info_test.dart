@@ -118,7 +118,7 @@ void main() {
     doc.runFor('CUDA', 'CUDA', 'RTX 5060', '').openTest(const TestHeader(
           id: 'cublas_gemm',
           title: 'cuBLASLt GEMM peak',
-          category: BenchCategory.fpCompute,
+          category: BenchCategory.compute,
           shape: TestShape.heterogeneous,
           axis: 'data type',
           units: Units(
@@ -174,7 +174,7 @@ void main() {
         .openTest(const TestHeader(
           id: 'cpu_matrix_fp',
           title: 'Matrix engine (AMX)',
-          category: BenchCategory.fpCompute,
+          category: BenchCategory.compute,
           description: 'Throughput of the dedicated matrix-multiply unit.',
           units: Units(
               symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
@@ -204,7 +204,7 @@ void main() {
     doc.runFor('Metal', 'Metal', 'M1 Pro', '').openTest(const TestHeader(
           id: 'mps_gemm',
           title: 'MPS GEMM peak',
-          category: BenchCategory.fpCompute,
+          category: BenchCategory.compute,
           shape: TestShape.heterogeneous,
           axis: 'data type',
           units: Units(

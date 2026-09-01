@@ -19,6 +19,7 @@ using clpeak_cpu::kernelMenu;
 
 int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
 {
+  (void)category;
   const logger::TestSpec base = {
       "cpu_matrix", "CPU matrix engine", "gflops", Category::Unknown,
       "Peak speed of the CPU's built-in matrix engine -- Intel AMX tiles or "
@@ -28,7 +29,6 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
       "the next.",
       TestShape::Heterogeneous, "data type"};
 
-  if (category == Category::FpCompute)
   {
     std::vector<FamilyRow> rows = {
         { "bf16",
@@ -77,11 +77,9 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
 #endif
 
     emitFamily(*this, base, rows, cfg);
-    return 0;
   }
 
-  // Integer phase.  Same test, reopened: the engine does not become a
-  // different piece of hardware because the numbers are whole.
+  // Integer row -- same test, reopened; carries its own unit (ops).
   emitFamily(*this, base,
              {{ "int8",
                 "8-bit whole numbers, the format quantized neural networks "

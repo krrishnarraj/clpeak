@@ -9,24 +9,17 @@
 
 int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category)
 {
+  (void)category;
   // Shared geometry: one warp (32 threads) per block, m16n16k16 tile per
   // wmma fragment, 256 outer iters → COOPMAT_WORK_PER_WI per thread.
   const uint32_t warp = 32;
   const uint32_t outElems = 16 * 16; // M*N
 
-  // ---------------------------------------------------------------------
-  // FP cluster -- each variant opens its own <wmma_*> group with the
-  // proper unit attribute via runComputeKernel; no umbrella tag here
-  // (depth-5 nesting under one would break the v2 logger shim).
-  // ---------------------------------------------------------------------
-  if (category == Category::FpCompute)
-  {
-    // One scope for the whole family, opened here rather than per data type:
-    // nineteen descs each opening the same test worked, but closed and
-    // reopened it nineteen times, which no channel should have to stitch back
-    // together.
-    auto test = currentDeviceScope->beginTest(
-        {"wmma", "Tensor cores (WMMA / mma.sync)", "tflops", Category::Unknown,
+  // One scope for the whole family -- all data types in one test.
+  // The integer readings carry their own unit (tops) so they share the
+  // test with the floating-point ones.
+  auto test = currentDeviceScope->beginTest(
+      {"wmma", "Tensor cores (WMMA / mma.sync)", "tflops", Category::Unknown,
          "Peak speed of the tensor cores -- dedicated units that "
          "multiply whole blocks of numbers in one step rather than one value at "
          "a time.  Each reading is a different input format, and several are one "
@@ -404,31 +397,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "NVFP4 mma.sp 2:4 sparsity requires Blackwell sm_120a or newer! Skipped";
       runComputeKernel(dev, cfg, d);
     }
-  }
 
-  // ---------------------------------------------------------------------
-  // Integer / binary cluster -- each variant opens its own <wmma_*> group
-  // with the proper unit attribute via runComputeKernel; no umbrella tag.
-  // The fp/int split is preserved by the per-variant unit -> category
-  // derivation in the dump pipeline.
-  // ---------------------------------------------------------------------
-
-  if (category != Category::IntCompute)
-    return 0;
-
-  // The same test, reopened for the integer phase: the tensor cores do not
-  // become different hardware because the numbers are whole.  Its readings are
-  // measured in ops, so this opening declares that unit and each carries it.
-  auto test = currentDeviceScope->beginTest(
-      {"wmma", "Tensor cores (WMMA / mma.sync)", "tops", Category::Unknown,
-       "Peak speed of the tensor cores -- dedicated units that "
-       "multiply whole blocks of numbers in one step rather than one value at "
-       "a time.  Each reading is a different input format, and several are one "
-       "format run a second way: with the running total kept narrower, or with "
-       "half the values skipped as known zeros.  Which of them exist at all, "
-       "and how much faster the narrow ones go, is most of what separates one "
-       "generation of NVIDIA hardware from the next.",
-       TestShape::Heterogeneous, "data type"});
+  // Integer cluster -- same test, same scope; each reading carries
+  // its own unit (tops) so the integer rows share the test above.
 
   // INT8 WMMA
   {

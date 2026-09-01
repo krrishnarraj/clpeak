@@ -51,7 +51,7 @@ bool isCdnaFamily(const std::string &base)
 
 int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
 {
-  const bool isInt = category == Category::IntCompute;
+  (void)category;
 
   static const SparseEntry fpEntries[] = {
     {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "tflops",
@@ -79,9 +79,6 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
      "quantized neural networks use."},
   };
 
-  const SparseEntry *entries = isInt ? intEntries : fpEntries;
-  const size_t numEntries = isInt ? (sizeof(intEntries) / sizeof(intEntries[0]))
-                                  : (sizeof(fpEntries) / sizeof(fpEntries[0]));
 
   const bool cdna = isCdnaFamily(archBaseOf(dev.info.archName));
 
@@ -100,11 +97,9 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     return o;
   };
 
-  // One scope for the whole family, not one per entry: the loop below
-  // measures each data type on the same engine, and opening the test
-  // inside it closed and reopened the test once per reading.
+  // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
-    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", entries[0].unit, Category::Unknown,
+    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "tflops", Category::Unknown,
        "The matrix cores with structured sparsity: half the values in each "
        "group of four are known to be zero and are skipped, so the hardware "
        "does twice the useful work per step.  Each reading is a different "
@@ -112,9 +107,9 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
        "the trick is actually worth.",
        TestShape::Heterogeneous, "data type"});
 
-  for (size_t e = 0; e < numEntries; e++)
+  for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)
   {
-    const SparseEntry &se = entries[e];
+    const SparseEntry &se = fpEntries[e];
 
     if (!cdna)
     {
@@ -161,6 +156,59 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     }
 
     // Dense-equivalent work: each sparse op produces a full 2*M*N*Kdense result.
+    const double ops = (double)numBlocks * (double)kPerWave *
+                       2.0 * (double)se.M * (double)se.N * (double)se.Kdense;
+    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    test.emit(se.label, value, unitOpts(se));
+
+    (void)hipFree(outBuf);
+  }
+  for (size_t e = 0; e < sizeof(intEntries)/sizeof(intEntries[0]); e++)
+  {
+    const SparseEntry &se = intEntries[e];
+
+    if (!cdna)
+    {
+      test.skip(se.label, ResultStatus::Unsupported,
+                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", se.description);
+      continue;
+    }
+
+    hipFunction_t fn;
+    if (!dev.getKernel(*se.blob, se.kernelName, fn))
+    {
+      test.skip(se.label, ResultStatus::Unsupported,
+                "Sparse MFMA instruction for this datatype not available on this GPU", unitOpts(se));
+      continue;
+    }
+
+    const uint32_t elemSize = se.isInt ? (uint32_t)sizeof(int) : (uint32_t)sizeof(float);
+    uint64_t bytesPerBlock = (uint64_t)blockSize * elemSize;
+    uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock;
+    uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
+    if (pickBlocks == 0)
+      pickBlocks = 1;
+    uint32_t numBlocks = (uint32_t)pickBlocks;
+
+    void *outBuf = nullptr;
+    if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
+    {
+      test.skip(se.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(se));
+      continue;
+    }
+
+    void *args[1] = {&outBuf};
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    if (us <= 0.0f)
+    {
+      (void)hipFree(outBuf);
+      test.skip(se.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(se));
+      continue;
+    }
+
     const double ops = (double)numBlocks * (double)kPerWave *
                        2.0 * (double)se.M * (double)se.N * (double)se.Kdense;
     float value = (float)(ops * 1.0e6 / us / 1.0e12);

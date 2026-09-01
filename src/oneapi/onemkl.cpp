@@ -39,7 +39,8 @@ static uint32_t pickOnemklGemmDim(const oneapi_device_info_t &info)
 
 int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category category)
 {
-  const bool fpPhase = (category != Category::IntCompute);
+  (void)category;
+  const bool fpPhase = true;
 
   // One note per dtype row, shared by every emit and skip path below.
   const char *fp32Note = "Full 32-bit precision, on the general compute units "
@@ -56,19 +57,8 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
   const char *int8Note = "8-bit whole numbers with 32-bit totals -- the format "
                          "quantized neural networks use.";
 
-  auto test = fpPhase
-    ? currentDeviceScope->beginTest(
+  auto test = currentDeviceScope->beginTest(
         {"onemkl_gemm", "oneMKL GEMM peak", "tflops", Category::Unknown,
-         "Matrix-multiply speed through Intel's own tuned library, on a large "
-         "square problem.  Where the joint_matrix rows show what the hardware "
-         "can do in principle, this shows what shipping code reaches on the "
-         "operation most AI work is built from.  Each reading is a different "
-         "input format.",
-         TestShape::Heterogeneous, "data type"})
-    // The same test, reopened: the library is the same software whether the
-    // numbers are whole or not.
-    : currentDeviceScope->beginTest(
-        {"onemkl_gemm", "oneMKL GEMM peak", "tops", Category::Unknown,
          "Matrix-multiply speed through Intel's own tuned library, on a large "
          "square problem.  Where the joint_matrix rows show what the hardware "
          "can do in principle, this shows what shipping code reaches on the "
@@ -76,28 +66,24 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
          "input format.",
          TestShape::Heterogeneous, "data type"});
 
-  // The integer readings carry their own unit, which is what lets them share
-  // the test with the floating-point ones -- skips included, or an
-  // unsupported int8 row reads as flops.
   auto mklOpts = [&](const char *note) {
     logger::EmitOptions o;
     if (note) o.description = note;
-    if (!fpPhase) o.unit = "tops";
+    return o;
+  };
+  auto intOpts = [&](const char *note) {
+    logger::EmitOptions o;
+    if (note) o.description = note;
+    o.unit = "tops";
     return o;
   };
 
 #ifndef CLPEAK_ONEAPI_HAS_ONEMKL
-  if (fpPhase)
-  {
-    test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp32Note));
-    test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp64Note));
-    test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp16Note));
-    test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(bf16Note));
-  }
-  else
-  {
-    test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(int8Note));
-  }
+  test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp32Note));
+  test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp64Note));
+  test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp16Note));
+  test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(bf16Note));
+  test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time", intOpts(int8Note));
   return 0;
 #else
   namespace mkl = oneapi::mkl;
@@ -197,72 +183,134 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category cate
     // q and its private context are destroyed here.
   };
 
-  if (fpPhase)
-  {
-    measure("fp32", fp32Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+  measure("fp32", fp32Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                         std::int64_t n) {
+    mkl::blas::row_major::gemm(
+      q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+      n, n, n, 1.0f,
+      (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
+  });
+
+  if (dev.info.fp64Supported)
+    measure("fp64", fp64Note, fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                                 std::int64_t n) {
+      mkl::blas::row_major::gemm(
+        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+        n, n, n, 1.0,
+        (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
+    });
+  else
+    test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", mklOpts(fp64Note));
+
+  if (dev.info.fp16Supported)
+    measure("fp16", fp16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
                            std::int64_t n) {
       mkl::blas::row_major::gemm(
         q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-        n, n, n, 1.0f,
-        (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
+        n, n, n, sycl::half(1.0f),
+        (const sycl::half *)dA, n, (const sycl::half *)dB, n,
+        sycl::half(0.0f), (sycl::half *)dC, n);
     });
-
-    if (dev.info.fp64Supported)
-      measure("fp64", fp64Note, fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                                   std::int64_t n) {
-        mkl::blas::row_major::gemm(
-          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          n, n, n, 1.0,
-          (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
-      });
-    else
-      test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", mklOpts(fp64Note));
-
-    if (dev.info.fp16Supported)
-      measure("fp16", fp16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                             std::int64_t n) {
-        mkl::blas::row_major::gemm(
-          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          n, n, n, sycl::half(1.0f),
-          (const sycl::half *)dA, n, (const sycl::half *)dB, n,
-          sycl::half(0.0f), (sycl::half *)dC, n);
-      });
-    else
-      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", mklOpts(fp16Note));
-
-    // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
-    // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
-#if defined(CLPEAK_ONEMKL_HAS_BF16)
-    if (dev.info.bf16Supported)
-      measure("bf16", bf16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                             std::int64_t n) {
-        using bfloat16 = sycl::ext::oneapi::bfloat16;
-        mkl::blas::row_major::gemm(
-          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          n, n, n, 1.0f,
-          (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
-      });
-    else
-      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", mklOpts(bf16Note));
-#else
-    test.skip("bf16", ResultStatus::Unsupported,
-              "SYCL bfloat16 header not available in this oneAPI toolchain", mklOpts(bf16Note));
-#endif
-  }
   else
+    test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", mklOpts(fp16Note));
+
+  // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
+  // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
+#if defined(CLPEAK_ONEMKL_HAS_BF16)
+  if (dev.info.bf16Supported)
+    measure("bf16", bf16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
+                           std::int64_t n) {
+      using bfloat16 = sycl::ext::oneapi::bfloat16;
+      mkl::blas::row_major::gemm(
+        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
+        n, n, n, 1.0f,
+        (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
+    });
+  else
+    test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", mklOpts(bf16Note));
+#else
+  test.skip("bf16", ResultStatus::Unsupported,
+            "SYCL bfloat16 header not available in this oneAPI toolchain", mklOpts(bf16Note));
+#endif
+  // INT8: s8 x u8 -> s32 via gemm_bias
   {
-    // INT8: s8 x u8 -> s32 via gemm_bias (the oneMKL integer GEMM entrypoint).
-    // Zero offsets / zero bias -- we only measure throughput, so the numeric
-    // result is irrelevant.  Reported in tops.  Gate on XMX (Arc/PVC/Battlemage
-    // carry the int8 matmul path); on devices without it gemm_bias throws and
-    // measure() reports a clean skip.
+    auto intMeasure = [&](const char *label, const char *note, std::int64_t dim, auto gemmFn) {
+      const size_t cells = (size_t)dim * (size_t)dim;
+      const double flops = 2.0 * (double)dim * (double)dim * (double)dim;
+      sycl::queue q = [&]() -> sycl::queue {
+        try
+        {
+          return sycl::queue(sycl::context(dev.dev), dev.dev,
+                             sycl::property::queue::in_order{});
+        }
+        catch (const std::exception &e)
+        {
+          CLPEAK_VLOG("oneMKL %s: private context create failed (%s); shared queue\n",
+                      label, e.what());
+          return dev.stream;
+        }
+      }();
+
+      void *dA  = sycl::malloc_device(cells * sizeof(double), q);
+      void *dB  = sycl::malloc_device(cells * sizeof(double), q);
+      void *dC  = sycl::malloc_device(cells * sizeof(double), q);
+      void *dCo = sycl::malloc_device(sizeof(std::int32_t), q);
+      auto freeAll = [&]() {
+        if (dA)  { try { sycl::free(dA,  q); } catch (...) {} }
+        if (dB)  { try { sycl::free(dB,  q); } catch (...) {} }
+        if (dC)  { try { sycl::free(dC,  q); } catch (...) {} }
+        if (dCo) { try { sycl::free(dCo, q); } catch (...) {} }
+      };
+      if (!dA || !dB || !dC || !dCo)
+      {
+        test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", intOpts(note));
+        freeAll();
+        return;
+      }
+      try { q.memset(dA,  0x3f, cells * sizeof(double)).wait(); } catch (...) {}
+      try { q.memset(dB,  0x3f, cells * sizeof(double)).wait(); } catch (...) {}
+      try { q.memset(dC,  0,    cells * sizeof(double)).wait(); } catch (...) {}
+      try { q.memset(dCo, 0,    sizeof(std::int32_t)).wait();   } catch (...) {}
+
+      auto runBatch = [&](unsigned int n) -> double {
+        try
+        {
+          auto t0 = std::chrono::high_resolution_clock::now();
+          for (unsigned int i = 0; i < n; i++)
+            gemmFn(q, dA, dB, dC, dCo, dim);
+          q.wait_and_throw();
+          auto t1 = std::chrono::high_resolution_clock::now();
+          auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+          return (double)ns / 1000.0 / (double)n;
+        }
+        catch (const std::exception &e)
+        {
+          CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
+          return -1.0;
+        }
+      };
+
+      const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
+      double probeUs = runBatch(warm);
+      if (probeUs <= 0.0)
+        test.skip(label, ResultStatus::Error, "timing probe failed", intOpts(note));
+      else
+      {
+        unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
+        double meanUs = runBatch(iters);
+        if (meanUs <= 0.0)
+          test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", intOpts(note));
+        else
+          test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), intOpts(note));
+      }
+      freeAll();
+    };
     if (!dev.info.xmxSupported)
       test.skip("int8", ResultStatus::Unsupported,
-                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", mklOpts(int8Note));
+                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", intOpts(int8Note));
     else
-      measure("int8", int8Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
+      intMeasure("int8", int8Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
                              std::int64_t n) {
-        // gemm_bias with offset::fix reads a single int32 bias from `co`.
         mkl::blas::row_major::gemm_bias(
           q, mkl::transpose::nontrans, mkl::transpose::nontrans,
           mkl::offset::fix,

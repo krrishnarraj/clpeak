@@ -44,11 +44,6 @@ public:
         return !clpeak::cancelRequested() &&
                isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
     }
-
-    bool isAllowedAs(Benchmark b, Category c) const {
-        return !clpeak::cancelRequested() &&
-               isCategoryEnabled(c) && isTestEnabled(b);
-    }
     // --------------------------------------------------------------------
 
     virtual ~Peak() = default;

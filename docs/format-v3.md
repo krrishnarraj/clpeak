@@ -37,7 +37,7 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
   "invocation": {
     "argv": ["clpeak", "-o", "run.clpeak.json"],
     "target_time_us": 500000, "target_time_us_cpu": 2000000, "warmup": 2,
-    "categories": ["fp_compute", "bandwidth", "latency"]
+    "categories": ["compute", "bandwidth", "latency"]
   },
 
   "notes": [
@@ -53,7 +53,7 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
     "tests": [{
       "id": "cublas_gemm_fp",
       "title": "cuBLASLt GEMM peak",
-      "category": "fp_compute",
+      "category": "compute",
       "shape": "heterogeneous",
       "axis": "data type",
       "direction": "higher_is_better",
@@ -114,7 +114,7 @@ free-form facts the backend chose to report (compute units, VRAM, clocks).
 | `id` | canonical tag, stable across machines and runs |
 | `title` | human-readable name |
 | `variant` | runtime qualifier that is *not* part of the identity — a CPU ISA (`AVX2+FMA`), a GPU arch, a library version. Two variants of one test are two tests; their key is `id@variant` |
-| `category` | `fp_compute` \| `int_compute` \| `crypto` \| `string` \| `bandwidth` \| `latency` \| `ai` \| `unknown` |
+| `category` | `compute` \| `crypto` \| `string` \| `bandwidth` \| `latency` \| `ai` \| `unknown` |
 | `shape` | `homogeneous` \| `heterogeneous` — see below |
 | `axis` | what varies across the readings (see below). Optional |
 | `direction` | `higher_is_better` \| `lower_is_better` |

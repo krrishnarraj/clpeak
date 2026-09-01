@@ -226,9 +226,9 @@ static std::string jmNote(const JmTile &t)
   return s;
 }
 
-// True when this accumulator type makes the combination an integer one.  The
-// benchmark reports integer rows in TOPS under the IntCompute category and
-// floating-point rows in TFLOPS under FpCompute.
+// True when this accumulator type makes the combination an integer one.
+// The benchmark reports integer rows in TOPS and floating-point rows in TFLOPS
+// within the single Compute category (integer rows carry a per-reading unit).
 static bool jmIsIntAcc(syclex::matrix_type t)
 {
   using mt = syclex::matrix_type;
@@ -498,13 +498,11 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
 
 int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category)
 {
-  const bool isInt = (category == Category::IntCompute);
-  // One test across both phases: the engine does not become different
-  // hardware because the numbers are whole, and the integer readings carry
-  // their own unit.
+  (void)category;
+  // One test for all data types -- integer readings carry their own unit.
   auto test = currentDeviceScope->beginTest(
     {"joint_matrix", "joint_matrix peak",
-     isInt ? "tops" : "tflops", Category::Unknown,
+     "tflops", Category::Unknown,
      "Peak speed of Intel's XMX matrix engine -- dedicated units that multiply "
      "whole blocks of numbers in one step rather than one value at a time.  "
      "One reading per input type, sign combination and tile shape the device "
@@ -512,12 +510,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
      "hardware.",
      TestShape::Heterogeneous, "data type"});
 
-  // The integer readings are measured in ops, not flops.  Carrying that on the
-  // reading is what lets both phases share one test.
   auto jmOpts = [&](const JmTile &t) {
     logger::EmitOptions o;
     o.description = jmNote(t);
-    if (isInt) o.unit = "tops";
+    if (jmIsIntAcc(t.ct)) o.unit = "tops";
     return o;
   };
 
@@ -527,22 +523,12 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
                          "quantized neural networks use.";
 
-  // Nothing to enumerate (no toolchain support, no matrix engine, no table):
-  // record the row set a device with an engine would have produced, so the
-  // reader sees what was looked for rather than an empty test.
   auto skipEverything = [&](ResultStatus status, const char *reason) {
-    if (isInt)
-    {
-      logger::EmitOptions o;
-      o.description = int8Note;
-      o.unit = "tops";
-      // jmBaseName spells the signed/signed pair "int8"; the mixed-sign
-      // forms only exist once a table has been enumerated, which by
-      // definition has not happened here.
-      test.skip("int8", status, reason, o);
-    }
-    else
-      test.skipAll({"bf16", "fp16", "tf32"}, status, reason);
+    test.skip("bf16", status, reason);
+    test.skip("fp16", status, reason);
+    test.skip("tf32", status, reason);
+    logger::EmitOptions o; o.description = int8Note; o.unit = "tops";
+    test.skip("int8", status, reason, o);
   };
 
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
@@ -555,10 +541,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   bool combosThrew = false;
   const auto combos = queryCombos(dev.dev, combosThrew);
 
-  // Ground-truth diagnostic (verbose only).  Dumped once, on the FP pass, and
-  // BEFORE the xmxSupported gate, so even a device we mis-classify still
-  // reveals its real table under --verbose.
-  if (!isInt && !combosThrew)
+  if (!combosThrew)
     dumpMatrixCombinations(combos);
 
   if (!dev.info.xmxSupported)
@@ -568,18 +551,24 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     return 0;
   }
 
-  std::vector<JmTile> tiles = resolveTiles(combos, isInt);
-  if (tiles.empty())
+  std::vector<JmTile> tilesFp = resolveTiles(combos, false);
+  std::vector<JmTile> tilesInt = resolveTiles(combos, true);
+  bool haveFp = !tilesFp.empty();
+  bool haveInt = !tilesInt.empty();
+  if (!haveFp && !haveInt)
   {
     skipEverything(ResultStatus::Unsupported,
                    combosThrew
                      ? "device's matrix-combination table could not be queried"
-                     : (isInt ? "device advertises no integer matrix combinations"
-                              : "device advertises no floating-point matrix combinations"));
+                     : "device advertises no matrix combinations");
     return 0;
   }
-  addMissingCanonical(tiles, isInt);
-  finalizeTiles(tiles);
+  if (haveFp) { addMissingCanonical(tilesFp, false); finalizeTiles(tilesFp); }
+  if (haveInt) { addMissingCanonical(tilesInt, true); finalizeTiles(tilesInt); }
+  std::vector<JmTile> tiles;
+  tiles.reserve(tilesFp.size() + tilesInt.size());
+  tiles.insert(tiles.end(), tilesFp.begin(), tilesFp.end());
+  tiles.insert(tiles.end(), tilesInt.begin(), tilesInt.end());
 
   // The work-group is the device's widest sub-group, but IGC decides the SIMD
   // width it compiles at, so a work-group may end up holding several sub-groups
@@ -644,7 +633,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     if (blocks == 0) blocks = 1;
     const uint32_t numBlocks = (uint32_t)blocks;
 
-    const float us = isInt
+    const float us = jmIsIntAcc(t.ct)
         ? runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize,
                    cfg.targetTimeUs, forced, t)
         : runJmFp (*this, dev, (float *)out, sgCount, numBlocks, blockSize,

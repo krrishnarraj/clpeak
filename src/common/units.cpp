@@ -112,8 +112,8 @@ UnitInfo unitInfo(const std::string &token)
 
 Category categoryFromUnit(const std::string &unit)
 {
-    if (unit == "gflops" || unit == "tflops") return Category::FpCompute;
-    if (unit == "gops"   || unit == "tops")   return Category::IntCompute;
+    if (unit == "gflops" || unit == "tflops") return Category::Compute;
+    if (unit == "gops"   || unit == "tops")   return Category::Compute;
     if (unit == "gbps")                       return Category::Bandwidth;
     if (unit == "us")                         return Category::Latency;
     return Category::Unknown;

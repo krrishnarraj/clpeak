@@ -109,9 +109,9 @@ void main() {
       final config = RunConfig.allDevices(catalog);
       config.categories
         ..clear()
-        ..addAll({BenchCategory.fpCompute, BenchCategory.bandwidth});
+        ..addAll({BenchCategory.compute, BenchCategory.bandwidth});
       final args = config.toArgs(catalog);
-      expect(args, containsAll(['--fp-compute', '--bandwidth']));
+      expect(args, containsAll(['--compute', '--bandwidth']));
       expect(args, isNot(contains('--crypto')));
     });
 
@@ -136,7 +136,7 @@ void main() {
     Map<String, dynamic> testHeader({
       String test = 'single_precision_compute',
       String title = 'Single-precision compute',
-      String category = 'fp_compute',
+      String category = 'compute',
       String shape = 'homogeneous',
       String unit = 'GFLOPS',
       String quantity = 'flops',
@@ -301,7 +301,7 @@ void main() {
     TestHeader header({
       String id = 'single_precision_compute',
       String title = 'Single-precision compute',
-      BenchCategory category = BenchCategory.fpCompute,
+      BenchCategory category = BenchCategory.compute,
       TestShape shape = TestShape.homogeneous,
       Direction direction = Direction.higherIsBetter,
       String variant = '',
@@ -352,7 +352,7 @@ void main() {
       final run = doc.runs.first;
       expect(run.categories, hasLength(2));
       final fp = run.categories.first;
-      expect(fp.category, BenchCategory.fpCompute);
+      expect(fp.category, BenchCategory.compute);
       expect(fp.tests.single.metrics, hasLength(2));
       expect(fp.tests.single.peakValue, 120);
     });
@@ -548,7 +548,7 @@ void main() {
                 'id': 'single_precision_compute',
                 'title': 'Single-precision compute',
                 'variant': 'NEON',
-                'category': 'fp_compute',
+                'category': 'compute',
                 'shape': 'homogeneous',
                 'direction': 'higher_is_better',
                 'quantity': 'flops',
@@ -566,7 +566,7 @@ void main() {
               {
                 'id': 'cpu_matrix_fp',
                 'title': 'CPU matrix engine',
-                'category': 'fp_compute',
+                'category': 'compute',
                 'shape': 'heterogeneous',
                 'direction': 'higher_is_better',
                 'quantity': 'flops',

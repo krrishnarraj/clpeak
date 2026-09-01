@@ -73,8 +73,7 @@ enum class Benchmark : unsigned int {
 
 // Test category — drives the run-order phase loop on every backend.
 enum class Category {
-    FpCompute,
-    IntCompute,
+    Compute,      // all compute (floating-point + integer)
     Crypto,       // fixed-function crypto/hash silicon (CPU: AES/SHA/CRC)
     String,       // string/text processing (CPU: byte scan, UTF-8 validation)
     Bandwidth,
@@ -83,10 +82,7 @@ enum class Category {
     Unknown
 };
 
-// Map every benchmark to its primary category.  Tensor / vendor-library
-// tests that span both fp and int variants (Wmma, CoopMatrix, SimdgroupMatrix,
-// Cublas, MpsGemm, Rocwmma, Mfma, Rocblas, Amx) are listed under their fp form here; backends iterate
-// them again in the int_compute phase emitting only int variants there.
+// Map every benchmark to its primary category.
 inline Category categoryOf(Benchmark b)
 {
     switch (b) {
@@ -108,6 +104,13 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeBF16:
     case Benchmark::ComputeFP8DP:
     case Benchmark::ComputeDivSqrt:
+    case Benchmark::ComputeInt:
+    case Benchmark::ComputeIntFast:
+    case Benchmark::ComputeChar:
+    case Benchmark::ComputeShort:
+    case Benchmark::ComputeInt8DP:
+    case Benchmark::ComputeInt16DP:
+    case Benchmark::ComputeIntDiv:
     case Benchmark::Wmma:
     case Benchmark::CoopMatrix:
     case Benchmark::SimdgroupMatrix:
@@ -125,16 +128,7 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::OnnxGemm:
     case Benchmark::OnnxNumericError:
     case Benchmark::OnnxConv:
-        return Category::FpCompute;
-
-    case Benchmark::ComputeInt:
-    case Benchmark::ComputeIntFast:
-    case Benchmark::ComputeChar:
-    case Benchmark::ComputeShort:
-    case Benchmark::ComputeInt8DP:
-    case Benchmark::ComputeInt16DP:
-    case Benchmark::ComputeIntDiv:
-        return Category::IntCompute;
+        return Category::Compute;
 
     case Benchmark::CryptoAes:
     case Benchmark::CryptoSha256:

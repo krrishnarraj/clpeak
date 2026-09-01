@@ -190,7 +190,7 @@ int CpuPeak::runAll()
   if (forceIters)
     cfg.kernelLatencyIters = specifiedIters;
 
-  // ---- FP compute ----
+  // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ----
   if (isAllowed(Benchmark::ComputeSP))   runComputeSP(cfg);
   if (isAllowed(Benchmark::ComputeHP))   runComputeHP(cfg);
   if (isAllowed(Benchmark::ComputeDP))   runComputeDP(cfg);
@@ -198,20 +198,15 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeBF16)) runComputeBF16(cfg);
   if (isAllowed(Benchmark::ComputeFP8DP)) runComputeFP8DP(cfg);
   if (isAllowed(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
-  if (isAllowedAs(Benchmark::Amx, Category::FpCompute))
-    runCpuMatrix(cfg, Category::FpCompute);
-#ifdef __APPLE__
-  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
-#endif
-  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
-
-  // ---- INT compute ----
   if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
   if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
   if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
   if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
-  if (isAllowedAs(Benchmark::Amx, Category::IntCompute))
-    runCpuMatrix(cfg, Category::IntCompute);
+  if (isAllowed(Benchmark::Amx))         runCpuMatrix(cfg, Category::Compute);
+#ifdef __APPLE__
+  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
+#endif
+  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
 
   // ---- Crypto (dedicated AES/SHA/CRC silicon; GB/s) ----
   if (isAllowed(Benchmark::CryptoAes))    runCryptoAes(cfg);

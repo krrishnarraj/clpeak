@@ -426,7 +426,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg, Category category)
 {
   (void)cfg;
-  const bool isInt = (category == Category::IntCompute);
+  (void)category;
 
   static const Variant kFpVariants[] = {
       {ONNX_DT_FLOAT, false, "fp32",
@@ -489,16 +489,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "TOPS figure is quoted for."},
   };
 
-  const Variant *variants = isInt ? kIntVariants : kFpVariants;
-  const size_t nVariants = isInt ? 1
-                                 : sizeof(kFpVariants) / sizeof(kFpVariants[0]);
-
   auto test = currentDeviceScope->beginTest(
-      // One test across both phases: the same single-operation model, run on
-      // whichever formats the provider accepts.  The integer readings carry
-      // their own unit, which is what lets them share it.
       {"onnx_gemm", "ONNX MatMul peak",
-       isInt ? "tops" : "tflops",
+       "tflops",
        Category::Unknown,
        "Matrix-multiply speed through ONNX Runtime on this execution "
        "provider, using a single-operation model with constant weights.  "
@@ -510,16 +503,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "Each reading is a different input format.",
        TestShape::Heterogeneous, "data type"});
 
-  // ---- Sweep every size, keep each datatype's best ----------------------
-  for (size_t i = 0; i < nVariants; i++)
-  {
-    if (clpeak::cancelRequested())
-      break;
-    const Variant &v = variants[i];
+  // ---- Sweep every variant (all data types in one test) ---------------
+  // Helper to run one variant's sweep
+  auto runVariant = [&](const Variant &v) {
+    const bool isInt = (v.dtype == ONNX_DT_INT8 && v.qdq);
 
-    // A datatype the runtime cannot be asked for fails to *load*, with a
-    // message about opsets or a rewritten graph that says nothing about the
-    // datatype.  Name it instead.
     if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
     {
       logger::EmitOptions o;
@@ -527,7 +515,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (isInt)
         o.unit = "tops";
       test.skip(v.label, ResultStatus::Unsupported, why, o);
-      continue;
+      return;
     }
 
     double best = 0.0;
@@ -638,7 +626,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                             v.label +
                             " rate (ran: " + tried + ")",
                   o);
-        continue;
+        return;
       }
     }
 
@@ -866,6 +854,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "no supported datatype" : firstErr, o);
     }
+  };
+  for (size_t i = 0; i < sizeof(kFpVariants)/sizeof(kFpVariants[0]); i++)
+  {
+    if (clpeak::cancelRequested()) break;
+    runVariant(kFpVariants[i]);
+  }
+  for (size_t i = 0; i < sizeof(kIntVariants)/sizeof(kIntVariants[0]); i++)
+  {
+    if (clpeak::cancelRequested()) break;
+    runVariant(kIntVariants[i]);
   }
 
   test.end();

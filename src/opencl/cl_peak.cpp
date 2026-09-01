@@ -148,7 +148,7 @@ int clPeak::runAll()
         cl_command_queue_properties queueCreateProps = supportsProfilingQueue ? CL_QUEUE_PROFILING_ENABLE : 0;
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], queueCreateProps);
 
-        // ---- Phase 1: floating-point compute ---------------------------
+        // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "gflops",
@@ -182,7 +182,6 @@ int clPeak::runAll()
                        "pattern AI code uses.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
-        // ---- Phase 2: integer compute ----------------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute", "integer_compute",
                        "compute_integer", "int", "gops",

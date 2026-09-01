@@ -174,6 +174,7 @@ int RocmPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
+    // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (isAllowed(Benchmark::ComputeSP))
       runComputeSP(dev, cfg);
     if (isAllowed(Benchmark::ComputeHP))
@@ -184,34 +185,22 @@ int RocmPeak::runAll()
       runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))
       runComputeBF16(dev, cfg);
-    if (isAllowedAs(Benchmark::Wmma, Category::FpCompute))
-      runWmma(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Rocwmma, Category::FpCompute))
-      runRocwmma(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Mfma, Category::FpCompute))
-      runMfma(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Mfma, Category::FpCompute))
-      runSparseMfma(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Rocblas, Category::FpCompute))
-      runRocblas(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Rocblas, Category::FpCompute))
-      runHipblasLt(dev, cfg);
-
     if (isAllowed(Benchmark::ComputeInt))
       runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-
-    if (isAllowedAs(Benchmark::Wmma, Category::IntCompute))
-      runWmma(dev, cfg, Category::IntCompute);
-    if (isAllowedAs(Benchmark::Rocwmma, Category::IntCompute))
-      runRocwmma(dev, cfg, Category::IntCompute);
-    if (isAllowedAs(Benchmark::Mfma, Category::IntCompute))
-      runMfma(dev, cfg, Category::IntCompute);
-    if (isAllowedAs(Benchmark::Mfma, Category::IntCompute))
-      runSparseMfma(dev, cfg, Category::IntCompute);
-    if (isAllowedAs(Benchmark::Rocblas, Category::IntCompute))
-      runRocblas(dev, cfg, Category::IntCompute);
+    if (isAllowed(Benchmark::Wmma))
+      runWmma(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::Rocwmma))
+      runRocwmma(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::Mfma))
+      runMfma(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::Mfma))
+      runSparseMfma(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::Rocblas))
+      runRocblas(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::Rocblas))
+      runHipblasLt(dev, cfg);
 
 
     if (isAllowed(Benchmark::GlobalBW))

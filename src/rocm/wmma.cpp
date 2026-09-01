@@ -50,7 +50,7 @@ bool isRdnaWmmaFamily(const std::string &base)
 
 int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
 {
-  const bool isInt = category == Category::IntCompute;
+  (void)category;
 
   static const WmmaEntry fpEntries[] = {
     {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "tflops",
@@ -88,10 +88,6 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
      "fast on cheaper hardware."},
   };
 
-  const WmmaEntry *entries = isInt ? intEntries : fpEntries;
-  const size_t numEntries = isInt ? (sizeof(intEntries) / sizeof(intEntries[0]))
-                                  : (sizeof(fpEntries) / sizeof(fpEntries[0]));
-
   const bool rdna = isRdnaWmmaFamily(archBaseOf(dev.info.archName));
 
   // WMMA builtins are wave32 (_w32). HIP defaults to wave32 on RDNA; if a part
@@ -113,11 +109,9 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     return o;
   };
 
-  // One scope for the whole family, not one per entry: the loop below
-  // measures each data type on the same engine, and opening the test
-  // inside it closed and reopened the test once per reading.
+  // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
-    {"wmma", "Matrix cores (WMMA)", entries[0].unit, Category::Unknown,
+    {"wmma", "Matrix cores (WMMA)", "tflops", Category::Unknown,
        "Peak speed of the matrix cores -- dedicated units that multiply whole "
        "16x16 blocks of numbers in one step rather than one value at a time. "
        "Each reading is a different input format; which of them the hardware "
@@ -126,9 +120,9 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
        "(gfx12) only -- the compute cards use MFMA instead.",
        TestShape::Heterogeneous, "data type"});
 
-  for (size_t e = 0; e < numEntries; e++)
+  for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)
   {
-    const WmmaEntry &me = entries[e];
+    const WmmaEntry &me = fpEntries[e];
 
     if (!rdna)
     {
@@ -182,6 +176,66 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     }
 
     // Each wave issues kWmmaPerWave WMMA ops, each doing 2*M*N*K flops/ops.
+    const double ops = (double)numBlocks * (double)kWmmaPerWave *
+                       2.0 * (double)me.M * (double)me.N * (double)me.K;
+    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    test.emit(me.label, value, unitOpts(me));
+
+    (void)hipFree(outBuf);
+  }
+  for (size_t e = 0; e < sizeof(intEntries)/sizeof(intEntries[0]); e++)
+  {
+    const WmmaEntry &me = intEntries[e];
+
+    if (!rdna)
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; "
+                "absent on this architecture", me.description);
+      continue;
+    }
+    if (!wave32)
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA peak measured only in wave32 mode on this build", unitOpts(me));
+      continue;
+    }
+
+    hipFunction_t fn;
+    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA instruction for this datatype not available on this GPU", unitOpts(me));
+      continue;
+    }
+
+    const uint32_t elemSize = me.isInt ? (uint32_t)sizeof(int) : (uint32_t)sizeof(float);
+    uint64_t bytesPerBlock = (uint64_t)blockSize * elemSize;
+    uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock;
+    uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
+    if (pickBlocks == 0)
+      pickBlocks = 1;
+    uint32_t numBlocks = (uint32_t)pickBlocks;
+
+    void *outBuf = nullptr;
+    if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
+    {
+      test.skip(me.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(me));
+      continue;
+    }
+
+    void *args[1] = {&outBuf};
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    if (us <= 0.0f)
+    {
+      (void)hipFree(outBuf);
+      test.skip(me.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(me));
+      continue;
+    }
+
     const double ops = (double)numBlocks * (double)kWmmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
     float value = (float)(ops * 1.0e6 / us / 1.0e12);

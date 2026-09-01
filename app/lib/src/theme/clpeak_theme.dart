@@ -290,8 +290,7 @@ class ClpeakTheme {
   static Color categoryColor(BenchCategory c, {Brightness? brightness}) =>
       brightness == Brightness.light
           ? switch (c) {
-              BenchCategory.fpCompute => const Color(0xFF1F63C8), // blue
-              BenchCategory.intCompute => const Color(0xFF1F63C8),
+              BenchCategory.compute => const Color(0xFF1F63C8), // blue
               BenchCategory.crypto => const Color(0xFF1F63C8),
               BenchCategory.string => const Color(0xFF1F63C8),
               BenchCategory.bandwidth => const Color(0xFF1F63C8),
@@ -300,8 +299,7 @@ class ClpeakTheme {
               BenchCategory.unknown => const Color(0xFF1F63C8),
             }
           : switch (c) {
-              BenchCategory.fpCompute => const Color(0xFF4FA8FF), // blue
-              BenchCategory.intCompute => const Color(0xFF4FA8FF),
+              BenchCategory.compute => const Color(0xFF4FA8FF), // blue
               BenchCategory.crypto => const Color(0xFF4FA8FF),
               BenchCategory.string => const Color(0xFF4FA8FF),
               BenchCategory.bandwidth => const Color(0xFF4FA8FF),
@@ -311,8 +309,7 @@ class ClpeakTheme {
             };
 
   static IconData categoryIcon(BenchCategory c) => switch (c) {
-        BenchCategory.fpCompute => Icons.speed,
-        BenchCategory.intCompute => Icons.tag,
+        BenchCategory.compute => Icons.speed,
         BenchCategory.crypto => Icons.lock_outline,
         BenchCategory.string => Icons.text_fields,
         BenchCategory.bandwidth => Icons.swap_vert,

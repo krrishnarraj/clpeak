@@ -28,8 +28,7 @@ enum ResultStatus {
 
 /// The canonical categories (stable vocabulary; tests within them churn).
 enum BenchCategory {
-  fpCompute('fp_compute', 'FP Compute'),
-  intCompute('int_compute', 'Integer Compute'),
+  compute('compute', 'Compute'),
   crypto('crypto', 'Crypto'),
   string('string', 'String'),
   bandwidth('bandwidth', 'Bandwidth'),
@@ -47,7 +46,7 @@ enum BenchCategory {
       (c) => c.tag == tag,
       orElse: () => BenchCategory.unknown);
 
-  /// CLI flag name, e.g. "fp-compute" → --fp-compute / --no-fp-compute.
+  /// CLI flag name, e.g. "compute" → --compute / --no-compute.
   String get flag => tag.replaceAll('_', '-');
 
   /// The user-selectable categories (excludes the `unknown` sentinel).
