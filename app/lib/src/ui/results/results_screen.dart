@@ -129,7 +129,7 @@ class _ExportButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return CIconButton(
       icon: Icons.ios_share,
-      tooltip: 'Export XML',
+      tooltip: 'Export',
       onPressed: () async {
         final history = context.read<RunHistoryStore>();
         final export = context.read<ExportService>();

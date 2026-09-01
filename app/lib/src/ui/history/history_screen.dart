@@ -332,7 +332,7 @@ class _Menu extends StatelessWidget {
         PopupMenuItem(
             value: 'export',
             height: 38,
-            child: Text('Export XML', style: t.monoSmall)),
+            child: Text('Export', style: t.monoSmall)),
         PopupMenuItem(
             value: 'delete',
             height: 38,
