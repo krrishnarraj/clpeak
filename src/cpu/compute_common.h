@@ -43,7 +43,7 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
 
   auto giga = [](double opsPerIter, int n, double meanUs) -> float {
     if (meanUs <= 0.0) return -1.0f;
-    return (float)(opsPerIter * (double)n / (meanUs * 1e3));
+    return (float)(opsPerIter * (double)n / (meanUs * 1e-6));
   };
 
   // ST/MT mean the same thing in every test routed through this runner, so the

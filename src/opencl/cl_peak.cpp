@@ -151,7 +151,7 @@ int clPeak::runAll()
         // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute", "single_precision_compute",
-                       "compute_sp", "float", "gflops",
+                       "compute_sp", "float", "flops",
                        "Peak arithmetic speed of the device's compute units on 32-bit "
                        "fractional numbers -- the ordinary float type.  Nothing "
                        "touches memory, so only the arithmetic units limit the rate.",
@@ -159,7 +159,7 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
                        "Half-precision compute", "half_precision_compute",
-                       "compute_hp", "half", "gflops",
+                       "compute_hp", "half", "flops",
                        "Peak arithmetic speed on 16-bit fractional numbers -- half "
                        "the size of a normal float, and what graphics and on-device "
                        "AI mostly run on.",
@@ -167,7 +167,7 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute", "double_precision_compute",
-                       "compute_dp", "double", "gflops",
+                       "compute_dp", "double", "flops",
                        "Peak arithmetic speed on 64-bit fractional numbers, the "
                        "high-accuracy type scientific computing relies on.  Consumer "
                        "graphics parts deliberately run these many times slower than "
@@ -176,7 +176,7 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
                        "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
-                       "compute_mp", "mp", "gflops",
+                       "compute_mp", "mp", "flops",
                        "Peak speed when the device multiplies 16-bit numbers but keeps "
                        "the running total in 32 bits -- the accuracy-preserving "
                        "pattern AI code uses.",
@@ -184,7 +184,7 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute", "integer_compute",
-                       "compute_integer", "int", "gops",
+                       "compute_integer", "int", "ops",
                        "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                        "indexing, addressing and bit manipulation, which kernels do "
                        "alongside their fractional maths.",
@@ -192,7 +192,7 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
                        "Integer compute Fast 24bit", "integer_compute_fast",
-                       "compute_intfast", "int", "gops",
+                       "compute_intfast", "int", "ops",
                        "The same integer maths restricted to 24-bit values, which "
                        "some devices multiply on their faster floating-point hardware "
                        "instead.  Where this beats the plain integer row, the full "
@@ -201,7 +201,7 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
                        "Integer char (8bit) compute", "integer_compute_char",
-                       "compute_char", "char", "gops",
+                       "compute_char", "char", "ops",
                        "Peak speed on 8-bit whole numbers, the smallest integer type "
                        "-- worth knowing because image and quantized-AI work is full "
                        "of them.",
@@ -209,14 +209,14 @@ int clPeak::runAll()
 
         runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
                        "Integer short (16bit) compute", "integer_compute_short",
-                       "compute_short", "short", "gops",
+                       "compute_short", "short", "ops",
                        "Peak speed on 16-bit whole numbers -- the middle size, "
                        "between the 8-bit and 32-bit rows.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
         runComputeTest(queue, int8DpProg, devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute", "integer_compute_int8_dp",
-                       "compute_int8_dp", "int8_dp", "gops",
+                       "compute_int8_dp", "int8_dp", "ops",
                        "Peak speed of the 8-bit dot-product instruction, which "
                        "multiplies four pairs of small whole numbers and sums them in "
                        "one step -- the workhorse of quantized (compressed) neural "
@@ -235,7 +235,7 @@ int clPeak::runAll()
         else if (isAllowed(Benchmark::KernelLatency))
         {
           auto test = deviceScope.beginTest(
-            {"kernel_launch_latency", "Kernel launch latency", "us",
+            {"kernel_launch_latency", "Kernel launch latency", "s",
              Category::Unknown,
              "The overhead of asking the device to do anything at all, measured "
              "with a kernel that does no work.  It is what small, frequent jobs "

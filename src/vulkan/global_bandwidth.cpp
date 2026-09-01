@@ -26,7 +26,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   logger::TestSpec testSpec;
   testSpec.tag = "global_memory_bandwidth";
   testSpec.display = "Global memory bandwidth";
-  testSpec.unit = "gbps";
+  testSpec.unit = "bps";
   testSpec.description =
       "How many bytes per second the device can stream out of its main memory, "
       "reading a buffer far too large to cache.  Each reading fetches a "
@@ -222,7 +222,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
-    float gbps = ((float)numItems * sizeof(float)) / timed / 1e3f;
+    float gbps = ((float)numItems * sizeof(float)) / timed * 1e6f;
     test.emit(key, gbps, vkWidthNote(v.width));
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }

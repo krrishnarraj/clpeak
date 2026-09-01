@@ -138,9 +138,8 @@ void main() {
       String title = 'Single-precision compute',
       String category = 'compute',
       String shape = 'homogeneous',
-      String unit = 'GFLOPS',
+      String unit = 'FLOPS',
       String quantity = 'flops',
-      double scale = 1e9,
       String direction = 'higher_is_better',
       String variant = '',
       String axis = '',
@@ -156,7 +155,6 @@ void main() {
           'direction': direction,
           'quantity': quantity,
           'unit': unit,
-          'scale': scale,
           'desc': desc,
         };
 
@@ -172,9 +170,8 @@ void main() {
           title: 'Memory latency (pointer-chase)',
           category: 'latency',
           shape: 'heterogeneous',
-          unit: 'ns',
+          unit: 's',
           quantity: 'seconds',
-          scale: 1e-9,
           direction: 'lower_is_better',
           axis: 'cache level',
           desc: 'How long the core waits for one memory read.',
@@ -243,7 +240,6 @@ void main() {
         'value': 74.2,
         'unit': 'TOPS',
         'quantity': 'ops',
-        'scale': 1e12,
       });
       final m = (e as MetricEvent).metric;
       expect(m.units, isNotNull);
@@ -283,8 +279,7 @@ void main() {
         ...testHeader(
             test: 'coopmat',
             title: 'Cooperative matrix',
-            unit: 'TFLOPS',
-            scale: 1e12),
+            unit: 'FLOPS'),
         'metrics': ['fp16', 'bf16'],
         'status': 'unsupported',
         'reason': 'requires M3+',
@@ -308,7 +303,7 @@ void main() {
       String axis = '',
       String description = '',
       Units units = const Units(
-          symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9),
+          symbol: 'FLOPS', quantity: Quantity.flops),
     }) =>
         TestHeader(
           id: id,
@@ -323,7 +318,7 @@ void main() {
         );
 
     const nsUnits =
-        Units(symbol: 'ns', quantity: Quantity.seconds, scale: 1e-9);
+        Units(symbol: 's', quantity: Quantity.seconds);
 
     test('groups by run, category, test', () {
       final doc = RunDocument();
@@ -337,9 +332,8 @@ void main() {
               title: 'Global memory bandwidth',
               category: BenchCategory.bandwidth,
               units: const Units(
-                  symbol: 'GB/s',
-                  quantity: Quantity.bytesPerSecond,
-                  scale: 1e9)))
+                  symbol: 'B/s',
+                  quantity: Quantity.bytesPerSecond)))
           .metrics
           .add(const MetricResult(id: 'float', value: 200));
       doc
@@ -460,7 +454,7 @@ void main() {
           shape: TestShape.homogeneous,
           direction: Direction.lowerIsBetter,
           units: const Units(
-              symbol: 'µs', quantity: Quantity.seconds, scale: 1e-6)));
+              symbol: 's', quantity: Quantity.seconds)));
       t.metrics.addAll(const [
         MetricResult(id: 'dispatch', value: 5.2),
         MetricResult(id: 'roundtrip', value: 188.0),
@@ -552,8 +546,7 @@ void main() {
                 'shape': 'homogeneous',
                 'direction': 'higher_is_better',
                 'quantity': 'flops',
-                'unit': 'GFLOPS',
-                'scale': 1e9,
+                'unit': 'FLOPS',
                 'description': 'Peak arithmetic speed.',
                 'metrics': [
                   {
@@ -570,8 +563,7 @@ void main() {
                 'shape': 'heterogeneous',
                 'direction': 'higher_is_better',
                 'quantity': 'flops',
-                'unit': 'GFLOPS',
-                'scale': 1e9,
+                'unit': 'FLOPS',
                 'metrics': [
                   {'id': 'bf16', 'status': 'unsupported', 'reason': 'no AMX'},
                 ],
@@ -667,20 +659,18 @@ void main() {
   });
 
   group('formatValue', () {
-    const gflops =
-        Units(symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9);
-    const us = Units(symbol: 'µs', quantity: Quantity.seconds, scale: 1e-6);
-    const gbps =
-        Units(symbol: 'GB/s', quantity: Quantity.bytesPerSecond, scale: 1e9);
-    const ppm = Units(symbol: 'ppm', quantity: Quantity.ratio, scale: 1e-6);
+    const flops = Units(symbol: 'FLOPS', quantity: Quantity.flops);
+    const s = Units(symbol: 's', quantity: Quantity.seconds);
+    const bps = Units(symbol: 'B/s', quantity: Quantity.bytesPerSecond);
+    const ppm = Units(symbol: 'ppm', quantity: Quantity.ratio);
 
     test('slides the SI prefix instead of switching on the unit', () {
-      expect(formatValue(12500, gflops), (value: '12.5', unit: 'TFLOPS'));
-      expect(formatValue(950, gflops), (value: '950', unit: 'GFLOPS'));
-      expect(formatValue(5.2083, us), (value: '5.21', unit: 'µs'));
+      expect(formatValue(12.5e12, flops), (value: '12.5', unit: 'TFLOPS'));
+      expect(formatValue(950e9, flops), (value: '950', unit: 'GFLOPS'));
+      expect(formatValue(5.2083e-6, s), (value: '5.21', unit: 'µs'));
       // Sub-microsecond latency reads in nanoseconds, not "0.12 µs".
-      expect(formatValue(0.125, us), (value: '125', unit: 'ns'));
-      expect(formatValue(183.4, gbps), (value: '183', unit: 'GB/s'));
+      expect(formatValue(0.125e-6, s), (value: '125', unit: 'ns'));
+      expect(formatValue(183.4e9, bps), (value: '183', unit: 'GB/s'));
     });
 
     test('a quantity with no ladder prints as measured', () {
@@ -688,7 +678,7 @@ void main() {
     });
 
     test('zero and unknown units survive', () {
-      expect(formatValue(0, gflops), (value: '0.00', unit: 'GFLOPS'));
+      expect(formatValue(0, flops), (value: '0.00', unit: 'FLOPS'));
       expect(formatValue(3, Units.empty), (value: '3.00', unit: ''));
     });
   });

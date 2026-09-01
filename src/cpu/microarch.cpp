@@ -37,7 +37,7 @@
 // ---------------------------------------------------------------------------
 int CpuPeak::runAtomics(benchmark_config_t &cfg)
 {
-  logger::TestSpec spec{"atomics", "Atomic fetch-add latency", "ns",
+  logger::TestSpec spec{"atomics", "Atomic fetch-add latency", "s",
                         Category::Latency,
                         "How long one all-or-nothing counter update takes.  This is "
                         "the operation behind locks, reference counts and every "
@@ -64,11 +64,11 @@ int CpuPeak::runAtomics(benchmark_config_t &cfg)
   const char *coNote = "Every core fighting over the same counter, which has to be "
                        "handed from core to core -- the time between completed "
                        "updates anywhere on the chip.";
-  if (us1 > 0) test.emit("uncontended ST", (float)(us1 * 1e3), unNote);
+  if (us1 > 0) test.emit("uncontended ST", (float)(us1 * 1e-6), unNote);
   else         test.skip("uncontended ST", ResultStatus::Error, "workload failed", unNote);
   // Each of the maxT threads completes one op per mean iteration, so the
   // system-wide time between completions is wall / maxT.
-  if (usN > 0) test.emit("contended MT", (float)(usN * 1e3 / (double)maxT), coNote);
+  if (usN > 0) test.emit("contended MT", (float)(usN * 1e-6 / (double)maxT), coNote);
   else         test.skip("contended MT", ResultStatus::Error, "workload failed", coNote);
   return 0;
 }
@@ -143,7 +143,7 @@ static void branchPenalty(double &predictedNs, double &randomNs, double &penalty
 int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
 {
   (void)cfg;
-  logger::TestSpec spec{"branch_mispredict", "Branch mispredict penalty", "ns",
+  logger::TestSpec spec{"branch_mispredict", "Branch mispredict penalty", "s",
                         Category::Latency,
                         "What it costs when the CPU guesses the wrong way at an "
                         "if-statement.  The same loop runs over sorted data (easy to "
@@ -162,13 +162,13 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
                         "gap between the other two readings.";
   if (pred > 0 && rnd > 0)
   {
-    test.emit("predicted", (float)pred,       // ns/branch, sorted input
+    test.emit("predicted", (float)(pred * 1e-9),       // s/branch, sorted input
               "Time per if-statement on sorted data, where the CPU guesses right "
               "every time.");
-    test.emit("random", (float)rnd,           // ns/branch, 50/50 input
+    test.emit("random", (float)(rnd * 1e-9),           // s/branch, 50/50 input
               "Time per if-statement on shuffled data, where the CPU is wrong "
               "about half the time.");
-    test.emit("penalty", (float)std::max(pen, 0.0), penNote);  // ns per mispredict
+    test.emit("penalty", (float)(std::max(pen, 0.0) * 1e-9), penNote);  // s per mispredict
   }
   else
   {
@@ -256,7 +256,7 @@ int CpuPeak::runStoreForward(benchmark_config_t &cfg)
 {
   (void)cfg;
   logger::TestSpec spec{
-      "store_forward", "Store-to-load forwarding", "ns",
+      "store_forward", "Store-to-load forwarding", "s",
       Category::Latency,
       "How fast the core can read back a value it just wrote, without the "
       "write having reached the cache yet.",
@@ -265,7 +265,7 @@ int CpuPeak::runStoreForward(benchmark_config_t &cfg)
 
   double ns = -1.0;
   pool->run(1, [&](int) { ns = storeForwardNs(); });
-  if (ns > 0) test.emit("st->ld ST", (float)ns);
+  if (ns > 0) test.emit("st->ld ST", (float)(ns * 1e-9));
   else        test.skip("st->ld ST", ResultStatus::Error, "workload failed");
   return 0;
 }
@@ -343,7 +343,7 @@ static std::vector<int> primaryCpusPerCore(int logicalCores)
 
 int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
 {
-  logger::TestSpec spec{"smt_scaling", "SMT scaling (fp32 FMA)", "gflops",
+  logger::TestSpec spec{"smt_scaling", "SMT scaling (fp32 FMA)", "flops",
                         Category::Unknown,
                         "Whether the CPU's extra hardware threads (SMT, or Intel's "
                         "Hyper-Threading) actually add throughput: the same maths "
@@ -404,7 +404,7 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   (void)keep;
 
   auto giga = [&](int n, double us) {
-    return (float)(chain->v.opsPerIter * (double)n / (us * 1e3));
+    return (float)(chain->v.opsPerIter * (double)n / (us * 1e-6));
   };
   const char *physNote = "One thread per physical core, with the extra hardware "
                          "threads left idle.";

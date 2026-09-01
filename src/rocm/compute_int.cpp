@@ -18,7 +18,7 @@ int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "integer_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gops";
+  d.unit = "ops";
   d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                   "indexing, addressing and bit manipulation, which shaders do "
                   "alongside their fractional maths.";
@@ -56,7 +56,7 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   // Independent DP4a chains, not wider vectors: each reading gives the
   // hardware more dot products to have in flight at once.
   d.axis = "chains in flight";
-  d.unit = "gops";
+  d.unit = "ops";
   d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
                   "four pairs of small whole numbers and sums them in one step -- the "
                   "shader-core path for quantized (compressed) neural networks.";

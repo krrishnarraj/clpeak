@@ -6,20 +6,15 @@
 
 // ── Units, quantities, and which way is "better" ───────────────────────────
 //
-// Backends keep passing the short lowercase tokens they always have --
-// "gflops", "gbps", "us" -- and the logger resolves each one here, exactly
-// once, into everything a consumer needs:
+// Backends pass SI base tokens -- "flops", "bps", "s" -- and the logger
+// resolves each one here, exactly once, into everything a consumer needs:
 //
-//   symbol     what to print         "GFLOPS", "GB/s", "µs"
+//   symbol     what to print         "FLOPS", "B/s", "s"
 //   quantity   what is measured      Flops, BytesPerSecond, Seconds, …
-//   scale      value * scale = SI    1e9 for gflops, 1e-6 for us
 //   direction  which way is better   higher for throughput, lower for latency
 //
-// `scale` is what makes readings comparable across tests and devices: clpeak
-// reports GFLOPS in one test and TFLOPS in the next, so a raw value carries no
-// meaning on its own.  Multiplying by `scale` normalizes every reading to the
-// SI base unit for its quantity (FLOP/s, byte/s, second, 1/s), which is how
-// the presenters pick an SI prefix instead of special-casing each token.
+// Values are already SI (FLOP/s, byte/s, s, 1/s, ppm) and the presenters
+// pick `G/T/P` or `µ/n` via the SI ladder instead of a per-test magnitude.
 
 // What a reading measures.  The SI base unit for each is what `scale`
 // normalizes to.
@@ -54,16 +49,15 @@ const char *directionString(Direction d);
 Direction   directionFromString(const std::string &s);
 
 struct UnitInfo {
-    std::string symbol;     // display form, ready to print: "GFLOPS", "GB/s"
+    std::string symbol;     // display form, ready to print: "FLOPS", "B/s"
     Quantity    quantity = Quantity::Unknown;
-    double      scale    = 1.0;   // value * scale -> SI base unit
     Direction   direction = Direction::HigherIsBetter;
 };
 
-// Resolve a unit token as backends write it ("gflops", "us", …).  An unknown
-// token is passed through unchanged as its own symbol, with quantity Unknown,
-// scale 1 and higher-is-better -- a new unit therefore shows up correctly in
-// the output before anyone gets round to adding it here.
+// Resolve a unit token as backends write it ("flops", "s", …).  An unknown
+// token is passed through unchanged as its own symbol, with quantity Unknown
+// and higher-is-better -- a new unit therefore shows up correctly in the
+// output before anyone gets round to adding it here.
 UnitInfo unitInfo(const std::string &token);
 
 // ── Magnitude-scaled display ────────────────────────────────────────────────
@@ -79,8 +73,8 @@ struct ScaledValue {
     std::string unit;   // the symbol with the prefix that mantissa wants
 };
 
-// Auto-scaled display form of a reading: 4476 GFLOPS -> ("4.48", "TFLOPS"),
-// 1.5e-7 s -> ("150", "ns").  This is the ladder the GUI's value column
+// Auto-scaled display form of a reading: 4.476e12 FLOP/s -> ("4.48", "TFLOPS"),
+// 1.5e-7 s -> ("150", "s").  This is the ladder the GUI's value column
 // slides along (formatValue in app/lib/src/model/result_model.dart) — the
 // two are kept identical so a reading prints the same in either presenter.
 // Quantities without a ladder, a zero, and a non-finite value print as

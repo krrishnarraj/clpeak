@@ -133,8 +133,7 @@ struct cuda_compute_desc_t
 {
   const char *title;             // header line
   const char *resultTag;            // persisted test name
-  const char *unit;              // "gflops" / "gops" / "tflops" / "tops"
-  double      unitDivider;       // 1e9 = G* (default when 0), 1e12 = T*
+  const char *unit;              // "flops" / "ops"
 
   // One or two plain-language sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).

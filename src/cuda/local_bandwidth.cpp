@@ -6,7 +6,7 @@
 int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+    {"local_memory_bandwidth", "Local memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the GPU moves through shared memory -- the "
      "small on-chip scratchpad a block of threads passes data through, which "
@@ -53,7 +53,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     float us = runKernel(dev, fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
-    float gbps = (float)bytes / us / 1e3f;
+    float gbps = (float)bytes / us * 1e6f;
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ')
       key.pop_back();

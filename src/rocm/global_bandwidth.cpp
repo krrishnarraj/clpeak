@@ -19,7 +19,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   // Opened before the sizing diagnostic below, so that line lands under
   // this test's header rather than under the previous test's readings.
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the GPU can stream out of its own memory, "
      "reading a buffer far too large to cache.  Each reading fetches a "
@@ -114,7 +114,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
-    float gbps = (float)(bytes / us / 1e3);
+    float gbps = (float)(bytes / us * 1e6);
     test.emit(key, gbps, rocmWidthNote(v.width));
   }
 

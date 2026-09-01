@@ -15,7 +15,7 @@ int CudaPeak::runComputeSP(CudaDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "single_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
                   "fractional numbers -- the ordinary float type.  Nothing touches "
                   "memory, so only the arithmetic units limit the rate.";
@@ -41,7 +41,7 @@ int CudaPeak::runComputeHP(CudaDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "half_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                   "size of a normal float, and what graphics and on-device AI mostly "
                   "run on.  NVIDIA shader cores reach full speed only on the packed "
@@ -65,7 +65,7 @@ int CudaPeak::runComputeDP(CudaDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "double_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
                   "high-accuracy type scientific computing relies on.  Consumer "
                   "GeForce cards run these dozens of times slower than 32-bit; the "
@@ -90,7 +90,7 @@ int CudaPeak::runComputeMP(CudaDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "mixed_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
                   "running total in 32 bits -- the accuracy-preserving pattern AI "
                   "code uses.  This is the shader cores, not the tensor cores.";
@@ -118,7 +118,7 @@ int CudaPeak::runComputeBF16(CudaDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "bfloat16_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
                   "digits of accuracy for the number range of a full float.  Again "
                   "the shader cores, with the tensor-core figure in the WMMA rows.";

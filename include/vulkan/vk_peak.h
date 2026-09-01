@@ -256,11 +256,10 @@ struct vk_compute_variant_t
 struct vk_compute_desc_t
 {
   // Display / reporting
-  const char *title;         // e.g. "Single-precision compute (GFLOPS)"
+  const char *title;         // e.g. "Single-precision compute (FLOPS)"
   const char *resultTag;        // e.g. "single_precision_compute"
   const char *metricLabel;   // used when variants==nullptr
-  const char *unit;          // "gflops" / "gops" / "tflops" / "tops"
-  double      unitDivider;   // 1e9 = G* (default when 0), 1e12 = T*
+  const char *unit;          // "flops" / "ops"
 
   // One or two plain-language sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).

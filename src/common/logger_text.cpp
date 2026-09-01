@@ -194,13 +194,11 @@ void LoggerText::renderMetric(const LogEvent &e)
     {
         ml.unit.symbol   = e.metric.unit;
         ml.unit.quantity = e.metric.quantity;
-        ml.unit.scale    = e.metric.scale;
     }
     else
     {
         ml.unit.symbol   = e.unit;
         ml.unit.quantity = e.quantity;
-        ml.unit.scale    = e.scale;
     }
     ml.direction = (e.metric.direction == Direction::FromUnit) ? e.direction
                                                                : e.metric.direction;

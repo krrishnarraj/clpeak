@@ -11,14 +11,14 @@
 // is the byte count per outer iteration, so the shared emitCompute() math
 // lands directly in GB/s.  Kernel bodies live in kernels/crypto_compute.h;
 // per-ISA variants (e.g. AES-NI vs VAES-512) come from kernelMenu() like the
-// compute tests.  The unit is "gbps" but the category is passed explicitly:
+// compute tests.  The unit is "bps" but the category is passed explicitly:
 // categoryFromUnit() would otherwise file these under Bandwidth.
 
 using clpeak_cpu::kernelMenu;
 
 int CpuPeak::runCryptoAes(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"aes_encrypt", "AES-128 encrypt", "gbps", Category::Crypto,
+  emitVariants(*this, {"aes_encrypt", "AES-128 encrypt", "bps", Category::Crypto,
                        "How many bytes per second the CPU's dedicated AES "
                        "instructions encrypt -- the ceiling for disk encryption and "
                        "HTTPS traffic."},
@@ -28,7 +28,7 @@ int CpuPeak::runCryptoAes(benchmark_config_t &cfg)
 
 int CpuPeak::runCryptoSha256(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"sha256_hash", "SHA-256 hash", "gbps", Category::Crypto,
+  emitVariants(*this, {"sha256_hash", "SHA-256 hash", "bps", Category::Crypto,
                        "How many bytes per second the CPU hashes with SHA-256, the "
                        "fingerprint function behind signatures, integrity checks and "
                        "git-style content addressing."},
@@ -40,7 +40,7 @@ int CpuPeak::runCryptoSha512(benchmark_config_t &cfg)
 {
   // The x86 SHA512 EVEX extension (Arrow/Lunar Lake) is detected but has no
   // kernel yet, so x86 always reports the Unsupported row here.
-  emitVariants(*this, {"sha512_hash", "SHA-512 hash", "gbps", Category::Crypto,
+  emitVariants(*this, {"sha512_hash", "SHA-512 hash", "bps", Category::Crypto,
                        "How many bytes per second the CPU hashes with SHA-512, the "
                        "wider member of the same family.  Only Arm cores have an "
                        "instruction for it today."},
@@ -51,7 +51,7 @@ int CpuPeak::runCryptoSha512(benchmark_config_t &cfg)
 
 int CpuPeak::runCryptoCrc32c(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"crc32c", "CRC32-C checksum", "gbps", Category::Crypto,
+  emitVariants(*this, {"crc32c", "CRC32-C checksum", "bps", Category::Crypto,
                        "How many bytes per second the CPU checksums with CRC32-C, "
                        "the corruption check storage and network stacks run over "
                        "every block and packet."},

@@ -501,7 +501,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
   // One test for all data types -- integer readings carry their own unit.
   auto test = currentDeviceScope->beginTest(
     {"joint_matrix", "joint_matrix peak",
-     "tflops", Category::Unknown,
+     "flops", Category::Unknown,
      "Peak speed of Intel's XMX matrix engine -- dedicated units that multiply "
      "whole blocks of numbers in one step rather than one value at a time.  "
      "One reading per input type, sign combination and tile shape the device "
@@ -512,7 +512,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
   auto jmOpts = [&](const JmTile &t) {
     logger::EmitOptions o;
     o.description = jmNote(t);
-    if (jmIsIntAcc(t.ct)) o.unit = "tops";
+    if (jmIsIntAcc(t.ct)) o.unit = "ops";
     return o;
   };
 
@@ -526,7 +526,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     test.skip("bf16", status, reason);
     test.skip("fp16", status, reason);
     test.skip("tf32", status, reason);
-    logger::EmitOptions o; o.description = int8Note; o.unit = "tops";
+    logger::EmitOptions o; o.description = int8Note; o.unit = "ops";
     test.skip("int8", status, reason, o);
   };
 
@@ -675,7 +675,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
 
     const double ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() *
                        2.0 * (double)JM_ITERS;
-    test.emit(t.metric, (float)(ops * 1.0e6 / us / 1.0e12), jmOpts(t));
+    test.emit(t.metric, (float)(ops * 1.0e6 / us), jmOpts(t));
   }
 
   sycl::free(out, dev.stream);

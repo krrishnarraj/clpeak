@@ -21,7 +21,7 @@ const _longTest = 'Half-precision compute fp16 (vector width 8)';
 const _shortTest = 'Integer compute';
 
 const _gflops =
-    Units(symbol: 'GFLOPS', quantity: Quantity.flops, scale: 1e9);
+    Units(symbol: 'FLOPS', quantity: Quantity.flops);
 
 /// One measured reading of one test on one device, added to [doc].
 void _add(

@@ -32,7 +32,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   logger::TestSpec testSpec;
   testSpec.tag = "kernel_launch_latency";
   testSpec.display = "Kernel launch latency";
-  testSpec.unit = "us";
+  testSpec.unit = "s";
   testSpec.description =
       "The overhead of asking the device to do anything at all, measured with "
       "a shader that does no work.  It is what small, frequent jobs pay before "
@@ -284,7 +284,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   else if (dispatchSamples > 0)
   {
     float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
-    test.emit("dispatch", dispatchUs, dispatchNote);
+    test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote);
   }
   else
   {
@@ -299,7 +299,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   else
   {
     double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
-    test.emit("roundtrip", (float)avgRoundtripUs, roundtripNote);
+    test.emit("roundtrip", (float)(avgRoundtripUs * 1e-6), roundtripNote);
   }
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);

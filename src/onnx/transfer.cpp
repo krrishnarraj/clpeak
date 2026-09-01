@@ -146,7 +146,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx_transfer_bw", "ONNX host transfer bandwidth", "gbps",
+      {"onnx_transfer_bw", "ONNX host transfer bandwidth", "bps",
        Category::Bandwidth,
        "How fast data reaches this provider and comes back.  Every other test "
        "here keeps its tensors on the device on purpose, because otherwise a "
@@ -201,7 +201,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     if (firstElems == 0) { firstUs = r.us; firstElems = elems; }
     lastUs = r.us; lastElems = elems;
 
-    const double gbps = (double)elems * 2.0 / (r.us * 1.0e-6) / 1.0e9;
+    const double gbps = (double)elems * 2.0 / (r.us * 1.0e-6);
     CLPEAK_VLOG("onnx-transfer[%s/h2d]: %lld MB -> %.1f GB/s\n",
                 ep.providerKey.c_str(), (long long)((elems * 2) >> 20), gbps);
     lastGbps = gbps;
@@ -262,7 +262,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     if (r.us > 0.0)
     {
       roundUs = r.us;
-      const double gbps = 2.0 * (double)firstElems * 2.0 / (r.us * 1.0e-6) / 1.0e9;
+      const double gbps = 2.0 * (double)firstElems * 2.0 / (r.us * 1.0e-6);
       CLPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
                   ep.providerKey.c_str(),
                   (long long)((firstElems * 2) >> 20), gbps);
@@ -322,7 +322,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     if (computeUs > 0.0 && roundUs > computeUs)
       test.emit("d2h",
                 (float)((double)firstElems * 2.0 /
-                        ((roundUs - computeUs) * 1.0e-6) / 1.0e9),
+                        ((roundUs - computeUs) * 1.0e-6)),
                 d2hNote);
     else if (roundUs <= 0.0)
       test.skip("d2h", ResultStatus::Error,

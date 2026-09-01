@@ -325,7 +325,6 @@ void writeMetric(Writer &w, const MetricResult &m)
     {
         w.str("unit", m.unit);
         w.str("quantity", quantityString(m.quantity));
-        w.num("scale", m.scale);
     }
     if (m.direction != Direction::FromUnit)
         w.str("direction", directionString(m.direction));
@@ -345,7 +344,6 @@ void writeTest(Writer &w, const TestResult &t)
     w.str("direction", directionString(t.direction));
     w.str("quantity", quantityString(t.quantity));
     w.str("unit", t.unit);
-    w.num("scale", t.scale);
     w.strIf("description", t.description);
     w.beginArray("metrics");
     for (const MetricResult &m : t.metrics) writeMetric(w, m);
@@ -493,7 +491,6 @@ MetricResult readMetric(const JsonValue &v)
         m.hasUnit  = true;
         m.unit     = v.str("unit");
         m.quantity = quantityFromString(v.str("quantity"));
-        m.scale    = v.num("scale", 1.0);
     }
     if (v.has("direction"))
         m.direction = directionFromString(v.str("direction"));
@@ -513,7 +510,6 @@ TestResult readTest(const JsonValue &v)
     t.direction   = directionFromString(v.str("direction"));
     t.quantity    = quantityFromString(v.str("quantity"));
     t.unit        = v.str("unit");
-    t.scale       = v.num("scale", 1.0);
     if (const JsonValue *ms = v.find("metrics"))
         for (const JsonValue &m : ms->items()) t.metrics.push_back(readMetric(m));
     return t;

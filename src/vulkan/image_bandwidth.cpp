@@ -24,7 +24,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   logger::TestSpec testSpec;
   testSpec.tag = "image_memory_bandwidth";
   testSpec.display = "Image memory bandwidth";
-  testSpec.unit = "gbps";
+  testSpec.unit = "bps";
   testSpec.description =
       "How many bytes per second the device reads through its texture units, "
       "which take a different path to memory than plain buffer reads.  Each "
@@ -333,7 +333,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                          &walk, sizeof(walk));
     vkDestroyPipeline(dev.device, pipe, nullptr);
 
-    float gbps = us > 0.0f ? (float)bytes / us / 1e3f : 0.0f;
+    float gbps = us > 0.0f ? (float)bytes / us * 1e6f : 0.0f;
     best = std::max(best, gbps);
     CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f gbps\n", s.label, gbps);
   }

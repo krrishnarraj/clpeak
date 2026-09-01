@@ -31,7 +31,7 @@ struct MfmaEntry
 {
   const char *label;    // reading id within the family test
   const char *title;
-  const char *unit;     // "tflops" or "tops"
+  const char *unit;     // "flops" or "ops"
   const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, K;
@@ -59,24 +59,24 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
 {
 
   static const MfmaEntry fpEntries[] = {
-    {"fp16", "MFMA fp16xfp16+fp32 16x16x16", "tflops",
+    {"fp16", "MFMA fp16xfp16+fp32 16x16x16", "flops",
      &rocm_kernels::mfma_fp16, "mfma_fp16",
      16, 16, 16, false,
      "Peak speed of the matrix cores on AMD's compute cards -- dedicated units "
      "that multiply whole blocks of numbers in one step -- on 16-bit inputs "
      "with a 32-bit running total, the everyday precision of AI work."},
-    {"bf16", "MFMA bf16xbf16+fp32 16x16x16", "tflops",
+    {"bf16", "MFMA bf16xbf16+fp32 16x16x16", "flops",
      &rocm_kernels::mfma_bf16, "mfma_bf16",
      16, 16, 16, false,
      "Matrix cores on bfloat16 -- 16 bits arranged for AI work, trading digits "
      "of accuracy for the number range of a full float, which makes training "
      "far more forgiving."},
-    {"fp8", "MFMA fp8xfp8+fp32 16x16x32", "tflops",
+    {"fp8", "MFMA fp8xfp8+fp32 16x16x32", "flops",
      &rocm_kernels::mfma_fp8, "mfma_fp8",
      16, 16, 32, false,
      "Matrix cores on 8-bit numbers -- half the data of 16-bit per value, so "
      "they run at roughly twice the rate."},
-    {"mxfp4", "MFMA mxfp4(e2m1)+fp32 16x16x128", "tflops",
+    {"mxfp4", "MFMA mxfp4(e2m1)+fp32 16x16x128", "flops",
      &rocm_kernels::mfma_mxfp4, "mfma_mxfp4",
      16, 16, 128, false,
      "Matrix cores on 4-bit numbers with a shared scale factor per block, the "
@@ -84,7 +84,7 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
      "rather than a curiosity."},
   };
   static const MfmaEntry intEntries[] = {
-    {"int8", "MFMA int8xint8+int32 16x16x32", "tops",
+    {"int8", "MFMA int8xint8+int32 16x16x32", "ops",
      &rocm_kernels::mfma_int8, "mfma_int8",
      16, 16, 32, true,
      "Matrix cores on 8-bit whole numbers with a 32-bit running total -- the "
@@ -109,13 +109,13 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
   auto unitOpts = [](const MfmaEntry &en) {
     logger::EmitOptions o;
     if (en.description) o.description = en.description;
-    if (en.isInt) o.unit = "tops";
+    if (en.isInt) o.unit = "ops";
     return o;
   };
 
   // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
-    {"mfma", "Matrix cores (MFMA)", "tflops", Category::Unknown,
+    {"mfma", "Matrix cores (MFMA)", "flops", Category::Unknown,
        "Peak speed of the matrix cores on AMD's compute cards -- dedicated "
        "units that multiply whole blocks of numbers in one step rather than "
        "one value at a time.  Each reading is a different input format, at "
@@ -177,7 +177,7 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
     // Each wave issues kMfmaPerWave MFMA ops, each doing 2*M*N*K flops/ops.
     const double ops = (double)numBlocks * (double)kMfmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(me.label, value, unitOpts(me));
 
     (void)hipFree(outBuf);
@@ -230,7 +230,7 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
 
     const double ops = (double)numBlocks * (double)kMfmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(me.label, value, unitOpts(me));
 
     (void)hipFree(outBuf);

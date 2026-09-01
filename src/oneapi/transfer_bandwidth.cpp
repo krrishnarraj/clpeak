@@ -15,7 +15,7 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+    {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
      "How fast data crosses between the host's memory and the device's.  On a "
      "discrete card that means the PCIe link, which is far narrower than "
      "either side's own memory; on integrated graphics the two share one pool "
@@ -83,11 +83,11 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   };
 
   float usH2D = timeXfer(true);
-  if (usH2D > 0.0f) test.emit("h2d_pinned", (float)bytes / usH2D / 1e3f, h2dNote);
+  if (usH2D > 0.0f) test.emit("h2d_pinned", (float)bytes / usH2D * 1e6f, h2dNote);
   else              test.skip("h2d_pinned", ResultStatus::Error, "transfer failed", h2dNote);
 
   float usD2H = timeXfer(false);
-  if (usD2H > 0.0f) test.emit("d2h_pinned", (float)bytes / usD2H / 1e3f, d2hNote);
+  if (usD2H > 0.0f) test.emit("d2h_pinned", (float)bytes / usD2H * 1e6f, d2hNote);
   else              test.skip("d2h_pinned", ResultStatus::Error, "transfer failed", d2hNote);
 
   sycl::free(hPinned, dev.stream);

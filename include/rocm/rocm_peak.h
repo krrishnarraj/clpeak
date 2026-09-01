@@ -98,8 +98,7 @@ struct rocm_compute_desc_t
 {
   const char *title;
   const char *resultTag;
-  const char *unit;
-  double      unitDivider;
+  const char *unit;              // "flops" / "ops"
 
   // One or two plain-language sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).

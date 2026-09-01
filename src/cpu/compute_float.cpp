@@ -13,7 +13,7 @@ using clpeak_cpu::kernelMenu;
 
 int CpuPeak::runComputeSP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"single_precision_compute", "Single-precision compute", "gflops",
+  emitVariants(*this, {"single_precision_compute", "Single-precision compute", "flops",
                        Category::Unknown,
                        "Peak arithmetic speed on 32-bit fractional numbers -- the "
                        "ordinary float type most programs use.  The data stays in "
@@ -24,7 +24,7 @@ int CpuPeak::runComputeSP(benchmark_config_t &cfg)
 
 int CpuPeak::runComputeDP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"double_precision_compute", "Double-precision compute", "gflops",
+  emitVariants(*this, {"double_precision_compute", "Double-precision compute", "flops",
                        Category::Unknown,
                        "Peak arithmetic speed on 64-bit fractional numbers, the "
                        "high-accuracy type scientific and engineering code relies on."},
@@ -34,7 +34,7 @@ int CpuPeak::runComputeDP(benchmark_config_t &cfg)
 
 int CpuPeak::runComputeHP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"half_precision_compute", "Half-precision compute", "gflops",
+  emitVariants(*this, {"half_precision_compute", "Half-precision compute", "flops",
                        Category::Unknown,
                        "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                        "size of a normal float, and common in graphics and AI.  Needs "
@@ -45,7 +45,7 @@ int CpuPeak::runComputeHP(benchmark_config_t &cfg)
 
 int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops",
+  emitVariants(*this, {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
                        Category::Unknown,
                        "Peak speed of the bfloat16 dot-product instruction, which "
                        "multiplies pairs of 16-bit AI-format numbers and adds the "
@@ -56,7 +56,7 @@ int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
   // genuinely different peak from the bf16 dot above (real bf16 multiply-add, no
   // fp32-accumulate widening).  Only emit it on an x86 build; on ARM there is no
   // native-bf16-FMA instruction, so the row would be meaningless noise.
-  emitVariants(*this, {"bfloat16_fma_compute", "BF16 FMA compute bf16xbf16+bf16", "gflops",
+  emitVariants(*this, {"bfloat16_fma_compute", "BF16 FMA compute bf16xbf16+bf16", "flops",
                        Category::Unknown,
                        "Peak speed of true bfloat16 multiply-add, which keeps the "
                        "answer in 16 bits instead of widening it to 32.  Only the "
@@ -77,7 +77,7 @@ int CpuPeak::runComputeDivSqrt(benchmark_config_t &cfg)
   // unit, and its profile across the two operations and both precisions is
   // one fact about the CPU, not four.
   emitFamily(*this,
-             {"divide_sqrt", "Divide and square-root throughput", "gflops",
+             {"divide_sqrt", "Divide and square-root throughput", "flops",
               Category::Unknown,
               "How many divisions and square roots per second the CPU sustains. "
               "Both run on their own narrow unit rather than the wide "
@@ -99,7 +99,7 @@ int CpuPeak::runComputeDivSqrt(benchmark_config_t &cfg)
 
 int CpuPeak::runComputeMP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "gflops",
+  emitVariants(*this, {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "flops",
                        Category::Unknown,
                        "Peak speed when the CPU multiplies 16-bit numbers but keeps "
                        "the running total in 32 bits -- the accuracy-preserving "
@@ -116,7 +116,7 @@ int CpuPeak::runComputeFP8DP(benchmark_config_t &cfg)
   // x86 has no fp8 *vector* instruction, only the AMX-FP8 tile path, which is
   // its own matrix row).  Only emit on an arm64 build, mirroring how the
   // x86-only bf16-FMA row is handled.
-  emitVariants(*this, {"fp8_dot_product_compute", "FP8 dot-product compute fp8xfp8+fp32", "gflops",
+  emitVariants(*this, {"fp8_dot_product_compute", "FP8 dot-product compute fp8xfp8+fp32", "flops",
                        Category::Unknown,
                        "Peak speed of the 8-bit float dot product, the narrowest "
                        "number format a CPU can multiply directly.  Only the newest "

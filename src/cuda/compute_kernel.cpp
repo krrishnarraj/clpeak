@@ -98,8 +98,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     float us = runKernel(dev, fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
-    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);
 
     test.emit(v.label, value, emitOpts(v.description));
   }

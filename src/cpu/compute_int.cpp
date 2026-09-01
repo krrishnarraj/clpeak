@@ -10,7 +10,7 @@ using clpeak_cpu::kernels;
 
 int CpuPeak::runComputeInt32(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"integer_compute", "Integer compute", "gops",
+  emitVariants(*this, {"integer_compute", "Integer compute", "ops",
                        Category::Unknown,
                        "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                        "array indexing, hashing, compression and address math."},
@@ -52,7 +52,7 @@ std::vector<FamilyRow> intDotRows()
 }
 
 const logger::TestSpec kIntDotSpec = {
-    "integer_dot_product", "Integer dot-product compute", "gops",
+    "integer_dot_product", "Integer dot-product compute", "ops",
     Category::Unknown,
     "Peak speed of the CPU's integer dot-product instructions, which multiply "
     "several pairs of small whole numbers and sum them in one step.  Each "
@@ -86,7 +86,7 @@ int CpuPeak::runComputeIntDiv(benchmark_config_t &cfg)
   // every TU and read straight from kernels().intdiv (always present via the
   // generic floor).  The number is the scalar DIV unit's throughput in Gops.
   const auto &v = kernels().intdiv;
-  logger::TestSpec spec{"integer_divide_compute", "Integer divide compute u64", "gops",
+  logger::TestSpec spec{"integer_divide_compute", "Integer divide compute u64", "ops",
                         Category::Unknown,
                         "How many 64-bit whole-number divisions the CPU sustains per "
                         "second.  No CPU has a vector integer divide, so this is one "

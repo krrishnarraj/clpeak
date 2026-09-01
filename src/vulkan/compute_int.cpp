@@ -28,7 +28,7 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   vk_compute_desc_t d = {};
   d.title       = "Integer compute int32";
   d.resultTag   = "integer_compute";
-  d.unit        = "gops";
+  d.unit        = "ops";
   d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                   "indexing, addressing and bit manipulation, which kernels do "
                   "alongside their fractional maths.";
@@ -70,7 +70,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   vk_compute_desc_t d = {};
   d.title       = "INT8 dot-product compute";
   d.resultTag   = "integer_compute_int8_dp";
-  d.unit        = "gops";
+  d.unit        = "ops";
   d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
                   "four pairs of small whole numbers and sums them in one step -- the "
                   "workhorse of quantized (compressed) neural networks.";

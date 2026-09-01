@@ -42,7 +42,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     mtl_compute_desc_t d = {};
     d.title            = "simdgroup_matrix 8x8x8";
     d.resultTag        = "simdgroup_matrix";
-    d.unit             = "tflops";
+    d.unit             = "flops";
     d.description      = "Peak speed of Apple's matrix instruction, which multiplies "
                          "whole 8x8 blocks in one step instead of one value at a "
                          "time -- the GPU's answer to a tensor core.  Each reading "
@@ -50,7 +50,6 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
                          "32-bit floats.";
     d.shape            = TestShape::Heterogeneous;
     d.axis             = "data type";
-    d.unitDivider      = 1e12;
     d.variants         = variants;
     d.numVariants      = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI        = MTL_SIMDGROUP_WORK_PER_WI;

@@ -141,7 +141,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   // One scope for the whole family -- all data types in one test.
   // The int8 row carries its own unit (tops) so it shares the test.
   auto test = currentDeviceScope->beginTest(
-      {"coopmat", "Cooperative matrix", "tflops", Category::Unknown,
+      {"coopmat", "Cooperative matrix", "flops", Category::Unknown,
        "The device's matrix engine -- its tensor cores -- which "
        "multiplies whole small blocks of numbers in one step instead of one "
        "value at a time.  Each reading is a different input format, run at the "
@@ -158,11 +158,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.scope = &test;
       d.resultTag = "coopmat";
       d.metricLabel = "fp32";
-      d.unit = "tflops";
+      d.unit = "flops";
       d.metricDescription = "Peak speed of the device's matrix engine (its tensor cores) on "
                             "full 32-bit numbers.  These units multiply whole small blocks "
                             "of numbers in one step instead of one value at a time.";
-      d.unitDivider = 1e12;
 
       d.elemSize = sizeof(float);
       if (dev.info.coopmatFP32.supported)
@@ -188,13 +187,12 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.scope = &test;
       d.resultTag = "coopmat";
       d.metricLabel = "fp16";
-      d.unit = "tflops";
+      d.unit = "flops";
       d.metricDescription = "The matrix engine on 16-bit inputs with a 32-bit running "
                             "total -- the everyday precision of AI inference, and the "
                             "widest-supported row here.  Keeping the total at 32 bits "
                             "costs accuracy nothing and, on consumer graphics cards, "
                             "costs half the speed: see the 16-bit-total row below.";
-      d.unitDivider = 1e12;
 
       d.elemSize = sizeof(float);
       if (dev.info.float16Supported && dev.info.coopmatFP16.supported)
@@ -220,12 +218,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.scope = &test;
       d.resultTag = "coopmat";
       d.metricLabel = "fp16 f16acc";
-      d.unit = "tflops";
+      d.unit = "flops";
       d.metricDescription = "The matrix engine on 16-bit inputs with the running total also "
                             "kept at 16 bits.  Consumer graphics cards run this at twice the "
                             "rate of the 32-bit total above, which is why a card's headline "
                             "AI figure is usually this one; server parts run both alike.";
-      d.unitDivider = 1e12;
 
       d.elemSize = sizeof(float);
       if (dev.info.float16Supported && dev.info.coopmatFP16F16.supported)
@@ -251,11 +248,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.scope = &test;
       d.resultTag = "coopmat";
       d.metricLabel = "bf16";
-      d.unit = "tflops";
+      d.unit = "flops";
       d.metricDescription = "The matrix engine on bfloat16 -- 16 bits arranged for AI work, "
                             "trading digits of accuracy for the number range of a full "
                             "float, which makes training far more forgiving.";
-      d.unitDivider = 1e12;
 
       d.elemSize = sizeof(float);
       if (dev.info.bfloat16Supported && dev.info.coopmatBF16.supported)
@@ -281,11 +277,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.scope = &test;
       d.resultTag = "coopmat";
       d.metricLabel = "fp8_e4m3";
-      d.unit = "tflops";
+      d.unit = "flops";
       d.metricDescription = "The matrix engine on 8-bit numbers, in the variant that spends "
                             "its bits on accuracy rather than range.  Half the data of fp16 "
                             "per value, so the newest hardware runs it at roughly twice the rate.";
-      d.unitDivider = 1e12;
 
       d.elemSize = sizeof(float);
       // Two gates: the float8 feature must be enabled at device creation
@@ -313,11 +308,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.scope = &test;
       d.resultTag = "coopmat";
       d.metricLabel = "fp8_e5m2";
-      d.unit = "tflops";
+      d.unit = "flops";
       d.metricDescription = "The same 8-bit matrix path in the other variant, which spends "
                             "its bits on range rather than accuracy -- the one that copes "
                             "with very large and very small values.";
-      d.unitDivider = 1e12;
 
       d.elemSize = sizeof(float);
       if (dev.info.fp8Supported && dev.info.coopmatFP8E5M2.supported)
@@ -349,12 +343,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     // what lets it join the floating-point family instead of needing a test of
     // its own; `unit` only heads the test when this reading is the one that
     // opens it, which happens on an integer-only run.
-    d.unit = "tops";
-    d.metricUnit = "tops";
+    d.unit = "ops";
+    d.metricUnit = "ops";
     d.metricDescription = "8-bit whole numbers with a 32-bit running total -- the "
                           "format quantized neural networks use when they are squeezed "
                           "down to run fast on cheaper hardware.";
-    d.unitDivider = 1e12;
 
     d.elemSize = sizeof(int32_t);
     // Two gates, like fp8: the shader's Int8 capability needs shaderInt8

@@ -222,7 +222,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx_activation", "ONNX activation throughput", "gbps",
+      {"onnx_activation", "ONNX activation throughput", "bps",
        Category::Bandwidth,
        "How fast this provider runs the operations between the matrix "
        "multiplies -- normalisation, softmax, the feed-forward gate.  They do "
@@ -314,7 +314,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       // One pass in, one pass out.
-      const double gbps = 2.0 * (double)bytes / (netUs * 1.0e-6) / 1.0e9;
+      const double gbps = 2.0 * (double)bytes / (netUs * 1.0e-6);
       CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n",
                   ep.providerKey.c_str(), v.label,

@@ -174,7 +174,7 @@ double timeHipblasLt(hipStream_t stream, hipblasLtHandle_t lt,
 int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 {
   auto test = currentDeviceScope->beginTest(
-    {"hipblaslt-fp8", "hipBLASLt FP8 GEMM peak", "tflops", Category::Unknown,
+    {"hipblaslt-fp8", "hipBLASLt FP8 GEMM peak", "flops", Category::Unknown,
      "Matrix-multiply speed through AMD's hipBLASLt library on the narrowest "
      "number formats -- 8-bit and 4-bit.  These are the formats large models "
      "are compressed into to fit and run fast, and the library is how real "
@@ -342,7 +342,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
     if (meanUs <= 0.0)
       test.skip(label, ResultStatus::Error, "hipBLASLt GEMM failed", note);
     else
-      test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), note);
+      test.emit(label, (float)(flops * 1.0e6 / meanUs), note);
 
     (void)hipblasLtMatmulDescDestroy(opDesc);
     (void)hipblasLtMatrixLayoutDestroy(Adesc);
@@ -457,7 +457,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
               if (meanUs <= 0.0)
                 test.skip("mxf4_e2m1", ResultStatus::Error, "hipBLASLt GEMM failed", mxf4Note);
               else
-                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs / 1.0e12), mxf4Note);
+                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs), mxf4Note);
             }
           }
         }

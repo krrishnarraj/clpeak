@@ -10,7 +10,7 @@ import 'package:clpeak/src/ui/results/results_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const _ns = Units(symbol: 'ns', quantity: Quantity.seconds, scale: 1e-9);
+const _ns = Units(symbol: 's', quantity: Quantity.seconds);
 
 TestHeader _header({
   required String id,
@@ -122,10 +122,10 @@ void main() {
           shape: TestShape.heterogeneous,
           axis: 'data type',
           units: Units(
-              symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
+              symbol: 'FLOPS', quantity: Quantity.flops),
         ))
-      ..metrics.add(const MetricResult(id: 'fp32', value: 14.87))
-      ..metrics.add(const MetricResult(id: 'nvf4_e2m1', value: 300.43));
+      ..metrics.add(const MetricResult(id: 'fp32', value: 14.87e12))
+      ..metrics.add(const MetricResult(id: 'nvf4_e2m1', value: 300.43e12));
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
@@ -151,7 +151,7 @@ void main() {
           title: 'Kernel launch latency',
           shape: TestShape.heterogeneous,
           units: const Units(
-              symbol: 'µs', quantity: Quantity.seconds, scale: 1e-6),
+              symbol: 's', quantity: Quantity.seconds),
         ))
       ..metrics.add(const MetricResult(id: 'dispatch', value: 5.24))
       ..metrics.add(const MetricResult(id: 'roundtrip', value: 184.0));
@@ -177,7 +177,7 @@ void main() {
           category: BenchCategory.compute,
           description: 'Throughput of the dedicated matrix-multiply unit.',
           units: Units(
-              symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
+              symbol: 'FLOPS', quantity: Quantity.flops),
         ))
         .metrics
         .add(const MetricResult(
@@ -208,7 +208,7 @@ void main() {
           shape: TestShape.heterogeneous,
           axis: 'data type',
           units: Units(
-              symbol: 'TFLOPS', quantity: Quantity.flops, scale: 1e12),
+              symbol: 'FLOPS', quantity: Quantity.flops),
         ))
       ..metrics.add(const MetricResult(id: 'fp32', value: 4.06))
       ..metrics.add(const MetricResult(id: 'fp16', value: 3.95))

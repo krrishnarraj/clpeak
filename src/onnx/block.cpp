@@ -142,7 +142,7 @@ namespace
        "the difference between them is what the integer units are worth."},
 
       {"int8_qdq", ONNX_DT_FLOAT16, ONNX_DT_INT8, 0, /*qdq=*/true,
-       /*sweep=*/false, "tops",
+       /*sweep=*/false, "ops",
        "8-bit weights and 8-bit arithmetic through the projections, quantized in "
        "and quantized out -- the form an NPU's headline TOPS figure is quoted "
        "for, now measured on a whole layer rather than one matmul.  Attention and "
@@ -608,7 +608,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         continue;
       if (it->second.us > 0.0)
         test.emit(metric,
-                  (float)(blockFlops(sseq, sseq) * 1.0e6 / it->second.us / 1.0e12), o);
+                  (float)(blockFlops(sseq, sseq) * 1.0e6 / it->second.us), o);
       else
         test.skip(metric, it->second.status, it->second.error, o);
     }
@@ -632,7 +632,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   {
     auto testFp = currentDeviceScope->beginTest(
-        {"onnx_block_prefill", "Transformer block, prefill", "tflops",
+        {"onnx_block_prefill", "Transformer block, prefill", "flops",
          Category::Ai,
          "Speed of one whole transformer layer while it is chewing through a "
          "prompt, at each precision a model ships in.  This is the phase that "
@@ -819,7 +819,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
   {
     auto testInt = currentDeviceScope->beginTest(
-        {"onnx_block_prefill", "Transformer block, prefill", "tops",
+        {"onnx_block_prefill", "Transformer block, prefill", "ops",
          Category::Ai,
          "Speed of one whole transformer layer while it is chewing through a "
          "prompt, at each precision a model ships in.  This is the phase that "
@@ -1042,7 +1042,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // full-width dequantize it never should have needed.
   {
     auto test = currentDeviceScope->beginTest(
-        {"onnx_block_decode", "Transformer block, decode", "gbps",
+        {"onnx_block_decode", "Transformer block, decode", "bps",
          Category::Ai,
          "How fast the same layer streams its weights while generating one "
          "token with 2048 tokens of context behind it, at each precision.  "
@@ -1082,7 +1082,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (it == vr.decode.end())
         continue;
       if (it->second.us > 0.0)
-        test.emit(metric, (float)(bytes / (it->second.us * 1.0e-6) / 1.0e9), o);
+        test.emit(metric, (float)(bytes / (it->second.us * 1.0e-6)), o);
       else
         test.skip(metric, it->second.status, it->second.error, o);
     }
@@ -1103,7 +1103,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // are four times less to read.
   {
     auto test = currentDeviceScope->beginTest(
-        {"onnx_block_latency", "Transformer block latency", "us",
+        {"onnx_block_latency", "Transformer block latency", "s",
          Category::Ai,
          "How long one layer takes, in microseconds, at each precision.  "
          "Multiply by a model's layer count for a floor on that model's "
@@ -1140,7 +1140,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           if (it != vr.prefill.end())
           {
             if (it->second.us > 0.0)
-              test.emit(metric, (float)it->second.us, note.c_str());
+              test.emit(metric, (float)(it->second.us * 1e-6), note.c_str());
             else
               test.skip(metric, it->second.status, it->second.error, note);
           }
@@ -1163,7 +1163,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (it == vr.decode.end())
           continue;
         if (it->second.us > 0.0)
-          test.emit(metric, (float)it->second.us, note.c_str());
+          test.emit(metric, (float)(it->second.us * 1e-6), note.c_str());
         else
         {
           test.skip(metric, it->second.status,

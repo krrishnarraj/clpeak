@@ -51,7 +51,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     bytes = 256;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+    {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
      "How fast data crosses between the host's memory and the device's.  On a "
      "discrete card that means the PCIe link, which is far narrower than "
      "either side's own memory and is what makes moving data to the device "
@@ -146,7 +146,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float timed = runBatch(iters) / static_cast<float>(iters);
       if (timed <= 0.0f)
         return -1.0f;
-      return (float)bytes / timed / 1e3f;
+      return (float)bytes / timed * 1e6f;
     };
 
     float bw;

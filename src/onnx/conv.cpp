@@ -262,7 +262,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx_conv", "ONNX convolution peak", "tflops", Category::Compute,
+      {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
        "Convolution speed at the precision each row names, swept over "
        "feature-map sizes and reported at its best.  Neural accelerators were "
        "built for this operation before they were asked to do anything else, "
@@ -350,7 +350,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
 
         const double flops = convFlops(v, sp);
-        const double rate = flops * 1.0e6 / mean_us / 1.0e12;
+        const double rate = flops * 1.0e6 / mean_us;
         lastRate = flops / mean_us;
         CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld -> %.3f\n",
                     ep.providerKey.c_str(), row.c_str(),

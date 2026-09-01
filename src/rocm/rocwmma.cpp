@@ -8,7 +8,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
   // One test for all data types -- integer reading carries its own unit.
   auto test = currentDeviceScope->beginTest(
     {"rocwmma", "rocWMMA matrix multiply",
-     "tflops", Category::Unknown,
+     "flops", Category::Unknown,
      "Matrix-core speed reached through AMD's rocWMMA library rather than the "
      "raw instructions.  Compare each reading with the WMMA or MFMA row for "
      "the same format to see what the library layer costs.",
@@ -20,13 +20,13 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
             : "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
   logger::EmitOptions metricOpts;
   metricOpts.description = metricNote;
-  if (isInt) metricOpts.unit = "tops";
+  if (isInt) metricOpts.unit = "ops";
 
 #ifndef CLPEAK_ROCM_HAS_ROCWMMA
   {
     logger::EmitOptions o; o.description = "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
     test.skip("fp16", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", o);
-    logger::EmitOptions oi; oi.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; oi.unit = "tops";
+    logger::EmitOptions oi; oi.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; oi.unit = "ops";
     test.skip("int8", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", oi);
   }
   return 0;
@@ -35,7 +35,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
   {
     logger::EmitOptions o; o.description = "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
     test.skip("fp16", ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", o);
-    logger::EmitOptions oi; oi.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; oi.unit = "tops";
+    logger::EmitOptions oi; oi.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; oi.unit = "ops";
     test.skip("int8", ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", oi);
     return 0;
   }
@@ -87,7 +87,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
 
     const double ops = (double)numBlocks * (double)M * (double)N *
                        (double)K * 2.0 * (double)Iters;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(metric, value, opts);
 
     (void)hipFree(outBuf);
@@ -98,7 +98,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
     runOne("fp16", "fp16", "rocwmma_fp16", rocm_kernels::rocwmma_fp16, 16u, sizeof(float), o);
   }
   {
-    logger::EmitOptions o; o.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; o.unit = "tops";
+    logger::EmitOptions o; o.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; o.unit = "ops";
     runOne("int8", "int8", "rocwmma_int8", rocm_kernels::rocwmma_int8, 32u, sizeof(int), o);
   }
   return 0;

@@ -18,7 +18,7 @@ int RocmPeak::runComputeSP(RocmDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "single_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
                   "fractional numbers -- the ordinary float type.  Nothing touches "
                   "memory, so only the arithmetic units limit the rate.";
@@ -43,7 +43,7 @@ int RocmPeak::runComputeHP(RocmDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "half_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                   "size of a normal float, and what graphics and on-device AI mostly "
                   "run on.  AMD shader cores reach full speed only on the packed "
@@ -74,7 +74,7 @@ int RocmPeak::runComputeDP(RocmDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "double_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
                   "high-accuracy type scientific computing relies on.  Radeon "
                   "gaming cards run these far slower than 32-bit; the Instinct "
@@ -96,7 +96,7 @@ int RocmPeak::runComputeMP(RocmDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "mixed_precision_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
                   "running total in 32 bits -- the accuracy-preserving pattern AI "
                   "code uses.  This is the shader cores, not the matrix cores.";
@@ -120,7 +120,7 @@ int RocmPeak::runComputeBF16(RocmDevice &dev, benchmark_config_t &cfg)
   d.resultTag = "bfloat16_compute";
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
-  d.unit = "gflops";
+  d.unit = "flops";
   d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
                   "digits of accuracy for the number range of a full float.  Again "
                   "the shader cores; the matrix-core figure is in the WMMA or MFMA "

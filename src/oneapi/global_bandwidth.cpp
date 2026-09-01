@@ -63,7 +63,7 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   // Opened before the sizing diagnostic below, so that line lands under
   // this test's header rather than under the previous test's readings.
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the device can stream out of its main memory, "
      "reading a buffer far too large to cache.  Each reading fetches a "
@@ -136,7 +136,7 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.W * sizeof(float);
-    test.emit(v.key, (float)(bytes / us / 1e3), oneapiWidthNote(v.W));
+    test.emit(v.key, (float)(bytes / us * 1e6), oneapiWidthNote(v.W));
   }
 
   sycl::free(inBuf,  dev.stream);

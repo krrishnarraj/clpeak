@@ -25,7 +25,7 @@ struct WmmaEntry
 {
   const char *label;    // reading id within the family test
   const char *title;
-  const char *unit;     // "tflops" or "tops"
+  const char *unit;     // "flops" or "ops"
   const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, K;
@@ -52,26 +52,26 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
 {
 
   static const WmmaEntry fpEntries[] = {
-    {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "tflops",
+    {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp16, "wmma_fp16",
      16, 16, 16, false,
      "Peak speed of the matrix cores -- dedicated units that multiply whole "
      "16x16 blocks of numbers in one step rather than one value at a time -- "
      "on 16-bit inputs with a 32-bit running total.  This is the everyday "
      "precision of AI work."},
-    {"bf16", "WMMA bf16xbf16+fp32 16x16x16", "tflops",
+    {"bf16", "WMMA bf16xbf16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_bf16, "wmma_bf16",
      16, 16, 16, false,
      "Matrix cores on bfloat16 -- 16 bits arranged for AI work, trading digits "
      "of accuracy for the number range of a full float, which makes training "
      "far more forgiving."},
-    {"fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "tflops",
+    {"fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e4m3",
      16, 16, 16, false,
      "Matrix cores on 8-bit numbers, in the variant that spends its bits on "
      "accuracy rather than range.  Half the data of 16-bit per value, so it "
      "runs at roughly twice the rate."},
-    {"fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "tflops",
+    {"fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e5m2",
      16, 16, 16, false,
      "The same 8-bit matrix path in the other variant, which spends its bits "
@@ -79,7 +79,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
      "very small values."},
   };
   static const WmmaEntry intEntries[] = {
-    {"int8", "WMMA int8xint8+int32 16x16x16", "tops",
+    {"int8", "WMMA int8xint8+int32 16x16x16", "ops",
      &rocm_kernels::wmma_int8, "wmma_int8",
      16, 16, 16, true,
      "Matrix cores on 8-bit whole numbers with a 32-bit running total -- the "
@@ -104,13 +104,13 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
   auto unitOpts = [](const WmmaEntry &en) {
     logger::EmitOptions o;
     if (en.description) o.description = en.description;
-    if (en.isInt) o.unit = "tops";
+    if (en.isInt) o.unit = "ops";
     return o;
   };
 
   // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
-    {"wmma", "Matrix cores (WMMA)", "tflops", Category::Unknown,
+    {"wmma", "Matrix cores (WMMA)", "flops", Category::Unknown,
        "Peak speed of the matrix cores -- dedicated units that multiply whole "
        "16x16 blocks of numbers in one step rather than one value at a time. "
        "Each reading is a different input format; which of them the hardware "
@@ -177,7 +177,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     // Each wave issues kWmmaPerWave WMMA ops, each doing 2*M*N*K flops/ops.
     const double ops = (double)numBlocks * (double)kWmmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(me.label, value, unitOpts(me));
 
     (void)hipFree(outBuf);
@@ -237,7 +237,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
 
     const double ops = (double)numBlocks * (double)kWmmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(me.label, value, unitOpts(me));
 
     (void)hipFree(outBuf);

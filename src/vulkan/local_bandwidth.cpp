@@ -16,7 +16,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   logger::TestSpec testSpec;
   testSpec.tag = "local_memory_bandwidth";
   testSpec.display = "Local memory bandwidth";
-  testSpec.unit = "gbps";
+  testSpec.unit = "bps";
   testSpec.description =
       "How many bytes per second the device moves through shared local memory "
       "-- the small on-chip scratchpad a group of threads passes data through, "
@@ -109,7 +109,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
-    float gbps = (float)bytes / us / 1e3f;
+    float gbps = (float)bytes / us * 1e6f;
     test.emit(key, gbps, vkWidthNote(v.width));
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }

@@ -140,7 +140,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
         float timed = run_kernel(queue, kernels[w], globalSize, localSize,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-        float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed / 1e3f;
+        float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed * 1e6f;
 
         // Race the affine chain and keep the faster reading.  A failure here
         // is not an error: the squaring chain already produced one.
@@ -150,7 +150,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           {
             float altTimed = run_kernel(queue, altKernels[w], globalSize, localSize,
                                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-            float altThroughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / altTimed / 1e3f;
+            float altThroughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / altTimed * 1e6f;
             CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
                         resultTag.c_str(), labels[w].c_str(), throughput,
                         altThroughput, unit.c_str());

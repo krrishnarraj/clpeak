@@ -91,7 +91,6 @@ LogEvent logger::makeEvent(LogEvent::Kind kind) const
         e.direction       = t->direction;
         e.unit            = t->unit;
         e.quantity        = t->quantity;
-        e.scale           = t->scale;
     }
     return e;
 }
@@ -296,7 +295,6 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
     const UnitInfo u = unitInfo(spec.unit);
     fresh.unit      = u.symbol;
     fresh.quantity  = u.quantity;
-    fresh.scale     = u.scale;
     fresh.direction = (spec.direction != Direction::FromUnit) ? spec.direction
                                                               : u.direction;
     fresh.category  = (spec.category != Category::Unknown)
@@ -359,9 +357,8 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
         m.hasUnit  = true;
         m.unit     = u.symbol;
         m.quantity = u.quantity;
-        m.scale    = u.scale;
         // A unit override with no explicit direction takes that unit's, not
-        // the test's: a `us` reading inside a throughput test is still
+        // the test's: a `s` reading inside a throughput test is still
         // lower-is-better.
         if (m.direction == Direction::FromUnit) m.direction = u.direction;
     }
@@ -419,7 +416,6 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
         m.hasUnit  = true;
         m.unit     = u.symbol;
         m.quantity = u.quantity;
-        m.scale    = u.scale;
         if (m.direction == Direction::FromUnit) m.direction = u.direction;
     }
 

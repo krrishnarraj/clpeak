@@ -84,8 +84,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     }
 
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
-    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);
 
     test.emit(v.label, value, note(v.description).c_str());
   }

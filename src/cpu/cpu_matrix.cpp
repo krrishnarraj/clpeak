@@ -19,7 +19,7 @@ using clpeak_cpu::kernelMenu;
 int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
 {
   const logger::TestSpec base = {
-      "cpu_matrix", "CPU matrix engine", "gflops", Category::Unknown,
+      "cpu_matrix", "CPU matrix engine", "flops", Category::Unknown,
       "Peak speed of the CPU's built-in matrix engine -- Intel AMX tiles or "
       "Arm SMMLA/BFMMLA/SME, a small tensor unit beside the ordinary vector "
       "units.  Each reading is a different input format; which of them the "
@@ -79,7 +79,7 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
         "run on -- and the fastest thing the engine does.",
         "no CPU int8 matrix engine (AMX / I8MM / SME) on this CPU",
         &kernelMenu().mat_int8,
-        "gops" });
+        "ops" });
 
   emitFamily(*this, base, rows, cfg);
   return 0;

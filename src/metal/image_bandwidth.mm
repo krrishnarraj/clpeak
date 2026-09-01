@@ -8,7 +8,7 @@
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+        {"image_memory_bandwidth", "Image memory bandwidth", "bps",
          Category::Unknown,
          "How many bytes per second the GPU reads through its texture units, "
          "which take a different path to memory than plain buffer reads.  Each "
@@ -154,8 +154,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         walk = 0;
 
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
-        float rowGbps = (float)bytes / us / 1e3f;
-        float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+        float rowGbps = (float)bytes / us * 1e6f;
+        float colGbps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
         CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f gbps\n",
                     v.label, rowGbps, colGbps);
         test.emit(v.label, std::max(rowGbps, colGbps), v.note);
@@ -175,7 +175,7 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"texture_sample_rate", "Texture sample rate (bilinear)", "gtexels",
+        {"texture_sample_rate", "Texture sample rate (bilinear)", "texels",
          Category::Bandwidth,
          "How many filtered texture lookups per second the GPU's sampling "
          "hardware performs.  Every lookup falls between pixels, so the hardware "
@@ -293,7 +293,7 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
             gpuTimedUs = wallTimedSec * 1e6;
         float us = (float)(gpuTimedUs / iters);
         uint64_t samples = (uint64_t)SAMPLES_PER_WI * globalThreads;
-        float gtexels = (float)samples / us / 1e3f;   // samples/us -> Gsamples/s
+        float gtexels = (float)samples / us * 1e6f;   // samples/us -> samples/s
         test.emit(v.label, gtexels, v.note);
     }
 

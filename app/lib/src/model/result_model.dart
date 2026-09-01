@@ -110,38 +110,31 @@ enum Quantity {
 
 /// How to print a reading, and how to compare it to one measured elsewhere.
 ///
-/// `symbol` is the unit as authored ("TFLOPS", "GB/s", "µs") and `scale`
-/// multiplies a value into that quantity's SI base unit.  clpeak reports
-/// GFLOPS in one test and TFLOPS in the next, so a bare number means nothing
-/// on its own — normalizing through `scale` is what lets one formatter serve
-/// every test instead of a switch over unit strings.
+/// `symbol` is the unit as authored ("FLOPS", "B/s", "s") -- values are
+/// already SI so the presenters pick `G/T` or `µ/n` via the ladder.
 class Units {
   const Units({
     required this.symbol,
     required this.quantity,
-    required this.scale,
   });
 
   final String symbol;
   final Quantity quantity;
-  final double scale;
 
-  static const empty =
-      Units(symbol: '', quantity: Quantity.unknown, scale: 1);
+  static const empty = Units(symbol: '', quantity: Quantity.unknown);
 
   /// From either an event or a saved test/metric object — the field names are
   /// the same in both.
   factory Units.fromJson(Map<String, dynamic> m) => Units(
         symbol: m['unit'] as String? ?? '',
         quantity: Quantity.fromTag(m['quantity'] as String? ?? ''),
-        scale: (m['scale'] as num?)?.toDouble() ?? 1,
       );
 }
 
 /// SI prefixes, smallest first.  A unit symbol is `<prefix><base>`, so
-/// rescaling is a matter of swapping the prefix — which works for GFLOPS →
-/// TFLOPS, GB/s → TB/s, GTexel/s → TTexel/s and ns → µs alike, without a
-/// table of every unit clpeak might one day report.
+/// rescaling is a matter of swapping the prefix — which works for FLOPS →
+/// GFLOPS → TFLOPS, B/s → GB/s → TB/s, Texel/s → GTexel/s and s →
+/// ms/µs/ns alike, without a table of every unit clpeak might one day report.
 const List<(int, String)> _siPrefixes = [
   (-9, 'n'),
   (-6, 'µ'),
@@ -155,11 +148,15 @@ const List<(int, String)> _siPrefixes = [
 ];
 
 /// Strip a leading SI prefix off a unit symbol: "TFLOPS" → (12, "FLOPS").
+/// Known bases are FLOPS/OPS/B/s/s/Texel/s so "Texel/s" is not taken as
+/// T + "exel/s".
 (int, String) _splitPrefix(String symbol) {
+  const bases = {'FLOPS', 'OPS', 'B/s', 's', 'Texel/s'};
   for (final (exp, prefix) in _siPrefixes) {
     if (prefix.isEmpty) continue;
     if (symbol.length > prefix.length && symbol.startsWith(prefix)) {
-      return (exp, symbol.substring(prefix.length));
+      final base = symbol.substring(prefix.length);
+      if (bases.contains(base)) return (exp, base);
     }
   }
   return (0, symbol);
@@ -168,7 +165,7 @@ const List<(int, String)> _siPrefixes = [
 String _prefixFor(int exp) =>
     _siPrefixes.firstWhere((p) => p.$1 == exp, orElse: () => (0, '')).$2;
 
-/// Auto-scaled display value, e.g. 4476 GFLOPS → "4.48 TFLOPS", 1.5e-7 s →
+/// Auto-scaled display value, e.g. 4.476e12 FLOPS → "4.48 TFLOPS", 1.5e-7 s →
 /// "150 ns".  The same ladder as `formatScaledValue()` in
 /// `src/common/units.cpp`, which is what the CLI's value column prints —
 /// one algorithm, two presenters — and replaces the hard-coded per-unit

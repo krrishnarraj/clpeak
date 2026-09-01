@@ -26,7 +26,7 @@ struct SparseEntry
 {
   const char *label;    // reading id within the family test
   const char *title;
-  const char *unit;     // "tflops" or "tops"
+  const char *unit;     // "flops" or "ops"
   const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, Kdense; // dense-equivalent K for op accounting
@@ -53,25 +53,25 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
 {
 
   static const SparseEntry fpEntries[] = {
-    {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "tflops",
+    {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp16, "smfmac_fp16",
      16, 16, 32, false,
      "The matrix cores on 16-bit inputs with structured sparsity: half the "
      "values in each group of four are known to be zero and are skipped, so "
      "the hardware does twice the useful work per step."},
-    {"bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "tflops",
+    {"bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_bf16, "smfmac_bf16",
      16, 16, 32, false,
      "The same skip-the-zeros trick on bfloat16, the AI-oriented 16-bit "
      "format."},
-    {"fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "tflops",
+    {"fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp8, "smfmac_fp8",
      16, 16, 64, false,
      "The same skip-the-zeros trick on 8-bit numbers -- the fastest "
      "arrangement these matrix cores offer for fractional values."},
   };
   static const SparseEntry intEntries[] = {
-    {"int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "tops",
+    {"int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "ops",
      &rocm_kernels::smfmac_int8, "smfmac_int8",
      16, 16, 64, true,
      "The same skip-the-zeros trick on 8-bit whole numbers, the format "
@@ -92,13 +92,13 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
   auto unitOpts = [](const SparseEntry &en) {
     logger::EmitOptions o;
     if (en.description) o.description = en.description;
-    if (en.isInt) o.unit = "tops";
+    if (en.isInt) o.unit = "ops";
     return o;
   };
 
   // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
-    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "tflops", Category::Unknown,
+    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "flops", Category::Unknown,
        "The matrix cores with structured sparsity: half the values in each "
        "group of four are known to be zero and are skipped, so the hardware "
        "does twice the useful work per step.  Each reading is a different "
@@ -157,7 +157,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     // Dense-equivalent work: each sparse op produces a full 2*M*N*Kdense result.
     const double ops = (double)numBlocks * (double)kPerWave *
                        2.0 * (double)se.M * (double)se.N * (double)se.Kdense;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(se.label, value, unitOpts(se));
 
     (void)hipFree(outBuf);
@@ -210,7 +210,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
 
     const double ops = (double)numBlocks * (double)kPerWave *
                        2.0 * (double)se.M * (double)se.N * (double)se.Kdense;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
+    float value = (float)(ops * 1.0e6 / us);
     test.emit(se.label, value, unitOpts(se));
 
     (void)hipFree(outBuf);

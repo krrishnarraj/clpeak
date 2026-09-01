@@ -138,7 +138,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
                          "quantized neural networks use.";
 
   auto test = currentDeviceScope->beginTest(
-        {"rocblas_gemm", "rocBLAS GEMM peak", "tflops", Category::Unknown,
+        {"rocblas_gemm", "rocBLAS GEMM peak", "flops", Category::Unknown,
          "Matrix-multiply speed through AMD's own tuned library, on a large "
          "square problem.  Where the matrix-core rows show what the hardware "
          "can do in principle, this shows what shipping code reaches on the "
@@ -154,7 +154,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   auto intOpts = [&](const char *note) {
     logger::EmitOptions o;
     if (note) o.description = note;
-    o.unit = "tops";
+    o.unit = "ops";
     return o;
   };
 
@@ -232,7 +232,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
       test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", blasOpts(note));
       return;
     }
-    test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), blasOpts(note));
+    test.emit(label, (float)(flops * 1.0e6 / meanUs), blasOpts(note));
   };
 
   {
@@ -334,7 +334,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
         test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", intOpts(note));
         return;
       }
-      test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), intOpts(note));
+      test.emit(label, (float)(flops * 1.0e6 / meanUs), intOpts(note));
     };
     if (int8Gemm() != rocblas_status_success)
       test.skip("int8", ResultStatus::Unsupported,

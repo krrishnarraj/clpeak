@@ -17,23 +17,17 @@ struct UnitRow {
     const char *token;
     const char *symbol;
     Quantity    quantity;
-    double      scale;      // value * scale -> SI base unit
     Direction   direction;
 };
 
-// Latency and error units are the lower-is-better ones.  `ppm` is the ONNX
-// numeric-error unit: the reading is a distance from the right answer, so
-// less of it is better even though it is not a time.
+// All values are already SI: FLOP/s, OP/s, byte/s, 1/s, s, ppm.
 const UnitRow kUnits[] = {
-    { "gflops",  "GFLOPS",    Quantity::Flops,          1e9,  Direction::HigherIsBetter },
-    { "tflops",  "TFLOPS",    Quantity::Flops,          1e12, Direction::HigherIsBetter },
-    { "gops",    "GOPS",      Quantity::Ops,            1e9,  Direction::HigherIsBetter },
-    { "tops",    "TOPS",      Quantity::Ops,            1e12, Direction::HigherIsBetter },
-    { "gbps",    "GB/s",      Quantity::BytesPerSecond, 1e9,  Direction::HigherIsBetter },
-    { "gtexels", "GTexel/s",  Quantity::ItemsPerSecond, 1e9,  Direction::HigherIsBetter },
-    { "us",      "µs",   Quantity::Seconds,        1e-6, Direction::LowerIsBetter  },
-    { "ns",      "ns",        Quantity::Seconds,        1e-9, Direction::LowerIsBetter  },
-    { "ppm",     "ppm",       Quantity::Ratio,          1e-6, Direction::LowerIsBetter  },
+    { "flops",  "FLOPS",    Quantity::Flops,          Direction::HigherIsBetter },
+    { "ops",    "OPS",      Quantity::Ops,            Direction::HigherIsBetter },
+    { "bps",    "B/s",      Quantity::BytesPerSecond, Direction::HigherIsBetter },
+    { "texels", "Texel/s",  Quantity::ItemsPerSecond, Direction::HigherIsBetter },
+    { "s",      "s",        Quantity::Seconds,        Direction::LowerIsBetter  },
+    { "ppm",    "ppm",      Quantity::Ratio,          Direction::LowerIsBetter  },
 };
 
 } // namespace
@@ -94,38 +88,37 @@ UnitInfo unitInfo(const std::string &token)
         UnitInfo info;
         info.symbol    = r.symbol;
         info.quantity  = r.quantity;
-        info.scale     = r.scale;
         info.direction = r.direction;
         return info;
     }
 
-    // Unknown token: show it as written rather than dropping it.  scale 1 and
-    // quantity Unknown tell consumers not to rescale, which is the only safe
+    // Unknown token: show it as written rather than dropping it.
+    // Quantity Unknown tells consumers not to rescale, which is the only safe
     // thing to do with a magnitude nobody has described.
     UnitInfo info;
     info.symbol    = token;
     info.quantity  = Quantity::Unknown;
-    info.scale     = 1.0;
     info.direction = Direction::HigherIsBetter;
     return info;
 }
 
 Category categoryFromUnit(const std::string &unit)
 {
-    if (unit == "gflops" || unit == "tflops") return Category::Compute;
-    if (unit == "gops"   || unit == "tops")   return Category::Compute;
-    if (unit == "gbps")                       return Category::Bandwidth;
-    if (unit == "us")                         return Category::Latency;
+    if (unit == "flops") return Category::Compute;
+    if (unit == "ops")   return Category::Compute;
+    if (unit == "bps")   return Category::Bandwidth;
+    if (unit == "texels")return Category::Bandwidth;
+    if (unit == "s")     return Category::Latency;
     return Category::Unknown;
 }
 
 // ── Magnitude-scaled display ────────────────────────────────────────────────
 //
 // A unit symbol is <SI prefix><base>, so rescaling is a matter of swapping
-// the prefix — which works for GFLOPS → TFLOPS, GB/s → TB/s, GTexel/s →
-// TTexel/s and ns → µs alike, without a table of every unit clpeak might one
-// day report.  Byte-wise prefix matching: every prefix is one logical
-// character, "µ" included (two UTF-8 bytes).
+// the prefix — which works for FLOPS → GFLOPS → TFLOPS, B/s → GB/s → TB/s,
+// Texel/s → GTexel/s and s → ms/µs/ns alike, without a table of every unit
+// clpeak might one day report.  Byte-wise prefix matching: every prefix is
+// one logical character, "µ" included (two UTF-8 bytes).
 
 namespace {
 
@@ -134,7 +127,9 @@ const struct { int exp; const char *prefix; } kSiPrefixes[] = {
     {  6, "M" }, {  9, "G" }, { 12, "T" }, { 15, "P" },
 };
 
-// Strip a leading SI prefix off a unit symbol: "TFLOPS" -> (12, "FLOPS").
+// Strip a leading SI prefix off a unit symbol: "TFLOPS" -> (12, "FLOPS"),
+// "GB/s" -> (9, "B/s") , "s" -> (-9, "s").  Known bases are FLOPS/OPS/B/s/s/Texel/s
+// so "Texel/s" is not mistaken for T + "exel/s".
 std::pair<int, std::string> splitPrefix(const std::string &symbol)
 {
     for (const auto &p : kSiPrefixes)
@@ -142,7 +137,12 @@ std::pair<int, std::string> splitPrefix(const std::string &symbol)
         const size_t len = std::strlen(p.prefix);   // bytes; "µ" is two
         if (len == 0) continue;
         if (symbol.size() > len && symbol.compare(0, len, p.prefix) == 0)
-            return { p.exp, symbol.substr(len) };
+        {
+            std::string base = symbol.substr(len);
+            if (base == "FLOPS" || base == "OPS" || base == "B/s" ||
+                base == "s" || base == "Texel/s")
+                return { p.exp, base };
+        }
     }
     return { 0, symbol };
 }

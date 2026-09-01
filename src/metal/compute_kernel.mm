@@ -159,8 +159,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                                  gridSize, tgSizeM, warmupCount,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t totalThreads = (uint64_t)numGroups * tgSize;
-        double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-        float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+        float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);
 
         // Race the affine chain and keep the faster reading.  A failure here is
         // not an error -- the squaring chain already produced one.
@@ -177,7 +176,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                 if (altUs > 0.0f)
                 {
                     float altValue = (float)((double)totalThreads * (double)d.workPerWI
-                                             * 1e6 / altUs / divider);
+                                             * 1e6 / altUs);
                     CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
                                 d.resultTag, metricTag(v.label).c_str(), value,
                                 altValue, d.unit);

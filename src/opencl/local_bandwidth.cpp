@@ -13,7 +13,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+    {"local_memory_bandwidth", "Local memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
@@ -73,7 +73,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
-      gbps = (float)bytesPerCall / timed / 1e3f;
+      gbps = (float)bytesPerCall / timed * 1e6f;
 
       test.emit(labels[w], gbps, clWidthNote(widths[w]));
     }

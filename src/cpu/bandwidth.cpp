@@ -59,7 +59,7 @@ static inline uint64_t readBufferChecksum(const float *p, size_t M, uint64_t ite
 // ---------------------------------------------------------------------------
 int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 {
-  logger::TestSpec spec{"cache_bandwidth", "Cache bandwidth (read)", "gbps",
+  logger::TestSpec spec{"cache_bandwidth", "Cache bandwidth (read)", "bps",
                         Category::Bandwidth,
                         "How many bytes per second the CPU can read out of each "
                         "cache, from the tiny fast one next to the core to the big "
@@ -191,7 +191,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     double mtPassBytes = (double)MN * sizeof(float) * (double)maxT;
     auto gbps = [](double bytes, double meanUs) -> float
     {
-      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
     };
 
     if (us1 > 0)
@@ -223,7 +223,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   // threshold and would bypass the very cache under test.
   {
     logger::TestSpec wspec{"l1_write_bandwidth", "L1 bandwidth (write / copy)",
-                           "gbps", Category::Bandwidth,
+                           "bps", Category::Bandwidth,
                            "How many bytes per second a core can write into its "
                            "nearest cache, and copy within it.  Cores have fewer "
                            "paths out to memory than in, so writing usually lands "
@@ -254,7 +254,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
     auto gbps = [](double bytes, double meanUs) -> float
     {
-      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
     };
 
     const char *wStNote = "One thread storing new values into its own L1.";
@@ -326,7 +326,7 @@ static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-      {"global_memory_bandwidth", "DRAM bandwidth", "gbps", Category::Unknown,
+      {"global_memory_bandwidth", "DRAM bandwidth", "bps", Category::Unknown,
        "How many bytes per second all cores together can move to and from main "
        "memory.  The arrays are far too big for any cache, so every access goes "
        "out to RAM.  The two rows that write count only the bytes the program "
@@ -373,7 +373,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   unsigned int forced = forceIters ? specifiedIters : 0;
   auto gbps = [](double bytes, double meanUs) -> float
   {
-    return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+    return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
   };
 
   {

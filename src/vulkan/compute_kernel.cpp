@@ -240,10 +240,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     return timed;
   };
 
-  double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
   auto toValue = [&](float timed)
   {
-    return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
+    return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed);
   };
 
   for (const auto &v : variants)

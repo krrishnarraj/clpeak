@@ -24,7 +24,7 @@
 //   auto device  = backend.beginDevice({"M1 Pro", "Apple", "1.2.3",
 //                                        {{"Compute units", "16"}}});
 //   auto test    = device.beginTest({"global_bandwidth",
-//                                    "Global memory bandwidth", "gbps"});
+//                                    "Global memory bandwidth", "bps"});
 //   test.emit("float",  123.45f);
 //   test.emit("float2", 456.78f);
 //
@@ -74,7 +74,6 @@ struct LogEvent {
   Direction   direction = Direction::HigherIsBetter;
   std::string unit;                             // resolved display symbol
   Quantity    quantity  = Quantity::Unknown;
-  double      scale     = 1.0;
 
   // True when this TestBegin reopened an already-recorded test to append more
   // readings to it, rather than starting a new one.
@@ -133,7 +132,7 @@ public:
   struct TestSpec {
     std::string tag;              // canonical tag, e.g. "global_memory_bandwidth"
     std::string display;          // human-readable, e.g. "Global memory bandwidth"
-    std::string unit;             // "gflops" | "gbps" | "us" | … (see units.h)
+    std::string unit;             // "flops" | "bps" | "s" | … (see units.h)
     Category    category = Category::Unknown;  // auto-derived from unit if omitted
 
     // One or two sentences on what this test measures, for readers who don't
@@ -178,7 +177,7 @@ public:
     std::string label;
 
     // Unit token for this one reading, when it differs from the test's — an
-    // integer reading (`tops`) inside a GEMM test reported in `tflops`.  This
+    // integer reading (`ops`) inside a GEMM test reported in `flops`.  This
     // is what lets one heterogeneous test cover both, instead of the `-fp` /
     // `-int` twins that exist today only because the unit string had to
     // differ.  Empty means "the test's unit".

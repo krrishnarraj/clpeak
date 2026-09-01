@@ -62,7 +62,7 @@ double bestGflops(uint64_t n, Fn gemm)
     double us = nowUs() - t0;
     spentUs += us;
     if (us > 0.0)
-      best = std::max(best, flops / (us * 1e3));
+      best = std::max(best, flops / (us * 1e-6));
     if (r >= 1 && spentUs >= 250e3)
       break;
   }
@@ -119,7 +119,7 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
   // ---- Accelerate BLAS GEMM: fp32 + fp64 ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"accelerate_gemm", "Accelerate GEMM", "gflops",
+        {"accelerate_gemm", "Accelerate GEMM", "flops",
          Category::Unknown,
          "Matrix-multiply speed through Apple's Accelerate library, the only way "
          "to reach the matrix coprocessor Apple ships but does not expose as "
@@ -178,7 +178,7 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
   // ---- BNNS matmul: fp16 / bf16 (+ int8 unsupported row) ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"bnns_matmul", "BNNS matmul", "gflops",
+        {"bnns_matmul", "BNNS matmul", "flops",
          Category::Unknown,
          "Matrix-multiply speed through Apple's BNNS library, the only public "
          "route to reduced-precision (16-bit) matrix maths on Apple Silicon.",

@@ -56,7 +56,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
                          "quantized neural networks use.";
 
   auto test = currentDeviceScope->beginTest(
-        {"onemkl_gemm", "oneMKL GEMM peak", "tflops", Category::Unknown,
+        {"onemkl_gemm", "oneMKL GEMM peak", "flops", Category::Unknown,
          "Matrix-multiply speed through Intel's own tuned library, on a large "
          "square problem.  Where the joint_matrix rows show what the hardware "
          "can do in principle, this shows what shipping code reaches on the "
@@ -72,7 +72,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   auto intOpts = [&](const char *note) {
     logger::EmitOptions o;
     if (note) o.description = note;
-    o.unit = "tops";
+    o.unit = "ops";
     return o;
   };
 
@@ -175,7 +175,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       if (meanUs <= 0.0)
         test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", mklOpts(note));
       else
-        test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), mklOpts(note));
+        test.emit(label, (float)(flops * 1.0e6 / meanUs), mklOpts(note));
     }
     freeAll();
     // q and its private context are destroyed here.
@@ -299,7 +299,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
         if (meanUs <= 0.0)
           test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", intOpts(note));
         else
-          test.emit(label, (float)(flops * 1.0e6 / meanUs / 1.0e12), intOpts(note));
+          test.emit(label, (float)(flops * 1.0e6 / meanUs), intOpts(note));
       }
       freeAll();
     };

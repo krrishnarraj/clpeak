@@ -7,7 +7,7 @@
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+    {"image_memory_bandwidth", "Image memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the GPU reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
@@ -104,8 +104,8 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   };
   float rowUs = timeWalk(0);
   float colUs = timeWalk(1);
-  float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
-  float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+  float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
+  float colGbps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
   CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
               rowGbps, colGbps);
 

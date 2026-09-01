@@ -11,7 +11,7 @@ template <int WALK> class image_bw_kernel;
 int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+    {"image_memory_bandwidth", "Image memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the device reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
@@ -116,8 +116,8 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     float colUs = runKernel(dev, submit(std::integral_constant<int, 1>{}),
                             cfg.targetTimeUs, forced);
     const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
-    float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
+    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
+    float colGbps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
     CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
                 rowGbps, colGbps);
 

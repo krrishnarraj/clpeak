@@ -98,7 +98,6 @@ struct MetricResult {
     bool        hasUnit  = false;
     std::string unit;                             // resolved display symbol
     Quantity    quantity = Quantity::Unknown;
-    double      scale    = 1.0;
 
     // Direction override.  FromUnit means "inherit the test's".
     Direction   direction = Direction::FromUnit;
@@ -134,9 +133,8 @@ struct TestResult {
     Direction direction = Direction::HigherIsBetter;  // resolved, never FromUnit
 
     // Resolved from the authored unit token exactly once, at beginTest().
-    std::string unit;                             // display symbol: "TFLOPS"
+    std::string unit;                             // display symbol: "FLOPS"
     Quantity    quantity = Quantity::Unknown;
-    double      scale    = 1.0;                   // value * scale -> SI base
 
     std::vector<MetricResult> metrics;
 

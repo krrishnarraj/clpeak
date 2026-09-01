@@ -213,7 +213,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     {
         auto t = currentDeviceScope->beginTest(
             {"cublas_gemm", "cuBLASLt GEMM peak",
-             "tflops", Category::Unknown,
+             "flops", Category::Unknown,
              "Matrix-multiply speed through NVIDIA's own tuned library, on a "
              "large square problem.  Where the tensor-core rows show what the "
              "hardware can do in principle, this shows what shipping code "
@@ -222,7 +222,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
              TestShape::Heterogeneous, "data type"});
         t.skip("fp32", ResultStatus::Unsupported,
                "cuBLASLt library not found; GEMM skipped", {});
-        logger::EmitOptions o; o.unit = "tops";
+        logger::EmitOptions o; o.unit = "ops";
         t.skip("int8", ResultStatus::Unsupported,
                "cuBLASLt library not found; GEMM skipped", o);
         return 0;
@@ -301,7 +301,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         logger::EmitOptions o;
         if (note)
             o.description = note;
-        o.unit = "tops";
+        o.unit = "ops";
         return o;
     };
 
@@ -437,7 +437,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                       betaPtr, (void *)dC, Cdesc, (void *)dC, Cdesc,
                                       &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
-        double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
+        double tops = flops_per_iter * 1.0e6 / mean_us;
         blasTest->emit(label, (float)tops, curOpts);
 
         cublasLtMatmulDescDestroy(opDesc);
@@ -611,7 +611,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                       &beta32, (void *)dC, Cdesc, (void *)dC, Cdesc,
                                       &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
-        double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
+        double tops = flops_per_iter * 1.0e6 / mean_us;
         blasTest->emit(label, (float)tops, blasOpts(note));
         cleanup();
         return 0;
@@ -620,7 +620,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 
     // One test for all data types -- integer readings carry their own unit.
     auto test = currentDeviceScope->beginTest(
-        {"cublas_gemm", "cuBLASLt GEMM peak", "tflops", Category::Unknown,
+        {"cublas_gemm", "cuBLASLt GEMM peak", "flops", Category::Unknown,
          "Matrix-multiply speed through NVIDIA's own tuned library, on a "
          "large square problem.  Where the tensor-core rows show what the "
          "hardware can do in principle, this shows what shipping code "

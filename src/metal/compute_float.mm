@@ -22,7 +22,7 @@ int MetalPeak::runComputeSP(MetalDevice &dev, benchmark_config_t &cfg)
     mtl_compute_desc_t d = {};
     d.title       = "Single-precision compute";
     d.resultTag      = "single_precision_compute";
-    d.unit        = "gflops";
+    d.unit        = "flops";
     d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
                     "fractional numbers -- the ordinary float type.  Nothing "
                     "touches memory, so only the arithmetic units limit the rate.";
@@ -52,7 +52,7 @@ int MetalPeak::runComputeHP(MetalDevice &dev, benchmark_config_t &cfg)
     mtl_compute_desc_t d = {};
     d.title       = "Half-precision compute";
     d.resultTag      = "half_precision_compute";
-    d.unit        = "gflops";
+    d.unit        = "flops";
     d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                     "size of a normal float, and what graphics and on-device AI "
                     "mostly run on.";
@@ -78,7 +78,7 @@ int MetalPeak::runComputeMP(MetalDevice &dev, benchmark_config_t &cfg)
     mtl_compute_desc_t d = {};
     d.title       = "Mixed-precision compute fp16xfp16+fp32";
     d.resultTag      = "mixed_precision_compute";
-    d.unit        = "gflops";
+    d.unit        = "flops";
     d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
                     "running total in 32 bits -- the accuracy-preserving pattern AI "
                     "code uses.";

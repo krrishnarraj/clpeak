@@ -60,7 +60,7 @@ static float runLocalVariant(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+    {"local_memory_bandwidth", "Local memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
@@ -110,7 +110,7 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.W * sizeof(float) * globalThreads;
-    test.emit(v.key, (float)bytes / us / 1e3f, oneapiWidthNote(v.W));
+    test.emit(v.key, (float)bytes / us * 1e6f, oneapiWidthNote(v.W));
   }
 
   sycl::free(outBuf, dev.stream);

@@ -58,8 +58,7 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
       "axis": "data type",
       "direction": "higher_is_better",
       "quantity": "flops",
-      "unit": "TFLOPS",
-      "scale": 1e12,
+      "unit": "FLOPS",
       "description": "Matrix-multiply speed through NVIDIA's own tuned library…",
       "metrics": [
         { "id": "fp32", "value": 14.87 },
@@ -118,7 +117,7 @@ free-form facts the backend chose to report (compute units, VRAM, clocks).
 | `shape` | `homogeneous` \| `heterogeneous` — see below |
 | `axis` | what varies across the readings (see below). Optional |
 | `direction` | `higher_is_better` \| `lower_is_better` |
-| `quantity`, `unit`, `scale` | see *Units* |
+| `quantity`, `unit` | see *Units* |
 | `description` | what the test measures, in plain language |
 | `metrics` | the readings |
 
@@ -171,7 +170,7 @@ invented word for that pair would read worse than none.
 | `status` | `unsupported` \| `skipped` \| `error`. **Omitted for a successful reading** — every row of a healthy file is `ok`, so spelling it out on each would be noise |
 | `reason` | why, for a non-`ok` reading |
 | `description` | what this one reading means |
-| `unit`, `quantity`, `scale` | present only when this reading overrides its test's |
+| `unit`, `quantity` | present only when this reading overrides its test's |
 | `direction` | present only when this reading overrides its test's |
 
 The unit override is what lets one heterogeneous test hold both TFLOPS and
@@ -182,27 +181,24 @@ and not flops, or it reads as its test's unit and claims something false.
 
 ## Units
 
-A reading is stored **as measured**, with enough alongside it to normalize:
+A reading is stored **in SI** — `FLOP/s`, `byte/s`, `s`, `Texel/s`, `ppm` —
+with the unit that explains it:
 
 ```jsonc
 "quantity": "flops",   // what is measured
-"unit": "TFLOPS",      // display symbol, ready to print
-"scale": 1e12          // value * scale  ->  SI base unit (FLOP/s here)
+"unit": "FLOPS"        // display symbol, ready to print
 ```
 
-`scale` is what makes readings comparable. clpeak reports GFLOPS in one test
-and TFLOPS in the next, µs in one latency test and ns in another, so a bare
-number means nothing on its own. Multiplying by `scale` puts every reading in
-its quantity's SI base unit, which is how one formatter serves every test
-instead of a switch over unit strings.
+Values are already SI so the presenters pick `G/T/P` or `µ/n` via the SI
+ladder.
 
 `quantity` is one of `flops`, `ops`, `bytes_per_second`, `seconds`,
 `items_per_second`, `ratio`, `count`, `unknown`. The last three have no SI
 ladder to slide along, so a presenter prints them exactly as measured.
 
-The table mapping clpeak's internal unit tokens (`gflops`, `us`, `ppm`, …) to
-these fields is `src/common/units.cpp`; a token missing from it passes through
-as its own symbol with `quantity: "unknown"` and `scale: 1`, so a new unit
+The table mapping clpeak's internal unit tokens (`flops`, `bps`, `s`, `ppm`,
+…) to these fields is `src/common/units.cpp`; a token missing from it passes
+through as its own symbol with `quantity: "unknown"`, so a new unit
 appears correctly in the output before anyone adds it there.
 
 ## Conventions
@@ -231,7 +227,7 @@ with a message naming its version. Regenerate it.
 |---|---|
 | `--xml-file` / `--json-file` / `--csv-file` | `-o, --output` |
 | flat `entries[]` (JSON) / `run → category → test → metric` (XML) | `devices[] → tests[] → metrics[]` |
-| `unit: "gflops"` | `unit: "GFLOPS"` + `quantity` + `scale` |
+| `unit: "gflops"` | `unit: "FLOPS"` + `quantity` |
 | direction inferred from the unit, in the GUI only | `direction`, per test, resolved natively |
 | — | `shape`, `axis`, `variant` |
 | — | `generated_at`, `duration_s`, `cancelled`, `host`, `invocation`, `notes` |

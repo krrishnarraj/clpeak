@@ -489,7 +489,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_gemm", "ONNX MatMul peak",
-       "tflops",
+       "flops",
        Category::Unknown,
        "Matrix-multiply speed through ONNX Runtime on this execution "
        "provider, using a single-operation model with constant weights.  "
@@ -511,7 +511,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       logger::EmitOptions o;
       o.description = v.note;
       if (isInt)
-        o.unit = "tops";
+        o.unit = "ops";
       test.skip(v.label, ResultStatus::Unsupported, why, o);
       return;
     }
@@ -609,7 +609,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                     "sizes.  ") +
                         v.note;
         if (isInt)
-          o.unit = "tops";
+          o.unit = "ops";
         test.skip(v.label,
                   tried.empty() ? errStatus : ResultStatus::Unsupported,
                   tried.empty()
@@ -737,7 +737,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       lastDim = D;
 
       const double ops = 2.0 * (double)D * (double)D * (double)D;
-      const double rate = ops * 1.0e6 / mean_us / 1.0e12;
+      const double rate = ops * 1.0e6 / mean_us;
       // Rate per FLOP-count is what the ladder is searching on; the raw rate
       // in ops/us drives the time prediction for the next rung.
       lastRate = ops / mean_us;
@@ -841,14 +841,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                          "the multiply itself is unaffected, but the cast is a "
                          "full pass over the result and costs a few percent.";
       if (isInt)
-        o.unit = "tops";
+        o.unit = "ops";
       test.emit(v.label, (float)best, o);
     }
     else
     {
       o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
       if (isInt)
-        o.unit = "tops";
+        o.unit = "ops";
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "no supported datatype" : firstErr, o);
     }

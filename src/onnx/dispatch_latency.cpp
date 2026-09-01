@@ -186,7 +186,7 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        specifiedIters);
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx_dispatch_latency", "ONNX dispatch latency", "us",
+      {"onnx_dispatch_latency", "ONNX dispatch latency", "s",
        Category::Latency,
        "The fixed cost of handing one piece of work to this execution "
        "provider, with the arithmetic made deliberately negligible.  Reaching "
@@ -197,7 +197,7 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        TestShape::Heterogeneous, "what is submitted"});
 
   if (trivial.perRunUs > 0.0)
-    test.emit("trivial_op", (float)trivial.perRunUs,
+    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6),
               "One multiply over 64 values -- as close to doing nothing as a "
               "graph can get, so almost all of this is overhead.");
   else
@@ -205,7 +205,7 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               "One multiply over 64 values.");
 
   if (matmul.perRunUs > 0.0)
-    test.emit("matmul_256", (float)matmul.perRunUs,
+    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6),
               "A 256x256x256 matrix multiply: 34 million operations, which "
               "any accelerator here should finish in well under a "
               "millisecond.  Whatever this reads above the row before it is "
@@ -215,7 +215,7 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               "A 256x256x256 matrix multiply.");
 
   if (trivial.createUs > 0.0)
-    test.emit("session_create", (float)trivial.createUs,
+    test.emit("session_create", (float)(trivial.createUs * 1e-6),
               "Preparing that trivial graph for execution.  On NPU providers "
               "this runs a compiler rather than bookkeeping, which is why "
               "starting up and running steadily are such different stories.");

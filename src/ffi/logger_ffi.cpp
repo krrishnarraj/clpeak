@@ -65,7 +65,6 @@ void appendTestHeader(std::ostringstream &ss, const LogEvent &e)
     appendStr(ss, "direction", directionString(e.direction));
     appendStr(ss, "quantity",  quantityString(e.quantity));
     appendStr(ss, "unit",      e.unit);
-    ss << ",\"scale\":" << fmtNum(e.scale);
     appendStr(ss, "desc", e.testDescription);
 }
 
@@ -125,12 +124,11 @@ std::string ffiEventToJson(const LogEvent &e)
             appendStr(ss, "reason", e.metric.reason);
         }
         // Unit fields ride along only when this reading overrides its test's,
-        // which is what lets one test carry both TFLOPS and TOPS readings.
+        // which is what lets one test carry both FLOPS and OPS readings.
         if (e.metric.hasUnit)
         {
             appendStr(ss, "unit",     e.metric.unit);
             appendStr(ss, "quantity", quantityString(e.metric.quantity));
-            ss << ",\"scale\":" << fmtNum(e.metric.scale);
         }
         if (e.metric.direction != Direction::FromUnit)
             appendStr(ss, "direction", directionString(e.metric.direction));

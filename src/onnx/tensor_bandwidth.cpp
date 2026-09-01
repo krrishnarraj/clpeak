@@ -217,7 +217,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   auto test = currentDeviceScope->beginTest(
-      {"onnx_tensor_bw", "ONNX resident-tensor bandwidth", "gbps",
+      {"onnx_tensor_bw", "ONNX resident-tensor bandwidth", "bps",
        Category::Bandwidth,
        "How fast this provider streams model weights out of its own memory, "
        "measured on the exact operation that generating a token performs -- "
@@ -304,7 +304,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       continue;
     }
     const double bytes = (double)s.dim * (double)s.dim * 2.0;
-    const double gbps  = bytes / (netUs * 1.0e-6) / 1.0e9;
+    const double gbps  = bytes / (netUs * 1.0e-6);
     test.emit(s.label, (float)gbps, s.note);
 
     stillFalling = (prevGbps <= 0.0) || (gbps < prevGbps * kFallingRatio);
