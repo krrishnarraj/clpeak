@@ -3,9 +3,8 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 
-int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
+int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  (void)category;
   // One test for all data types -- integer reading carries its own unit.
   auto test = currentDeviceScope->beginTest(
     {"rocwmma", "rocWMMA matrix multiply",

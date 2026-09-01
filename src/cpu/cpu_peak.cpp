@@ -202,7 +202,7 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
   if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
   if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
-  if (isAllowed(Benchmark::Amx))         runCpuMatrix(cfg, Category::Compute);
+  if (isAllowed(Benchmark::Amx))         runCpuMatrix(cfg);
 #ifdef __APPLE__
   if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
 #endif

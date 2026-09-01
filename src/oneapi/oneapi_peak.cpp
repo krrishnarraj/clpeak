@@ -185,8 +185,8 @@ int OneapiPeak::runAll()
     if (isAllowed(Benchmark::ComputeMP))     runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))   runComputeBF16(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-    if (isAllowed(Benchmark::JointMatrix))   runJointMatrix(dev, cfg, Category::Compute);
-    if (isAllowed(Benchmark::Onemkl))        runOnemkl(dev, cfg, Category::Compute);
+    if (isAllowed(Benchmark::JointMatrix))   runJointMatrix(dev, cfg);
+    if (isAllowed(Benchmark::Onemkl))        runOnemkl(dev, cfg);
 
 
     if (isAllowed(Benchmark::GlobalBW))     runGlobalBandwidth(dev, cfg);

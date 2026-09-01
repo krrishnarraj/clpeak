@@ -10,16 +10,14 @@
 //
 // One test, one reading per data type -- the engine is a single unit and the
 // interesting question is which formats it runs and how fast, which six
-// near-identical one-reading tests answered only by their names.  int8 runs in
-// the integer phase and reopens the same test to append its readings, carrying
-// its own unit (ops, not flops) since it is the one row that is not floating
-// point.
+// near-identical one-reading tests answered only by their names.  The int8
+// row carries its own unit (ops) so it shares the test with the floating-
+// point rows.
 
 using clpeak_cpu::kernelMenu;
 
-int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
+int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
 {
-  (void)category;
   const logger::TestSpec base = {
       "cpu_matrix", "CPU matrix engine", "gflops", Category::Unknown,
       "Peak speed of the CPU's built-in matrix engine -- Intel AMX tiles or "
@@ -29,8 +27,7 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
       "the next.",
       TestShape::Heterogeneous, "data type"};
 
-  {
-    std::vector<FamilyRow> rows = {
+  std::vector<FamilyRow> rows = {
         { "bf16",
           "bfloat16 -- the AI-oriented 16-bit format, and the one every matrix "
           "engine supports first.",
@@ -76,18 +73,15 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg, Category category)
           &kernelMenu().mat_fp64 });
 #endif
 
-    emitFamily(*this, base, rows, cfg);
-  }
+  rows.push_back(
+      { "int8",
+        "8-bit whole numbers, the format quantized neural networks "
+        "run on -- and the fastest thing the engine does.",
+        "no CPU int8 matrix engine (AMX / I8MM / SME) on this CPU",
+        &kernelMenu().mat_int8,
+        "gops" });
 
-  // Integer row -- same test, reopened; carries its own unit (ops).
-  emitFamily(*this, base,
-             {{ "int8",
-                "8-bit whole numbers, the format quantized neural networks "
-                "run on -- and the fastest thing the engine does.",
-                "no CPU int8 matrix engine (AMX / I8MM / SME) on this CPU",
-                &kernelMenu().mat_int8,
-                "gops" }},
-             cfg);
+  emitFamily(*this, base, rows, cfg);
   return 0;
 }
 

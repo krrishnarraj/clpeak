@@ -49,9 +49,8 @@ bool isCdnaFamily(const std::string &base)
 
 } // namespace
 
-int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
+int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  (void)category;
 
   static const SparseEntry fpEntries[] = {
     {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "tflops",

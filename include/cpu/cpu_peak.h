@@ -133,7 +133,7 @@ public:
   int runComputeInt8DP(benchmark_config_t &cfg);
   int runComputeInt16DP(benchmark_config_t &cfg);
   int runComputeIntDiv(benchmark_config_t &cfg);
-  int runCpuMatrix(benchmark_config_t &cfg, Category category);
+  int runCpuMatrix(benchmark_config_t &cfg);
 #ifdef __APPLE__
   int runAppleBlas(benchmark_config_t &cfg);   // Accelerate GEMM + BNNS matmul
 #endif

@@ -37,10 +37,8 @@ static uint32_t pickOnemklGemmDim(const oneapi_device_info_t &info)
   return (uint32_t)D;
 }
 
-int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &, Category category)
+int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
 {
-  (void)category;
-  const bool fpPhase = true;
 
   // One note per dtype row, shared by every emit and skip path below.
   const char *fp32Note = "Full 32-bit precision, on the general compute units "

@@ -498,10 +498,8 @@ int vkPeak::runAll()
     if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (isAllowed(Benchmark::CoopMatrix)) {
-        runCoopMatrix(dev, cfg, /*intPart=*/false);
-        runCoopMatrix(dev, cfg, /*intPart=*/true);
-    }
+    if (isAllowed(Benchmark::CoopMatrix))
+        runCoopMatrix(dev, cfg);
 #endif
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
     if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);

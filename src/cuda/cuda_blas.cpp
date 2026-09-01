@@ -205,11 +205,9 @@ namespace
 
 } // namespace
 
-int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category)
+int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 {
     (void)cfg;
-
-    (void)category;
     // cuBLASLt is an optional runtime dependency (not part of the driver).
     if (!g_lt.load())
     {
@@ -316,7 +314,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
                             bool useTN) -> int
     {
         const bool isIntLabel = (label[0]=='i' && label[1]=='n' && label[2]=='t');
-        auto curOpts = isIntLabel ? intOpts(note) : curOpts;
+        auto curOpts = isIntLabel ? intOpts(note) : blasOpts(note);
         cublasLtMatmulDesc_t opDesc = nullptr;
         cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
 

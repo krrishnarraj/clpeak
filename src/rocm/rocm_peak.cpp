@@ -190,15 +190,15 @@ int RocmPeak::runAll()
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
     if (isAllowed(Benchmark::Wmma))
-      runWmma(dev, cfg, Category::Compute);
+      runWmma(dev, cfg);
     if (isAllowed(Benchmark::Rocwmma))
-      runRocwmma(dev, cfg, Category::Compute);
+      runRocwmma(dev, cfg);
     if (isAllowed(Benchmark::Mfma))
-      runMfma(dev, cfg, Category::Compute);
+      runMfma(dev, cfg);
     if (isAllowed(Benchmark::Mfma))
-      runSparseMfma(dev, cfg, Category::Compute);
+      runSparseMfma(dev, cfg);
     if (isAllowed(Benchmark::Rocblas))
-      runRocblas(dev, cfg, Category::Compute);
+      runRocblas(dev, cfg);
     if (isAllowed(Benchmark::Rocblas))
       runHipblasLt(dev, cfg);
 

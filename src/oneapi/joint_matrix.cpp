@@ -496,9 +496,8 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
 
 #endif // CLPEAK_ONEAPI_HAS_JOINT_MATRIX
 
-int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category)
+int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  (void)category;
   // One test for all data types -- integer readings carry their own unit.
   auto test = currentDeviceScope->beginTest(
     {"joint_matrix", "joint_matrix peak",

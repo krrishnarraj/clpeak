@@ -55,9 +55,8 @@ bool isCdnaFamily(const std::string &base)
 
 } // namespace
 
-int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
+int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  (void)category;
 
   static const MfmaEntry fpEntries[] = {
     {"fp16", "MFMA fp16xfp16+fp32 16x16x16", "tflops",

@@ -48,9 +48,8 @@ bool isRdnaWmmaFamily(const std::string &base)
 
 } // namespace
 
-int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
+int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  (void)category;
 
   static const WmmaEntry fpEntries[] = {
     {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "tflops",

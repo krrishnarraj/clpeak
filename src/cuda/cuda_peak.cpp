@@ -177,9 +177,9 @@ int CudaPeak::runAll()
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
     if (isAllowed(Benchmark::Wmma))
-      runWmma(dev, cfg, Category::Compute);
+      runWmma(dev, cfg);
     if (isAllowed(Benchmark::Cublas))
-      runCublas(dev, cfg, Category::Compute);
+      runCublas(dev, cfg);
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
     if (isAllowed(Benchmark::GlobalBW))
       runGlobalBandwidth(dev, cfg);

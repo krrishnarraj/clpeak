@@ -7,9 +7,8 @@
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
 // ---------------------------------------------------------------------------
 
-int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category)
+int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  (void)category;
   // Shared geometry: one warp (32 threads) per block, m16n16k16 tile per
   // wmma fragment, 256 outer iters → COOPMAT_WORK_PER_WI per thread.
   const uint32_t warp = 32;

@@ -116,7 +116,7 @@ namespace
 
 } // namespace
 
-int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart)
+int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   // One subgroup per work-group: each subgroup collectively computes one MxN
   // output tile.  The width is a specialization constant bound to both the
@@ -138,20 +138,17 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
     return coopmatRequiredSubgroupSize(dev.info, t.subgroupSize);
   };
 
-  if (!intPart)
-  {
-    // One scope for the whole family: each data type is measured in its own
-    // #ifdef block, and opening the test in each would close and reopen it
-    // seven times over.
-    auto test = currentDeviceScope->beginTest(
-        {"coopmat", "Cooperative matrix", "tflops", Category::Unknown,
-         "The device's matrix engine -- its tensor cores -- which "
-         "multiplies whole small blocks of numbers in one step instead of one "
-         "value at a time.  Each reading is a different input format, run at the "
-         "block shape the driver advertises for it; which formats the engine "
-         "supports, and how much faster the narrow ones go, is most of what "
-         "separates one generation of hardware from the next.",
-         TestShape::Heterogeneous, "data type"});
+  // One scope for the whole family -- all data types in one test.
+  // The int8 row carries its own unit (tops) so it shares the test.
+  auto test = currentDeviceScope->beginTest(
+      {"coopmat", "Cooperative matrix", "tflops", Category::Unknown,
+       "The device's matrix engine -- its tensor cores -- which "
+       "multiplies whole small blocks of numbers in one step instead of one "
+       "value at a time.  Each reading is a different input format, run at the "
+       "block shape the driver advertises for it; which formats the engine "
+       "supports, and how much faster the narrow ones go, is most of what "
+       "separates one generation of hardware from the next.",
+       TestShape::Heterogeneous, "data type"});
 
 #ifdef VK_HAS_COOPMAT_FP32
     {
@@ -338,23 +335,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       runComputeKernel(dev, cfg, d);
     }
 #endif
-  } // !intPart
 
 #ifdef VK_HAS_COOPMAT_INT8
-  if (intPart)
-  {
-    // The same test, reopened for the integer phase: the engine does not
-    // become different hardware because the numbers are whole.  This opening
-    // declares ops, so its readings are not headed as flops.
-    auto test = currentDeviceScope->beginTest(
-        {"coopmat", "Cooperative matrix", "tops", Category::Unknown,
-         "The device's matrix engine -- its tensor cores -- which "
-         "multiplies whole small blocks of numbers in one step instead of one "
-         "value at a time.  Each reading is a different input format, run at the "
-         "block shape the driver advertises for it; which formats the engine "
-         "supports, and how much faster the narrow ones go, is most of what "
-         "separates one generation of hardware from the next.",
-         TestShape::Heterogeneous, "data type"});
+  // Integer row -- same test, same scope; carries its own unit (tops).
 
     CoopTileRun r;
     r.push.A.i = 3;
@@ -389,7 +372,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPa
       d.skipMsg = "No int8xint8+int32 coopmat support (shaderInt8 or property)! Skipped";
     }
     runComputeKernel(dev, cfg, d);
-  } // if (intPart)
 #endif
   return 0;
 }

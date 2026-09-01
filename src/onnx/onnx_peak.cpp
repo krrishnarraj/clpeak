@@ -196,7 +196,7 @@ int OnnxPeak::runAll()
 
     // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (isAllowed(Benchmark::OnnxGemm))
-      runGemm(*rt, ep, cfg, Category::Compute);
+      runGemm(*rt, ep, cfg);
 
     if (isAllowed(Benchmark::OnnxConv))
       runConv(*rt, ep, cfg);

@@ -119,10 +119,8 @@ double timeRocblas(hipStream_t stream, Fn fn, unsigned int n)
 
 } // namespace
 
-int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &, Category category)
+int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
 {
-  (void)category;
-  const bool fpPhase = true; // unused, kept for minimal diff
 
 
   // One note per dtype row, shared by every emit and skip path below.

@@ -423,10 +423,9 @@ namespace
 } // namespace
 
 int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                      benchmark_config_t &cfg, Category category)
+                      benchmark_config_t &cfg)
 {
   (void)cfg;
-  (void)category;
 
   static const Variant kFpVariants[] = {
       {ONNX_DT_FLOAT, false, "fp32",
