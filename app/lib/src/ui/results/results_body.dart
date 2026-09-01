@@ -82,6 +82,11 @@ class _ResultsBodyState extends State<ResultsBody> {
     // by wrapping a category in one container, which would undo the laziness.
     final rows = <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
+      if (meta != null &&
+          (meta.clpeakVersion.isNotEmpty ||
+              meta.generatedAt.isNotEmpty ||
+              meta.host.isNotEmpty))
+        _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
       if (runs.length > 1)
         _WidgetRow(
           _RunSelector(
@@ -91,11 +96,6 @@ class _ResultsBodyState extends State<ResultsBody> {
           ),
           padBottom: 16,
         ),
-      if (meta != null &&
-          (meta.clpeakVersion.isNotEmpty ||
-              meta.generatedAt.isNotEmpty ||
-              meta.host.isNotEmpty))
-        _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
       _WidgetRow(_DeviceHeader(run: selected)),
       if (hasTests)
         _WidgetRow(
