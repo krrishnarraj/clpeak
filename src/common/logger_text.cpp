@@ -113,8 +113,8 @@ void LoggerText::renderTestBegin(const LogEvent &e)
 {
     // Reopening the test that just closed, with its header still standing:
     // keep accumulating into the same stanza, under the header already
-    // printed for it.  Rows carry their own units, so a reopen in a different
-    // one (a GEMM test's integer phase) joins the same table rather than
+    // printed for it.  Rows carry their own units, so a reopen with a different
+    // unit joins the same table rather than
     // starting a look-alike stanza beside it.
     if (e.reopened && e.testKey() == lastClosedTest && stanzaHasHeader)
         return;

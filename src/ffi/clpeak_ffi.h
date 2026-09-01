@@ -91,7 +91,7 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // alone (heterogeneous); `direction` which way is better; `scale` multiplies
 // a value into its SI base unit, which is how a presenter picks an SI prefix.
 // `reopened` marks a test_begin that resumes an already-announced test to
-// append readings measured in a later category phase.
+// append readings.
 //
 // A reading omits `status` when it succeeded (it has a `value` instead), and
 // carries unit fields only when it overrides its test's -- the case that lets

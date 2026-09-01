@@ -10,10 +10,9 @@
 // peak was measuring PCIe.  On unified-memory devices the difference is
 // small, but the graph is identical everywhere so the rows stay comparable.
 //
-// One test, `onnx_gemm`, across both category phases: the same
-// single-operation model on whichever formats the provider accepts.  The int8
-// QDQ reading is measured in ops rather than flops and carries that unit
-// itself, which is what removed the second scope this used to need.
+// One test, `onnx_gemm`: the same single-operation model on whichever
+// formats the provider accepts.  The int8 QDQ reading is measured in ops
+// rather than flops and carries that unit itself.
 // int8 is the dtype most NPUs are actually built for, so an NPU whose only
 // measured reading is the int8 one is the expected shape, not a gap.
 

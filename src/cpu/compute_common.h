@@ -139,11 +139,8 @@ struct FamilyRow {
   spec.shape = TestShape::Heterogeneous;
 
   // When every row of THIS call shares one unit override, it is the unit of
-  // the readings this opening produces, so it heads them.  cpu_matrix opens in
-  // the floating-point phase reporting flops and reopens in the integer phase
-  // reporting ops; without this the integer readings would sit under a GFLOPS
-  // header.  A mixed-unit call keeps the family's unit and the rows carry
-  // their own.
+  // the readings this opening produces, so it heads them.  A mixed-unit call
+  // keeps the family's unit and the rows carry their own.
   {
     const char *shared = rows.empty() ? nullptr : rows.front().unit;
     bool uniform = shared != nullptr;
