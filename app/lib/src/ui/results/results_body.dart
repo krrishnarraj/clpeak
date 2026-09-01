@@ -272,10 +272,11 @@ class _DeviceHeader extends StatelessWidget {
 /// away: its readings are interchangeable variants of one measurement, so one
 /// number really is the answer.
 ///
-/// A heterogeneous test never collapses — its readings measure different
+/// A heterogeneous test starts expanded — its readings measure different
 /// things, and the largest of them is not the test's result but merely its
-/// largest number.  It renders as a small always-open table instead, headed by
-/// what varies across the readings ("DATA TYPE", "CACHE LEVEL").
+/// largest number.  It renders as a small table headed by what varies across
+/// the readings ("DATA TYPE", "CACHE LEVEL"), expanded by default but
+/// collapsible to its header.
 ///
 /// Draws its own top/bottom rules and side borders so a run of these reads as
 /// a single bordered table even though each is an independent list row.
@@ -298,16 +299,22 @@ class _TestLine extends StatefulWidget {
 }
 
 class _TestLineState extends State<_TestLine> {
-  bool _expanded = false;
+  // Null means follow the default: heterogeneous multi expanded, everything
+  // else collapsed.  Once the user taps, their choice sticks even as metrics
+  // stream in during a live run.
+  bool? _userExpanded;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final test = widget.test;
     final collapsible = test.collapsible;
-    // A heterogeneous test is its readings, so they are always on screen; a
-    // homogeneous one shows its answer and opens on demand.
-    final showBreakdown = collapsible ? _expanded : true;
+    // Heterogeneous with multiple readings is its readings, so expanded by
+    // default; homogeneous (and any single-reading test) collapses to its
+    // best reading and opens on demand.
+    final defaultExpanded = !collapsible;
+    final effectiveExpanded = _userExpanded ?? defaultExpanded;
+    final showBreakdown = effectiveExpanded;
 
     final header = Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
@@ -334,12 +341,18 @@ class _TestLineState extends State<_TestLine> {
                   value: peak.value, unit: peak.unit, color: widget.color);
             }),
             const SizedBox(width: 6),
-            Icon(_expanded ? Icons.remove : Icons.add, size: 13, color: t.faint),
-          ] else if (test.axis.isNotEmpty)
+            Icon(effectiveExpanded ? Icons.remove : Icons.add,
+                size: 13, color: t.faint),
+          ] else ...[
             // No number here on purpose: naming what varies is the honest
             // answer to "what did this test measure?", where any single
             // reading would misrepresent the other eight.
-            Text(test.axis.toUpperCase(), style: t.micro),
+            if (test.axis.isNotEmpty)
+              Text(test.axis.toUpperCase(), style: t.micro),
+            if (test.axis.isNotEmpty) const SizedBox(width: 6),
+            Icon(effectiveExpanded ? Icons.remove : Icons.add,
+                size: 13, color: t.faint),
+          ],
         ],
       ),
     );
@@ -362,16 +375,14 @@ class _TestLineState extends State<_TestLine> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (collapsible)
-            CTap(
-              onTap: () => setState(() => _expanded = !_expanded),
-              builder: (context, hovered, pressed) => Container(
-                color: hovered || pressed ? t.hover : Colors.transparent,
-                child: header,
-              ),
-            )
-          else
-            header,
+          CTap(
+            onTap: () => setState(
+                () => _userExpanded = !effectiveExpanded),
+            builder: (context, hovered, pressed) => Container(
+              color: hovered || pressed ? t.hover : Colors.transparent,
+              child: header,
+            ),
+          ),
           // Instant, not a cross-fade: expansion happens mid-run, and an
           // animated one would cost the benchmark a burst of frames.
           if (showBreakdown)

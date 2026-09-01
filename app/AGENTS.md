@@ -60,12 +60,13 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   reading's rides the reading.
 - Collapsed number, or a table of readings? → `TestResult.shape` /
   `.collapsible` (`lib/src/model/run_document.dart`).  A **homogeneous** test
-  collapses to its best reading — its readings are variants of one measurement.
-  A **heterogeneous** one never does: its readings measure different things,
-  and the largest is not the test's result but merely its largest number, so it
-  renders as an always-open mini-table headed by its `axis` ("DATA TYPE").  A
-  single-reading test collapses whatever its shape, since a one-row table says
-  nothing the row does not.  `shape` is authored natively and cannot be
+  collapses to its best reading — its readings are variants of one measurement,
+  so one number is the answer.  A **heterogeneous** one starts expanded — its
+  readings measure different things, and the largest is not the test's result
+  but merely its largest number, so it renders as a mini-table headed by its
+  `axis` ("DATA TYPE"), expanded by default but collapsible to that header.
+  A single-reading test collapses whatever its shape, since a one-row table
+  says nothing the row does not.  `shape` is authored natively and cannot be
   inferred — see `docs/format-v3.md`.
 - What do the meters mean? → `TestResult.barFraction`: a reading's size against
   the largest reading in its test, in every test, whichever direction is
