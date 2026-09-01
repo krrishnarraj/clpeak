@@ -56,7 +56,7 @@ local memory, DRAM ↔ global memory.
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
 | `string.cpp` | `runStringScan/Utf8Validate` — `Category::String` in GB/s, own `--string` flag |
-| `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::Amx`, run in both the fp and int phases |
+| `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::Amx` |
 | `apple_blas.cpp` | `runAppleBlas` (`--accelerate`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width) |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level, plus the `DRAM linear`, MLP (`DRAM x8`/`x32`) and TLB-miss rows |
@@ -110,8 +110,7 @@ makes two readings incomparable (bf16 on AMX vs on SME is different hardware;
 bf16 vs fp16 on one AMX is not), and a row this host cannot run still appears
 as a skip, so the reader sees which formats the engine lacks. A row measured in
 another unit carries it (`FamilyRow::unit`) — that is how `cpu_matrix`'s int8
-row lives in an otherwise floating-point test, reopening the same test in the
-integer phase.
+row shares the test with its floating-point rows.
 
 TU tags (`cpu_tu_registry.h`):
 

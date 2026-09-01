@@ -73,8 +73,7 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
   `half`/`half2` and `int`/`int2`/`int4`.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
   *independent chains*.  They carry their own notes.
-- `rocblas_gemm` and `rocwmma` are each one test across both category phases,
-  with the integer reading carrying its own unit.
+- `rocblas_gemm` and `rocwmma` are each one test, with the integer reading carrying its own unit.
 - `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
   through `runTimed` / `runVariant`.
 

@@ -52,7 +52,7 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   them onto `vkWidthNote()`, and their axis is "chains in flight", not "vector
   width".
 - **Every coopmat data type is one reading of ONE test** (`coopmat`), not a
-  test each.  `runCoopMatrix` opens one scope per category phase and every
+  test each.  `runCoopMatrix` opens one scope and every
   `#ifdef` block writes into it via `vk_compute_desc_t::scope` — a desc that
   does still sets `resultTag`, which the runner's --verbose lines report
   themselves under, but leaves the other header fields null.  The reading is
@@ -61,8 +61,7 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   because a shape in the name would differ between a device that measured the
   reading and one that skipped it — the same reading under two ids.  The prose
   goes on `metricDescription` — the test's own description covers the family.
-  int8
-  arrives in the integer phase and carries `metricUnit = "tops"`, which is what
+  int8 carries `metricUnit = "tops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.
 
 ## When You Change This Directory

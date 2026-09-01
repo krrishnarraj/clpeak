@@ -58,11 +58,9 @@ beside the title.
 ### A reading in another unit
 
 `EmitOptions::unit` overrides the test's for one reading. That is what lets a
-single heterogeneous GEMM test hold both TFLOPS and TOPS readings, instead of
-the `-fp` / `-int` twins that existed only because the unit string had to
-differ. `DeviceScope::beginTest()` on a tag already recorded for the device
-*reopens* it and appends, so the two halves can be measured in different
-category phases and still land in one test.
+single heterogeneous GEMM test hold both TFLOPS and TOPS readings. 
+`DeviceScope::beginTest()` on a tag already recorded for the device
+*reopens* it and appends.
 
 Two things are easy to get wrong here:
 
@@ -71,8 +69,7 @@ Two things are easy to get wrong here:
   inherits its test's, and then claims to be flops.
 - **The reopening `TestSpec` still carries the unit of the readings it is about
   to produce.** The test keeps the unit of its *first* open — that is what the
-  document records — and on a category-filtered run the integer phase's open
-  *is* the first, so a `tops` reopen that declared no unit would record the
+  document records — and if the first open emits int rows, a `tops` reading that declared no unit would record the
   whole test in flops. Both presenters print the unit per row, so no row is
   mislabelled by the test header.
 
@@ -85,13 +82,12 @@ global-bandwidth working-set line is the worked example, in all five GPU
 backends. Device-scope diagnostics (a failed program build, an enumeration
 dump) are the exception and correctly precede every test.
 
-**Reopen across phases, not within one.** A family whose data types are each
+**Reopen across scopes, not within one.** A family whose data types are each
 measured in their own block should open ONE scope and pass it down, not open
 the test per block — see the tensor-core and cooperative-matrix runners, whose
 descriptors take a `logger::TestScope *`. Reopening per reading works, but
 each metric flushes immediately so the label column widens down the page
-(via `mergedPad`). The genuine use for a reopen is the integer phase arriving
-after the rest of the run, where a new header is what you want anyway.
+(via `mergedPad`).
 
 ## Test documentation
 

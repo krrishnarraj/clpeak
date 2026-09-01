@@ -55,15 +55,14 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
   *independent chains* (see `compute_int8_dp.cu`).  They carry their own notes,
   and their axis is "chains in flight".
 - **Every tensor-core row is one reading of ONE test** (`wmma`), not a test
-  each.  `runWmma` opens one scope per category phase and every block writes
+  each.  `runWmma` opens one scope and every block writes
   into it via `cuda_compute_desc_t::scope`; the block's prose goes on
   `metricDescription`
   and the exact instruction (`mma.sync m16n8k32`) ends the sentence, since the
-  metric label is the data type alone.  The integer rows arrive in the integer
-  phase and carry `metricUnit = "tops"` — that override is what makes a
+  metric label is the data type alone.  The integer rows carry `metricUnit = "tops"` — that override is what makes a
   `wmma_int` twin unnecessary.
-- `cublas_gemm` is likewise one test across both phases; `blasOpts()` attaches
-  the note and, in the integer phase, the unit.
+- `cublas_gemm` is likewise one test; `blasOpts()` attaches
+  the note and integer rows carry their own unit.
 - `cuda_blas.cpp` threads a `note` next to `label` through `runVariantAB` /
   `runVariant` / `runVariantFp4`.
 
