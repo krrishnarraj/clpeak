@@ -11,8 +11,9 @@
 // quantized matmul at all.  A provider that declined dequantizes the operands
 // and multiplies in floating point, and the error that comes back is then the
 // quantization scheme's rather than the integer unit's -- the same distinction
-// onnx_gemm refuses to publish a rate without, and the two tests can
-// disagree because they choose the activation signedness on different grounds.
+// onnx_gemm refuses to publish a rate without.  Both tests now gate on the
+// same fusion check and try the same signed→unsigned schemes, so their
+// supported sets stay symmetric.
 //
 // The fp32 row does a second job.  clpeak's CPU-fallback guard works at
 // ORT's partitioning level, so it cannot see an EP that accepts a node and
@@ -320,29 +321,33 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     const float cScale = qdqOutputScale(kDim, v.dtype);
 
-    // Quantized activations may be signed or unsigned; providers disagree
-    // about which they accept, so try both.
-    //
-    // Unsigned first, which is the opposite of the throughput row's order and
-    // deliberate.  That row picks by which scheme *fuses*; this one can only
-    // pick by which one runs, and on x86 both run while only the unsigned one
-    // fuses.  Choosing signed there would quietly measure a floating-point
-    // multiply and report the mild error of one, hiding what unsigned int8
-    // actually costs on that hardware -- the 18% loss from int16 accumulators
-    // saturating, which is the whole reason this row exists.
-    // int8 alone has two spellings to choose between; every other quantized
-    // format uses its own type for both operands.
-    const int kInt8Acts[] = {ONNX_DT_UINT8, ONNX_DT_INT8};
-    const int kSameAct[]  = {v.dtype};
-    const int   *actCands = (v.dtype == ONNX_DT_INT8) ? kInt8Acts : kSameAct;
-    const size_t nActCands = (v.dtype == ONNX_DT_INT8) ? 2u : 1u;
+    // Quantization schemes, tried in order until one fuses - aligned with
+    // gemm.cpp.  There is no single choice that works everywhere: TensorRT
+    // rejects unsigned activations and demands a zero point of zero, while
+    // x86 MLAS without VNNI implements only the unsigned form and quietly
+    // declines to fuse the signed one.  Trying is the only way to know, and
+    // the fusion check is what decides.  Both tests now gate on the same
+    // decision so their supported sets stay symmetric.
+    struct QuantScheme
+    {
+      int actDtype;
+      int wDtype;
+      const char *name;
+    };
+    static const QuantScheme kInt8Schemes[] = {
+        {ONNX_DT_INT8, ONNX_DT_INT8, "signed activations"},
+        {ONNX_DT_UINT8, ONNX_DT_INT8, "unsigned activations"},
+    };
 
     int aDtype = v.dtype;
     std::string aRaw, bRaw, err;
+    std::string firstErr;
+    std::string tried; // what an unfused attempt actually ran
     std::vector<uint8_t> raw;
     std::vector<float> aDeq;
     std::vector<std::string> ranOps;
     const char *inName = "A", *outName = "C";
+    bool isFused = false;
 
     if (v.qdq)
     {
@@ -355,31 +360,88 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // internally but refuses it at its boundary can be measured at all.
       // TensorRT is exactly that: it imports float8 initializers and answers
       // "input onnx tensor data type: 17 not supported" for a float8 input.
-      for (size_t ci = 0; ci < nActCands; ci++)
+      QuantScheme single[1] = {{v.dtype, v.dtype, "matching activations and weights"}};
+      const QuantScheme *schemes = (v.dtype == ONNX_DT_INT8) ? kInt8Schemes : single;
+      const size_t nSchemes = (v.dtype == ONNX_DT_INT8) ? 2u : 1u;
+      for (size_t si = 0; si < nSchemes; si++)
       {
-        aDtype = actCands[ci];
-        fillTensor(aRaw, aDtype, kDim * kDim, 0x9e3779b9u);
-        fillTensor(bRaw, v.dtype, kDim * kDim, 0x243f6a88u);
+        const QuantScheme &qs = schemes[si];
+        aDtype = qs.actDtype;
+        fillTensor(aRaw, qs.actDtype, kDim * kDim, 0x9e3779b9u);
+        fillTensor(bRaw, qs.wDtype, kDim * kDim, 0x243f6a88u);
         std::string model = onnxQdqMatMulModel(
-            kDim, kDim, kDim, bRaw, onnxQuantScaleFor(aDtype),
-            onnxQuantScaleFor(v.dtype), cScale, aDtype, v.dtype,
+            kDim, kDim, kDim, bRaw, onnxQuantScaleFor(qs.actDtype),
+            onnxQuantScaleFor(qs.wDtype), cScale, qs.actDtype, qs.wDtype,
             /*floatIo=*/true);
         inName  = "A";
         outName = "C";
         err.clear();
         ranOps.clear();
         // Anything QLinearMatMul cannot carry must not be fused into it.
-        const bool unfusable = !onnxQdqFusionIsLegal(aDtype) ||
-                               !onnxQdqFusionIsLegal(v.dtype);
+        const bool unfusable = !onnxQdqFusionIsLegal(qs.actDtype) ||
+                               !onnxQdqFusionIsLegal(qs.wDtype);
         // What the device is given is the dequantized form of what was
         // quantized here, so the reference below and the run see one set of
         // values.
-        aDeq = widen(aRaw, aDtype, kDim * kDim, onnxQuantScaleFor(aDtype));
+        aDeq = widen(aRaw, qs.actDtype, kDim * kDim, onnxQuantScaleFor(qs.actDtype));
+        std::vector<std::string> ops;
         raw = runOnce(rt, ep, model, inName, outName, aDeq.data(),
                       aDeq.size() * sizeof(float), ONNX_DT_FLOAT, kDim, kDim,
-                      err, &ranOps, unfusable);
-        if (!raw.empty())
+                      err, &ops, unfusable);
+        if (raw.empty())
+        {
+          if (firstErr.empty())
+            firstErr = err;
+          CLPEAK_VLOG("onnx-numeric-error[%s/%s]: %s rejected: %s\n",
+                      ep.providerKey.c_str(), v.label, qs.name, err.c_str());
+          continue;
+        }
+        // Fusion check is the selector, exactly as in gemm.cpp.
+        if (onnxOpsRanQuantizedMatMul(ops))
+        {
+          ranOps = std::move(ops);
+          isFused = true;
           break;
+        }
+        std::string joined;
+        for (const auto &op : ops)
+          joined += (joined.empty() ? "" : ", ") + op;
+        if (tried.empty() && !joined.empty())
+          tried = joined;
+        CLPEAK_VLOG("onnx-numeric-error[%s/%s]: %s executed %s (no fused quantized matmul)\n",
+                    ep.providerKey.c_str(), v.label, qs.name, joined.c_str());
+        // Keep the unfused raw/err for now but continue to next scheme;
+        // symmetry requires a fused kernel, so an unfused success is not kept.
+        raw.clear();
+        if (firstErr.empty())
+          firstErr = err;
+      }
+      if (!isFused)
+      {
+        // Aligned with gemm.cpp: a quantized row is only published when the
+        // provider fused a quantized matmul. Reporting the dequantized float
+        // error as a quantized error would be symmetric with gemm's suppression
+        // but would attribute the quantization scheme's cost to the hardware.
+        if (!tried.empty())
+        {
+          err = "provider did not fuse a quantized matmul -- it dequantized "
+                "the operands and multiplied in floating point, so this is not a " +
+                std::string(v.label) + " error (ran: " + tried + ")";
+        }
+        else if (!firstErr.empty())
+        {
+          err = firstErr;
+        }
+        // Clear any unfused raw that may have been left.
+        raw.clear();
+        ranOps.clear();
+      }
+      else if (v.dtype == ONNX_DT_INT8)
+      {
+        // Record which scheme fused, for the row description.
+        o.description += (aDtype == ONNX_DT_UINT8)
+                             ? "  Measured with unsigned activations."
+                             : "  Measured with signed activations.";
       }
     }
     else
@@ -389,36 +451,6 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       std::string model = onnxMatMulModel(kDim, kDim, kDim, v.dtype, bRaw);
       raw = runOnce(rt, ep, model, inName, outName, aRaw.data(), aRaw.size(),
                     aDtype, kDim, kDim, err);
-    }
-    if (v.qdq)
-    {
-      if (v.dtype == ONNX_DT_INT8)
-        o.description += (aDtype == ONNX_DT_UINT8)
-                             ? "  Measured with unsigned activations."
-                             : "  Measured with signed activations.";
-      // Whether the provider fused a quantized matmul decides what this row
-      // is the error *of*.  onnx_gemm refuses to publish a rate when the
-      // fusion did not happen, because a float multiply is not an int8 rate;
-      // the error is still worth reporting either way -- quantizing and
-      // dequantizing costs precision whatever the multiply ran as -- but it
-      // must not be read as the cost of integer arithmetic when no integer
-      // arithmetic took place.  The scheme here is chosen by which one runs
-      // rather than which one fuses (see above), so the two tests can and do
-      // disagree on the same provider.
-      if (!raw.empty() && !ranOps.empty() && !onnxOpsRanQuantizedMatMul(ranOps))
-      {
-        std::string joined;
-        for (const auto &op : ranOps)
-          joined += (joined.empty() ? "" : ", ") + op;
-        o.description +=
-            "  This provider did not fuse a quantized matmul: it dequantized "
-            "the operands and multiplied in floating point (ran: " + joined +
-            "), so this is what the quantization scheme costs rather than "
-            "what this hardware's own quantized arithmetic costs.";
-        CLPEAK_VLOG("onnx-numeric-error[%s/%s]: no fused quantized matmul, "
-                    "executed %s\n", ep.providerKey.c_str(), v.label,
-                    joined.c_str());
-      }
     }
 
     if (raw.empty())

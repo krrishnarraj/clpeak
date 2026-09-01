@@ -396,16 +396,12 @@ quantized matmul — it dequantizes and multiplies in floating point. One card,
 one graph, and a five-fold difference that depends entirely on which runtime
 was asked.
 
-The error row does not vanish when the fusion does, and it must not be read as
-if it had. `numeric_error.cpp` profiles its quantized run the same way
-`gemm.cpp` does and says in the row's own description when the provider
-dequantized and multiplied in floating point, because the number is then what
-the quantization scheme costs rather than what this hardware's integer unit
-costs. The two tests can legitimately disagree on one provider: the throughput
-row picks the activation signedness by which scheme *fuses* and reports
-nothing when neither does, while the error row picks by which scheme *runs*,
-deliberately, so that x86's unsigned kernel is the one measured (see the Zen 2
-row below).
+Both tests gate on the same fusion check, and both report `[unsupported]`
+when the provider dequantized and multiplied in floating point. `gemm.cpp`
+and `numeric_error.cpp` profile the quantized run the same way, try the same
+`signed → unsigned` schemes, and keep only the one that fused into a
+quantized kernel. An unfused run is not a quantized rate and not a quantized
+error, so it is not published as either.
 
 The Zen 2 int8 row is the other half of the argument for measuring accuracy
 at all. That CPU fuses the quantized matmul happily and runs it at 1.3 TOPS —
