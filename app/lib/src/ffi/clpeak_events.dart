@@ -108,7 +108,7 @@ class DeviceEvent extends ClpeakEvent {
 }
 
 /// A test opened.  Carries the whole resolved header — title, shape,
-/// direction, unit, scale — so the test's row exists before its first reading
+/// direction, unit — so the test's row exists before its first reading
 /// and nothing has to be back-filled off the readings later.
 class TestBeginEvent extends ClpeakEvent {
   const TestBeginEvent({

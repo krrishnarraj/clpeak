@@ -60,7 +60,7 @@ local memory, DRAM ↔ global memory.
 | `apple_blas.cpp` | `runAppleBlas` (`--accelerate`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width) |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level, plus the `DRAM linear`, MLP (`DRAM x8`/`x32`) and TLB-miss rows |
-| `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (ns-per-op cost probes) and `runSmtScaling` (gflops at 1 thread/core vs all logical threads) |
+| `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (seconds-per-op cost probes) and `runSmtScaling` (flops at 1 thread/core vs all logical threads) |
 
 ## Build
 
@@ -267,11 +267,11 @@ Compute and cache-bandwidth tests emit an `ST` (one pinned core) and an `MT`
 counts, so results compare across machines with different core counts. DRAM
 bandwidth emits `read`/`copy`/`triad`; memory latency is `ST` only.
 
-Crypto and string tests report GB/s with unit `gbps` **and the category passed
-explicitly** in the `TestSpec` — `categoryFromUnit("gbps")` would otherwise file
-them under Bandwidth. The divide/sqrt rows are GFLOPS counting one op per lane
+Crypto and string tests report B/s with unit `bps` **and the category passed
+explicitly** in the `TestSpec` — `categoryFromUnit("bps")` would otherwise file
+them under Bandwidth. The divide/sqrt rows are flops counting one op per lane
 (far below the FMA rows by design). Atomics, branch-mispredict and
-store-forward report ns per op — cost probes, not throughput peaks.
+store-forward report seconds per op — cost probes, not throughput peaks.
 
 Two tests were considered and deliberately dropped: **core-to-core latency**
 (macOS has no hard pinning, so pair attribution is unreliable; the contended

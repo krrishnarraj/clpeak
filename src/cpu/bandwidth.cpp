@@ -189,17 +189,17 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
     double stPassBytes = (double)M1 * sizeof(float);
     double mtPassBytes = (double)MN * sizeof(float) * (double)maxT;
-    auto gbps = [](double bytes, double meanUs) -> float
+    auto bps = [](double bytes, double meanUs) -> float
     {
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
     };
 
     if (us1 > 0)
-      test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1), lvl.stNote);
+      test.emit(std::string(lvl.name) + " ST", bps(stPassBytes, us1), lvl.stNote);
     else
       test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote);
     if (usN > 0)
-      test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN), lvl.mtNote);
+      test.emit(std::string(lvl.name) + " MT", bps(mtPassBytes, usN), lvl.mtNote);
     else
       test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote);
   }
@@ -252,7 +252,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
       clpeak_cpu::kernels().copybuf(p, p + cFloats, cFloats, iters);
     };
 
-    auto gbps = [](double bytes, double meanUs) -> float
+    auto bps = [](double bytes, double meanUs) -> float
     {
       return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
     };
@@ -266,22 +266,22 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     double us1 = runWorkload(1, writeBody, cfg.targetTimeUs, forced);
     double usN = runWorkload(maxT, writeBody, cfg.targetTimeUs, forced);
     if (us1 > 0)
-      wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1), wStNote);
+      wtest.emit("write ST", bps((double)wFloats * sizeof(float), us1), wStNote);
     else
       wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote);
     if (usN > 0)
-      wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
+      wtest.emit("write MT", bps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
     else
       wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote);
 
     us1 = runWorkload(1, copyBody, cfg.targetTimeUs, forced);
     usN = runWorkload(maxT, copyBody, cfg.targetTimeUs, forced);
     if (us1 > 0)
-      wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1), cStNote);
+      wtest.emit("copy ST", bps(2.0 * cFloats * sizeof(float), us1), cStNote);
     else
       wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote);
     if (usN > 0)
-      wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
+      wtest.emit("copy MT", bps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
     else
       wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote);
   }
@@ -371,7 +371,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
   unsigned int forced = forceIters ? specifiedIters : 0;
-  auto gbps = [](double bytes, double meanUs) -> float
+  auto bps = [](double bytes, double meanUs) -> float
   {
     return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
   };
@@ -384,7 +384,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
       sink[(size_t)tid] ^= readBufferChecksum(A + lo, hi - lo, iters);
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("read", gbps((double)N * sizeof(float), us),
+    test.emit("read", bps((double)N * sizeof(float), us),
               "Reading one large array straight through, start to end.");
   }
   {
@@ -396,7 +396,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
         std::memcpy(A + lo, C + lo, (hi - lo) * sizeof(float));
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("copy", gbps(2.0 * N * sizeof(float), us),
+    test.emit("copy", bps(2.0 * N * sizeof(float), us),
               "Copying one large array into another -- a read and a write for "
               "every element.");
   }
@@ -411,7 +411,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
           A[i] = B[i] + s * C[i];
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("triad", gbps(3.0 * N * sizeof(float), us),
+    test.emit("triad", bps(3.0 * N * sizeof(float), us),
               "Scaling one array, adding a second and storing to a third: two "
               "reads and a write per element, the hardest of the three.");
   }

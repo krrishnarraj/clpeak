@@ -154,18 +154,18 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         walk = 0;
 
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
-        float rowGbps = (float)bytes / us * 1e6f;
-        float colGbps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
-        CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f gbps\n",
-                    v.label, rowGbps, colGbps);
-        test.emit(v.label, std::max(rowGbps, colGbps), v.note);
+        float rowBps = (float)bytes / us * 1e6f;
+        float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
+        CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f B/s\n",
+                    v.label, rowBps, colBps);
+        test.emit(v.label, std::max(rowBps, colBps), v.note);
     }
 
     return 0;
 }
 
 // ---------------------------------------------------------------------------
-// Texture sample rate (bilinear GTexels/s) -- TMU throughput, not bandwidth.
+// Texture sample rate (bilinear texels/s) -- TMU throughput, not bandwidth.
 // A small cache-resident texture is sampled with forced-fractional bilinear
 // coordinates, so the filter units are the limiter rather than DRAM (that is
 // what image_bandwidth measures).  Apple's TBDR parts sustain very high
@@ -293,8 +293,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
             gpuTimedUs = wallTimedSec * 1e6;
         float us = (float)(gpuTimedUs / iters);
         uint64_t samples = (uint64_t)SAMPLES_PER_WI * globalThreads;
-        float gtexels = (float)samples / us * 1e6f;   // samples/us -> samples/s
-        test.emit(v.label, gtexels, v.note);
+        float texels = (float)samples / us * 1e6f;   // samples/us -> samples/s
+        test.emit(v.label, texels, v.note);
     }
 
     return 0;

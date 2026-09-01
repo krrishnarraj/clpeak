@@ -110,13 +110,13 @@ static const char *helpStr =
 #endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
-    "\n  --compute     / --no-compute         compute (gflops / tflops / gops / tops)"
+    "\n  --compute     / --no-compute         compute (flops / ops)"
 #ifdef ENABLE_CPU
-    "\n  --crypto      / --no-crypto          crypto/hash silicon (gbps)     [CPU]"
-    "\n  --string      / --no-string          string/text processing (gbps)  [CPU]"
+    "\n  --crypto      / --no-crypto          crypto/hash silicon (bps)      [CPU]"
+    "\n  --string      / --no-string          string/text processing (bps)   [CPU]"
 #endif
-    "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (gbps)"
-    "\n  --latency     / --no-latency         kernel-launch latency (us)"
+    "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (bps)"
+    "\n  --latency     / --no-latency         kernel-launch latency (s)"
 #ifdef ENABLE_ONNX
     "\n  --ai          / --no-ai              AI-composite micro-graphs      [ONNX]"
 #endif
@@ -159,7 +159,7 @@ static const char *helpStr =
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
     "\n  --mps-attention                   | --no-mps-attention             [Metal: SDPA fp16]"
-    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear GTexels/s]"
+    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear texels/s]"
 #endif
 #ifdef ENABLE_ONEAPI
     "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"

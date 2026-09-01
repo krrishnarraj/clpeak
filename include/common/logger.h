@@ -60,7 +60,7 @@ struct LogEvent {
   std::string driver;
 
   // Open test.  Everything a live consumer needs to render the test's header
-  // and scale its readings, resolved once at beginTest() so nothing
+  // and resolve its unit, resolved once at beginTest() so nothing
   // downstream repeats the unit-table lookup.  Empty / defaulted until a test
   // opens.  Per-reading notes are not here: they belong to individual
   // readings and arrive with them, on `metric.description`.

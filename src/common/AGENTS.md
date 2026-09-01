@@ -26,7 +26,7 @@ used by the Flutter GUI on every platform).
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (including gating) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
 | `run_document.cpp` | The result tree + its single JSON serialization. Also `RunDocument::append`, which folds each backend's logger into the document a host saves |
-| `units.cpp` | The unit table: token → symbol, quantity, SI scale, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
+| `units.cpp` | The unit table: token → symbol, quantity, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
 | `json.cpp` | Recursive-descent JSON parser, classic-locale numbers. Hand-rolled: it is the only parser clpeak needs, and it is smaller than the XML/CSV line scanners it replaced |
 | `host_info.cpp` | `probeHost()`. Deliberately records no hostname, username or serial — result files get shared |
 | `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook. Also whitespace-collapses the documentation strings to one line, since all three dump formats are line-oriented |

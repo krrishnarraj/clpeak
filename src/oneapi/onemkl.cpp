@@ -16,8 +16,8 @@
 #endif
 
 // oneMKL GEMM peak — analog of rocBLAS / cuBLAS / MPSGraph.  FP category
-// reports tflops for FP32, FP64, FP16, BF16 (each gated by device aspect);
-// INT category reports tops for INT8 (s8 x u8 -> s32 via gemm_bias).  This
+// reports flops for FP32, FP64, FP16, BF16 (each gated by device aspect);
+// INT category reports ops for INT8 (s8 x u8 -> s32 via gemm_bias).  This
 // mirrors the datatype coverage of the joint_matrix microbenchmark so every
 // SDK-supported GEMM dtype is measured by both the raw and the library path.
 //

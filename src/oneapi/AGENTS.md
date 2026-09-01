@@ -14,7 +14,7 @@ build time and the SYCL runtime JITs it on first launch.
 - Looking for the main class / orchestrator? → `oneapi_peak.cpp`
 - Looking for OneapiDevice class (SYCL device/queue init, info)? → `oneapi_device.cpp`
 - Looking for SYCL device enumeration? → `oneapi_peak.cpp` (`enumerateDevices` — prefers GPUs, falls back to CPU/accelerator when no GPU is visible)
-- Looking for the shared compute helpers (block sizing, gflops math)? → `compute_kernel.cpp`
+- Looking for the shared compute helpers (block sizing, flops math)? → `compute_kernel.cpp`
 - Looking for kernel timing? → `oneapi_peak.cpp` (`OneapiPeak::runKernel`)
 - Looking for FP compute benchmarks? → `compute_float.cpp`
 - Looking for int compute benchmarks? → `compute_int.cpp`
@@ -29,11 +29,11 @@ build time and the SYCL runtime JITs it on first launch.
 |------|---------|
 | `oneapi_peak.cpp` | `OneapiPeak`: ctor, `applyOptions()`, `runAll()`, `runKernel()`, `enumerate()`, `printInventory()`, `enumerateDevices()` |
 | `oneapi_device.cpp` | `OneapiDevice::init()` — sets up `sycl::queue`, populates `oneapi_device_info_t` (vendor, CUs, sub-group sizes, fp16/fp64/bf16/XMX flags) |
-| `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeGflops`) reused by `compute_float.cpp` / `compute_int.cpp` |
+| `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeFlops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
 | `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`). No int8 dot-product test — see Gotchas |
 | `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). The row list is **derived from the device's `matrix_combinations` table**, not hardcoded: one row per advertised (A, B, accumulator) type triple and tile shape. `CLPEAK_JM_SHAPES` is the compiled (M,N) set — joint_matrix needs the tile at compile time — and an advertised shape outside it records an `Unsupported` row naming the shape. Row names come from `jmBaseName()`: bare dtype (`joint_matrix_bf16`, `_fp16`, `_tf32`, `_int8`) for the first tile of each dtype, `_MxNxK` suffix for any further tile of the same dtype |
-| `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; fp32/fp64/fp16/bf16/int8 (fp32/fp64/fp16/bf16 tflops, int8 tops via `gemm_bias`). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail |
+| `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; fp32/fp64/fp16/bf16/int8 (fp32/fp64/fp16/bf16 flops, int8 ops via `gemm_bias`). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
 | `image_bandwidth.cpp` | `runImageBandwidth` (float4 via `sycl::image<2>`) |
@@ -114,7 +114,7 @@ See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
   the function.  The helper lives in `oneapi_peak.h`.
 - `joint_matrix.cpp`: `jmNote()` composes each row's note from its dtype pair
   and tile shape, so a row documents the shape it actually ran.  All of them
-  land in ONE test (`joint_matrix`); integer rows carry their own `tops` unit.  The readings are discovered from what the device
+  land in ONE test (`joint_matrix`); integer rows carry their own `ops` unit.  The readings are discovered from what the device
   advertises, so the set of them is itself a description of the hardware.
 - `onemkl.cpp` threads a `note` next to `label` through `measure()`, likewise
   into one `onemkl_gemm`.

@@ -403,16 +403,16 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   for (double s : sink) keep += s;
   (void)keep;
 
-  auto giga = [&](int n, double us) {
+  auto rate = [&](int n, double us) {
     return (float)(chain->v.opsPerIter * (double)n / (us * 1e-6));
   };
   const char *physNote = "One thread per physical core, with the extra hardware "
                          "threads left idle.";
   const char *smtNote  = "Every hardware thread busy, including the second thread "
                          "sharing each core.";
-  if (usPhys > 0) test.emit("1T/core", giga(nPhys, usPhys), physNote);
+  if (usPhys > 0) test.emit("1T/core", rate(nPhys, usPhys), physNote);
   else            test.skip("1T/core", ResultStatus::Error, "workload failed", physNote);
-  if (usAll > 0)  test.emit("SMT MT", giga(nAll, usAll), smtNote);
+  if (usAll > 0)  test.emit("SMT MT", rate(nAll, usAll), smtNote);
   else            test.skip("SMT MT", ResultStatus::Error, "workload failed", smtNote);
   return 0;
 }

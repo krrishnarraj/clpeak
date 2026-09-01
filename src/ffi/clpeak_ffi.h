@@ -76,10 +76,10 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // exposes one GPU twice, and a multi-GPU box has N identical cards), and two
 // devices whose readings merge produce a test with two of everything.
 //   test_begin    {..., test, title, variant, axis, category, shape,
-//                  direction, quantity, unit, scale, desc, reopened}
+//                  direction, quantity, unit, desc, reopened}
 //   metric        {..., test, variant, metric, label,
 //                  value | (status, reason),
-//                  unit, quantity, scale, direction,   // only when overriding
+//                  unit, quantity, direction,   // only when overriding
 //                  minfo}
 //   test_skipped  {... same header as test_begin ...,
 //                  metrics:[...], status, reason}
@@ -88,14 +88,14 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // what identifies its test plus the reading itself -- so a consumer builds
 // the test node up front and appends readings to it.  `shape` says whether
 // the readings may be collapsed to one number (homogeneous) or each stands
-// alone (heterogeneous); `direction` which way is better; `scale` multiplies
-// a value into its SI base unit, which is how a presenter picks an SI prefix.
-// `reopened` marks a test_begin that resumes an already-announced test to
-// append readings.
+// alone (heterogeneous); `direction` which way is better; `unit` is an
+// SI base unit (flops, ops, bps, texels, s) and the presenter picks G/T/P/µ/n
+// prefixes from it.  `reopened` marks a test_begin that resumes an already-
+// announced test to append readings.
 //
 // A reading omits `status` when it succeeded (it has a `value` instead), and
 // carries unit fields only when it overrides its test's -- the case that lets
-// one test hold both TFLOPS and TOPS readings.
+// one test hold both flops and ops readings.
 //
 // `desc` explains what the test measures and `minfo` what one reading means;
 // both are empty for tests and readings that carry no documentation.  A

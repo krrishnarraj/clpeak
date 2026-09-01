@@ -39,7 +39,7 @@ GEMM datatypes, L1/L2/L3/DRAM, h2d vs d2h, ST vs MT — so the GUI shows them al
 and no headline.
 
 It cannot be inferred from anything. `wmma_fp16` has one reading and is
-homogeneous; `mps-gemm-fp` has three and is not; both are tflops. The same tag
+homogeneous; `mps-gemm-fp` has three and is not; both are flops. The same tag
 even differs by backend: a GPU's `global_memory_bandwidth` is a vector-width
 sweep, the CPU's is read/copy/triad.
 
@@ -58,7 +58,7 @@ beside the title.
 ### A reading in another unit
 
 `EmitOptions::unit` overrides the test's for one reading. That is what lets a
-single heterogeneous GEMM test hold both TFLOPS and TOPS readings. 
+single heterogeneous GEMM test hold both flops and ops readings. 
 `DeviceScope::beginTest()` on a tag already recorded for the device
 *reopens* it and appends.
 
@@ -69,7 +69,7 @@ Two things are easy to get wrong here:
   inherits its test's, and then claims to be flops.
 - **The reopening `TestSpec` still carries the unit of the readings it is about
   to produce.** The test keeps the unit of its *first* open — that is what the
-  document records — and if the first open emits int rows, a `tops` reading that declared no unit would record the
+  document records — and if the first open emits int rows, an `ops` reading that declared no unit would record the
   whole test in flops. Both presenters print the unit per row, so no row is
   mislabelled by the test header.
 
@@ -158,7 +158,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
 | `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
-| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, SI `scale` and which way is better; `formatScaledValue()` picks the display SI prefix |
+| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix |
 | `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, single `onEvent()` hook, accumulated `results` |

@@ -6,8 +6,8 @@
 // an intermediate number that is meaningful, comparable across completely
 // different hardware, and needs no model download.
 //
-//   prefill (64/512/2048 tokens at once)      compute-bound -> effective TFLOPS
-//   decode  (1 token, 512/2048/8192 context)  memory-bound  -> effective GB/s
+//   prefill (64/512/2048 tokens at once)      compute-bound -> effective FLOPS
+//   decode  (1 token, 512/2048/8192 context)  memory-bound  -> effective B/s
 //
 // Both numbers come out of the whole stack -- graph scheduling, layout
 // conversions, softmax, the lot -- not just the matmuls, so they are what a
@@ -16,10 +16,10 @@
 // check any tokens/second claim made for this device.
 //
 // Six timings per precision, three scopes, one unit each, and nothing
-// restated: the prompt ladder is onnx-block-prefill (tflops, or tops where the
-// arithmetic is integer), the 2048-context token is onnx-block-decode (gbps)
+// restated: the prompt ladder is onnx-block-prefill (flops, or ops where the
+// arithmetic is integer), the 2048-context token is onnx-block-decode (bps)
 // because that is the row onnx-tensor-bw compares against, and every timing
-// that is worth reading as a duration lands in onnx-block-latency (us).
+// that is worth reading as a duration lands in onnx-block-latency (s).
 // Splitting a ladder's headline rung into a scope of its own is what to avoid
 // here: the rung and the scope hold the same timing in the same unit, so one
 // of the two rows is pure repetition.
@@ -615,8 +615,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   };
 
   // ---- Measure every variant, but emit prefill split by unit ----
-  // Fp variants (tflops, weight-only int4/int8 stay here) and int variants
-  // (tops, only int8_qdq) are measured in one loop so the affordability seed
+  // Fp variants (flops, weight-only int4/int8 stay here) and int variants
+  // (ops, only int8_qdq) are measured in one loop so the affordability seed
   // flows from the fastest to the slowest.  Emission is split into two tests
   // with the same id reopened: the document keeps one test with per-reading
   // unit overrides (like onnx_gemm), the CLI shows two blocks.
@@ -1105,7 +1105,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto test = currentDeviceScope->beginTest(
         {"onnx_block_latency", "Transformer block latency", "s",
          Category::Ai,
-         "How long one layer takes, in microseconds, at each precision.  "
+          "How long one layer takes, in seconds, at each precision.  "
          "Multiply by a model's layer count for a floor on that model's "
          "time-to-first-token and per-token time on this device -- a 32-layer "
          "7B model runs 32 of these back to back per token.  It is the honest "

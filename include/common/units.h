@@ -16,8 +16,8 @@
 // Values are already SI (FLOP/s, byte/s, s, 1/s, ppm) and the presenters
 // pick `G/T/P` or `µ/n` via the SI ladder instead of a per-test magnitude.
 
-// What a reading measures.  The SI base unit for each is what `scale`
-// normalizes to.
+// What a reading measures.  Values are already expressed in the SI base
+// unit for each quantity.
 enum class Quantity {
     Flops,           // FLOP/s
     Ops,             // OP/s (integer)
@@ -82,8 +82,8 @@ struct ScaledValue {
 ScaledValue formatScaledValue(double value, const UnitInfo &unit);
 
 // Derive a test's category from its unit when the author did not name one.
-// Units that several categories share (gbps is Bandwidth *and* the crypto and
-// string tests; ns is Latency) cannot be resolved here -- those call sites
+// Units that several categories share (bps is Bandwidth *and* the crypto and
+// string tests; s is Latency) cannot be resolved here -- those call sites
 // pass Category explicitly.
 Category categoryFromUnit(const std::string &unit);
 

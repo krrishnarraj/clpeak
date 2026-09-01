@@ -34,14 +34,14 @@ backend.
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in tflops, int8 QDQ carrying its own `tops` unit |
+| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (tflops, int8_qdq `tops` per-reading), prompt ladder; `onnx-block-decode` (gbps), `onnx-block-latency` (us, prefill pass + context ladder) |
-| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (gbps) |
-| `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (us) |
+| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
+| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
+| `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (s) |
 
 ## The runtime is dlopen'd, never linked (except on iOS)
 
@@ -237,7 +237,7 @@ readings could sit in one table.
 ## What the datatype rows cover
 
 `onnx_gemm` measures fp32, fp16, bf16, both float8 formats and int8 QDQ in one test — the
-int8 reading carries its own `tops` unit. float8 is a floating-point format and reports TFLOPS, so it
+int8 reading carries its own `ops` unit. float8 is a floating-point format and reports flops, so it
 belongs beside fp16 even though its graph is the QDQ shape. Every one of them
 also has an `onnx-numeric-error` row, and they are meant to stay in step: a
 rate without its accuracy is half a number here.
@@ -1264,9 +1264,9 @@ nothing else:
 
 | scope | unit | rows |
 |---|---|---|
-| `onnx-block-prefill` | tflops | `s64`, `s512`, `s2048` |
-| `onnx-block-decode` | gbps | `kv2048` |
-| `onnx-block-latency` | us | `prefill_s512`, `decode_kv512`, `decode_kv2048`, `decode_kv8192` |
+| `onnx-block-prefill` | flops | `s64`, `s512`, `s2048` |
+| `onnx-block-decode` | bps | `kv2048` |
+| `onnx-block-latency` | s | `prefill_s512`, `decode_kv512`, `decode_kv2048`, `decode_kv8192` |
 
 **A ladder's headline rung does not also get a scope of its own.** A scope for
 prefill's 512 rung, or for decode's 2048 rung in microseconds, republishes a

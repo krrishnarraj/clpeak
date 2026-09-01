@@ -84,8 +84,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  gridSize, tgSizeM, warmupCount,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
-        float gbps = (float)bytesRead / us * 1e6f;
-        test.emit(v.label, gbps, mtlWidthNote(v.width));
+        float bps = (float)bytesRead / us * 1e6f;
+        test.emit(v.label, bps, mtlWidthNote(v.width));
     }
 
     return 0;

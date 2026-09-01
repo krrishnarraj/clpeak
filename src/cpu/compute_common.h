@@ -41,7 +41,7 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
   for (int t = 0; t < maxT; t++) keep += sink[(size_t)t];
   (void)keep;
 
-  auto giga = [](double opsPerIter, int n, double meanUs) -> float {
+  auto rate = [](double opsPerIter, int n, double meanUs) -> float {
     if (meanUs <= 0.0) return -1.0f;
     return (float)(opsPerIter * (double)n / (meanUs * 1e-6));
   };
@@ -61,11 +61,11 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
     return o;
   };
 
-  if (us1 > 0.0) test.emit(label + " ST", giga(opsPerIterPerThread, 1, us1), opts(stNote));
+  if (us1 > 0.0) test.emit(label + " ST", rate(opsPerIterPerThread, 1, us1), opts(stNote));
   else           test.skip(label + " ST", ResultStatus::Error, "workload failed",
                            opts(stNote));
 
-  if (usN > 0.0) test.emit(label + " MT", giga(opsPerIterPerThread, maxT, usN), opts(mtNote));
+  if (usN > 0.0) test.emit(label + " MT", rate(opsPerIterPerThread, maxT, usN), opts(mtNote));
   else           test.skip(label + " MT", ResultStatus::Error, "workload failed",
                            opts(mtNote));
 }

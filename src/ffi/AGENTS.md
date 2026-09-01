@@ -16,8 +16,8 @@ shared library / Apple framework.
 - Test documentation (`desc` / `minfo`)? → authored natively, the test's at its
   `beginTest()` and each reading's at its own `emit()`
   (`include/common/AGENTS.md`).  The test's arrives once on `test_begin`, with
-  the rest of the resolved header (`shape`, `axis`, `direction`, `unit`,
-  `scale`); each reading's rides the reading
+  the rest of the resolved header (`shape`, `axis`, `direction`, `unit`);
+  each reading's rides the reading
 - Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: same order,
   `RunDocument::append` merge, centralized `-o` save — which also stamps
   `cancelled` so a partial run does not read as a complete one)

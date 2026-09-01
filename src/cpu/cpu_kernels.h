@@ -89,7 +89,7 @@ struct CpuKernelTable {
   // mat_fp16 / mat_int8 with its BFMOPA / FMOPA-f16 / SMOPA kernels.
   ChainVariant mat_fp32, mat_fp64, ssve_fp32, ssve_fp64;
   // Crypto/hash kernels (opsPerIter counts BYTES processed per outer iteration,
-  // so emitCompute's giga() yields GB/s) and the fp divide/sqrt + scalar u64
+  // so emitCompute's rate() yields B/s) and the fp divide/sqrt + scalar u64
   // integer-divide chains (opsPerIter counts divides/sqrts per outer iteration).
   ChainVariant aes, sha256, sha512, crc32c;
   // String kernels (opsPerIter counts BYTES per pass over the thread-local

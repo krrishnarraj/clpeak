@@ -80,8 +80,8 @@ private:
         // The unit context this row prints in: its own when the reading
         // overrides its test's (an int8 row in ops inside a GEMM test in
         // flops), else the test's.  The unit is printed beside the value,
-        // auto-scaled to the magnitude, so a TOPS row is never read as
-        // TFLOPS no matter which test it sits in.
+        // auto-scaled to the magnitude, so an ops row is never read as
+        // flops no matter which test it sits in.
         UnitInfo     unit;
 
         // Which way is better for this reading, so a compare delta can say

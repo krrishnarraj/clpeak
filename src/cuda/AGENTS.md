@@ -59,7 +59,7 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
   into it via `cuda_compute_desc_t::scope`; the block's prose goes on
   `metricDescription`
   and the exact instruction (`mma.sync m16n8k32`) ends the sentence, since the
-  metric label is the data type alone.  The integer rows carry `metricUnit = "tops"` — that override is what makes a
+  metric label is the data type alone.  The integer rows carry `metricUnit = "ops"` — that override is what makes a
   `wmma_int` twin unnecessary.
 - `cublas_gemm` is likewise one test; `blasOpts()` attaches
   the note and integer rows carry their own unit.

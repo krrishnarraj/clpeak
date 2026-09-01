@@ -51,7 +51,7 @@ enum class ResultStatus {
 //                    answer, and picking the largest reading invents one.
 //
 // This cannot be derived from anything else.  `wmma_fp16` has one metric and
-// is homogeneous; `mps-gemm-fp` has three and is not; both are tflops.  The
+// is homogeneous; `mps-gemm-fp` has three and is not; both are flops.  The
 // same tag even differs by backend -- a GPU's global_memory_bandwidth is a
 // vector-width sweep, the CPU's is read/copy/triad.  So it is authored at the
 // beginTest() call site, next to the description (include/common/AGENTS.md).
@@ -80,7 +80,7 @@ DeviceType   deviceTypeFromString(const std::string &s);
 
 // One reading.  Unit fields are overrides: they are set only when this
 // reading is measured in something other than its test's unit, which is what
-// lets a single heterogeneous test hold both TFLOPS and TOPS readings instead
+// lets a single heterogeneous test hold both flops and ops readings instead
 // of being split into a `-fp` and a `-int` twin.
 struct MetricResult {
     std::string  id;           // stable slug within the test: "fp8_e4m3"

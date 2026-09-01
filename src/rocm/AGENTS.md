@@ -67,7 +67,7 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
   Opening it inside the loop instead would close and reopen the test per
   reading, which the CLI renders as a column that widens down the page.  The three stay separate from one
   another because they are different instructions on different hardware (RDNA
-  vs CDNA), not different formats on one unit.  `en.isInt` drives the `tops`
+  vs CDNA), not different formats on one unit.  `en.isInt` drives the `ops`
   unit override that lets the integer entry share the test.
 - `rocmWidthNote()` (`rocm_peak.h`) covers `float`/`float2`/`float4`,
   `half`/`half2` and `int`/`int2`/`int4`.

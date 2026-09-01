@@ -61,7 +61,7 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   because a shape in the name would differ between a device that measured the
   reading and one that skipped it — the same reading under two ids.  The prose
   goes on `metricDescription` — the test's own description covers the family.
-  int8 carries `metricUnit = "tops"`, which is what
+  int8 carries `metricUnit = "ops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.
 
 ## When You Change This Directory
