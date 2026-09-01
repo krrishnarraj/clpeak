@@ -29,6 +29,27 @@ class ResultsBody extends StatefulWidget {
 class _ResultsBodyState extends State<ResultsBody> {
   String? _selectedRunKey;
 
+  // Global expand/collapse generation.  Null means follow each test's default
+  // (heterogeneous expanded, homogeneous collapsed); true/false forces all
+  // tests to that state until the next global toggle.  Per-row local taps
+  // override the forced value until the next global action bumps the generation.
+  bool? _forcedExpanded;
+  int _forcedGen = 0;
+
+  void _expandAll() {
+    setState(() {
+      _forcedExpanded = true;
+      _forcedGen++;
+    });
+  }
+
+  void _collapseAll() {
+    setState(() {
+      _forcedExpanded = false;
+      _forcedGen++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final runs = widget.document.runs;
@@ -46,6 +67,8 @@ class _ResultsBodyState extends State<ResultsBody> {
     final selected = runs.firstWhere((r) => r.key == _selectedRunKey,
         orElse: () => runs.last);
     final brightness = Theme.of(context).brightness;
+    final hasTests =
+        selected.categories.any((g) => g.supported.isNotEmpty);
 
     // Flattened one level: category sections used to be non-lazy Columns
     // holding every test card, so all of them were built, laid out and
@@ -67,6 +90,15 @@ class _ResultsBodyState extends State<ResultsBody> {
           padBottom: 16,
         ),
       _WidgetRow(_DeviceHeader(run: selected)),
+      if (hasTests)
+        _WidgetRow(
+          _ExpandControls(
+            onExpandAll: _expandAll,
+            onCollapseAll: _collapseAll,
+          ),
+          padTop: 10,
+          padBottom: 2,
+        ),
       for (final group in selected.categories)
         if (group.supported.isNotEmpty) ...[
           _SectionRow(group, brightness),
@@ -76,6 +108,8 @@ class _ResultsBodyState extends State<ResultsBody> {
               group.supported[i],
               brightness,
               last: i == group.supported.length - 1,
+              forcedExpanded: _forcedExpanded,
+              forcedGen: _forcedGen,
             ),
         ],
       if (selected.unavailable.isNotEmpty)
@@ -132,12 +166,15 @@ class _SectionRow extends _Row {
 }
 
 class _TestRow extends _Row {
-  const _TestRow(this.group, this.test, this.brightness, {required this.last});
+  const _TestRow(this.group, this.test, this.brightness,
+      {required this.last, this.forcedExpanded, this.forcedGen = 0});
 
   final CategoryGroup group;
   final TestResult test;
   final Brightness brightness;
   final bool last;
+  final bool? forcedExpanded;
+  final int forcedGen;
 
   @override
   Widget build() => _TestLine(
@@ -150,6 +187,8 @@ class _TestRow extends _Row {
             brightness: brightness),
         first: identical(test, group.supported.first),
         last: last,
+        forcedExpanded: forcedExpanded,
+        forcedGen: forcedGen,
       );
 }
 
@@ -266,6 +305,50 @@ class _DeviceHeader extends StatelessWidget {
   }
 }
 
+/// Expand/collapse all tests on the page.  Mirrors the per-row +/- but
+/// acts on every row at once.
+class _ExpandControls extends StatelessWidget {
+  const _ExpandControls({
+    required this.onExpandAll,
+    required this.onCollapseAll,
+  });
+
+  final VoidCallback onExpandAll;
+  final VoidCallback onCollapseAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    Widget link(String label, IconData icon, VoidCallback onTap) => CTap(
+          onTap: onTap,
+          builder: (context, hovered, pressed) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            color: hovered || pressed ? t.hover : Colors.transparent,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 12, color: t.faint),
+                const SizedBox(width: 5),
+                Text(label, style: t.micro),
+              ],
+            ),
+          ),
+        );
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          link('EXPAND ALL', Icons.unfold_more, onExpandAll),
+          const SizedBox(width: 2),
+          link('COLLAPSE ALL', Icons.unfold_less, onCollapseAll),
+        ],
+      ),
+    );
+  }
+}
+
 /// One test.
 ///
 /// A homogeneous test collapses to its best reading, with the breakdown a tap
@@ -287,12 +370,16 @@ class _TestLine extends StatefulWidget {
     required this.color,
     required this.first,
     required this.last,
+    this.forcedExpanded,
+    this.forcedGen = 0,
   });
 
   final TestResult test;
   final Color color;
   final bool first;
   final bool last;
+  final bool? forcedExpanded;
+  final int forcedGen;
 
   @override
   State<_TestLine> createState() => _TestLineState();
@@ -301,8 +388,31 @@ class _TestLine extends StatefulWidget {
 class _TestLineState extends State<_TestLine> {
   // Null means follow the default: heterogeneous multi expanded, everything
   // else collapsed.  Once the user taps, their choice sticks even as metrics
-  // stream in during a live run.
+  // stream in during a live run.  A global expand/collapse all bumps
+  // [widget.forcedGen] and overrides this until the next local tap.
   bool? _userExpanded;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.forcedExpanded != null) {
+      _userExpanded = widget.forcedExpanded;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _TestLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.forcedGen != oldWidget.forcedGen &&
+        widget.forcedExpanded != null) {
+      _userExpanded = widget.forcedExpanded;
+    } else if (widget.forcedExpanded != oldWidget.forcedExpanded &&
+        widget.forcedExpanded != null &&
+        oldWidget.forcedExpanded == null) {
+      // First global action after mount (gen still 0) — handle without gen bump.
+      _userExpanded = widget.forcedExpanded;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
