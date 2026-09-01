@@ -325,11 +325,6 @@ class _RunMetaPanel extends StatelessWidget {
     if (meta.clpeakVersion.isNotEmpty) {
       entries.add((key: 'CLPEAK VERSION', value: meta.clpeakVersion));
     }
-    if (meta.generatedAt.isNotEmpty) {
-      final dt = DateTime.tryParse(meta.generatedAt);
-      final display = dt != null ? formatDate(dt) : meta.generatedAt;
-      entries.add((key: 'GENERATED', value: display));
-    }
     if (meta.durationSeconds > 0) {
       entries.add((
         key: 'DURATION',
@@ -337,17 +332,12 @@ class _RunMetaPanel extends StatelessWidget {
             Duration(milliseconds: (meta.durationSeconds * 1000).round()))
       ));
     }
+    const skipHostKeys = {'cpu', 'logical_cores', 'memory_bytes'};
     for (final e in meta.host.entries) {
       final k = e.key.toString().trim();
+      if (skipHostKeys.contains(k)) continue;
       final v = e.value?.toString().trim() ?? '';
       if (k.isEmpty || v.isEmpty) continue;
-      if (k == 'memory_bytes') {
-        final bytes = int.tryParse(v);
-        if (bytes != null) {
-          entries.add((key: k.toUpperCase(), value: formatBytes(bytes)));
-          continue;
-        }
-      }
       entries.add((key: k.toUpperCase(), value: v));
     }
 
