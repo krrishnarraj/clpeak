@@ -48,6 +48,9 @@ namespace
   // And no single size is right anyway: fp32 there peaks at 4096 while fp16
   // peaks at 2048, because different engines serve them.
   constexpr int64_t kMinDim = 1024;
+  // Tiny probe dimension: large enough to exercise the same kernels, small
+  // enough that AOT compilation stays cheap (QNN HTP: 64^3 ~ 0.5s vs 1024^3 33s).
+  constexpr int64_t kProbeDim = 64;
 
   // NVFP4's second scale.  A power of two so factoring it out of the block scales
   // is exact and the row measures the format rather than an arithmetic accident.
@@ -540,6 +543,97 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // already runs on a dequantized fp32 result.
     bool reduceInFloat = false, triedFloatReduce = false;
 
+    // Tiny probe: learn whether this EP can handle this dtype at all
+    // without paying the full kMinDim (1024) compilation cost.  On QNN HTP
+    // 1024^3 costs 33-71s even when it will be the only rung; 64^3 is the
+    // same kernels at ~0.5s and tells us cheaply whether to attempt the
+    // ladder.  Uses a tight 5s budget so emulated dtypes (fp32 on HTP)
+    // that are slow even at 64 are skipped early.
+    {
+      // QNN HTP is an int8/fp16 NPU - fp32/bf16/fp8 are emulated and
+      // minutes to compile at 1024.  Tiny probe at 64 would still pass
+      // (~0.5s) but the 1024 ladder would then cost 33-71s per variant.
+      // Filter to the dtypes HTP natively accelerates; other EPs keep all.
+      if (ep.providerKey == "QNNExecutionProvider")
+      {
+        bool qnnOk = false;
+        if (v.qdq && v.dtype == ONNX_DT_INT8)
+          qnnOk = true; // int8_qdq
+        else if (v.blockSize > 0 &&
+                 (v.dtype == ONNX_DT_INT4 || v.dtype == ONNX_DT_FLOAT16))
+          qnnOk = true; // int4_weight, fp16 (also covers int4_weight via block)
+        else if (!v.qdq && v.blockSize == 0 && !v.nvfp4 &&
+                 v.dtype == ONNX_DT_FLOAT16)
+          qnnOk = true; // fp16
+        // Allow int8_qdq, fp16, int4_weight only on QNN; skip the rest
+        // before paying any compilation.
+        if (!qnnOk)
+        {
+          logger::EmitOptions o;
+          o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
+          if (isInt)
+            o.unit = "ops";
+          test.skip(v.label, ResultStatus::Unsupported,
+                    "QNN HTP has no native support for " + std::string(v.label) +
+                        " - emulated path compiles in minutes and is not representative",
+                    o);
+          return;
+        }
+      }
+      auto t0 = std::chrono::steady_clock::now();
+      GemmSetup tiny = makeSetup(rt, ep, v, kProbeDim, /*profile=*/false,
+                                 actDtype, /*reduceInFloat=*/false, wgtDtype);
+      auto t1 = std::chrono::steady_clock::now();
+      double tinyCreateUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 tiny probe create %.1f s\n",
+                  ep.providerKey.c_str(), v.label,
+                  (long long)kProbeDim, tinyCreateUs / 1.0e6);
+      if (!tiny.session)
+      {
+        // Try the float-reduction fallback once, like the ladder does.
+        if (!v.qdq && !triedFloatReduce)
+        {
+          const std::string tinyErr = tiny.error;
+          destroySetup(rt, tiny);
+          tiny = makeSetup(rt, ep, v, kProbeDim, /*profile=*/false, actDtype,
+                           /*reduceInFloat=*/true, wgtDtype);
+          if (tiny.session)
+            reduceInFloat = true;
+          else
+            tiny.error = tinyErr;
+        }
+      }
+      if (!tiny.session)
+      {
+        logger::EmitOptions o;
+        o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
+        if (isInt)
+          o.unit = "ops";
+        test.skip(v.label, ResultStatus::Unsupported, tiny.error, o);
+        return;
+      }
+      if (tinyCreateUs > kOnnxTinyMaxCreateUs)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: tiny probe %.1f s > %.1f s, skipping dtype\n",
+                    ep.providerKey.c_str(), v.label,
+                    tinyCreateUs / 1.0e6, kOnnxTinyMaxCreateUs / 1.0e6);
+        logger::EmitOptions o;
+        o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
+        if (isInt)
+          o.unit = "ops";
+        destroySetup(rt, tiny);
+        test.skip(v.label, ResultStatus::Unsupported,
+                  "session creation at " + std::to_string(kProbeDim) + "^3 took " +
+                      std::to_string((long long)(tinyCreateUs / 1.0e6)) +
+                      " s, exceeds " +
+                      std::to_string((long long)(kOnnxTinyMaxCreateUs / 1.0e6)) +
+                      " s tiny compilation budget",
+                  o);
+        return;
+      }
+      destroySetup(rt, tiny);
+    }
+
     // For the quantized variant, settle the scheme before sweeping anything.
     // ONNX Runtime rewrites graphs before running them, and a provider that
     // will not fuse dequantize/matmul/quantize into a quantized kernel
@@ -552,6 +646,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // and run an ordinary multiply?  For weight-only the unfused form pays for
     // a full dequantize of the matrix on every single run, so it is not the
     // rate a 4-bit deployment would ever see.
+    // Tiny probe dimension is used here as well to keep QNN probe cheap.
     if (v.qdq || v.blockSize > 0)
     {
       std::string tried;
@@ -562,9 +657,15 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const QuantScheme &qs = schemes[si];
         if (clpeak::cancelRequested())
           break;
-        GemmSetup probe = makeSetup(rt, ep, v, kMinDim, /*profile=*/true,
+        auto pq0 = std::chrono::steady_clock::now();
+        GemmSetup probe = makeSetup(rt, ep, v, kProbeDim, /*profile=*/true,
                                     qs.actDtype, /*reduceInFloat=*/false,
                                     qs.wDtype);
+        auto pq1 = std::chrono::steady_clock::now();
+        double pqUs = std::chrono::duration<double, std::micro>(pq1 - pq0).count();
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s tiny probe %lld^3 create %.1f s\n",
+                    ep.providerKey.c_str(), v.label, qs.name,
+                    (long long)kProbeDim, pqUs / 1.0e6);
         if (!probe.session)
         {
           if (firstErr.empty())
@@ -668,6 +769,40 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       v.label, (long long)D, predictedUs / 1.0e6);
           break;
         }
+      }
+      // QNN HTP: cap ladder at 1024.  1024 already 33-71s, 2048 is 531s
+      // and 4096 would be hours.  1024 is where HTP's SRAM still helps;
+      // larger is DRAM bound and not representative of LLM decode anyway.
+      if (ep.providerKey == "QNNExecutionProvider" && D > 1024)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: QNN HTP capped at 1024^3, skipping %lld^3\n",
+                    ep.providerKey.c_str(), v.label, (long long)D);
+        break;
+      }
+      // Predicted compilation gate: save the next rung before paying its
+      // Graph Optimizations.  QNN HTP scales ~4x memory / 8x flops per 2x dim,
+      // so prev 33s predicts 132s for next.  Gate only beyond 2048 - 1024 and
+      // 2048 are where most NPUs peak (ANE 2048 fp16, 4096 fp32), so keep them
+      // and stop the exponential beyond.
+      if (D >= 4096 && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kOnnxMaxCreateUs)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s (prev %.1f s *4) > %.1f s, stopping\n",
+                    ep.providerKey.c_str(), v.label,
+                    (long long)D, prevCreateUs * 4.0 / 1.0e6,
+                    prevCreateUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+        break;
+      }
+      // Also stop if previous rung already exceeded absolute budget - its
+      // predicted next is at least as slow.  This catches the 2048->4096
+      // cliff without paying 4096's 2000s.  Allow 1024->2048 (where most NPUs
+      // peak), gate beyond.
+      if (D > 2048 && prevCreateUs > kOnnxMaxCreateUs * 4.0)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: prev create %.1f s > %.1f s, skipping %lld^3\n",
+                    ep.providerKey.c_str(), v.label,
+                    prevCreateUs / 1.0e6, kOnnxMaxCreateUs * 4.0 / 1.0e6,
+                    (long long)D);
+        break;
       }
 
       auto createStart = std::chrono::steady_clock::now();

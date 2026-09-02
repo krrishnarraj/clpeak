@@ -56,6 +56,10 @@ constexpr unsigned int kOnnxMaxIters = 500;
 constexpr double kOnnxMaxCreateUs = 30.0e6;
 constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
 constexpr double kOnnxCreateGrowthFactor = 6.0;
+// Tiny probe budget: 64^3 model should compile in <5s even on AOT.
+// If it exceeds this, the dtype is emulated/slow and the full 1024
+// ladder will be minutes - skip the variant early.
+constexpr double kOnnxTinyMaxCreateUs = 5.0e6;
 
 // One benchmarkable "device" of this backend: an ONNX Runtime execution
 // provider (EP).  NPUs are reachable only through such vendor runtimes --
