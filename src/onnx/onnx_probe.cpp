@@ -13,252 +13,253 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cmath>
 
 // Copied from gemm.cpp - keep in sync with kFpVariants/kIntVariants there.
 // Probe uses 64^3 so AOT compilation stays cheap (QNN HTP: 64^3 ~0.5s vs 1024^3 33s).
 namespace
 {
-constexpr int64_t kProbeDim = 64;
+  constexpr int64_t kProbeDim = 64;
 
-struct Variant
-{
-  int dtype;
-  bool qdq;
-  const char *label;
-  const char *note;
-  int64_t blockSize;
-  bool nvfp4;
-};
-
-constexpr float kNvfp4GlobalScale = 0.125f;
-
-const Variant kFpVariants[] = {
-    {ONNX_DT_FLOAT, false, "fp32", "", 0, false},
-    {ONNX_DT_FLOAT16, false, "fp16", "", 0, false},
-    {ONNX_DT_BFLOAT16, false, "bf16", "", 0, false},
-    {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3", "", 0, false},
-    {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2", "", 0, false},
-    {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1", "", 0, false},
-    {ONNX_DT_FLOAT4E2M1, false, "nvfp4", "", 16, true},
-    {ONNX_DT_FLOAT4E2M1, false, "fp4_weight", "", 32, false},
-    {ONNX_DT_INT4, false, "int4_weight", "", 32, false},
-};
-const Variant kIntVariants[] = {
-    {ONNX_DT_INT8, true, "int8_qdq", "", 0, false},
-};
-
-struct QuantScheme
-{
-  int actDtype;
-  int wDtype;
-  const char *name;
-};
-const QuantScheme kInt8Schemes[] = {
-    {ONNX_DT_INT8, ONNX_DT_INT8, "signed activations"},
-    {ONNX_DT_UINT8, ONNX_DT_INT8, "unsigned activations"},
-};
-
-size_t schemesFor(const Variant &v, QuantScheme out[2])
-{
-  if (v.nvfp4)
+  struct Variant
   {
-    out[0] = {v.dtype, v.dtype, "both operands blocked, with a global scale"};
+    int dtype;
+    bool qdq;
+    const char *label;
+    const char *note;
+    int64_t blockSize;
+    bool nvfp4;
+  };
+
+  constexpr float kNvfp4GlobalScale = 0.125f;
+
+  const Variant kFpVariants[] = {
+      {ONNX_DT_FLOAT, false, "fp32", "", 0, false},
+      {ONNX_DT_FLOAT16, false, "fp16", "", 0, false},
+      {ONNX_DT_BFLOAT16, false, "bf16", "", 0, false},
+      {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3", "", 0, false},
+      {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2", "", 0, false},
+      {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1", "", 0, false},
+      {ONNX_DT_FLOAT4E2M1, false, "nvfp4", "", 16, true},
+      {ONNX_DT_FLOAT4E2M1, false, "fp4_weight", "", 32, false},
+      {ONNX_DT_INT4, false, "int4_weight", "", 32, false},
+  };
+  const Variant kIntVariants[] = {
+      {ONNX_DT_INT8, true, "int8_qdq", "", 0, false},
+  };
+
+  struct QuantScheme
+  {
+    int actDtype;
+    int wDtype;
+    const char *name;
+  };
+  const QuantScheme kInt8Schemes[] = {
+      {ONNX_DT_INT8, ONNX_DT_INT8, "signed activations"},
+      {ONNX_DT_UINT8, ONNX_DT_INT8, "unsigned activations"},
+  };
+
+  size_t schemesFor(const Variant &v, QuantScheme out[2])
+  {
+    if (v.nvfp4)
+    {
+      out[0] = {v.dtype, v.dtype, "both operands blocked, with a global scale"};
+      return 1;
+    }
+    if (v.blockSize > 0)
+    {
+      out[0] = {ONNX_DT_FLOAT16, v.dtype, "16-bit activations against blocked weights"};
+      return 1;
+    }
+    if (v.dtype == ONNX_DT_INT8)
+    {
+      out[0] = kInt8Schemes[0];
+      out[1] = kInt8Schemes[1];
+      return 2;
+    }
+    out[0] = {v.dtype, v.dtype, "matching activations and weights"};
     return 1;
   }
-  if (v.blockSize > 0)
-  {
-    out[0] = {ONNX_DT_FLOAT16, v.dtype, "16-bit activations against blocked weights"};
-    return 1;
-  }
-  if (v.dtype == ONNX_DT_INT8)
-  {
-    out[0] = kInt8Schemes[0];
-    out[1] = kInt8Schemes[1];
-    return 2;
-  }
-  out[0] = {v.dtype, v.dtype, "matching activations and weights"};
-  return 1;
-}
 
-size_t dtypeSize(int dtype)
-{
-  switch (dtype)
+  size_t dtypeSize(int dtype)
   {
-  case ONNX_DT_FLOAT:
-    return 4;
-  case ONNX_DT_FLOAT16:
-  case ONNX_DT_BFLOAT16:
-    return 2;
-  default:
-    return 1;
-  }
-}
-
-void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
-{
-  uint32_t s = seed;
-  raw.assign((size_t)onnxElemBytes(dtype, count), '\0');
-  float *f = reinterpret_cast<float *>(&raw[0]);
-  uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-  for (int64_t i = 0; i < count; i++)
-  {
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    float v = (float)(s >> 8) / 16777216.0f - 0.5f;
     switch (dtype)
     {
     case ONNX_DT_FLOAT:
-      f[i] = v;
-      break;
+      return 4;
     case ONNX_DT_FLOAT16:
-      h[i] = floatToHalf(v);
-      break;
     case ONNX_DT_BFLOAT16:
-      h[i] = floatToBf16(v);
-      break;
+      return 2;
     default:
-      onnxStoreQuantElem(&raw[0], i, dtype, v * 2.0f);
-      break;
+      return 1;
     }
   }
-}
 
-float qdqOutputScale(int64_t K, int outDtype)
-{
-  const double top = (outDtype == ONNX_DT_FLOAT4E2M1) ? 6.0 : 127.0;
-  return (float)(4.0 * std::sqrt((double)K) / 3.0 / top);
-}
+  void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
+  {
+    uint32_t s = seed;
+    raw.assign((size_t)onnxElemBytes(dtype, count), '\0');
+    float *f = reinterpret_cast<float *>(&raw[0]);
+    uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
+    for (int64_t i = 0; i < count; i++)
+    {
+      s ^= s << 13;
+      s ^= s >> 17;
+      s ^= s << 5;
+      float v = (float)(s >> 8) / 16777216.0f - 0.5f;
+      switch (dtype)
+      {
+      case ONNX_DT_FLOAT:
+        f[i] = v;
+        break;
+      case ONNX_DT_FLOAT16:
+        h[i] = floatToHalf(v);
+        break;
+      case ONNX_DT_BFLOAT16:
+        h[i] = floatToBf16(v);
+        break;
+      default:
+        onnxStoreQuantElem(&raw[0], i, dtype, v * 2.0f);
+        break;
+      }
+    }
+  }
 
-// Minimal setup for probe - mirrors gemm.cpp::makeSetup but at kProbeDim
-struct GemmSetup
-{
-  OrtSession *session = nullptr;
-  OrtValue *inVal = nullptr;
-  OrtValue *outVal = nullptr;
-  std::vector<uint8_t> inBuf, outBuf;
-  std::string error;
-};
+  float qdqOutputScale(int64_t K, int outDtype)
+  {
+    const double top = (outDtype == ONNX_DT_FLOAT4E2M1) ? 6.0 : 127.0;
+    return (float)(4.0 * std::sqrt((double)K) / 3.0 / top);
+  }
 
-void destroySetup(const OrtRuntime &rt, GemmSetup &g)
-{
-  if (g.inVal)
-    rt.api->ReleaseValue(g.inVal);
-  if (g.outVal)
-    rt.api->ReleaseValue(g.outVal);
-  if (g.session)
-    rt.api->ReleaseSession(g.session);
-  g.inVal = nullptr;
-  g.outVal = nullptr;
-  g.session = nullptr;
-}
+  // Minimal setup for probe - mirrors gemm.cpp::makeSetup but at kProbeDim
+  struct GemmSetup
+  {
+    OrtSession *session = nullptr;
+    OrtValue *inVal = nullptr;
+    OrtValue *outVal = nullptr;
+    std::vector<uint8_t> inBuf, outBuf;
+    std::string error;
+  };
 
-void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep, GemmSetup &g,
-                 const std::string &modelBytes, int ioDtype, int64_t D, bool profile,
-                 bool keepQdqUnfused)
-{
-  auto ses = onnxCreateSession(rt, ep, modelBytes, true, profile, keepQdqUnfused);
-  if (!ses.session)
+  void destroySetup(const OrtRuntime &rt, GemmSetup &g)
   {
-    g.error = ses.error;
-    return;
+    if (g.inVal)
+      rt.api->ReleaseValue(g.inVal);
+    if (g.outVal)
+      rt.api->ReleaseValue(g.outVal);
+    if (g.session)
+      rt.api->ReleaseSession(g.session);
+    g.inVal = nullptr;
+    g.outVal = nullptr;
+    g.session = nullptr;
   }
-  g.session = ses.session;
-  const size_t es = dtypeSize(ioDtype);
-  {
-    std::string one;
-    fillTensor(one, ioDtype, 1, 0x12345678u);
-    g.inBuf.assign(one.begin(), one.end());
-  }
-  g.outBuf.assign((size_t)D * es, 0);
-  OrtMemoryInfo *mi = nullptr;
-  OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator, OrtMemTypeDefault, &mi);
-  if (st)
-  {
-    g.error = onnxStatusText(rt, st);
-    destroySetup(rt, g);
-    return;
-  }
-  const int64_t outShape[1] = {D};
-  st = rt.api->CreateTensorWithDataAsOrtValue(
-      mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
-      (ONNXTensorElementDataType)ioDtype, &g.inVal);
-  if (!st)
-    st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, g.outBuf.data(), g.outBuf.size(), outShape, 1,
-        (ONNXTensorElementDataType)ioDtype, &g.outVal);
-  rt.api->ReleaseMemoryInfo(mi);
-  if (st)
-  {
-    g.error = onnxStatusText(rt, st);
-    destroySetup(rt, g);
-  }
-}
 
-GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant &v,
-                    int64_t D, bool profile, int actDtype, bool reduceInFloat,
-                    int wgtDtype)
-{
-  GemmSetup g;
-  std::string modelBytes;
-  if (v.nvfp4)
+  void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep, GemmSetup &g,
+                   const std::string &modelBytes, int ioDtype, int64_t D, bool profile,
+                   bool keepQdqUnfused)
   {
-    std::string aPacked, aScales, bPacked, bScales;
-    onnxFillNvfp4(aPacked, aScales, D, D, 1, v.blockSize, kNvfp4GlobalScale, 0x9e3779b9u);
-    onnxFillNvfp4(bPacked, bScales, D, D, 0, v.blockSize, kNvfp4GlobalScale, 0x243f6a88u);
-    modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked, aScales,
-                                              bPacked, bScales, kNvfp4GlobalScale);
-    finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT, D, profile, true);
-    return g;
-  }
-  if (v.blockSize > 0)
-  {
-    std::string aRaw, wPacked, wScales;
-    fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
-    onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u, v.dtype);
-    modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype, v.blockSize, aRaw,
-                                                   wPacked, wScales);
-    finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, D, profile, false);
-    return g;
-  }
-  std::string aRaw, bRaw;
-  const int wDtype = v.qdq ? wgtDtype : v.dtype;
-  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
-  fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
-  if (v.qdq)
-  {
-    modelBytes = onnxResidentQdqMatMulModel(D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
-                                            onnxQuantScaleFor(wDtype),
-                                            qdqOutputScale(D, actDtype), actDtype, wDtype);
-  }
-  else
-  {
-    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw, reduceInFloat);
-  }
-  const bool unfusable = !onnxQdqFusionIsLegal(actDtype) || !onnxQdqFusionIsLegal(wDtype);
-  const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
-  finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile, v.qdq && unfusable);
-  return g;
-}
-
-double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
-{
-  static const char *inNames[] = {"S"};
-  static const char *outNames[] = {"Y"};
-  auto t0 = std::chrono::steady_clock::now();
-  for (unsigned int i = 0; i < n; i++)
-  {
-    OrtStatus *st = rt.api->Run(g.session, nullptr, inNames,
-                                (const OrtValue *const *)&g.inVal, 1, outNames, 1, &g.outVal);
+    auto ses = onnxCreateSession(rt, ep, modelBytes, true, profile, keepQdqUnfused);
+    if (!ses.session)
+    {
+      g.error = ses.error;
+      return;
+    }
+    g.session = ses.session;
+    const size_t es = dtypeSize(ioDtype);
+    {
+      std::string one;
+      fillTensor(one, ioDtype, 1, 0x12345678u);
+      g.inBuf.assign(one.begin(), one.end());
+    }
+    g.outBuf.assign((size_t)D * es, 0);
+    OrtMemoryInfo *mi = nullptr;
+    OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator, OrtMemTypeDefault, &mi);
     if (st)
     {
       g.error = onnxStatusText(rt, st);
-      return -1.0;
+      destroySetup(rt, g);
+      return;
+    }
+    const int64_t outShape[1] = {D};
+    st = rt.api->CreateTensorWithDataAsOrtValue(
+        mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
+        (ONNXTensorElementDataType)ioDtype, &g.inVal);
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, g.outBuf.data(), g.outBuf.size(), outShape, 1,
+          (ONNXTensorElementDataType)ioDtype, &g.outVal);
+    rt.api->ReleaseMemoryInfo(mi);
+    if (st)
+    {
+      g.error = onnxStatusText(rt, st);
+      destroySetup(rt, g);
     }
   }
-  auto t1 = std::chrono::steady_clock::now();
-  return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
-}
+
+  GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant &v,
+                      int64_t D, bool profile, int actDtype, bool reduceInFloat,
+                      int wgtDtype)
+  {
+    GemmSetup g;
+    std::string modelBytes;
+    if (v.nvfp4)
+    {
+      std::string aPacked, aScales, bPacked, bScales;
+      onnxFillNvfp4(aPacked, aScales, D, D, 1, v.blockSize, kNvfp4GlobalScale, 0x9e3779b9u);
+      onnxFillNvfp4(bPacked, bScales, D, D, 0, v.blockSize, kNvfp4GlobalScale, 0x243f6a88u);
+      modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked, aScales,
+                                                bPacked, bScales, kNvfp4GlobalScale);
+      finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT, D, profile, true);
+      return g;
+    }
+    if (v.blockSize > 0)
+    {
+      std::string aRaw, wPacked, wScales;
+      fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
+      onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u, v.dtype);
+      modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype, v.blockSize, aRaw,
+                                                     wPacked, wScales);
+      finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, D, profile, false);
+      return g;
+    }
+    std::string aRaw, bRaw;
+    const int wDtype = v.qdq ? wgtDtype : v.dtype;
+    fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
+    fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
+    if (v.qdq)
+    {
+      modelBytes = onnxResidentQdqMatMulModel(D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
+                                              onnxQuantScaleFor(wDtype),
+                                              qdqOutputScale(D, actDtype), actDtype, wDtype);
+    }
+    else
+    {
+      modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw, reduceInFloat);
+    }
+    const bool unfusable = !onnxQdqFusionIsLegal(actDtype) || !onnxQdqFusionIsLegal(wDtype);
+    const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
+    finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile, v.qdq && unfusable);
+    return g;
+  }
+
+  double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
+  {
+    static const char *inNames[] = {"S"};
+    static const char *outNames[] = {"Y"};
+    auto t0 = std::chrono::steady_clock::now();
+    for (unsigned int i = 0; i < n; i++)
+    {
+      OrtStatus *st = rt.api->Run(g.session, nullptr, inNames,
+                                  (const OrtValue *const *)&g.inVal, 1, outNames, 1, &g.outVal);
+      if (st)
+      {
+        g.error = onnxStatusText(rt, st);
+        return -1.0;
+      }
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
+  }
 
 } // namespace
 
@@ -268,7 +269,8 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
   // Probe is per-EP and per-variant at 64^3, so do it fresh each call.
   // The cached wrapper below memoizes this for the global once-per-EP probe.
 
-  auto probeOne = [&](const Variant &v) {
+  auto probeOne = [&](const Variant &v)
+  {
     OnnxProbeResult r;
     r.actDtype = ONNX_DT_UINT8;
     r.wgtDtype = ONNX_DT_INT8;
