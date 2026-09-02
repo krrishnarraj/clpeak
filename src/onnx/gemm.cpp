@@ -639,20 +639,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
       }
-      // QNN HTP: cap ladder at 1024.  1024 already 33-71s, 2048 is 531s
-      // and 4096 would be hours.  1024 is where HTP's SRAM still helps;
-      // larger is DRAM bound and not representative of LLM decode anyway.
-      if (ep.providerKey == "QNNExecutionProvider" && D > 1024)
-      {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: QNN HTP capped at 1024^3, skipping %lld^3\n",
-                    ep.providerKey.c_str(), v.label, (long long)D);
-        break;
-      }
       // Predicted compilation gate: save the next rung before paying its
-      // Graph Optimizations.  QNN HTP scales ~4x memory / 8x flops per 2x dim,
-      // so prev 33s predicts 132s for next.  Gate only beyond 2048 - 1024 and
-      // 2048 are where most NPUs peak (ANE 2048 fp16, 4096 fp32), so keep them
-      // and stop the exponential beyond.
+      // Graph Optimizations.  Scales ~4x memory per 2x dim, so prev 33s
+      // predicts 132s for next.  Gate only beyond 2048 - 1024 and 2048 are
+      // where most NPUs peak, so keep them and stop the exponential beyond.
       if (D >= 4096 && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kOnnxMaxCreateUs)
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s (prev %.1f s *4) > %.1f s, stopping\n",

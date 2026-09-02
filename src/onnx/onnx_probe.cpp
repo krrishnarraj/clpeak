@@ -275,26 +275,6 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
     r.actDtype = ONNX_DT_UINT8;
     r.wgtDtype = ONNX_DT_INT8;
 
-    // QNN HTP allow-list - same as gemm.cpp per-variant filter
-    if (ep.providerKey == "QNNExecutionProvider")
-    {
-      bool qnnOk = false;
-      if (v.qdq && v.dtype == ONNX_DT_INT8)
-        qnnOk = true;
-      else if (v.blockSize > 0 && (v.dtype == ONNX_DT_INT4 || v.dtype == ONNX_DT_FLOAT16))
-        qnnOk = true;
-      else if (!v.qdq && v.blockSize == 0 && !v.nvfp4 && v.dtype == ONNX_DT_FLOAT16)
-        qnnOk = true;
-      if (!qnnOk)
-      {
-        r.ok = false;
-        r.reason = "QNN HTP has no native support for " + std::string(v.label) +
-                   " - emulated path compiles in minutes and is not representative";
-        out[v.label] = r;
-        return;
-      }
-    }
-
     if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
     {
       r.ok = false;
@@ -303,53 +283,64 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       return;
     }
 
-    // Tiny create at 64^3
-    auto t0 = std::chrono::steady_clock::now();
-    GemmSetup tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, false, r.wgtDtype);
-    // Try float reduction fallback once
-    bool triedFloatReduce = false;
-    bool reduceInFloat = false;
-    if (!tiny.session && !v.qdq && !triedFloatReduce)
+    // Quantized / weight-only / nvfp4: check fusion directly at 64^3,
+    // no plain tiny probe (plain would use UINT8 and fail for fp8).
+    if (v.qdq || v.blockSize > 0 || v.nvfp4)
     {
-      std::string tinyErr = tiny.error;
-      destroySetup(rt, tiny);
-      tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, true, r.wgtDtype);
-      if (tiny.session)
-        reduceInFloat = true;
-      else
-        tiny.error = tinyErr;
+      // Fall through to fusion check below
     }
-    auto t1 = std::chrono::steady_clock::now();
-    r.createUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
-    r.reduceInFloat = reduceInFloat;
-
-    CLPEAK_VLOG("onnx-probe[%s/%s]: %lld^3 tiny create %.1f s\n",
-                ep.providerKey.c_str(), v.label, (long long)kProbeDim, r.createUs / 1.0e6);
-
-    if (!tiny.session)
+    else
     {
-      r.ok = false;
-      r.reason = tiny.error;
+      // Plain matmul: tiny create at 64^3 with native dtype
+      auto t0 = std::chrono::steady_clock::now();
+      GemmSetup tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, false, r.wgtDtype);
+      bool triedFloatReduce = false;
+      bool reduceInFloat = false;
+      if (!tiny.session && !v.qdq && !triedFloatReduce)
+      {
+        std::string tinyErr = tiny.error;
+        destroySetup(rt, tiny);
+        tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, true, r.wgtDtype);
+        if (tiny.session)
+          reduceInFloat = true;
+        else
+          tiny.error = tinyErr;
+      }
+      auto t1 = std::chrono::steady_clock::now();
+      r.createUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
+      r.reduceInFloat = reduceInFloat;
+
+      CLPEAK_VLOG("onnx-probe[%s/%s]: %lld^3 tiny create %.1f s\n",
+                  ep.providerKey.c_str(), v.label, (long long)kProbeDim, r.createUs / 1.0e6);
+
+      if (!tiny.session)
+      {
+        r.ok = false;
+        r.reason = tiny.error;
+        out[v.label] = r;
+        return;
+      }
+      if (r.createUs > kOnnxTinyMaxCreateUs)
+      {
+        CLPEAK_VLOG("onnx-probe[%s/%s]: tiny %.1f s > %.1f s, skipping\n",
+                    ep.providerKey.c_str(), v.label, r.createUs / 1.0e6,
+                    kOnnxTinyMaxCreateUs / 1.0e6);
+        r.ok = false;
+        r.reason = "session creation at " + std::to_string(kProbeDim) + "^3 took " +
+                   std::to_string((long long)(r.createUs / 1.0e6)) +
+                   " s, exceeds tiny budget";
+        destroySetup(rt, tiny);
+        out[v.label] = r;
+        return;
+      }
+      destroySetup(rt, tiny);
+      r.ok = true;
       out[v.label] = r;
       return;
     }
-    if (r.createUs > kOnnxTinyMaxCreateUs)
-    {
-      CLPEAK_VLOG("onnx-probe[%s/%s]: tiny %.1f s > %.1f s, skipping\n",
-                  ep.providerKey.c_str(), v.label, r.createUs / 1.0e6,
-                  kOnnxTinyMaxCreateUs / 1.0e6);
-      r.ok = false;
-      r.reason = "session creation at " + std::to_string(kProbeDim) + "^3 took " +
-                 std::to_string((long long)(r.createUs / 1.0e6)) +
-                 " s, exceeds tiny budget";
-      destroySetup(rt, tiny);
-      out[v.label] = r;
-      return;
-    }
-    destroySetup(rt, tiny);
 
     // For quantized / weight-only, check fusion at 64 with profile
-    if (v.qdq || v.blockSize > 0)
+    if (v.qdq || v.blockSize > 0 || v.nvfp4)
     {
       std::string tried;
       std::string firstErr;
