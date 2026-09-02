@@ -153,7 +153,7 @@ namespace
         const char *prefix;
     } kSiPrefixes[] = {
         {-9, "n"},
-        {-6, "µ"},
+        {-6, "u"},
         {-3, "m"},
         {0, ""},
         {3, "K"},
