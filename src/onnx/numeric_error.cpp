@@ -24,6 +24,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <cmath>
@@ -310,6 +311,17 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     logger::EmitOptions o;
     o.description = v.note;
 
+    // Global probe fast-path: gemm's 64^3 already knows if this dtype is
+    // emulated/slow on this EP (QNN 33s).  Skip before paying 1024^3.
+    {
+      const auto &probe = onnxProbeGemmCache(rt, ep);
+      auto it = probe.find(v.label);
+      if (it != probe.end() && !it->second.ok)
+      {
+        test.skip(v.label, ResultStatus::Unsupported, it->second.reason, o.description);
+        continue;
+      }
+    }
     // The same gate onnx-gemm applies.  Without it a datatype newer than the
     // runtime reports whatever ORT says about IR versions, which names neither
     // the datatype nor the fix.

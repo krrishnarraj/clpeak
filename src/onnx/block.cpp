@@ -26,6 +26,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -745,6 +746,19 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (isIntVariant(v)) continue;
       VariantResult &vr = results[vi];
 
+      // Global probe fast-path: if gemm's tiny probe already says this
+      // dtype is unsupported/emulated on this EP, skip without paying
+      // block's 50M-weight model compilation.
+      {
+        const auto &probe = onnxProbeGemmCache(rt, ep);
+        auto it = probe.find(v.label);
+        if (it != probe.end() && !it->second.ok)
+        {
+          vr.skipReason = it->second.reason;
+          emitPrefillTo(testFlops, v, vr);
+          continue;
+        }
+      }
       // dtype / opset
       {
         std::string why = onnxDtypeUnsupportedReason(rt, v.wDtype);
@@ -841,6 +855,16 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       if (!isIntVariant(v)) continue;
       VariantResult &vr = results[vi];
+      {
+        const auto &probe = onnxProbeGemmCache(rt, ep);
+        auto it = probe.find(v.label);
+        if (it != probe.end() && !it->second.ok)
+        {
+          vr.skipReason = it->second.reason;
+          emitPrefillTo(testOps, v, vr);
+          continue;
+        }
+      }
       {
         std::string why = onnxDtypeUnsupportedReason(rt, v.wDtype);
         if (why.empty()) why = onnxDtypeUnsupportedReason(rt, v.actDtype);

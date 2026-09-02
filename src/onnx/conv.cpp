@@ -21,6 +21,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -279,6 +280,21 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
 
       const std::string row = std::string(dt.label) + "_" + v.label;
+
+      // Global probe fast-path: gemm's 64^3 matmul probe already tells us if
+      // this dtype is emulated on this EP (QNN HTP fp32 33s).  Skip before
+      // building any conv ladder.
+      {
+        const auto &probe = onnxProbeGemmCache(rt, ep);
+        auto it = probe.find(dt.label);
+        if (it != probe.end() && !it->second.ok)
+        {
+          logger::EmitOptions o;
+          o.description = std::string("Peak over a doubling sweep of feature-map sizes.  ") + dt.note + "  " + v.note;
+          test.skip(row, ResultStatus::Unsupported, it->second.reason, o.description);
+          continue;
+        }
+      }
 
       double best = 0.0;
       int64_t bestSpatial = 0;
