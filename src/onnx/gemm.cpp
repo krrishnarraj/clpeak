@@ -18,6 +18,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -543,167 +544,47 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // already runs on a dequantized fp32 result.
     bool reduceInFloat = false, triedFloatReduce = false;
 
-    // Tiny probe: learn whether this EP can handle this dtype at all
-    // without paying the full kMinDim (1024) compilation cost.  On QNN HTP
-    // 1024^3 costs 33-71s even when it will be the only rung; 64^3 is the
-    // same kernels at ~0.5s and tells us cheaply whether to attempt the
-    // ladder.  Uses a tight 5s budget so emulated dtypes (fp32 on HTP)
-    // that are slow even at 64 are skipped early.
+    // Global probe once per EP (tiny 64^3) - consult cache instead of
+    // per-variant probing.  The cache was populated in onnx_peak.cpp
+    // before any runGemm call, at 64^3 per variant (~0.5s vs 33-71s at
+    // 1024).  This deduplicates fp16 across gemm/conv/block etc.
     {
-      // QNN HTP is an int8/fp16 NPU - fp32/bf16/fp8 are emulated and
-      // minutes to compile at 1024.  Tiny probe at 64 would still pass
-      // (~0.5s) but the 1024 ladder would then cost 33-71s per variant.
-      // Filter to the dtypes HTP natively accelerates; other EPs keep all.
-      if (ep.providerKey == "QNNExecutionProvider")
-      {
-        bool qnnOk = false;
-        if (v.qdq && v.dtype == ONNX_DT_INT8)
-          qnnOk = true; // int8_qdq
-        else if (v.blockSize > 0 &&
-                 (v.dtype == ONNX_DT_INT4 || v.dtype == ONNX_DT_FLOAT16))
-          qnnOk = true; // int4_weight, fp16 (also covers int4_weight via block)
-        else if (!v.qdq && v.blockSize == 0 && !v.nvfp4 &&
-                 v.dtype == ONNX_DT_FLOAT16)
-          qnnOk = true; // fp16
-        // Allow int8_qdq, fp16, int4_weight only on QNN; skip the rest
-        // before paying any compilation.
-        if (!qnnOk)
-        {
-          logger::EmitOptions o;
-          o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
-          if (isInt)
-            o.unit = "ops";
-          test.skip(v.label, ResultStatus::Unsupported,
-                    "QNN HTP has no native support for " + std::string(v.label) +
-                        " - emulated path compiles in minutes and is not representative",
-                    o);
-          return;
-        }
-      }
-      auto t0 = std::chrono::steady_clock::now();
-      GemmSetup tiny = makeSetup(rt, ep, v, kProbeDim, /*profile=*/false,
-                                 actDtype, /*reduceInFloat=*/false, wgtDtype);
-      auto t1 = std::chrono::steady_clock::now();
-      double tinyCreateUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 tiny probe create %.1f s\n",
-                  ep.providerKey.c_str(), v.label,
-                  (long long)kProbeDim, tinyCreateUs / 1.0e6);
-      if (!tiny.session)
-      {
-        // Try the float-reduction fallback once, like the ladder does.
-        if (!v.qdq && !triedFloatReduce)
-        {
-          const std::string tinyErr = tiny.error;
-          destroySetup(rt, tiny);
-          tiny = makeSetup(rt, ep, v, kProbeDim, /*profile=*/false, actDtype,
-                           /*reduceInFloat=*/true, wgtDtype);
-          if (tiny.session)
-            reduceInFloat = true;
-          else
-            tiny.error = tinyErr;
-        }
-      }
-      if (!tiny.session)
+      const auto &cache = onnxProbeGemmCache(rt, ep);
+      auto it = cache.find(v.label);
+      if (it == cache.end())
       {
         logger::EmitOptions o;
         o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
         if (isInt)
           o.unit = "ops";
-        test.skip(v.label, ResultStatus::Unsupported, tiny.error, o);
+        test.skip(v.label, ResultStatus::Unsupported, "no probe result for " + std::string(v.label), o);
         return;
       }
-      if (tinyCreateUs > kOnnxTinyMaxCreateUs)
+      const auto &pr = it->second;
+      if (!pr.ok)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: tiny probe %.1f s > %.1f s, skipping dtype\n",
-                    ep.providerKey.c_str(), v.label,
-                    tinyCreateUs / 1.0e6, kOnnxTinyMaxCreateUs / 1.0e6);
         logger::EmitOptions o;
         o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
         if (isInt)
           o.unit = "ops";
-        destroySetup(rt, tiny);
-        test.skip(v.label, ResultStatus::Unsupported,
-                  "session creation at " + std::to_string(kProbeDim) + "^3 took " +
-                      std::to_string((long long)(tinyCreateUs / 1.0e6)) +
-                      " s, exceeds " +
-                      std::to_string((long long)(kOnnxTinyMaxCreateUs / 1.0e6)) +
-                      " s tiny compilation budget",
-                  o);
+        test.skip(v.label, ResultStatus::Unsupported, pr.reason, o);
         return;
       }
-      destroySetup(rt, tiny);
+      actDtype = pr.actDtype;
+      wgtDtype = pr.wgtDtype;
+      schemeName = pr.schemeName;
+      ranAs = pr.ranAs;
+      castedActs = pr.castedActs;
+      reduceInFloat = pr.reduceInFloat;
+      // For quantized/weight-only, the cache already verified fusion;
+      // no need to re-probe schemes.  Plain variants keep reduceInFloat.
     }
-
-    // For the quantized variant, settle the scheme before sweeping anything.
-    // ONNX Runtime rewrites graphs before running them, and a provider that
-    // will not fuse dequantize/matmul/quantize into a quantized kernel
-    // dequantizes the operands and multiplies in floating point instead --
-    // a perfectly good number that is not an int8 number.  One profiled run
-    // per scheme at the smallest size answers it, and doing it first means a
-    // provider that fuses neither is not swept at all.
-    // Both quantized shapes need the same question answered before they are
-    // swept: did the provider fuse, or did it unpack the weights into floats
-    // and run an ordinary multiply?  For weight-only the unfused form pays for
-    // a full dequantize of the matrix on every single run, so it is not the
-    // rate a 4-bit deployment would ever see.
-    // Tiny probe dimension is used here as well to keep QNN probe cheap.
     if (v.qdq || v.blockSize > 0)
     {
-      std::string tried;
-      QuantScheme schemes[2];
-      const size_t nSchemes = schemesFor(v, schemes);
-      for (size_t si = 0; si < nSchemes; si++)
-      {
-        const QuantScheme &qs = schemes[si];
-        if (clpeak::cancelRequested())
-          break;
-        auto pq0 = std::chrono::steady_clock::now();
-        GemmSetup probe = makeSetup(rt, ep, v, kProbeDim, /*profile=*/true,
-                                    qs.actDtype, /*reduceInFloat=*/false,
-                                    qs.wDtype);
-        auto pq1 = std::chrono::steady_clock::now();
-        double pqUs = std::chrono::duration<double, std::micro>(pq1 - pq0).count();
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s tiny probe %lld^3 create %.1f s\n",
-                    ep.providerKey.c_str(), v.label, qs.name,
-                    (long long)kProbeDim, pqUs / 1.0e6);
-        if (!probe.session)
-        {
-          if (firstErr.empty())
-            firstErr = probe.error;
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s rejected: %s\n",
-                      ep.providerKey.c_str(), v.label, qs.name,
-                      probe.error.c_str());
-          continue;
-        }
-        timeRuns(rt, probe, 1);
-        auto ops = onnxCollectExecutedOps(rt, probe.session);
-        destroySetup(rt, probe);
-
-        std::string joined;
-        for (const auto &o : ops)
-          joined += (joined.empty() ? "" : ", ") + o;
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s executed %s\n",
-                    ep.providerKey.c_str(), v.label, qs.name, joined.c_str());
-
-        if (onnxOpsRanQuantizedMatMul(ops))
-        {
-          actDtype = qs.actDtype;
-          wgtDtype = qs.wDtype;
-          schemeName = qs.name;
-          for (const auto &o : ops)
-            if (o == "Cast")
-              castedActs = true;
-          // A provider that compiles the whole subgraph names its kernel
-          // after itself, and that name carries a hash of the graph -- it
-          // would differ between runs and has no place in a saved result.
-          const std::string named = onnxQuantizedKernelName(ops);
-          ranAs = named.empty() ? "a kernel it compiled itself" : named;
-          break;
-        }
-        if (!ops.empty())
-          tried = joined;
-      }
-
+      // Quantized fusion already verified by global probe; keep ranAs etc.
+      // This block is retained only for the skip path when global probe
+      // said ok but per-variant scheme would have failed - now handled above.
+      // Verify we have a fused kernel name; if not, skip (should not happen).
       if (ranAs.empty())
       {
         logger::EmitOptions o;
@@ -712,20 +593,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         v.note;
         if (isInt)
           o.unit = "ops";
-        test.skip(v.label,
-                  tried.empty() ? errStatus : ResultStatus::Unsupported,
-                  tried.empty()
-                      ? (firstErr.empty()
-                             ? std::string("this provider accepted no session "
-                                           "for ") +
-                                   v.label
-                             : firstErr)
-                      : std::string("provider did not fuse a quantized matmul "
-                                    "-- it dequantized the operands and multiplied in "
-                                    "floating point, so this is not a ") +
-                            v.label +
-                            " rate (ran: " + tried + ")",
-                  o);
+        test.skip(v.label, ResultStatus::Unsupported,
+                  "no fused quantized matmul for " + std::string(v.label), o);
         return;
       }
     }

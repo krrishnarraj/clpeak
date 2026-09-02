@@ -2,6 +2,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_runtime.h"
+#include "onnx_probe.h"
 
 #include <common/options.h>
 
@@ -193,6 +194,16 @@ int OnnxPeak::runAll()
         idx,
     });
     currentDeviceScope = &deviceScope;
+
+    // Global tiny probe once per EP: learn which dtypes this EP can
+    // actually run at 64^3 before paying 1024^3 (QNN HTP: 0.5s vs 33s).
+    // Subsequent runGemm/runConv etc consult the cache instead of
+    // re-probing per variant.
+    if (isAllowed(Benchmark::OnnxGemm) || isAllowed(Benchmark::OnnxConv) ||
+        isAllowed(Benchmark::OnnxNumericError) || isAllowed(Benchmark::OnnxBlock))
+    {
+      (void)onnxProbeGemmCache(*rt, ep);
+    }
 
     // ---- Compute (FLOPS + OPS) ---------------------------
     if (isAllowed(Benchmark::OnnxGemm))
