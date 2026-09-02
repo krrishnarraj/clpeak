@@ -283,6 +283,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       double best = 0.0;
       int64_t bestSpatial = 0;
       double lastRate = 0.0;
+      double prevCreateUs = 0.0;
       int strikes = 0;
       std::string firstErr;
       ResultStatus errStatus = ResultStatus::Unsupported;
@@ -312,7 +313,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
+        auto createStart = std::chrono::steady_clock::now();
         ConvSetup c = makeSetup(rt, ep, dt.dtype, v, sp);
+        auto createEnd = std::chrono::steady_clock::now();
+        double createUs = std::chrono::duration<double, std::micro>(
+                              createEnd - createStart).count();
+        CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld session create %.1f s\n",
+                    ep.providerKey.c_str(), row.c_str(),
+                    (long long)sp, (long long)sp, createUs / 1.0e6);
         if (!c.session)
         {
           if (firstErr.empty())
@@ -386,6 +394,30 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       (long long)sp, (long long)sp, per_iter_us / 1.0e6);
           break;
         }
+
+        bool createCliff = (prevCreateUs > 0.0 &&
+                            createUs > prevCreateUs * kOnnxCreateGrowthFactor);
+        if (createCliff)
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create grew %.1fx (%.1f s -> %.1f s) > %.1fx, stopping\n",
+                      ep.providerKey.c_str(), row.c_str(),
+                      (long long)sp, (long long)sp,
+                      createUs / prevCreateUs,
+                      prevCreateUs / 1.0e6, createUs / 1.0e6,
+                      kOnnxCreateGrowthFactor);
+          prevCreateUs = createUs;
+          break;
+        }
+        if (sp != kMinSpatial && createUs > kOnnxMaxCreateUs)
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create %.1f s > %.1f s, stopping\n",
+                      ep.providerKey.c_str(), row.c_str(),
+                      (long long)sp, (long long)sp,
+                      createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+          prevCreateUs = createUs;
+          break;
+        }
+        prevCreateUs = createUs;
       }
 
       logger::EmitOptions o;

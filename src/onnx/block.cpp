@@ -457,8 +457,31 @@ namespace
                  std::string &error, ResultStatus &status,
                  int64_t kvLen, int64_t prefillSeq)
   {
+    auto createStart = std::chrono::steady_clock::now();
     BlockRun r = makeRun(rt, ep, v, decode, kvLen, prefillSeq, qActDtype,
                          /*profile=*/false);
+    auto createEnd = std::chrono::steady_clock::now();
+    double createUs = std::chrono::duration<double, std::micro>(
+                          createEnd - createStart).count();
+    CLPEAK_VLOG("onnx-block[%s/%s]: %s create %.1f s\n",
+                ep.providerKey.c_str(), v.label,
+                decode ? ("decode_kv" + std::to_string(kvLen)).c_str()
+                       : ("prefill_s" + std::to_string(prefillSeq)).c_str(),
+                createUs / 1.0e6);
+    if (r.session && createUs > kOnnxMaxBlockCreateUs)
+    {
+      CLPEAK_VLOG("onnx-block[%s/%s]: create %.1f s > %.1f s, skipping\n",
+                  ep.providerKey.c_str(), v.label,
+                  createUs / 1.0e6, kOnnxMaxBlockCreateUs / 1.0e6);
+      error = "session creation took " +
+              std::to_string((long long)(createUs / 1.0e6)) +
+              " s, exceeds " +
+              std::to_string((long long)(kOnnxMaxBlockCreateUs / 1.0e6)) +
+              " s compilation budget";
+      status = ResultStatus::Unsupported;
+      destroyRun(rt, r);
+      return -1.0;
+    }
     if (!r.session)
     {
       error = r.error;

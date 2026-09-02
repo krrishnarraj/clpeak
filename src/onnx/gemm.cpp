@@ -526,6 +526,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     double firstUs = 0.0, lastUs = 0.0;
     int64_t firstDim = 0, lastDim = 0;
     double lastRate = 0.0;
+    double prevCreateUs = 0.0;
     int strikes = 0;
     std::string ranAs; // kernel the provider actually used (quantized only)
     int actDtype = ONNX_DT_UINT8;
@@ -669,6 +670,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
       }
 
+      auto createStart = std::chrono::steady_clock::now();
       GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
                               reduceInFloat, wgtDtype);
       if (!g.session && !v.qdq && !triedFloatReduce)
@@ -689,6 +691,13 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         else
           g.error = nativeErr;
       }
+      auto createEnd = std::chrono::steady_clock::now();
+      double createUs = std::chrono::duration<double, std::micro>(
+                            createEnd - createStart).count();
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 session create %.1f s\n",
+                  ep.providerKey.c_str(), v.label,
+                  (long long)D, createUs / 1.0e6);
+
       if (!g.session)
       {
         if (firstErr.empty())
@@ -787,6 +796,34 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     (long long)D, per_iter_us / 1.0e6);
         break;
       }
+
+      // Session creation (graph compilation) dominates on AOT providers
+      // (QNN HTP: 33s at 1024, 313s at 2048, ~9x per 2x dim).  Two guards:
+      // absolute and factor.  The first rung is allowed to exceed the
+      // absolute once - its time seeds the factor gate; truncating it would
+      // discard a valid peak.  Factor catches the cliff before the next
+      // model is even built.
+      bool createCliff = (prevCreateUs > 0.0 &&
+                          createUs > prevCreateUs * kOnnxCreateGrowthFactor);
+      if (createCliff)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 create grew %.1fx (%.1f s -> %.1f s) > %.1fx, stopping\n",
+                    ep.providerKey.c_str(), v.label,
+                    (long long)D, createUs / prevCreateUs,
+                    prevCreateUs / 1.0e6, createUs / 1.0e6,
+                    kOnnxCreateGrowthFactor);
+        prevCreateUs = createUs;
+        break;
+      }
+      if (D != kMinDim && createUs > kOnnxMaxCreateUs)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 create %.1f s > %.1f s, stopping\n",
+                    ep.providerKey.c_str(), v.label,
+                    (long long)D, createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+        prevCreateUs = createUs;
+        break;
+      }
+      prevCreateUs = createUs;
     }
 
     // Both operands are constants, so this test depends on ORT honouring the

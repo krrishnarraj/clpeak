@@ -37,6 +37,26 @@ struct OrtRuntime;
 // microseconds, and it passes its own far larger cap.
 constexpr unsigned int kOnnxMaxIters = 500;
 
+// Ceiling on session creation (graph compilation) time.  Separate from
+// kMaxIterUs which gates per-iteration execution time: on QNN HTP the
+// compilation dominates (1024^3: 33s, 2048^3: 313s, ~9x per 2x dim) and the
+// execution gate never fires because per-iter stays in ms.  Two guards:
+//
+//  * absolute: one create > kOnnxMaxCreateUs -> stop ladder after this rung
+//    (keep its result, skip larger).  30s for the doubling ladders (gemm,
+//    conv), 60s for the fixed-geometry block whose 8192 context legitimately
+//    needs ~1 min on CoreML/TensorRT AOT toolchains.
+//
+//  * factor: create grew > kOnnxCreateGrowthFactor since previous rung
+//    (memory 4x, flops 8x per 2x dim; 6x tolerates jitter but catches QNN's
+//    9.3x).  Applies only to ladders where D doubles.
+//
+// The first rung (kMinDim) is allowed to exceed the absolute once - its time
+// is the seed for the factor gate; truncating it would discard a valid peak.
+constexpr double kOnnxMaxCreateUs = 30.0e6;
+constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
+constexpr double kOnnxCreateGrowthFactor = 6.0;
+
 // One benchmarkable "device" of this backend: an ONNX Runtime execution
 // provider (EP).  NPUs are reachable only through such vendor runtimes --
 // the EP is the closest thing to an ISA they expose -- so each EP the

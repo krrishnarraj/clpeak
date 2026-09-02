@@ -136,13 +136,33 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
   OrtSession *session = nullptr;
   {
     std::string model = streamModel(d);
+    auto createStart = std::chrono::steady_clock::now();
     auto ses = onnxCreateSession(rt, ep, model);
+    auto createEnd = std::chrono::steady_clock::now();
+    double createUs = std::chrono::duration<double, std::micro>(
+                          createEnd - createStart).count();
+    CLPEAK_VLOG("onnx-tensor-bw[%s]: %lld dim create %.1f s\n",
+                ep.providerKey.c_str(), (long long)d, createUs / 1.0e6);
     model.clear();
     model.shrink_to_fit();
     if (!ses.session)
     {
       r.error  = ses.error;
       r.status = ResultStatus::Unsupported;
+      return r;
+    }
+    if (createUs > kOnnxMaxCreateUs)
+    {
+      CLPEAK_VLOG("onnx-tensor-bw[%s]: %lld dim create %.1f s > %.1f s, skipping\n",
+                  ep.providerKey.c_str(), (long long)d,
+                  createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+      r.error = "session creation took " +
+                std::to_string((long long)(createUs / 1.0e6)) +
+                " s, exceeds " +
+                std::to_string((long long)(kOnnxMaxCreateUs / 1.0e6)) +
+                " s compilation budget";
+      r.status = ResultStatus::Unsupported;
+      rt.api->ReleaseSession(ses.session);
       return r;
     }
     session = ses.session;

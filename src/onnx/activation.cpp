@@ -136,13 +136,33 @@ namespace
       xRaw.clear();
       xRaw.shrink_to_fit();
 
+      auto createStart = std::chrono::steady_clock::now();
       auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
+      auto createEnd = std::chrono::steady_clock::now();
+      double createUs = std::chrono::duration<double, std::micro>(
+                            createEnd - createStart).count();
+      CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s\n",
+                  ep.providerKey.c_str(), (long long)rows, createUs / 1.0e6);
       model.clear();
       model.shrink_to_fit();
       if (!ses.session)
       {
         r.error = ses.error;
         r.status = ResultStatus::Unsupported;
+        return r;
+      }
+      if (createUs > kOnnxMaxCreateUs)
+      {
+        CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s > %.1f s, skipping\n",
+                    ep.providerKey.c_str(), (long long)rows,
+                    createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+        r.error = "session creation took " +
+                  std::to_string((long long)(createUs / 1.0e6)) +
+                  " s, exceeds " +
+                  std::to_string((long long)(kOnnxMaxCreateUs / 1.0e6)) +
+                  " s compilation budget";
+        r.status = ResultStatus::Unsupported;
+        rt.api->ReleaseSession(ses.session);
         return r;
       }
       session = ses.session;
