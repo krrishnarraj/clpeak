@@ -169,7 +169,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   // transfer that never happened.  The largest size is the one that is
   // certainly real, and it is also where any fixed overhead has been
   // amortised away.
-  double  lastGbps = 0.0;
+  double  lastBps = 0.0;
   // The smallest rung is kept separately: the round trip is measured there
   // and the two have to be compared at one size.
   double  firstUs = 0.0;
@@ -201,10 +201,10 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     if (firstElems == 0) { firstUs = r.us; firstElems = elems; }
     lastUs = r.us; lastElems = elems;
 
-    const double gbps = (double)elems * 2.0 / (r.us * 1.0e-6);
+    const double bps = (double)elems * 2.0 / (r.us * 1.0e-6);
     CLPEAK_VLOG("onnx-transfer[%s/h2d]: %lld MB -> %.1f GB/s\n",
-                ep.providerKey.c_str(), (long long)((elems * 2) >> 20), gbps);
-    lastGbps = gbps;
+                ep.providerKey.c_str(), (long long)((elems * 2) >> 20), bps);
+    lastBps = bps;
   }
 
   // Does a transfer happen at all?  A provider that shares memory with the
@@ -240,9 +240,9 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
       "this provider shares memory with the host -- the tensor is handed over "
       "by pointer and no copy takes place";
 
-  if (lastGbps > 0.0 && transfers)
-    test.emit("h2d", (float)lastGbps, h2dNote);
-  else if (lastGbps > 0.0)
+  if (lastBps > 0.0 && transfers)
+    test.emit("h2d", (float)lastBps, h2dNote);
+  else if (lastBps > 0.0)
     test.skip("h2d", ResultStatus::Unsupported, sharedNote, h2dNote);
   else
     test.skip("h2d", errStatus, firstErr.empty() ? "unsupported" : firstErr,
@@ -262,11 +262,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     if (r.us > 0.0)
     {
       roundUs = r.us;
-      const double gbps = 2.0 * (double)firstElems * 2.0 / (r.us * 1.0e-6);
+      const double bps = 2.0 * (double)firstElems * 2.0 / (r.us * 1.0e-6);
       CLPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
                   ep.providerKey.c_str(),
-                  (long long)((firstElems * 2) >> 20), gbps);
-      test.emit("roundtrip", (float)gbps,
+                  (long long)((firstElems * 2) >> 20), bps);
+      test.emit("roundtrip", (float)bps,
                 "The full cost of offloading: sending a tensor, applying one "
                 "trivial operation to it, and getting the result back.  This "
                 "is the bar any offloaded work has to clear -- a calculation "

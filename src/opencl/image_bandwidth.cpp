@@ -3,7 +3,7 @@
 
 int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  float timed, gbps;
+  float timed, bps;
   cl::NDRange globalSize, localSize;
 
   if (!isAllowed(Benchmark::ImageBW))
@@ -93,14 +93,14 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       // Each WI reads IMAGE_FETCH_PER_WI float4 pixels = IMAGE_FETCH_PER_WI * 4 * sizeof(float) bytes
       uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * ndRangeTotal(globalSize);
-      float rowGbps = rowUs > 0.0f ? (float)bytesPerCall / rowUs * 1e6f : 0.0f;
-      float colGbps = colUs > 0.0f ? (float)bytesPerCall / colUs * 1e6f : 0.0f;
-      CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
-                  rowGbps, colGbps);
-      gbps = std::max(rowGbps, colGbps);
+      float rowBps = rowUs > 0.0f ? (float)bytesPerCall / rowUs * 1e6f : 0.0f;
+      float colBps = colUs > 0.0f ? (float)bytesPerCall / colUs * 1e6f : 0.0f;
+      CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
+                  rowBps, colBps);
+      bps = std::max(rowBps, colBps);
       (void)timed;
 
-      test.emit("float4", gbps, fetchNote);
+      test.emit("float4", bps, fetchNote);
     }
     ///////////////////////////////////////////////////////////////////////////
   }

@@ -243,7 +243,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   CLPEAK_VLOG("onnx-tensor-bw[%s]: dispatch floor %.2f us\n",
               ep.providerKey.c_str(), floorUs);
 
-  double prevGbps = 0.0;
+  double prevBps = 0.0;
   bool   stillFalling = true;
   size_t index = 0;
   for (const Size &s : kSizes)
@@ -255,7 +255,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // Stop once the curve has flattened, but only past the base rungs: those
     // exist for devices whose caches are larger, while the base three are
     // what every reading is compared against.
-    if (rung >= kAlwaysMeasured && prevGbps > 0.0 && !stillFalling)
+    if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
     {
       CLPEAK_VLOG("onnx-tensor-bw[%s]: rate flattened, stopping below %s\n",
                   ep.providerKey.c_str(), s.label);
@@ -304,11 +304,11 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       continue;
     }
     const double bytes = (double)s.dim * (double)s.dim * 2.0;
-    const double gbps  = bytes / (netUs * 1.0e-6);
-    test.emit(s.label, (float)gbps, s.note);
+    const double bps  = bytes / (netUs * 1.0e-6);
+    test.emit(s.label, (float)bps, s.note);
 
-    stillFalling = (prevGbps <= 0.0) || (gbps < prevGbps * kFallingRatio);
-    prevGbps = gbps;
+    stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
+    prevBps = bps;
   }
 
   test.end();

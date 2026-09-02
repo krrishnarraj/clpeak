@@ -437,8 +437,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                       betaPtr, (void *)dC, Cdesc, (void *)dC, Cdesc,
                                       &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
-        double tops = flops_per_iter * 1.0e6 / mean_us;
-        blasTest->emit(label, (float)tops, curOpts);
+        double rate = flops_per_iter * 1.0e6 / mean_us;
+        blasTest->emit(label, (float)rate, curOpts);
 
         cublasLtMatmulDescDestroy(opDesc);
         cublasLtMatrixLayoutDestroy(Adesc);
@@ -611,8 +611,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                       &beta32, (void *)dC, Cdesc, (void *)dC, Cdesc,
                                       &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
-        double tops = flops_per_iter * 1.0e6 / mean_us;
-        blasTest->emit(label, (float)tops, blasOpts(note));
+        double rate = flops_per_iter * 1.0e6 / mean_us;
+        blasTest->emit(label, (float)rate, blasOpts(note));
         cleanup();
         return 0;
     };
@@ -738,7 +738,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                        "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(nvf4Note));
 #endif
 
-    // Integer variants -- same test, each reading carries its own unit (tops).
+    // Integer variants -- same test, each reading carries its own unit (ops).
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
     // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.

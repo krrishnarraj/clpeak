@@ -318,9 +318,9 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
             unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
             double mean_us = timeMPSMatMul(queue, mm, matA, matB, matC, iters);
-            double tops = flops_per_iter * 1.0e6 / mean_us;
+            double rate = flops_per_iter * 1.0e6 / mean_us;
 
-            test.emit(label, (float)tops, note);
+            test.emit(label, (float)rate, note);
         }
     };
 
@@ -365,9 +365,9 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
             unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
             double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
-            double tops = flops_per_iter * 1.0e6 / mean_us;
+            double rate = flops_per_iter * 1.0e6 / mean_us;
 
-            test.emit(label, (float)tops, note);
+            test.emit(label, (float)rate, note);
         }
     };
 

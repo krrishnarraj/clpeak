@@ -2,7 +2,7 @@
 
 int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  float timed, gbps;
+  float timed, bps;
   cl::NDRange globalSize, localSize;
 
   if (!isAllowed(Benchmark::LocalBW))
@@ -73,9 +73,9 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
-      gbps = (float)bytesPerCall / timed * 1e6f;
+      bps = (float)bytesPerCall / timed * 1e6f;
 
-      test.emit(labels[w], gbps, clWidthNote(widths[w]));
+      test.emit(labels[w], bps, clWidthNote(widths[w]));
     }
   }
   catch (cl::Error &error)

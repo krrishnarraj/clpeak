@@ -195,8 +195,8 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                  "vkQueueSubmit/WaitIdle failed or timer returned zero", note);
       return;
     }
-    float gbps = (float)bytes / us * 1e6f;
-    test.emit(metric, gbps, note);
+    float bps = (float)bytes / us * 1e6f;
+    test.emit(metric, bps, note);
   };
 
   reportCopy("h2d", "Host to device: sending data across to the device.",

@@ -94,8 +94,8 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     float us = runKernel(dev, fn, blocksU, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
-    float gbps = (float)(bytes / us * 1e6);
-    test.emit(key, gbps, cudaWidthNote(v.width));
+    float bps = (float)(bytes / us * 1e6);
+    test.emit(key, bps, cudaWidthNote(v.width));
   }
 
   cuMemFree(inBuf);

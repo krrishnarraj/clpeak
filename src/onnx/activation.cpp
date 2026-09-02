@@ -314,12 +314,12 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       // One pass in, one pass out.
-      const double gbps = 2.0 * (double)bytes / (netUs * 1.0e-6);
+      const double bps = 2.0 * (double)bytes / (netUs * 1.0e-6);
       CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n",
                   ep.providerKey.c_str(), v.label,
-                  sz.label, gbps, full.us, floorUs);
-      test.emit(metric, (float)gbps, note.c_str());
+                  sz.label, bps, full.us, floorUs);
+      test.emit(metric, (float)bps, note.c_str());
     }
   }
 

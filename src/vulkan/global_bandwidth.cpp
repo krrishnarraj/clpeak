@@ -222,8 +222,8 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
-    float gbps = ((float)numItems * sizeof(float)) / timed * 1e6f;
-    test.emit(key, gbps, vkWidthNote(v.width));
+    float bps = ((float)numItems * sizeof(float)) / timed * 1e6f;
+    test.emit(key, bps, vkWidthNote(v.width));
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

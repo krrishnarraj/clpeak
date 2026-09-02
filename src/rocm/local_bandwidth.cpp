@@ -60,8 +60,8 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
-    float gbps = (float)bytes / us * 1e6f;
-    test.emit(key, gbps, rocmWidthNote(v.width));
+    float bps = (float)bytes / us * 1e6f;
+    test.emit(key, bps, rocmWidthNote(v.width));
   }
 
   (void)hipFree(outBuf);

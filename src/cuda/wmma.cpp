@@ -15,7 +15,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   const uint32_t outElems = 16 * 16; // M*N
 
   // One scope for the whole family -- all data types in one test.
-  // The integer readings carry their own unit (tops) so they share the
+  // The integer readings carry their own unit (ops) so they share the
   // test with the floating-point ones.
   auto test = currentDeviceScope->beginTest(
       {"wmma", "Tensor cores (WMMA / mma.sync)", "flops", Category::Unknown,
@@ -383,7 +383,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     }
 
   // Integer cluster -- same test, same scope; each reading carries
-  // its own unit (tops) so the integer rows share the test above.
+  // its own unit (ops) so the integer rows share the test above.
 
   // INT8 WMMA
   {

@@ -109,8 +109,8 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
-    float gbps = (float)bytes / us * 1e6f;
-    test.emit(key, gbps, vkWidthNote(v.width));
+    float bps = (float)bytes / us * 1e6f;
+    test.emit(key, bps, vkWidthNote(v.width));
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

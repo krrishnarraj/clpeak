@@ -53,11 +53,11 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     float us = runKernel(dev, fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
-    float gbps = (float)bytes / us * 1e6f;
+    float bps = (float)bytes / us * 1e6f;
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
-    test.emit(key, gbps, cudaWidthNote(v.width));
+    test.emit(key, bps, cudaWidthNote(v.width));
   }
 
   cuMemFree(outBuf);

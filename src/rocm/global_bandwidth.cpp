@@ -114,8 +114,8 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
-    float gbps = (float)(bytes / us * 1e6);
-    test.emit(key, gbps, rocmWidthNote(v.width));
+    float bps = (float)(bytes / us * 1e6);
+    test.emit(key, bps, rocmWidthNote(v.width));
   }
 
   (void)hipFree(inBuf);

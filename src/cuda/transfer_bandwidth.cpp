@@ -88,12 +88,12 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   };
 
   float usH2D = timeXfer(true);
-  float gbpsH2D = (float)bytes / usH2D * 1e6f;
-  test.emit("h2d_pinned", gbpsH2D, h2dNote);
+  float bpsH2D = (float)bytes / usH2D * 1e6f;
+  test.emit("h2d_pinned", bpsH2D, h2dNote);
 
   float usD2H = timeXfer(false);
-  float gbpsD2H = (float)bytes / usD2H * 1e6f;
-  test.emit("d2h_pinned", gbpsD2H, d2hNote);
+  float bpsD2H = (float)bytes / usD2H * 1e6f;
+  test.emit("d2h_pinned", bpsD2H, d2hNote);
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);

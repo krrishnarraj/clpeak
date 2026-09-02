@@ -7,7 +7,7 @@
 
 // ── The unit table ─────────────────────────────────────────────────────────
 //
-// Keyed by the tokens backends already pass, so adding quantity/scale/
+// Keyed by the tokens backends already pass, so adding quantity/
 // direction to the model cost no backend churn.  A token missing from here is
 // not an error: unitInfo() passes it through as its own symbol (see below).
 

@@ -139,7 +139,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   };
 
   // One scope for the whole family -- all data types in one test.
-  // The int8 row carries its own unit (tops) so it shares the test.
+  // The int8 row carries its own unit (ops) so it shares the test.
   auto test = currentDeviceScope->beginTest(
       {"coopmat", "Cooperative matrix", "flops", Category::Unknown,
        "The device's matrix engine -- its tensor cores -- which "
@@ -331,7 +331,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
 #endif
 
 #ifdef VK_HAS_COOPMAT_INT8
-  // Integer row -- same test, same scope; carries its own unit (tops).
+  // Integer row -- same test, same scope; carries its own unit (ops).
 
     CoopTileRun r;
     r.push.A.i = 3;

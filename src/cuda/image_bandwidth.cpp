@@ -104,15 +104,15 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   };
   float rowUs = timeWalk(0);
   float colUs = timeWalk(1);
-  float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
-  float colGbps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
-  CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
-              rowGbps, colGbps);
+  float rowBps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
+  float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
+  CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
+              rowBps, colBps);
 
-  if (rowGbps <= 0.0f && colGbps <= 0.0f)
+  if (rowBps <= 0.0f && colBps <= 0.0f)
     test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
   else
-    test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
+    test.emit("float4", std::max(rowBps, colBps), fetchNote);
 
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);
