@@ -67,22 +67,53 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 
 OrtEnv *onnxEnv(const OrtRuntime &rt)
 {
+  // One OrtEnv per loaded runtime.  The GUI can hot-swap the ONNX Runtime
+  // library in-process (Settings → Choose library…); enumeration is what
+  // loads the runtime and needs no Env, so it succeeds, but the old Env
+  // belongs to the old shared object's LoggingManager singleton.
+  // Reusing it with the new OrtApi triggers
+  //   "Attempt to use DefaultLogger but none has been registered."
+  // Track which runtime the cached Env was created from and recreate it
+  // when the runtime changes.  Works on Windows/Linux/macOS/Android;
+  // on iOS (CLPEAK_ONNX_STATIC) the runtime never changes so the Env
+  // is still created once.
+  static std::mutex mutex;
   static OrtEnv *env = nullptr;
-  static std::once_flag once;
-  std::call_once(once, [&rt] {
-    // A provider declining a graph is an expected outcome here -- it becomes
-    // an Unsupported row -- but ORT reports it at ERROR level and writes it
-    // straight to stderr.  Normal runs stay silent (the skip row carries the
-    // message); --verbose opens the runtime's own log up.
-    OrtLoggingLevel level = clpeak::verboseEnabled() ? ORT_LOGGING_LEVEL_WARNING
-                                                     : ORT_LOGGING_LEVEL_FATAL;
-    OrtStatus *st = rt.api->CreateEnv(level, "clpeak", &env);
-    if (st)
-    {
-      CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", onnxStatusText(rt, st).c_str());
-      env = nullptr;
-    }
-  });
+  static const OrtApi *envApi = nullptr;
+  static const OrtApiBase *envBase = nullptr;
+  std::lock_guard<std::mutex> lock(mutex);
+  if (env && envApi == rt.api && envBase == rt.base)
+    return env;
+  if (env)
+  {
+    // Release with the API that created it; the old shared object is still
+    // mapped (g_rt.lib is leaked on purpose) so its ReleaseEnv remains valid.
+    if (envApi && envApi->ReleaseEnv)
+      envApi->ReleaseEnv(env);
+    else if (rt.api && rt.api->ReleaseEnv)
+      rt.api->ReleaseEnv(env);
+    env = nullptr;
+    envApi = nullptr;
+    envBase = nullptr;
+  }
+  // A provider declining a graph is an expected outcome here -- it becomes
+  // an Unsupported row -- but ORT reports it at ERROR level and writes it
+  // straight to stderr.  Normal runs stay silent (the skip row carries the
+  // message); --verbose opens the runtime's own log up.
+  OrtLoggingLevel level = clpeak::verboseEnabled() ? ORT_LOGGING_LEVEL_WARNING
+                                                   : ORT_LOGGING_LEVEL_FATAL;
+  OrtStatus *st = rt.api->CreateEnv(level, "clpeak", &env);
+  if (st)
+  {
+    CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", onnxStatusText(rt, st).c_str());
+    env = nullptr;
+    return nullptr;
+  }
+  if (env)
+  {
+    envApi = rt.api;
+    envBase = rt.base;
+  }
   return env;
 }
 
