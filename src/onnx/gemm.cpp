@@ -50,8 +50,9 @@ namespace
   // peaks at 2048, because different engines serve them.
   constexpr int64_t kMinDim = 1024;
   // Tiny probe dimension: large enough to exercise the same kernels, small
-  // enough that AOT compilation stays cheap (QNN HTP: 64^3 ~ 0.5s vs 1024^3 33s).
-  constexpr int64_t kProbeDim = 64;
+  // enough that AOT compilation stays cheap (QNN HTP: 32^3 ~0.2s vs 1024^3 33s,
+  // TensorRT 32^3 ~0.8s vs 64^3 3.6s).
+  constexpr int64_t kProbeDim = 32;
 
   // NVFP4's second scale.  A power of two so factoring it out of the block scales
   // is exact and the row measures the format rather than an arithmetic accident.

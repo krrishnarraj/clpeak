@@ -16,10 +16,11 @@
 #include <cmath>
 
 // Copied from gemm.cpp - keep in sync with kFpVariants/kIntVariants there.
-// Probe uses 64^3 so AOT compilation stays cheap (QNN HTP: 64^3 ~0.5s vs 1024^3 33s).
+// Probe uses 32^3 so AOT compilation stays cheap (QNN HTP: 32^3 ~0.2s vs 1024^3 33s,
+// TensorRT 32^3 ~0.8s vs 64^3 3.6s).
 namespace
 {
-  constexpr int64_t kProbeDim = 64;
+constexpr int64_t kProbeDim = 32;
 
   struct Variant
   {
