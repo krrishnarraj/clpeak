@@ -194,7 +194,7 @@ int OnnxPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
+    // ---- Compute (FLOPS + OPS) ---------------------------
     if (isAllowed(Benchmark::OnnxGemm))
       runGemm(*rt, ep, cfg);
 

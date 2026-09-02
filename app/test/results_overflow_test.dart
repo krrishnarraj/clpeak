@@ -20,7 +20,7 @@ const _longDevice = 'Goldfish GFXStream (llvmpipe (LLVM 21.1.4, 128 bits))';
 const _longTest = 'Half-precision compute fp16 (vector width 8)';
 const _shortTest = 'Integer compute';
 
-const _gflops =
+const _flops =
     Units(symbol: 'FLOPS', quantity: Quantity.flops);
 
 /// One measured reading of one test on one device, added to [doc].
@@ -42,7 +42,7 @@ void _add(
         description: description,
         category: BenchCategory.compute,
         shape: TestShape.homogeneous,
-        units: _gflops,
+        units: _flops,
       ))
       .metrics
       .add(const MetricResult(id: 'float8 uncontended', value: 93.1));
