@@ -532,6 +532,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t firstDim = 0, lastDim = 0;
     double lastRate = 0.0;
     double prevCreateUs = 0.0;
+    double prevRate = 0.0;
+    int64_t prevD = 0;
     int strikes = 0;
     std::string ranAs; // kernel the provider actually used (quantized only)
     int actDtype = ONNX_DT_UINT8;
@@ -747,6 +749,33 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       lastRate = ops / mean_us;
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 -> %.3f\n", ep.providerKey.c_str(),
                   v.label, (long long)D, rate);
+
+      // Per-doubling fold detector.  A folded graph leaves only dispatch plus
+      // a Mul over D elements, so the time stays flat while the work grows
+      // 8x and the rate jumps ~8x in a single doubling (QNN HTP: 7-10x, e.g.
+      // fp32 13.3 -> 98.4 TFLOPS from 1024 to 2048).  Real rate gains are
+      // gradual: TensorRT int8 improves 9.4x over four doublings (~1.75x per
+      // step), so 4x in one step clears every legitimate ladder measured
+      // while catching a fold at the rung where it happens.  The whole-ladder
+      // 64x guard below stays as the backstop.
+      if (prevRate > 0.0 && D == prevD * 2 && rate > prevRate * 4.0)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: rate %.3f at %lld vs %.3f at %lld "
+                    "(%.1fx in one doubling) -- work does not scale, "
+                    "constants were folded\n",
+                    ep.providerKey.c_str(), v.label, prevRate,
+                    (long long)prevD, rate, (long long)D, rate / prevRate);
+        best = 0.0;
+        firstErr = "this provider folded the operands at compile time: the "
+                   "timed runs measure dispatch plus a reduction of a "
+                   "precomputed result rather than the matrix multiply, so "
+                   "the timings do not scale with the problem size and mean "
+                   "nothing";
+        errStatus = ResultStatus::Error;
+        break;
+      }
+      prevRate = rate;
+      prevD = D;
 
       if (rate > best * kImproveFactor)
       {
