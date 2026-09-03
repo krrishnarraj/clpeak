@@ -71,7 +71,7 @@ android {
 dependencies {
     // Packaged for its jni/<abi>/libonnxruntime.so; the Java API that comes
     // with it is unused (clpeak talks to the C API through the FFI library).
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 }
 
 kotlin {
