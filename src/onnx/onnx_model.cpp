@@ -400,12 +400,16 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
 
   // Activations are fp16 and resident, exactly as in the plain throughput
   // model: only the weights are narrow, and only the weights are what a
-  // quantized model actually shrinks.
+  // quantized model actually shrinks.  Deliberately the old result-scaled
+  // shape, with no operand trick: no EP observed to fold has the dequantize
+  // kernel this needs (QNN refuses it outright), while the trick's own Add
+  // drew inserted precision casts on the CPU.  The weight dequantize folding
+  // into a prepack is legitimate and is what a deployment does; the timing
+  // guard stays the backstop for the multiply itself.
   g.input("S", ONNX_DT_FLOAT16, {});
   g.initializer("A",       ONNX_DT_FLOAT16, {M, K}, aRaw);
   g.initializer("B_q",     wDtype,          {K, N}, wPacked);
   g.initializer("b_scale", ONNX_DT_FLOAT16, {K / blockSize, N}, wScalesRaw);
-
   // Blocked dequantize: one scale per `blockSize` rows per column, which is
   // the axis the reduction runs along and therefore the axis a group-quantized
   // model groups on.  No zero point -- the quantization is symmetric.
@@ -419,9 +423,9 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
 }
 
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
-                                    const std::string &aRaw,
-                                    const std::string &bRaw,
-                                    bool reduceInFloat)
+                                     const std::string &aRaw,
+                                     const std::string &bRaw,
+                                     bool reduceInFloat)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(dtype));
@@ -432,14 +436,20 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // product of two constants -- so this graph runs correctly only while
   // constant folding stays disabled, and ONNX Runtime 1.17 accepts the
   // request to disable it and ignores it.  gemm.cpp guards against that by
-  // checking the timings scale with the problem size.
+  // checking the timings scale with the problem size, per doubling.
   //
   // Scaling an operand instead would make the graph unfoldable outright, and
-  // that was tried.  It cannot be used: the CPU provider has no fp16 kernel
-  // for the multiply, so it inserts a Cast and carries out the whole matmul
-  // in fp32 -- the half-precision row came back equal to the single-precision
-  // one, measuring the wrong arithmetic entirely.  A guarded fold beats a
-  // silent upcast.
+  // that was tried twice.  A Mul against the tail scalar cannot be used: the
+  // CPU provider has no fp16 Mul kernel, so it inserts a Cast and carries
+  // out the whole matmul in fp32 -- the half-precision row came back equal
+  // to the single-precision one, 0.41 against 0.40.  An Add-0 avoids the
+  // wrong arithmetic but costs ~20% on the ANE (2.30 -> 1.74 fp32, 8.60 ->
+  // 6.97 fp16 peaks, measured back-to-back against these old graphs on the
+  // same hot machine): a dynamic operand compiles to a different, slower ANE
+  // program.  A guarded fold beats both a silent upcast and a quiet
+  // regression, so the plain rows keep this shape and the folding EPs report
+  // an error (QNN did fold it: flat ~170 us at 1024 and 2048, 98 TFLOPS fp32
+  // against a 45 TOPS spec).
   g.input("S", tailDtype, {});
   g.initializer("A", dtype, {M, K}, aRaw);
   g.initializer("B", dtype, {K, N}, bRaw);
@@ -469,7 +479,8 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
-                                       int actDtype, int wDtype)
+                                       int actDtype, int wDtype,
+                                       bool unfoldActs)
 {
   // Signed activations are symmetric (zero point 0); unsigned ones centre on
   // 128.  TensorRT accepts only the former, x86 MLAS only fuses the latter.
@@ -496,7 +507,6 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // `keepConstantsUnfolded`.
   g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
   g.input("S", ONNX_DT_FLOAT, {});
-  g.initializer("A_q",     actDtype, {M, K}, aRaw);
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
   g.initializer("B_q",     wDtype,   {K, N}, bRaw);
@@ -505,6 +515,24 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
   g.initializer("c_zp",    actDtype, {}, actZp);
 
+  // With `unfoldActs`, Add-0 on the quantized codes (ZA holds literal zero)
+  // makes the activations runtime-dependent while leaving every value
+  // bit-identical -- a+0 is a in every dtype here, with no overflow, NaN or
+  // denormal risk.  That keeps a vendor AOT backend from evaluating the
+  // matmul once at load time (QNN reported 90 TOPS int8 this way against a
+  // 45 TOPS spec).  The Add sits *before* the dequantize, so the DQ ->
+  // MatMul -> Q adjacency ORT matches on is untouched, and the scales stay
+  // build-time constants, which is what TensorRT needs to commit to integer
+  // arithmetic.  Callers pass false for the types QLinearMatMul cannot carry:
+  // Add has no float8/float4 type constraint, so those graphs keep the old
+  // shape and the timing guard stays their backstop (no EP observed to fold
+  // them).
+  g.initializer(unfoldActs ? "A_q0" : "A_q", actDtype, {M, K}, aRaw);
+  if (unfoldActs)
+  {
+    g.input("ZA", actDtype, {});
+    g.node("Add", {"A_q0", "ZA"}, {"A_q"});
+  }
   // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
   g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});

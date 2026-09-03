@@ -21,11 +21,17 @@ struct OnnxProbeResult
   const char *schemeName = "";
   bool castedActs = false;
   bool reduceInFloat = false;
+  // Graph shape the ladder must reproduce: true = Add-0 operand trick
+  // (unfoldable), false = old result-scaled-only shape.  Decided per
+  // (provider, dtype) by profiling the 32^3 session for an inserted Cast --
+  // a trick whose elementwise promotes (CPU fp16) measures the wrong
+  // arithmetic, so the probe falls back to the old shape there.
+  bool unfoldActs = false;
 };
 
 using OnnxProbeCache = std::unordered_map<std::string, OnnxProbeResult>;
 
-// Probe every gemm variant once at 64^3 (tiny) and cache result.
+// Probe every gemm variant once at 32^3 (tiny) and cache result.
 // The cache is keyed by variant label (e.g. "fp16", "int8_qdq").
 // Returned reference is cached per EP (providerKey) for the lifetime
 // of the process - subsequent calls for same EP return the same map

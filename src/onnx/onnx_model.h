@@ -162,8 +162,10 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 // A scalar input scales the reduced result, so the graph has a runtime
 // dependency, and the session must disable constant folding or ORT will
 // evaluate the entire matmul once at load time.  `gemm.cpp` cross-checks that
-// timings still scale with the cube of the size, which is what folding would
-// break.
+// timings still scale with the cube of the size, per doubling, which is what
+// folding would break.  (An operand-scaling Add-0 was tried to make the
+// graph unfoldable outright and reverted: it cost ~20% on the ANE against
+// these graphs measured back-to-back.)
 //
 // `reduceInFloat` casts the product to fp32 before reducing it, and makes the
 // runtime scalar and the output fp32 with it.  A provider can have a matmul
@@ -216,14 +218,20 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               const std::string &wScalesRaw);
 
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
-                                    const std::string &aRaw,
-                                    const std::string &bRaw,
-                                    bool reduceInFloat = false);
+                                     const std::string &aRaw,
+                                     const std::string &bRaw,
+                                     bool reduceInFloat = false);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the
 // matmul stops ORT recognising it as a quantized matmul at all, which would
-// silently measure float arithmetic.
+// silently measure float arithmetic.  With `unfoldActs` the runtime
+// dependency instead sits before the dequantize as an Add-0 on the quantized
+// codes (`ZA` holds literal zero), which leaves every value bit-identical
+// while keeping a vendor backend from folding the multiply at load time.
+// Takes a second runtime input then, so callers bind `S` and `ZA` (see
+// `finishSetup`).  Pass false for the types QLinearMatMul cannot carry: Add
+// has no float8/float4 type constraint, so those graphs keep the old shape.
 // Activations are uint8 and weights int8 -- the combination ONNX Runtime's
 // own quantizer emits for deployment, and the one x86 implements without
 // VNNI.  Signed activations fuse on ARM but not there, which showed up as an
@@ -237,8 +245,8 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
-                                       int actDtype,
-                                       int wDtype = ONNX_DT_INT8);
+                                       int actDtype, int wDtype,
+                                       bool unfoldActs);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per

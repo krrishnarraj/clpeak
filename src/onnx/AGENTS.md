@@ -966,9 +966,12 @@ Three details are load-bearing:
 - **Constant folding must be off** (`keepConstantsUnfolded` on
   `onnxCreateSession`). Two constant operands are otherwise multiplied once at
   load time and every timed run measures an empty graph. `gemm.cpp` guards
-  this: real work grows with the cube of the size, 64x across the ladder, so
+  this per doubling (a >4x rate jump in one doubling is folding; legitimate
+  gains are gradual) with the whole-ladder 64x check as the backstop, so
   timings that stay flat are reported as an error rather than as a
-  spectacular number.
+  spectacular number. The flag only stops ORT's own folder -- a vendor AOT
+  backend folds in its own compiler instead, which is what the per-doubling
+  guard catches.
 - **Reduce with `ReduceMax`, never `ReduceSum`.** Summing the rows of `A*B`
   equals multiplying the summed rows of `A` — a rewrite an optimiser is free
   to make, and it would quietly turn the matrix multiply into a matrix-vector
@@ -983,13 +986,21 @@ Three details are load-bearing:
   scaling guard in `gemm.cpp` catches exactly this and reports an error.
 
   Scaling an *operand* instead would make the graph unfoldable outright, and
-  it was tried. It cannot be used: **the CPU provider has no fp16 kernel for
-  the multiply**, so it inserts a `Cast` and runs the whole matmul in fp32 —
-  the half-precision row came back equal to the single-precision one, 0.41
-  against 0.40, measuring the wrong arithmetic entirely. A guarded fold beats
-  a silent upcast. Adding any elementwise op to a half-precision graph risks
-  this; check the executed kernels for a `Cast` before believing an
-  improvement.
+  it was tried twice. A `Mul` cannot be used: **the CPU provider has no fp16
+  kernel for the multiply**, so it inserts a `Cast` and runs the whole matmul
+  in fp32 — the half-precision row came back equal to the single-precision
+  one, 0.41 against 0.40, measuring the wrong arithmetic entirely. An `Add-0`
+  avoids the wrong arithmetic but costs ~20% on the ANE (2.30 -> 1.74 fp32,
+  8.60 -> 6.97 fp16 peaks, back-to-back against these graphs on the same hot
+  machine): a dynamic operand compiles to a different, slower ANE program.
+  A guarded fold beats both a silent upcast and a quiet regression, so the
+  plain rows keep this shape and folding providers report an error instead
+  (QNN folded it: flat ~170 us at 1024 and 2048, 98 TFLOPS fp32 against a 45
+  TOPS spec). The int8 QDQ row is the exception: its Add-0 profiles clean on
+  the CPU and its headline NPU needs it, so the probe uses it there — and
+  falls back to this shape wherever the profile shows an inserted `Cast`.
+  Adding any elementwise op to a half-precision graph risks this; check the
+  executed kernels for a `Cast` before believing an improvement.
 - **Every quantization scale is a build-time constant.** Supplying the
   activation scale as a runtime input is tidier — it keeps the dequantize out
   of constant folding's reach with no optimizer disabled — and ONNX Runtime

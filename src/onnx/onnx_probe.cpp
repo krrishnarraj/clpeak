@@ -132,13 +132,16 @@ constexpr int64_t kProbeDim = 32;
     return (float)(4.0 * std::sqrt((double)K) / 3.0 / top);
   }
 
-  // Minimal setup for probe - mirrors gemm.cpp::makeSetup but at kProbeDim
+  // Minimal setup for probe - mirrors gemm.cpp::makeSetup but at kProbeDim.
+  // Any change to gemm.cpp's GemmSetup/finishSetup/makeSetup/timeRuns must be
+  // mirrored here (same graph, same inputs).
   struct GemmSetup
   {
     OrtSession *session = nullptr;
     OrtValue *inVal = nullptr;
+    OrtValue *zaVal = nullptr;
     OrtValue *outVal = nullptr;
-    std::vector<uint8_t> inBuf, outBuf;
+    std::vector<uint8_t> inBuf, zaBuf, outBuf;
     std::string error;
   };
 
@@ -146,18 +149,21 @@ constexpr int64_t kProbeDim = 32;
   {
     if (g.inVal)
       rt.api->ReleaseValue(g.inVal);
+    if (g.zaVal)
+      rt.api->ReleaseValue(g.zaVal);
     if (g.outVal)
       rt.api->ReleaseValue(g.outVal);
     if (g.session)
       rt.api->ReleaseSession(g.session);
     g.inVal = nullptr;
+    g.zaVal = nullptr;
     g.outVal = nullptr;
     g.session = nullptr;
   }
 
   void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep, GemmSetup &g,
                    const std::string &modelBytes, int ioDtype, int64_t D, bool profile,
-                   bool keepQdqUnfused)
+                   bool keepQdqUnfused, int zaDtype = 0)
   {
     auto ses = onnxCreateSession(rt, ep, modelBytes, true, profile, keepQdqUnfused);
     if (!ses.session)
@@ -181,10 +187,18 @@ constexpr int64_t kProbeDim = 32;
       destroySetup(rt, g);
       return;
     }
+    if (!st && zaDtype)
+    {
+      g.zaBuf.assign((size_t)onnxElemBytes(zaDtype, 1), 0);
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, g.zaBuf.data(), g.zaBuf.size(), nullptr, 0,
+          (ONNXTensorElementDataType)zaDtype, &g.zaVal);
+    }
     const int64_t outShape[1] = {D};
-    st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
-        (ONNXTensorElementDataType)ioDtype, &g.inVal);
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
+          (ONNXTensorElementDataType)ioDtype, &g.inVal);
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
           mi, g.outBuf.data(), g.outBuf.size(), outShape, 1,
@@ -199,7 +213,7 @@ constexpr int64_t kProbeDim = 32;
 
   GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant &v,
                       int64_t D, bool profile, int actDtype, bool reduceInFloat,
-                      int wgtDtype)
+                      int wgtDtype, bool unfoldActs)
   {
     GemmSetup g;
     std::string modelBytes;
@@ -231,7 +245,8 @@ constexpr int64_t kProbeDim = 32;
     {
       modelBytes = onnxResidentQdqMatMulModel(D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
                                               onnxQuantScaleFor(wDtype),
-                                              qdqOutputScale(D, actDtype), actDtype, wDtype);
+                                              qdqOutputScale(D, actDtype), actDtype, wDtype,
+                                              unfoldActs);
     }
     else
     {
@@ -239,19 +254,23 @@ constexpr int64_t kProbeDim = 32;
     }
     const bool unfusable = !onnxQdqFusionIsLegal(actDtype) || !onnxQdqFusionIsLegal(wDtype);
     const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
-    finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile, v.qdq && unfusable);
+    // Second input exists exactly when the model builds Add-0.
+    const int zaDtype = unfoldActs ? (v.qdq ? actDtype : v.dtype) : 0;
+    finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile, v.qdq && unfusable,
+                zaDtype);
     return g;
   }
 
   double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
   {
-    static const char *inNames[] = {"S"};
+    static const char *inNames[] = {"S", "ZA"};
     static const char *outNames[] = {"Y"};
     auto t0 = std::chrono::steady_clock::now();
     for (unsigned int i = 0; i < n; i++)
     {
-      OrtStatus *st = rt.api->Run(g.session, nullptr, inNames,
-                                  (const OrtValue *const *)&g.inVal, 1, outNames, 1, &g.outVal);
+      const OrtValue *ins[] = {g.inVal, g.zaVal};
+      OrtStatus *st = rt.api->Run(g.session, nullptr, inNames, ins,
+                                  g.zaVal ? 2 : 1, outNames, 1, &g.outVal);
       if (st)
       {
         g.error = onnxStatusText(rt, st);
@@ -267,7 +286,7 @@ constexpr int64_t kProbeDim = 32;
 OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
   OnnxProbeCache out;
-  // Probe is per-EP and per-variant at 64^3, so do it fresh each call.
+  // Probe is per-EP and per-variant at 32^3, so do it fresh each call.
   // The cached wrapper below memoizes this for the global once-per-EP probe.
 
   auto probeOne = [&](const Variant &v)
@@ -284,24 +303,57 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       return;
     }
 
-    // Quantized / weight-only / nvfp4: check fusion directly at 64^3,
-    // no plain tiny probe (plain would use UINT8 and fail for fp8).
-    if (v.qdq || v.blockSize > 0 || v.nvfp4)
-    {
-      // Fall through to fusion check below
-    }
-    else
-    {
-      // Plain matmul: tiny create at 64^3 with native dtype
+    auto hasCast = [](const std::vector<std::string> &ops) {
+      for (const auto &o : ops)
+        if (o == "Cast")
+          return true;
+      return false;
+    };
+
+    // One profiled 32^3 build: session + one run + executed ops.  `built` is
+    // false when no session came back (`err` set); ops may still be empty on
+    // a built session whose profile could not be read.
+    auto probeBuild = [&](int actDtype, bool rif, bool unfold, int wgtDtype,
+                          double &createUs, std::string &err, bool &built) {
+      std::vector<std::string> ops;
+      built = false;
       auto t0 = std::chrono::steady_clock::now();
-      GemmSetup tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, false, r.wgtDtype);
+      GemmSetup s = makeSetup(rt, ep, v, kProbeDim, /*profile=*/true, actDtype,
+                              rif, wgtDtype, unfold);
+      auto t1 = std::chrono::steady_clock::now();
+      createUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
+      if (!s.session)
+      {
+        err = s.error;
+        return ops;
+      }
+      built = true;
+      timeRuns(rt, s, 1);
+      ops = onnxCollectExecutedOps(rt, s.session);
+      destroySetup(rt, s);
+      return ops;
+    };
+
+    // Plain matmul: old result-scaled shape, native then with the product
+    // cast (the ladder's own retry order).  An operand Add-0 trick was tried
+    // here to defeat load-time folding and reverted: the elementwise either
+    // promotes (CPU fp16 profiles an inserted Cast and reads 0.41 against
+    // fp32's 0.40) or compiles to a slower program (ANE peaks -20% against
+    // these graphs back-to-back).  Folding EPs report an error via the
+    // per-doubling timing guard instead.
+    if (!v.qdq && v.blockSize == 0 && !v.nvfp4)
+    {
+      auto t0 = std::chrono::steady_clock::now();
+      GemmSetup tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype,
+                                 false, r.wgtDtype, false);
       bool triedFloatReduce = false;
       bool reduceInFloat = false;
       if (!tiny.session && !v.qdq && !triedFloatReduce)
       {
         std::string tinyErr = tiny.error;
         destroySetup(rt, tiny);
-        tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, true, r.wgtDtype);
+        tiny = makeSetup(rt, ep, v, kProbeDim, false, r.actDtype, true,
+                         r.wgtDtype, false);
         if (tiny.session)
           reduceInFloat = true;
         else
@@ -310,9 +362,11 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       auto t1 = std::chrono::steady_clock::now();
       r.createUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
       r.reduceInFloat = reduceInFloat;
+      r.unfoldActs = false;
 
       CLPEAK_VLOG("onnx-probe[%s/%s]: %lld^3 tiny create %.1f s\n",
-                  ep.providerKey.c_str(), v.label, (long long)kProbeDim, r.createUs / 1.0e6);
+                  ep.providerKey.c_str(), v.label, (long long)kProbeDim,
+                  r.createUs / 1.0e6);
 
       if (!tiny.session)
       {
@@ -327,8 +381,8 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
                     ep.providerKey.c_str(), v.label, r.createUs / 1.0e6,
                     kOnnxTinyMaxCreateUs / 1.0e6);
         r.ok = false;
-        r.reason = "session creation at " + std::to_string(kProbeDim) + "^3 took " +
-                   std::to_string((long long)(r.createUs / 1.0e6)) +
+        r.reason = "session creation at " + std::to_string(kProbeDim) +
+                   "^3 took " + std::to_string((long long)(r.createUs / 1.0e6)) +
                    " s, exceeds tiny budget";
         destroySetup(rt, tiny);
         out[v.label] = r;
@@ -340,53 +394,75 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       return;
     }
 
-    // For quantized / weight-only, check fusion at 64 with profile
-    if (v.qdq || v.blockSize > 0 || v.nvfp4)
+    // Quantized / weight-only / nvfp4: check fusion at 32^3 with profile.
+    // The Add-0 trick is attempted only for the types QLinearMatMul can
+    // carry (Add has no float8/float4 constraint); weight-only and nvfp4
+    // keep the old shape.  Per scheme the trick shape goes first and the old
+    // shape follows when the trick fails to build, promotes via a Cast, or
+    // stays unfused (a strict matcher may balk at the extra Add).
     {
       std::string tried;
       std::string firstErr;
       QuantScheme schemes[2];
       size_t nSchemes = schemesFor(v, schemes);
+      const bool trickOk = v.qdq && onnxQdqFusionIsLegal(v.dtype);
       for (size_t si = 0; si < nSchemes; si++)
       {
         const QuantScheme &qs = schemes[si];
         if (clpeak::cancelRequested())
           break;
-        auto pq0 = std::chrono::steady_clock::now();
-        GemmSetup probe = makeSetup(rt, ep, v, kProbeDim, true, qs.actDtype, false, qs.wDtype);
-        auto pq1 = std::chrono::steady_clock::now();
-        double pqUs = std::chrono::duration<double, std::micro>(pq1 - pq0).count();
-        CLPEAK_VLOG("onnx-probe[%s/%s]: %s tiny probe %lld^3 create %.1f s\n",
-                    ep.providerKey.c_str(), v.label, qs.name, (long long)kProbeDim, pqUs / 1.0e6);
-        if (!probe.session)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-          if (firstErr.empty())
-            firstErr = probe.error;
-          continue;
-        }
-        timeRuns(rt, probe, 1);
-        auto ops = onnxCollectExecutedOps(rt, probe.session);
-        destroySetup(rt, probe);
-        std::string joined;
-        for (auto &o : ops)
-          joined += (joined.empty() ? "" : ", ") + o;
-        if (onnxOpsRanQuantizedMatMul(ops))
-        {
-          r.ok = true;
-          r.actDtype = qs.actDtype;
-          r.wgtDtype = qs.wDtype;
-          r.schemeName = qs.name;
+          const bool unfold = trickOk && (attempt == 0);
+          if (!trickOk && attempt > 0)
+            break;
+          double cu = 0.0;
+          std::string berr;
+          bool built = false;
+          std::vector<std::string> ops =
+              probeBuild(qs.actDtype, false, unfold, qs.wDtype, cu, berr, built);
+          CLPEAK_VLOG("onnx-probe[%s/%s]: %s%s tiny probe %lld^3 create %.1f s\n",
+                      ep.providerKey.c_str(), v.label, qs.name,
+                      unfold ? " unfold" : "", (long long)kProbeDim, cu / 1.0e6);
+          if (!built)
+          {
+            if (firstErr.empty())
+              firstErr = berr;
+            continue;
+          }
+          std::string joined;
           for (auto &o : ops)
-            if (o == "Cast")
-              r.castedActs = true;
-          r.ranAs = onnxQuantizedKernelName(ops);
-          if (r.ranAs.empty())
-            r.ranAs = "a kernel it compiled itself";
-          out[v.label] = r;
-          return;
+            joined += (joined.empty() ? "" : ", ") + o;
+          CLPEAK_VLOG("onnx-probe[%s/%s]: %s%s executed %s\n",
+                      ep.providerKey.c_str(), v.label, qs.name,
+                      unfold ? " unfold" : "", joined.c_str());
+          if (unfold && hasCast(ops))
+          {
+            CLPEAK_VLOG("onnx-probe[%s/%s]: trick session runs via an inserted "
+                        "Cast, retrying the old shape\n",
+                        ep.providerKey.c_str(), v.label);
+            continue;
+          }
+          if (onnxOpsRanQuantizedMatMul(ops))
+          {
+            r.ok = true;
+            r.actDtype = qs.actDtype;
+            r.wgtDtype = qs.wDtype;
+            r.schemeName = qs.name;
+            for (auto &o : ops)
+              if (o == "Cast")
+                r.castedActs = true;
+            r.ranAs = onnxQuantizedKernelName(ops);
+            if (r.ranAs.empty())
+              r.ranAs = "a kernel it compiled itself";
+            r.createUs = cu;
+            r.unfoldActs = unfold;
+            out[v.label] = r;
+            return;
+          }
+          if (!ops.empty())
+            tried = joined;
         }
-        if (!ops.empty())
-          tried = joined;
       }
       r.ok = false;
       r.reason = tried.empty() ? (firstErr.empty() ? "no fused quantized matmul" : firstErr)
@@ -394,10 +470,6 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       out[v.label] = r;
       return;
     }
-
-    // Plain matmul - tiny already succeeded
-    r.ok = true;
-    out[v.label] = r;
   };
 
   for (auto &v : kFpVariants)

@@ -131,8 +131,9 @@ namespace
   {
     OrtSession *session = nullptr;
     OrtValue *inVal = nullptr;  // the scalar that keeps the graph live
+    OrtValue *zaVal = nullptr;  // QDQ only: literal zero the activations add
     OrtValue *outVal = nullptr; // reduced row
-    std::vector<uint8_t> inBuf, outBuf;
+    std::vector<uint8_t> inBuf, zaBuf, outBuf;
     std::string error;
 
     // Not copyable, and the compiler has to enforce it: inVal and outVal are
@@ -243,11 +244,14 @@ namespace
   {
     if (g.inVal)
       rt.api->ReleaseValue(g.inVal);
+    if (g.zaVal)
+      rt.api->ReleaseValue(g.zaVal);
     if (g.outVal)
       rt.api->ReleaseValue(g.outVal);
     if (g.session)
       rt.api->ReleaseSession(g.session);
     g.inVal = nullptr;
+    g.zaVal = nullptr;
     g.outVal = nullptr;
     g.session = nullptr;
     g.inBuf.clear();
@@ -261,11 +265,12 @@ namespace
   // Build model + session + bound input/output tensors for one (variant, D).
   // Create the session and bind the scalar input and reduced output.  Shared by
   // every model shape here: they differ in what they compute and agree entirely
-  // on how they are driven.
+  // on how they are driven.  `zaDtype` is nonzero only for the QDQ form, whose
+  // activations add a stored-zero second input.
   void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                    GemmSetup &g, const std::string &modelBytes,
                    int ioDtype, int64_t D, bool profile,
-                   bool keepQdqUnfused)
+                   bool keepQdqUnfused, int zaDtype = 0)
   {
     // Every model here holds its operands as constants and needs folding held
     // off, or the whole multiply is evaluated once at load time.
@@ -299,10 +304,21 @@ namespace
       return;
     }
 
+    if (!st && zaDtype)
+    {
+      // Literal zero bytes: adding them is bit-identical in every dtype here
+      // (0 for int, +0.0 for float), so the values -- and the fusion pattern
+      // -- are unchanged, and only the load-time folding becomes impossible.
+      g.zaBuf.assign((size_t)onnxElemBytes(zaDtype, 1), 0);
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, g.zaBuf.data(), g.zaBuf.size(), nullptr, 0,
+          (ONNXTensorElementDataType)zaDtype, &g.zaVal);
+    }
     const int64_t outShape[1] = {D};
-    st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
-        (ONNXTensorElementDataType)ioDtype, &g.inVal);
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
+          (ONNXTensorElementDataType)ioDtype, &g.inVal);
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
           mi, g.outBuf.data(), g.outBuf.size(), outShape, 1,
@@ -319,7 +335,8 @@ namespace
                       const Variant &v, int64_t D, bool profile = false,
                       int actDtype = ONNX_DT_UINT8,
                       bool reduceInFloat = false,
-                      int wgtDtype = ONNX_DT_INT8)
+                      int wgtDtype = ONNX_DT_INT8,
+                      bool unfoldActs = false)
   {
     GemmSetup g;
 
@@ -379,7 +396,7 @@ namespace
       modelBytes = onnxResidentQdqMatMulModel(
           D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
           onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
-          actDtype, wDtype);
+          actDtype, wDtype, unfoldActs);
     }
     else
     {
@@ -397,22 +414,25 @@ namespace
     // The QDQ graph reduces in float, and so does a plain one whose reduction
     // had to be cast; otherwise the tail keeps the matmul's dtype.
     const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
+    // Second input exists exactly when the QDQ model builds Add-0.
+    const int zaDtype = (unfoldActs && v.qdq) ? actDtype : 0;
     finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile,
-                /*keepQdqUnfused=*/v.qdq && unfusable);
+                /*keepQdqUnfused=*/v.qdq && unfusable, zaDtype);
     return g;
   }
 
   // Mean microseconds per Run() over n runs; negative on failure.
   double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
   {
-    static const char *inNames[] = {"S"};
+    static const char *inNames[] = {"S", "ZA"};
     static const char *outNames[] = {"Y"};
 
     auto t0 = std::chrono::steady_clock::now();
     for (unsigned int i = 0; i < n; i++)
     {
+      const OrtValue *ins[] = {g.inVal, g.zaVal};
       OrtStatus *st = rt.api->Run(g.session, nullptr,
-                                  inNames, (const OrtValue *const *)&g.inVal, 1,
+                                  inNames, ins, g.zaVal ? 2 : 1,
                                   outNames, 1, &g.outVal);
       if (st)
       {
@@ -546,11 +566,13 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // nothing pays nothing -- and never for the quantized form, whose reduction
     // already runs on a dequantized fp32 result.
     bool reduceInFloat = false, triedFloatReduce = false;
+    // Graph shape from the probe: Add-0 operand trick or old result-scaled.
+    bool unfoldActs = false;
 
-    // Global probe once per EP (tiny 64^3) - consult cache instead of
+    // Global probe once per EP (tiny 32^3) - consult cache instead of
     // per-variant probing.  The cache was populated in onnx_peak.cpp
-    // before any runGemm call, at 64^3 per variant (~0.5s vs 33-71s at
-    // 1024).  This deduplicates fp16 across gemm/conv/block etc.
+    // before any runGemm call, at 32^3 per variant.  This deduplicates fp16
+    // across gemm/conv/block etc.
     {
       const auto &cache = onnxProbeGemmCache(rt, ep);
       auto it = cache.find(v.label);
@@ -579,6 +601,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       ranAs = pr.ranAs;
       castedActs = pr.castedActs;
       reduceInFloat = pr.reduceInFloat;
+      unfoldActs = pr.unfoldActs;
       // For quantized/weight-only, the cache already verified fusion;
       // no need to re-probe schemes.  Plain variants keep reduceInFloat.
     }
@@ -642,11 +665,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
       }
-      // Predicted compilation gate: save the next rung before paying its
-      // Graph Optimizations.  Scales ~4x memory per 2x dim, so prev 33s
-      // predicts 132s for next.  Gate only beyond 2048 - 1024 and 2048 are
-      // where most NPUs peak, so keep them and stop the exponential beyond.
-      if (D >= 4096 && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kOnnxMaxCreateUs)
+      // Predicted compilation gate: skip the next rung before paying its
+      // Graph Optimizations when the previous rung already predicts worse
+      // than the budget (compilation scales ~4x memory per 2x dim, so prev
+      // 33s predicts 132s).  The first rung is always attempted -- its time
+      // seeds this prediction.  Verified against the TensorRT ladder to stop
+      // exactly where the old narrower gates did (fp32 8192 predicted
+      // 35.4s, nvfp4 32768 predicted 74.4s) while also saving QNN's 2048
+      // (45s predicts 180s).
+      if (D > kMinDim && prevCreateUs > 0.0 &&
+          prevCreateUs * 4.0 > kOnnxMaxCreateUs)
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s (prev %.1f s *4) > %.1f s, stopping\n",
                     ep.providerKey.c_str(), v.label,
@@ -654,22 +682,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     prevCreateUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
         break;
       }
-      // Also stop if previous rung already exceeded absolute budget - its
-      // predicted next is at least as slow.  This catches the 2048->4096
-      // cliff without paying 4096's 2000s.  Allow 1024->2048 (where most NPUs
-      // peak), gate beyond.
-      if (D > 2048 && prevCreateUs > kOnnxMaxCreateUs * 4.0)
-      {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: prev create %.1f s > %.1f s, skipping %lld^3\n",
-                    ep.providerKey.c_str(), v.label,
-                    prevCreateUs / 1.0e6, kOnnxMaxCreateUs * 4.0 / 1.0e6,
-                    (long long)D);
-        break;
-      }
 
       auto createStart = std::chrono::steady_clock::now();
       GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
-                              reduceInFloat, wgtDtype);
+                              reduceInFloat, wgtDtype, unfoldActs);
       if (!g.session && !v.qdq && !triedFloatReduce)
       {
         triedFloatReduce = true;
@@ -682,7 +698,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     ep.providerKey.c_str(), v.label, nativeErr.c_str());
         destroySetup(rt, g);
         g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
-                      /*reduceInFloat=*/true, wgtDtype);
+                      /*reduceInFloat=*/true, wgtDtype, unfoldActs);
         if (g.session)
           reduceInFloat = true;
         else
@@ -901,6 +917,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                          "so the product is cast to fp32 before being reduced; "
                          "the multiply itself is unaffected, but the cast is a "
                          "full pass over the result and costs a few percent.";
+      if (unfoldActs)
+        o.description += "  The activations add a runtime zero on the way in, "
+                         "so the multiply cannot be folded away at load time.";
       if (isInt)
         o.unit = "ops";
       test.emit(v.label, (float)best, o);
