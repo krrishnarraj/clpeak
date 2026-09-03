@@ -56,10 +56,10 @@ constexpr unsigned int kOnnxMaxIters = 500;
 constexpr double kOnnxMaxCreateUs = 30.0e6;
 constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
 constexpr double kOnnxCreateGrowthFactor = 6.0;
-// Tiny probe budget: 64^3 model should compile in <5s even on AOT.
+// Tiny probe budget: 64^3 model should compile in <10s even on AOT.
 // If it exceeds this, the dtype is emulated/slow and the full 1024
 // ladder will be minutes - skip the variant early.
-constexpr double kOnnxTinyMaxCreateUs = 5.0e6;
+constexpr double kOnnxTinyMaxCreateUs = 10.0e6;
 
 // One benchmarkable "device" of this backend: an ONNX Runtime execution
 // provider (EP).  NPUs are reachable only through such vendor runtimes --
@@ -69,22 +69,22 @@ constexpr double kOnnxTinyMaxCreateUs = 5.0e6;
 // comparable on one machine.
 struct onnx_ep_info_t
 {
-  std::string providerKey;   // ORT registration name, e.g. "CoreMLExecutionProvider"
-  std::string displayName;   // e.g. "CoreML (Apple Neural Engine)"
-  std::string typeStr;       // "NPU" / "GPU" / "CPU"
-  DeviceType  deviceType = DeviceType::Unknown;
+  std::string providerKey; // ORT registration name, e.g. "CoreMLExecutionProvider"
+  std::string displayName; // e.g. "CoreML (Apple Neural Engine)"
+  std::string typeStr;     // "NPU" / "GPU" / "CPU"
+  DeviceType deviceType = DeviceType::Unknown;
 };
 
 class OnnxPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices;  // empty = run all enumerated EPs
+  std::vector<int> deviceIndices; // empty = run all enumerated EPs
 
   OnnxPeak();
   ~OnnxPeak() override;
 
   void applyOptions(const CliOptions &opts) override;
-  int  runAll() override;
+  int runAll() override;
 
   static BackendInventory enumerate();
   static void printInventory(const BackendInventory &inv, std::ostream &os);
@@ -133,11 +133,11 @@ std::string onnxLoadDiagnostic();
 // picking one.
 struct OnnxRuntimeStatus
 {
-  bool        available = false;
-  bool        linkedIn  = false;  // built in rather than loaded (iOS)
-  std::string version;            // "1.29.0"
-  std::string path;               // what was loaded; empty = found by name
-  std::string error;              // populated only when !available
+  bool available = false;
+  bool linkedIn = false; // built in rather than loaded (iOS)
+  std::string version;   // "1.29.0"
+  std::string path;      // what was loaded; empty = found by name
+  std::string error;     // populated only when !available
 };
 OnnxRuntimeStatus onnxRuntimeStatus();
 
