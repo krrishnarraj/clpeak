@@ -14,6 +14,9 @@
 #ifndef CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR
 #define CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR (1 << 1)
 #endif
+#ifndef CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR
+#define CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR (1 << 0)
+#endif
 
 device_info_t getDeviceInfo(cl::Device &d)
 {
@@ -69,8 +72,12 @@ device_info_t getDeviceInfo(cl::Device &d)
         cl_bitfield dpCaps = 0;
         if (clGetDeviceInfo(d(), CL_DEVICE_INTEGER_DOT_PRODUCT_CAPABILITIES_KHR,
                             sizeof(dpCaps), &dpCaps, nullptr) == CL_SUCCESS)
+        {
             devInfo.int8DotProductSupported =
                 (dpCaps & CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR) != 0;
+            devInfo.int8DotProductPackedSupported =
+                (dpCaps & CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR) != 0;
+        }
     }
 
     devInfo.clDeviceType = d.getInfo<CL_DEVICE_TYPE>();

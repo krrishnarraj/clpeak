@@ -27,6 +27,7 @@ struct device_info_t
     bool halfSupported;
     bool doubleSupported;
     bool int8DotProductSupported;
+    bool int8DotProductPackedSupported;
     cl_device_type clDeviceType; // original OpenCL device type
     DeviceType deviceType;       // neutral equivalent
 

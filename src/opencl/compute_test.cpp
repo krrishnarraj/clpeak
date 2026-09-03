@@ -54,11 +54,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                  ResultStatus::Unsupported, "No double precision support");
     return 0;
   }
-  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
+  if (which == Benchmark::ComputeInt8DP &&
+      !devInfo.int8DotProductSupported && !devInfo.int8DotProductPackedSupported)
   {
     test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
                  ResultStatus::Unsupported,
-                 "cl_khr_integer_dot_product not supported");
+                 "integer dot product (4x8) not supported");
     return 0;
   }
 

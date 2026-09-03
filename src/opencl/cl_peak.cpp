@@ -109,7 +109,8 @@ int clPeak::runAll()
         }
 
         // Helper: build an auxiliary program, silently skip on failure.
-        auto buildAuxProg = [&](const std::string &src, const std::string &label) -> cl::Program
+        auto buildAuxProg = [&](const std::string &src, const std::string &label,
+                                const std::string &options = BUILD_OPTIONS) -> cl::Program
         {
           cl::Program p;
           try
@@ -117,7 +118,7 @@ int clPeak::runAll()
             cl::Program::Sources s(1, src);
             p = cl::Program(ctx, s);
             std::vector<cl::Device> dev = {devices[d]};
-            p.build(dev, BUILD_OPTIONS);
+            p.build(dev, options.c_str());
           }
           catch (cl::Error &)
           {
@@ -139,8 +140,12 @@ int clPeak::runAll()
           imgProg = buildAuxProg(clGetImageKernels(), "Image bandwidth");
 
         cl::Program int8DpProg;
-        if (devInfo.int8DotProductSupported)
-          int8DpProg = buildAuxProg(clGetInt8DpKernels(), "INT8 dot-product compute");
+        if (devInfo.int8DotProductSupported || devInfo.int8DotProductPackedSupported)
+        {
+          std::string int8BuildOptions = std::string(BUILD_OPTIONS) +
+              (devInfo.int8DotProductPackedSupported ? " -DUSE_PACKED_DOT " : "");
+          int8DpProg = buildAuxProg(clGetInt8DpKernels(), "INT8 dot-product compute", int8BuildOptions);
+        }
 
         cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
         bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
