@@ -91,9 +91,36 @@ class RunHistoryStore {
   }
 
   /// History rows, newest first, adopting any orphan documents.
+  ///
+  /// Only v3 documents are listed: the index may still hold pre-v3 rows
+  /// (v2 tracked `<id>.xml`), which this build can no longer open, so such
+  /// rows are hidden — and pruned from the index — rather than listed only
+  /// to fail on tap. The same goes for rows whose file went missing or no
+  /// longer parses as the current version.
   Future<List<RunSummary>> list() async {
     final dir = await runsDirectory();
-    final runs = await _readIndex(dir);
+    var runs = await _readIndex(dir);
+
+    if (runs.isNotEmpty) {
+      final kept = <RunSummary>[];
+      var pruned = false;
+      for (final r in runs) {
+        if (!r.fileName.endsWith(fileSuffix)) {
+          pruned = true;
+          continue;
+        }
+        final f = File(p.join(dir.path, p.basename(r.fileName)));
+        if (!await f.exists() || !await _isCurrentVersion(f)) {
+          pruned = true;
+          continue;
+        }
+        kept.add(r);
+      }
+      if (pruned) {
+        await _writeIndex(dir, kept);
+      }
+      runs = kept;
+    }
     final known = {for (final r in runs) r.fileName};
 
     var adopted = false;
@@ -165,12 +192,26 @@ class RunHistoryStore {
   Future<RunDocument?> _readDocument(File f) async {
     try {
       final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      if ((doc['format_version'] as num?)?.toInt() != formatVersion) return null;
+      if (!_matchesCurrentVersion(doc)) return null;
       return RunDocument.fromJson(doc);
     } catch (_) {
       return null;
     }
   }
+
+  /// Lightweight version probe for history rows: answers whether a file is a
+  /// document this build renders, without building the full model.
+  Future<bool> _isCurrentVersion(File f) async {
+    try {
+      final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      return _matchesCurrentVersion(doc);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _matchesCurrentVersion(Map<String, dynamic> doc) =>
+      (doc['format_version'] as num?)?.toInt() == formatVersion;
 
   Future<File> documentFile(RunSummary summary) async {
     final dir = await runsDirectory();
