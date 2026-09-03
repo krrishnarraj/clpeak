@@ -451,7 +451,10 @@ void LoggerText::printBaselineDelta(const std::string &key, double value,
     // The baseline prints through the row's own scaling: "was 4476" beside a
     // row that says 4.48 TFLOPS reads as a collapse that did not happen.
     const ScaledValue sv = formatScaledValue(base, unit);
-    out << "  (was " << sv.text << ", " << sign << std::fixed
+    out << "  (was " << sv.text;
+    if (!sv.unit.empty())
+        out << " " << sv.unit;
+    out << ", " << sign << std::fixed
         << std::setprecision(1) << absDelta << "%";
     // Below this the figure prints as 0.0%, and calling run-to-run noise
     // "better" or "worse" would be inventing a result.
