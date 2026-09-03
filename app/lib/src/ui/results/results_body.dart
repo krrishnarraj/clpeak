@@ -36,19 +36,64 @@ class _ResultsBodyState extends State<ResultsBody> {
   // override the forced value until the next global action bumps the generation.
   bool? _forcedExpanded;
   int _forcedGen = 0;
+  int _nextGen = 0;
+
+  // Per-category bulk controls — small "[+]" / "[-]" after the "X TESTS"
+  // label in each category header.  Each category has its own forced state
+  // and generation so a category action only touches its own tests, but the
+  // generation shares the global counter so the most-recent action (global
+  // vs category) wins and a per-test tap still overrides until the next
+  // forced bump.
+  final Map<BenchCategory, bool> _catForced = {};
+  final Map<BenchCategory, int> _catGen = {};
 
   void _expandAll() {
     setState(() {
+      _nextGen++;
       _forcedExpanded = true;
-      _forcedGen++;
+      _forcedGen = _nextGen;
     });
   }
 
   void _collapseAll() {
     setState(() {
+      _nextGen++;
       _forcedExpanded = false;
-      _forcedGen++;
+      _forcedGen = _nextGen;
     });
+  }
+
+  void _expandCategory(BenchCategory c) {
+    setState(() {
+      _nextGen++;
+      _catForced[c] = true;
+      _catGen[c] = _nextGen;
+    });
+  }
+
+  void _collapseCategory(BenchCategory c) {
+    setState(() {
+      _nextGen++;
+      _catForced[c] = false;
+      _catGen[c] = _nextGen;
+    });
+  }
+
+  void _toggleCategory(CategoryGroup group) {
+    final eff = _effectiveFor(group);
+    if (eff.$1 == true) {
+      _collapseCategory(group.category);
+    } else {
+      _expandCategory(group.category);
+    }
+  }
+
+  (bool? forced, int gen) _effectiveFor(CategoryGroup group) {
+    final catG = _catGen[group.category] ?? 0;
+    if (_catForced.containsKey(group.category) && catG > _forcedGen) {
+      return (_catForced[group.category], catG);
+    }
+    return (_forcedExpanded, _forcedGen);
   }
 
   @override
@@ -108,15 +153,20 @@ class _ResultsBodyState extends State<ResultsBody> {
         ),
       for (final group in selected.categories)
         if (group.supported.isNotEmpty) ...[
-          _SectionRow(group, brightness),
+          _SectionRow(
+            group,
+            brightness,
+            expanded: _effectiveFor(group).$1 == true,
+            onToggle: () => _toggleCategory(group),
+          ),
           for (var i = 0; i < group.supported.length; i++)
             _TestRow(
               group,
               group.supported[i],
               brightness,
               last: i == group.supported.length - 1,
-              forcedExpanded: _forcedExpanded,
-              forcedGen: _forcedGen,
+              forcedExpanded: _effectiveFor(group).$1,
+              forcedGen: _effectiveFor(group).$2,
             ),
         ],
       if (selected.unavailable.isNotEmpty)
@@ -155,21 +205,103 @@ class _WidgetRow extends _Row {
 }
 
 class _SectionRow extends _Row {
-  const _SectionRow(this.group, this.brightness);
+  const _SectionRow(this.group, this.brightness,
+      {required this.expanded, required this.onToggle});
 
   final CategoryGroup group;
   final Brightness brightness;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build() => Padding(
         padding: const EdgeInsets.only(top: 22, bottom: 9),
-        child: CSection(
+        child: _CategoryCSection(
           label: group.category.label,
           color: ClpeakTheme.categoryColor(group.category,
               brightness: brightness),
-          trailing: '${group.supported.length} tests',
+          count: group.supported.length,
+          expanded: expanded,
+          onToggle: onToggle,
         ),
       );
+}
+
+/// Category header that mirrors [CSection] but carries a small "[+]" / "[-]"
+/// bulk toggle after the trailing "X TESTS" count. Shows "[-]" when the
+/// category is currently forced expanded, "[+]" otherwise.
+class _CategoryCSection extends StatelessWidget {
+  const _CategoryCSection({
+    required this.label,
+    required this.color,
+    required this.count,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final String label;
+  final Color? color;
+  final int count;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Row(
+      children: [
+        Container(width: 3, height: 12, color: color ?? t.text),
+        const SizedBox(width: 9),
+        Text(label.toUpperCase(),
+            style: t.micro.copyWith(color: color ?? t.text)),
+        const SizedBox(width: 12),
+        Expanded(child: Container(height: 1, color: t.line)),
+        const SizedBox(width: 12),
+        Text('$count TESTS', style: t.micro),
+        const SizedBox(width: 8),
+        _BracketButton(
+          label: expanded ? '[-]' : '[+]',
+          tooltip: expanded ? 'Collapse all $label' : 'Expand all $label',
+          onTap: onToggle,
+        ),
+      ],
+    );
+  }
+}
+
+class _BracketButton extends StatelessWidget {
+  const _BracketButton({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: CTap(
+        onTap: onTap,
+        builder: (context, hovered, pressed) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+          color: hovered || pressed ? t.hover : Colors.transparent,
+          child: Text(
+            label,
+            style: t.micro.copyWith(
+              color: hovered || pressed ? t.text : t.faint,
+              fontSize: 10,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TestRow extends _Row {
@@ -536,11 +668,29 @@ class _TestLineState extends State<_TestLine> {
             Icon(effectiveExpanded ? Icons.remove : Icons.add,
                 size: 13, color: t.faint),
           ] else ...[
-            // No number here on purpose: naming what varies is the honest
-            // answer to "what did this test measure?", where any single
-            // reading would misrepresent the other eight.
+            // Axis labels like "DATA TYPE, PHASE AND CONTEXT LENGTH" are
+            // explanatory, not the answer — keep them smaller and capped so
+            // the test title keeps the width. The title wraps rather than
+            // ellipsizes because its tail distinguishes two tests; the axis
+            // can ellipsize after two lines.
             if (test.axis.isNotEmpty)
-              Text(test.axis.toUpperCase(), style: t.micro),
+              Flexible(
+                flex: 0,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 132),
+                  child: Text(
+                    test.axis.toUpperCase(),
+                    style: t.micro.copyWith(
+                      fontSize: 9,
+                      letterSpacing: 0.7,
+                      height: 1.2,
+                    ),
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
             if (test.axis.isNotEmpty) const SizedBox(width: 6),
             Icon(effectiveExpanded ? Icons.remove : Icons.add,
                 size: 13, color: t.faint),
