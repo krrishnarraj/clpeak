@@ -6,8 +6,13 @@
 #include <common/dynlib.h>
 
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // Oldest OrtApi we are prepared to speak.  Every entry point this backend
 // calls existed well before this; requesting downwards from ORT_API_VERSION
@@ -20,9 +25,36 @@ static bool       g_loaded    = false;
 static bool       g_attempted = false;  // a failed search is not retried
 static std::string g_loadError;         // why the last attempt failed
 
-// Fill g_rt from an OrtApiBase, whether it came from dlsym or a direct call.
+// Every successfully loaded runtime stays mapped for the life of the process
+// (unloading is unsafe) and is remembered under its override key ("" for the
+// default search).  Switching back to a previously used library then reuses
+// its handle instead of mapping the file a second time.
+static std::map<std::string, OrtRuntime> g_cache;  // key = g_override value
+
+#ifdef _WIN32
+// Absolute filesystem path of the default runtime, bypassing the loader's
+// already-loaded-module cache.  LoadLibrary("onnxruntime.dll") with a bare
+// name returns the first-loaded module of that basename -- after one or more
+// custom DLLs (usually also named onnxruntime.dll) are mapped that is a
+// custom build, not the system one, so "Use default" would stick on (or fall
+// back to) a previous pick.  SearchPath searches the filesystem only, so the
+// absolute path it returns loads the file it names.  Empty when no system
+// runtime is on the search path.
+static std::string resolveWindowsDefaultAbsolute()
+{
+  std::string buf(32768, '\0');
+  DWORD n = SearchPathA(NULL, "onnxruntime.dll", NULL,
+                        static_cast<DWORD>(buf.size()), buf.data(), NULL);
+  if (n == 0 || n >= buf.size())
+    return "";
+  buf.resize(n);
+  return buf;
+}
+#endif
+
+// Fill `out` from an OrtApiBase, whether it came from dlsym or a direct call.
 // Returns false when the runtime serves no API version this build can speak.
-static bool adoptApiBase(const OrtApiBase *base)
+static bool adoptApiBase(const OrtApiBase *base, OrtRuntime &out)
 {
   if (!base)
     return false;
@@ -65,10 +97,10 @@ static bool adoptApiBase(const OrtApiBase *base)
     return false;
   }
 
-  g_rt.base          = base;
-  g_rt.api           = api;
-  g_rt.apiVersion    = version;
-  g_rt.versionString = base->GetVersionString();
+  out.base          = base;
+  out.api           = api;
+  out.apiVersion    = version;
+  out.versionString = base->GetVersionString();
   return true;
 }
 
@@ -79,7 +111,7 @@ static void loadRuntime()
 {
   g_rt.lib  = nullptr;
   g_rt.path.clear();
-  g_loaded  = adoptApiBase(OrtGetApiBase());
+  g_loaded  = adoptApiBase(OrtGetApiBase(), g_rt);
   if (!g_loaded)
     g_loadError = "the linked-in ONNX Runtime exposes no usable OrtApi";
 }
@@ -92,6 +124,17 @@ static std::string g_override;  // --onnx-lib / clpeak_set_onnx_library
 
 static void loadRuntime()
 {
+  // A repeat pick reuses the still-mapped handle: no second mapping of the
+  // same file, and (on Windows) no chance for a bare-name search to alias a
+  // different file of the same basename.
+  auto cached = g_cache.find(g_override);
+  if (cached != g_cache.end())
+  {
+    g_rt     = cached->second;
+    g_loaded = true;
+    return;
+  }
+
   // A library the user named -- by --onnx-lib or by the FFI setter -- is the
   // library to measure, and nothing else will do.  The conventional names are
   // searched only when nobody named one: quietly falling back would report a
@@ -114,10 +157,46 @@ static void loadRuntime()
     // not on the default dlopen search path.  On Android the bare soname is
     // what resolves -- a packaged runtime lands in the APK's read-only lib
     // dir, which is on the linker path.
+#ifdef _WIN32
+    const std::string absDefault = resolveWindowsDefaultAbsolute();
+    if (!absDefault.empty())
+    {
+      // Absolute path: loads the file it names even when custom DLLs of the
+      // same basename are already mapped.  A bare "onnxruntime.dll" here
+      // would hand back the first-loaded custom build instead.
+      lib = clpeak::dynOpen({absDefault.c_str()});
+      if (!lib)
+        g_loadError = std::string("could not load onnxruntime from '") +
+                      absDefault + "'";
+    }
+    else
+    {
+      lib = clpeak::dynOpen({"onnxruntime.dll"});
+      if (!lib)
+      {
+        g_loadError = "onnxruntime library not found";
+      }
+      else
+      {
+        // No system runtime on the filesystem search path, yet a bare load
+        // succeeded: that is an already-mapped custom DLL shining through
+        // (see resolveWindowsDefaultAbsolute), not a default.  Adopting it
+        // would report the previous pick's version under the default's name.
+        for (const auto &kv : g_cache)
+        {
+          if (kv.second.lib == lib)
+          {
+            clpeak::dynClose(lib);  // drop this call's ref; the leaked one stays
+            g_loadError = "onnxruntime library not found";
+            lib = nullptr;
+            break;
+          }
+        }
+      }
+    }
+#else
     lib = clpeak::dynOpen({
-#if defined(_WIN32)
-        "onnxruntime.dll",
-#elif defined(__APPLE__)
+#if defined(__APPLE__)
         "libonnxruntime.dylib",
         "/opt/homebrew/lib/libonnxruntime.dylib",
         "/usr/local/lib/libonnxruntime.dylib",
@@ -128,6 +207,7 @@ static void loadRuntime()
     });
     if (!lib)
       g_loadError = "onnxruntime library not found";
+#endif
   }
   if (!lib)
     return;
@@ -142,7 +222,8 @@ static void loadRuntime()
     return;
   }
 
-  if (!adoptApiBase(getBase()))
+  OrtRuntime cur;
+  if (!adoptApiBase(getBase(), cur))
   {
     clpeak::dynClose(lib);
     return;
@@ -150,9 +231,11 @@ static void loadRuntime()
 
   // Deliberately not dlclosed for the rest of the process: see the note on
   // onnxSetLibraryOverride() in the header.
-  g_rt.lib  = lib;
-  g_rt.path = named ? named : "";
-  g_loaded  = true;
+  cur.lib  = lib;
+  cur.path = named ? named : "";
+  g_rt     = cur;
+  g_cache[g_override] = cur;
+  g_loaded = true;
 }
 
 void onnxSetLibraryOverride(const std::string &path)

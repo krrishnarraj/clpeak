@@ -74,15 +74,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// the only place Android will dlopen from.  One library is kept at a time;
   /// it is ~27 MB.
   ///
-  /// Desktop pickers return the real file, already stable and not ours to
-  /// duplicate.
+  /// The copy is stamped per pick: vendor builds are usually all named
+  /// libonnxruntime.so, so reusing the bare basename would land every pick at
+  /// the same destination path and the native loader -- which keys runtimes
+  /// by path and never unmaps -- would see the same key and keep measuring
+  /// the first file.  Desktop pickers return the real file, already stable
+  /// and not ours to duplicate.
   Future<String> _durablePath(String picked) async {
     if (!Platform.isAndroid) return picked;
     final dir = Directory(
         p.join((await getApplicationSupportDirectory()).path, 'onnxruntime'));
     if (dir.existsSync()) dir.deleteSync(recursive: true);
     dir.createSync(recursive: true);
-    final dest = p.join(dir.path, p.basename(picked));
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final dest = p.join(dir.path, '${stamp}_${p.basename(picked)}');
     await File(picked).copy(dest);
     return dest;
   }
