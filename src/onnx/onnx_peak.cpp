@@ -138,6 +138,28 @@ std::vector<onnx_ep_info_t> onnxUsableEps(
   std::vector<onnx_ep_info_t> out;
   for (const auto &ep : onnxAvailableEps(rt))
   {
+#if defined(__ANDROID__)
+    // The WebGPU execution provider is not offered on Android.  Its Dawn
+    // backend shares the process GPU with the app's own UI, where a lost
+    // device is unrecoverable -- and its Android support is experimental:
+    // every matmul fails there (Mali-G710 never completes the buffer
+    // download), and one fp16 run never returned at all, wedging the
+    // phone's GPU until reboot.  Other OSes keep the provider.  Filtered
+    // here rather than at enumeration so listing and runs agree, and with
+    // a reason so the device list says why it is missing.
+    if (ep.providerKey == "WebGpuExecutionProvider")
+    {
+      static const std::string reason =
+          "the WebGPU execution provider is disabled on Android: it shares "
+          "the app's GPU, where a lost device cannot be recovered, and its "
+          "Android support is experimental";
+      CLPEAK_VLOG("onnx: %s not usable (%s), skipping\n",
+                  ep.displayName.c_str(), reason.c_str());
+      if (skipped)
+        skipped->emplace_back(ep, reason);
+      continue;
+    }
+#endif
     std::string reason;
     if (onnxEpViable(rt, ep, reason))
     {

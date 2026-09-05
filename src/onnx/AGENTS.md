@@ -1580,6 +1580,16 @@ on real hardware:
 When a graph works on one provider and not another, suspect the optional
 behaviour before the operator.
 
+## WebGPU is not offered on Android
+
+`onnxUsableEps()` (`onnx_peak.cpp`) filters `WebGpuExecutionProvider` out on
+`__ANDROID__` with a reason, so listing and runs agree and the device list
+says why it is missing. Its Dawn backend shares the process GPU with the
+app's own UI, where a lost device is unrecoverable -- and its Android
+support is experimental: every matmul fails there, and one fp16 run never
+returned, wedging the phone's GPU until reboot. Other OSes keep it, and the
+session wiring in `onnx_session.cpp` stays for them.
+
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `src/onnx/CMakeLists.txt`,
