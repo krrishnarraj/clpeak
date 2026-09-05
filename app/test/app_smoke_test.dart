@@ -42,6 +42,13 @@ void main() {
       ],
       child: const ClpeakApp(),
     ));
+    // Catalog loads on a worker isolate: spawn it inside runAsync, since
+    // testWidgets runs in fake async and an isolate spawned outside it
+    // never resolves (see isolate_probe_test.dart).
+    await tester.pump();
+    expect(find.textContaining('Detecting'), findsWidgets);
+
+    await tester.runAsync(() => service.init());
     await tester.pump();
 
     // Dashboard: launcher + real system summary from the native catalog.

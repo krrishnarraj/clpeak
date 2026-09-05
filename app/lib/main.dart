@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -25,15 +26,24 @@ Future<void> main() async {
   final history = RunHistoryStore();
   final service = BenchmarkService(bindings, history);
 
+  // First frame never waits for enumeration: the device catalog (seconds
+  // on NPU/GPU boxes while native viability probes compile) loads on a
+  // worker isolate and the UI populates when it lands.  init() never
+  // throws — failure lands in service.catalogError with history still
+  // usable — so this future needs no error handler.
+  unawaited(service.init());
+
   // On quit during a run: cancel and let the native side save partial
   // results before the process exits.
   AppLifecycleListener(onExitRequested: service.onExitRequested);
 
   // Dev hook: CLPEAK_AUTORUN=1 starts a run at launch (used by automated UI
-  // verification; harmless otherwise).
+  // verification; harmless otherwise).  Waits for the catalog: device
+  // indices are positions in the enumerated list.
   final autorun = Platform.environment['CLPEAK_AUTORUN'];
   if (autorun != null && autorun.isNotEmpty && autorun != '0') {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await service.ready;
       service.start(preset: RunPreset.full);
     });
   }

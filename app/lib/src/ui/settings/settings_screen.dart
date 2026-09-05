@@ -49,7 +49,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final service = context.read<BenchmarkService>();
     await settings.setOnnxLibraryPath(path);
     if (!mounted) return;
-    service.setOnnxLibrary(path);
+    // Async since catalog loads off-thread; refresh the status after the
+    // re-enumeration lands.
+    await service.setOnnxLibrary(path);
+    if (!mounted) return;
     _refreshOnnx();
   }
 
