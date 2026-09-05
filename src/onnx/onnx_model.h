@@ -126,6 +126,14 @@ private:
 std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                             const std::string &weightRaw);
 
+// The smallest graph worth expressing: Y = X * K over [1, width] fp16,
+// K a full-size constant.  A scalar K would need broadcasting, which
+// providers implementing only fixed-shape elementwise ops decline --
+// the XNNPACK EP does -- so both operands carry the same shape.  This is
+// the dispatch-latency test's trivial graph, shared so the viability
+// probe compiles the cheapest possible session rather than a matmul.
+std::string onnxTrivialMulModel(int64_t width = 64);
+
 // The same GEMM in QDQ form, the shape every NPU actually wants:
 //
 //   A_q(int8) -> DequantizeLinear -\

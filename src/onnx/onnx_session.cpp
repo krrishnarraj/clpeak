@@ -324,6 +324,32 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
 
 } // namespace
 
+// Attach-only check for the viability probe: provider registration with no
+// model behind it.  A target the provider cannot serve (OpenVINO NPU with
+// no NPU, a QNN backend_path pointing at a missing library) fails here,
+// before any graph is built or compiled.
+std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  // The CPU EP is implicit and needs no registration; it always attaches.
+  if (ep.providerKey == "CPUExecutionProvider")
+    return std::string();
+
+  // Provider appends log through ORT's DefaultLogger, which only exists
+  // once an Env has registered it.  Session creation always builds the
+  // Env first; this attach-only path must do the same, or EPs that log at
+  // registration (TensorRT, CUDA) fail with "Attempt to use DefaultLogger
+  // but none has been registered" instead of attaching.
+  if (!onnxEnv(rt))
+    return "onnxruntime environment creation failed";
+
+  OrtSessionOptions *so = nullptr;
+  if (OrtStatus *st = rt.api->CreateSessionOptions(&so))
+    return onnxStatusText(rt, st);
+  std::string err = appendProvider(rt, so, ep);
+  rt.api->ReleaseSessionOptions(so);
+  return err;
+}
+
 // Where a profile file may be written.  Never the working directory: this is
 // a benchmark, not something that should leave files where it was run from.
 static std::string profilePrefixPath()

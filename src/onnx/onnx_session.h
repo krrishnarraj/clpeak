@@ -90,6 +90,14 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 // the constant-folding guard in gemm.cpp reports.
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 
+// Attach `ep` to throwaway session options: the provider-registration half
+// of session creation, with no model and no session.  Empty when the
+// provider accepts clpeak's options for this target (an OpenVINO target
+// with no hardware behind it fails here, fast, with nothing compiled);
+// otherwise the one-line refusal.  The viability probe tries this before
+// building any graph.
+std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
 

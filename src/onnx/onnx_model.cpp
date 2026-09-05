@@ -281,6 +281,24 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   return g.build();
 }
 
+std::string onnxTrivialMulModel(int64_t width)
+{
+  OnnxGraph g;
+  g.input("X", ONNX_DT_FLOAT16, {1, width});
+
+  std::string k((size_t)width * 2, '\0');
+  {
+    uint16_t *h = reinterpret_cast<uint16_t *>(&k[0]);
+    for (int64_t i = 0; i < width; i++)
+      h[i] = floatToHalf(1.0009765625f);   // not 1.0: nothing to fold away
+  }
+  g.initializer("K", ONNX_DT_FLOAT16, {1, width}, k);
+
+  g.node("Mul", {"X", "K"}, {"Y"});
+  g.output("Y", ONNX_DT_FLOAT16, {1, width});
+  return g.build();
+}
+
 // Zero point for a quantized element type, as its own one-byte encoding.
 // int8 and the float8 types are symmetric so it is a literal zero; uint8
 // centres on 128.  ONNX requires the float8 zero point to be zero, which 0x00

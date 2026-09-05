@@ -1564,6 +1564,9 @@ each for fp32, fp16 and int8 QDQ, stopping at the first success. Both
 agree; skipped entries surface once as a note with the refusal reason.
 OpenVINO enumerates as three targets (NPU/GPU/CPU, see `onnx_peak.cpp`) and
 each is filtered independently. Answers are memoized per runtime and target.
+The probe tries cheapest first -- provider attach with no model, then the
+dispatch-latency trivial Mul, then the matmul legs -- so a live EP never
+pays for a matmul session it was only ever going to pass.
 
 ## Graphs must avoid optional operator behaviour
 

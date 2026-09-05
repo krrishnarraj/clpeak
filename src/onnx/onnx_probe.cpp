@@ -520,36 +520,91 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     }
   }
 
-  // A provider that cannot create even one of these can run nothing here.
-  // fp32 and fp16 are the plain matmuls every float-capable EP takes, and
-  // int8 QDQ in both spellings covers an integer-only NPU with no float
-  // path at all (signed fuses on ARM/TensorRT, unsigned on pre-VNNI x86).
-  // All three spell at opset 17, so no runtime gate applies.
+  // Tier 0 -- attach, no model and no session.  A target the provider
+  // cannot serve fails here, fast, with nothing compiled (OpenVINO NPU
+  // with no NPU, a QNN backend_path with no library behind it).  Session
+  // creation runs the same append first, so an attach failure means every
+  // later attempt would fail identically: record it and stop.
   //
-  // Creation only, no runs: the failures this filters -- an absent device
-  // (OpenVINO NPU on a box with no NPU) or a graph no EP backend takes
-  // under the fallback guard (NNAPI declining everything) -- all happen
-  // at creation, fast, with nothing compiled.
+  // Tier 1 -- the trivial graph: one Mul over 64 fp16 values, the cheapest
+  // session every ahead-of-time compiler here can build (the
+  // dispatch-latency test's graph, shared via onnxTrivialMulModel).  A
+  // live EP answers here and never pays for a matmul it was only ever
+  // going to pass.  The output depends on a runtime input, so there is
+  // nothing to fold and default session options match the latency test's
+  // own session exactly.
   //
-  // Plain variants try the native reduction only: an EP missing just the
-  // reduction still runs fp32, whose reduction is universal, so the cast
-  // retry the ladder uses would add nothing to the verdict.
+  // Tier 2 -- matmul legs: fp32 and fp16 plain plus int8 QDQ in both
+  // spellings.  No known EP needs these to prove viable, but an
+  // integer-only NPU with no float path would decline the trivial Mul
+  // while fusing int8 QDQ, and only these legs catch that.  All three
+  // spell at opset 17, so no runtime gate applies.
+  //
+  // Creation only, no runs: the failures this filters all happen at
+  // creation -- an absent device or a graph no EP backend takes under the
+  // fallback guard -- fast, with nothing compiled on the failure paths.
+  //
+  // Plain matmul variants try the native reduction only: an EP missing
+  // just the reduction still runs fp32, whose reduction is universal, so
+  // the cast retry the ladder uses would add nothing to the verdict.
   const std::string tag =
       ep.providerKey + (ep.epDevice.empty() ? "" : "/" + ep.epDevice);
   std::string firstErr;
+  auto elapsedUs = [](std::chrono::steady_clock::time_point t0) {
+    return (double)std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - t0)
+        .count();
+  };
+
+  {
+    auto t0 = std::chrono::steady_clock::now();
+    std::string attachErr = onnxProviderAttach(rt, ep);
+    CLPEAK_VLOG("onnx-viable[%s]: attach %.1f ms (%s)\n", tag.c_str(),
+                elapsedUs(t0) / 1000.0,
+                attachErr.empty() ? "ok" : attachErr.c_str());
+    if (!attachErr.empty())
+    {
+      reason = attachErr;
+      std::lock_guard<std::mutex> lk(mtx);
+      memo.emplace(memoKey, std::make_pair(false, reason));
+      return false;
+    }
+  }
+
+  {
+    auto t0 = std::chrono::steady_clock::now();
+    auto ses = onnxCreateSession(rt, ep, onnxTrivialMulModel());
+    const double us = elapsedUs(t0);
+    if (ses.session)
+    {
+      CLPEAK_VLOG("onnx-viable[%s]: trivial %.1f ms (ok)\n", tag.c_str(),
+                  us / 1000.0);
+      rt.api->ReleaseSession(ses.session);
+      reason.clear();
+      std::lock_guard<std::mutex> lk(mtx);
+      memo.emplace(memoKey, std::make_pair(true, reason));
+      return true;
+    }
+    CLPEAK_VLOG("onnx-viable[%s]: trivial %.1f ms (%s)\n", tag.c_str(),
+                us / 1000.0, ses.error.c_str());
+    firstErr = ses.error;
+  }
+
   auto tryBuild = [&](const Variant &v, int actDtype, int wgtDtype) {
     if (clpeak::cancelRequested())
       return false;
+    auto t0 = std::chrono::steady_clock::now();
     GemmSetup s =
         makeSetup(rt, ep, v, kProbeDim, /*profile=*/false, actDtype,
                   /*reduceInFloat=*/false, wgtDtype, /*unfoldActs=*/false);
+    const double us = elapsedUs(t0);
     const bool ok = (s.session != nullptr);
     if (!ok && firstErr.empty())
       firstErr = s.error;
-    CLPEAK_VLOG("onnx-viable[%s]: %s%d%s (%s)\n", tag.c_str(),
+    CLPEAK_VLOG("onnx-viable[%s]: %s%d%s %.1f ms (%s)\n", tag.c_str(),
                 v.qdq ? "qdq-" : "", v.dtype,
                 v.qdq ? (actDtype == ONNX_DT_UINT8 ? "-u8" : "-s8") : "",
-                ok ? "ok" : s.error.c_str());
+                us / 1000.0, ok ? "ok" : s.error.c_str());
     destroySetup(rt, s);
     return ok;
   };
