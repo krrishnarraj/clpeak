@@ -97,15 +97,14 @@ class RunConfigScreen extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        canRun
-                            ? 'Ready'
-                            : 'Select at least one device and category',
-                        textAlign: TextAlign.center,
-                        style:
-                            t.micro.copyWith(color: canRun ? t.dim : t.danger),
-                      ),
-                      const SizedBox(height: 10),
+                      if (!canRun) ...[
+                        Text(
+                          'Select at least one device and category',
+                          textAlign: TextAlign.center,
+                          style: t.micro.copyWith(color: t.danger),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       CButton(
                         label: 'Run',
                         icon: Icons.play_arrow,
