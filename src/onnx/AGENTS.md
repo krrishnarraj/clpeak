@@ -1551,6 +1551,20 @@ The mobile packages are the counter-example, and it is why they are bundled:
 `com.microsoft.onnxruntime:onnxruntime-android` carries NNAPI, and the iOS
 pod carries CoreML, so on a phone the accelerator is there out of the box.
 
+## Listing shows what can run, not what the build contains
+
+`GetAvailableProviders` reports which EPs the runtime was built with, not
+which hardware is in the box — an OpenVINO NPU target on a box with no NPU,
+or NNAPI on a phone whose accelerator declines every graph, would otherwise
+list as a device that only ever reports Unsupported. `onnxAvailableEps()`
+(`onnx_peak.cpp`) is that raw capability list; `onnxUsableEps()` filters it
+through `onnxEpViable()` (`onnx_probe.cpp`), one tiny creation-only session
+each for fp32, fp16 and int8 QDQ, stopping at the first success. Both
+`enumerate()` and `runAll()` consume the filtered list, so listing and runs
+agree; skipped entries surface once as a note with the refusal reason.
+OpenVINO enumerates as three targets (NPU/GPU/CPU, see `onnx_peak.cpp`) and
+each is filtered independently. Answers are memoized per runtime and target.
+
 ## Graphs must avoid optional operator behaviour
 
 Providers implement the common shapes and decline the rest, and under the

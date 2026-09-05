@@ -71,10 +71,8 @@ constexpr double kOnnxTinyMaxCreateUs = 10.0e6;
 // OpenVINO is the exception: one EP fronts three different pieces of
 // silicon (NPU, GPU, CPU) selected by its `device_type` option, so it
 // enumerates as three devices sharing one providerKey and differing only
-// in epDevice.  Hard-coding NPU mislabels an Arc discrete GPU as an NPU
-// and fails outright on machines with no NPU ("Device NPU is not
-// available"); a missing target then reports Unsupported on its own row
-// while the present ones still measure.
+// in epDevice.  A target with no hardware behind it (an Arc dGPU box has
+// no NPU) is filtered by the viability probe before it ever lists.
 struct onnx_ep_info_t
 {
   std::string providerKey; // ORT registration name, e.g. "CoreMLExecutionProvider"
@@ -122,6 +120,17 @@ public:
 // List the loaded runtime's execution providers in benchmark order
 // (accelerators first, CPU last).  Shared by enumerate() and runAll().
 std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt);
+
+// The providers from onnxAvailableEps that can actually run here: each
+// has created at least one tiny session (see onnxEpViable).  A provider
+// the build contains but the hardware cannot serve -- OpenVINO NPU with
+// no NPU, NNAPI declining every graph -- is dropped instead of listing
+// as a device that only ever reports Unsupported.  When `skipped` is
+// given it also receives each dropped entry with its refusal reason, for
+// the one-line notes in runAll() and --list-devices.
+std::vector<onnx_ep_info_t> onnxUsableEps(
+    const OrtRuntime &rt,
+    std::vector<std::pair<onnx_ep_info_t, std::string>> *skipped = nullptr);
 
 // Choose which onnxruntime library to load, ahead of the platform's
 // conventional names; empty clears the choice.  Backs

@@ -44,5 +44,16 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt,
 OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt,
                                      const onnx_ep_info_t &ep);
 
+// Can this EP run anything at all?  Tries one tiny session each for fp32,
+// fp16 and int8 QDQ (both spellings) and answers on the first success.
+// GetAvailableProviders reports what the build contains, not what is in
+// the box -- an OpenVINO NPU target with no NPU, or NNAPI on a phone whose
+// accelerator declines every graph -- so listing and runAll() filter
+// through this first instead of printing a device that only ever reports
+// Unsupported.  Creation only, no runs; memoized per runtime and target.
+// `reason` carries the refusal when it answers false.
+bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                  std::string &reason);
+
 #endif // ENABLE_ONNX
 #endif // CLPEAK_ONNX_PROBE_H

@@ -8,6 +8,7 @@
 #include <common/common.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -496,6 +497,77 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
   auto cache = onnxProbeGemmVariants(rt, ep);
   auto res = memo.emplace(memoKey, std::move(cache));
   return res.first->second;
+}
+
+bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                  std::string &reason)
+{
+  // Memoized: listing (CLI, FFI catalog) and runAll() each ask, and the
+  // answer cannot change while the runtime stays mapped (handles are
+  // leaked on purpose, so the base pointer is a stable identity).
+  static std::unordered_map<std::string, std::pair<bool, std::string>> memo;
+  static std::mutex mtx;
+  const std::string memoKey =
+      std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
+      ep.providerKey + '\x1f' + ep.epDevice;
+  {
+    std::lock_guard<std::mutex> lk(mtx);
+    auto it = memo.find(memoKey);
+    if (it != memo.end())
+    {
+      reason = it->second.second;
+      return it->second.first;
+    }
+  }
+
+  // A provider that cannot create even one of these can run nothing here.
+  // fp32 and fp16 are the plain matmuls every float-capable EP takes, and
+  // int8 QDQ in both spellings covers an integer-only NPU with no float
+  // path at all (signed fuses on ARM/TensorRT, unsigned on pre-VNNI x86).
+  // All three spell at opset 17, so no runtime gate applies.
+  //
+  // Creation only, no runs: the failures this filters -- an absent device
+  // (OpenVINO NPU on a box with no NPU) or a graph no EP backend takes
+  // under the fallback guard (NNAPI declining everything) -- all happen
+  // at creation, fast, with nothing compiled.
+  //
+  // Plain variants try the native reduction only: an EP missing just the
+  // reduction still runs fp32, whose reduction is universal, so the cast
+  // retry the ladder uses would add nothing to the verdict.
+  const std::string tag =
+      ep.providerKey + (ep.epDevice.empty() ? "" : "/" + ep.epDevice);
+  std::string firstErr;
+  auto tryBuild = [&](const Variant &v, int actDtype, int wgtDtype) {
+    if (clpeak::cancelRequested())
+      return false;
+    GemmSetup s =
+        makeSetup(rt, ep, v, kProbeDim, /*profile=*/false, actDtype,
+                  /*reduceInFloat=*/false, wgtDtype, /*unfoldActs=*/false);
+    const bool ok = (s.session != nullptr);
+    if (!ok && firstErr.empty())
+      firstErr = s.error;
+    CLPEAK_VLOG("onnx-viable[%s]: %s%d%s (%s)\n", tag.c_str(),
+                v.qdq ? "qdq-" : "", v.dtype,
+                v.qdq ? (actDtype == ONNX_DT_UINT8 ? "-u8" : "-s8") : "",
+                ok ? "ok" : s.error.c_str());
+    destroySetup(rt, s);
+    return ok;
+  };
+
+  static const Variant kFp32{ONNX_DT_FLOAT, false, "", "", 0, false};
+  static const Variant kFp16{ONNX_DT_FLOAT16, false, "", "", 0, false};
+  static const Variant kInt8{ONNX_DT_INT8, true, "", "", 0, false};
+  const bool ok = tryBuild(kFp32, 0, 0) || tryBuild(kFp16, 0, 0) ||
+                  tryBuild(kInt8, ONNX_DT_INT8, ONNX_DT_INT8) ||
+                  tryBuild(kInt8, ONNX_DT_UINT8, ONNX_DT_INT8);
+
+  reason = ok ? "" : (firstErr.empty() ? "the provider refused every probe graph"
+                                       : firstErr);
+  {
+    std::lock_guard<std::mutex> lk(mtx);
+    memo.emplace(memoKey, std::make_pair(ok, reason));
+  }
+  return ok;
 }
 
 #endif // ENABLE_ONNX

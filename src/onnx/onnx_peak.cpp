@@ -80,9 +80,9 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
     // OpenVINO selects its hardware per session through `device_type`,
     // so one provider registration is three benchmarkable devices.  Each
     // carries its target in epDevice; session creation passes it through
-    // (see onnx_session.cpp).  A target with no hardware behind it fails
-    // session creation and reports Unsupported on its own row -- an Arc
-    // dGPU box with no NPU measures GPU and CPU while NPU says why not.
+    // (see onnx_session.cpp).  Targets with no hardware behind them are
+    // filtered by onnxUsableEps below -- an Arc dGPU box with no NPU
+    // lists GPU and CPU, not a phantom NPU.
     if (key == "OpenVINOExecutionProvider")
     {
       static const struct { const char *dev; const char *display; const char *type; DeviceType dt; } kOv[] = {
@@ -124,6 +124,33 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
 
   // GetAvailableProviders returns default-priority order (accelerators
   // before CPU), which is also the order we want to benchmark in.  Keep it.
+  return out;
+}
+
+// Providers the box can actually run, in the same order.  This is what
+// listing and benchmarking both consume; the raw capability list above is
+// only the input.  Viability answers are memoized per runtime and target,
+// so the second caller in a process pays nothing.
+std::vector<onnx_ep_info_t> onnxUsableEps(
+    const OrtRuntime &rt,
+    std::vector<std::pair<onnx_ep_info_t, std::string>> *skipped)
+{
+  std::vector<onnx_ep_info_t> out;
+  for (const auto &ep : onnxAvailableEps(rt))
+  {
+    std::string reason;
+    if (onnxEpViable(rt, ep, reason))
+    {
+      out.push_back(ep);
+    }
+    else
+    {
+      CLPEAK_VLOG("onnx: %s not usable (%s), skipping\n",
+                  ep.displayName.c_str(), reason.c_str());
+      if (skipped)
+        skipped->emplace_back(ep, reason);
+    }
+  }
   return out;
 }
 
@@ -173,7 +200,11 @@ int OnnxPeak::runAll()
     return 0;   // absent runtime is not an error, like a missing GPU driver
   }
 
-  auto eps = onnxAvailableEps(*rt);
+  std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
+  auto eps = onnxUsableEps(*rt, &skipped);
+  for (const auto &sk : skipped)
+    log->note("ONNX: skipping " + sk.first.displayName + " (" +
+              sk.second + ")\n");
   if (eps.empty())
   {
     log->note("ONNX: no execution providers available\n");
@@ -281,10 +312,14 @@ BackendInventory OnnxPeak::enumerate()
   if (!rt)
     return inv;
 
-  auto eps = onnxAvailableEps(*rt);
-  if (eps.empty())
+  // Capabilities, not viability: a backend with providers that all fail
+  // the probe still counts as available (with an empty device list), so
+  // --list-devices reports the runtime rather than "library not found".
+  if (onnxAvailableEps(*rt).empty())
     return inv;
   inv.available = true;
+
+  auto eps = onnxUsableEps(*rt);
 
   InventoryPlatform plat;
   plat.index = 0;
@@ -325,6 +360,18 @@ void OnnxPeak::printInventory(const BackendInventory &b, std::ostream &os)
         os << " [" << d.typeStr << "]";
       os << "\n";
     }
+  }
+  // Providers the runtime names but nothing here can run: not devices (no
+  // index, not selectable), but named with the reason, so a missing NPU
+  // reads as absent hardware rather than a detection failure.  Answers are
+  // memoized, so this re-probe after enumerate() costs nothing.
+  if (const OrtRuntime *rt = ortRuntime())
+  {
+    std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
+    (void)onnxUsableEps(*rt, &skipped);
+    for (const auto &sk : skipped)
+      os << "  (skipping " << sk.first.displayName << ": " << sk.second
+         << ")\n";
   }
 }
 
