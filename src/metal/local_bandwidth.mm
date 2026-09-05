@@ -8,11 +8,12 @@
 int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+        {"local_memory_bandwidth", "Local memory bandwidth", "bps",
          Category::Unknown,
          "How many bytes per second the GPU moves through threadgroup memory -- "
          "the small scratchpad a group of threads shares on-chip, which never "
-         "goes out to main memory."});
+         "goes out to main memory.",
+         TestShape::Homogeneous, "vector width"});
 
     const uint32_t tgSize = 256;
     uint64_t globalThreads = mtlTargetGlobalThreads(dev.info);
@@ -50,8 +51,8 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  gridSize, tgSizeM, warmupCount,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
-        float gbps = (float)bytes / us / 1e3f;
-        test.emit(v.label, gbps, mtlWidthNote(v.width));
+        float bps = (float)bytes / us * 1e6f;
+        test.emit(v.label, bps, mtlWidthNote(v.width));
     }
 
     return 0;

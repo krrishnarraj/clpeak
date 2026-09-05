@@ -8,12 +8,13 @@
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+        {"image_memory_bandwidth", "Image memory bandwidth", "bps",
          Category::Unknown,
          "How many bytes per second the GPU reads through its texture units, "
          "which take a different path to memory than plain buffer reads.  Each "
          "reading uses a different pixel format, so they differ in how many "
-         "bytes one pixel costs."});
+         "bytes one pixel costs.",
+         TestShape::Heterogeneous, "pixel format"});
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
@@ -153,18 +154,18 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         walk = 0;
 
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
-        float rowGbps = (float)bytes / us / 1e3f;
-        float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
-        CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f gbps\n",
-                    v.label, rowGbps, colGbps);
-        test.emit(v.label, std::max(rowGbps, colGbps), v.note);
+        float rowBps = (float)bytes / us * 1e6f;
+        float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
+        CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f B/s\n",
+                    v.label, rowBps, colBps);
+        test.emit(v.label, std::max(rowBps, colBps), v.note);
     }
 
     return 0;
 }
 
 // ---------------------------------------------------------------------------
-// Texture sample rate (bilinear GTexels/s) -- TMU throughput, not bandwidth.
+// Texture sample rate (bilinear texels/s) -- TMU throughput, not bandwidth.
 // A small cache-resident texture is sampled with forced-fractional bilinear
 // coordinates, so the filter units are the limiter rather than DRAM (that is
 // what image_bandwidth measures).  Apple's TBDR parts sustain very high
@@ -174,13 +175,14 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"texture_sample_rate", "Texture sample rate (bilinear)", "gtexels",
+        {"texture_sample_rate", "Texture sample rate (bilinear)", "texels",
          Category::Bandwidth,
          "How many filtered texture lookups per second the GPU's sampling "
          "hardware performs.  Every lookup falls between pixels, so the hardware "
          "must blend four of them -- the basic operation of drawing any textured "
          "surface.  The texture is small enough to stay cached, so this measures "
-         "the sampling units rather than memory."});
+         "the sampling units rather than memory.",
+         TestShape::Heterogeneous, "pixel format"});
 
     const unsigned int SAMPLES_PER_WI = 64;   // must match texture_sample.metal
     const NSUInteger imgW = 1024, imgH = 1024;  // 4 MB rgba8 -- SLC-resident
@@ -291,8 +293,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
             gpuTimedUs = wallTimedSec * 1e6;
         float us = (float)(gpuTimedUs / iters);
         uint64_t samples = (uint64_t)SAMPLES_PER_WI * globalThreads;
-        float gtexels = (float)samples / us / 1e3f;   // samples/us -> Gsamples/s
-        test.emit(v.label, gtexels, v.note);
+        float texels = (float)samples / us * 1e6f;   // samples/us -> samples/s
+        test.emit(v.label, texels, v.note);
     }
 
     return 0;

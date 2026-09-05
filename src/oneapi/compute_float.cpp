@@ -12,8 +12,7 @@ namespace clpeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
                            uint32_t blockSize, uint32_t outElemsPerBlock,
                            uint32_t elemSize);
-float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
-                       double unitDivider);
+float    computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs);
 }
 
 // --------------------------------------------------------------------------
@@ -170,15 +169,15 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     test.skip(label, ResultStatus::Error, "kernel launch failed", note);
     return;
   }
-  float value = clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9);
+  float value = clpeak_oneapi::computeFlops(totalThreads, workPerWI, us);
 
   // Race the affine chain and keep the faster reading.  A failure here is not
   // an error -- the squaring chain already produced one.
   float affUs = peak.runKernel(dev, submitAff, targetTimeUs, forced);
   if (affUs > 0.0f)
   {
-    float affValue = clpeak_oneapi::computeGflops(totalThreads, workPerWI, affUs, 1e9);
-    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f gflops\n",
+    float affValue = clpeak_oneapi::computeFlops(totalThreads, workPerWI, affUs);
+    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f flops\n",
                 label, value, affValue);
     if (affValue > value * MAX_ALT_CHAIN_RATIO)
       CLPEAK_VLOG("%s: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
@@ -187,7 +186,7 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
       value = affValue;
   }
 
-  test.emit(label, value, {false, note});
+  test.emit(label, value, note);
 }
 
 // Drive the {1,2,4,8,16} sweep for one FP family.
@@ -212,11 +211,12 @@ static void runFpSweep(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"single_precision_compute", "Single-precision compute", "gflops",
+    {"single_precision_compute", "Single-precision compute", "flops",
      Category::Unknown,
      "Peak arithmetic speed of the device's compute units on 32-bit fractional "
      "numbers -- the ordinary float type.  Nothing touches memory, so only the "
-     "arithmetic units limit the rate."});
+     "arithmetic units limit the rate.",
+     TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
@@ -244,10 +244,11 @@ int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
 int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"half_precision_compute", "Half-precision compute", "gflops",
+    {"half_precision_compute", "Half-precision compute", "flops",
      Category::Unknown,
      "Peak arithmetic speed on 16-bit fractional numbers -- half the size of a "
-     "normal float, and what graphics and on-device AI mostly run on."});
+     "normal float, and what graphics and on-device AI mostly run on.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.fp16Supported)
   {
@@ -283,11 +284,12 @@ int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
 int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"double_precision_compute", "Double-precision compute", "gflops",
+    {"double_precision_compute", "Double-precision compute", "flops",
      Category::Unknown,
      "Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type "
      "scientific computing relies on.  Consumer graphics parts run these far "
-     "slower than 32-bit; the datacenter parts do not."});
+     "slower than 32-bit; the datacenter parts do not.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.fp64Supported)
   {
@@ -327,11 +329,12 @@ class compute_mp_alt_kernel;
 int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "gflops",
+    {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "flops",
      Category::Unknown,
      "Peak speed when the device multiplies 16-bit numbers but keeps the running "
      "total in 32 bits -- the accuracy-preserving pattern AI code uses.  This is "
-     "the general compute units, not the matrix engine."});
+     "the general compute units, not the matrix engine.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.fp16Supported)
   {
@@ -399,14 +402,14 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
     sycl::free(out, dev.stream);
     return 0;
   }
-  float value = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9);
+  float value = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, us);
 
   // Race the affine chain and keep the faster reading.
   float altUs = runKernel(dev, submitAlt, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (altUs > 0.0f)
   {
-    float altValue = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs, 1e9);
-    CLPEAK_VLOG("mp: squaring chain %.1f, alt chain %.1f gflops\n", value, altValue);
+    float altValue = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs);
+    CLPEAK_VLOG("mp: squaring chain %.1f, alt chain %.1f flops\n", value, altValue);
     if (altValue > value * MAX_ALT_CHAIN_RATIO)
       CLPEAK_VLOG("mp: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
                   altValue / value);
@@ -433,11 +436,12 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
   using bfloat16 = sycl::ext::oneapi::bfloat16;
 
   auto test = currentDeviceScope->beginTest(
-    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops",
+    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
      Category::Unknown,
      "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of "
      "accuracy for the number range of a full float.  Integrated graphics "
-     "without bf16 hardware emulate it, and the rate drops accordingly."});
+     "without bf16 hardware emulate it, and the rate drops accordingly.",
+     TestShape::Homogeneous, "vector width"});
 
   if (!dev.info.bf16Supported)
   {
@@ -504,14 +508,14 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
     sycl::free(out, dev.stream);
     return 0;
   }
-  float value = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, us, 1e9);
+  float value = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, us);
 
   // Race the affine chain and keep the faster reading.
   float altUs = runKernel(dev, submitAlt, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (altUs > 0.0f)
   {
-    float altValue = clpeak_oneapi::computeGflops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs, 1e9);
-    CLPEAK_VLOG("bf16: squaring chain %.1f, alt chain %.1f gflops\n", value, altValue);
+    float altValue = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs);
+    CLPEAK_VLOG("bf16: squaring chain %.1f, alt chain %.1f flops\n", value, altValue);
     if (altValue > value * MAX_ALT_CHAIN_RATIO)
       CLPEAK_VLOG("bf16: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
                   altValue / value);
@@ -527,11 +531,12 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
 int OneapiPeak::runComputeBF16(OneapiDevice &, benchmark_config_t &)
 {
   auto test = currentDeviceScope->beginTest(
-    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "gflops",
+    {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
      Category::Unknown,
      "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of "
      "accuracy for the number range of a full float.  Integrated graphics "
-     "without bf16 hardware emulate it, and the rate drops accordingly."});
+     "without bf16 hardware emulate it, and the rate drops accordingly.",
+     TestShape::Homogeneous, "vector width"});
   test.skip("bf16", ResultStatus::Unsupported,
             "SYCL bfloat16 header not available in this oneAPI toolchain");
   return 0;

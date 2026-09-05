@@ -74,6 +74,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# MSVC's CRT marks POSIX names (fileno) and "insecure" C functions (fopen,
+# sscanf, getenv, ...) as deprecated. The code uses the portable names
+# intentionally (and maps the few truly non-portable ones like dup -> _dup via
+# CLPEAK_* macros in console_mute.cpp). Define the standard opt-outs so the
+# build stays warning-clean on both cl.exe and clang-cl without per-call
+# pragmas.
+if(MSVC)
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+endif()
+
 # Backend options
 option(CLPEAK_ENABLE_OPENCL "Build OpenCL backend" ON)
 option(CLPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)
@@ -82,6 +92,7 @@ option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
 option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
 option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
 option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
+option(CLPEAK_ENABLE_ONNX   "Build ONNX Runtime backend (NPUs via execution providers; library dlopen'd at run time)" ON)
 option(CLPEAK_ENABLE_GUI    "Build the Flutter GUI app (clpeak-gui target) and its native bridge" ON)
 
 # The native CPU backend needs a threading library (always available).
@@ -205,6 +216,7 @@ add_subdirectory(src/rocm)
 add_subdirectory(src/metal)
 add_subdirectory(src/oneapi)
 add_subdirectory(src/cpu)
+add_subdirectory(src/onnx)
 
 # CLI executable
 add_subdirectory(src/cli)
@@ -291,6 +303,11 @@ if(CLPEAK_ENABLE_CPU)
     string(APPEND _clpeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch)\n")
 else()
     string(APPEND _clpeak_summary "  CPU    : disabled (CLPEAK_ENABLE_CPU=OFF)\n")
+endif()
+if(CLPEAK_ENABLE_ONNX)
+    string(APPEND _clpeak_summary "  ONNX   : ENABLED  (onnxruntime dlopen'd at run time)\n")
+else()
+    string(APPEND _clpeak_summary "  ONNX   : disabled (CLPEAK_ENABLE_ONNX=OFF)\n")
 endif()
 if(CLPEAK_ENABLE_GUI AND FLUTTER_EXECUTABLE)
     string(APPEND _clpeak_summary "  GUI    : ENABLED  (${FLUTTER_EXECUTABLE})\n")

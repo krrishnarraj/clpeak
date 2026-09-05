@@ -2,6 +2,7 @@
 
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
+#include <memory>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -20,19 +21,37 @@
 int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                              const vk_compute_desc_t &d)
 {
-  logger::TestSpec testSpec;
-  testSpec.tag = d.resultTag;
-  testSpec.display = d.title;
-  testSpec.unit = d.unit;
-  if (d.description) testSpec.description = d.description;
-  auto test = currentDeviceScope->beginTest(testSpec);
+  // The spec is built only when this desc opens its own test.  A desc that
+  // writes into a caller's scope leaves the header fields null -- assigning
+  // one of those to the spec's std::string is undefined, and did crash.
+  std::unique_ptr<logger::TestScope> ownTest;
+  if (!d.scope)
+  {
+    logger::TestSpec testSpec;
+    testSpec.tag = d.resultTag;
+    testSpec.display = d.title;
+    testSpec.unit = d.unit;
+    if (d.description)
+      testSpec.description = d.description;
+    testSpec.shape = d.shape;
+    if (d.axis)
+      testSpec.axis = d.axis;
+    ownTest.reset(new logger::TestScope(currentDeviceScope->beginTest(testSpec)));
+  }
+  logger::TestScope &test = d.scope ? *d.scope : *ownTest;
 
   // Collect variants.  Multi-variant path (e.g. fp16 v1/v2/v4) shares one
   // buffer + descriptor set and swaps only the pipeline between dispatches;
   // single-variant benchmarks materialize a one-entry list.
-  struct Variant { const char *label; const uint32_t *spirv; size_t spirvSize;
-                   const char *description;
-                   const uint32_t *altSpirv; size_t altSpirvSize; };
+  struct Variant
+  {
+    const char *label;
+    const uint32_t *spirv;
+    size_t spirvSize;
+    const char *description;
+    const uint32_t *altSpirv;
+    size_t altSpirvSize;
+  };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
   {
@@ -43,18 +62,31 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   }
   else
   {
-    // Single-variant tests (coopmat): the metric name restates the title, so
-    // the test-level description covers it.
-    variants.push_back({d.metricLabel, d.spirv, d.spirvSize, nullptr, nullptr, 0});
+    // Single-variant tests: one reading, documented by d.metricDescription.
+    // Coopmat uses this path once per data type, all into the same test.
+    variants.push_back({d.metricLabel, d.spirv, d.spirvSize,
+                        d.metricDescription, nullptr, 0});
   }
 
-  auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+  auto note = [](const char *text)
+  { return text ? std::string(text) : std::string(); };
+
+  // Unit override for the single-variant path: an integer member of an
+  // otherwise floating-point family carries its own.
+  auto emitOpts = [&](const char *description)
+  {
+    logger::EmitOptions o;
+    o.description = note(description);
+    if (d.metricUnit)
+      o.unit = d.metricUnit;
+    return o;
+  };
 
   if (d.skip)
   {
     const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
     for (const auto &v : variants)
-      test.skip(v.label, ResultStatus::Unsupported, msg, note(v.description));
+      test.skip(v.label, ResultStatus::Unsupported, msg, emitOpts(v.description));
     return 0;
   }
 
@@ -170,19 +202,15 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Time one shader, returning microseconds per dispatch (<= 0 on failure).
   // *built distinguishes "the driver rejected the stage" from "the dispatch
   // failed", which the caller reports differently.
-  CLPEAK_VLOG("%s: %u groups x %u threads, %llu KB output buffer\n",
-              d.resultTag, numGroups, wgSize,
-              (unsigned long long)(bufferBytes / 1024));
 
   // Phase markers.  A driver that faults inside its own shader compiler or on
   // submit takes the process with it, so the last line printed is the only
   // evidence of where it went -- which of the two below appears last says
   // whether pipeline creation or the dispatch was fatal.
   auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
-                       bool *built) -> float {
+                       bool *built) -> float
+  {
     VkPipeline pipeline;
-    CLPEAK_VLOG("%s: creating pipeline (subgroup %u)\n",
-                d.resultTag, d.requiredSubgroupSize);
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                        pipeline, d.specInfo, d.requiredSubgroupSize);
     // A pinned subgroup width is a preference, not a requirement: if the
@@ -199,9 +227,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
     }
-    if (!*built) return -1.0f;
+    if (!*built)
+      return -1.0f;
 
-    CLPEAK_VLOG("%s: pipeline built, dispatching\n", d.resultTag);
     // No barrier between dispatches: a compute peak reads nothing twice, so
     // overlapping launches cannot flatter it, and forbidding the overlap costs
     // ~2% of the reading.
@@ -212,9 +240,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     return timed;
   };
 
-  double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-  auto toValue = [&](float timed) {
-    return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed / divider);
+  auto toValue = [&](float timed)
+  {
+    return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed);
   };
 
   for (const auto &v : variants)
@@ -224,13 +252,13 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     if (!built)
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
-                note(v.description));
+                emitOpts(v.description));
       continue;
     }
     if (timed <= 0.0f)
     {
       test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                note(v.description));
+                emitOpts(v.description));
       continue;
     }
     float value = toValue(timed);
@@ -249,13 +277,14 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                     d.resultTag, v.label, value, altValue, d.unit);
         if (altValue > value * MAX_ALT_CHAIN_RATIO)
           CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
-                      "compiler fold\n", d.resultTag, v.label, altValue / value);
+                      "compiler fold\n",
+                      d.resultTag, v.label, altValue / value);
         else if (altValue > value)
           value = altValue;
       }
     }
 
-    test.emit(v.label, value, {false, note(v.description)});
+    test.emit(v.label, value, emitOpts(v.description));
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

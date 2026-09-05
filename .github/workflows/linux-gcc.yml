@@ -52,4 +52,4 @@ jobs:
           cmake --build build --config Release -j4
 
       - name: Run
-        run: ./build/clpeak
+        run: ./build/clpeak --version

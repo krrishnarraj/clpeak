@@ -27,6 +27,7 @@ struct device_info_t
     bool halfSupported;
     bool doubleSupported;
     bool int8DotProductSupported;
+    bool int8DotProductPackedSupported;
     cl_device_type clDeviceType; // original OpenCL device type
     DeviceType deviceType;       // neutral equivalent
 
@@ -44,8 +45,5 @@ struct device_info_t
 };
 
 device_info_t getDeviceInfo(cl::Device &d);
-
-// Return time in us for the given event.
-float timeInUS(cl::Event &timeEvent);
 
 #endif // CL_COMMON_H

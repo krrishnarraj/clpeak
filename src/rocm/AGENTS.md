@@ -39,7 +39,7 @@ ROCm headers. Built as `peak_rocm` static library.
 | `rocwmma.cpp` | `runRocwmma` — raw rocWMMA matrix-engine benchmark (library path) |
 | `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (CDNA, fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
 | `sparse_mfma.cpp` | `runSparseMfma` — 2:4 structured-sparse MFMA peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_smfmac_*` |
-| `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak; FP category fp32/fp64/fp16/bf16 (tflops), INT category int8 (tops) |
+| `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak; FP category fp32/fp64/fp16/bf16 (flops), INT category int8 (ops) |
 | `hipblaslt_gemm.cpp` | `runHipblasLt` — hipBLASLt GEMM peak: fp8 e4m3/e5m2 fnuz + mxfp4 (block-scaled, gated by `CLPEAK_HIPBLASLT_HAS_FP4`) |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` |
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
@@ -59,11 +59,21 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
   forwards both on every path, skips included.
 - The matrix-core runners (`wmma.cpp`, `mfma.cpp`, `sparse_mfma.cpp`) walk
   `WmmaEntry` / `MfmaEntry` / `SparseEntry` tables, so the description is a
-  field on the entry.  Add one whenever you add an entry.
+  field on the entry.  Add one whenever you add an entry — it is the
+  *reading's* note now, carried on every emit and skip by `unitOpts()`.
+- **Each of those three tables is ONE test**, not one per entry: `wmma`,
+  `mfma`, `smfmac`.  The entry's `label` is the data type; the family tag,
+  title and description are constants at a single `beginTest` above the loop.
+  Opening it inside the loop instead would close and reopen the test per
+  reading, which the CLI renders as a column that widens down the page.  The three stay separate from one
+  another because they are different instructions on different hardware (RDNA
+  vs CDNA), not different formats on one unit.  `en.isInt` drives the `ops`
+  unit override that lets the integer entry share the test.
 - `rocmWidthNote()` (`rocm_peak.h`) covers `float`/`float2`/`float4`,
   `half`/`half2` and `int`/`int2`/`int4`.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
   *independent chains*.  They carry their own notes.
+- `rocblas_gemm` and `rocwmma` are each one test, with the integer reading carrying its own unit.
 - `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
   through `runTimed` / `runVariant`.
 

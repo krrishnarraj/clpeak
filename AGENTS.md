@@ -2,7 +2,8 @@
 
 Cross-API compute benchmark tool. Measures compute, bandwidth, and latency
 across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL GPU backends —
-plus a native CPU backend — from a single binary.
+plus a native CPU backend and an ONNX Runtime backend that reaches NPUs —
+from a single binary.
 
 ## Architecture
 
@@ -14,7 +15,8 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 ├── CudaPeak   → src/cuda/                           ← CUDA backend
 ├── RocmPeak   → src/rocm/                           ← ROCm/HIP backend
 ├── MetalPeak  → src/metal/                          ← Metal backend
-└── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
+├── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
+└── OnnxPeak   → src/onnx/                           ← ONNX Runtime backend (NPUs via execution providers)
 ```
 
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
@@ -34,6 +36,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `include/metal/` | Metal backend header — `mtl_peak.h` |
 | `include/oneapi/` | oneAPI/SYCL backend header — `oneapi_peak.h` |
 | `include/cpu/` | Native CPU backend header — `cpu_peak.h` |
+| `include/onnx/` | ONNX Runtime backend header — `onnx_peak.h` |
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
@@ -42,17 +45,18 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
 | `src/oneapi/` | oneAPI/SYCL backend: `OneapiPeak` class + SYCL kernels (inline lambdas, AOT/JIT via DPC++) |
 | `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (one feature TU per ISA, runtime-dispatched); cache/DRAM bandwidth + memory latency |
+| `src/onnx/` | ONNX Runtime backend: `OnnxPeak` class + per-benchmark `.cpp`. Each execution provider (QNN / OpenVINO / VitisAI / CoreML / NNAPI / GPU / CPU) is one device; the runtime is dlopen'd and models are emitted as protobuf bytes in memory |
 | `src/cli/` | Desktop CLI: `main.cpp` |
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
-| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build) |
-| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `shader_ops.py` — reads a Vulkan shader's inner loop back out of the compiled SPIR-V) |
+| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` (C API — no library needed to build) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` — refresh the vendored ONNX Runtime headers) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
-| `results/` | Saved reference runs (`--xml-file` output) per vendor — the baselines a suspicious number gets checked against |
+| `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 | `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
-| `docs/` | GitHub Pages site (Jekyll, built natively by Pages from this folder — no plugins). Also holds the app screenshots the README links to, in `docs/assets/img/` |
+| `docs/` | GitHub Pages site (Jekyll, built natively by Pages from this folder — no plugins). `format-v3.md` is the published result-format schema. Also holds the app screenshots the README links to, in `docs/assets/img/` |
 
 ## Build
 
@@ -73,8 +77,9 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 
 - **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h`
 - **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface
-- **Explaining what a test measures?** → `include/common/AGENTS.md` § Test documentation
-- **Result output format?** → `include/common/result_store.h` + `src/common/AGENTS.md`
+- **Classifying or explaining a test?** → `include/common/AGENTS.md`
+  § What a backend authors at `beginTest()` (shape, axis, variant, prose)
+- **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
 

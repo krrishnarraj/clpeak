@@ -3,7 +3,7 @@ description: "clpeak — cross-API compute benchmark (OpenCL, Vulkan, CUDA, ROCm
 publish_to: 'none'
 
 # versionName / versionCode
-version: 2.1.4+35
+version: 3.0.0+36
 
 environment:
   sdk: ^3.12.2
@@ -19,6 +19,7 @@ dependencies:
   file_selector: ^1.0.0
   shared_preferences: ^2.3.0
   url_launcher: ^6.3.0
+  wakelock_plus: ^1.7.0
 
 dev_dependencies:
   flutter_test:

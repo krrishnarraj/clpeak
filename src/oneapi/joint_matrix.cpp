@@ -226,9 +226,9 @@ static std::string jmNote(const JmTile &t)
   return s;
 }
 
-// True when this accumulator type makes the combination an integer one.  The
-// benchmark reports integer rows in TOPS under the IntCompute category and
-// floating-point rows in TFLOPS under FpCompute.
+// True when this accumulator type makes the combination an integer one.
+// The benchmark reports integer rows in TOPS and floating-point rows in TFLOPS
+// within the single Compute category (integer rows carry a per-reading unit).
 static bool jmIsIntAcc(syclex::matrix_type t)
 {
   using mt = syclex::matrix_type;
@@ -331,11 +331,14 @@ static void finalizeTiles(std::vector<JmTile> &tiles)
 
     // Bare stem for the first tile of each stem, MxNxK suffix for any further
     // tile of the same stem — Alchemist advertises bf16 at both 8x8x16 and
-    // 32x32x16, and the two need distinct row names.  Devices that advertise
-    // one tile per dtype (every part before that one) keep the old names.
+    // 32x32x16, and the two need distinct row names.
+    //
+    // No "joint_matrix_" prefix: the test is called joint_matrix, so every
+    // reading repeating it said nothing.  The prefix went when the fp and int
+    // halves became one test.
     const std::string base = jmBaseName(t.at, t.bt);
     const bool dup = (i > 0) && jmBaseName(tiles[i - 1].at, tiles[i - 1].bt) == base;
-    t.metric = "joint_matrix_" + base + (dup ? "_" + t.shape : "");
+    t.metric = base + (dup ? " " + t.shape : "");
   }
 }
 
@@ -493,40 +496,38 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
 
 #endif // CLPEAK_ONEAPI_HAS_JOINT_MATRIX
 
-int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Category category)
+int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  const bool isInt = (category == Category::IntCompute);
+  // One test for all data types -- integer readings carry their own unit.
   auto test = currentDeviceScope->beginTest(
-    {isInt ? "joint-matrix-int" : "joint-matrix-fp",
-     isInt ? "joint_matrix integer peak (every combination the device advertises)"
-           : "joint_matrix float peak (every combination the device advertises)",
-     isInt ? "tops" : "tflops", Category::Unknown,
-     isInt ? "Peak speed of Intel's XMX matrix engine on 8-bit whole numbers -- "
-             "dedicated units that multiply whole blocks of numbers in one step "
-             "rather than one value at a time.  This is the format quantized "
-             "neural networks use.  One row per A/B sign combination and tile "
-             "shape the device advertises."
-           : "Peak speed of Intel's XMX matrix engine -- dedicated units that "
-             "multiply whole blocks of numbers in one step rather than one "
-             "value at a time -- across the reduced-precision formats AI work "
-             "runs on.  One row per input-type and tile shape the device "
-             "advertises."});
+    {"joint_matrix", "joint_matrix peak",
+     "flops", Category::Unknown,
+     "Peak speed of Intel's XMX matrix engine -- dedicated units that multiply "
+     "whole blocks of numbers in one step rather than one value at a time.  "
+     "One reading per input type, sign combination and tile shape the device "
+     "advertises, so the set of readings is itself a description of the "
+     "hardware.",
+     TestShape::Heterogeneous, "data type"});
 
-  // Note for the historical int8 row, used by the paths that skip before any
-  // enumeration has happened.  The FP equivalents go through skipAll, which
-  // carries no per-reading notes, so they have nothing to declare here.
+  auto jmOpts = [&](const JmTile &t) {
+    logger::EmitOptions o;
+    o.description = jmNote(t);
+    if (jmIsIntAcc(t.ct)) o.unit = "ops";
+    return o;
+  };
+
+  // Note for the int8 row, used by the paths that skip before any enumeration
+  // has happened.  The FP equivalents go through skipAll, which carries no
+  // per-reading notes, so they have nothing to declare here.
   const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
                          "quantized neural networks use.";
 
-  // Nothing to enumerate (no toolchain support, no matrix engine, no table):
-  // record the historical row set so a device that has never been able to run
-  // this still produces the rows it always did.
   auto skipEverything = [&](ResultStatus status, const char *reason) {
-    if (isInt)
-      test.skip("joint_matrix_int8", status, reason, int8Note);
-    else
-      test.skipAll({"joint_matrix_bf16", "joint_matrix_fp16", "joint_matrix_tf32"},
-                   status, reason);
+    test.skip("bf16", status, reason);
+    test.skip("fp16", status, reason);
+    test.skip("tf32", status, reason);
+    logger::EmitOptions o; o.description = int8Note; o.unit = "ops";
+    test.skip("int8", status, reason, o);
   };
 
 #ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
@@ -539,10 +540,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
   bool combosThrew = false;
   const auto combos = queryCombos(dev.dev, combosThrew);
 
-  // Ground-truth diagnostic (verbose only).  Dumped once, on the FP pass, and
-  // BEFORE the xmxSupported gate, so even a device we mis-classify still
-  // reveals its real table under --verbose.
-  if (!isInt && !combosThrew)
+  if (!combosThrew)
     dumpMatrixCombinations(combos);
 
   if (!dev.info.xmxSupported)
@@ -552,18 +550,24 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     return 0;
   }
 
-  std::vector<JmTile> tiles = resolveTiles(combos, isInt);
-  if (tiles.empty())
+  std::vector<JmTile> tilesFp = resolveTiles(combos, false);
+  std::vector<JmTile> tilesInt = resolveTiles(combos, true);
+  bool haveFp = !tilesFp.empty();
+  bool haveInt = !tilesInt.empty();
+  if (!haveFp && !haveInt)
   {
     skipEverything(ResultStatus::Unsupported,
                    combosThrew
                      ? "device's matrix-combination table could not be queried"
-                     : (isInt ? "device advertises no integer matrix combinations"
-                              : "device advertises no floating-point matrix combinations"));
+                     : "device advertises no matrix combinations");
     return 0;
   }
-  addMissingCanonical(tiles, isInt);
-  finalizeTiles(tiles);
+  if (haveFp) { addMissingCanonical(tilesFp, false); finalizeTiles(tilesFp); }
+  if (haveInt) { addMissingCanonical(tilesInt, true); finalizeTiles(tilesInt); }
+  std::vector<JmTile> tiles;
+  tiles.reserve(tilesFp.size() + tilesInt.size());
+  tiles.insert(tiles.end(), tilesFp.begin(), tilesFp.end());
+  tiles.insert(tiles.end(), tilesInt.begin(), tilesInt.end());
 
   // The work-group is the device's widest sub-group, but IGC decides the SIMD
   // width it compiles at, so a work-group may end up holding several sub-groups
@@ -597,11 +601,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
 
   auto skipRows = [&](ResultStatus status, const std::string &reason) {
     for (const auto &t : tiles)
-      test.skip(t.metric, status, reason, jmNote(t));
+      test.skip(t.metric, status, reason, jmOpts(t));
   };
 
-  void *out = isInt ? (void *)sycl::malloc_device<int32_t>(outElems, dev.stream)
-                    : (void *)sycl::malloc_device<float>(outElems, dev.stream);
+  void *out = (void *)sycl::malloc_device<float>(outElems, dev.stream);
   uint32_t *sgCount = sycl::malloc_device<uint32_t>(1, dev.stream);
   if (!out || !sgCount)
   {
@@ -617,7 +620,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     {
       test.skip(t.metric, ResultStatus::Unsupported,
                 t.label + " not in this device's matrix-engine combinations",
-                jmNote(t));
+                jmOpts(t));
       continue;
     }
 
@@ -628,7 +631,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
     if (blocks == 0) blocks = 1;
     const uint32_t numBlocks = (uint32_t)blocks;
 
-    const float us = isInt
+    const float us = jmIsIntAcc(t.ct)
         ? runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize,
                    cfg.targetTimeUs, forced, t)
         : runJmFp (*this, dev, (float *)out, sgCount, numBlocks, blockSize,
@@ -639,12 +642,12 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
       test.skip(t.metric, ResultStatus::Unsupported,
                 "tile " + t.label + " " + t.shape +
                   " has no compiled instantiation in this build",
-                jmNote(t));
+                jmOpts(t));
       continue;
     }
     if (us <= 0.0f)
     {
-      test.skip(t.metric, ResultStatus::Error, "kernel launch failed", jmNote(t));
+      test.skip(t.metric, ResultStatus::Error, "kernel launch failed", jmOpts(t));
       continue;
     }
 
@@ -671,7 +674,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg, Categ
 
     const double ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() *
                        2.0 * (double)JM_ITERS;
-    test.emit(t.metric, (float)(ops * 1.0e6 / us / 1.0e12), {false, jmNote(t)});
+    test.emit(t.metric, (float)(ops * 1.0e6 / us), jmOpts(t));
   }
 
   sycl::free(out, dev.stream);

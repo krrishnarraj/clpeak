@@ -33,7 +33,7 @@ static library.  Source files are Objective-C++ (`.mm`).
 | `mtl_blas.mm` | `runMpsGemm` — MPS/MPSGraph matrix multiply; `runMpsAttention` — MPSGraph scaled-dot-product-attention peak (`--mps-attention`, fp16, fixed llama-class shape, needs macOS 15 / iOS 18). Its FLOPs count the two matmuls only, so it reads below raw GEMM peak by design. **Any MPSGraph-based test must gate on `mtl_device_info_t::mpsGraphSupported`** — on the iOS Simulator MPSGraph aborts the process and the throw cannot be caught (rationale in `mtl_device.mm`). **int8 GEMM is impossible on Metal** — MPSGraph matmul is float-only and MPSCNN's UInt8 weights are storage quantization, dequantized before compute |
 | `global_bandwidth.mm` | `runGlobalBandwidth` |
 | `local_bandwidth.mm` | `runLocalBandwidth` |
-| `image_bandwidth.mm` | `runImageBandwidth`; `runTextureSampleRate` (`--texture-sample`, unit `gtexels` with `Category::Bandwidth` passed explicitly) — bilinear filtered-fetch rate from a cache-resident texture, rgba8 + rgba16f. A TMU test, not a bandwidth one; the addressing constraints that keep it at TMU rate are in `mtl_kernels/texture_sample.metal`. M1 Pro reference: rgba8 ~115, rgba16f ~92 GTexels/s |
+| `image_bandwidth.mm` | `runImageBandwidth`; `runTextureSampleRate` (`--texture-sample`, unit `texels` with `Category::Bandwidth` passed explicitly) — bilinear filtered-fetch rate from a cache-resident texture, rgba8 + rgba16f. A TMU test, not a bandwidth one; the addressing constraints that keep it at TMU rate are in `mtl_kernels/texture_sample.metal`. M1 Pro reference: rgba8 ~115, rgba16f ~92 GTexels/s |
 | `kernel_latency.mm` | `runKernelLatency` |
 | `mtl_kernels/` | Metal Shading Language kernels (`.metal`) embedded as C++ string literals |
 | `cmake/EmbedMetalKernels.cmake` | `embed_metal_kernels()` — .metal → C++ raw-string arrays |
@@ -44,7 +44,12 @@ See `include/common/AGENTS.md` § Test documentation.  Metal specifics:
 
 - `mtl_compute_desc_t::description` (test) and
   `mtl_compute_variant_t::description` (one reading); `runComputeKernel()`
-  forwards both on every path, skips included.
+  forwards both on every path, skips included.  `shape` / `axis` ride the same
+  descriptor and are forwarded the same way.
+- A data-type family is ONE descriptor with a variant per type, gated
+  individually by `mtl_compute_variant_t::skipMsg` — `simdgroup.mm` is the
+  worked example: fp16 and bf16 are one test, and an M1 (no bf16) skips that
+  one reading instead of losing the test.
 - `mtlWidthNote()` (`mtl_internal.h`) is the shared wording for the
   `float`/`float2`/`float4`/… readings.
 - The `V` tables in `global_bandwidth.mm` / `local_bandwidth.mm` /

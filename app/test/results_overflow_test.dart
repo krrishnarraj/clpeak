@@ -8,7 +8,7 @@
 // since the column tracked the full row width, not the text.
 //
 // Pure Dart — ResultsBody takes a RunDocument, so no native bridge is needed.
-import 'package:clpeak/src/model/result_entry.dart';
+import 'package:clpeak/src/model/result_model.dart';
 import 'package:clpeak/src/model/run_document.dart';
 import 'package:clpeak/src/theme/clpeak_theme.dart';
 import 'package:clpeak/src/ui/results/results_body.dart';
@@ -20,31 +20,33 @@ const _longDevice = 'Goldfish GFXStream (llvmpipe (LLVM 21.1.4, 128 bits))';
 const _longTest = 'Half-precision compute fp16 (vector width 8)';
 const _shortTest = 'Integer compute';
 
-ResultEntry _entry({
+const _flops =
+    Units(symbol: 'FLOPS', quantity: Quantity.flops);
+
+/// One measured reading of one test on one device, added to [doc].
+void _add(
+  RunDocument doc, {
   String backend = 'Vulkan',
   String device = _longDevice,
   String test = 'compute_hp',
-  String display = _longTest,
+  String title = _longTest,
   String description = '',
   String? platform,
   String driver = '24.2.0',
-}) =>
-    ResultEntry(
-      backend: backend,
-      platform: platform ?? backend,
-      device: device,
-      driver: driver,
-      category: 'fp_compute',
-      test: test,
-      display: display,
-      metric: 'float8 uncontended',
-      unit: 'gflops',
-      status: ResultStatus.ok,
-      value: 93.1,
-      reason: '',
-      description: description,
-      metricDescription: '',
-    );
+}) {
+  doc
+      .runFor(backend, platform ?? backend, device, driver)
+      .openTest(TestHeader(
+        id: test,
+        title: title,
+        description: description,
+        category: BenchCategory.compute,
+        shape: TestShape.homogeneous,
+        units: _flops,
+      ))
+      .metrics
+      .add(const MetricResult(id: 'float8 uncontended', value: 93.1));
+}
 
 Widget _host(RunDocument doc) => MaterialApp(
       theme: ClpeakTheme.dark(),
@@ -62,8 +64,8 @@ void main() {
     final doc = RunDocument();
     // Two runs, so the device selector chips are shown — the chip is the
     // narrowest place the device name has to fit.
-    doc.addEntry(_entry());
-    doc.addEntry(_entry(backend: 'CPU', device: 'Apple CPU (part 0x000)'));
+    _add(doc);
+    _add(doc, backend: 'CPU', device: 'Apple CPU (part 0x000)');
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
@@ -102,16 +104,14 @@ void main() {
     addTearDown(tester.view.reset);
 
     final doc = RunDocument();
-    doc.addEntry(_entry(
-      test: 'compute_int',
-      display: _shortTest,
-      description: 'How fast the device does plain int32 math.',
-    ));
-    doc.addEntry(_entry(
-      test: 'compute_int_dp4a',
-      display: 'Integer compute int32 dot-product',
-      description: 'How fast the device does int32 dot-product math.',
-    ));
+    _add(doc,
+        test: 'compute_int',
+        title: _shortTest,
+        description: 'How fast the device does plain int32 math.');
+    _add(doc,
+        test: 'compute_int_dp4a',
+        title: 'Integer compute int32 dot-product',
+        description: 'How fast the device does int32 dot-product math.');
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
@@ -139,12 +139,11 @@ void main() {
     const driver = '32.0.101.8993';
 
     final doc = RunDocument();
-    doc.addEntry(_entry(
-      backend: 'OpenCL',
-      device: 'Intel(R) Arc(TM) A380 Graphics',
-      platform: platform,
-      driver: driver,
-    ));
+    _add(doc,
+        backend: 'OpenCL',
+        device: 'Intel(R) Arc(TM) A380 Graphics',
+        platform: platform,
+        driver: driver);
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();

@@ -6,6 +6,7 @@
 #include <vector>
 #include <common/benchmark_enums.h>  // Benchmark, Category
 #include <common/common.h>           // DEFAULT_TARGET_TIME_US
+#include <common/run_document.h>     // Invocation
 
 // Shared CLI options populated once in entry.cpp and consumed by every
 // backend.  Each backend's applyOptions() copies the relevant fields into
@@ -19,6 +20,7 @@ struct CliOptions {
   bool skipMetal  = false;
   bool skipOneapi = false;
   bool skipCpu    = false;
+  bool skipOnnx   = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
   // applyOptions can copy it).  Empty = run all enumerated platforms/devices.
@@ -31,6 +33,13 @@ struct CliOptions {
   std::vector<int> rocmDeviceIndices;
   std::vector<int> mtlDeviceIndices;
   std::vector<int> oneapiDeviceIndices;
+  std::vector<int> onnxDeviceIndices;
+
+  // --onnx-lib: absolute path to the onnxruntime shared library to load,
+  // overriding the platform's conventional names.  Empty = search the
+  // default names (see src/onnx/onnx_runtime.cpp).  Ignored on a build that
+  // links ONNX Runtime statically, where there is nothing to load.
+  std::string onnxLibPath;
 
   // Iters / warmup.  When forceIters is false, each backend's runKernel
   // calibrates iters from a one-shot timed warmup so the timed phase lands
@@ -50,16 +59,13 @@ struct CliOptions {
   // category is enabled AND its own bit is set (see isAllowed).
   std::bitset<static_cast<size_t>(Benchmark::COUNT)>  enabledTests;
   std::bitset<static_cast<size_t>(Category::Unknown)> enabledCategories;
-  // OpenCL-only timing knob.
-  bool useEventTimer = false;
 
-  // Output / compare
-  bool        enableXml  = false;
-  std::string xmlFile;
-  bool        enableJson = false;
-  std::string jsonFile;
-  bool        enableCsv  = false;
-  std::string csvFile;
+  // Output / compare.  One format, one flag: `-o file` writes the v3 JSON
+  // document (run_document.h).  The XML and CSV writers are gone -- XML's
+  // only advantage over JSON was nesting, and CSV could carry neither device
+  // metadata nor the per-test documentation.
+  bool        enableOutput = false;
+  std::string outputFile;
   std::string compareFile;
 
   // Listing mode (no benchmarks run; just print devices).
@@ -81,6 +87,13 @@ struct CliOptions {
   }
 
 };
+
+// Describe how clpeak was asked to run, for the result document's `invocation`
+// block.  Every number in a run is sensitive to this -- a shorter --max-time
+// measures a different thing, and a selective run is not a full one even though
+// the file looks the same shape -- so it is recorded rather than inferred.
+// Lives here because the category and test flag-name tables do.
+Invocation invocationFrom(const CliOptions &opts, int argc, char **argv);
 
 // Parse argv into out.  On --help / --version / parse error this calls
 // exit() directly (matching the previous behavior).  Returns 0 on success.

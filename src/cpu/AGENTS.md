@@ -18,7 +18,7 @@ local memory, DRAM ↔ global memory.
 - Pinned barrier thread pool? → `thread_pool.cpp`
 - SIMD abstraction (per-ISA vector wrappers, `NACC`, unroll macros)? → `cpu_simd.h`
 - Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
-- Shared 1T/NT compute runner + per-ISA test emit (`emitVariants`)? → `compute_common.h`
+- Shared 1T/NT compute runner, per-ISA emit (`emitVariants`) and merged families (`emitFamily`)? → `compute_common.h`
 - FP compute (fp32/fp64/fp16/bf16/mixed/fp8 dot, divide/sqrt)? → `compute_float.cpp`
 - INT compute (int32, int8 dot, int16 dot, u64 divide)? → `compute_int.cpp`
 - CPU matrix engine (AMX / SMMLA / BFMMLA / SME)? → `cpu_matrix.cpp`
@@ -51,16 +51,16 @@ local memory, DRAM ↔ global memory.
 | `cpu_tu_registry.h` | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
 | `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `clpeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
 | `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — runs every ISA variant of a `kernelMenu()` slot as its own test (ISA slugged into the tag), or one `Unsupported` test. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
 | `string.cpp` | `runStringScan/Utf8Validate` — `Category::String` in GB/s, own `--string` flag |
-| `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::Amx`, run in both the fp and int phases |
+| `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::Amx` |
 | `apple_blas.cpp` | `runAppleBlas` (`--accelerate`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width) |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level, plus the `DRAM linear`, MLP (`DRAM x8`/`x32`) and TLB-miss rows |
-| `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (ns-per-op cost probes) and `runSmtScaling` (gflops at 1 thread/core vs all logical threads) |
+| `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (seconds-per-op cost probes) and `runSmtScaling` (flops at 1 thread/core vs all logical threads) |
 
 ## Build
 
@@ -94,11 +94,23 @@ feature it was compiled with is present. The rationale for each TU's flags and
 platform gating lives in `CMakeLists.txt`.
 
 **Compute tests run EVERY supported ISA variant, not just the best.** The
-compute methods iterate `kernelMenu()` and emit one test per ISA — decorated
-with the canonical label, e.g. `Single-precision compute (AVX-512)` — so users
-can compare instruction sets, with the ISA slugged into the tag so dump/baseline
-rows stay unique. Bandwidth still uses the single best kernel via `kernels()`,
-and the device-header `ISA:` property is the widest active ISA (`isaName()`).
+compute methods iterate `kernelMenu()` and emit one test per ISA so users can
+compare instruction sets. The ISA goes in `logger::TestSpec::variant`, **never
+into the tag**: the tag is the test's identity and must be the same string on
+every machine, or `--compare` cannot match a run against one taken elsewhere.
+The GUI shows the variant beside the title, and the CLI in brackets —
+`Single-precision compute [AVX-512]`. Bandwidth still uses the single best
+kernel via `kernels()`, and the device-header `ISA:` property is the widest
+active ISA (`isaName()`).
+
+**Families share a test.** `emitFamily()` runs several related kernels as one
+test per ISA rather than one test per kernel — the matrix engine's data types,
+the divider's four operations, the two integer dot-product widths. It groups by ISA because the ISA is what
+makes two readings incomparable (bf16 on AMX vs on SME is different hardware;
+bf16 vs fp16 on one AMX is not), and a row this host cannot run still appears
+as a skip, so the reader sees which formats the engine lacks. A row measured in
+another unit carries it (`FamilyRow::unit`) — that is how `cpu_matrix`'s int8
+row shares the test with its floating-point rows.
 
 TU tags (`cpu_tu_registry.h`):
 
@@ -178,10 +190,32 @@ changing a kernel.
   glibc's switch to non-temporal stores above a size threshold, bypassing the
   cache under test — the first "L1 write" landed exactly at DRAM bandwidth. The
   DRAM STREAM copy keeps libc memcpy on purpose.
-- **Size DRAM arrays off the AGGREGATE LLC and first-touch them in parallel.**
-  On multi-CCX/CCD AMD, `cpu0`'s L3 is one slice; sizing off it let a 64 MB array
-  sit entirely in a 64 MB aggregate L3 and report ~550 GB/s "DRAM" read.
-  Single-threaded init puts every page on one NUMA node and collapses the number.
+- **Size DRAM working sets off the SUM of every cache level, and first-touch
+  them in parallel.** Not "the LLC": that name fails twice over. On
+  multi-CCX/CCD AMD `cpu0`'s L3 is one slice, and on a chip whose last level
+  *is* the L2 (Apple Silicon, Snapdragon X, most phone SoCs) there is no L3 to
+  size off at all — a Snapdragon X Elite has 36 MB of aggregate L2 and reports
+  none. `l1dTotalBytes + l2TotalBytes + l3Total` at the classic STREAM 4x
+  margin covers both; `pickStreamFloats` (`bandwidth.cpp`) and the DRAM
+  pointer-chase (`latency.cpp`) both use it. Single-threaded init puts every
+  page on one NUMA node and collapses the number.
+- **An MT cache row splits the AGGREGATE of its level, and never below the
+  level under it.** Two ways it degenerates into re-measuring the faster cache.
+  Dividing the *per-instance* size by every thread shrinks the slice by the
+  instance count twice over — on a 4-CCX Threadripper the L3 MT slice came out
+  at 256 KB per thread, inside the 512 KB per-core L2, and "L3 MT" read 1758
+  GB/s against "L2 MT" at 1744. Two levels reporting the same bandwidth is the
+  tell. And whether a level is shared at all is a question for the topology
+  (`l2Total < l2PerInstance × cores`), not for the vendor string: Apple is not
+  the only one with a cluster L2 — Qualcomm's Oryon and Intel's E-core modules
+  share theirs too. `mtFloor` in `bandwidth.cpp` is the backstop for both.
+- **No L3 is a real answer — never fabricate one.** `detectCpuInfo` leaves
+  `l3CacheBytes` at 0 when the OS reports no L3, and the L3 cache-bandwidth and
+  latency rows skip as Unsupported rather than measure a made-up working set
+  that still fits in L2. An invented 8 MB there put an "L3" in the device
+  header of every Apple part, reported an L3 *faster* than the L2 next to it,
+  and undersized the STREAM arrays. Apple additionally needs its L2 total
+  summed over `hw.perflevel*.cpusperl2` — one sysctl reports one cluster.
 - **macOS has no hard thread affinity**, so `ST` numbers vary run-to-run as the
   kernel lands on a P- or E-core; `MT` is stable. Pinning is real on
   Linux/Windows. This is also why SMT scaling reports Unsupported on macOS —
@@ -213,9 +247,16 @@ Numbers to sanity-check a change against; anything far off is a bug, not a win.
   when validating on a new x86 host or on real SVE silicon.
 - Expect write MT to scale far worse than read MT on Apple (~2.5× vs ~7.7×):
   the store path has a shared ceiling, reproduced outside clpeak.
+- **DRAM `read` above the memory's rated peak is always a sizing bug**, never a
+  win — the arrays are partly cache-resident. `--verbose` prints the array size
+  and the total cache it has to clear. `copy`/`triad` landing well *below*
+  `read` is not the mirror-image bug: they count only the bytes asked for while
+  most CPUs also fetch each line before overwriting it, so ~1.5x of copy's
+  traffic and ~1.33x of triad's goes uncounted. Apple is the outlier that makes
+  `copy` come out *above* `read` (M1 Pro: read ~119, copy ~158, triad ~132).
 - The STREAM triad row **is** vectorised on both arm64 and x86 — do not
-  re-investigate that. It reads below copy everywhere (uncounted RFO traffic),
-  but collapses specifically on Windows (triad/copy 0.32–0.38 vs 0.60–0.92
+  re-investigate that. It reads below copy everywhere, but collapses
+  specifically on Windows (triad/copy 0.32–0.38 vs 0.60–0.92
   elsewhere), which tracks page-size/TLB pressure over three concurrent 256 MB
   streams, not codegen.
 
@@ -226,11 +267,11 @@ Compute and cache-bandwidth tests emit an `ST` (one pinned core) and an `MT`
 counts, so results compare across machines with different core counts. DRAM
 bandwidth emits `read`/`copy`/`triad`; memory latency is `ST` only.
 
-Crypto and string tests report GB/s with unit `gbps` **and the category passed
-explicitly** in the `TestSpec` — `categoryFromUnit("gbps")` would otherwise file
-them under Bandwidth. The divide/sqrt rows are GFLOPS counting one op per lane
+Crypto and string tests report B/s with unit `bps` **and the category passed
+explicitly** in the `TestSpec` — `categoryFromUnit("bps")` would otherwise file
+them under Bandwidth. The divide/sqrt rows are flops counting one op per lane
 (far below the FMA rows by design). Atomics, branch-mispredict and
-store-forward report ns per op — cost probes, not throughput peaks.
+store-forward report seconds per op — cost probes, not throughput peaks.
 
 Two tests were considered and deliberately dropped: **core-to-core latency**
 (macOS has no hard pinning, so pair attribution is unreliable; the contended

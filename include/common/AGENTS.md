@@ -9,11 +9,85 @@ No backend-specific includes live here.
 - Looking for benchmark enums? → `benchmark_enums.h`
 - Looking for benchmark constants + calibration? → `common.h`
 - Looking for CLI options struct? → `options.h`
-- Looking for result output format? → `result_store.h`
+- Looking for result output format? → `run_document.h` (model) / `docs/format-v3.md` (schema)
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
 - Looking for device inventory structs? → `inventory.h`
 - Looking for gating? → `peak.h` (gating is part of Peak)
-- Documenting a test for non-expert readers? → see *Test documentation* below
+- Classifying or documenting a test? → see *What a backend authors at beginTest()* below
+
+## What a backend authors at `beginTest()`
+
+Six things, all authored where the measurement lives — never collected into a
+table somewhere else, because none of them can be recovered from anywhere else.
+
+| field | says |
+|---|---|
+| `shape` | whether the readings are comparable to one another (below) |
+| `axis` | what varies across them: `"vector width"`, `"data type"`, `"cache level"`, `"direction"`, `"threads"` |
+| `direction` | which way is better, when the unit table's default is wrong |
+| `variant` | a runtime qualifier that is *not* identity — a CPU ISA, a GPU arch |
+| `description` | what the test measures (below) |
+| `unit` | the token the unit table resolves (`src/common/units.cpp`) |
+
+### `shape` — homogeneous or heterogeneous
+
+`TestShape::Homogeneous` means the readings are interchangeable variants of one
+measurement — `float` / `float2` / `float4`, `int8_dp` chain depths — so the
+best of them is the test's answer and the GUI shows that one number.
+`TestShape::Heterogeneous` means each reading is its own measurement — nine
+GEMM datatypes, L1/L2/L3/DRAM, h2d vs d2h, ST vs MT — so the GUI shows them all
+and no headline.
+
+It cannot be inferred from anything. `wmma_fp16` has one reading and is
+homogeneous; `mps-gemm-fp` has three and is not; both are flops. The same tag
+even differs by backend: a GPU's `global_memory_bandwidth` is a vector-width
+sweep, the CPU's is read/copy/triad.
+
+Heterogeneous is the default, so an unclassified test is verbose, never wrong.
+Classifying one is what turns the collapsed row on.
+
+### `variant`, not a slugged tag
+
+A runtime qualifier belongs in `TestSpec::variant`, never appended to `tag`.
+Slugging it in is lossy — `"NEON + SME2 (SVL=512b)"` and `"AMX/SME"` both
+collapse to underscores — and it makes the tag differ between machines, which
+breaks `--compare` across them. `variant` participates in the test's key
+(`id@variant`) so two ISAs of one test stay two rows, and the GUI shows it
+beside the title.
+
+### A reading in another unit
+
+`EmitOptions::unit` overrides the test's for one reading. That is what lets a
+single heterogeneous GEMM test hold both flops and ops readings. 
+`DeviceScope::beginTest()` on a tag already recorded for the device
+*reopens* it and appends.
+
+Two things are easy to get wrong here:
+
+- **Skips need the unit as much as measurements do.** `skip()` has an
+  `EmitOptions` overload for exactly this. An unsupported int8 row with no unit
+  inherits its test's, and then claims to be flops.
+- **The reopening `TestSpec` still carries the unit of the readings it is about
+  to produce.** The test keeps the unit of its *first* open — that is what the
+  document records — and if the first open emits int rows, an `ops` reading that declared no unit would record the
+  whole test in flops. Both presenters print the unit per row, so no row is
+  mislabelled by the test header.
+
+**A test's `CLPEAK_VLOG` lines belong after its `beginTest()`.** The table
+streams per metric; a diagnostic emitted during the *setup* that precedes
+`beginTest()` therefore appears under the previous test's readings, where it
+reads as belonging to them. Open the scope first — it needs nothing from the
+setup — and let the diagnostic land under its own header. The
+global-bandwidth working-set line is the worked example, in all five GPU
+backends. Device-scope diagnostics (a failed program build, an enumeration
+dump) are the exception and correctly precede every test.
+
+**Reopen across scopes, not within one.** A family whose data types are each
+measured in their own block should open ONE scope and pass it down, not open
+the test per block — see the tensor-core and cooperative-matrix runners, whose
+descriptors take a `logger::TestScope *`. Reopening per reading works, but
+each metric flushes immediately so the label column widens down the page
+(via `mergedPad`).
 
 ## Test documentation
 
@@ -34,11 +108,10 @@ Authoring natively, next to the measurement, is what makes this work at all:
 CPU tags are ISA-slugged at runtime, so no static table keyed by tag could
 cover them, and the same tag means different things across backends.
 
-The strings travel on the result rows (`ResultEntry::description`,
-`::metricDescription`), so all three dump formats round-trip them and a
-reopened file explains itself.  Whitespace is collapsed to single spaces on
-the way in, so the line-oriented CSV/XML/JSON writers stay safe no matter how
-the literal is wrapped in source.
+The strings travel on the document (`TestResult::description`,
+`MetricResult::description`), so the dump round-trips them and a reopened file
+explains itself.  Whitespace is collapsed to single spaces on the way in, so a
+literal wrapped across source lines stays one line in the output.
 
 Two consumers render them: the GUI behind an info glyph, and the CLI under
 `--describe` (off by default — the plain output stays a table).  Undocumented
@@ -84,7 +157,10 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums, `categoryOf()` |
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
-| `result_store.h` | `ResultEntry`/`ResultStore` + JSON/CSV/XML serialization + `resultsToJson()` |
+| `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
+| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix |
+| `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
+| `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, single `onEvent()` hook, accumulated `results` |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` |
@@ -94,8 +170,11 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 
 - If you change the `Peak` interface → update all backend `AGENTS.md` files.
 - If you add/remove a header → update this file's Key Files table.
-- If you change result format → bump `RESULT_FORMAT_VERSION` in `result_store.h`.
-  Purely additive fields don't need it: every loader ignores keys/attributes/
-  trailing CSV columns it doesn't know, which is how `display`, the `devices`
-  block and the documentation fields all landed on v2.
+- If you change result format → update `docs/format-v3.md`, and bump
+  `RESULT_FORMAT_VERSION` in `run_document.h` only for a *breaking* change.
+  Adding an optional field is not one: the loader ignores keys it doesn't know,
+  and absent-means-default is the format's own convention. A bump makes every
+  file already saved unreadable, the GUI's whole run history included, so it
+  also means bumping `formatVersion` in
+  `app/lib/src/services/run_history_store.dart`.
 - If you change benchmark enums → make sure all backends handle the new enum values.

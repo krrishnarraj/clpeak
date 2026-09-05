@@ -10,12 +10,13 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t tgSize = 256;
 
     auto test = currentDeviceScope->beginTest(
-        {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+        {"global_memory_bandwidth", "Global memory bandwidth", "bps",
          Category::Unknown,
          "How many bytes per second the GPU can stream out of main memory, "
          "reading a buffer far too large to cache.  Each reading fetches a "
          "different number of values per instruction, since wider fetches "
-         "usually pull more through before the memory system saturates."});
+         "usually pull more through before the memory system saturates.",
+         TestShape::Homogeneous, "vector width"});
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).
@@ -25,6 +26,15 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     uint64_t numItems = (maxItems / align) * align;
     if (numItems > cfg.globalBWMaxSize / sizeof(float))
         numItems = (cfg.globalBWMaxSize / sizeof(float) / align) * align;
+
+    // The one number that decides whether this test measured memory or cache:
+    // the timed phase re-reads the same buffer, so a working set that fits
+    // behind the last-level cache reports the cache.  Metal exposes no cache
+    // size and the SLC is memory-side, so this stays on the shared default --
+    // print the working set so an implausible reading can be checked without
+    // a rebuild.
+    CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB (Metal reports no cache size)\n",
+                (unsigned long long)(numItems * sizeof(float) >> 20));
 
     id<MTLBuffer> inBuf  = [dev.impl->device newBufferWithLength:numItems * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
@@ -74,8 +84,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  gridSize, tgSizeM, warmupCount,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
-        float gbps = (float)bytesRead / us / 1e3f;
-        test.emit(v.label, gbps, mtlWidthNote(v.width));
+        float bps = (float)bytesRead / us * 1e6f;
+        test.emit(v.label, bps, mtlWidthNote(v.width));
     }
 
     return 0;

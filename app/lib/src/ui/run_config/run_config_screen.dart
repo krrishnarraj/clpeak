@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../model/catalog.dart';
-import '../../model/result_entry.dart';
+import '../../model/result_model.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../theme/clpeak_theme.dart';
@@ -19,7 +19,9 @@ class RunConfigScreen extends StatelessWidget {
     final service = context.watch<BenchmarkService>();
     final config = service.config;
     final catalog = service.catalog;
-    final canRun = config.hasSelection && config.categories.isNotEmpty;
+    final ready = service.catalogReady;
+    final canRun =
+        ready && config.hasSelection && config.categories.isNotEmpty;
 
     return Scaffold(
       body: SafeArea(
@@ -36,6 +38,13 @@ class RunConfigScreen extends StatelessWidget {
                 children: [
                   const CSection(label: 'Devices'),
                   const SizedBox(height: 10),
+                  if (!ready)
+                    CPanel(
+                      child: Text(
+                        'Detecting devices…',
+                        style: t.body,
+                      ),
+                    ),
                   for (final backend in catalog.usable) ...[
                     _BackendSelector(backend: backend),
                     const SizedBox(height: 10),
@@ -97,17 +106,18 @@ class RunConfigScreen extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        canRun
-                            ? 'Ready'
-                            : 'Select at least one device and category',
-                        textAlign: TextAlign.center,
-                        style:
-                            t.micro.copyWith(color: canRun ? t.dim : t.danger),
-                      ),
-                      const SizedBox(height: 10),
+                      if (!canRun) ...[
+                        Text(
+                          !ready
+                              ? 'Detecting devices…'
+                              : 'Select at least one device and category',
+                          textAlign: TextAlign.center,
+                          style: t.micro.copyWith(color: t.danger),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       CButton(
-                        label: 'Run',
+                        label: ready ? 'Run' : 'Detecting…',
                         icon: Icons.play_arrow,
                         kind: CButtonKind.primary,
                         stretch: true,

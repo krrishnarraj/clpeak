@@ -28,10 +28,12 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   vk_compute_desc_t d = {};
   d.title       = "Integer compute int32";
   d.resultTag   = "integer_compute";
-  d.unit        = "gops";
+  d.unit        = "ops";
   d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                   "indexing, addressing and bit manipulation, which kernels do "
                   "alongside their fractional maths.";
+  d.shape       = TestShape::Homogeneous;
+  d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT_WORK_PER_WI;
@@ -68,10 +70,14 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   vk_compute_desc_t d = {};
   d.title       = "INT8 dot-product compute";
   d.resultTag   = "integer_compute_int8_dp";
-  d.unit        = "gops";
+  d.unit        = "ops";
   d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
                   "four pairs of small whole numbers and sums them in one step -- the "
                   "workhorse of quantized (compressed) neural networks.";
+  d.shape       = TestShape::Homogeneous;
+  // Independent chains, not wider vectors: each reading gives the hardware
+  // more dot products to have in flight at once.
+  d.axis        = "chains in flight";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;

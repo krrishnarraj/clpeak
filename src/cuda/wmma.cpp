@@ -7,33 +7,37 @@
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
 // ---------------------------------------------------------------------------
 
-int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category category)
+int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
 {
   // Shared geometry: one warp (32 threads) per block, m16n16k16 tile per
   // wmma fragment, 256 outer iters → COOPMAT_WORK_PER_WI per thread.
   const uint32_t warp = 32;
   const uint32_t outElems = 16 * 16; // M*N
 
-  // ---------------------------------------------------------------------
-  // FP cluster -- each variant opens its own <wmma_*> group with the
-  // proper unit attribute via runComputeKernel; no umbrella tag here
-  // (depth-5 nesting under one would break the v2 logger shim).
-  // ---------------------------------------------------------------------
-  if (category == Category::FpCompute)
-  {
+  // One scope for the whole family -- all data types in one test.
+  // The integer readings carry their own unit (ops) so they share the
+  // test with the floating-point ones.
+  auto test = currentDeviceScope->beginTest(
+      {"wmma", "Tensor cores (WMMA / mma.sync)", "flops", Category::Unknown,
+         "Peak speed of the tensor cores -- dedicated units that "
+         "multiply whole blocks of numbers in one step rather than one value at "
+         "a time.  Each reading is a different input format, and several are one "
+         "format run a second way: with the running total kept narrower, or with "
+         "half the values skipped as known zeros.  Which of them exist at all, "
+         "and how much faster the narrow ones go, is most of what separates one "
+         "generation of NVIDIA hardware from the next.",
+         TestShape::Heterogeneous, "data type"});
+
     // FP16 WMMA
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA fp16xfp16+fp32 16x16x16";
-      d.resultTag = "wmma_fp16";
-      d.description = "Peak speed of the tensor cores -- dedicated units that "
-                      "multiply whole 16x16 blocks of numbers in one step rather "
-                      "than one value at a time -- on 16-bit inputs with a 32-bit "
-                      "running total.  This is the everyday precision of AI work.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "wmma_fp16";
+      d.scope = &test;
+      d.metricDescription = "16-bit inputs with a 32-bit running total -- the "
+                            "everyday precision of AI work.  Uses the "
+                            "portable WMMA 16x16x16 tile.";
+      d.unit = "flops";
+      d.metricLabel = "fp16";
       d.kernelName = "wmma_fp16";
       d.blob = &cuda_kernels::wmma_fp16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
@@ -52,15 +56,14 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP16 mma.sync m16n8k16+fp16";
-      d.resultTag = "wmma_fp16_f16";
-      d.description = "The same 16-bit tensor-core maths, but keeping the running "
-                      "total in 16 bits too.  On GeForce cards the 32-bit-total "
-                      "form is deliberately capped at half rate, so this row is "
-                      "where the full tensor-core speed shows up.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "fp16_f16acc";
+      d.scope = &test;
+      d.metricDescription = "The same 16-bit maths, keeping the running total "
+                            "in 16 bits too.  On GeForce cards the 32-bit- "
+                            "total form is deliberately capped at half rate, "
+                            "so this is where the full tensor-core speed "
+                            "shows up.  mma.sync m16n8k16.";
+      d.unit = "flops";
+      d.metricLabel = "fp16 f16acc";
       d.kernelName = "wmma_fp16_f16";
       d.blob = &cuda_kernels::wmma_fp16_f16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 8 chains * m16n8k16
@@ -77,14 +80,13 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA bf16xbf16+fp32 16x16x16";
-      d.resultTag = "wmma_bf16";
-      d.description = "Tensor cores on bfloat16 -- 16 bits arranged for AI work, "
-                      "trading digits of accuracy for the number range of a full "
-                      "float, which makes training far more forgiving.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "wmma_bf16";
+      d.scope = &test;
+      d.metricDescription = "bfloat16 -- 16 bits arranged for AI work, "
+                            "trading digits of accuracy for the number range "
+                            "of a full float, which makes training far more "
+                            "forgiving.  WMMA 16x16x16.";
+      d.unit = "flops";
+      d.metricLabel = "bf16";
       d.kernelName = "wmma_bf16";
       d.blob = &cuda_kernels::wmma_bf16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4;
@@ -103,14 +105,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "TF32 mma.sync m16n8k8+fp32";
-      d.resultTag = "wmma_tf32";
-      d.description = "Tensor cores on tf32, NVIDIA's trimmed-down stand-in for "
-                      "32-bit float: it keeps the full number range but drops "
-                      "accuracy to fit the tensor cores.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "wmma_tf32";
+      d.scope = &test;
+      d.metricDescription = "NVIDIA's trimmed-down stand-in for 32-bit float: "
+                            "the full number range, with accuracy dropped to "
+                            "fit the tensor cores.  mma.sync m16n8k8.";
+      d.unit = "flops";
+      d.metricLabel = "tf32";
       d.kernelName = "wmma_tf32";
       d.blob = &cuda_kernels::wmma_tf32;
       d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 8 chains * m16n8k8 (half K of fp16)
@@ -127,13 +127,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       double A = 1.3;
       cuda_compute_desc_t d = {};
-      d.title = "WMMA fp64xfp64+fp64 8x8x4";
-      d.resultTag = "wmma_fp64";
-      d.description = "Tensor cores on full 64-bit numbers, for scientific "
-                      "computing.  Only the datacenter parts carry this hardware.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "wmma_fp64";
+      d.scope = &test;
+      d.metricDescription = "Full 64-bit numbers, for scientific computing "
+                            "rather than AI.  Only the datacenter parts carry "
+                            "this hardware.  WMMA 8x8x4.";
+      d.unit = "flops";
+      d.metricLabel = "fp64";
       d.kernelName = "wmma_fp64";
       d.blob = &cuda_kernels::wmma_fp64;
       d.workPerWI = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
@@ -150,13 +149,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E4M3) mma.sync m16n8k32+fp32";
-      d.resultTag = "wmma_fp8_e4m3";
-      d.description = "Tensor cores on 8-bit numbers, in the variant that spends "
-                      "its bits on accuracy rather than range.  Half the data of "
-                      "16-bit per value, so it runs at roughly twice the rate.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
+      d.scope = &test;
+      d.metricDescription = "8-bit floats spending their bits on accuracy "
+                            "rather than range.  Half the data of 16-bit per "
+                            "value, so roughly twice the rate.  mma.sync "
+                            "m16n8k32.";
+      d.unit = "flops";
       d.metricLabel = "fp8_e4m3";
       d.kernelName = "wmma_fp8_e4m3";
       d.blob = &cuda_kernels::wmma_fp8_e4m3;
@@ -174,13 +172,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E5M2) mma.sync m16n8k32+fp32";
-      d.resultTag = "wmma_fp8_e5m2";
-      d.description = "The same 8-bit tensor-core path in the other variant, "
-                      "which spends its bits on range rather than accuracy -- the "
-                      "one that copes with very large and very small values.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
+      d.scope = &test;
+      d.metricDescription = "The other 8-bit float, spending its bits on "
+                            "range rather than accuracy -- the one that copes "
+                            "with very large and very small values.  mma.sync "
+                            "m16n8k32.";
+      d.unit = "flops";
       d.metricLabel = "fp8_e5m2";
       d.kernelName = "wmma_fp8_e5m2";
       d.blob = &cuda_kernels::wmma_fp8_e5m2;
@@ -200,15 +197,14 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E4M3) mma.sync m16n8k32+fp16";
-      d.resultTag = "wmma_fp8_f16";
-      d.description = "The same 8-bit tensor-core maths, but keeping the running "
-                      "total in 16 bits rather than 32.  On GeForce cards the "
-                      "32-bit-total form is deliberately capped at half rate, so "
-                      "this row is where the full 8-bit speed shows up.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "fp8_e4m3_f16acc";
+      d.scope = &test;
+      d.metricDescription = "8-bit inputs with the running total kept in 16 "
+                            "bits rather than 32.  As with fp16, GeForce caps "
+                            "the 32-bit-total form at half rate, so this is "
+                            "where the full 8-bit speed shows up.  mma.sync "
+                            "m16n8k32.";
+      d.unit = "flops";
+      d.metricLabel = "fp8_e4m3 f16acc";
       d.kernelName = "wmma_fp8_f16";
       d.blob = &cuda_kernels::wmma_fp8_f16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 chains * m16n8k32, as the +fp32 row
@@ -225,14 +221,13 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp32";
-      d.resultTag = "wmma_fp8_sparse";
-      d.description = "8-bit numbers with structured sparsity: half the values in "
-                      "each group of four are known to be zero and are skipped, so "
-                      "the hardware does twice the useful work per step.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "fp8_sparse";
+      d.scope = &test;
+      d.metricDescription = "8-bit floats with structured sparsity: half the "
+                            "values in each group of four are known to be "
+                            "zero and are skipped, so the hardware does twice "
+                            "the useful work per step.  mma.sp m16n8k64.";
+      d.unit = "flops";
+      d.metricLabel = "fp8_e4m3 2:4";
       d.kernelName = "wmma_fp8_sparse";
       d.blob = &cuda_kernels::wmma_fp8_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64 = 2x dense k32
@@ -252,15 +247,13 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP8(E4M3) mma.sp 2:4 sparsity m16n8k64+fp16";
-      d.resultTag = "wmma_fp8_sparse_f16";
-      d.description = "8-bit numbers with both tricks at once: half the values in "
-                      "each group of four are skipped as known zeros, and the "
-                      "running total is kept in 16 bits rather than 32.  The "
-                      "fastest arrangement these tensor cores offer for 8-bit.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "fp8_sparse_f16acc";
+      d.scope = &test;
+      d.metricDescription = "Both tricks at once -- zeros skipped and the "
+                            "running total kept at 16 bits.  The fastest "
+                            "arrangement these tensor cores offer for 8 bits. "
+                            "mma.sp m16n8k64.";
+      d.unit = "flops";
+      d.metricLabel = "fp8_e4m3 2:4 f16acc";
       d.kernelName = "wmma_fp8_sparse_f16";
       d.blob = &cuda_kernels::wmma_fp8_sparse_f16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64, as the +fp32 row
@@ -277,12 +270,14 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "FP4(E2M1) mma.sync m16n8k32+fp32";
-      d.resultTag = "wmma_fp4_e2m1";
-      d.description = "Tensor cores on 4-bit numbers, the narrowest format the "
-                      "hardware handles.  Blackwell and newer only.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
+      d.scope = &test;
+      d.metricDescription = "4-bit floats with no shared scale factor.  Read "
+                            "it against the mxf4 and nvf4 rows below, which "
+                            "are the same width with a scale: where those are "
+                            "faster, the hardware only accelerates 4-bit "
+                            "arithmetic when it carries one.  Blackwell and "
+                            "newer only.  mma.sync m16n8k32.";
+      d.unit = "flops";
       d.metricLabel = "fp4_e2m1";
       d.kernelName = "wmma_fp4_e2m1";
       d.blob = &cuda_kernels::wmma_fp4_e2m1;
@@ -300,13 +295,13 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "MXFP4(E2M1) mma.sync m16n8k64+fp32";
-      d.resultTag = "wmma_mxf4_e2m1";
-      d.description = "4-bit numbers with a shared scale factor per block of 32, "
-                      "the open MX format.  The scale is what makes 4 bits usable "
-                      "for real models rather than a curiosity.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
+      d.scope = &test;
+      d.metricDescription = "4-bit floats with a scale factor shared by each "
+                            "block of 32 values, the open MX format.  The "
+                            "scale is what makes 4 bits usable for real "
+                            "models rather than a curiosity.  mma.sync "
+                            "m16n8k64.";
+      d.unit = "flops";
       d.metricLabel = "mxf4_e2m1";
       d.kernelName = "wmma_mxf4_e2m1";
       d.blob = &cuda_kernels::wmma_mxf4_e2m1;
@@ -324,13 +319,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "NVFP4(E2M1) mma.sync m16n8k64+fp32";
-      d.resultTag = "wmma_nvf4_e2m1";
-      d.description = "NVIDIA's own 4-bit block format, with a finer scale factor "
-                      "shared by every 16 values instead of every 32 -- more "
-                      "accurate than MX at the same width.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
+      d.scope = &test;
+      d.metricDescription = "NVIDIA's own 4-bit block format, with a finer "
+                            "scale shared by every 16 values instead of every "
+                            "32 -- more accurate than MX at the same width. "
+                            "mma.sync m16n8k64.";
+      d.unit = "flops";
       d.metricLabel = "nvf4_e2m1";
       d.kernelName = "wmma_nvf4_e2m1";
       d.blob = &cuda_kernels::wmma_nvf4_e2m1;
@@ -348,14 +342,11 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "MXFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
-      d.resultTag = "wmma_mxf4_sparse";
-      d.description = "The MX 4-bit path with structured sparsity: half the values "
-                      "in each group of four are known to be zero and are skipped, "
-                      "so the hardware does twice the useful work per step.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "mxf4_sparse";
+      d.scope = &test;
+      d.metricDescription = "The MX 4-bit path with zeros skipped as well, "
+                            "two per group of four.  mma.sp m16n8k128.";
+      d.unit = "flops";
+      d.metricLabel = "mxf4_e2m1 2:4";
       d.kernelName = "wmma_mxf4_sparse";
       d.blob = &cuda_kernels::wmma_mxf4_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
@@ -372,13 +363,12 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
     {
       float A = 1.3f;
       cuda_compute_desc_t d = {};
-      d.title = "NVFP4 mma.sp 2:4 sparsity m16n8k128+fp32";
-      d.resultTag = "wmma_nvf4_sparse";
-      d.description = "NVIDIA's 4-bit block format with the same skip-the-zeros "
-                      "trick -- the fastest arrangement these tensor cores offer.";
-      d.unit = "tflops";
-      d.unitDivider = 1e12;
-      d.metricLabel = "nvf4_sparse";
+      d.scope = &test;
+      d.metricDescription = "NVIDIA's 4-bit block format with zeros skipped "
+                            "too -- the fastest arrangement these tensor "
+                            "cores offer.  mma.sp m16n8k128.";
+      d.unit = "flops";
+      d.metricLabel = "nvf4_e2m1 2:4";
       d.kernelName = "wmma_nvf4_sparse";
       d.blob = &cuda_kernels::wmma_nvf4_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
@@ -391,30 +381,22 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
       d.skipMsg = "NVFP4 mma.sp 2:4 sparsity requires Blackwell sm_120a or newer! Skipped";
       runComputeKernel(dev, cfg, d);
     }
-  }
 
-  // ---------------------------------------------------------------------
-  // Integer / binary cluster -- each variant opens its own <wmma_*> group
-  // with the proper unit attribute via runComputeKernel; no umbrella tag.
-  // The fp/int split is preserved by the per-variant unit -> category
-  // derivation in the dump pipeline.
-  // ---------------------------------------------------------------------
-
-  if (category != Category::IntCompute)
-    return 0;
+  // Integer cluster -- same test, same scope; each reading carries
+  // its own unit (ops) so the integer rows share the test above.
 
   // INT8 WMMA
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "WMMA int8xint8+int32 16x16x16";
-    d.resultTag = "wmma_int8";
-    d.description = "Tensor cores on 8-bit whole numbers with a 32-bit running "
-                    "total -- the format quantized neural networks use when they are "
-                    "squeezed down to run fast on cheaper hardware.";
-    d.unit = "tops";
-    d.unitDivider = 1e12;
-    d.metricLabel = "wmma_int8";
+    d.scope = &test;
+    d.metricDescription = "8-bit whole numbers with a 32-bit running total -- "
+                          "the format quantized neural networks use when they "
+                          "are squeezed down to run fast on cheaper hardware. "
+                          "Portable WMMA 16x16x16 tile.";
+    d.unit = "ops";
+    d.metricLabel = "int8";
+    d.metricUnit = "ops";
     d.kernelName = "wmma_int8";
     d.blob = &cuda_kernels::wmma_int8;
     d.workPerWI = COOPMAT_WORK_PER_WI * 4;
@@ -431,14 +413,14 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "INT8 mma.sync m16n8k32+int32";
-    d.resultTag = "wmma_int8_k32";
-    d.description = "The same 8-bit whole-number maths on NVIDIA's own native "
-                    "tile shape rather than the portable one, which the hardware "
-                    "feeds more efficiently.";
-    d.unit = "tops";
-    d.unitDivider = 1e12;
-    d.metricLabel = "int8_k32";
+    d.scope = &test;
+    d.metricDescription = "The same 8-bit whole-number maths on NVIDIA's "
+                          "native tile shape rather than the portable one, "
+                          "which the hardware feeds more efficiently. "
+                          "mma.sync m16n8k32.";
+    d.unit = "ops";
+    d.metricLabel = "int8 k32";
+    d.metricUnit = "ops";
     d.kernelName = "wmma_int8_k32";
     d.blob = &cuda_kernels::wmma_int8_k32;
     d.workPerWI = COOPMAT_WORK_PER_WI * 4;
@@ -457,14 +439,13 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "INT8 mma.sp 2:4 sparsity m16n8k64+int32";
-    d.resultTag = "wmma_int8_sparse";
-    d.description = "8-bit whole numbers with structured sparsity: half the values "
-                    "in each group of four are known to be zero and are skipped, so "
-                    "the hardware does twice the useful work per step.";
-    d.unit = "tops";
-    d.unitDivider = 1e12;
-    d.metricLabel = "int8_sparse";
+    d.scope = &test;
+    d.metricDescription = "8-bit whole numbers with zeros skipped, two per "
+                          "group of four, so the hardware does twice the "
+                          "useful work per step.  mma.sp m16n8k64.";
+    d.unit = "ops";
+    d.metricLabel = "int8 2:4";
+    d.metricUnit = "ops";
     d.kernelName = "wmma_int8_sparse";
     d.blob = &cuda_kernels::wmma_int8_sparse;
     d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64 = 2x dense k32
@@ -481,14 +462,14 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
   {
     int A = 3;
     cuda_compute_desc_t d = {};
-    d.title = "INT4 mma.sync m8n8k32+int32";
-    d.resultTag = "wmma_int4";
-    d.description = "Tensor cores on 4-bit whole numbers.  Turing through Ada "
-                    "only -- NVIDIA dropped the integer 4-bit path afterwards in "
-                    "favour of the 4-bit float formats above.";
-    d.unit = "tops";
-    d.unitDivider = 1e12;
+    d.scope = &test;
+    d.metricDescription = "4-bit whole numbers.  Turing through Ada only -- "
+                          "NVIDIA dropped the integer 4-bit path afterwards "
+                          "in favour of the 4-bit float formats above. "
+                          "mma.sync m8n8k32.";
+    d.unit = "ops";
     d.metricLabel = "int4";
+    d.metricUnit = "ops";
     d.kernelName = "wmma_int4";
     d.blob = &cuda_kernels::wmma_int4;
     d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 256 outer * 4 chains * 8*8*32*2 / 32
@@ -508,6 +489,5 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg, Category categor
 // ---------------------------------------------------------------------------
 // Global bandwidth (CUDA)
 // ---------------------------------------------------------------------------
-
 
 #endif // ENABLE_CUDA

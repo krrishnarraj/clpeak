@@ -37,7 +37,6 @@ class clPeak : public Peak
 {
 public:
     // OpenCL-specific device selection.  Empty index list = run all.
-    bool useEventTimer;
     std::vector<unsigned long> platformIndices, deviceIndices;
 
     clPeak();

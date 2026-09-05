@@ -78,6 +78,18 @@ if(ANDROID_VULKAN_LIB)
 endif()
 
 # -----------------------------------------------------------------------
+# ONNX Runtime backend — NNAPI / XNNPACK / CPU execution providers.
+# Nothing to find at build time: only the vendored C-API header is needed,
+# and libonnxruntime.so is dlopen'd at run time.  The app packages one
+# (com.microsoft.onnxruntime:onnxruntime-android, see
+# app/android/app/build.gradle.kts) so the bare soname resolves out of the
+# APK's lib dir; a build without it still works, reporting the backend
+# unavailable until the settings screen names a library.
+# -----------------------------------------------------------------------
+set(CLPEAK_ENABLE_ONNX ON)
+add_subdirectory(${CLPEAK_ROOT}/src/onnx ${CMAKE_BINARY_DIR}/onnx)
+
+# -----------------------------------------------------------------------
 # The FFI bridge — the same library every other platform loads
 # -----------------------------------------------------------------------
 set(CLPEAK_FFI_STANDALONE ON)

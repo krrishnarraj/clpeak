@@ -11,12 +11,13 @@ template <int WALK> class image_bw_kernel;
 int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "gbps",
+    {"image_memory_bandwidth", "Image memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the device reads through its texture units, "
      "which take a different path to memory than plain buffer reads.  Each "
      "pixel of the image is read exactly once, so caching cannot flatter the "
-     "number."});
+     "number.",
+     TestShape::Homogeneous});
 
   // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
   // hence the metric name.
@@ -115,15 +116,15 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     float colUs = runKernel(dev, submit(std::integral_constant<int, 1>{}),
                             cfg.targetTimeUs, forced);
     const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
-    float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
-    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
-                rowGbps, colGbps);
+    float rowBps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
+    float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
+    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
+                rowBps, colBps);
 
-    if (rowGbps <= 0.0f && colGbps <= 0.0f)
+    if (rowBps <= 0.0f && colBps <= 0.0f)
       test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
     else
-      test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
+      test.emit("float4", std::max(rowBps, colBps), fetchNote);
   }
   catch (const sycl::exception &e)
   {

@@ -10,10 +10,11 @@ int RocmPeak::runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg)
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+    {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
      "The overhead of asking the GPU to do anything at all, measured with a "
      "kernel that does no work.  It is what small, frequent GPU jobs pay "
-     "before any of their own work begins."});
+     "before any of their own work begins.",
+     TestShape::Heterogeneous});
 
   const char *dispatchNote = "One way only: from the moment the host submits the "
                              "work to the moment the GPU starts running it.  HIP "
@@ -65,7 +66,7 @@ int RocmPeak::runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg)
   }
   else
   {
-    test.emit("roundtrip", (float)(totalRoundtripUs / iters), roundtripNote);
+    test.emit("roundtrip", (float)(totalRoundtripUs / iters * 1e-6), roundtripNote);
   }
 
   return 0;

@@ -28,10 +28,8 @@ static const char *helpStr =
     "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
     "\n  --describe                  explain what each test and each reading measures"
     "\n  --list-devices              list available devices for every backend and exit"
-    "\n  --xml-file file             save results to an XML file"
-    "\n  --json-file file            save results to a JSON file"
-    "\n  --csv-file file             save results to a CSV file"
-    "\n  --compare file              compare results against a baseline (JSON / CSV / XML)"
+    "\n  -o, --output file           save results to a JSON file"
+    "\n  --compare file              compare results against a saved run"
     "\n"
     "\n BACKEND SELECTION (default: run every available backend):"
 #ifdef ENABLE_OPENCL
@@ -55,6 +53,9 @@ static const char *helpStr =
 #ifdef ENABLE_CPU
     "\n  --cpu                       run only the native CPU backend"
 #endif
+#ifdef ENABLE_ONNX
+    "\n  --onnx                      run only the ONNX Runtime backend"
+#endif
     "\n  (multiple --<backend> flags can be combined)"
 #ifdef ENABLE_OPENCL
     "\n  --no-opencl                 skip the OpenCL backend"
@@ -76,6 +77,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_CPU
     "\n  --no-cpu                    skip the native CPU backend"
+#endif
+#ifdef ENABLE_ONNX
+    "\n  --no-onnx                   skip the ONNX Runtime backend"
 #endif
     "\n"
     "\n DEVICE SELECTION (indices are 0-based; comma-separated for multiple,"
@@ -99,16 +103,23 @@ static const char *helpStr =
 #ifdef ENABLE_ONEAPI
     "\n  --oneapi-device list        oneAPI/SYCL device index/indices"
 #endif
+#ifdef ENABLE_ONNX
+    "\n  --onnx-device list          ONNX Runtime execution-provider index/indices"
+    "\n  --onnx-lib path             onnxruntime shared library to load"
+    "\n                              (default: the platform's conventional names)"
+#endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
-    "\n  --fp-compute / --no-fp-compute       floating-point compute (gflops / tflops)"
-    "\n  --int-compute / --no-int-compute     integer compute (gops / tops)"
+    "\n  --compute     / --no-compute         compute (flops / ops)"
 #ifdef ENABLE_CPU
-    "\n  --crypto      / --no-crypto          crypto/hash silicon (gbps)     [CPU]"
-    "\n  --string      / --no-string          string/text processing (gbps)  [CPU]"
+    "\n  --crypto      / --no-crypto          crypto/hash silicon (bps)      [CPU]"
+    "\n  --string      / --no-string          string/text processing (bps)   [CPU]"
 #endif
-    "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (gbps)"
-    "\n  --latency     / --no-latency         kernel-launch latency (us)"
+    "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (bps)"
+    "\n  --latency     / --no-latency         kernel-launch latency (s)"
+#ifdef ENABLE_ONNX
+    "\n  --ai          / --no-ai              AI-composite micro-graphs      [ONNX]"
+#endif
     "\n  Any positive --<category> flag switches to allow-list mode."
     "\n"
     "\n TEST SELECTION (default: every test the backend supports;"
@@ -148,7 +159,7 @@ static const char *helpStr =
     "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
     "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
     "\n  --mps-attention                   | --no-mps-attention             [Metal: SDPA fp16]"
-    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear GTexels/s]"
+    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear texels/s]"
 #endif
 #ifdef ENABLE_ONEAPI
     "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"
@@ -177,12 +188,17 @@ static const char *helpStr =
     "\n  --smt-scaling                     | --no-smt-scaling               [CPU: Linux/Windows SMT]"
 #endif
     "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
-    "\n"
-#ifdef ENABLE_OPENCL
-    "\n OPENCL-SPECIFIC:"
-    "\n  --use-event-timer           time using cl events instead of std chrono"
-    "\n"
+#ifdef ENABLE_ONNX
+    "\n  --onnx-gemm                       | --no-onnx-gemm                 [ONNX: MatMul via EP]"
+    "\n  --onnx-numeric-error              | --no-onnx-numeric-error        [ONNX: dtype accuracy cost]"
+    "\n  --onnx-conv                       | --no-onnx-conv                 [ONNX: convolution peak]"
+    "\n  --onnx-block                      | --no-onnx-block                [ONNX: transformer block]"
+    "\n  --onnx-activation                 | --no-onnx-activation           [ONNX: softmax/norm GB/s]"
+    "\n  --onnx-tensor-bandwidth           | --no-onnx-tensor-bandwidth     [ONNX: resident-tensor GB/s]"
+    "\n  --onnx-transfer-bandwidth         | --no-onnx-transfer-bandwidth   [ONNX: host<->device GB/s]"
+    "\n  --onnx-dispatch-latency           | --no-onnx-dispatch-latency     [ONNX: submission overhead]"
 #endif
+    "\n"
 ;
 
 // ---- Flag tables ----------------------------------------------------------
@@ -261,6 +277,15 @@ static const TestFlag testFlags[] = {
   {"image-memory-bandwidth",    Benchmark::ImageBW},
   {"transfer-bandwidth",        Benchmark::TransferBW},
   {"kernel-launch-latency",     Benchmark::KernelLatency},
+
+  {"onnx-gemm",                 Benchmark::OnnxGemm},
+  {"onnx-numeric-error",        Benchmark::OnnxNumericError},
+  {"onnx-conv",                 Benchmark::OnnxConv},
+  {"onnx-block",                Benchmark::OnnxBlock},
+  {"onnx-activation",           Benchmark::OnnxActivation},
+  {"onnx-tensor-bandwidth",     Benchmark::OnnxTensorBW},
+  {"onnx-transfer-bandwidth",   Benchmark::OnnxTransferBW},
+  {"onnx-dispatch-latency",     Benchmark::OnnxDispatchLatency},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
@@ -270,12 +295,12 @@ struct CategoryFlag {
 };
 
 static const CategoryFlag categoryFlags[] = {
-  {"fp-compute",  Category::FpCompute},
-  {"int-compute", Category::IntCompute},
-  {"crypto",      Category::Crypto},
-  {"string",      Category::String},
-  {"bandwidth",   Category::Bandwidth},
-  {"latency",     Category::Latency},
+  {"compute",   Category::Compute},
+  {"crypto",    Category::Crypto},
+  {"string",    Category::String},
+  {"bandwidth", Category::Bandwidth},
+  {"latency",   Category::Latency},
+  {"ai",        Category::Ai},
 };
 static const int numCategoryFlags = sizeof(categoryFlags) / sizeof(categoryFlags[0]);
 
@@ -439,7 +464,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false, incOnnx = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
@@ -493,6 +518,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
 #ifdef ENABLE_CPU
     else if (!strcmp(a, "--no-cpu"))    out.skipCpu = true;
     else if (!strcmp(a, "--cpu"))       { incCpu = true; includeAny = true; }
+#endif
+#ifdef ENABLE_ONNX
+    else if (!strcmp(a, "--no-onnx"))   out.skipOnnx = true;
+    else if (!strcmp(a, "--onnx"))      { incOnnx = true; includeAny = true; }
 #endif
 
     // ---- iters / warmup -------------------------------------------------
@@ -613,12 +642,21 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         return invalidList(err, "oneAPI device index list", v);
     }
 #endif
-
-    // ---- OpenCL-specific timer ------------------------------------------
-#ifdef ENABLE_OPENCL
-    else if (!strcmp(a, "--use-event-timer"))
+#ifdef ENABLE_ONNX
+    else if (!strcmp(a, "--onnx-device"))
     {
-      out.useEventTimer = true;
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      if (!parseIndexList(v, out.onnxDeviceIndices))
+        return invalidList(err, "ONNX device index list", v);
+    }
+    else if (!strcmp(a, "--onnx-lib"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.onnxLibPath = v;
     }
 #endif
 
@@ -629,29 +667,13 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     }
 
     // ---- Output ---------------------------------------------------------
-    else if (!strcmp(a, "--xml-file"))
+    else if (!strcmp(a, "-o") || !strcmp(a, "--output"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
         return missingArg(err, a);
-      out.xmlFile    = v;
-      out.enableXml  = true;
-    }
-    else if (!strcmp(a, "--json-file"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      out.jsonFile   = v;
-      out.enableJson = true;
-    }
-    else if (!strcmp(a, "--csv-file"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      out.csvFile    = v;
-      out.enableCsv  = true;
+      out.outputFile   = v;
+      out.enableOutput = true;
     }
     else if (!strcmp(a, "--compare"))
     {
@@ -702,6 +724,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     if (!incMetal)  out.skipMetal  = true;
     if (!incOneapi) out.skipOneapi = true;
     if (!incCpu)    out.skipCpu    = true;
+    if (!incOnnx)   out.skipOnnx   = true;
   }
 
   return ParseResult::Ok;
@@ -746,4 +769,39 @@ bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
   default:
     return false;
   }
+}
+
+// ---- Invocation record ----------------------------------------------------
+
+Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
+{
+  Invocation inv;
+
+  for (int i = 0; i < argc; i++)
+    if (argv[i]) inv.argv.push_back(argv[i]);
+
+  inv.targetTimeUs    = opts.targetTimeUs;
+  inv.targetTimeUsCpu = opts.targetTimeUsCpu;
+  inv.warmup          = opts.warmupCount;
+  // Only when pinned with -i.  Left at 0 the run calibrated each test to a
+  // time budget instead, which is the normal mode and the comparable one.
+  inv.iters           = opts.forceIters ? opts.iters : 0;
+
+  for (int c = 0; c < numCategoryFlags; c++)
+    if (opts.enabledCategories.test(static_cast<size_t>(categoryFlags[c].cat)))
+      inv.categories.push_back(categoryString(categoryFlags[c].cat));
+
+  // Recorded only when the run was narrowed.  A full run would list every
+  // test in the build, which says nothing and would differ between builds
+  // that enable different backends.
+  bool allTests = true;
+  for (int t = 0; t < numTestFlags; t++)
+    if (!opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
+      allTests = false;
+  if (!allTests)
+    for (int t = 0; t < numTestFlags; t++)
+      if (opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
+        inv.tests.push_back(testFlags[t].name);
+
+  return inv;
 }

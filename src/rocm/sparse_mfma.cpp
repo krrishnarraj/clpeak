@@ -24,9 +24,9 @@ constexpr uint64_t kPerWave = kIters * kAcc;
 
 struct SparseEntry
 {
-  const char *metric;
+  const char *label;    // reading id within the family test
   const char *title;
-  const char *unit;     // "tflops" or "tops"
+  const char *unit;     // "flops" or "ops"
   const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, Kdense; // dense-equivalent K for op accounting
@@ -49,39 +49,35 @@ bool isCdnaFamily(const std::string &base)
 
 } // namespace
 
-int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
+int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  const bool isInt = category == Category::IntCompute;
 
   static const SparseEntry fpEntries[] = {
-    {"smfmac_fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "tflops",
+    {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp16, "smfmac_fp16",
      16, 16, 32, false,
      "The matrix cores on 16-bit inputs with structured sparsity: half the "
      "values in each group of four are known to be zero and are skipped, so "
      "the hardware does twice the useful work per step."},
-    {"smfmac_bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "tflops",
+    {"bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_bf16, "smfmac_bf16",
      16, 16, 32, false,
      "The same skip-the-zeros trick on bfloat16, the AI-oriented 16-bit "
      "format."},
-    {"smfmac_fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "tflops",
+    {"fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp8, "smfmac_fp8",
      16, 16, 64, false,
      "The same skip-the-zeros trick on 8-bit numbers -- the fastest "
      "arrangement these matrix cores offer for fractional values."},
   };
   static const SparseEntry intEntries[] = {
-    {"smfmac_int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "tops",
+    {"int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "ops",
      &rocm_kernels::smfmac_int8, "smfmac_int8",
      16, 16, 64, true,
      "The same skip-the-zeros trick on 8-bit whole numbers, the format "
      "quantized neural networks use."},
   };
 
-  const SparseEntry *entries = isInt ? intEntries : fpEntries;
-  const size_t numEntries = isInt ? (sizeof(intEntries) / sizeof(intEntries[0]))
-                                  : (sizeof(fpEntries) / sizeof(fpEntries[0]));
 
   const bool cdna = isCdnaFamily(archBaseOf(dev.info.archName));
 
@@ -90,16 +86,34 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
   uint64_t wantBlocks = globalThreads / blockSize;
 
-  for (size_t e = 0; e < numEntries; e++)
+  // The reading's own note rides along on every path, and the integer reading
+  // carries its own unit -- that override is what lets it share the test with
+  // the floating-point ones instead of needing a twin.
+  auto unitOpts = [](const SparseEntry &en) {
+    logger::EmitOptions o;
+    if (en.description) o.description = en.description;
+    if (en.isInt) o.unit = "ops";
+    return o;
+  };
+
+  // One scope for the whole family -- all data types in one test.
+  auto test = currentDeviceScope->beginTest(
+    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "flops", Category::Unknown,
+       "The matrix cores with structured sparsity: half the values in each "
+       "group of four are known to be zero and are skipped, so the hardware "
+       "does twice the useful work per step.  Each reading is a different "
+       "input format -- compare them against the dense MFMA rows to see what "
+       "the trick is actually worth.",
+       TestShape::Heterogeneous, "data type"});
+
+  for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)
   {
-    const SparseEntry &se = entries[e];
-    auto test = currentDeviceScope->beginTest(
-      {se.metric, se.title, se.unit, Category::Unknown, se.description});
+    const SparseEntry &se = fpEntries[e];
 
     if (!cdna)
     {
-      test.skip(se.metric, ResultStatus::Unsupported,
-                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture");
+      test.skip(se.label, ResultStatus::Unsupported,
+                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", se.description);
       continue;
     }
 
@@ -108,8 +122,8 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     // arch; the HIPRTC log is --verbose-only so it never breaks result output.
     if (!dev.getKernel(*se.blob, se.kernelName, fn))
     {
-      test.skip(se.metric, ResultStatus::Unsupported,
-                "Sparse MFMA instruction for this datatype not available on this GPU");
+      test.skip(se.label, ResultStatus::Unsupported,
+                "Sparse MFMA instruction for this datatype not available on this GPU", unitOpts(se));
       continue;
     }
 
@@ -124,7 +138,8 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     void *outBuf = nullptr;
     if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
     {
-      test.skip(se.metric, ResultStatus::Error, "Failed to allocate output buffer");
+      test.skip(se.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(se));
       continue;
     }
 
@@ -134,15 +149,69 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category c
     if (us <= 0.0f)
     {
       (void)hipFree(outBuf);
-      test.skip(se.metric, ResultStatus::Error, "kernel launch failed");
+      test.skip(se.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(se));
       continue;
     }
 
     // Dense-equivalent work: each sparse op produces a full 2*M*N*Kdense result.
     const double ops = (double)numBlocks * (double)kPerWave *
                        2.0 * (double)se.M * (double)se.N * (double)se.Kdense;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
-    test.emit(se.metric, value);
+    float value = (float)(ops * 1.0e6 / us);
+    test.emit(se.label, value, unitOpts(se));
+
+    (void)hipFree(outBuf);
+  }
+  for (size_t e = 0; e < sizeof(intEntries)/sizeof(intEntries[0]); e++)
+  {
+    const SparseEntry &se = intEntries[e];
+
+    if (!cdna)
+    {
+      test.skip(se.label, ResultStatus::Unsupported,
+                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", se.description);
+      continue;
+    }
+
+    hipFunction_t fn;
+    if (!dev.getKernel(*se.blob, se.kernelName, fn))
+    {
+      test.skip(se.label, ResultStatus::Unsupported,
+                "Sparse MFMA instruction for this datatype not available on this GPU", unitOpts(se));
+      continue;
+    }
+
+    const uint32_t elemSize = se.isInt ? (uint32_t)sizeof(int) : (uint32_t)sizeof(float);
+    uint64_t bytesPerBlock = (uint64_t)blockSize * elemSize;
+    uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock;
+    uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
+    if (pickBlocks == 0)
+      pickBlocks = 1;
+    uint32_t numBlocks = (uint32_t)pickBlocks;
+
+    void *outBuf = nullptr;
+    if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
+    {
+      test.skip(se.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(se));
+      continue;
+    }
+
+    void *args[1] = {&outBuf};
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    if (us <= 0.0f)
+    {
+      (void)hipFree(outBuf);
+      test.skip(se.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(se));
+      continue;
+    }
+
+    const double ops = (double)numBlocks * (double)kPerWave *
+                       2.0 * (double)se.M * (double)se.N * (double)se.Kdense;
+    float value = (float)(ops * 1.0e6 / us);
+    test.emit(se.label, value, unitOpts(se));
 
     (void)hipFree(outBuf);
   }

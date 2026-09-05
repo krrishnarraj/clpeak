@@ -4,13 +4,14 @@ title: clpeak — cross-API compute benchmark
 ---
 
 A synthetic micro-benchmark for measuring the **peak achievable compute
-performance** of CPUs and GPUs. It exercises tight vector, MAD and MMA kernels,
+performance** of CPUs, GPUs and NPUs. It exercises tight vector, MAD and MMA kernels,
 together with vendor-optimized GEMM libraries, to expose what the silicon can
 actually reach — not what the spec sheet claims.
 {: .lede }
 
 Originally an OpenCL benchmark, clpeak now drives OpenCL, Vulkan, CUDA,
-ROCm/HIP, Metal, oneAPI/SYCL and a native CPU backend from one codebase, so the
+ROCm/HIP, Metal, oneAPI/SYCL, a native CPU backend and an ONNX Runtime backend
+(NPUs via execution providers) from one codebase, so the
 same tests can be compared across APIs on the same machine.
 
 <figure>
@@ -33,9 +34,12 @@ same tests can be compared across APIs on the same machine.
   oneMKL, Accelerate/BNNS, so a hand-rolled kernel can be checked against the
   tuned path.
 - **Bandwidth** — global, local/shared, image and host transfer; CPU cache and
-  DRAM levels.
+  DRAM levels; NPU resident-tensor and transfer bandwidth.
 - **Latency** — kernel launch round-trip, memory latency, atomics and
-  branch-mispredict cost.
+  branch-mispredict cost; NPU dispatch overhead.
+- **AI composites** — ONNX transformer-block prefill/decode, convolution and
+  activation throughput, plus per-dtype numeric error, so a rate always ships
+  with its accuracy cost.
 
 Every test carries a description of what it does and how to read the number,
 both in the app (the info glyph beside each row) and on the CLI
@@ -54,8 +58,15 @@ both in the app (the info glyph beside each row) and on the CLI
 | Metal | Apple silicon and Intel Macs |
 | oneAPI/SYCL | Intel GPUs |
 | CPU | x86-64 and AArch64, runtime-dispatched per ISA |
+| ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
 
 </div>
+
+Each provider is enumerated as a device. The ONNX runtime is loaded at run
+time, never linked (except on iOS), so no ONNX install is needed to build:
+a machine without one reports "library not found", and `--onnx-lib PATH`
+points at another build. A graph a provider can't fully own reports
+`unsupported` rather than silently measuring the CPU.
 
 ## The desktop app
 
@@ -148,7 +159,8 @@ cmake --build build -j
 
 Optional backends are auto-detected and enabled when their SDK is found; each
 one can be turned off at configure time (`-DCLPEAK_ENABLE_CUDA=OFF` and
-friends). The desktop app builds alongside the CLI whenever the Flutter SDK is
+friends). The ONNX backend needs no SDK — only its vendored header — and the
+desktop app builds alongside the CLI whenever the Flutter SDK is
 on `PATH`, landing in `build/clpeak-gui/`.
 
 ## Command line
@@ -160,9 +172,10 @@ whichever API is doing the work.
 ./clpeak                            # every test, every available backend
 ./clpeak --metal                    # one backend
 ./clpeak --cuda --vulkan            # or several
+./clpeak --onnx --onnx-device 0     # one NPU/GPU provider (--onnx-lib PATH picks the runtime)
 ./clpeak --single-precision-compute # one test, everywhere
 ./clpeak --describe                 # explain what each reading measures
-./clpeak --json-file out.json       # save results (also --xml-file / --csv-file)
+./clpeak -o out.clpeak.json         # save results (one JSON document)
 ./clpeak --compare baseline.json    # diff this run against a saved baseline
 ```
 

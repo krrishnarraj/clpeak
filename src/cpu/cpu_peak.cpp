@@ -156,16 +156,24 @@ int CpuPeak::runAll()
     props.push_back({"L1d", l1d});
   }
   {
+    // The "x N" breakdown only holds when every instance is the same size.
+    // Apple's clusters are not: an M1 Pro is 12 MB x 2 (P) + 4 MB (E) = 28 MB,
+    // and "28 MB (12 MB x 2)" would be a wrong reading of a right total.
     std::string l2 = fmtBytes(info.l2TotalBytes);
-    if (info.l2TotalBytes > info.l2CacheBytes)
+    if (info.l2TotalBytes > info.l2CacheBytes &&
+        info.l2TotalBytes % info.l2CacheBytes == 0)
       l2 += " (" + fmtBytes(info.l2CacheBytes) + " x " +
             std::to_string(info.l2TotalBytes / info.l2CacheBytes) + ")";
     props.push_back({"L2", l2});
   }
+  // Show aggregate L3; note the per-instance size on multi-LLC chips (AMD CCX).
+  // Omitted entirely on the many CPUs that have no L3 at all (Apple Silicon,
+  // Snapdragon X, most phone SoCs) — see the fallbacks in cpu_device.cpp.
+  if (info.l3TotalBytes)
   {
-    // Show aggregate L3; note the per-instance size on multi-LLC chips (AMD CCX).
     std::string l3 = fmtBytes(info.l3TotalBytes);
-    if (info.l3TotalBytes > info.l3CacheBytes)
+    if (info.l3TotalBytes > info.l3CacheBytes &&
+        info.l3TotalBytes % info.l3CacheBytes == 0)
       l3 += " (" + fmtBytes(info.l3CacheBytes) + " x " +
             std::to_string(info.l3TotalBytes / info.l3CacheBytes) + ")";
     props.push_back({"L3", l3});
@@ -182,7 +190,7 @@ int CpuPeak::runAll()
   if (forceIters)
     cfg.kernelLatencyIters = specifiedIters;
 
-  // ---- FP compute ----
+  // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ----
   if (isAllowed(Benchmark::ComputeSP))   runComputeSP(cfg);
   if (isAllowed(Benchmark::ComputeHP))   runComputeHP(cfg);
   if (isAllowed(Benchmark::ComputeDP))   runComputeDP(cfg);
@@ -190,20 +198,15 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeBF16)) runComputeBF16(cfg);
   if (isAllowed(Benchmark::ComputeFP8DP)) runComputeFP8DP(cfg);
   if (isAllowed(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
-  if (isAllowedAs(Benchmark::Amx, Category::FpCompute))
-    runCpuMatrix(cfg, Category::FpCompute);
-#ifdef __APPLE__
-  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
-#endif
-  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
-
-  // ---- INT compute ----
   if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
   if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
   if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
   if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
-  if (isAllowedAs(Benchmark::Amx, Category::IntCompute))
-    runCpuMatrix(cfg, Category::IntCompute);
+  if (isAllowed(Benchmark::Amx))         runCpuMatrix(cfg);
+#ifdef __APPLE__
+  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
+#endif
+  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
 
   // ---- Crypto (dedicated AES/SHA/CRC silicon; GB/s) ----
   if (isAllowed(Benchmark::CryptoAes))    runCryptoAes(cfg);

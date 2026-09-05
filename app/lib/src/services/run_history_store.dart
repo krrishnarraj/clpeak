@@ -4,24 +4,33 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import '../ffi/clpeak_bindings.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
 
 /// Persists every run under `<base>/runs/`:
-///   `<id>.xml`   canonical schema-v2 XML written by the NATIVE side
-///                (clpeak_launch --xml-file) — also the export artifact
-///   index.json   {"runs":[RunSummary...]} for a fast history list
+///   `<id>.clpeak.json`  the run document, written by the NATIVE side
+///                       (clpeak_launch -o) — also the export artifact
+///   index.json          {"runs":[RunSummary...]} for a fast history list
 ///
-/// Orphan XMLs (present on disk but missing from the index, e.g. after an
-/// app kill mid-finalize) are re-adopted on load via the native loader.
+/// Orphan documents (present on disk but missing from the index, e.g. after
+/// an app kill mid-finalize) are re-adopted on load.
+///
+/// Files are read here with dart:convert rather than through the native
+/// library: the saved document is already the shape the UI renders, so a
+/// round trip through FFI would buy nothing — and history stays readable even
+/// when the native library cannot be loaded at all.
 class RunHistoryStore {
-  RunHistoryStore(this._bindings, {Directory? directoryOverride})
-      : _override = directoryOverride;
+  RunHistoryStore({Directory? directoryOverride}) : _override = directoryOverride;
 
-  final ClpeakBindings _bindings;
   final Directory? _override;
   Directory? _dir;
+
+  /// Suffix rather than plain `.json`: it names the format at a glance in a
+  /// directory a user is expected to browse, and keeps the index sidecar
+  /// (index.json) out of the orphan scan.
+  static const fileSuffix = '.clpeak.json';
+
+  static String fileNameFor(String id) => '$id$fileSuffix';
 
   Future<Directory> runsDirectory() async {
     if (_dir != null) return _dir!;
@@ -57,9 +66,9 @@ class RunHistoryStore {
 
   File _indexFile(Directory dir) => File(p.join(dir.path, 'index.json'));
 
-  /// Absolute path a new run's XML should be written to.
-  Future<String> xmlPathFor(String id) async =>
-      p.join((await runsDirectory()).path, '$id.xml');
+  /// Absolute path a new run's document should be written to.
+  Future<String> filePathFor(String id) async =>
+      p.join((await runsDirectory()).path, fileNameFor(id));
 
   Future<List<RunSummary>> _readIndex(Directory dir) async {
     final f = _indexFile(dir);
@@ -81,27 +90,61 @@ class RunHistoryStore {
         .writeAsString(const JsonEncoder.withIndent(' ').convert(doc));
   }
 
-  /// History rows, newest first, adopting any orphan XML files.
+  /// History rows, newest first, adopting any orphan documents.
+  ///
+  /// Only v3 documents are listed: the index may still hold pre-v3 rows
+  /// (v2 tracked `<id>.xml`), which this build can no longer open, so such
+  /// rows are hidden — and pruned from the index — rather than listed only
+  /// to fail on tap. The same goes for rows whose file went missing or no
+  /// longer parses as the current version.
   Future<List<RunSummary>> list() async {
     final dir = await runsDirectory();
-    final runs = await _readIndex(dir);
+    var runs = await _readIndex(dir);
+
+    if (runs.isNotEmpty) {
+      final kept = <RunSummary>[];
+      var pruned = false;
+      for (final r in runs) {
+        if (!r.fileName.endsWith(fileSuffix)) {
+          pruned = true;
+          continue;
+        }
+        final f = File(p.join(dir.path, p.basename(r.fileName)));
+        if (!await f.exists() || !await _isCurrentVersion(f)) {
+          pruned = true;
+          continue;
+        }
+        kept.add(r);
+      }
+      if (pruned) {
+        await _writeIndex(dir, kept);
+      }
+      runs = kept;
+    }
     final known = {for (final r in runs) r.fileName};
 
     var adopted = false;
     await for (final f in dir.list()) {
-      if (f is! File || !f.path.endsWith('.xml')) continue;
+      if (f is! File || !f.path.endsWith(fileSuffix)) continue;
       final name = p.basename(f.path);
       if (known.contains(name)) continue;
-      final doc = _bindings.loadResultFile(f.path);
+      final doc = await _readDocument(f);
       if (doc == null) continue;
       final stat = await f.stat();
+      DateTime startedAt;
+      if (doc.meta?.generatedAt.isNotEmpty ?? false) {
+        startedAt = DateTime.tryParse(doc.meta!.generatedAt) ?? stat.modified;
+      } else {
+        startedAt = stat.modified;
+      }
+      final durationMs = ((doc.meta?.durationSeconds ?? 0) * 1000).toInt();
       runs.add(RunSummary.fromDocument(
-        id: p.basenameWithoutExtension(name),
+        id: name.substring(0, name.length - fileSuffix.length),
         fileName: name,
-        doc: RunDocument.fromEntriesJson(doc),
-        startedAt: stat.modified,
-        durationMs: 0,
-        cancelled: false,
+        doc: doc,
+        startedAt: startedAt,
+        durationMs: durationMs,
+        cancelled: doc.meta?.cancelled ?? false,
       ));
       adopted = true;
     }
@@ -131,23 +174,143 @@ class RunHistoryStore {
 
   Future<void> delete(RunSummary summary) async {
     final dir = await runsDirectory();
-    final xml = File(p.join(dir.path, summary.fileName));
-    if (await xml.exists()) await xml.delete();
+    final file = File(p.join(dir.path, summary.fileName));
+    if (await file.exists()) await file.delete();
     final runs = await _readIndex(dir)
       ..removeWhere((r) => r.id == summary.id);
     await _writeIndex(dir, runs);
   }
 
-  /// Load a saved run for viewing (XML → native loader → document).
+  /// Load a saved run for viewing.
   Future<RunDocument?> load(RunSummary summary) async {
     final dir = await runsDirectory();
-    final doc = _bindings.loadResultFile(p.join(dir.path, summary.fileName));
-    if (doc == null) return null;
-    return RunDocument.fromEntriesJson(doc);
+    return _readDocument(File(p.join(dir.path, summary.fileName)));
   }
 
-  Future<File> xmlFile(RunSummary summary) async {
+  /// Parse one saved document, or null when it is unreadable, not JSON, or
+  /// written by a clpeak whose format this build does not know.
+  Future<RunDocument?> _readDocument(File f) async {
+    try {
+      final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      if (!_matchesCurrentVersion(doc)) return null;
+      return RunDocument.fromJson(doc);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Lightweight version probe for history rows: answers whether a file is a
+  /// document this build renders, without building the full model.
+  Future<bool> _isCurrentVersion(File f) async {
+    try {
+      final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      return _matchesCurrentVersion(doc);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _matchesCurrentVersion(Map<String, dynamic> doc) =>
+      (doc['format_version'] as num?)?.toInt() == formatVersion;
+
+  Future<File> documentFile(RunSummary summary) async {
     final dir = await runsDirectory();
     return File(p.join(dir.path, summary.fileName));
   }
+
+  Future<bool> fileExists(String fileName) async {
+    final dir = await runsDirectory();
+    return File(p.join(dir.path, p.basename(fileName))).exists();
+  }
+
+  Future<String> nextAvailableFileName(String desiredName) async {
+    final dir = await runsDirectory();
+    var base = p.basename(desiredName);
+    if (!base.endsWith(fileSuffix)) {
+      final dot = base.lastIndexOf('.');
+      base = (dot > 0 ? base.substring(0, dot) : base) + fileSuffix;
+    }
+    var candidate = base;
+    var i = 1;
+    while (await File(p.join(dir.path, candidate)).exists()) {
+      final without = base.substring(0, base.length - fileSuffix.length);
+      candidate = '${without}_$i$fileSuffix';
+      i++;
+    }
+    return candidate;
+  }
+
+  /// Import a run document from outside the runs directory.
+  ///
+  /// Validates the JSON, checks `format_version`, copies the file into the
+  /// store and updates the index.  When [overwrite] is false and a file with
+  /// the same name already exists a [FileSystemException] is thrown so the
+  /// caller can prompt the user (overwrite vs. rename).
+  Future<RunSummary> importExternalFile(
+    File sourceFile, {
+    String? targetFileName,
+    bool overwrite = false,
+  }) async {
+    final raw = await sourceFile.readAsString();
+    return importContent(raw,
+        fileName: targetFileName ?? p.basename(sourceFile.path),
+        overwrite: overwrite);
+  }
+
+  /// Import from an in-memory JSON string (e.g. an `XFile` picked via
+  /// `file_selector` where the path may not be a normal file).
+  Future<RunSummary> importContent(
+    String raw, {
+    required String fileName,
+    bool overwrite = false,
+  }) async {
+    late Map<String, dynamic> json;
+    try {
+      json = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      throw FormatException('Not valid JSON: $e');
+    }
+    if ((json['format_version'] as num?)?.toInt() != formatVersion) {
+      throw FormatException(
+          'Unsupported format version ${json['format_version']} – expected $formatVersion');
+    }
+    final doc = RunDocument.fromJson(json);
+    final dir = await runsDirectory();
+    var targetName = p.basename(fileName);
+    if (!targetName.endsWith(fileSuffix)) {
+      final dot = targetName.lastIndexOf('.');
+      targetName =
+          (dot > 0 ? targetName.substring(0, dot) : targetName) + fileSuffix;
+    }
+    final targetFile = File(p.join(dir.path, targetName));
+    if (await targetFile.exists() && !overwrite) {
+      throw FileSystemException('File already exists', targetFile.path);
+    }
+    await targetFile.writeAsString(raw);
+    final id = targetName.substring(0, targetName.length - fileSuffix.length);
+    DateTime startedAt;
+    final generated = doc.meta?.generatedAt ?? '';
+    if (generated.isNotEmpty) {
+      startedAt =
+          DateTime.tryParse(generated) ?? (await targetFile.stat()).modified;
+    } else {
+      startedAt = (await targetFile.stat()).modified;
+    }
+    final durationMs = ((doc.meta?.durationSeconds ?? 0) * 1000).toInt();
+    final summary = RunSummary.fromDocument(
+      id: id,
+      fileName: targetName,
+      doc: doc,
+      startedAt: startedAt,
+      durationMs: durationMs,
+      cancelled: doc.meta?.cancelled ?? false,
+    );
+    await add(summary);
+    return summary;
+  }
 }
+
+/// Dump-format version this build reads — must match RESULT_FORMAT_VERSION in
+/// include/common/run_document.h.  A file from another version is skipped
+/// rather than half-parsed.
+const int formatVersion = 3;

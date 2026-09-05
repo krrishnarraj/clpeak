@@ -3,12 +3,11 @@
 
 namespace {
 
-// Descriptions are prose, and all three dump formats (CSV, XML, JSON) are
-// line-oriented -- one row, one line -- so a literal newline in one would cut
-// a record in half for the loaders.  Authors write them as C++ string
-// literals wrapped across source lines, which is exactly where stray newlines
-// and tabs creep in, so collapse every whitespace run to one space once,
-// here, instead of trusting every call site to do it.
+// Descriptions are prose, and they end up in a JSON document and in aligned
+// terminal output, neither of which wants an embedded newline.  Authors write
+// them as C++ string literals wrapped across source lines, which is exactly
+// where stray newlines and tabs creep in, so collapse every whitespace run to
+// one space once, here, instead of trusting every call site to do it.
 std::string oneLine(const std::string &s)
 {
     std::string out;
@@ -30,6 +29,20 @@ std::string oneLine(const std::string &s)
     return out;
 }
 
+// Driver-reported names come as the driver spells them, padding included:
+// Intel's OpenCL runtime returns "AMD Ryzen Threadripper PRO 3955WX 16-Cores"
+// with five trailing spaces.  That padding reached the document, the device's
+// identity key and the GUI, where it is at best untidy and at worst two names
+// for one device if a driver ever changes how much of it there is.  Trimmed
+// once here rather than in eight backends.
+std::string trimmed(const std::string &s)
+{
+    const char *ws = " \t\n\r";
+    const size_t b = s.find_first_not_of(ws);
+    if (b == std::string::npos) return "";
+    return s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
+
 } // namespace
 
 // ── Constructor ────────────────────────────────────────────────────────────
@@ -37,48 +50,57 @@ std::string oneLine(const std::string &s)
 logger::logger(std::string compareFileName)
     : compareEnabled(!compareFileName.empty())
 {
-    if (compareEnabled)
-        baseline = buildBaselineMap(loadResultFile(compareFileName));
+    if (!compareEnabled) return;
+    RunDocument base;
+    if (loadRunJson(compareFileName, base))
+        baseline = buildBaselineMap(base);
 }
 
-// ── Event / entry construction ─────────────────────────────────────────────
+// ── Event construction ─────────────────────────────────────────────────────
+
+TestResult *logger::openTest()
+{
+    if (curDeviceIdx == kNoIndex || curTestIdx == kNoIndex) return nullptr;
+    return &doc.devices[curDeviceIdx].tests[curTestIdx];
+}
+
+const TestResult *logger::openTest() const
+{
+    return const_cast<logger *>(this)->openTest();
+}
 
 LogEvent logger::makeEvent(LogEvent::Kind kind) const
 {
     LogEvent e;
-    e.kind        = kind;
-    e.backend     = curBackend;
-    e.platform    = curPlatform;
+    e.kind     = kind;
+    e.backend  = curBackend;
+    e.platform = curPlatform;
     e.device      = curDevice;
     e.driver      = curDriver;
-    e.testTag     = curTest;
-    e.testDisplay = curTestDisplay;
-    e.unit        = curUnit;
-    e.category    = curCategory;
-    e.testDescription = curTestDescription;
+    e.deviceIndex = curDeviceIndex;
+
+    if (const TestResult *t = openTest())
+    {
+        e.testId          = t->id;
+        e.testTitle       = t->title;
+        e.testVariant     = t->variant;
+        e.testAxis        = t->axis;
+        e.testDescription = t->description;
+        e.category        = t->category;
+        e.shape           = t->shape;
+        e.direction       = t->direction;
+        e.unit            = t->unit;
+        e.quantity        = t->quantity;
+    }
     return e;
 }
 
-ResultEntry logger::makeEntry(const std::string &metric, ResultStatus status,
-                              float value, const std::string &reason,
-                              const std::string &metricDescription) const
+MetricResult &logger::record(MetricResult m)
 {
-    ResultEntry e;
-    e.backend  = curBackend;
-    e.platform = curPlatform;
-    e.device   = curDevice;
-    e.driver   = curDriver;
-    e.category = categoryString(curCategory);
-    e.test     = curTest;
-    e.metric   = metric;
-    e.unit     = curUnit;
-    e.status   = status;
-    e.value    = value;
-    e.reason   = reason;
-    e.display  = curTestDisplay;
-    e.description       = curTestDescription;
-    e.metricDescription = oneLine(metricDescription);
-    return e;
+    TestResult *t = openTest();
+    assert(t && "record() outside an open test");
+    t->metrics.push_back(std::move(m));
+    return t->metrics.back();
 }
 
 // ── Top-level entry ────────────────────────────────────────────────────────
@@ -90,6 +112,11 @@ logger::BackendScope logger::beginBackend(const std::string &name)
 
 void logger::note(const std::string &msg)
 {
+    // Kept on the document as well as dispatched: a note is usually the only
+    // record of *why* something is missing ("library not found"), and without
+    // it a reopened run reads as hardware that simply lacks the feature.
+    doc.notes.push_back({curBackend, curDevice, oneLine(msg)});
+
     LogEvent e = makeEvent(LogEvent::Kind::Note);
     e.message = msg;
     onEvent(e);
@@ -146,33 +173,42 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
 {
     assert(log->contextDepth == 1);
 
-    log->curPlatform = spec.platform.empty() ? log->curBackend : spec.platform;
-    log->curDevice   = spec.name;
-    log->curDriver   = spec.driver_version;
+    log->curPlatform    = spec.platform.empty() ? log->curBackend
+                                                : trimmed(spec.platform);
+    log->curDevice      = trimmed(spec.name);
+    log->curDriver      = trimmed(spec.driver_version);
+    log->curDeviceIndex = spec.device_index;
     log->contextDepth = 2;
+    log->curTestIdx   = logger::kNoIndex;
 
-    DeviceInfo info;
-    info.backend  = log->curBackend;
-    info.platform = log->curPlatform;
-    info.device   = log->curDevice;
-    info.driver   = log->curDriver;
-    info.props    = spec.props;
+    DeviceResult fresh;
+    fresh.backend       = log->curBackend;
+    fresh.platform      = log->curPlatform;
+    fresh.name          = log->curDevice;
+    fresh.driver        = log->curDriver;
+    fresh.type          = spec.type;
+    fresh.platformIndex = spec.platform_index;
+    fresh.deviceIndex   = spec.device_index;
+    fresh.properties    = spec.props;
 
-    // Re-opening the same device (a backend that enumerates it twice) must not
-    // duplicate the row the dump formats key off.
-    bool known = false;
-    for (DeviceInfo &d : log->devices)
+    // Re-opening the same device (a backend that enumerates it twice) must
+    // append to the block already recorded, not start a second one.
+    if (DeviceResult *known = log->doc.findDevice(fresh.key()))
     {
-        if (d.key() != info.key()) continue;
-        d.props = info.props;
-        known   = true;
-        break;
+        known->properties = fresh.properties;
+        known->driver     = fresh.driver;
+        if (known->type == DeviceType::Unknown) known->type = fresh.type;
+        log->curDeviceIdx = static_cast<std::size_t>(known - &log->doc.devices[0]);
     }
-    if (!known)
-        log->devices.push_back(info);
+    else
+    {
+        log->doc.devices.push_back(fresh);
+        log->curDeviceIdx = log->doc.devices.size() - 1;
+    }
 
     LogEvent e = log->makeEvent(LogEvent::Kind::DeviceBegin);
     e.props            = spec.props;
+    e.type             = spec.type;
     e.platformIndex    = spec.platform_index;
     e.deviceIndex      = spec.device_index;
     e.showPlatformLine = (log->curPlatform != log->curBackend);
@@ -201,6 +237,8 @@ void logger::DeviceScope::end()
     log->curDevice.clear();
     log->curDriver.clear();
     log->curPlatform.clear();
+    log->curDeviceIndex = -1;
+    log->curDeviceIdx = logger::kNoIndex;
     log->contextDepth = 1;
 }
 
@@ -208,11 +246,7 @@ void logger::closeOpenTest()
 {
     if (contextDepth != 3) return;
     onEvent(makeEvent(LogEvent::Kind::TestEnd));
-    curTest.clear();
-    curTestDisplay.clear();
-    curTestDescription.clear();
-    curUnit.clear();
-    curCategory  = Category::Unknown;
+    curTestIdx   = kNoIndex;
     contextDepth = 2;
     curTestSeq   = 0;          // any live TestScope for it is now stale
 }
@@ -221,16 +255,16 @@ logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
 {
     assert(!closed);
     assert(log->contextDepth == 2);
-    // Overlapping TestScopes are a caller bug: the previous test's rows are
-    // still pending in buffering channels (LoggerText renders a whole test at
-    // TestEnd).  Rather than let them be dropped -- which is silent, because
-    // the ResultStore keeps them and only the text output loses rows -- close
-    // the open test first so its output is complete and correctly attributed,
-    // and say so.  The assert above catches this in debug builds; the note and
-    // the implicit close are what make release builds behave sanely.
+    // Overlapping TestScopes are a caller bug: the previous test's readings
+    // may still be pending (LoggerText streams per metric).  Rather than let
+    // them be dropped -- which is silent, because the document keeps them and
+    // only the text output loses rows -- close the open test first so its
+    // output is complete and correctly attributed, and say so.  The assert
+    // above catches this in debug builds; the note and the implicit close are
+    // what make release builds behave sanely.
     if (log->contextDepth == 3)
     {
-        std::string prev = log->curTest;
+        std::string prev = log->openTest() ? log->openTest()->id : std::string();
         log->closeOpenTest();
         log->note("logger: test '" + spec.tag + "' opened while '" + prev +
                   "' was still open; closed it first (call end() on the "
@@ -245,19 +279,51 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
     : log(log)
 {
     assert(log->contextDepth == 2);
+    assert(log->curDeviceIdx != logger::kNoIndex);
 
-    log->curTest        = spec.tag;
-    log->curTestDisplay = spec.display;
-    log->curTestDescription = oneLine(spec.description);
-    log->curUnit        = spec.unit;
-    log->curCategory    = (spec.category != Category::Unknown)
-                              ? spec.category
-                              : categoryFromUnit(spec.unit);
+    TestResult fresh;
+    fresh.id          = spec.tag;
+    fresh.title       = spec.display.empty() ? spec.tag : spec.display;
+    fresh.variant     = spec.variant;
+    fresh.axis        = spec.axis;
+    fresh.description = oneLine(spec.description);
+    fresh.shape       = spec.shape;
+
+    // Resolve the authored unit token exactly once.  Everything downstream --
+    // the CLI header, the GUI's SI scaling, the direction of a compare delta
+    // -- reads the resolved fields, so no consumer repeats this lookup.
+    const UnitInfo u = unitInfo(spec.unit);
+    fresh.unit      = u.symbol;
+    fresh.quantity  = u.quantity;
+    fresh.direction = (spec.direction != Direction::FromUnit) ? spec.direction
+                                                              : u.direction;
+    fresh.category  = (spec.category != Category::Unknown)
+                          ? spec.category
+                          : categoryFromUnit(spec.unit);
+
+    DeviceResult &dev  = log->doc.devices[log->curDeviceIdx];
+    bool          reopened = false;
+    if (TestResult *known = dev.findTest(fresh.key()))
+    {
+        // Reopen: the first open defined this test, so only readings are
+        // added.  A reading measured in another unit carries its own on
+        // EmitOptions::unit.
+        reopened        = true;
+        log->curTestIdx = static_cast<std::size_t>(known - &dev.tests[0]);
+    }
+    else
+    {
+        dev.tests.push_back(fresh);
+        log->curTestIdx = dev.tests.size() - 1;
+    }
+
     log->contextDepth = 3;
     seq = ++log->testSeqCounter;
     log->curTestSeq = seq;
 
-    log->onEvent(log->makeEvent(LogEvent::Kind::TestBegin));
+    LogEvent e = log->makeEvent(LogEvent::Kind::TestBegin);
+    e.reopened   = reopened;
+    log->onEvent(e);
 }
 
 logger::TestScope::~TestScope()
@@ -278,12 +344,27 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     assert(!closed);
     assert(log->contextDepth == 3);
 
-    LogEvent e  = log->makeEvent(LogEvent::Kind::Metric);
-    e.entry     = log->makeEntry(metric, ResultStatus::Ok, value, "",
-                                 opts.description);
-    e.subMetric = opts.subMetric;
-    log->results.push_back(e.entry);
+    MetricResult m;
+    m.id          = std::move(metric);
+    m.label       = opts.label;
+    m.status      = ResultStatus::Ok;
+    m.value       = value;
+    m.description = oneLine(opts.description);
+    m.direction   = opts.direction;
+    if (!opts.unit.empty())
+    {
+        const UnitInfo u = unitInfo(opts.unit);
+        m.hasUnit  = true;
+        m.unit     = u.symbol;
+        m.quantity = u.quantity;
+        // A unit override with no explicit direction takes that unit's, not
+        // the test's: a `s` reading inside a throughput test is still
+        // lower-is-better.
+        if (m.direction == Direction::FromUnit) m.direction = u.direction;
+    }
 
+    LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
+    e.metric   = log->record(std::move(m));
     log->onEvent(e);
 }
 
@@ -301,10 +382,45 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
     assert(!closed);
     assert(log->contextDepth == 3);
 
-    LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
-    e.entry    = log->makeEntry(metric, status, 0.0f, reason, description);
-    log->results.push_back(e.entry);
+    MetricResult m;
+    m.id          = std::move(metric);
+    m.status      = status;
+    m.reason      = std::move(reason);
+    m.description = oneLine(description);
 
+    LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
+    e.metric   = log->record(std::move(m));
+    log->onEvent(e);
+}
+
+void logger::TestScope::skip(std::string metric, ResultStatus status,
+                             std::string reason, EmitOptions opts)
+{
+    assert(!closed);
+    assert(log->contextDepth == 3);
+
+    MetricResult m;
+    m.id          = std::move(metric);
+    m.status      = status;
+    m.reason      = std::move(reason);
+    m.description = oneLine(opts.description);
+    m.label       = opts.label;
+    m.direction   = opts.direction;
+    // A reading that never ran still records the unit it would have been in:
+    // that is what tells a reader an unsupported int8 row was never going to
+    // be flops, and what keeps the row honest when the test it sits in
+    // reports something else.
+    if (!opts.unit.empty())
+    {
+        const UnitInfo u = unitInfo(opts.unit);
+        m.hasUnit  = true;
+        m.unit     = u.symbol;
+        m.quantity = u.quantity;
+        if (m.direction == Direction::FromUnit) m.direction = u.direction;
+    }
+
+    LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
+    e.metric   = log->record(std::move(m));
     log->onEvent(e);
 }
 
@@ -320,7 +436,11 @@ void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,
 
     for (const auto &metric : metrics)
     {
-        log->results.push_back(log->makeEntry(metric, status, 0.0f, reason));
+        MetricResult m;
+        m.id     = metric;
+        m.status = status;
+        m.reason = reason;
+        log->record(std::move(m));
         e.metricNames.push_back(metric);
     }
 

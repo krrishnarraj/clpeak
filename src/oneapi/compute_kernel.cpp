@@ -23,15 +23,12 @@ uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
   return (uint32_t)pickBlocks;
 }
 
-float computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
-                    double unitDivider /*=1e9*/)
+float computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs)
 {
   if (meanUs <= 0.0f)
     return -1.0f;
-  if (unitDivider <= 0.0)
-    unitDivider = 1e9;
   return (float)((double)totalThreads * (double)workPerWI * 1e6 /
-                 (double)meanUs / unitDivider);
+                 (double)meanUs);
 }
 
 } // namespace clpeak_oneapi

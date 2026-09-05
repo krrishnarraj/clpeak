@@ -51,12 +51,13 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     bytes = 256;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+    {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
      "How fast data crosses between the host's memory and the device's.  On a "
      "discrete card that means the PCIe link, which is far narrower than "
      "either side's own memory and is what makes moving data to the device "
      "worth avoiding; where the two share one pool of memory the numbers are much "
-     "higher.  Both readings use pinned host memory, the fast path."});
+     "higher.  Both readings use pinned host memory, the fast path.",
+     TestShape::Heterogeneous, "direction"});
 
   const char *h2dNote = "Host to device: sending data across to the device.";
   const char *d2hNote = "Device to host: reading results back.  Often a little "
@@ -118,12 +119,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     // the batch is drained once, so the driver can keep the link busy -- the
     // same shape as the async memcpy loops in the CUDA/ROCm/oneAPI backends.
     //
-    // Always wall-clock, even under --use-event-timer: CL profiling events
-    // time the device's command processing, which on a unified-memory device
-    // is near zero for a copy that moves nothing (Apple M1 reports ~70x the
-    // real rate).  The host clock over a ~targetTimeUs window is both accurate
-    // enough and the number a caller actually pays.  oneAPI times this the
-    // same way.
+    // Always wall-clock: CL profiling events time the device's command
+    // processing, which on a unified-memory device is near zero for a copy that
+    // moves nothing (Apple M1 reports ~70x the real rate).  The host clock over
+    // a ~targetTimeUs window is both accurate enough and the number a caller
+    // actually pays.  oneAPI times this the same way.
     auto runTransfer = [&](std::function<void()> op) -> float
     {
       for (unsigned int w = 0; w < warmupCount; w++)
@@ -146,7 +146,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       float timed = runBatch(iters) / static_cast<float>(iters);
       if (timed <= 0.0f)
         return -1.0f;
-      return (float)bytes / timed / 1e3f;
+      return (float)bytes / timed * 1e6f;
     };
 
     float bw;

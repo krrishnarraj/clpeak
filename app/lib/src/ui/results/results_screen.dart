@@ -129,14 +129,14 @@ class _ExportButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return CIconButton(
       icon: Icons.ios_share,
-      tooltip: 'Export XML',
+      tooltip: 'Export',
       onPressed: () async {
         final history = context.read<RunHistoryStore>();
         final export = context.read<ExportService>();
         final messenger = ScaffoldMessenger.of(context);
         try {
-          final xml = await history.xmlFile(summary);
-          await export.exportXml(xml, suggestedName: summary.fileName);
+          final file = await history.documentFile(summary);
+          await export.exportRun(file, suggestedName: summary.fileName);
         } catch (e) {
           messenger.showSnackBar(
               SnackBar(content: Text('Export failed: $e')));

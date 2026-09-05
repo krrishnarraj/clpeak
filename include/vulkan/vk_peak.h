@@ -256,15 +256,30 @@ struct vk_compute_variant_t
 struct vk_compute_desc_t
 {
   // Display / reporting
-  const char *title;         // e.g. "Single-precision compute (GFLOPS)"
+  const char *title;         // e.g. "Single-precision compute (FLOPS)"
   const char *resultTag;        // e.g. "single_precision_compute"
   const char *metricLabel;   // used when variants==nullptr
-  const char *unit;          // "gflops" / "gops" / "tflops" / "tops"
-  double      unitDivider;   // 1e9 = G* (default when 0), 1e12 = T*
+  const char *unit;          // "flops" / "ops"
 
   // One or two plain-language sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
+
+  // Whether the variants below are interchangeable forms of one measurement
+  // (Homogeneous -- a vector-width sweep) or separate measurements sharing a
+  // kernel shape (Heterogeneous -- a family of data types).  See
+  // include/common/AGENTS.md.
+  TestShape   shape;
+
+  // What varies across the readings: "vector width", "data type".  Optional.
+  const char *axis;
+
+  // Single-variant path only: what this one reading means, and the unit it is
+  // measured in when that differs from the test's.  The unit override is what
+  // lets the integer members of a data-type family share the test with the
+  // floating-point ones instead of living in a `-int` twin.
+  const char *metricDescription;
+  const char *metricUnit;
 
   // Single-variant shader (used when variants == nullptr)
   const uint32_t *spirv;
@@ -294,6 +309,14 @@ struct vk_compute_desc_t
   // Used by the coopmat shaders to bind the selected M/N/K tile + loop count.
   // nullptr => none.
   const VkSpecializationInfo *specInfo;
+
+
+  // Test to write into.  nullptr means "open one from the fields above" --
+  // the ordinary case.  A family measured in several descs (every data type
+  // its own #ifdef block) passes one scope instead, so the test opens and
+  // closes once rather than once per reading.  `resultTag` is still read then,
+  // as the name the runner's --verbose lines report themselves under.
+  logger::TestScope *scope;
 
   // Optional feature gate.  If skip==true, emit skipMsg and close the tag.
   bool skip;
@@ -334,7 +357,7 @@ public:
   int runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg);
 #endif
   // Cooperative matrix (tensor-core) umbrella -- runs each advertised dtype.
-  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg, bool intPart = false);
+  int runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);
   int runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg);

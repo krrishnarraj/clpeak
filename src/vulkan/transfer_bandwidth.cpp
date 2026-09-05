@@ -37,12 +37,14 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   logger::TestSpec testSpec;
   testSpec.tag = "transfer_bandwidth";
   testSpec.display = "Transfer bandwidth";
-  testSpec.unit = "gbps";
+  testSpec.unit = "bps";
   testSpec.description =
       "How fast data crosses between the host's memory and the device's.  On a "
       "discrete card that means the PCIe link, which is usually far narrower "
       "than either side's own memory and is what makes moving data to the "
       "device worth avoiding.";
+  testSpec.shape = TestShape::Heterogeneous;
+  testSpec.axis  = "direction";
   auto test = currentDeviceScope->beginTest(testSpec);
 
   VkBuffer hostBuf = VK_NULL_HANDLE;
@@ -178,7 +180,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     if (totalUs < 0.0f) return -1.0f;
     // A genuine zero reading (no measurable wall-clock time AND no
     // timestamp delta) is the timer-broken case -- don't paper over it
-    // with FLT_EPSILON, since (bytes / FLT_EPSILON / 1e3) prints 1.13e12
+    // with FLT_EPSILON, since (bytes / FLT_EPSILON * 1e6) prints 1.13e12
     // GBPS and looks like a real result.
     if (totalUs <= 0.0f)
       return -1.0f;
@@ -193,8 +195,8 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                  "vkQueueSubmit/WaitIdle failed or timer returned zero", note);
       return;
     }
-    float gbps = (float)bytes / us / 1e3f;
-    test.emit(metric, gbps, note);
+    float bps = (float)bytes / us * 1e6f;
+    test.emit(metric, bps, note);
   };
 
   reportCopy("h2d", "Host to device: sending data across to the device.",

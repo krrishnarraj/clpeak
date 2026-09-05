@@ -1,6 +1,7 @@
 #ifdef ENABLE_CUDA
 
 #include <cuda/cuda_peak.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,9 +14,13 @@
 int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
                                const cuda_compute_desc_t &d)
 {
-  auto test = currentDeviceScope->beginTest(
-    {d.resultTag, d.title, d.unit, Category::Unknown,
-     d.description ? d.description : ""});
+  std::unique_ptr<logger::TestScope> ownTest;
+  if (!d.scope)
+    ownTest.reset(new logger::TestScope(currentDeviceScope->beginTest(
+      {d.resultTag, d.title, d.unit, Category::Unknown,
+       d.description ? d.description : "",
+       d.shape, d.axis ? d.axis : ""})));
+  logger::TestScope &test = d.scope ? *d.scope : *ownTest;
 
   struct Variant
   {
@@ -30,17 +35,28 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
                           d.variants[i].blob, d.variants[i].description});
   else
-    // Single-variant tests: the metric name restates the title, so the
-    // test-level description covers it.
-    variants.push_back({d.metricLabel, d.kernelName, d.blob, nullptr});
+    // Single-variant tests: one reading, documented by d.metricDescription.
+    // The tensor-core tests use this path once per data type, all into the
+    // same test.
+    variants.push_back({d.metricLabel, d.kernelName, d.blob,
+                        d.metricDescription});
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
+
+  // Unit override for the single-variant path: an integer member of an
+  // otherwise floating-point family carries its own.
+  auto emitOpts = [&](const char *description) {
+    logger::EmitOptions o;
+    o.description = note(description);
+    if (d.metricUnit) o.unit = d.metricUnit;
+    return o;
+  };
 
   if (d.skip)
   {
     for (const auto &v : variants)
       test.skip(v.label, ResultStatus::Unsupported,
-                d.skipMsg ? d.skipMsg : "Skipped", note(v.description));
+                d.skipMsg ? d.skipMsg : "Skipped", emitOpts(v.description));
     return 0;
   }
 
@@ -61,7 +77,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
   {
     for (const auto &v : variants)
       test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer",
-                note(v.description));
+                emitOpts(v.description));
     return -1;
   }
 
@@ -71,7 +87,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     if (!dev.getKernel(*v.blob, v.kernelName, fn))
     {
       test.skip(v.label, ResultStatus::Error, "compile/load failed",
-                note(v.description));
+                emitOpts(v.description));
       continue;
     }
 
@@ -82,10 +98,9 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     float us = runKernel(dev, fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
-    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);
 
-    test.emit(v.label, value, {false, note(v.description)});
+    test.emit(v.label, value, emitOpts(v.description));
   }
 
   cuMemFree(outputBuf);

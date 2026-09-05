@@ -431,10 +431,34 @@ void detectCpuInfo(cpu_device_info_t &info)
   if (!info.l2CacheBytes)
     info.l2CacheBytes = sysctlU64("hw.l2cachesize");
   // On Apple Silicon, L1d is per P-core; L2 is a shared cluster cache.
-  // Report total L1d = per-core x physicalCores; L2 total = L2 as-is.
+  // Report total L1d = per-core x physicalCores.  The L2 total has to be
+  // summed over every perf level AND over the clusters inside each one:
+  // hw.perflevel0.l2cachesize is ONE cluster, so an M1 Pro (2 P-clusters of
+  // 12 MB + 1 E-cluster of 4 MB = 28 MB) reports 12 from that sysctl alone.
+  // The aggregate is what sizes the STREAM arrays in bandwidth.cpp, and
+  // understating it by 2.3x is how a "DRAM" row ends up partly cached.
   if (info.l1dCacheBytes && info.physicalCores > 0)
     info.l1dTotalBytes = info.l1dCacheBytes * (uint64_t)info.physicalCores;
-  info.l2TotalBytes = info.l2CacheBytes;
+  info.l2TotalBytes = 0;
+  {
+    uint64_t nLevels = sysctlU64("hw.nperflevels");
+    if (nLevels < 1)
+      nLevels = 1;
+    for (uint64_t lvl = 0; lvl < nLevels; lvl++)
+    {
+      char key[64];
+      std::snprintf(key, sizeof(key), "hw.perflevel%llu.l2cachesize", (unsigned long long)lvl);
+      uint64_t sz = sysctlU64(key);
+      std::snprintf(key, sizeof(key), "hw.perflevel%llu.physicalcpu", (unsigned long long)lvl);
+      uint64_t cores = sysctlU64(key);
+      std::snprintf(key, sizeof(key), "hw.perflevel%llu.cpusperl2", (unsigned long long)lvl);
+      uint64_t per = sysctlU64(key);
+      if (sz && cores && per)
+        info.l2TotalBytes += sz * ((cores + per - 1) / per);
+    }
+  }
+  if (!info.l2TotalBytes)
+    info.l2TotalBytes = info.l2CacheBytes;
   info.l3CacheBytes = sysctlU64("hw.l3cachesize");
   info.totalMemBytes = sysctlU64("hw.memsize");
   uint64_t hz = sysctlU64("hw.cpufrequency_max");
@@ -647,8 +671,13 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.l1dCacheBytes = 32ull * 1024;
   if (!info.l2CacheBytes)
     info.l2CacheBytes = 512ull * 1024;
-  if (!info.l3CacheBytes)
-    info.l3CacheBytes = 8ull * 1024 * 1024;
+  // L3 gets NO fallback: plenty of CPUs genuinely have none (every Apple
+  // Silicon part, Snapdragon X, most phone SoCs), and inventing 8 MB there was
+  // worse than reporting nothing.  It printed an "L3" that does not exist,
+  // pointed the L3 cache-bandwidth and latency rows at a working set that
+  // still fits in L2 (M1 Pro reported an L3 *faster* than its own L2), and
+  // sized the STREAM arrays off 8 MB instead of the ~28 MB really there.
+  // Zero means "no L3"; the rows that need one skip as Unsupported.
   // If totals couldn't be determined, fall back to the per-core size (no breakdown shown).
   if (info.l1dTotalBytes < info.l1dCacheBytes)
     info.l1dTotalBytes = info.l1dCacheBytes;

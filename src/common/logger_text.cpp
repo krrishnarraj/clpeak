@@ -38,10 +38,16 @@ void LoggerText::onEvent(const LogEvent &e)
     case LogEvent::Kind::TestBegin:      renderTestBegin(e);      break;
     case LogEvent::Kind::Metric:         renderMetric(e);         break;
     case LogEvent::Kind::TestSkippedAll: renderTestSkippedAll(e); break;
-    case LogEvent::Kind::TestEnd:        renderTestEnd();         break;
+    case LogEvent::Kind::TestEnd:
+        renderTestEnd();
+        noteClosedTest(e.testKey());
+        break;
     case LogEvent::Kind::DeviceEnd:      renderDeviceEnd();       break;
     case LogEvent::Kind::BackendEnd:     renderBackendEnd();      break;
     case LogEvent::Kind::Note:
+        // Before the message, or it would appear above rows that were measured
+        // before it.
+        flushMetrics();
         out << e.message;
         out.flush();
         break;
@@ -105,35 +111,58 @@ void LoggerText::renderDeviceBegin(const LogEvent &e)
 
 void LoggerText::renderTestBegin(const LogEvent &e)
 {
-    // Defence in depth: rows are buffered until TestEnd, so anything still
-    // pending here belongs to a test that was not closed.  The scope layer
-    // now closes it for us (logger::closeOpenTest), but flush rather than
-    // clear so no measured row can ever be discarded silently.
-    flushMetrics();
+    // Reopening the test that just closed, with its header still standing:
+    // keep accumulating into the same stanza, under the header already
+    // printed for it.  Rows carry their own units, so a reopen with a different
+    // unit joins the same table rather than
+    // starting a look-alike stanza beside it.
+    if (e.reopened && e.testKey() == lastClosedTest && stanzaHasHeader)
+        return;
 
-    out << "\n";
+    flushMetrics();
+    mergedPad       = 0;
+    stanzaHasHeader = true;
 
     metricIndent = propIndent + 1;   // metrics indented one more than props
     indentLevel  = propIndent;       // test header at prop level
 
-    // Build header: display name + unit in caps, e.g. "Global memory bandwidth (GBPS)"
-    std::string header = e.testDisplay;
-    if (!e.unit.empty())
+    // Build the header.  In verbose mode the header is printed
+    // immediately so that backend CLPEAK_VLOG lines (stderr) land
+    // under it, not above it.  In default mode the header is deferred
+    // until we know the test has visible output, so a fully-skipped
+    // test leaves no orphan header behind.  The header always
+    // precedes its --describe prose.
+    std::string header = e.testTitle;
+    if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
+    if (verbose)
     {
-        std::string u = e.unit;
-        for (auto &c : u)
-            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        header += " (" + u + ")";
-    }
-
-    writeLine(header);
-
-    // What the test measures, under its own header and one step in from it,
-    // then a blank line so the readings below still read as a block.
-    if (describe && !e.testDescription.empty())
-    {
-        writeWrapped(metricIndent * 2, e.testDescription);
         out << "\n";
+        writeLine(header);
+        if (describe && (!e.testDescription.empty() || !e.testAxis.empty()))
+        {
+            if (!e.testDescription.empty())
+                writeWrapped(metricIndent * 2, e.testDescription);
+            if (!e.testAxis.empty())
+                writeWrapped(metricIndent * 2, "Readings vary by " + e.testAxis + ".");
+            out << "\n";
+        }
+        mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+    else
+    {
+        mPendingHeader = header;
+        if (describe)
+        {
+            mPendingDescription = e.testDescription;
+            mPendingAxis        = e.testAxis;
+        }
+        else
+        {
+            mPendingDescription.clear();
+            mPendingAxis.clear();
+        }
     }
 
     metricLines.clear();
@@ -144,15 +173,73 @@ void LoggerText::renderTestBegin(const LogEvent &e)
 
 void LoggerText::renderMetric(const LogEvent &e)
 {
-    metricLines.push_back({e.entry.metric, e.entry.value, e.entry.status,
-                           e.entry.reason, e.subMetric, e.entry.key(),
-                           e.entry.metricDescription});
+    // In non-verbose mode, skip unsupported/skipped/error readings —
+    // they clutter the table and are only useful when debugging.
+    if (!verbose && e.metric.status != ResultStatus::Ok)
+        return;
+
+    MetricLine ml;
+    ml.label       = e.metric.displayLabel();
+    ml.value       = e.metric.value;
+    ml.status      = e.metric.status;
+    ml.reason      = e.metric.reason;
+    ml.description = e.metric.description;
+    ml.baselineKey = baselineKey(e.backend, e.platform, e.deviceKey(),
+                                 e.testKey(), e.metric.id);
+    // The unit context this row prints in: the reading's own when it
+    // overrides its test's (an int8 row in ops inside a GEMM test in flops),
+    // else the test's.  Resolved here so the print path does no unit-table
+    // lookups.
+    if (e.metric.hasUnit)
+    {
+        ml.unit.symbol   = e.metric.unit;
+        ml.unit.quantity = e.metric.quantity;
+    }
+    else
+    {
+        ml.unit.symbol   = e.unit;
+        ml.unit.quantity = e.quantity;
+    }
+    ml.direction = (e.metric.direction == Direction::FromUnit) ? e.direction
+                                                               : e.metric.direction;
+
+    metricLines.push_back(std::move(ml));
+    flushMetrics();
 }
 
 // ── TestSkippedAll ─────────────────────────────────────────────────────────
 
 void LoggerText::renderTestSkippedAll(const LogEvent &e)
 {
+    if (!verbose)
+        return;
+
+    // Flush the deferred header (and its --describe prose) first so the
+    // skip line appears under its own test, not orphaned under the
+    // previous one.
+    if (!mPendingHeader.empty())
+    {
+        out << "\n";
+        writeLine(mPendingHeader);
+        if (!mPendingDescription.empty())
+            writeWrapped(metricIndent * 2, mPendingDescription);
+        if (!mPendingAxis.empty())
+            writeWrapped(metricIndent * 2, "Readings vary by " + mPendingAxis + ".");
+        if (!mPendingDescription.empty() || !mPendingAxis.empty())
+            out << "\n";
+        mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+    else
+    {
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+
+    // One line, not one per metric: a whole-test skip is a single fact, and
+    // the reason is identical on every reading it stands in for.  The document
+    // still records each named reading, so the file is complete.
     writeLine(metricIndent, "[" + statusTag(e.status) + "] " + e.reason);
     out.flush();
 }
@@ -163,6 +250,11 @@ void LoggerText::renderTestEnd()
 {
     flushMetrics();
     indentLevel = propIndent;
+}
+
+void LoggerText::noteClosedTest(const std::string &key)
+{
+    lastClosedTest = key;
 }
 
 // ── DeviceEnd ──────────────────────────────────────────────────────────────
@@ -182,6 +274,9 @@ void LoggerText::renderDeviceEnd()
 
 void LoggerText::renderBackendEnd()
 {
+    // Rows are held until the stanza ends (see renderTestEnd), so the last
+    // test of the last device flushes here.
+    flushMetrics();
     indentLevel = 0;
     out.flush();
 }
@@ -191,47 +286,85 @@ void LoggerText::renderBackendEnd()
 void LoggerText::flushMetrics()
 {
     if (metricLines.empty())
+    {
+        // The stanza produced nothing visible, so its deferred header goes —
+        // and with it the header a reopen would otherwise continue under (a
+        // reopened test re-heads itself instead: see renderTestBegin).
+        if (!mPendingHeader.empty())
+            stanzaHasHeader = false;
+        mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
         return;
+    }
 
-    // Compute the maximum metric name width in this test
-    int maxWidth = MIN_METRIC_PAD;
+    // Print the deferred test header if we have one.  The --describe prose
+    // was deferred with it so a fully-skipped test does not leave an empty
+    // header behind.
+    if (!mPendingHeader.empty())
+    {
+        out << "\n";
+        writeLine(mPendingHeader);
+        if (!mPendingDescription.empty())
+            writeWrapped(metricIndent * 2, mPendingDescription);
+        if (!mPendingAxis.empty())
+            writeWrapped(metricIndent * 2, "Readings vary by " + mPendingAxis + ".");
+        if (!mPendingDescription.empty() || !mPendingAxis.empty())
+            out << "\n";
+        mPendingHeader.clear();
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+    else
+    {
+        mPendingDescription.clear();
+        mPendingAxis.clear();
+    }
+
+    // Compute the maximum metric name width in this test.  `mergedPad` is the
+    // widest label already printed in this stanza, so a test written in
+    // several blocks stays one aligned table.
+    int maxWidth = MIN_METRIC_PAD > mergedPad ? MIN_METRIC_PAD : mergedPad;
     for (const auto &ml : metricLines)
     {
-        int w = static_cast<int>(ml.metric.size());
+        int w = static_cast<int>(ml.label.size());
         if (w > maxWidth)
             maxWidth = w;
     }
+    mergedPad = maxWidth;
 
     for (const auto &ml : metricLines)
     {
-        int lineIndent = ml.subMetric ? metricIndent + 1 : metricIndent;
-        int padTarget  = ml.subMetric ? maxWidth - 2 : maxWidth;
-        if (padTarget < MIN_METRIC_PAD)
-            padTarget = MIN_METRIC_PAD;
-
         // Build padded metric name
-        std::string padded = ml.metric;
-        while (static_cast<int>(padded.size()) < padTarget)
+        std::string padded = ml.label;
+        while (static_cast<int>(padded.size()) < maxWidth)
             padded += ' ';
 
         if (ml.status == ResultStatus::Ok)
         {
-            // Format value
-            std::stringstream ss;
-            ss << std::fixed << std::setprecision(2) << ml.value;
+            // Value and unit are chosen together: the mantissa is scaled to
+            // the reading's magnitude and the unit beside it is the one that
+            // matches (4476 GFLOPS prints as "4.48 TFLOPS") — the same pair
+            // the GUI's value column shows.  The unit lives on the row, not
+            // the test header, because a heterogeneous test's rows need not
+            // share one (a GEMM test holds TFLOPS and TOPS alike).
+            const ScaledValue sv = formatScaledValue(ml.value, ml.unit);
 
             // Print metric line without trailing newline (baseline delta may follow)
-            out << indentStr(lineIndent) << padded << " : " << ss.str();
+            out << indentStr(metricIndent) << padded << " : " << sv.text;
+            if (!sv.unit.empty())
+                out << " " << sv.unit;
 
             // Baseline delta on the same line (if enabled)
             if (compareEnabled)
-                printBaselineDelta(ml.baselineKey, ml.value);
+                printBaselineDelta(ml.baselineKey, ml.value, ml.direction,
+                                   ml.unit);
 
             out << "\n";
         }
         else
         {
-            out << indentStr(lineIndent) << padded << " : ["
+            out << indentStr(metricIndent) << padded << " : ["
                 << statusTag(ml.status) << "] " << ml.reason << "\n";
         }
 
@@ -239,7 +372,7 @@ void LoggerText::flushMetrics()
         // value column: one straight edge for every note in the test, and
         // clearly subordinate to the row it belongs to.
         if (describe && !ml.description.empty())
-            writeWrapped(lineIndent * 2 + padTarget + 3, ml.description);
+            writeWrapped(metricIndent * 2 + maxWidth + 3, ml.description);
     }
 
     metricLines.clear();
@@ -296,18 +429,36 @@ void LoggerText::writeWrapped(int column, const std::string &text)
         out << pad << line << "\n";
 }
 
-void LoggerText::printBaselineDelta(const std::string &key, float value)
+void LoggerText::printBaselineDelta(const std::string &key, double value,
+                                    Direction direction, const UnitInfo &unit)
 {
     auto it = baseline.find(key);
     if (it == baseline.end())
         return;
 
-    float base  = it->second;
-    float delta = (base != 0.0f) ? 100.0f * (value - base) / base : 0.0f;
+    const double base  = it->second;
+    const double delta = (base != 0.0) ? 100.0 * (value - base) / base : 0.0;
 
-    char  sign     = (delta >= 0.0f) ? '+' : '-';
-    float absDelta = (delta < 0.0f)  ? -delta : delta;
+    const char   sign     = (delta >= 0.0) ? '+' : '-';
+    const double absDelta = (delta < 0.0)  ? -delta : delta;
 
-    out << "  (was " << std::fixed << std::setprecision(2) << base
-        << ", " << sign << std::setprecision(1) << absDelta << "%)";
+    // Which way a reading moved is not which way is better: on a latency or
+    // numeric-error row, +3% is a regression.  A bare signed percentage has
+    // always read as good news, so say which it is.
+    const bool improved = (direction == Direction::LowerIsBetter) ? (delta < 0.0)
+                                                                  : (delta > 0.0);
+
+    // The baseline prints through the row's own scaling: "was 4476" beside a
+    // row that says 4.48 TFLOPS reads as a collapse that did not happen.
+    const ScaledValue sv = formatScaledValue(base, unit);
+    out << "  (was " << sv.text;
+    if (!sv.unit.empty())
+        out << " " << sv.unit;
+    out << ", " << sign << std::fixed
+        << std::setprecision(1) << absDelta << "%";
+    // Below this the figure prints as 0.0%, and calling run-to-run noise
+    // "better" or "worse" would be inventing a result.
+    if (absDelta >= 0.05)
+        out << (improved ? " better" : " worse");
+    out << ")";
 }

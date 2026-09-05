@@ -34,188 +34,209 @@
 // the existing call sites to the loaded pointers -- so the body below is
 // unchanged.
 // ---------------------------------------------------------------------------
-namespace {
-struct CublasLtApi
+namespace
 {
-  void *lib = nullptr;
-  decltype(&::cublasLtCreate)                       Create = nullptr;
-  decltype(&::cublasLtDestroy)                      Destroy = nullptr;
-  decltype(&::cublasLtMatmul)                       Matmul = nullptr;
-  decltype(&::cublasLtMatmulAlgoGetHeuristic)       AlgoGetHeuristic = nullptr;
-  decltype(&::cublasLtMatmulDescCreate)             DescCreate = nullptr;
-  decltype(&::cublasLtMatmulDescDestroy)            DescDestroy = nullptr;
-  decltype(&::cublasLtMatmulDescSetAttribute)       DescSetAttribute = nullptr;
-  decltype(&::cublasLtMatmulPreferenceCreate)       PrefCreate = nullptr;
-  decltype(&::cublasLtMatmulPreferenceDestroy)      PrefDestroy = nullptr;
-  decltype(&::cublasLtMatmulPreferenceSetAttribute) PrefSetAttribute = nullptr;
-  decltype(&::cublasLtMatrixLayoutCreate)           LayoutCreate = nullptr;
-  decltype(&::cublasLtMatrixLayoutDestroy)          LayoutDestroy = nullptr;
-  bool load();
-};
-CublasLtApi g_lt;
-bool CublasLtApi::load()
-{
-  if (lib)
-    return true;
-  lib = clpeak::dynOpen({"libcublasLt.so", "libcublasLt.so.13",
-                         "libcublasLt.so.12", "libcublasLt.so.11",
-                         "cublasLt64_13.dll", "cublasLt64_12.dll",
-                         "cublasLt64_11.dll"});
-  if (!lib)
-    return false;
-  bool ok = true;
-#define CLPEAK_LT_SYM(member, name)                                      \
-  member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
-  ok = ok && (member != nullptr)
-  CLPEAK_LT_SYM(Create,           "cublasLtCreate");
-  CLPEAK_LT_SYM(Destroy,          "cublasLtDestroy");
-  CLPEAK_LT_SYM(Matmul,           "cublasLtMatmul");
-  CLPEAK_LT_SYM(AlgoGetHeuristic, "cublasLtMatmulAlgoGetHeuristic");
-  CLPEAK_LT_SYM(DescCreate,       "cublasLtMatmulDescCreate");
-  CLPEAK_LT_SYM(DescDestroy,      "cublasLtMatmulDescDestroy");
-  CLPEAK_LT_SYM(DescSetAttribute, "cublasLtMatmulDescSetAttribute");
-  CLPEAK_LT_SYM(PrefCreate,       "cublasLtMatmulPreferenceCreate");
-  CLPEAK_LT_SYM(PrefDestroy,      "cublasLtMatmulPreferenceDestroy");
-  CLPEAK_LT_SYM(PrefSetAttribute, "cublasLtMatmulPreferenceSetAttribute");
-  CLPEAK_LT_SYM(LayoutCreate,     "cublasLtMatrixLayoutCreate");
-  CLPEAK_LT_SYM(LayoutDestroy,    "cublasLtMatrixLayoutDestroy");
-#undef CLPEAK_LT_SYM
-  if (!ok)
-  {
-    clpeak::dynClose(lib);
-    lib = nullptr;
-  }
-  return ok;
-}
-} // namespace
-
-#define cublasLtCreate                       g_lt.Create
-#define cublasLtDestroy                      g_lt.Destroy
-#define cublasLtMatmul                       g_lt.Matmul
-#define cublasLtMatmulAlgoGetHeuristic       g_lt.AlgoGetHeuristic
-#define cublasLtMatmulDescCreate             g_lt.DescCreate
-#define cublasLtMatmulDescDestroy            g_lt.DescDestroy
-#define cublasLtMatmulDescSetAttribute       g_lt.DescSetAttribute
-#define cublasLtMatmulPreferenceCreate       g_lt.PrefCreate
-#define cublasLtMatmulPreferenceDestroy      g_lt.PrefDestroy
-#define cublasLtMatmulPreferenceSetAttribute g_lt.PrefSetAttribute
-#define cublasLtMatrixLayoutCreate           g_lt.LayoutCreate
-#define cublasLtMatrixLayoutDestroy          g_lt.LayoutDestroy
-
-namespace {
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const char *cuErrStrLocal(CUresult r)
-{
-    const char *s = nullptr;
-    cuGetErrorString(r, &s);
-    return s ? s : "unknown CUDA error";
-}
-
-#define CU_TRY(call) do { CUresult _r = (call); \
-    if (_r != CUDA_SUCCESS) { \
-        CLPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStrLocal(_r)); \
-        return -1; } } while (0)
-
-#define LT_TRY(call) do { cublasStatus_t _s = (call); \
-    if (_s != CUBLAS_STATUS_SUCCESS) { \
-        CLPEAK_VLOG("cuBLASLt error at %s:%d: status=%d\n", __FILE__, __LINE__, (int)_s); \
-        return -1; } } while (0)
-
-// Pick a square GEMM dim that scales with the device's compute budget so
-// small / large GPUs land in similar wall-clock windows.  Same shape as the
-// Metal version: 2048 + numSMs*256, clamped to [2048, 16384], 256-aligned,
-// then capped to 25% of VRAM (worst-case fp32 = 4 bytes / element).
-uint32_t pickGemmDim(const cuda_device_info_t &info)
-{
-    uint32_t sms = (uint32_t)(info.numSMs > 0 ? info.numSMs : 16);
-    uint64_t D = 2048 + (uint64_t)sms * 256;
-    D = (D + 255) & ~uint64_t(255);
-    if (D < 2048)  D = 2048;
-    if (D > 16384) D = 16384;
-
-    uint64_t budget = info.totalGlobalMem ? info.totalGlobalMem / 4 : ((uint64_t)4 << 30);
-    // Worst-case element size is fp64 = 8 bytes (DGEMM); shrink D if the
-    // 3*D*D*8 footprint won't fit in 1/4 VRAM.
-    while (D > 1024 && 3ULL * D * D * 8 > budget)
-        D /= 2;
-    return (uint32_t)D;
-}
-
-// One-shot timing helper: run `n` cublasLtMatmul calls between an event pair.
-// Returns mean per-iter time in microseconds (or <0 on error).
-double timeCublasLt(cublasLtHandle_t lt, CUstream stream,
-                    cublasLtMatmulDesc_t opDesc,
-                    const void *alpha, const void *A, cublasLtMatrixLayout_t Adesc,
-                                       const void *B, cublasLtMatrixLayout_t Bdesc,
-                    const void *beta,  const void *C, cublasLtMatrixLayout_t Cdesc,
-                                             void *D, cublasLtMatrixLayout_t Ddesc,
-                    const cublasLtMatmulAlgo_t *algo,
-                    void *workspace, size_t workspaceSize,
-                    unsigned int n)
-{
-    CUevent start = nullptr, stop = nullptr;
-    cuEventCreate(&start, CU_EVENT_DEFAULT);
-    cuEventCreate(&stop,  CU_EVENT_DEFAULT);
-
-    cuStreamSynchronize(stream);
-    cuEventRecord(start, stream);
-    for (unsigned int i = 0; i < n; i++)
+    struct CublasLtApi
     {
-        cublasStatus_t s = cublasLtMatmul(lt, opDesc,
-                                          alpha, A, Adesc, B, Bdesc,
-                                          beta,  C, Cdesc, D, Ddesc,
-                                          algo, workspace, workspaceSize, stream);
-        if (s != CUBLAS_STATUS_SUCCESS)
+        void *lib = nullptr;
+        decltype(&::cublasLtCreate) Create = nullptr;
+        decltype(&::cublasLtDestroy) Destroy = nullptr;
+        decltype(&::cublasLtMatmul) Matmul = nullptr;
+        decltype(&::cublasLtMatmulAlgoGetHeuristic) AlgoGetHeuristic = nullptr;
+        decltype(&::cublasLtMatmulDescCreate) DescCreate = nullptr;
+        decltype(&::cublasLtMatmulDescDestroy) DescDestroy = nullptr;
+        decltype(&::cublasLtMatmulDescSetAttribute) DescSetAttribute = nullptr;
+        decltype(&::cublasLtMatmulPreferenceCreate) PrefCreate = nullptr;
+        decltype(&::cublasLtMatmulPreferenceDestroy) PrefDestroy = nullptr;
+        decltype(&::cublasLtMatmulPreferenceSetAttribute) PrefSetAttribute = nullptr;
+        decltype(&::cublasLtMatrixLayoutCreate) LayoutCreate = nullptr;
+        decltype(&::cublasLtMatrixLayoutDestroy) LayoutDestroy = nullptr;
+        bool load();
+    };
+    CublasLtApi g_lt;
+    bool CublasLtApi::load()
+    {
+        if (lib)
+            return true;
+        lib = clpeak::dynOpen({"libcublasLt.so", "libcublasLt.so.13",
+                               "libcublasLt.so.12", "libcublasLt.so.11",
+                               "cublasLt64_13.dll", "cublasLt64_12.dll",
+                               "cublasLt64_11.dll"});
+        if (!lib)
+            return false;
+        bool ok = true;
+#define CLPEAK_LT_SYM(member, name)                                         \
+    member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+    ok = ok && (member != nullptr)
+        CLPEAK_LT_SYM(Create, "cublasLtCreate");
+        CLPEAK_LT_SYM(Destroy, "cublasLtDestroy");
+        CLPEAK_LT_SYM(Matmul, "cublasLtMatmul");
+        CLPEAK_LT_SYM(AlgoGetHeuristic, "cublasLtMatmulAlgoGetHeuristic");
+        CLPEAK_LT_SYM(DescCreate, "cublasLtMatmulDescCreate");
+        CLPEAK_LT_SYM(DescDestroy, "cublasLtMatmulDescDestroy");
+        CLPEAK_LT_SYM(DescSetAttribute, "cublasLtMatmulDescSetAttribute");
+        CLPEAK_LT_SYM(PrefCreate, "cublasLtMatmulPreferenceCreate");
+        CLPEAK_LT_SYM(PrefDestroy, "cublasLtMatmulPreferenceDestroy");
+        CLPEAK_LT_SYM(PrefSetAttribute, "cublasLtMatmulPreferenceSetAttribute");
+        CLPEAK_LT_SYM(LayoutCreate, "cublasLtMatrixLayoutCreate");
+        CLPEAK_LT_SYM(LayoutDestroy, "cublasLtMatrixLayoutDestroy");
+#undef CLPEAK_LT_SYM
+        if (!ok)
         {
-            cuEventDestroy(start); cuEventDestroy(stop);
-            CLPEAK_VLOG("cublasLtMatmul failed: status=%d\n", (int)s);
-            return -1.0;
+            clpeak::dynClose(lib);
+            lib = nullptr;
         }
+        return ok;
     }
-    cuEventRecord(stop, stream);
-    cuEventSynchronize(stop);
+} // namespace
 
-    float ms = 0;
-    cuEventElapsedTime(&ms, start, stop);
-    cuEventDestroy(start);
-    cuEventDestroy(stop);
-    return (double)ms * 1000.0 / (double)n; // -> microseconds / iter
-}
+#define cublasLtCreate g_lt.Create
+#define cublasLtDestroy g_lt.Destroy
+#define cublasLtMatmul g_lt.Matmul
+#define cublasLtMatmulAlgoGetHeuristic g_lt.AlgoGetHeuristic
+#define cublasLtMatmulDescCreate g_lt.DescCreate
+#define cublasLtMatmulDescDestroy g_lt.DescDestroy
+#define cublasLtMatmulDescSetAttribute g_lt.DescSetAttribute
+#define cublasLtMatmulPreferenceCreate g_lt.PrefCreate
+#define cublasLtMatmulPreferenceDestroy g_lt.PrefDestroy
+#define cublasLtMatmulPreferenceSetAttribute g_lt.PrefSetAttribute
+#define cublasLtMatrixLayoutCreate g_lt.LayoutCreate
+#define cublasLtMatrixLayoutDestroy g_lt.LayoutDestroy
+
+namespace
+{
+
+    // ---------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------
+
+    const char *cuErrStrLocal(CUresult r)
+    {
+        const char *s = nullptr;
+        cuGetErrorString(r, &s);
+        return s ? s : "unknown CUDA error";
+    }
+
+#define CU_TRY(call)                                                                         \
+    do                                                                                       \
+    {                                                                                        \
+        CUresult _r = (call);                                                                \
+        if (_r != CUDA_SUCCESS)                                                              \
+        {                                                                                    \
+            CLPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStrLocal(_r)); \
+            return -1;                                                                       \
+        }                                                                                    \
+    } while (0)
+
+#define LT_TRY(call)                                                                          \
+    do                                                                                        \
+    {                                                                                         \
+        cublasStatus_t _s = (call);                                                           \
+        if (_s != CUBLAS_STATUS_SUCCESS)                                                      \
+        {                                                                                     \
+            CLPEAK_VLOG("cuBLASLt error at %s:%d: status=%d\n", __FILE__, __LINE__, (int)_s); \
+            return -1;                                                                        \
+        }                                                                                     \
+    } while (0)
+
+    // Pick a square GEMM dim that scales with the device's compute budget so
+    // small / large GPUs land in similar wall-clock windows.  Same shape as the
+    // Metal version: 2048 + numSMs*256, clamped to [2048, 16384], 256-aligned,
+    // then capped to 25% of VRAM (worst-case fp32 = 4 bytes / element).
+    uint32_t pickGemmDim(const cuda_device_info_t &info)
+    {
+        uint32_t sms = (uint32_t)(info.numSMs > 0 ? info.numSMs : 16);
+        uint64_t D = 2048 + (uint64_t)sms * 256;
+        D = (D + 255) & ~uint64_t(255);
+        if (D < 2048)
+            D = 2048;
+        if (D > 16384)
+            D = 16384;
+
+        uint64_t budget = info.totalGlobalMem ? info.totalGlobalMem / 4 : ((uint64_t)4 << 30);
+        // Worst-case element size is fp64 = 8 bytes (DGEMM); shrink D if the
+        // 3*D*D*8 footprint won't fit in 1/4 VRAM.
+        while (D > 1024 && 3ULL * D * D * 8 > budget)
+            D /= 2;
+        return (uint32_t)D;
+    }
+
+    // One-shot timing helper: run `n` cublasLtMatmul calls between an event pair.
+    // Returns mean per-iter time in microseconds (or <0 on error).
+    double timeCublasLt(cublasLtHandle_t lt, CUstream stream,
+                        cublasLtMatmulDesc_t opDesc,
+                        const void *alpha, const void *A, cublasLtMatrixLayout_t Adesc,
+                        const void *B, cublasLtMatrixLayout_t Bdesc,
+                        const void *beta, const void *C, cublasLtMatrixLayout_t Cdesc,
+                        void *D, cublasLtMatrixLayout_t Ddesc,
+                        const cublasLtMatmulAlgo_t *algo,
+                        void *workspace, size_t workspaceSize,
+                        unsigned int n)
+    {
+        CUevent start = nullptr, stop = nullptr;
+        cuEventCreate(&start, CU_EVENT_DEFAULT);
+        cuEventCreate(&stop, CU_EVENT_DEFAULT);
+
+        cuStreamSynchronize(stream);
+        cuEventRecord(start, stream);
+        for (unsigned int i = 0; i < n; i++)
+        {
+            cublasStatus_t s = cublasLtMatmul(lt, opDesc,
+                                              alpha, A, Adesc, B, Bdesc,
+                                              beta, C, Cdesc, D, Ddesc,
+                                              algo, workspace, workspaceSize, stream);
+            if (s != CUBLAS_STATUS_SUCCESS)
+            {
+                cuEventDestroy(start);
+                cuEventDestroy(stop);
+                CLPEAK_VLOG("cublasLtMatmul failed: status=%d\n", (int)s);
+                return -1.0;
+            }
+        }
+        cuEventRecord(stop, stream);
+        cuEventSynchronize(stop);
+
+        float ms = 0;
+        cuEventElapsedTime(&ms, start, stop);
+        cuEventDestroy(start);
+        cuEventDestroy(stop);
+        return (double)ms * 1000.0 / (double)n; // -> microseconds / iter
+    }
 
 } // namespace
 
-int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category category)
+int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 {
     (void)cfg;
-
     // cuBLASLt is an optional runtime dependency (not part of the driver).
     if (!g_lt.load())
     {
-        const bool isInt = category == Category::IntCompute;
         auto t = currentDeviceScope->beginTest(
-            {isInt ? "cublas-int" : "cublas-fp", "cuBLASLt GEMM peak",
-             isInt ? "tops" : "tflops", Category::Unknown,
+            {"cublas_gemm", "cuBLASLt GEMM peak",
+             "flops", Category::Unknown,
              "Matrix-multiply speed through NVIDIA's own tuned library, on a "
-             "large square problem.  Where the WMMA rows show what the tensor "
-             "cores can do in principle, this shows what shipping code reaches "
-             "on the operation most AI work is built from."});
-        t.skip(isInt ? "int8" : "fp32", ResultStatus::Unsupported,
-               "cuBLASLt library not found; GEMM skipped");
+             "large square problem.  Where the tensor-core rows show what the "
+             "hardware can do in principle, this shows what shipping code "
+             "reaches on the operation most AI work is built from.  Each "
+             "reading is a different input format.",
+             TestShape::Heterogeneous, "data type"});
+        t.skip("fp32", ResultStatus::Unsupported,
+                "cuBLASLt library not found; GEMM skipped");
+        logger::EmitOptions o; o.unit = "ops";
+        t.skip("int8", ResultStatus::Unsupported,
+               "cuBLASLt library not found; GEMM skipped", o);
         return 0;
     }
 
     const uint32_t D = pickGemmDim(dev.info);
     const uint32_t M = D, N = D, K = D;
-    const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
+    const double flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
     // Layout per variant: fp32 (CUDA cores) uses NN; tensor-core dtypes use TN
     // because that keeps the K axis contiguous for both A and B, matching the
     // MMA load pattern.
-    std::stringstream dimStr; dimStr << M << "x" << N << "x" << K;
+    std::stringstream dimStr;
+    dimStr << M << "x" << N << "x" << K;
 
     // -----------------------------------------------------------------------
     // Allocate persistent buffers (A, B, C, workspace).  Worst-case input
@@ -234,10 +255,14 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         cuMemAlloc(&dWS, wsBytes) != CUDA_SUCCESS)
     {
         log->note("  Failed to allocate device buffers\n");
-        if (dA)  cuMemFree(dA);
-        if (dB)  cuMemFree(dB);
-        if (dC)  cuMemFree(dC);
-        if (dWS) cuMemFree(dWS);
+        if (dA)
+            cuMemFree(dA);
+        if (dB)
+            cuMemFree(dB);
+        if (dC)
+            cuMemFree(dC);
+        if (dWS)
+            cuMemFree(dWS);
         return -1;
     }
 
@@ -255,11 +280,30 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     if (cublasLtCreate(&lt) != CUBLAS_STATUS_SUCCESS)
     {
         log->note("  cublasLtCreate failed\n");
-        cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
+        cuMemFree(dA);
+        cuMemFree(dB);
+        cuMemFree(dC);
+        cuMemFree(dWS);
         return -1;
     }
 
     logger::TestScope *blasTest = nullptr;
+
+    auto blasOpts = [&](const char *note)
+    {
+        logger::EmitOptions o;
+        if (note)
+            o.description = note;
+        return o;
+    };
+    auto intOpts = [&](const char *note)
+    {
+        logger::EmitOptions o;
+        if (note)
+            o.description = note;
+        o.unit = "ops";
+        return o;
+    };
 
     auto runVariantAB = [&](const char *label, const char *note,
                             cudaDataType_t aType, cudaDataType_t bType,
@@ -269,6 +313,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
                             const void *alphaPtr, const void *betaPtr,
                             bool useTN) -> int
     {
+        const bool isIntLabel = (label[0]=='i' && label[1]=='n' && label[2]=='t');
+        auto curOpts = isIntLabel ? intOpts(note) : blasOpts(note);
         cublasLtMatmulDesc_t opDesc = nullptr;
         cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
 
@@ -280,17 +326,21 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         // for fp32 on RTX 5060).
         const uint64_t Arows = useTN ? K : M;
         const uint64_t Acols = useTN ? M : K;
-        const uint64_t Ald   = Arows;
+        const uint64_t Ald = Arows;
         if (cublasLtMatmulDescCreate(&opDesc, computeType, scaleType) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Adesc, aType, Arows, Acols, Ald) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Bdesc, bType, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, cType, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", note);
-            if (opDesc) cublasLtMatmulDescDestroy(opDesc);
-            if (Adesc)  cublasLtMatrixLayoutDestroy(Adesc);
-            if (Bdesc)  cublasLtMatrixLayoutDestroy(Bdesc);
-            if (Cdesc)  cublasLtMatrixLayoutDestroy(Cdesc);
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", curOpts);
+            if (opDesc)
+                cublasLtMatmulDescDestroy(opDesc);
+            if (Adesc)
+                cublasLtMatrixLayoutDestroy(Adesc);
+            if (Bdesc)
+                cublasLtMatrixLayoutDestroy(Bdesc);
+            if (Cdesc)
+                cublasLtMatrixLayoutDestroy(Cdesc);
             return -1;
         }
 
@@ -309,7 +359,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         cublasLtMatmulPreference_t pref = nullptr;
         cublasLtMatmulPreferenceCreate(&pref);
         cublasLtMatmulPreferenceSetAttribute(pref,
-            CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
+                                             CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
 
         cublasLtMatmulHeuristicResult_t heurs[kCandidates] = {};
         int returnedResults = 0;
@@ -321,7 +371,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
         {
             blasTest->skip(label, ResultStatus::Unsupported,
-                          std::string("unsupported on ") + dev.info.archName, note);
+                           std::string("unsupported on ") + dev.info.archName, curOpts);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -340,14 +390,18 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         for (int i = 0; i < returnedResults; i++)
         {
             double t = timeCublasLt(lt, dev.stream, opDesc,
-                alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
-                betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-                &heurs[i].algo, (void*)dWS, wsBytes, probeIters);
-            if (t > 0.0 && t < bestProbeUs) { bestProbeUs = t; bestIdx = i; }
+                                    alphaPtr, (void *)dA, Adesc, (void *)dB, Bdesc,
+                                    betaPtr, (void *)dC, Cdesc, (void *)dC, Cdesc,
+                                    &heurs[i].algo, (void *)dWS, wsBytes, probeIters);
+            if (t > 0.0 && t < bestProbeUs)
+            {
+                bestProbeUs = t;
+                bestIdx = i;
+            }
         }
         if (bestIdx < 0)
         {
-            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", note);
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", curOpts);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -359,13 +413,13 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         // supplies them by pointer so we don't have to fan out a switch here.
         unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
         double per_iter_us = timeCublasLt(lt, dev.stream, opDesc,
-            alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
-            betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-            &heurs[bestIdx].algo, (void*)dWS, wsBytes, warmup);
+                                          alphaPtr, (void *)dA, Adesc, (void *)dB, Bdesc,
+                                          betaPtr, (void *)dC, Cdesc, (void *)dC, Cdesc,
+                                          &heurs[bestIdx].algo, (void *)dWS, wsBytes, warmup);
 
         if (per_iter_us <= 0.0)
         {
-            blasTest->skip(label, ResultStatus::Error, "timing probe failed", note);
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed", curOpts);
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
@@ -379,12 +433,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         unsigned int iters = pickIters(per_iter_us, 5000000u,
                                        forceIters ? specifiedIters : 0);
         double mean_us = timeCublasLt(lt, dev.stream, opDesc,
-            alphaPtr, (void*)dA, Adesc, (void*)dB, Bdesc,
-            betaPtr,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-            &heurs[bestIdx].algo, (void*)dWS, wsBytes, iters);
+                                      alphaPtr, (void *)dA, Adesc, (void *)dB, Bdesc,
+                                      betaPtr, (void *)dC, Cdesc, (void *)dC, Cdesc,
+                                      &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
-        double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
-        blasTest->emit(label, (float)tops, {false, note});
+        double rate = flops_per_iter * 1.0e6 / mean_us;
+        blasTest->emit(label, (float)rate, curOpts);
 
         cublasLtMatmulDescDestroy(opDesc);
         cublasLtMatrixLayoutDestroy(Adesc);
@@ -417,10 +471,10 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     //   * R_16F  -> half (16-bit; we use uint16_t with the IEEE half bit
     //               pattern: 0x3c00 = 1.0, 0x0000 = 0.0)
     //   * R_32I  -> int32
-    const float    alpha32   = 1.0f,  beta32   = 0.0f;
-    const double   alpha64   = 1.0,   beta64   = 0.0;
-    const uint16_t alpha16   = 0x3c00, beta16  = 0x0000;
-    const int32_t  alpha32i  = 1,     beta32i  = 0;
+    const float alpha32 = 1.0f, beta32 = 0.0f;
+    const double alpha64 = 1.0, beta64 = 0.0;
+    const uint16_t alpha16 = 0x3c00, beta16 = 0x0000;
+    const int32_t alpha32i = 1, beta32i = 0;
 
 #if defined(CLPEAK_CUBLASLT_HAS_FP4)
     // Block-scaled FP4 GEMM (Blackwell, CUDA 12.8+).  Both operands are
@@ -442,9 +496,11 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (cuMemAlloc(&dSA, scaleABytes) != CUDA_SUCCESS ||
             cuMemAlloc(&dSB, scaleBBytes) != CUDA_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed", note);
-            if (dSA) cuMemFree(dSA);
-            if (dSB) cuMemFree(dSB);
+            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed", blasOpts(note));
+            if (dSA)
+                cuMemFree(dSA);
+            if (dSB)
+                cuMemFree(dSB);
             return -1;
         }
         cuMemsetD8(dSA, neutralScaleByte, scaleABytes);
@@ -458,12 +514,17 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_4F_E2M1, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_16BF, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", note);
-            if (opDesc) cublasLtMatmulDescDestroy(opDesc);
-            if (Adesc)  cublasLtMatrixLayoutDestroy(Adesc);
-            if (Bdesc)  cublasLtMatrixLayoutDestroy(Bdesc);
-            if (Cdesc)  cublasLtMatrixLayoutDestroy(Cdesc);
-            cuMemFree(dSA); cuMemFree(dSB);
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", blasOpts(note));
+            if (opDesc)
+                cublasLtMatmulDescDestroy(opDesc);
+            if (Adesc)
+                cublasLtMatrixLayoutDestroy(Adesc);
+            if (Bdesc)
+                cublasLtMatrixLayoutDestroy(Bdesc);
+            if (Cdesc)
+                cublasLtMatrixLayoutDestroy(Cdesc);
+            cuMemFree(dSA);
+            cuMemFree(dSB);
             return -1;
         }
 
@@ -481,7 +542,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         cublasLtMatmulPreference_t pref = nullptr;
         cublasLtMatmulPreferenceCreate(&pref);
         cublasLtMatmulPreferenceSetAttribute(pref,
-            CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
+                                             CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBytes, sizeof(wsBytes));
 
         const int kCandidates = 8;
         cublasLtMatmulHeuristicResult_t heurs[kCandidates] = {};
@@ -491,18 +552,20 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
             pref, kCandidates, heurs, &returnedResults);
         cublasLtMatmulPreferenceDestroy(pref);
 
-        auto cleanup = [&]() {
+        auto cleanup = [&]()
+        {
             cublasLtMatmulDescDestroy(opDesc);
             cublasLtMatrixLayoutDestroy(Adesc);
             cublasLtMatrixLayoutDestroy(Bdesc);
             cublasLtMatrixLayoutDestroy(Cdesc);
-            cuMemFree(dSA); cuMemFree(dSB);
+            cuMemFree(dSA);
+            cuMemFree(dSB);
         };
 
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
         {
             blasTest->skip(label, ResultStatus::Unsupported,
-                          std::string("unsupported on ") + dev.info.archName, note);
+                           std::string("unsupported on ") + dev.info.archName, blasOpts(note));
             cleanup();
             return 0;
         }
@@ -513,26 +576,30 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         for (int i = 0; i < returnedResults; i++)
         {
             double t = timeCublasLt(lt, dev.stream, opDesc,
-                &alpha32, (void*)dA, Adesc, (void*)dB, Bdesc,
-                &beta32,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-                &heurs[i].algo, (void*)dWS, wsBytes, probeIters);
-            if (t > 0.0 && t < bestProbeUs) { bestProbeUs = t; bestIdx = i; }
+                                    &alpha32, (void *)dA, Adesc, (void *)dB, Bdesc,
+                                    &beta32, (void *)dC, Cdesc, (void *)dC, Cdesc,
+                                    &heurs[i].algo, (void *)dWS, wsBytes, probeIters);
+            if (t > 0.0 && t < bestProbeUs)
+            {
+                bestProbeUs = t;
+                bestIdx = i;
+            }
         }
         if (bestIdx < 0)
         {
-            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", note);
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", blasOpts(note));
             cleanup();
             return -1;
         }
 
         unsigned int warmup = warmupCount > 0 ? warmupCount : 2;
         double per_iter_us = timeCublasLt(lt, dev.stream, opDesc,
-            &alpha32, (void*)dA, Adesc, (void*)dB, Bdesc,
-            &beta32,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-            &heurs[bestIdx].algo, (void*)dWS, wsBytes, warmup);
+                                          &alpha32, (void *)dA, Adesc, (void *)dB, Bdesc,
+                                          &beta32, (void *)dC, Cdesc, (void *)dC, Cdesc,
+                                          &heurs[bestIdx].algo, (void *)dWS, wsBytes, warmup);
         if (per_iter_us <= 0.0)
         {
-            blasTest->skip(label, ResultStatus::Error, "timing probe failed", note);
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
             cleanup();
             return -1;
         }
@@ -540,60 +607,58 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         unsigned int iters = pickIters(per_iter_us, 5000000u,
                                        forceIters ? specifiedIters : 0);
         double mean_us = timeCublasLt(lt, dev.stream, opDesc,
-            &alpha32, (void*)dA, Adesc, (void*)dB, Bdesc,
-            &beta32,  (void*)dC, Cdesc, (void*)dC, Cdesc,
-            &heurs[bestIdx].algo, (void*)dWS, wsBytes, iters);
+                                      &alpha32, (void *)dA, Adesc, (void *)dB, Bdesc,
+                                      &beta32, (void *)dC, Cdesc, (void *)dC, Cdesc,
+                                      &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
-        double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
-        blasTest->emit(label, (float)tops, {false, note});
+        double rate = flops_per_iter * 1.0e6 / mean_us;
+        blasTest->emit(label, (float)rate, blasOpts(note));
         cleanup();
         return 0;
     };
 #endif // CLPEAK_CUBLASLT_HAS_FP4
 
-    if (category == Category::FpCompute)
-    {
-        // -----------------------------------------------------------------------
-        // Floating-point variants -- reported in TFLOPS.
-        // -----------------------------------------------------------------------
-        auto testFp = currentDeviceScope->beginTest(
-            {"cublas-fp", "cuBLASLt GEMM peak", "tflops", Category::Unknown,
-             "Matrix-multiply speed through NVIDIA's own tuned library, on a large "
-             "square problem.  Where the WMMA rows show what the tensor cores can "
-             "do in principle, this shows what shipping code reaches on the "
-             "operation most AI work is built from."});
-        blasTest = &testFp;
+    // One test for all data types -- integer readings carry their own unit.
+    auto test = currentDeviceScope->beginTest(
+        {"cublas_gemm", "cuBLASLt GEMM peak", "flops", Category::Unknown,
+         "Matrix-multiply speed through NVIDIA's own tuned library, on a "
+         "large square problem.  Where the tensor-core rows show what the "
+         "hardware can do in principle, this shows what shipping code "
+         "reaches on the operation most AI work is built from.  Each "
+         "reading is a different input format.",
+         TestShape::Heterogeneous, "data type"});
+    blasTest = &test;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
         // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
         // tuned kernel set for fp32 + TN.
         runVariant("fp32", "Full 32-bit precision, on the ordinary shader cores "
-                   "rather than the tensor cores.",
-                   CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F,
+                           "rather than the tensor cores.",
+                   CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
 
         // fp64: DGEMM on CUDA cores (tensor-core fp64 acceleration kicks in
         // automatically on sm_80+; the heuristic picks the right algo).  NN
         // layout matches fp32 -- DGEMM kernels are tuned for that shape.
         runVariant("fp64", "Full 64-bit precision, for scientific computing.  "
-                   "Consumer cards run this far slower than the datacenter parts.",
-                   CUDA_R_64F,  CUDA_R_64F, CUBLAS_COMPUTE_64F,
+                           "Consumer cards run this far slower than the datacenter parts.",
+                   CUDA_R_64F, CUDA_R_64F, CUBLAS_COMPUTE_64F,
                    CUDA_R_64F, &alpha64, &beta64, /*useTN=*/false);
 
         // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
         // tensor cores (Ampere+).  Inputs/outputs stay fp32.
         if (dev.info.tf32GemmSupported)
             runVariant("tf32", "32-bit numbers in and out, but rounded internally "
-                       "to a shorter form so the tensor cores can take them.",
-                       CUDA_R_32F,  CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
+                               "to a shorter form so the tensor cores can take them.",
+                       CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
         // fp16: half inputs + half output + half compute.  scaleType is R_16F so
         // alpha/beta must be 16-bit half values, not float.
         if (dev.info.fp16Supported)
             runVariant("fp16", "16-bit inputs and totals -- the everyday precision "
-                       "of AI inference, and usually the fastest row here.",
-                       CUDA_R_16F,  CUDA_R_16F, CUBLAS_COMPUTE_16F,
+                               "of AI inference, and usually the fastest row here.",
+                       CUDA_R_16F, CUDA_R_16F, CUBLAS_COMPUTE_16F,
                        CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
 
         // bf16: bf16 inputs + fp32 output + fp32 compute (mixed-precision).
@@ -602,8 +667,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         // peaks are quoted against.
         if (dev.info.bf16Supported)
             runVariant("bf16", "bfloat16 inputs with 32-bit totals -- 16 bits "
-                       "arranged for AI work, trading digits of accuracy for the "
-                       "number range of a full float.",
+                               "arranged for AI work, trading digits of accuracy for the "
+                               "number range of a full float.",
                        CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
@@ -625,12 +690,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         if (dev.info.fp8MmaSupported)
         {
             runVariant("fp8_e4m3", "8-bit inputs, in the variant that spends its "
-                       "bits on accuracy rather than range.",
+                                   "bits on accuracy rather than range.",
                        CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
             runVariantAB("fp8_e5m2", "8-bit inputs including the variant that "
-                         "spends its bits on range rather than accuracy -- the "
-                         "usual choice for inference.",
+                                     "spends its bits on range rather than accuracy -- the "
+                                     "usual choice for inference.",
                          CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
                          CUBLAS_COMPUTE_32F, CUDA_R_32F,
                          &alpha32, &beta32, /*useTN=*/true);
@@ -638,7 +703,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
 
         // mxfp4 / nvfp4: block-scaled 4-bit GEMM on Blackwell tensor cores.
         // Same dtypes the wmma microbench measures (mxf4_e2m1 / nvf4_e2m1), so
-        // the cublas-fp rows line up against the wmma rows.  Gated on
+        // the cublas_gemm rows line up against the wmma rows.  Gated on
         // fp4GemmSupported (all Blackwell) rather than fp4MmaSupported (the
         // consumer-only raw-mma microbench): the library FP4 path runs on
         // datacenter sm_100/103 as well, and self-skips where it can't.
@@ -662,43 +727,24 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
         else
         {
             blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
-                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName,
-                           mxf4Note);
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName, blasOpts(mxf4Note));
             blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
-                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName,
-                           nvf4Note);
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName, blasOpts(nvf4Note));
         }
 #else
         blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
-                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)",
-                       mxf4Note);
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(mxf4Note));
         blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
-                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)",
-                       nvf4Note);
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(nvf4Note));
 #endif
-    }
 
-    if (category != Category::IntCompute)
-    {
-        cublasLtDestroy(lt);
-        cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
-        return 0;
-    }
-
-    // -----------------------------------------------------------------------
-    // Integer variants -- reported in TOPS
-    // -----------------------------------------------------------------------
-    auto testInt = currentDeviceScope->beginTest(
-        {"cublas-int", "cuBLASLt GEMM peak", "tops", Category::Unknown,
-         "The same tuned-library matrix multiply on whole-number formats, which "
-         "is how a quantized (compressed) model actually runs."});
-    blasTest = &testInt;
+    // Integer variants -- same test, each reading carries its own unit (ops).
 
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
     // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.
     if (dev.info.int8GemmSupported)
         runVariant("int8", "8-bit whole numbers with 32-bit totals -- the format "
-                   "quantized neural networks use.",
+                           "quantized neural networks use.",
                    CUDA_R_8I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
@@ -709,12 +755,15 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg, Category categ
     // that line cleanly.
     if (dev.info.int4GemmSupported)
         runVariant("int4", "4-bit whole numbers.  The library may refuse this "
-                   "even where the hardware claims it.",
+                           "even where the hardware claims it.",
                    CUDA_R_4I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
     cublasLtDestroy(lt);
-    cuMemFree(dA); cuMemFree(dB); cuMemFree(dC); cuMemFree(dWS);
+    cuMemFree(dA);
+    cuMemFree(dB);
+    cuMemFree(dC);
+    cuMemFree(dWS);
     return 0;
 }
 

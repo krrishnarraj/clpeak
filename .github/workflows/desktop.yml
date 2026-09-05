@@ -154,7 +154,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: master
-          flutter-version: 3.47.1
+          flutter-version: 3.47.2
           cache: true
 
       - name: Install Vulkan SDK
@@ -218,7 +218,7 @@ jobs:
       - name: Run
         if: ${{ !matrix.cuda && !matrix.oneapi && !(matrix.rocm && runner.os == 'Windows') }}
         shell: bash
-        run: ${{ matrix.binary }}
+        run: ${{ matrix.binary }} --version
 
       # ROCm on Windows: amdhip64_6.dll ships with the driver half of AMD's
       # installer, which has no GPU to bind to on the runner, so the binary may
@@ -228,7 +228,7 @@ jobs:
       - name: Run ROCm (Windows)
         if: ${{ matrix.rocm && runner.os == 'Windows' }}
         shell: bash
-        run: ${{ matrix.binary }} || true
+        run: ${{ matrix.binary }} --version || true
 
       # CUDA: the runner has no GPU, so the real driver's libcuda.so.1 is absent.
       # The toolkit ships a stub libcuda.so (link-time placeholder) -- expose it
@@ -251,7 +251,7 @@ jobs:
           mkdir -p "$link_dir"
           [ -f "$stub" ] && ln -sf "$stub" "$link_dir/libcuda.so.1"
           export LD_LIBRARY_PATH="$link_dir:${LD_LIBRARY_PATH}"
-          ${{ matrix.binary }} || true
+          ${{ matrix.binary }} --version || true
 
       # The SYCL/OpenCL runtime libs live in the oneAPI install dir, which is on
       # the loader path via the environment setup-oneapi exported.  Tolerant of
@@ -260,7 +260,7 @@ jobs:
       - name: Run oneAPI
         if: matrix.oneapi
         shell: bash
-        run: ${{ matrix.binary }} || true
+        run: ${{ matrix.binary }} --version || true
 
       # Package with CPack into a self-contained zip whose top-level folder is
       # clpeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and

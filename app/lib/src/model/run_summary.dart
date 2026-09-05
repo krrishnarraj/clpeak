@@ -11,6 +11,10 @@ class RunSummary {
     required this.cancelled,
     required this.fileName,
     this.name = '',
+    this.clpeakVersion = '',
+    this.hostOs = '',
+    this.hostOsVersion = '',
+    this.hostArch = '',
   });
 
   final String id; // also the XML base name
@@ -23,6 +27,13 @@ class RunSummary {
 
   /// Optional user-given name (rename action in History).
   final String name;
+
+  /// Where the run was produced — persisted for history list preview so an
+  /// imported run from another machine is distinguishable without opening it.
+  final String clpeakVersion;
+  final String hostOs;
+  final String hostOsVersion;
+  final String hostArch;
 
   /// Title shown in lists/headers: the user's name when set, otherwise the
   /// run's timestamp id (`20260813_130317`) — the device list is identical
@@ -39,6 +50,10 @@ class RunSummary {
         cancelled: cancelled,
         fileName: fileName,
         name: newName,
+        clpeakVersion: clpeakVersion,
+        hostOs: hostOs,
+        hostOsVersion: hostOsVersion,
+        hostArch: hostArch,
       );
 
   Map<String, dynamic> toJson() => {
@@ -50,6 +65,10 @@ class RunSummary {
         'cancelled': cancelled,
         'fileName': fileName,
         if (name.isNotEmpty) 'name': name,
+        if (clpeakVersion.isNotEmpty) 'clpeakVersion': clpeakVersion,
+        if (hostOs.isNotEmpty) 'hostOs': hostOs,
+        if (hostOsVersion.isNotEmpty) 'hostOsVersion': hostOsVersion,
+        if (hostArch.isNotEmpty) 'hostArch': hostArch,
       };
 
   factory RunSummary.fromJson(Map<String, dynamic> m) => RunSummary(
@@ -62,6 +81,10 @@ class RunSummary {
         cancelled: m['cancelled'] as bool? ?? false,
         fileName: m['fileName'] as String? ?? '',
         name: m['name'] as String? ?? '',
+        clpeakVersion: m['clpeakVersion'] as String? ?? '',
+        hostOs: m['hostOs'] as String? ?? '',
+        hostOsVersion: m['hostOsVersion'] as String? ?? '',
+        hostArch: m['hostArch'] as String? ?? '',
       );
 
   /// Summarize a finished (or loaded) document.
@@ -79,6 +102,7 @@ class RunSummary {
       devices.add(run.device);
       backends.add(run.backend);
     }
+    final meta = doc.meta;
     return RunSummary(
       id: id,
       startedAt: startedAt,
@@ -87,6 +111,10 @@ class RunSummary {
       backends: backends.toList(),
       cancelled: cancelled,
       fileName: fileName,
+      clpeakVersion: meta?.clpeakVersion ?? '',
+      hostOs: (meta?.host['os']?.toString() ?? '').trim(),
+      hostOsVersion: (meta?.host['os_version']?.toString() ?? '').trim(),
+      hostArch: (meta?.host['arch']?.toString() ?? '').trim(),
     );
   }
 }

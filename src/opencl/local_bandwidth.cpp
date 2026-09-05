@@ -2,7 +2,7 @@
 
 int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  float timed, gbps;
+  float timed, bps;
   cl::NDRange globalSize, localSize;
 
   if (!isAllowed(Benchmark::LocalBW))
@@ -13,11 +13,12 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
   auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "gbps",
+    {"local_memory_bandwidth", "Local memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the device moves through local memory -- the "
      "small on-chip scratchpad a group of work-items passes data through, "
-     "which never goes out to main memory."});
+     "which never goes out to main memory.",
+     TestShape::Homogeneous, "vector width"});
 
   const int widths[] = {1, 2, 4, 8};
   const char *labels[] = {"float", "float2", "float4", "float8"};
@@ -72,9 +73,9 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
       // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
-      gbps = (float)bytesPerCall / timed / 1e3f;
+      bps = (float)bytesPerCall / timed * 1e6f;
 
-      test.emit(labels[w], gbps, clWidthNote(widths[w]));
+      test.emit(labels[w], bps, clWidthNote(widths[w]));
     }
   }
   catch (cl::Error &error)

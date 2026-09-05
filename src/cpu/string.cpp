@@ -11,7 +11,7 @@
 // kernels/string_compute.h (SVE scan in kernels/sve_compute.h); per-ISA
 // variants come from kernelMenu() like the compute tests.  The inputs are
 // 16 KB thread-local buffers -- L1-resident, so the numbers measure the
-// scan/classify machinery, not memory bandwidth.  The unit is "gbps" but the
+// scan/classify machinery, not memory bandwidth.  The unit is "bps" but the
 // category is passed explicitly: categoryFromUnit() would otherwise file
 // these under Bandwidth.
 
@@ -19,7 +19,7 @@ using clpeak_cpu::kernelMenu;
 
 int CpuPeak::runStringScan(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"string_scan", "String scan", "gbps", Category::String,
+  emitVariants(*this, {"string_scan", "String scan", "bps", Category::String,
                        "How fast the CPU hunts through memory for one particular "
                        "byte -- what memchr, strlen and every text search do.  The "
                        "data fits in L1 cache, so this is the scanning machinery, "
@@ -31,7 +31,7 @@ int CpuPeak::runStringScan(benchmark_config_t &cfg)
 
 int CpuPeak::runUtf8Validate(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"utf8_validate", "UTF-8 validate", "gbps", Category::String,
+  emitVariants(*this, {"utf8_validate", "UTF-8 validate", "bps", Category::String,
                        "How fast the CPU checks that text is well-formed UTF-8 -- "
                        "the first thing every parser, browser and web server does to "
                        "incoming text.  Also run on L1-resident data."},

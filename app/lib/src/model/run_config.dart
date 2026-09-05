@@ -1,5 +1,5 @@
 import 'catalog.dart';
-import 'result_entry.dart';
+import 'result_model.dart';
 
 /// Time-budget presets.  Custom keeps whatever the user configured.
 enum RunPreset { full, custom }
@@ -26,6 +26,7 @@ const Map<String, _BackendFlags> _backendFlags = {
   'Metal': _BackendFlags('metal', '--mtl-device'),
   'oneAPI': _BackendFlags('oneapi', '--oneapi-device'),
   'CPU': _BackendFlags('cpu', null),
+  'ONNX': _BackendFlags('onnx', '--onnx-device'), // device index = EP index
 };
 
 /// A device reference within a backend: platform index (OpenCL) + device

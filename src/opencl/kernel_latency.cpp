@@ -26,9 +26,10 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   unsigned int iters = forceIters ? specifiedIters : cfg.kernelLatencyIters;
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+    {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
      "The overhead of asking the device to do anything at all.  It is what "
-     "small, frequent jobs pay before any of their own work begins."});
+     "small, frequent jobs pay before any of their own work begins.",
+     TestShape::Heterogeneous});
 
   const char *dispatchNote = "One way only: from the moment the host queues the "
                              "work to the moment the device starts running it.";
@@ -73,8 +74,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     float dispatchUs  = (float)(totalDispatchUs  / iters);
     float roundtripUs = (float)(totalRoundtripUs / iters);
 
-    test.emit("dispatch",  dispatchUs,  dispatchNote);
-    test.emit("roundtrip", roundtripUs, roundtripNote);
+    test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote);
+    test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote);
   }
   catch (cl::Error &error)
   {

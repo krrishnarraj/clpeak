@@ -218,11 +218,12 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
-        {"mps-gemm-fp", "MPS GEMM peak", "tflops", Category::Unknown,
+        {"mps_gemm", "MPS GEMM peak", "flops", Category::Unknown,
          "Matrix-multiply speed through Apple's own tuned GPU library, on a "
          "large square problem.  Where the compute rows show what the hardware "
          "can do in principle, this shows what Apple's shipping code actually "
-         "reaches on the operation most graphics and AI work is built from."});
+         "reaches on the operation most graphics and AI work is built from.",
+         TestShape::Heterogeneous, "data type"});
 
     if (!dev.info.isAppleSilicon)
     {
@@ -317,9 +318,9 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
             unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
             double mean_us = timeMPSMatMul(queue, mm, matA, matB, matC, iters);
-            double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
+            double rate = flops_per_iter * 1.0e6 / mean_us;
 
-            test.emit(label, (float)tops, note);
+            test.emit(label, (float)rate, note);
         }
     };
 
@@ -364,9 +365,9 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 
             unsigned int iters = pickIters(per_iter_us, 5000000u, forceIters ? specifiedIters : 0);
             double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
-            double tops = flops_per_iter * 1.0e6 / mean_us / 1.0e12;
+            double rate = flops_per_iter * 1.0e6 / mean_us;
 
-            test.emit(label, (float)tops, note);
+            test.emit(label, (float)rate, note);
         }
     };
 
@@ -425,12 +426,13 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t H = 16, N = 4096, F = 128;
 
     auto test = currentDeviceScope->beginTest(
-        {"mps-attention", "MPS attention SDPA (H16 S4096 D128)", "tflops",
+        {"mps_attention", "MPS attention SDPA (H16 S4096 D128)", "flops",
          Category::Unknown,
          "Speed of the attention step -- the operation a language model spends "
          "most of its time in, deciding which earlier words each word should "
          "look at.  Apple's library runs it as one fused unit; the shape is "
-         "fixed at a small-LLM size so the number compares across devices."});
+         "fixed at a small-LLM size so the number compares across devices.",
+         TestShape::Homogeneous});
 
     if (!dev.info.isAppleSilicon)
     {
@@ -533,7 +535,7 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
 
             // QK^T and PV: 2 * (2*H*N*N*F) flops.
             double flops = 4.0 * (double)H * (double)N * (double)N * (double)F;
-            test.emit("fp16", (float)(flops * 1.0e6 / mean_us / 1.0e12));
+            test.emit("fp16", (float)(flops * 1.0e6 / mean_us));
         }
     }
     else

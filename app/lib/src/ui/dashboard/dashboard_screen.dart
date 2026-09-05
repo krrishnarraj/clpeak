@@ -27,7 +27,17 @@ class DashboardScreen extends StatelessWidget {
           children: [
             _Masthead(version: service.version),
             const SizedBox(height: 26),
-            if (usable.isEmpty)
+            if (!service.catalogReady)
+              // Static text, no animation: the frame budget belongs to the
+              // benchmarks, and enumeration finishes in seconds anyway.
+              CPanel(
+                child: const CEmpty(
+                  icon: Icons.search,
+                  title: 'Detecting devices…',
+                  detail: 'Probing backends. The app is usable meanwhile.',
+                ),
+              )
+            else if (usable.isEmpty)
               CPanel(
                 child: const CEmpty(
                   icon: Icons.search_off,
@@ -98,6 +108,10 @@ class _RunLauncher extends StatelessWidget {
         ? 'the detected device'
         : 'all $deviceCount detected devices';
 
+    // Runs need a complete catalog: device indices are positions in the
+    // enumerated list.  The button enables itself when probing lands.
+    final ready = service.catalogReady;
+
     return CPanel(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -115,10 +129,12 @@ class _RunLauncher extends StatelessWidget {
             runSpacing: 8,
             children: [
               CButton(
-                label: 'Run',
+                label: ready ? 'Run' : 'Detecting…',
                 icon: Icons.play_arrow,
                 kind: CButtonKind.primary,
-                onPressed: () => service.start(preset: RunPreset.full),
+                onPressed: ready
+                    ? () => service.start(preset: RunPreset.full)
+                    : null,
               ),
               CButton(
                 label: 'Custom…',

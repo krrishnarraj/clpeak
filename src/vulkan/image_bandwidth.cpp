@@ -3,16 +3,20 @@
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
 #include <algorithm>
+#include <cstddef>
 
 // ---------------------------------------------------------------------------
 // Image (texture) bandwidth (Vulkan)
 // ---------------------------------------------------------------------------
 //
 // Combined image-sampler descriptor + storage-buffer output.  Image is
-// VK_FORMAT_R32G32B32A32_SFLOAT, sampled with NEAREST + CLAMP_TO_EDGE.
+// VK_FORMAT_R32G32B32A32_SFLOAT, read with texelFetch -- integer coordinates,
+// no sampler -- to match what every other backend's image read compiles to.
+// The sampler below exists only because GLSL's sampler2D carries one; the
+// shader never samples through it.
 //
-// Two walk orders are raced and the faster reported -- why, and why neither
-// can flatter the result: the image-bandwidth block in
+// Four walk shapes are raced and the fastest reported -- why, and why none of
+// them can flatter the result: the image-bandwidth block in
 // include/common/common.h.
 
 int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
@@ -20,12 +24,13 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   logger::TestSpec testSpec;
   testSpec.tag = "image_memory_bandwidth";
   testSpec.display = "Image memory bandwidth";
-  testSpec.unit = "gbps";
+  testSpec.unit = "bps";
   testSpec.description =
       "How many bytes per second the device reads through its texture units, "
       "which take a different path to memory than plain buffer reads.  Each "
       "pixel of the image is read exactly once, so caching cannot flatter the "
       "number.";
+  testSpec.shape = TestShape::Homogeneous;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t imgW = 4096, imgH = 4096;
@@ -68,13 +73,33 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
         (memProps.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
     { typeIdx = i; break; }
 
+  if (typeIdx == UINT32_MAX)
+  {
+    log->note("No device-local memory type for the image\n");
+    vkDestroyImage(dev.device, img, nullptr);
+    return -1;
+  }
+
   VkMemoryAllocateInfo aI = {};
   aI.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   aI.allocationSize = imReq.size;
   aI.memoryTypeIndex = typeIdx;
   VkDeviceMemory imgMem;
-  vkAllocateMemory(dev.device, &aI, nullptr, &imgMem);
-  vkBindImageMemory(dev.device, img, imgMem, 0);
+  // A quarter-gigabyte image is a real allocation on a phone: bail rather than
+  // time a dispatch against unbound memory and report the result as bandwidth.
+  if (vkAllocateMemory(dev.device, &aI, nullptr, &imgMem) != VK_SUCCESS)
+  {
+    log->note("Image memory alloc failed\n");
+    vkDestroyImage(dev.device, img, nullptr);
+    return -1;
+  }
+  if (vkBindImageMemory(dev.device, img, imgMem, 0) != VK_SUCCESS)
+  {
+    log->note("Image memory bind failed\n");
+    vkDestroyImage(dev.device, img, nullptr);
+    vkFreeMemory(dev.device, imgMem, nullptr);
+    return -1;
+  }
 
   // Upload pseudo-random data to defeat hardware memory compression.
   {
@@ -248,35 +273,76 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
                           "colour values, 16 bytes.";
 
-  VkPipeline pipe;
-  bool ok = dev.createComputePipeline(vk_shaders::image_bandwidth_v1,
-      vk_shaders::image_bandwidth_v1_size, dsLayout, pipeLayout, pipe);
-  if (!ok)
-  {
-    test.skip("float4", ResultStatus::Error, "Pipeline creation failed", fetchNote);
-  }
-  else
-  {
-    const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
-    auto timeWalk = [&](int32_t walk) {
-      return runKernel(dev, pipe, pipeLayout, descSet, numGroups,
-                       cfg.targetTimeUs, forceIters ? specifiedIters : 0, true,
-                       &walk, sizeof(walk));
-    };
-    float rowUs = timeWalk(0);
-    float colUs = timeWalk(1);
-    float rowGbps = rowUs > 0.0f ? (float)bytes / rowUs / 1e3f : 0.0f;
-    float colGbps = colUs > 0.0f ? (float)bytes / colUs / 1e3f : 0.0f;
-    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f gbps\n",
-                rowGbps, colGbps);
+  // The walk shapes raced.  A row-major sweep and its transpose both hand a
+  // warp a 1D run of texels, which is what a linear surface wants; a driver
+  // that stores the image swizzled instead -- Mali's 16x16 u-order blocks, where
+  // a 64-byte line holds a 2x2 quad of RGBA32F texels -- serves either of them
+  // half a line at a time.  The blocked shapes give a run of lanes a 2D block,
+  // so one line is consumed by one warp whatever the swizzle granularity.  Each
+  // shape reads every pixel exactly once, so the byte count is identical and
+  // none of them can flatter the result.
+  //
+  // Which block size wins is the driver's swizzle granularity, and the two
+  // measured devices want opposite ends of the range: a Mali G615 climbs with
+  // block size (14.4 / 14.5 / 14.9 GBPS at 2x2 / 4x4 / 16x16) while an M1 Pro
+  // falls (175.6 / 170.7 / 166.8).  So both ends are raced.  4x4 is not: it
+  // landed strictly between them on both, which is what a shape that can never
+  // win looks like.
+  struct Shape { const char *label; int32_t tileW, tileH; int32_t walk; };
+  const Shape shapes[] = {
+    { "row",       (int32_t)imgW,  1, 0 },
+    { "col",       (int32_t)imgW,  1, 1 },
+    { "tile2x2",               2,  2, 0 },
+    { "tile16x16",            16, 16, 0 },
+  };
 
-    if (rowGbps <= 0.0f && colGbps <= 0.0f)
-      test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                fetchNote);
-    else
-      test.emit("float4", std::max(rowGbps, colGbps), fetchNote);
+  const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalWIs;
+  float best = 0.0f;
+
+  for (const Shape &s : shapes)
+  {
+    // Extent and block shape are specialization constants: that folds every
+    // divide and modulo in the walk into a shift and a mask, which matters on
+    // the GPUs without an integer-divide unit.
+    struct { int32_t w, h, tw, th; } specData =
+        { (int32_t)imgW, (int32_t)imgH, s.tileW, s.tileH };
+    VkSpecializationMapEntry specEntries[4] = {
+      { 0, (uint32_t)offsetof(decltype(specData), w),  sizeof(int32_t) },
+      { 1, (uint32_t)offsetof(decltype(specData), h),  sizeof(int32_t) },
+      { 2, (uint32_t)offsetof(decltype(specData), tw), sizeof(int32_t) },
+      { 3, (uint32_t)offsetof(decltype(specData), th), sizeof(int32_t) },
+    };
+    VkSpecializationInfo specInfo = {};
+    specInfo.mapEntryCount = 4;
+    specInfo.pMapEntries   = specEntries;
+    specInfo.dataSize      = sizeof(specData);
+    specInfo.pData         = &specData;
+
+    VkPipeline pipe;
+    if (!dev.createComputePipeline(vk_shaders::image_bandwidth_v1,
+                                   vk_shaders::image_bandwidth_v1_size,
+                                   dsLayout, pipeLayout, pipe, &specInfo))
+    {
+      log->note(std::string("Image pipeline creation failed for ") + s.label + "\n");
+      continue;
+    }
+
+    int32_t walk = s.walk;
+    float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0, true,
+                         &walk, sizeof(walk));
     vkDestroyPipeline(dev.device, pipe, nullptr);
+
+    float bps = us > 0.0f ? (float)bytes / us * 1e6f : 0.0f;
+    best = std::max(best, bps);
+    CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", s.label, bps);
   }
+
+  if (best <= 0.0f)
+    test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+              fetchNote);
+  else
+    test.emit("float4", best, fetchNote);
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);

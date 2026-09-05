@@ -9,7 +9,8 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
 {
   auto test = currentDeviceScope->beginTest(
     {d.resultTag, d.title, d.unit, Category::Unknown,
-     d.description ? d.description : ""});
+     d.description ? d.description : "",
+     d.shape, d.axis ? d.axis : ""});
 
   struct Variant
   {
@@ -83,10 +84,9 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     }
 
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
-    double divider = d.unitDivider > 0.0 ? d.unitDivider : 1e9;
-    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us / divider);
+    float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);
 
-    test.emit(v.label, value, {false, note(v.description)});
+    test.emit(v.label, value, note(v.description).c_str());
   }
 
   (void)hipFree(outputBuf);

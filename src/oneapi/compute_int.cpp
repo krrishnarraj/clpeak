@@ -9,8 +9,7 @@ namespace clpeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
                            uint32_t blockSize, uint32_t outElemsPerBlock,
                            uint32_t elemSize);
-float    computeGflops(uint64_t totalThreads, uint32_t workPerWI, float meanUs,
-                       double unitDivider);
+float    computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs);
 }
 
 // Integer MAD macros: shape mirrors compute_int32.hip exactly.  The alternating
@@ -120,14 +119,14 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
     test.skip(label, ResultStatus::Error, "kernel launch failed", note);
     return;
   }
-  float value = clpeak_oneapi::computeGflops(totalThreads, workPerWI, us, 1e9);
+  float value = clpeak_oneapi::computeFlops(totalThreads, workPerWI, us);
 
   // Race the rotating chain and keep the faster reading.
   float rotUs = peak.runKernel(dev, submitRot, targetTimeUs, forced);
   if (rotUs > 0.0f)
   {
-    float rotValue = clpeak_oneapi::computeGflops(totalThreads, workPerWI, rotUs, 1e9);
-    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f gops\n", label, value, rotValue);
+    float rotValue = clpeak_oneapi::computeFlops(totalThreads, workPerWI, rotUs);
+    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f ops\n", label, value, rotValue);
     if (rotValue > value * MAX_ALT_CHAIN_RATIO)
       CLPEAK_VLOG("%s: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
                   label, rotValue / value);
@@ -135,7 +134,7 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
       value = rotValue;
   }
 
-  test.emit(label, value, {false, note});
+  test.emit(label, value, note);
 }
 
 // --------------------------------------------------------------------------
@@ -144,10 +143,11 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-    {"integer_compute", "Integer compute (32-bit IMAD)", "gops", Category::Unknown,
+    {"integer_compute", "Integer compute (32-bit IMAD)", "ops", Category::Unknown,
      "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, "
      "addressing and bit manipulation, which kernels do alongside their "
-     "fractional maths."});
+     "fractional maths.",
+     TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));

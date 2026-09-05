@@ -1,84 +1,92 @@
-import 'result_entry.dart';
+import 'result_model.dart';
 
-/// Auto-scaled display value, e.g. 12500 gflops → "12.5 TFLOPS".
-({String value, String unit}) formatMetric(double value, String unit) {
-  String fmt(double v) => v >= 100
-      ? v.toStringAsFixed(0)
-      : v >= 10
-          ? v.toStringAsFixed(1)
-          : v.toStringAsFixed(2);
-  switch (unit) {
-    case 'gflops':
-      if (value >= 1000) return (value: fmt(value / 1000), unit: 'TFLOPS');
-      return (value: fmt(value), unit: 'GFLOPS');
-    case 'tflops':
-      return (value: fmt(value), unit: 'TFLOPS');
-    case 'gops':
-      if (value >= 1000) return (value: fmt(value / 1000), unit: 'TOPS');
-      return (value: fmt(value), unit: 'GOPS');
-    case 'tops':
-      return (value: fmt(value), unit: 'TOPS');
-    case 'gbps':
-      return (value: fmt(value), unit: 'GB/s');
-    case 'us':
-      return (value: fmt(value), unit: 'µs');
-    case 'ns':
-      return (value: fmt(value), unit: 'ns');
-    default:
-      return (value: fmt(value), unit: unit);
-  }
-}
+export 'result_model.dart' show formatValue;
 
-/// For latency units lower is better — bars and "peak" picking invert.
-bool isLowerBetter(String unit) => unit == 'us' || unit == 'ns';
-
-/// One test's rows on one device (all metric variants).
+/// One test's readings on one device.
+///
+/// Built once from a [TestHeader] — off `test_begin` during a live run, off
+/// the saved test object when a run is reopened — so both paths produce the
+/// same object and the UI has one thing to render.
 class TestResult {
-  TestResult({required this.test, required this.display, required this.unit});
+  TestResult(this.header);
 
-  final String test;
-  String display; // human-readable; falls back to the tag for loaded files
-  final String unit;
-  final List<ResultEntry> metrics = [];
+  final TestHeader header;
+  final List<MetricResult> metrics = [];
 
-  /// What the test measures, shown behind the info affordance on its row.
-  /// Every row of the test repeats it; empty for tests with none authored.
-  /// A reading's own note is not here — it stays on its
-  /// [ResultEntry.metricDescription], where the breakdown row reads it.
-  String description = '';
+  String get id => header.id;
+  String get key => header.key;
+  String get title => header.title;
+  String get variant => header.variant;
+  String get axis => header.axis;
+  String get description => header.description;
+  TestShape get shape => header.shape;
+  Units get units => header.units;
+
+  /// Title plus the runtime qualifier that distinguishes two variants of the
+  /// same test — a CPU test measured on SSE2 and on AVX2 is two rows, and
+  /// without this they read as duplicates.
+  String get displayTitle =>
+      variant.isEmpty ? title : '$title  ·  $variant';
 
   bool get hasInfo => description.isNotEmpty;
 
   /// Whether any reading is documented — the breakdown reserves its glyph
   /// column per test, so the meters of undocumented rows stay aligned with
   /// the documented ones.
-  bool get hasMetricNotes =>
-      metrics.any((m) => m.metricDescription.isNotEmpty);
+  bool get hasMetricNotes => metrics.any((m) => m.description.isNotEmpty);
 
-  /// Rows that produced a measurement.
-  List<ResultEntry> get okMetrics =>
-      metrics.where((m) => m.status == ResultStatus.ok).toList();
+  /// Readings that produced a measurement.
+  List<MetricResult> get okMetrics => metrics.where((m) => m.isOk).toList();
+
+  /// Readings that did not.  They are listed in the unavailable section
+  /// rather than inline, so the table above holds only measurements.
+  List<MetricResult> get unavailableMetrics =>
+      metrics.where((m) => !m.isOk).toList();
 
   bool get allSkipped => okMetrics.isEmpty;
 
-  /// The reason shown for a fully-unsupported test.
-  String get skipReason =>
-      metrics.isEmpty ? '' : metrics.first.reason;
+  /// The reason shown for a fully-unavailable test.
+  String get skipReason => metrics.isEmpty ? '' : metrics.first.reason;
 
-  /// Best value: max, or min for latency units.
+  /// Unit for one reading, honouring its override.
+  Units unitsOf(MetricResult m) => m.units ?? units;
+
+  /// Whether one number can stand for the whole test.
+  ///
+  /// True for a homogeneous test, whose readings are variants of one
+  /// measurement — and for any test down to a single reading, where a
+  /// one-row table would say nothing the row does not.
+  bool get collapsible =>
+      shape == TestShape.homogeneous || okMetrics.length <= 1;
+
+  /// The test's answer: best of the readings, by its own direction.  Only
+  /// meaningful when [collapsible]; a heterogeneous test has no single
+  /// answer, which is the whole reason for the distinction.
   double get peakValue {
     final ok = okMetrics;
     if (ok.isEmpty) return 0;
-    return isLowerBetter(unit)
+    return header.direction == Direction.lowerIsBetter
         ? ok.map((m) => m.value).reduce((a, b) => a < b ? a : b)
         : ok.map((m) => m.value).reduce((a, b) => a > b ? a : b);
   }
 
-  /// Largest value, used to normalize the per-metric bars.
-  double get maxValue {
-    final ok = okMetrics;
+  /// How full to draw one reading's meter: its size relative to the largest
+  /// reading in the test, whichever direction is better.
+  ///
+  /// The meter is a picture of the number printed beside it and nothing more.
+  /// Scaling it by which reading is *best* instead was tried and is worse: on
+  /// a latency test it drew the shortest time as the longest bar, and a bar
+  /// next to a number is read as that number's size, so it looked simply
+  /// wrong.  Direction still decides what it should — which reading a
+  /// homogeneous test collapses to, and whether a `--compare` delta is
+  /// better or worse.
+  double barFraction(MetricResult m) {
+    if (!m.isOk) return 0;
+    final ok = okMetrics.map((x) => x.value).where((v) => v > 0).toList();
     if (ok.isEmpty) return 0;
-    return ok.map((m) => m.value).reduce((a, b) => a > b ? a : b);
+    final largest = ok.reduce((a, b) => a > b ? a : b);
+    if (largest <= 0) return 0;
+    return (m.value / largest).clamp(0.0, 1.0);
   }
 }
 
@@ -88,19 +96,46 @@ class CategoryGroup {
   final BenchCategory category;
   final List<TestResult> tests = [];
 
-  List<TestResult> get supported =>
-      tests.where((t) => !t.allSkipped).toList();
-  List<TestResult> get unsupported =>
-      tests.where((t) => t.allSkipped).toList();
+  List<TestResult> get supported => tests.where((t) => !t.allSkipped).toList();
+  List<TestResult> get unsupported => tests.where((t) => t.allSkipped).toList();
 }
 
-/// One backend/device run (one `<run>` block in the XML).
+/// One reading that could not be taken, with enough breadcrumbs to name it in
+/// the unavailable section.
+class UnavailableItem {
+  const UnavailableItem({
+    required this.test,
+    required this.label,
+    required this.status,
+    required this.reason,
+    required this.description,
+  });
+
+  final TestResult test;
+
+  /// Empty when the whole test is unavailable — the test's own name says it,
+  /// and repeating every reading under it would bury the one fact that
+  /// matters.
+  final String label;
+
+  final ResultStatus status;
+  final String reason;
+  final String description;
+
+  /// "MPS GEMM peak › bf16" for one missing reading, or just the test's name
+  /// when the whole test is unavailable.
+  String get title =>
+      label.isEmpty ? test.displayTitle : '${test.displayTitle} › $label';
+}
+
+/// One backend/device run (one `devices[]` entry in the file).
 class DeviceRun {
   DeviceRun({
     required this.backend,
     required this.platform,
     required this.device,
     required this.driver,
+    this.index = -1,
   });
 
   final String backend;
@@ -108,13 +143,21 @@ class DeviceRun {
   final String device;
   final String driver;
 
+  /// Enumeration index within the backend, or -1 where the backend reports
+  /// none.  Part of the identity, because a name is not one: MoltenVK exposes
+  /// the same GPU twice, and a multi-GPU box has N identical cards.
+  final int index;
+
   /// Device props — from the live event stream during a run, and from the
-  /// file's `devices` block when a saved run is reopened.
+  /// file's device object when a saved run is reopened.
   List<({String key, String value})> props = [];
 
   final List<CategoryGroup> categories = [];
 
-  String get key => '$backend|$platform|$device|$driver';
+  /// Driver is metadata, not identity — a saved run stays comparable across a
+  /// driver update — but the index is, so two same-named devices stay two rows
+  /// instead of folding into one test with two of every reading.
+  String get key => '$backend|$platform|$device|#$index';
 
   CategoryGroup _category(BenchCategory c) =>
       categories.firstWhere((g) => g.category == c, orElse: () {
@@ -123,34 +166,104 @@ class DeviceRun {
         return g;
       });
 
-  TestResult _test(BenchCategory c, String test, String display, String unit) {
-    final group = _category(c);
+  /// Find or create the test this header describes.  A header that names an
+  /// already-open test reopens it — the native side does that to append
+  /// readings measured in a later category phase, and the two halves belong
+  /// in one row.
+  TestResult openTest(TestHeader header) {
+    final group = _category(header.category);
     for (final t in group.tests) {
-      if (t.test == test) {
-        if (t.display.isEmpty || t.display == t.test) {
-          if (display.isNotEmpty) t.display = display;
-        }
-        return t;
-      }
+      if (t.key == header.key) return t;
     }
-    final t = TestResult(
-        test: test, display: display.isEmpty ? test : display, unit: unit);
+    final t = TestResult(header);
     group.tests.add(t);
     return t;
   }
 
-  void addEntry(ResultEntry e) {
-    final t = _test(e.benchCategory, e.test, e.display, e.unit);
-    t.metrics.add(e);
-    // The test description rides the rows, not the `test_begin` event: rows
-    // are the only source a reopened file has, and taking it off the event
-    // would mean materializing a TestResult before its first measurement,
-    // which `CategoryGroup` reads as fully-skipped and lists under "not
-    // supported" until a row lands.  First non-empty wins, like `display`.
-    if (t.description.isEmpty && e.description.isNotEmpty) {
-      t.description = e.description;
+  TestResult? findTest(String testKey) {
+    for (final group in categories) {
+      for (final t in group.tests) {
+        if (t.key == testKey) return t;
+      }
     }
+    return null;
   }
+
+  /// Everything that could not be measured on this device, in category order:
+  /// whole tests first, then the individual readings missing from tests that
+  /// otherwise succeeded.  Both belong in the same section — a reader wants
+  /// one answer to "what did this device not do?".
+  List<UnavailableItem> get unavailable {
+    final out = <UnavailableItem>[];
+    for (final g in categories) {
+      for (final t in g.tests) {
+        if (t.allSkipped) {
+          final first = t.metrics.isEmpty ? null : t.metrics.first;
+          out.add(UnavailableItem(
+            test: t,
+            label: '',
+            status: first?.status ?? ResultStatus.unsupported,
+            reason: first?.reason ?? '',
+            description: t.description,
+          ));
+          continue;
+        }
+        for (final m in t.unavailableMetrics) {
+          out.add(UnavailableItem(
+            test: t,
+            label: m.displayLabel,
+            status: m.status,
+            reason: m.reason,
+            description: m.description,
+          ));
+        }
+      }
+    }
+    return out;
+  }
+}
+
+/// A note the run emitted outside any reading — a missing library, a driver
+/// warning.  Usually the only record of *why* something is absent.
+class RunNote {
+  const RunNote({this.backend = '', this.device = '', required this.message});
+
+  final String backend;
+  final String device;
+  final String message;
+}
+
+/// How the run was invoked and what it ran on.  Present for a saved run;
+/// filled in only at the end of a live one, so null while it is in flight.
+class RunMeta {
+  const RunMeta({
+    this.clpeakVersion = '',
+    this.generatedAt = '',
+    this.durationSeconds = 0,
+    this.cancelled = false,
+    this.host = const {},
+  });
+
+  final String clpeakVersion;
+  final String generatedAt;
+  final double durationSeconds;
+
+  /// A cancelled run is a partial one; without this every test it never
+  /// reached would read as hardware that lacks the feature.
+  final bool cancelled;
+
+  /// Free-form host facts (os, os_version, arch, cpu, logical_cores,
+  /// memory_bytes) — shown as-is rather than modelled field by field, since
+  /// which of them a platform can answer varies.
+  final Map<String, dynamic> host;
+
+  factory RunMeta.fromJson(Map<String, dynamic> m) => RunMeta(
+        clpeakVersion: m['clpeak_version'] as String? ?? '',
+        generatedAt: m['generated_at'] as String? ?? '',
+        durationSeconds: (m['duration_s'] as num?)?.toDouble() ?? 0,
+        cancelled: m['cancelled'] as bool? ?? false,
+        host: (m['host'] as Map<String, dynamic>?) ?? const {},
+      );
 }
 
 /// A whole benchmark session: one or more device runs, in emission order.
@@ -158,54 +271,68 @@ class RunDocument {
   RunDocument();
 
   final List<DeviceRun> runs = [];
+  final List<RunNote> notes = [];
+  RunMeta? meta;
 
   bool get isEmpty => runs.isEmpty;
 
   DeviceRun runFor(String backend, String platform, String device,
-      String driver) {
-    final key = '$backend|$platform|$device|$driver';
+      String driver, [int index = -1]) {
+    final key = '$backend|$platform|$device|#$index';
     for (final r in runs) {
       if (r.key == key) return r;
     }
     final r = DeviceRun(
-        backend: backend, platform: platform, device: device, driver: driver);
+        backend: backend,
+        platform: platform,
+        device: device,
+        driver: driver,
+        index: index);
     runs.add(r);
     return r;
   }
 
-  void addEntry(ResultEntry e) {
-    runFor(e.backend, e.platform, e.device, e.driver).addEntry(e);
-  }
-
-  /// Build from a loaded saveJson document (history viewing).
-  factory RunDocument.fromEntriesJson(Map<String, dynamic> doc) {
+  /// Build from a saved clpeak run document (docs/format-v3.md).  A direct
+  /// structural read: the file is already the shape the UI renders, so nothing
+  /// is regrouped and no test-level field has to be recovered from its rows.
+  factory RunDocument.fromJson(Map<String, dynamic> doc) {
     final out = RunDocument();
-    for (final e in (doc['entries'] as List? ?? const [])) {
-      out.addEntry(ResultEntry.fromJson(e as Map<String, dynamic>));
-    }
-    // Applied after the entries so run order follows the measurements, and so
-    // a device block with no rows doesn't create an empty run.  Absent for
-    // CSV and for files saved before device metadata was persisted.
+    out.meta = RunMeta.fromJson(doc);
+
     for (final d in (doc['devices'] as List? ?? const [])) {
-      final m = d as Map<String, dynamic>;
-      final key = [
-        m['backend'] ?? '',
-        m['platform'] ?? '',
-        m['device'] ?? '',
-        m['driver'] ?? '',
-      ].join('|');
-      for (final run in out.runs) {
-        if (run.key != key) continue;
-        run.props = [
-          for (final p in (m['props'] as List? ?? const []))
-            (
-              key: (p as Map<String, dynamic>)['k'] as String? ?? '',
-              value: p['v'] as String? ?? '',
-            ),
-        ];
-        break;
+      final dm = d as Map<String, dynamic>;
+      final run = out.runFor(
+        dm['backend'] as String? ?? '',
+        dm['platform'] as String? ?? dm['backend'] as String? ?? '',
+        dm['name'] as String? ?? '',
+        dm['driver'] as String? ?? '',
+        (dm['device_index'] as num?)?.toInt() ?? -1,
+      );
+      run.props = [
+        for (final p in (dm['properties'] as List? ?? const []))
+          (
+            key: (p as Map<String, dynamic>)['key'] as String? ?? '',
+            value: p['value'] as String? ?? '',
+          ),
+      ];
+      for (final t in (dm['tests'] as List? ?? const [])) {
+        final tm = t as Map<String, dynamic>;
+        final test = run.openTest(TestHeader.fromJson(tm));
+        for (final m in (tm['metrics'] as List? ?? const [])) {
+          test.metrics.add(MetricResult.fromJson(m as Map<String, dynamic>));
+        }
       }
     }
+
+    for (final n in (doc['notes'] as List? ?? const [])) {
+      final nm = n as Map<String, dynamic>;
+      out.notes.add(RunNote(
+        backend: nm['backend'] as String? ?? '',
+        device: nm['device'] as String? ?? '',
+        message: nm['message'] as String? ?? '',
+      ));
+    }
+
     return out;
   }
 }

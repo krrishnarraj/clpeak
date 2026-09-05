@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../model/result_entry.dart';
+import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/clpeak_theme.dart';
+import '../common/format.dart';
 import '../common/kit.dart';
 
 /// Renders one RunDocument: run-selector chips (when a session covered
@@ -29,6 +30,72 @@ class ResultsBody extends StatefulWidget {
 class _ResultsBodyState extends State<ResultsBody> {
   String? _selectedRunKey;
 
+  // Global expand/collapse generation.  Null means follow each test's default
+  // (heterogeneous expanded, homogeneous collapsed); true/false forces all
+  // tests to that state until the next global toggle.  Per-row local taps
+  // override the forced value until the next global action bumps the generation.
+  bool? _forcedExpanded;
+  int _forcedGen = 0;
+  int _nextGen = 0;
+
+  // Per-category bulk controls — small "[+]" / "[-]" after the "X TESTS"
+  // label in each category header.  Each category has its own forced state
+  // and generation so a category action only touches its own tests, but the
+  // generation shares the global counter so the most-recent action (global
+  // vs category) wins and a per-test tap still overrides until the next
+  // forced bump.
+  final Map<BenchCategory, bool> _catForced = {};
+  final Map<BenchCategory, int> _catGen = {};
+
+  void _expandAll() {
+    setState(() {
+      _nextGen++;
+      _forcedExpanded = true;
+      _forcedGen = _nextGen;
+    });
+  }
+
+  void _collapseAll() {
+    setState(() {
+      _nextGen++;
+      _forcedExpanded = false;
+      _forcedGen = _nextGen;
+    });
+  }
+
+  void _expandCategory(BenchCategory c) {
+    setState(() {
+      _nextGen++;
+      _catForced[c] = true;
+      _catGen[c] = _nextGen;
+    });
+  }
+
+  void _collapseCategory(BenchCategory c) {
+    setState(() {
+      _nextGen++;
+      _catForced[c] = false;
+      _catGen[c] = _nextGen;
+    });
+  }
+
+  void _toggleCategory(CategoryGroup group) {
+    final eff = _effectiveFor(group);
+    if (eff.$1 == true) {
+      _collapseCategory(group.category);
+    } else {
+      _expandCategory(group.category);
+    }
+  }
+
+  (bool? forced, int gen) _effectiveFor(CategoryGroup group) {
+    final catG = _catGen[group.category] ?? 0;
+    if (_catForced.containsKey(group.category) && catG > _forcedGen) {
+      return (_catForced[group.category], catG);
+    }
+    return (_forcedExpanded, _forcedGen);
+  }
+
   @override
   Widget build(BuildContext context) {
     final runs = widget.document.runs;
@@ -46,6 +113,9 @@ class _ResultsBodyState extends State<ResultsBody> {
     final selected = runs.firstWhere((r) => r.key == _selectedRunKey,
         orElse: () => runs.last);
     final brightness = Theme.of(context).brightness;
+    final hasTests =
+        selected.categories.any((g) => g.supported.isNotEmpty);
+    final meta = widget.document.meta;
 
     // Flattened one level: category sections used to be non-lazy Columns
     // holding every test card, so all of them were built, laid out and
@@ -57,6 +127,11 @@ class _ResultsBodyState extends State<ResultsBody> {
     // by wrapping a category in one container, which would undo the laziness.
     final rows = <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
+      if (meta != null &&
+          (meta.clpeakVersion.isNotEmpty ||
+              meta.generatedAt.isNotEmpty ||
+              meta.host.isNotEmpty))
+        _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
       if (runs.length > 1)
         _WidgetRow(
           _RunSelector(
@@ -67,19 +142,35 @@ class _ResultsBodyState extends State<ResultsBody> {
           padBottom: 16,
         ),
       _WidgetRow(_DeviceHeader(run: selected)),
+      if (hasTests)
+        _WidgetRow(
+          _ExpandControls(
+            onExpandAll: _expandAll,
+            onCollapseAll: _collapseAll,
+          ),
+          padTop: 10,
+          padBottom: 2,
+        ),
       for (final group in selected.categories)
         if (group.supported.isNotEmpty) ...[
-          _SectionRow(group, brightness),
+          _SectionRow(
+            group,
+            brightness,
+            expanded: _effectiveFor(group).$1 == true,
+            onToggle: () => _toggleCategory(group),
+          ),
           for (var i = 0; i < group.supported.length; i++)
             _TestRow(
               group,
               group.supported[i],
               brightness,
               last: i == group.supported.length - 1,
+              forcedExpanded: _effectiveFor(group).$1,
+              forcedGen: _effectiveFor(group).$2,
             ),
         ],
-      if (selected.categories.any((g) => g.unsupported.isNotEmpty))
-        _WidgetRow(_UnsupportedSection(run: selected), padTop: 22),
+      if (selected.unavailable.isNotEmpty)
+        _WidgetRow(_UnavailableSection(run: selected), padTop: 22),
     ];
 
     return ListView.builder(
@@ -114,42 +205,129 @@ class _WidgetRow extends _Row {
 }
 
 class _SectionRow extends _Row {
-  const _SectionRow(this.group, this.brightness);
+  const _SectionRow(this.group, this.brightness,
+      {required this.expanded, required this.onToggle});
 
   final CategoryGroup group;
   final Brightness brightness;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build() => Padding(
         padding: const EdgeInsets.only(top: 22, bottom: 9),
-        child: CSection(
+        child: _CategoryCSection(
           label: group.category.label,
           color: ClpeakTheme.categoryColor(group.category,
               brightness: brightness),
-          trailing: '${group.supported.length} tests',
+          count: group.supported.length,
+          expanded: expanded,
+          onToggle: onToggle,
         ),
       );
 }
 
+/// Category header that mirrors [CSection] but carries a small "[+]" / "[-]"
+/// bulk toggle after the trailing "X TESTS" count. Shows "[-]" when the
+/// category is currently forced expanded, "[+]" otherwise.
+class _CategoryCSection extends StatelessWidget {
+  const _CategoryCSection({
+    required this.label,
+    required this.color,
+    required this.count,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final String label;
+  final Color? color;
+  final int count;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Row(
+      children: [
+        Container(width: 3, height: 12, color: color ?? t.text),
+        const SizedBox(width: 9),
+        Text(label.toUpperCase(),
+            style: t.micro.copyWith(color: color ?? t.text)),
+        const SizedBox(width: 12),
+        Expanded(child: Container(height: 1, color: t.line)),
+        const SizedBox(width: 12),
+        Text('$count TESTS', style: t.micro),
+        const SizedBox(width: 8),
+        _BracketButton(
+          label: expanded ? '[-]' : '[+]',
+          tooltip: expanded ? 'Collapse all $label' : 'Expand all $label',
+          onTap: onToggle,
+        ),
+      ],
+    );
+  }
+}
+
+class _BracketButton extends StatelessWidget {
+  const _BracketButton({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: CTap(
+        onTap: onTap,
+        builder: (context, hovered, pressed) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+          color: hovered || pressed ? t.hover : Colors.transparent,
+          child: Text(
+            label,
+            style: t.micro.copyWith(
+              color: hovered || pressed ? t.text : t.faint,
+              fontSize: 10,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TestRow extends _Row {
-  const _TestRow(this.group, this.test, this.brightness, {required this.last});
+  const _TestRow(this.group, this.test, this.brightness,
+      {required this.last, this.forcedExpanded, this.forcedGen = 0});
 
   final CategoryGroup group;
   final TestResult test;
   final Brightness brightness;
   final bool last;
+  final bool? forcedExpanded;
+  final int forcedGen;
 
   @override
   Widget build() => _TestLine(
         // Keyed by test tag: rows are inserted as results stream in during a
         // live run, and without a key a row's expansion state would follow
         // the index and land on the wrong test.
-        key: ValueKey(test.test),
+        key: ValueKey(test.key),
         test: test,
         color: ClpeakTheme.categoryColor(group.category,
             brightness: brightness),
         first: identical(test, group.supported.first),
         last: last,
+        forcedExpanded: forcedExpanded,
+        forcedGen: forcedGen,
       );
 }
 
@@ -266,7 +444,136 @@ class _DeviceHeader extends StatelessWidget {
   }
 }
 
-/// One test: name, peak reading, and — when opened — a metric breakdown.
+class _RunMetaPanel extends StatelessWidget {
+  const _RunMetaPanel({required this.meta});
+
+  final RunMeta meta;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final entries = <({String key, String value})>[];
+
+    if (meta.clpeakVersion.isNotEmpty) {
+      entries.add((key: 'CLPEAK VERSION', value: meta.clpeakVersion));
+    }
+    if (meta.durationSeconds > 0) {
+      entries.add((
+        key: 'DURATION',
+        value: formatDuration(
+            Duration(milliseconds: (meta.durationSeconds * 1000).round()))
+      ));
+    }
+    const skipHostKeys = {'cpu', 'logical_cores', 'memory_bytes'};
+    for (final e in meta.host.entries) {
+      final k = e.key.toString().trim();
+      if (skipHostKeys.contains(k)) continue;
+      final v = e.value?.toString().trim() ?? '';
+      if (k.isEmpty || v.isEmpty) continue;
+      entries.add((key: k.toUpperCase(), value: v));
+    }
+
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+            decoration: BoxDecoration(
+              color: t.isDark ? t.hover : t.hover.withValues(alpha: 0.7),
+              border: Border(bottom: BorderSide(color: t.line)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 13, color: t.faint),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text('RUN INFO', style: t.micro),
+                ),
+                if (meta.cancelled)
+                  CTag(text: 'cancelled', color: t.danger),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            child: Wrap(
+              spacing: 22,
+              runSpacing: 7,
+              children: [
+                for (final e in entries)
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: '${e.key}  ', style: t.micro),
+                      TextSpan(text: e.value, style: t.monoSmall),
+                    ]),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Expand/collapse all tests on the page.  Mirrors the per-row +/- but
+/// acts on every row at once.
+class _ExpandControls extends StatelessWidget {
+  const _ExpandControls({
+    required this.onExpandAll,
+    required this.onCollapseAll,
+  });
+
+  final VoidCallback onExpandAll;
+  final VoidCallback onCollapseAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    Widget link(String label, IconData icon, VoidCallback onTap) => CTap(
+          onTap: onTap,
+          builder: (context, hovered, pressed) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            color: hovered || pressed ? t.hover : Colors.transparent,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 12, color: t.faint),
+                const SizedBox(width: 5),
+                Text(label, style: t.micro),
+              ],
+            ),
+          ),
+        );
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          link('EXPAND ALL', Icons.unfold_more, onExpandAll),
+          const SizedBox(width: 2),
+          link('COLLAPSE ALL', Icons.unfold_less, onCollapseAll),
+        ],
+      ),
+    );
+  }
+}
+
+/// One test.
+///
+/// A homogeneous test collapses to its best reading, with the breakdown a tap
+/// away: its readings are interchangeable variants of one measurement, so one
+/// number really is the answer.
+///
+/// A heterogeneous test starts expanded — its readings measure different
+/// things, and the largest of them is not the test's result but merely its
+/// largest number.  It renders as a small table headed by what varies across
+/// the readings ("DATA TYPE", "CACHE LEVEL"), expanded by default but
+/// collapsible to its header.
 ///
 /// Draws its own top/bottom rules and side borders so a run of these reads as
 /// a single bordered table even though each is an independent list row.
@@ -277,25 +584,120 @@ class _TestLine extends StatefulWidget {
     required this.color,
     required this.first,
     required this.last,
+    this.forcedExpanded,
+    this.forcedGen = 0,
   });
 
   final TestResult test;
   final Color color;
   final bool first;
   final bool last;
+  final bool? forcedExpanded;
+  final int forcedGen;
 
   @override
   State<_TestLine> createState() => _TestLineState();
 }
 
 class _TestLineState extends State<_TestLine> {
-  bool _expanded = false;
+  // Null means follow the default: heterogeneous multi expanded, everything
+  // else collapsed.  Once the user taps, their choice sticks even as metrics
+  // stream in during a live run.  A global expand/collapse all bumps
+  // [widget.forcedGen] and overrides this until the next local tap.
+  bool? _userExpanded;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.forcedExpanded != null) {
+      _userExpanded = widget.forcedExpanded;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _TestLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.forcedGen != oldWidget.forcedGen &&
+        widget.forcedExpanded != null) {
+      _userExpanded = widget.forcedExpanded;
+    } else if (widget.forcedExpanded != oldWidget.forcedExpanded &&
+        widget.forcedExpanded != null &&
+        oldWidget.forcedExpanded == null) {
+      // First global action after mount (gen still 0) — handle without gen bump.
+      _userExpanded = widget.forcedExpanded;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final test = widget.test;
-    final peak = formatMetric(test.peakValue, test.unit);
+    final collapsible = test.collapsible;
+    // Heterogeneous with multiple readings is its readings, so expanded by
+    // default; homogeneous (and any single-reading test) collapses to its
+    // best reading and opens on demand.
+    final defaultExpanded = !collapsible;
+    final effectiveExpanded = _userExpanded ?? defaultExpanded;
+    final showBreakdown = effectiveExpanded;
+
+    final header = Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      child: Row(
+        children: [
+          Container(width: 3, height: 15, color: widget.color),
+          const SizedBox(width: 10),
+          // The title wraps rather than ellipsizing: the row is as tall as
+          // its name needs, which on a phone is the difference between
+          // "Half-precision compute fp1…" and knowing which
+          // half-precision test this is.
+          Expanded(
+            child: _NameWithInfo(
+              name: test.displayTitle,
+              description: test.description,
+              style: t.mono,
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (collapsible) ...[
+            Builder(builder: (context) {
+              final peak = formatValue(test.peakValue, test.units);
+              return CValue(
+                  value: peak.value, unit: peak.unit, color: widget.color);
+            }),
+            const SizedBox(width: 6),
+            Icon(effectiveExpanded ? Icons.remove : Icons.add,
+                size: 13, color: t.faint),
+          ] else ...[
+            // Axis labels like "DATA TYPE, PHASE AND CONTEXT LENGTH" are
+            // explanatory, not the answer — keep them smaller and capped so
+            // the test title keeps the width. The title wraps rather than
+            // ellipsizes because its tail distinguishes two tests; the axis
+            // can ellipsize after two lines.
+            if (test.axis.isNotEmpty)
+              Flexible(
+                flex: 0,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 132),
+                  child: Text(
+                    test.axis.toUpperCase(),
+                    style: t.micro.copyWith(
+                      fontSize: 9,
+                      letterSpacing: 0.7,
+                      height: 1.2,
+                    ),
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            if (test.axis.isNotEmpty) const SizedBox(width: 6),
+            Icon(effectiveExpanded ? Icons.remove : Icons.add,
+                size: 13, color: t.faint),
+          ],
+        ],
+      ),
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -316,43 +718,16 @@ class _TestLineState extends State<_TestLine> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           CTap(
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: () => setState(
+                () => _userExpanded = !effectiveExpanded),
             builder: (context, hovered, pressed) => Container(
               color: hovered || pressed ? t.hover : Colors.transparent,
-              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-              child: Row(
-                children: [
-                  Container(width: 3, height: 15, color: widget.color),
-                  const SizedBox(width: 10),
-                  // The title wraps rather than ellipsizing: the row is as
-                  // tall as its name needs, which on a phone is the
-                  // difference between "Half-precision compute fp1…" and
-                  // knowing which half-precision test this is.
-                  Expanded(
-                    child: _NameWithInfo(
-                      name: test.display,
-                      description: test.description,
-                      style: t.mono,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  CValue(
-                      value: peak.value,
-                      unit: peak.unit,
-                      color: widget.color),
-                  const SizedBox(width: 6),
-                  Icon(
-                    _expanded ? Icons.remove : Icons.add,
-                    size: 13,
-                    color: t.faint,
-                  ),
-                ],
-              ),
+              child: header,
             ),
           ),
           // Instant, not a cross-fade: expansion happens mid-run, and an
           // animated one would cost the benchmark a burst of frames.
-          if (_expanded)
+          if (showBreakdown)
             Container(
               decoration: BoxDecoration(
                 color: t.isDark
@@ -363,10 +738,13 @@ class _TestLineState extends State<_TestLine> {
               padding: const EdgeInsets.fromLTRB(25, 9, 12, 10),
               child: Column(
                 children: [
-                  for (final metric in test.metrics)
+                  // Only measurements: a reading that could not be taken is
+                  // listed once, at the bottom of the page, rather than
+                  // sitting in the middle of a table of numbers.
+                  for (final metric in test.okMetrics)
                     _MetricLine(
-                      entry: metric,
-                      maxValue: test.maxValue,
+                      test: test,
+                      metric: metric,
                       color: widget.color,
                       glyphColumn: test.hasMetricNotes,
                     ),
@@ -508,14 +886,14 @@ class _InfoDialog extends StatelessWidget {
 
 class _MetricLine extends StatelessWidget {
   const _MetricLine({
-    required this.entry,
-    required this.maxValue,
+    required this.test,
+    required this.metric,
     required this.color,
     required this.glyphColumn,
   });
 
-  final ResultEntry entry;
-  final double maxValue;
+  final TestResult test;
+  final MetricResult metric;
   final Color color;
 
   /// Some reading of this test is documented, so every row of it leaves room
@@ -525,10 +903,7 @@ class _MetricLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final ok = entry.status == ResultStatus.ok;
-    final fraction =
-        ok && maxValue > 0 ? (entry.value / maxValue).clamp(0.0, 1.0) : 0.0;
-    final f = ok ? formatMetric(entry.value, entry.unit) : null;
+    final f = formatValue(metric.value, test.unitsOf(metric));
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3.5),
@@ -539,50 +914,46 @@ class _MetricLine extends StatelessWidget {
             // than it wraps inside that width rather than being cut.
             width: glyphColumn ? 121 : 104,
             child: _NameWithInfo(
-              name: entry.metric,
-              description: entry.metricDescription,
+              name: metric.displayLabel,
+              description: metric.description,
               style: t.monoSmallDim,
               small: true,
             ),
           ),
           const SizedBox(width: 10),
+          // Direction-aware: on a latency test the fastest reading draws the
+          // full bar, where a plain value/max filled the slowest one.
           Expanded(
-            child: ok
-                ? CMeter(fraction: fraction, color: color)
-                : Text(
-                    '${entry.status.name} — ${entry.reason}',
-                    style: t.monoSmall.copyWith(color: t.faint),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+            child: CMeter(fraction: test.barFraction(metric), color: color),
           ),
-          if (f != null) ...[
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 94,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: CValue(value: f.value, unit: f.unit, small: true),
-              ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 94,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: CValue(value: f.value, unit: f.unit, small: true),
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _UnsupportedSection extends StatelessWidget {
-  const _UnsupportedSection({required this.run});
+/// Everything the device could not measure, in one place at the foot of the
+/// page: whole tests it does not support, and the individual readings missing
+/// from tests that otherwise ran.  Both answer the same question, and keeping
+/// a dead row out of the table above is what lets that table be nothing but
+/// measurements.
+class _UnavailableSection extends StatelessWidget {
+  const _UnavailableSection({required this.run});
 
   final DeviceRun run;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final items = <TestResult>[
-      for (final g in run.categories) ...g.unsupported,
-    ];
+    final items = run.unavailable;
     if (items.isEmpty) return const SizedBox.shrink();
 
     return CPanel(
@@ -595,7 +966,7 @@ class _UnsupportedSection extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  'NOT SUPPORTED ON THIS DEVICE (${items.length})',
+                  'NOT AVAILABLE ON THIS DEVICE (${items.length})',
                   style: t.micro,
                 ),
               ),
@@ -607,7 +978,7 @@ class _UnsupportedSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(height: 1, color: t.line),
-            for (final test in items)
+            for (final item in items)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
                 child: Row(
@@ -616,17 +987,17 @@ class _UnsupportedSection extends StatelessWidget {
                     Expanded(
                       flex: 4,
                       child: _NameWithInfo(
-                        name: test.display,
-                        description: test.description,
+                        name: item.title,
+                        description: item.description,
                         style: t.monoSmall.copyWith(color: t.dim),
                         small: true,
                       ),
                     ),
-                    if (test.skipReason.isNotEmpty) ...[
+                    if (item.reason.isNotEmpty) ...[
                       const SizedBox(width: 12),
                       Expanded(
                         flex: 5,
-                        child: Text(test.skipReason,
+                        child: Text(item.reason,
                             style: t.monoSmall.copyWith(color: t.faint),
                             textAlign: TextAlign.right),
                       ),

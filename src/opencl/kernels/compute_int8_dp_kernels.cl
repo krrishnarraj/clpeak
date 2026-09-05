@@ -61,7 +61,7 @@ MSTRINGIFY(
 \n#if defined(cl_khr_integer_dot_product)
 \n  #pragma OPENCL EXTENSION cl_khr_integer_dot_product : enable
 \n#endif
-\n#if defined(cl_khr_integer_dot_product) || defined(__opencl_c_integer_dot_product_input_4x8bit)
+\n#if defined(cl_khr_integer_dot_product) || defined(__opencl_c_integer_dot_product_input_4x8bit) || defined(__opencl_c_integer_dot_product_input_4x8bit_packed)
 \n  #define INT8_DP_AVAILABLE
 \n#endif
 
@@ -72,7 +72,19 @@ MSTRINGIFY(
 \n#undef DP_STEP_4
 \n#undef DP_STEP_8
 \n
-\n#define DP_STEP(x, p, q)    p = dot_acc_sat(x, as_char4(q), p);  q = dot_acc_sat(x, as_char4(p), q);
+\n#ifdef USE_PACKED_DOT
+\n  // Packed 4x8-bit signed dot product: Adreno's OpenCL compiler maps the
+\n  // unpacked char4 / as_char4 pattern poorly, while the packed form (matching
+\n  // the Vulkan backend) is native.  The chain shape is otherwise identical.
+\n  #define DP4A_X_T            uint
+\n  #define DP4A_X(_A)          ((uint)((uchar)(_A)) | ((uint)((uchar)((_A) + 1)) << 8) | ((uint)((uchar)((_A) + 2)) << 16) | ((uint)((uchar)((_A) + 3)) << 24))
+\n  #define DP_STEP(x, p, q)    p = dot_acc_sat_4x8packed_ss_int(x, as_uint(q), p);  q = dot_acc_sat_4x8packed_ss_int(x, as_uint(p), q);
+\n#else
+\n  #define DP4A_X_T            char4
+\n  #define DP4A_X(_A)          (char4)((_A), (_A)+1, (_A)+2, (_A)+3)
+\n  #define DP_STEP(x, p, q)    p = dot_acc_sat(x, as_char4(q), p);  q = dot_acc_sat(x, as_char4(p), q);
+\n#endif
+
 \n#define DP_STEP_2(x, p, q)  DP_STEP(x, p, q)  DP_STEP(x, p, q)
 \n#define DP_STEP_4(x, p, q)  DP_STEP_2(x, p, q)  DP_STEP_2(x, p, q)
 \n#define DP_STEP_8(x, p, q)  DP_STEP_4(x, p, q)  DP_STEP_4(x, p, q)
@@ -80,7 +92,7 @@ MSTRINGIFY(
 
 __kernel void compute_int8_dp_v1(__global int *ptr, char _A)
 {
-    char4 x = (char4)(_A, _A+1, _A+2, _A+3);
+    DP4A_X_T x = DP4A_X(_A);
     int lid = (int)get_local_id(0);
     int a0 = lid, b0 = lid + 4;
 
@@ -94,7 +106,7 @@ __kernel void compute_int8_dp_v1(__global int *ptr, char _A)
 
 __kernel void compute_int8_dp_v2(__global int *ptr, char _A)
 {
-    char4 x = (char4)(_A, _A+1, _A+2, _A+3);
+    DP4A_X_T x = DP4A_X(_A);
     int lid = (int)get_local_id(0);
     int a0 = lid,     b0 = lid + 4;
     int a1 = lid + 8, b1 = lid + 12;
@@ -112,7 +124,7 @@ __kernel void compute_int8_dp_v2(__global int *ptr, char _A)
 
 __kernel void compute_int8_dp_v4(__global int *ptr, char _A)
 {
-    char4 x = (char4)(_A, _A+1, _A+2, _A+3);
+    DP4A_X_T x = DP4A_X(_A);
     int lid = (int)get_local_id(0);
     int a0 = lid + 0,  b0 = lid + 4;
     int a1 = lid + 8,  b1 = lid + 12;
@@ -130,7 +142,7 @@ __kernel void compute_int8_dp_v4(__global int *ptr, char _A)
 
 __kernel void compute_int8_dp_v8(__global int *ptr, char _A)
 {
-    char4 x = (char4)(_A, _A+1, _A+2, _A+3);
+    DP4A_X_T x = DP4A_X(_A);
     int lid = (int)get_local_id(0);
     int a0 = lid + 0,  b0 = lid + 4;
     int a1 = lid + 8,  b1 = lid + 12;
@@ -153,7 +165,7 @@ __kernel void compute_int8_dp_v8(__global int *ptr, char _A)
 
 __kernel void compute_int8_dp_v16(__global int *ptr, char _A)
 {
-    char4 x = (char4)(_A, _A+1, _A+2, _A+3);
+    DP4A_X_T x = DP4A_X(_A);
     int lid = (int)get_local_id(0);
     int a0 = lid + 0,   b0 = lid + 4;
     int a1 = lid + 8,   b1 = lid + 12;

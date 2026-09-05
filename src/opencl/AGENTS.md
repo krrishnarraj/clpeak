@@ -37,7 +37,9 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
 
 - `runComputeTest()` takes the test-level text as a `description` parameter
-  (after `unit`); the per-width readings are documented inside the helper.
+  (after `unit`); the per-width readings are documented inside the helper,
+  which also classifies every test it drives as a homogeneous "vector width"
+  sweep — that is all it ever runs.
 - `clWidthNote()` (`cl_peak.h`) is the shared wording for the
   `float`/`float2`/…/`float16` readings, used by the compute helper and the
   global/local bandwidth tests.

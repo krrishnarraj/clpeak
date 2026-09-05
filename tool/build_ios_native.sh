@@ -12,7 +12,11 @@
 # when the LunarG iOS SDK is discoverable via $VULKAN_SDK or
 # ~/VulkanSDK/1.4.350.0/iOS; otherwise the framework ships Metal + CPU only.
 #
-# Usage: tool/build_ios_native.sh [--no-vulkan]
+# ONNX Runtime is fetched (the official static C pod) and linked into the
+# framework; --no-onnx leaves it out, and CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK
+# points the build at a local one instead.
+#
+# Usage: tool/build_ios_native.sh [--no-vulkan] [--no-onnx]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,8 +24,43 @@ OUT="$ROOT/app/ios/clpeak_native"
 BUILD="$ROOT/build-ios"
 
 EXTRA_ARGS=()
-if [[ "${1:-}" == "--no-vulkan" ]]; then
-    EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_VULKAN=OFF)
+NO_ONNX=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-vulkan) EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_VULKAN=OFF) ;;
+        --no-onnx)   NO_ONNX=1 ;;
+        *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
+
+# ---- ONNX Runtime (static, from the official C pod archive) -----------------
+# iOS is the one platform where the runtime cannot be dlopen'd: Apple's pod is
+# a static framework and iOS will not load a library that was not built into
+# the app.  So it is fetched here and linked in.  Cached under build-ios/, not
+# checked in -- it is 61 MB.  Set CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK to point
+# at your own build instead, or pass --no-onnx to leave the backend out.
+ORT_POD_VERSION="${CLPEAK_IOS_ONNXRUNTIME_VERSION:-1.29.0}"
+ORT_DIR="$BUILD/onnxruntime/$ORT_POD_VERSION"
+
+if [[ $NO_ONNX -eq 0 ]]; then
+    if [[ -n "${CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK:-}" ]]; then
+        ORT_XCFRAMEWORK="$CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK"
+    else
+        ORT_XCFRAMEWORK="$ORT_DIR/onnxruntime.xcframework"
+        if [[ ! -d "$ORT_XCFRAMEWORK" ]]; then
+            echo "==> Fetching ONNX Runtime $ORT_POD_VERSION (iOS pod archive)"
+            mkdir -p "$ORT_DIR"
+            curl -fsSL -o "$ORT_DIR/pod.zip" \
+                "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-$ORT_POD_VERSION.zip"
+            unzip -oq "$ORT_DIR/pod.zip" -d "$ORT_DIR"
+            rm -f "$ORT_DIR/pod.zip"
+        fi
+    fi
+    if [[ -d "$ORT_XCFRAMEWORK" ]]; then
+        EXTRA_ARGS+=(-DCLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK="$ORT_XCFRAMEWORK")
+    else
+        echo "==> ONNX Runtime not available at $ORT_XCFRAMEWORK — skipping backend"
+    fi
 fi
 
 configure_and_build() {

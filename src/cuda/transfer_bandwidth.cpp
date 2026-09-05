@@ -10,11 +10,12 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "gbps", Category::Unknown,
+    {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
      "How fast data crosses between the computer's own memory and the card's, "
      "over the PCIe link.  That link is far narrower than either side's own "
      "memory, which is what makes moving data to the GPU worth avoiding.  Both "
-     "readings use pinned host memory, the fast path."});
+     "readings use pinned host memory, the fast path.",
+     TestShape::Heterogeneous, "direction"});
 
   const char *h2dNote = "Host to device: sending data up to the card.";
   const char *d2hNote = "Device to host: reading results back down.  Often a "
@@ -87,12 +88,12 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   };
 
   float usH2D = timeXfer(true);
-  float gbpsH2D = (float)bytes / usH2D / 1e3f;
-  test.emit("h2d_pinned", gbpsH2D, h2dNote);
+  float bpsH2D = (float)bytes / usH2D * 1e6f;
+  test.emit("h2d_pinned", bpsH2D, h2dNote);
 
   float usD2H = timeXfer(false);
-  float gbpsD2H = (float)bytes / usD2H / 1e3f;
-  test.emit("d2h_pinned", gbpsD2H, d2hNote);
+  float bpsD2H = (float)bytes / usD2H * 1e6f;
+  test.emit("d2h_pinned", bpsD2H, d2hNote);
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);

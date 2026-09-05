@@ -31,7 +31,9 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
   }
 
   auto test = currentDeviceScope->beginTest(
-    {resultTag, displayName, unit, Category::Unknown, description});
+    {resultTag, displayName, unit, Category::Unknown, description,
+     // Every test routed through here is one kernel at five vector widths.
+     TestShape::Homogeneous, "vector width"});
 
   // Feature gates
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
@@ -52,11 +54,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                  ResultStatus::Unsupported, "No double precision support");
     return 0;
   }
-  if (which == Benchmark::ComputeInt8DP && !devInfo.int8DotProductSupported)
+  if (which == Benchmark::ComputeInt8DP &&
+      !devInfo.int8DotProductSupported && !devInfo.int8DotProductPackedSupported)
   {
     test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
                  ResultStatus::Unsupported,
-                 "cl_khr_integer_dot_product not supported");
+                 "integer dot product (4x8) not supported");
     return 0;
   }
 
@@ -138,7 +141,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
         float timed = run_kernel(queue, kernels[w], globalSize, localSize,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-        float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed / 1e3f;
+        float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed * 1e6f;
 
         // Race the affine chain and keep the faster reading.  A failure here
         // is not an error: the squaring chain already produced one.
@@ -148,7 +151,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           {
             float altTimed = run_kernel(queue, altKernels[w], globalSize, localSize,
                                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-            float altThroughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / altTimed / 1e3f;
+            float altThroughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / altTimed * 1e6f;
             CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
                         resultTag.c_str(), labels[w].c_str(), throughput,
                         altThroughput, unit.c_str());
@@ -164,7 +167,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           }
         }
 
-        test.emit(labels[w], throughput, {false, clWidthNote(widths[w])});
+        test.emit(labels[w], throughput, clWidthNote(widths[w]));
       }
       catch (cl::Error &error)
       {

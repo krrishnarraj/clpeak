@@ -19,11 +19,20 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `CLPEAK_FFI_PATH=<build>/clpeak_ffi.framework/clpeak_ffi flutter run -d macos`
   (a plain `flutter build macos` does NOT embed the framework — the
   clpeak-gui target owns final assembly).
-- Android: `flutter build apk --release` (Gradle drives
-  `src/ffi/android/CMakeLists.txt`; needs `git submodule update --init`).
+- Android: `flutter build apk --release` / `flutter build appbundle --release`
+  (Gradle drives `src/ffi/android/CMakeLists.txt`; needs
+  `git submodule update --init`). The bundle includes ONNX Runtime for
+  **arm64-v8a** (devices) and **x86_64** (emulator / Chromebooks) —
+  `armeabi-v7a`/`x86` are excluded as legacy 32-bit ABIs; see the packaging
+  block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
+  per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
+  107 MB for every slice).
 - iOS: `tool/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
-  `flutter build ios` / `flutter run`.
+  `flutter build ios` / `flutter run`.  That script also fetches the ONNX
+  Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
+  `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
+  own build.
 - Tests: `flutter test` (pure Dart) or
   `CLPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
 
@@ -46,20 +55,58 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   name's edge was tried and dropped, since on a wide desktop window it left a
   visible gap between a short name and its glyph.  In tests that makes a
   documented name's plain text `name + U+FFFC`: match it with
-  `find.textContaining`, not `find.text`.  Text comes off the result rows
-  (`ResultEntry.description` / `.metricDescription`), **not** off the
-  `test_begin` event — that would create a `TestResult` before its first
-  measurement, which `CategoryGroup` reads as fully-skipped and files under
-  "not supported".
+  `find.textContaining`, not `find.text`.  A test's own text arrives on
+  `test_begin`, inside the `TestHeader` a `TestResult` is built from; each
+  reading's rides the reading.
+- Collapsed number, or a table of readings? → `TestResult.shape` /
+  `.collapsible` (`lib/src/model/run_document.dart`).  A **homogeneous** test
+  collapses to its best reading — its readings are variants of one measurement,
+  so one number is the answer.  A **heterogeneous** one starts expanded — its
+  readings measure different things, and the largest is not the test's result
+  but merely its largest number, so it renders as a mini-table headed by its
+  `axis` ("DATA TYPE"), expanded by default but collapsible to that header.
+  A single-reading test collapses whatever its shape, since a one-row table
+  says nothing the row does not.  `shape` is authored natively and cannot be
+  inferred — see `docs/format-v3.md`.
+- What do the meters mean? → `TestResult.barFraction`: a reading's size against
+  the largest reading in its test, in every test, whichever direction is
+  better.  The meter is a picture of the number printed beside it and nothing
+  more.  Scaling it by which reading is *best* was tried and reverted — on a
+  latency test it drew the shortest time as the longest bar, and a bar next to
+  a number is read as that number's size, so it looked wrong however it was
+  captioned.  `direction` still decides what it should: which reading a
+  homogeneous test collapses to, and whether a `--compare` delta reads better
+  or worse.
+- Readings that could not be taken? → `DeviceRun.unavailable`, rendered by
+  `_UnavailableSection` at the foot of the page.  It collects whole
+  unsupported tests **and** the individual readings missing from tests that
+  otherwise ran, so the tables above hold nothing but measurements.
 - History persistence? → `lib/src/services/run_history_store.dart`
-  (`<base>/runs/<id>.xml` written natively via `--xml-file`, `index.json`
-  sidecar; viewing goes XML → native loader → JSON).  `<base>` is
-  `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a macOS TCC
-  consent prompt — and `<app documents>/clpeak` on Android/iOS, where that
-  directory is inside the sandbox and is what the Files app shows.  Device
-  properties reach a reopened run through the file's `devices` block, not the
-  event stream — see `RunDocument.fromEntriesJson`.
+  (`<base>/runs/<id>.clpeak.json` written natively via `-o`, `index.json`
+  sidecar).  Viewing is a plain `jsonDecode` — the saved document is already
+  the shape the UI renders, so there is no native loader in the path and
+  history stays readable when the native library cannot be loaded at all.
+  `<base>` is `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a
+  macOS TCC consent prompt — and `<app documents>/clpeak` on Android/iOS,
+  where that directory is inside the sandbox and is what the Files app shows.
+  Files from an older `format_version` are skipped, not half-parsed.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
+- Which ONNX Runtime is loaded, and how a user changes it? →
+  `lib/src/ui/settings/settings_screen.dart` + `SettingsService.onnxLibraryPath`.
+  The path is applied in `main()` **before** `BenchmarkService` is built,
+  because that constructor enumerates and enumeration is what loads the
+  runtime — applied any later it would be a launch too late, which is why
+  `main()` is async and `SettingsService.load()` reads prefs up front.
+  Changing it calls `clpeak_set_onnx_library()` and then
+  `BenchmarkService.reloadCatalog()`, so the device list reflects the new
+  runtime's execution providers without a restart.  On iOS the picker is
+  replaced by "Built into the app": ONNX Runtime is statically linked there
+  (Apple's pod is a static framework and iOS will not dlopen another), which
+  `OnnxStatus.linkedIn` reports.
+- Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
+  (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
+  Android/iOS only — a sleeping display stops the frames the run was budgeted
+  for, which moves the scores of everything measured after it)
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
 - Colours / type / geometry? → `lib/src/theme/clpeak_theme.dart` (`CP.of(context)`

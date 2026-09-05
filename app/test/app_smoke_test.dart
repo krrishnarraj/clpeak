@@ -26,21 +26,29 @@ void main() {
   testWidgets('app boots against the real catalog; tabs render',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
+    final settings = await SettingsService.load();
     final bindings = ClpeakBindings.open();
     final tmp = Directory.systemTemp.createTempSync('clpeak_smoke');
     addTearDown(() => tmp.deleteSync(recursive: true));
-    final history = RunHistoryStore(bindings, directoryOverride: tmp);
+    final history = RunHistoryStore(directoryOverride: tmp);
     final service = BenchmarkService(bindings, history);
 
     await tester.pumpWidget(MultiProvider(
       providers: [
         Provider.value(value: history),
         Provider(create: (_) => ExportService()),
-        ChangeNotifierProvider(create: (_) => SettingsService()),
+        ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider.value(value: service),
       ],
       child: const ClpeakApp(),
     ));
+    // Catalog loads on a worker isolate: spawn it inside runAsync, since
+    // testWidgets runs in fake async and an isolate spawned outside it
+    // never resolves (see isolate_probe_test.dart).
+    await tester.pump();
+    expect(find.textContaining('Detecting'), findsWidgets);
+
+    await tester.runAsync(() => service.init());
     await tester.pump();
 
     // Dashboard: launcher + real system summary from the native catalog.
@@ -61,10 +69,16 @@ void main() {
     }
     expect(find.text('No saved runs yet'), findsOneWidget);
 
-    // About tab: version + theme control.
+    // Settings tab: theme control + the ONNX runtime panel, which reports
+    // whatever this build actually loaded.
+    await tester.tap(find.text('Settings'));
+    await tester.pump();
+    expect(find.text('Theme'), findsOneWidget);
+    expect(find.text('ONNX RUNTIME'), findsOneWidget);
+
+    // About tab: version.
     await tester.tap(find.text('About'));
     await tester.pump();
     expect(find.text('v${service.version}'), findsOneWidget);
-    expect(find.text('Theme'), findsOneWidget);
   }, skip: skip);
 }

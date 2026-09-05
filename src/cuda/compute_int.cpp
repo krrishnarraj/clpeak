@@ -16,7 +16,9 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
   cuda_compute_desc_t d = {};
   d.title = "Integer compute (32-bit IMAD)";
   d.resultTag = "integer_compute";
-  d.unit = "gops";
+  d.shape = TestShape::Homogeneous;
+  d.axis = "vector width";
+  d.unit = "ops";
   d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
                   "indexing, addressing and bit manipulation, which shaders do "
                   "alongside their fractional maths.";
@@ -48,7 +50,11 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
   cuda_compute_desc_t d = {};
   d.title = "INT8 dot-product compute (__dp4a)";
   d.resultTag = "integer_compute_int8_dp";
-  d.unit = "gops";
+  d.shape = TestShape::Homogeneous;
+  // Independent __dp4a chains, not wider vectors: each reading gives the
+  // hardware more dot products to have in flight at once.
+  d.axis = "chains in flight";
+  d.unit = "ops";
   d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
                   "four pairs of small whole numbers and sums them in one step -- the "
                   "shader-core path for quantized (compressed) neural networks.";

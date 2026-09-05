@@ -178,22 +178,15 @@ int OneapiPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
+    // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (isAllowed(Benchmark::ComputeSP))     runComputeSP(dev, cfg);
     if (isAllowed(Benchmark::ComputeHP))     runComputeHP(dev, cfg);
     if (isAllowed(Benchmark::ComputeDP))     runComputeDP(dev, cfg);
     if (isAllowed(Benchmark::ComputeMP))     runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))   runComputeBF16(dev, cfg);
-    if (isAllowedAs(Benchmark::JointMatrix, Category::FpCompute))
-      runJointMatrix(dev, cfg, Category::FpCompute);
-    if (isAllowedAs(Benchmark::Onemkl, Category::FpCompute))
-      runOnemkl(dev, cfg, Category::FpCompute);
-
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-
-    if (isAllowedAs(Benchmark::JointMatrix, Category::IntCompute))
-      runJointMatrix(dev, cfg, Category::IntCompute);
-    if (isAllowedAs(Benchmark::Onemkl, Category::IntCompute))
-      runOnemkl(dev, cfg, Category::IntCompute);
+    if (isAllowed(Benchmark::JointMatrix))   runJointMatrix(dev, cfg);
+    if (isAllowed(Benchmark::Onemkl))        runOnemkl(dev, cfg);
 
 
     if (isAllowed(Benchmark::GlobalBW))     runGlobalBandwidth(dev, cfg);

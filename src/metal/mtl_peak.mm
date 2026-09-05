@@ -86,16 +86,13 @@ int MetalPeak::runAll()
         });
         currentDeviceScope = &deviceScope;
 
-        // ---- Phase 1: floating-point compute (GFLOPS / TFLOPS) -----------
+        // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
         if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
         if (isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
         if (isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isAllowedAs(Benchmark::SimdgroupMatrix, Category::FpCompute))
-            runSimdgroupMatrix(dev, cfg);
-        if (isAllowedAs(Benchmark::MpsGemm, Category::FpCompute))
-            runMpsGemm(dev, cfg);
-        if (isAllowedAs(Benchmark::MpsAttention, Category::FpCompute))
-            runMpsAttention(dev, cfg);
+        if (isAllowed(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
+        if (isAllowed(Benchmark::MpsGemm))           runMpsGemm(dev, cfg);
+        if (isAllowed(Benchmark::MpsAttention))      runMpsAttention(dev, cfg);
 
         // ---- Phase 2: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);

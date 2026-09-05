@@ -59,25 +59,30 @@ enum class Benchmark : unsigned int {
     BranchPenalty,      // CPU branch mispredict penalty (ns)
     StoreForward,       // CPU store-to-load forwarding roundtrip (ns)
     SmtScaling,         // CPU fp32 FMA at 1 thread/core vs all SMT threads (GFLOPS)
+    OnnxGemm,           // single-node MatMul through ONNX Runtime EP (NPU/GPU/CPU)
+    OnnxNumericError,   // accuracy cost of each dtype vs an fp32 CPU reference
+    OnnxBlock,          // fixed transformer decoder block: prefill + decode
+    OnnxConv,           // 2-D convolution peak through an ONNX EP
+    OnnxActivation,     // softmax / layernorm / gate throughput through an ONNX EP
+    OnnxTensorBW,       // resident-tensor read bandwidth through an ONNX EP
+    OnnxTransferBW,     // host<->device transfer cost through an ONNX EP
+    OnnxDispatchLatency,// per-submission overhead of an ONNX EP
     KernelLatency,
     COUNT
 };
 
 // Test category — drives the run-order phase loop on every backend.
 enum class Category {
-    FpCompute,
-    IntCompute,
+    Compute,      // all compute (floating-point + integer)
     Crypto,       // fixed-function crypto/hash silicon (CPU: AES/SHA/CRC)
     String,       // string/text processing (CPU: byte scan, UTF-8 validation)
     Bandwidth,
     Latency,
+    Ai,           // AI-composite tests (fixed transformer-block micro-graphs)
     Unknown
 };
 
-// Map every benchmark to its primary category.  Tensor / vendor-library
-// tests that span both fp and int variants (Wmma, CoopMatrix, SimdgroupMatrix,
-// Cublas, MpsGemm, Rocwmma, Mfma, Rocblas, Amx) are listed under their fp form here; backends iterate
-// them again in the int_compute phase emitting only int variants there.
+// Map every benchmark to its primary category.
 inline Category categoryOf(Benchmark b)
 {
     switch (b) {
@@ -85,6 +90,9 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::LocalBW:
     case Benchmark::ImageBW:
     case Benchmark::TransferBW:
+    case Benchmark::OnnxActivation:
+    case Benchmark::OnnxTensorBW:
+    case Benchmark::OnnxTransferBW:
     case Benchmark::CacheBandwidth:
     case Benchmark::TextureSample:
         return Category::Bandwidth;
@@ -96,6 +104,13 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::ComputeBF16:
     case Benchmark::ComputeFP8DP:
     case Benchmark::ComputeDivSqrt:
+    case Benchmark::ComputeInt:
+    case Benchmark::ComputeIntFast:
+    case Benchmark::ComputeChar:
+    case Benchmark::ComputeShort:
+    case Benchmark::ComputeInt8DP:
+    case Benchmark::ComputeInt16DP:
+    case Benchmark::ComputeIntDiv:
     case Benchmark::Wmma:
     case Benchmark::CoopMatrix:
     case Benchmark::SimdgroupMatrix:
@@ -110,16 +125,10 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::Amx:
     case Benchmark::AppleBlas:
     case Benchmark::SmtScaling:
-        return Category::FpCompute;
-
-    case Benchmark::ComputeInt:
-    case Benchmark::ComputeIntFast:
-    case Benchmark::ComputeChar:
-    case Benchmark::ComputeShort:
-    case Benchmark::ComputeInt8DP:
-    case Benchmark::ComputeInt16DP:
-    case Benchmark::ComputeIntDiv:
-        return Category::IntCompute;
+    case Benchmark::OnnxGemm:
+    case Benchmark::OnnxNumericError:
+    case Benchmark::OnnxConv:
+        return Category::Compute;
 
     case Benchmark::CryptoAes:
     case Benchmark::CryptoSha256:
@@ -131,7 +140,11 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::Utf8Validate:
         return Category::String;
 
+    case Benchmark::OnnxBlock:
+        return Category::Ai;
+
     case Benchmark::KernelLatency:
+    case Benchmark::OnnxDispatchLatency:
     case Benchmark::MemoryLatency:
     case Benchmark::Atomics:
     case Benchmark::BranchPenalty:

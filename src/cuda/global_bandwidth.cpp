@@ -16,13 +16,25 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (numBlocks == 0)
     numBlocks = 1;
 
+  // Opened before the sizing diagnostic below, so that line lands under
+  // this test's header rather than under the previous test's readings.
   auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
+    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
      Category::Unknown,
      "How many bytes per second the GPU can stream out of its own memory, "
      "reading a buffer far too large to cache.  Each reading fetches a "
      "different number of values per instruction, since wider fetches usually "
-     "pull more through before the memory system saturates."});
+     "pull more through before the memory system saturates.",
+     TestShape::Homogeneous, "vector width"});
+
+  // The one number that decides whether this test measured memory or cache:
+  // the timed phase re-reads the same buffer, so a working set that fits behind
+  // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
+  // globalBWMaxSize to clear it; print both so an implausible reading can be
+  // checked against them without a rebuild.
+  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
+              (unsigned long long)(numItems * sizeof(float) >> 20),
+              (unsigned long long)(dev.info.l2CacheSize >> 20));
 
   CUdeviceptr inBuf = 0, outBuf = 0;
   if (cuMemAlloc(&inBuf, numItems * sizeof(float)) != CUDA_SUCCESS ||
@@ -82,8 +94,8 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     float us = runKernel(dev, fn, blocksU, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
-    float gbps = (float)(bytes / us / 1e3);
-    test.emit(key, gbps, cudaWidthNote(v.width));
+    float bps = (float)(bytes / us * 1e6);
+    test.emit(key, bps, cudaWidthNote(v.width));
   }
 
   cuMemFree(inBuf);

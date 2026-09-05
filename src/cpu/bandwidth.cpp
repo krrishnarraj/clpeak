@@ -2,7 +2,7 @@
 
 #include <cpu/cpu_peak.h>
 #include <common/common.h>
-#include <common/result_store.h>
+#include <common/run_document.h>
 #include "cpu_kernels.h"
 
 #include <algorithm>
@@ -59,16 +59,24 @@ static inline uint64_t readBufferChecksum(const float *p, size_t M, uint64_t ite
 // ---------------------------------------------------------------------------
 int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 {
-  logger::TestSpec spec{"cache_bandwidth", "Cache bandwidth (read)", "gbps",
+  logger::TestSpec spec{"cache_bandwidth", "Cache bandwidth (read)", "bps",
                         Category::Bandwidth,
                         "How many bytes per second the CPU can read out of each "
                         "cache, from the tiny fast one next to the core to the big "
                         "slow one shared by all of them.  Each reading uses a working "
-                        "set sized to stay inside the cache it names."};
+                        "set sized to stay inside the cache it names.",
+                        TestShape::Heterogeneous, "cache level"};
   auto test = currentDeviceScope->beginTest(spec);
 
   const int maxT = pool->maxThreads();
-  const bool appleCpu = info.vendor == "Apple" || info.name.rfind("Apple", 0) == 0;
+  // Is the L2 a per-core private cache, or shared by a cluster?  Asked of the
+  // topology, not of the vendor string: Apple is not the only one -- Qualcomm's
+  // Oryon shares 12 MB across each cluster of 4, and Intel's E-core modules
+  // share one L2 as well.  If every core had its own, the aggregate would be
+  // per-core x cores; anything less means cores are sharing, and the MT row has
+  // to split the working set or it overflows the level it names.
+  const int cores = info.physicalCores > 0 ? info.physicalCores : maxT;
+  const bool l2Shared = info.l2TotalBytes < info.l2CacheBytes * (uint64_t)cores;
   const uint64_t cap = 32ull * 1024 * 1024; // bound the per-thread allocation
   // Per-thread buffer must hold the largest single-thread working set we stream.
   // That is usually the L3 set, but on Apple Silicon the per-cluster L2 (e.g.
@@ -90,23 +98,45 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   std::vector<uint64_t> sink((size_t)maxT, 0);
 
   // Notes ride the table so a level's name and explanation stay adjacent.
+  // `bytes` is the ST working set: half of ONE instance of the level, which is
+  // all a single core can reach.  `totalBytes` is what the MT row splits across
+  // threads -- the AGGREGATE of the level, which on a multi-instance cache is
+  // not the same number.  Dividing the per-instance size by every thread in the
+  // machine shrinks the slice by the instance count twice over: on a 16C/32T
+  // Threadripper (4 CCX x 16 MB L3) it left 256 KB per thread, inside the
+  // 512 KB per-core L2, and "L3 MT" came back at 1758 GB/s against "L2 MT" at
+  // 1744 -- two different levels reporting the same bandwidth, which is the
+  // tell.  0 means the level is absent and the row skips.
+  // `mtFloor` is twice one instance of the level BELOW, and it is what keeps a
+  // split slice from falling out of the level it names: divide too far and the
+  // row quietly re-measures the faster cache underneath.  It also covers the
+  // case where the aggregate could not be detected and fell back to the
+  // per-instance size, which would otherwise divide a single instance by every
+  // thread in the machine.
   struct Level
   {
     const char *name;
     uint64_t bytes;
+    uint64_t totalBytes;
+    uint64_t mtFloor;
     bool sharedForMt;
     const char *stNote;
     const char *mtNote;
   };
   const Level levels[] = {
-      {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), false,
+      {"L1", std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), info.l1dTotalBytes,
+       0, false,
        "One thread reading from the small cache inside its own core.",
        "Every core reading from its own L1 at the same time."},
-      {"L2", std::max<uint64_t>(info.l2CacheBytes / 2, 16384), appleCpu,
+      {"L2", std::max<uint64_t>(info.l2CacheBytes / 2, 16384), info.l2TotalBytes,
+       info.l1dCacheBytes * 2, l2Shared,
        "One thread reading from the mid-level cache, the next step out.",
        "Every core reading from L2 at once; where L2 is shared, the data is "
        "split between them so it still fits."},
-      {"L3", std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes), true,
+      {"L3", info.l3CacheBytes
+                 ? std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), allocBytes)
+                 : 0, // 0 = this CPU has no L3; the loop skips the row
+       info.l3TotalBytes, info.l2CacheBytes * 2, true,
        "One thread reading from the large cache shared by all cores.",
        "Every core reading from that shared cache at once, each taking a slice "
        "of it."},
@@ -116,15 +146,29 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
   for (const auto &lvl : levels)
   {
+    // A CPU with no L3 (Apple Silicon, Snapdragon X, most phone SoCs) gets the
+    // row as Unsupported rather than a measurement: without a real size the
+    // working set falls back to something that still fits in L2, and the row
+    // silently reports L2 a second time.
+    if (lvl.bytes == 0)
+    {
+      test.skip(std::string(lvl.name) + " ST", ResultStatus::Unsupported,
+                "no L3 on this CPU", lvl.stNote);
+      test.skip(std::string(lvl.name) + " MT", ResultStatus::Unsupported,
+                "no L3 on this CPU", lvl.mtNote);
+      continue;
+    }
+
     size_t M1 = (size_t)(lvl.bytes / sizeof(float));
     if (M1 > allocFloats)
       M1 = allocFloats;
     if (M1 < 64)
       M1 = 64;
 
-    uint64_t mtBytes = lvl.sharedForMt
-                           ? std::max<uint64_t>(lvl.bytes / (uint64_t)maxT, 4096)
-                           : lvl.bytes;
+    uint64_t mtBytes =
+        lvl.sharedForMt
+            ? std::max<uint64_t>({lvl.totalBytes / 2 / (uint64_t)maxT, lvl.mtFloor, 4096})
+            : lvl.bytes;
     size_t MN = (size_t)(mtBytes / sizeof(float));
     if (MN > allocFloats)
       MN = allocFloats;
@@ -145,17 +189,17 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
     double stPassBytes = (double)M1 * sizeof(float);
     double mtPassBytes = (double)MN * sizeof(float) * (double)maxT;
-    auto gbps = [](double bytes, double meanUs) -> float
+    auto bps = [](double bytes, double meanUs) -> float
     {
-      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
     };
 
     if (us1 > 0)
-      test.emit(std::string(lvl.name) + " ST", gbps(stPassBytes, us1), lvl.stNote);
+      test.emit(std::string(lvl.name) + " ST", bps(stPassBytes, us1), lvl.stNote);
     else
       test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote);
     if (usN > 0)
-      test.emit(std::string(lvl.name) + " MT", gbps(mtPassBytes, usN), lvl.mtNote);
+      test.emit(std::string(lvl.name) + " MT", bps(mtPassBytes, usN), lvl.mtNote);
     else
       test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote);
   }
@@ -179,11 +223,12 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   // threshold and would bypass the very cache under test.
   {
     logger::TestSpec wspec{"l1_write_bandwidth", "L1 bandwidth (write / copy)",
-                           "gbps", Category::Bandwidth,
+                           "bps", Category::Bandwidth,
                            "How many bytes per second a core can write into its "
                            "nearest cache, and copy within it.  Cores have fewer "
                            "paths out to memory than in, so writing usually lands "
-                           "below the matching read row."};
+                           "below the matching read row.",
+                           TestShape::Heterogeneous, "operation"};
     auto wtest = currentDeviceScope->beginTest(wspec);
 
     // A QUARTER of the L1, not half like the read row: on a hybrid chip
@@ -207,9 +252,9 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
       clpeak_cpu::kernels().copybuf(p, p + cFloats, cFloats, iters);
     };
 
-    auto gbps = [](double bytes, double meanUs) -> float
+    auto bps = [](double bytes, double meanUs) -> float
     {
-      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+      return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
     };
 
     const char *wStNote = "One thread storing new values into its own L1.";
@@ -221,40 +266,48 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     double us1 = runWorkload(1, writeBody, cfg.targetTimeUs, forced);
     double usN = runWorkload(maxT, writeBody, cfg.targetTimeUs, forced);
     if (us1 > 0)
-      wtest.emit("write ST", gbps((double)wFloats * sizeof(float), us1), wStNote);
+      wtest.emit("write ST", bps((double)wFloats * sizeof(float), us1), wStNote);
     else
       wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote);
     if (usN > 0)
-      wtest.emit("write MT", gbps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
+      wtest.emit("write MT", bps((double)wFloats * sizeof(float) * maxT, usN), wMtNote);
     else
       wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote);
 
     us1 = runWorkload(1, copyBody, cfg.targetTimeUs, forced);
     usN = runWorkload(maxT, copyBody, cfg.targetTimeUs, forced);
     if (us1 > 0)
-      wtest.emit("copy ST", gbps(2.0 * cFloats * sizeof(float), us1), cStNote);
+      wtest.emit("copy ST", bps(2.0 * cFloats * sizeof(float), us1), cStNote);
     else
       wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote);
     if (usN > 0)
-      wtest.emit("copy MT", gbps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
+      wtest.emit("copy MT", bps(2.0 * cFloats * sizeof(float) * maxT, usN), cMtNote);
     else
       wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote);
   }
   return 0;
 }
 
-// Number of floats per STREAM array.  Must exceed the *aggregate* LLC (on
-// multi-CCX/CCD AMD the per-instance L3 is only a slice — sizing off it would
-// let the whole array sit in cache and report cache, not DRAM, bandwidth), and
-// is bounded so we don't hog memory.  Even split across threads.
+// Number of floats per STREAM array.  Must exceed *every cache the stream can
+// land in*, summed — not the L3 alone.  Two ways that goes wrong if you size
+// off L3 by name: on multi-CCX/CCD AMD the per-instance L3 is only a slice, and
+// on a chip whose last level IS the L2 (Apple Silicon, Snapdragon X, most ARM
+// parts) there is no L3 to size off at all.  A Snapdragon X Elite has 36 MB of
+// aggregate L2 and reports no L3, so the old L3-only rule left the array at the
+// 64 MB floor — under 2x the cache — and the "DRAM" read row came back at
+// 149 GB/s on memory whose theoretical peak is 135.  Under-sizing never fails
+// loudly: it just serves part of the read out of cache and reports a number
+// above what the DIMMs can physically do.  4x total cache is the classic STREAM
+// margin; the cap keeps us from hogging memory.  Even split across threads.
 static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 {
-  uint64_t llc = std::max(info.l3TotalBytes, info.l3CacheBytes);
-  uint64_t arrayBytes = std::max<uint64_t>(llc * 4, 64ull << 20);
+  uint64_t cache = info.l1dTotalBytes + info.l2TotalBytes +
+                   std::max(info.l3TotalBytes, info.l3CacheBytes);
+  uint64_t arrayBytes = std::max<uint64_t>(cache * 4, 64ull << 20);
   uint64_t cap = info.totalMemBytes ? std::min<uint64_t>(512ull << 20, info.totalMemBytes / 16)
                                     : (512ull << 20);
-  if (cap < llc * 2)
-    cap = llc * 2; // always large enough to miss the LLC
+  if (cap < cache * 2)
+    cap = cache * 2; // always large enough to miss every level
   arrayBytes = std::min(arrayBytes, cap);
   size_t N = (size_t)(arrayBytes / sizeof(float));
   N = (N / (size_t)maxT) * (size_t)maxT;
@@ -273,13 +326,25 @@ static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
-      {"global_memory_bandwidth", "DRAM bandwidth", "gbps", Category::Unknown,
+      {"global_memory_bandwidth", "DRAM bandwidth", "bps", Category::Unknown,
        "How many bytes per second all cores together can move to and from main "
        "memory.  The arrays are far too big for any cache, so every access goes "
-       "out to RAM."});
+       "out to RAM.  The two rows that write count only the bytes the program "
+       "asked for, the usual STREAM convention; most CPUs must also fetch each "
+       "line before overwriting it, so copy and triad move about half again as "
+       "much as they count and normally land below the read row.",
+       TestShape::Heterogeneous, "operation"});
 
   const int maxT = pool->maxThreads();
   const size_t N = pickStreamFloats(info, maxT);
+  // The one number that decides whether this test measures DRAM at all, so it
+  // is worth being able to read it back off a suspicious run: a "DRAM" figure
+  // above the memory's rated peak means the array was not big enough.
+  CLPEAK_VLOG("[cpu] STREAM array %llu MB x3, %llu MB total cache, %d threads\n",
+              (unsigned long long)((uint64_t)N * sizeof(float) >> 20),
+              (unsigned long long)((info.l1dTotalBytes + info.l2TotalBytes +
+                                    std::max(info.l3TotalBytes, info.l3CacheBytes)) >> 20),
+              maxT);
 
   auto chunk = [&](int tid, size_t &lo, size_t &hi)
   {
@@ -306,9 +371,9 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
 
   std::vector<uint64_t> sink((size_t)maxT, 0);
   unsigned int forced = forceIters ? specifiedIters : 0;
-  auto gbps = [](double bytes, double meanUs) -> float
+  auto bps = [](double bytes, double meanUs) -> float
   {
-    return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e3)) : -1.0f;
+    return meanUs > 0.0 ? (float)(bytes / (meanUs * 1e-6)) : -1.0f;
   };
 
   {
@@ -319,7 +384,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
       sink[(size_t)tid] ^= readBufferChecksum(A + lo, hi - lo, iters);
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("read", gbps((double)N * sizeof(float), us),
+    test.emit("read", bps((double)N * sizeof(float), us),
               "Reading one large array straight through, start to end.");
   }
   {
@@ -331,7 +396,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
         std::memcpy(A + lo, C + lo, (hi - lo) * sizeof(float));
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("copy", gbps(2.0 * N * sizeof(float), us),
+    test.emit("copy", bps(2.0 * N * sizeof(float), us),
               "Copying one large array into another -- a read and a write for "
               "every element.");
   }
@@ -346,7 +411,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
           A[i] = B[i] + s * C[i];
     };
     double us = runWorkload(maxT, body, cfg.targetTimeUs, forced);
-    test.emit("triad", gbps(3.0 * N * sizeof(float), us),
+    test.emit("triad", bps(3.0 * N * sizeof(float), us),
               "Scaling one array, adding a second and storing to a third: two "
               "reads and a write per element, the hardest of the three.");
   }

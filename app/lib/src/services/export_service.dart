@@ -3,13 +3,13 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:share_plus/share_plus.dart';
 
-/// Exports a saved run's XML: native share sheet on mobile, save-file dialog
-/// on desktop.
+/// Exports a saved run document: native share sheet on mobile, save-file
+/// dialog on desktop.
 class ExportService {
-  Future<void> exportXml(File xml, {required String suggestedName}) async {
+  Future<void> exportRun(File file, {required String suggestedName}) async {
     if (Platform.isAndroid || Platform.isIOS) {
       await SharePlus.instance.share(ShareParams(
-        files: [XFile(xml.path, mimeType: 'application/xml')],
+        files: [XFile(file.path, mimeType: 'application/json')],
         subject: suggestedName,
       ));
       return;
@@ -17,10 +17,10 @@ class ExportService {
     final location = await getSaveLocation(
       suggestedName: suggestedName,
       acceptedTypeGroups: const [
-        XTypeGroup(label: 'clpeak results', extensions: ['xml'])
+        XTypeGroup(label: 'clpeak results', extensions: ['json'])
       ],
     );
     if (location == null) return; // user cancelled
-    await xml.copy(location.path);
+    await file.copy(location.path);
   }
 }

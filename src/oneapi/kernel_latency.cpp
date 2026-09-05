@@ -17,10 +17,11 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
                                   : (cfg.kernelLatencyIters ? cfg.kernelLatencyIters : 1000);
 
   auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "us", Category::Unknown,
+    {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
      "The overhead of asking the device to do anything at all, measured with "
      "an empty kernel.  It is what small, frequent jobs pay before any of "
-     "their own work begins."});
+     "their own work begins.",
+     TestShape::Heterogeneous});
 
   const char *dispatchNote = "One way only: from the moment the host submits the "
                              "work to the moment the device starts running it.  "
@@ -76,7 +77,7 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
   if (submitFailed)
     test.skip("roundtrip", ResultStatus::Error, "SYCL submit/wait failed", roundtripNote);
   else
-    test.emit("roundtrip", (float)(totalRoundtripUs / iters), roundtripNote);
+    test.emit("roundtrip", (float)(totalRoundtripUs / iters * 1e-6), roundtripNote);
 
   return 0;
 }

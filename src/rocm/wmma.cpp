@@ -23,9 +23,9 @@ constexpr uint64_t kWmmaPerWave = kWmmaIters * kWmmaAcc;
 
 struct WmmaEntry
 {
-  const char *metric;
+  const char *label;    // reading id within the family test
   const char *title;
-  const char *unit;     // "tflops" or "tops"
+  const char *unit;     // "flops" or "ops"
   const rocm_kernels::Blob *blob;
   const char *kernelName;
   uint32_t M, N, K;
@@ -48,31 +48,30 @@ bool isRdnaWmmaFamily(const std::string &base)
 
 } // namespace
 
-int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category category)
+int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
 {
-  const bool isInt = category == Category::IntCompute;
 
   static const WmmaEntry fpEntries[] = {
-    {"wmma_fp16", "WMMA fp16xfp16+fp32 16x16x16", "tflops",
+    {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp16, "wmma_fp16",
      16, 16, 16, false,
      "Peak speed of the matrix cores -- dedicated units that multiply whole "
      "16x16 blocks of numbers in one step rather than one value at a time -- "
      "on 16-bit inputs with a 32-bit running total.  This is the everyday "
      "precision of AI work."},
-    {"wmma_bf16", "WMMA bf16xbf16+fp32 16x16x16", "tflops",
+    {"bf16", "WMMA bf16xbf16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_bf16, "wmma_bf16",
      16, 16, 16, false,
      "Matrix cores on bfloat16 -- 16 bits arranged for AI work, trading digits "
      "of accuracy for the number range of a full float, which makes training "
      "far more forgiving."},
-    {"wmma_fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "tflops",
+    {"fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e4m3",
      16, 16, 16, false,
      "Matrix cores on 8-bit numbers, in the variant that spends its bits on "
      "accuracy rather than range.  Half the data of 16-bit per value, so it "
      "runs at roughly twice the rate."},
-    {"wmma_fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "tflops",
+    {"fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e5m2",
      16, 16, 16, false,
      "The same 8-bit matrix path in the other variant, which spends its bits "
@@ -80,17 +79,13 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
      "very small values."},
   };
   static const WmmaEntry intEntries[] = {
-    {"wmma_int8", "WMMA int8xint8+int32 16x16x16", "tops",
+    {"int8", "WMMA int8xint8+int32 16x16x16", "ops",
      &rocm_kernels::wmma_int8, "wmma_int8",
      16, 16, 16, true,
      "Matrix cores on 8-bit whole numbers with a 32-bit running total -- the "
      "format quantized neural networks use when they are squeezed down to run "
      "fast on cheaper hardware."},
   };
-
-  const WmmaEntry *entries = isInt ? intEntries : fpEntries;
-  const size_t numEntries = isInt ? (sizeof(intEntries) / sizeof(intEntries[0]))
-                                  : (sizeof(fpEntries) / sizeof(fpEntries[0]));
 
   const bool rdna = isRdnaWmmaFamily(archBaseOf(dev.info.archName));
 
@@ -103,23 +98,42 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
   uint64_t globalThreads = targetGlobalThreads((uint32_t)dev.info.numCUs);
   uint64_t wantBlocks = globalThreads / blockSize;
 
-  for (size_t e = 0; e < numEntries; e++)
+  // The reading's own note rides along on every path, and the integer reading
+  // carries its own unit -- that override is what lets it share the test with
+  // the floating-point ones instead of needing a twin.
+  auto unitOpts = [](const WmmaEntry &en) {
+    logger::EmitOptions o;
+    if (en.description) o.description = en.description;
+    if (en.isInt) o.unit = "ops";
+    return o;
+  };
+
+  // One scope for the whole family -- all data types in one test.
+  auto test = currentDeviceScope->beginTest(
+    {"wmma", "Matrix cores (WMMA)", "flops", Category::Unknown,
+       "Peak speed of the matrix cores -- dedicated units that multiply whole "
+       "16x16 blocks of numbers in one step rather than one value at a time. "
+       "Each reading is a different input format; which of them the hardware "
+       "runs, and how much faster the narrow ones go, is most of what "
+       "separates one generation from the next.  RDNA3 (gfx11) and RDNA4 "
+       "(gfx12) only -- the compute cards use MFMA instead.",
+       TestShape::Heterogeneous, "data type"});
+
+  for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)
   {
-    const WmmaEntry &me = entries[e];
-    auto test = currentDeviceScope->beginTest(
-      {me.metric, me.title, me.unit, Category::Unknown, me.description});
+    const WmmaEntry &me = fpEntries[e];
 
     if (!rdna)
     {
-      test.skip(me.metric, ResultStatus::Unsupported,
+      test.skip(me.label, ResultStatus::Unsupported,
                 "WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; "
-                "absent on this architecture");
+                "absent on this architecture", me.description);
       continue;
     }
     if (!wave32)
     {
-      test.skip(me.metric, ResultStatus::Unsupported,
-                "WMMA peak measured only in wave32 mode on this build");
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA peak measured only in wave32 mode on this build", unitOpts(me));
       continue;
     }
 
@@ -128,8 +142,8 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     hipFunction_t fn;
     if (!dev.getKernel(*me.blob, me.kernelName, fn))
     {
-      test.skip(me.metric, ResultStatus::Unsupported,
-                "WMMA instruction for this datatype not available on this GPU");
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA instruction for this datatype not available on this GPU", unitOpts(me));
       continue;
     }
 
@@ -144,7 +158,8 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     void *outBuf = nullptr;
     if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
     {
-      test.skip(me.metric, ResultStatus::Error, "Failed to allocate output buffer");
+      test.skip(me.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(me));
       continue;
     }
 
@@ -154,15 +169,76 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category categor
     if (us <= 0.0f)
     {
       (void)hipFree(outBuf);
-      test.skip(me.metric, ResultStatus::Error, "kernel launch failed");
+      test.skip(me.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(me));
       continue;
     }
 
     // Each wave issues kWmmaPerWave WMMA ops, each doing 2*M*N*K flops/ops.
     const double ops = (double)numBlocks * (double)kWmmaPerWave *
                        2.0 * (double)me.M * (double)me.N * (double)me.K;
-    float value = (float)(ops * 1.0e6 / us / 1.0e12);
-    test.emit(me.metric, value);
+    float value = (float)(ops * 1.0e6 / us);
+    test.emit(me.label, value, unitOpts(me));
+
+    (void)hipFree(outBuf);
+  }
+  for (size_t e = 0; e < sizeof(intEntries)/sizeof(intEntries[0]); e++)
+  {
+    const WmmaEntry &me = intEntries[e];
+
+    if (!rdna)
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; "
+                "absent on this architecture", me.description);
+      continue;
+    }
+    if (!wave32)
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA peak measured only in wave32 mode on this build", unitOpts(me));
+      continue;
+    }
+
+    hipFunction_t fn;
+    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    {
+      test.skip(me.label, ResultStatus::Unsupported,
+                "WMMA instruction for this datatype not available on this GPU", unitOpts(me));
+      continue;
+    }
+
+    const uint32_t elemSize = me.isInt ? (uint32_t)sizeof(int) : (uint32_t)sizeof(float);
+    uint64_t bytesPerBlock = (uint64_t)blockSize * elemSize;
+    uint64_t maxBlocks = dev.info.totalGlobalMem / 4 / bytesPerBlock;
+    uint64_t pickBlocks = (wantBlocks < maxBlocks) ? wantBlocks : maxBlocks;
+    if (pickBlocks == 0)
+      pickBlocks = 1;
+    uint32_t numBlocks = (uint32_t)pickBlocks;
+
+    void *outBuf = nullptr;
+    if (hipMalloc(&outBuf, (uint64_t)numBlocks * bytesPerBlock) != hipSuccess)
+    {
+      test.skip(me.label, ResultStatus::Error,
+                "Failed to allocate output buffer", unitOpts(me));
+      continue;
+    }
+
+    void *args[1] = {&outBuf};
+    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+    if (us <= 0.0f)
+    {
+      (void)hipFree(outBuf);
+      test.skip(me.label, ResultStatus::Error,
+                "kernel launch failed", unitOpts(me));
+      continue;
+    }
+
+    const double ops = (double)numBlocks * (double)kWmmaPerWave *
+                       2.0 * (double)me.M * (double)me.N * (double)me.K;
+    float value = (float)(ops * 1.0e6 / us);
+    test.emit(me.label, value, unitOpts(me));
 
     (void)hipFree(outBuf);
   }

@@ -2,7 +2,7 @@
 
 int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  float timed_lo, timed_go, timed, gbps;
+  float timed_lo, timed_go, timed, bps;
   cl::NDRange globalSize, localSize;
   float *arr = nullptr;
 
@@ -15,6 +15,17 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   uint64_t maxItems = devInfo.maxAllocSize / sizeof(float) / 2;
   uint64_t numItems = roundToMultipleOf(maxItems, (devInfo.maxWGSize * FETCH_PER_WI * 16), cfg.globalBWMaxSize / sizeof(float));
 
+  // Opened before the sizing diagnostic below, so that line lands under
+  // this test's header rather than under the previous test's readings.
+  auto test = currentDeviceScope->beginTest(
+    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
+     Category::Unknown,
+     "How many bytes per second the device can stream out of its main memory, "
+     "reading a buffer far too large to cache.  Each reading fetches a "
+     "different number of values per instruction, since wider fetches usually "
+     "pull more through before the memory system saturates.",
+     TestShape::Homogeneous, "vector width"});
+
   // The one number that decides whether this test measured memory or cache:
   // the timed phase re-reads the same buffer, so a working set that fits behind
   // the last-level cache reports the cache.  benchmark_config_t::forDevice
@@ -23,14 +34,6 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
               (unsigned long long)(numItems * sizeof(float) >> 20),
               (unsigned long long)(devInfo.globalMemCacheSize >> 20));
-
-  auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "gbps",
-     Category::Unknown,
-     "How many bytes per second the device can stream out of its main memory, "
-     "reading a buffer far too large to cache.  Each reading fetches a "
-     "different number of values per instruction, since wider fetches usually "
-     "pull more through before the memory system saturates."});
 
   try
   {
@@ -100,7 +103,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
       // Bytes actually moved = effective work-items * per-WI fetch.
       uint64_t movedFloats = ndRangeTotal(globalSize) * widths[w] * FETCH_PER_WI;
-      gbps = ((float)movedFloats * sizeof(float)) / timed / 1e3f;
+      bps = ((float)movedFloats * sizeof(float)) / timed * 1e6f;
 
       // OpenCL is the only backend carrying both offset shapes -- the other
       // five implement the local-offset one alone -- so this race is the only
@@ -108,12 +111,12 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       // both: if it never does by more than noise, the second family can go and
       // every backend measures the same thing; if it does, the shape has to be
       // ported to the other five instead.
-      CLPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f gbps\n",
+      CLPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f B/s\n",
                   labels[w],
-                  ((float)movedFloats * sizeof(float)) / timed_lo / 1e3f,
-                  ((float)movedFloats * sizeof(float)) / timed_go / 1e3f);
+                  ((float)movedFloats * sizeof(float)) / timed_lo * 1e6f,
+                  ((float)movedFloats * sizeof(float)) / timed_go * 1e6f);
 
-      test.emit(labels[w], gbps, clWidthNote(widths[w]));
+      test.emit(labels[w], bps, clWidthNote(widths[w]));
      }
   }
   catch (cl::Error &error)

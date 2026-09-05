@@ -74,6 +74,41 @@ add_subdirectory(${CLPEAK_ROOT}/src/metal ${CMAKE_BINARY_DIR}/metal)
 set(CLPEAK_ENABLE_CPU ON CACHE BOOL "" FORCE)
 add_subdirectory(${CLPEAK_ROOT}/src/cpu ${CMAKE_BINARY_DIR}/cpu)
 
+# ---- ONNX Runtime backend (CoreML / XNNPACK / CPU) -------------------------
+# Statically linked, and it has to be: Apple's official pod ships
+# onnxruntime.xcframework as a *static* framework (`static_framework = true`
+# in its podspec), and iOS will not dlopen a library that was not built into
+# the app to begin with.  So iOS is the one platform where the runtime is
+# baked in -- which is also why --onnx-lib and the settings screen's library
+# picker do nothing here: there is no second runtime to choose.
+#
+# tool/build_ios_native.sh fetches and unpacks the pod archive, then passes
+# its path in.  Point CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK at an existing
+# onnxruntime.xcframework to use your own build; the backend is left out
+# entirely when it is absent.
+set(CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK "" CACHE PATH
+    "onnxruntime.xcframework to link into clpeak_ffi (empty = no ONNX backend)")
+set(CLPEAK_IOS_ONNX_AVAILABLE OFF)
+
+if(CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK)
+  if(CLPEAK_IOS_SIMULATOR)
+    set(_ort_slice "ios-arm64_x86_64-simulator")
+  else()
+    set(_ort_slice "ios-arm64")
+  endif()
+  set(_ort_fw
+      "${CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK}/${_ort_slice}/onnxruntime.framework")
+  if(EXISTS "${_ort_fw}/onnxruntime")
+    set(CLPEAK_IOS_ONNX_AVAILABLE ON)
+    set(CLPEAK_ENABLE_ONNX ON)
+    set(CLPEAK_ONNX_STATIC ON)
+    add_subdirectory(${CLPEAK_ROOT}/src/onnx ${CMAKE_BINARY_DIR}/onnx)
+  else()
+    message(WARNING "No ${_ort_slice} slice under "
+                    "${CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK} - ONNX backend disabled.")
+  endif()
+endif()
+
 # ---- The FFI bridge framework ------------------------------------------------
 set(CLPEAK_FFI_STANDALONE ON)
 add_subdirectory(${CLPEAK_ROOT}/src/ffi ${CMAKE_BINARY_DIR}/ffi)
@@ -89,7 +124,23 @@ if(CLPEAK_IOS_VULKAN_AVAILABLE)
   target_link_libraries(clpeak_ffi PRIVATE "${CLPEAK_IOS_VULKAN_SDK}/lib/vulkan.framework")
 endif()
 
-foreach(_dep peak_common peak_metal peak_cpu peak_vulkan)
+if(CLPEAK_IOS_ONNX_AVAILABLE)
+  # The framework binary is a plain ar archive, so it links as a static
+  # library by path.  The accompanying system frameworks are the ones the
+  # official podspec declares -- CoreML weak-linked, exactly as the pod does,
+  # since the EP is optional at run time.
+  target_link_libraries(clpeak_ffi PRIVATE
+      "${_ort_fw}/onnxruntime"
+      "-weak_framework CoreML"
+      "-framework CoreFoundation"
+      "-framework Foundation"
+      "-framework Network"
+      "-framework Security"
+      "-framework SystemConfiguration"
+      "-framework UIKit")
+endif()
+
+foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx)
   if(TARGET ${_dep})
     set_target_properties(${_dep} PROPERTIES
       "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"

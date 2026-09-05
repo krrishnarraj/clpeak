@@ -36,6 +36,10 @@ struct rocm_device_info_t {
   // front of device memory (the MALL / Infinity Cache is not included).  0 when
   // the driver does not report one.
   uint64_t l2CacheSize = 0;
+  // hipDeviceProp_t::integrated -- an APU whose "device memory" is system RAM.
+  // The global-bandwidth working set must not be sized off it (see
+  // benchmark_config_t::forDevice).
+  bool integrated = false;
   int warpSize = 0;
 
   bool fp16Supported = false;
@@ -94,12 +98,19 @@ struct rocm_compute_desc_t
 {
   const char *title;
   const char *resultTag;
-  const char *unit;
-  double      unitDivider;
+  const char *unit;              // "flops" / "ops"
 
   // One or two plain-language sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
+
+  // Whether the variants below are interchangeable forms of one measurement
+  // (Homogeneous -- a vector-width sweep) or separate measurements sharing a
+  // kernel shape (Heterogeneous).  See include/common/AGENTS.md.
+  TestShape   shape;
+
+  // What varies across the readings: "vector width", "data type".  Optional.
+  const char *axis;
 
   const char *metricLabel;
   const char *kernelName;
@@ -142,11 +153,11 @@ public:
   int runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg);
   int runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg);
 
-  int runWmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
-  int runRocwmma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
-  int runMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
-  int runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg, Category category);
-  int runRocblas(RocmDevice &dev, benchmark_config_t &cfg, Category category);
+  int runWmma(RocmDevice &dev, benchmark_config_t &cfg);
+  int runRocwmma(RocmDevice &dev, benchmark_config_t &cfg);
+  int runMfma(RocmDevice &dev, benchmark_config_t &cfg);
+  int runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg);
+  int runRocblas(RocmDevice &dev, benchmark_config_t &cfg);
   int runHipblasLt(RocmDevice &dev, benchmark_config_t &cfg);
   int runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg);
   int runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg);

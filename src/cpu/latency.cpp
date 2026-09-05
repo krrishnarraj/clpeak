@@ -2,7 +2,7 @@
 
 #include <cpu/cpu_peak.h>
 #include <common/common.h>
-#include <common/result_store.h>
+#include <common/run_document.h>
 
 #include <algorithm>
 #include <chrono>
@@ -221,22 +221,29 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
 {
   (void)cfg;
   logger::TestSpec spec{
-      "memory_latency", "Memory latency (pointer-chase)", "ns",
+      "memory_latency", "Memory latency (pointer-chase)", "s",
       Category::Latency,
       "How long the core waits for one memory read when it has nothing else "
       "to do -- each read's address comes from the previous read, so the "
-      "hardware cannot start the next one early."};
+      "hardware cannot start the next one early.",
+      TestShape::Heterogeneous, "memory level"};
   auto test = currentDeviceScope->beginTest(spec);
 
   struct Level { const char *name; uint64_t bytes; const char *note; };
+  // The DRAM walk must clear every cache, not just the L3: where the last
+  // level is the L2 (Apple Silicon, Snapdragon X) there is no L3 to size off.
+  const uint64_t cacheTotal = info.l1dTotalBytes + info.l2TotalBytes +
+                              std::max(info.l3TotalBytes, info.l3CacheBytes);
   const Level levels[] = {
     {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192),
      "Reading from the small cache inside the core."},
     {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536),
      "Reading from the mid-level cache, after an L1 miss."},
-    {"L3",   std::max<uint64_t>(info.l3CacheBytes  / 2, 1u << 20),
+    // 0 when the CPU has no L3 at all — that row is then Unsupported, not a
+    // second reading of L2 taken over a made-up working set.
+    {"L3",   info.l3CacheBytes ? std::max<uint64_t>(info.l3CacheBytes / 2, 1u << 20) : 0,
      "Reading from the last-level cache shared between cores."},
-    {"DRAM", std::max<uint64_t>(info.l3CacheBytes  * 4, 256ull << 20),
+    {"DRAM", std::max<uint64_t>(cacheTotal * 4, 256ull << 20),
      "Reading from main memory at random -- the worst case."},
   };
 
@@ -245,13 +252,18 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   for (int i = 0; i < 4; i++)
   {
     uint64_t bytes = levels[i].bytes;
+    if (!bytes)
+      continue;
     pool->run(1, [&, bytes, i](int) { ns[(size_t)i] = chaseLatencyNs(bytes); });
   }
 
   for (int i = 0; i < 4; i++)
   {
-    if (ns[(size_t)i] > 0)
-      test.emit(levels[i].name, (float)ns[(size_t)i], levels[i].note);
+    if (!levels[i].bytes)
+      test.skip(levels[i].name, ResultStatus::Unsupported, "no L3 on this CPU",
+                levels[i].note);
+    else if (ns[(size_t)i] > 0)
+      test.emit(levels[i].name, (float)(ns[(size_t)i] * 1e-9), levels[i].note);
     else
       test.skip(levels[i].name, ResultStatus::Error, "latency walk failed",
                 levels[i].note);
@@ -267,7 +279,7 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
     pool->run(1, [&](int) { nsLin = chaseLatencyNs(dramB, /*randomOrder=*/false); });
     const char *note = "Main memory again, but read in address order, so the "
                        "hardware can fetch ahead -- the best case DRAM gets.";
-    if (nsLin > 0) test.emit("DRAM linear", (float)nsLin, note);
+    if (nsLin > 0) test.emit("DRAM linear", (float)(nsLin * 1e-9), note);
     else           test.skip("DRAM linear", ResultStatus::Error, "latency walk failed", note);
   }
 
@@ -283,9 +295,9 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   const char *note32 = "Thirty-two chases at once -- deep enough that the core "
                        "runs out of room for further overlap, so the cost per "
                        "read stops falling.";
-  if (ns8 > 0)  test.emit("DRAM x8",  (float)ns8, note8);
+  if (ns8 > 0)  test.emit("DRAM x8",  (float)(ns8 * 1e-9), note8);
   else          test.skip("DRAM x8",  ResultStatus::Error, "latency walk failed", note8);
-  if (ns32 > 0) test.emit("DRAM x32", (float)ns32, note32);
+  if (ns32 > 0) test.emit("DRAM x32", (float)(ns32 * 1e-9), note32);
   else          test.skip("DRAM x32", ResultStatus::Error, "latency walk failed", note32);
 
   // TLB miss / page-walk: cache-resident nodes, one per page, across more
@@ -294,7 +306,7 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   pool->run(1, [&](int) { nsTlb = tlbChaseNs(); });
   const char *noteTlb = "The address-translation cost on its own: the data is "
                         "cached, but every read lands on a different page.";
-  if (nsTlb > 0) test.emit("TLB miss", (float)nsTlb, noteTlb);
+  if (nsTlb > 0) test.emit("TLB miss", (float)(nsTlb * 1e-9), noteTlb);
   else           test.skip("TLB miss", ResultStatus::Error, "latency walk failed", noteTlb);
   return 0;
 }

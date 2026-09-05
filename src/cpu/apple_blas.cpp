@@ -45,11 +45,11 @@ double nowUs()
              clock::now().time_since_epoch()).count() / 1000.0;
 }
 
-// Best GFLOPS over a few repetitions of one gemm() call (2*N^3 flops).
+// Best FLOPS over a few repetitions of one gemm() call (2*N^3 flops).
 // GEMM calls are chunky and low-variance: 1 warmup, then rep until ~250 ms
 // of timed work or 6 reps, whichever comes first (always >= 2).
 template <class Fn>
-double bestGflops(uint64_t n, Fn gemm)
+double bestFlops(uint64_t n, Fn gemm)
 {
   const double flops = 2.0 * (double)n * (double)n * (double)n;
   gemm();  // warmup (first call pays internal setup / thread spin-up)
@@ -62,7 +62,7 @@ double bestGflops(uint64_t n, Fn gemm)
     double us = nowUs() - t0;
     spentUs += us;
     if (us > 0.0)
-      best = std::max(best, flops / (us * 1e3));
+      best = std::max(best, flops / (us * 1e-6));
     if (r >= 1 && spentUs >= 250e3)
       break;
   }
@@ -78,9 +78,9 @@ bool fitsInMem(uint64_t n, size_t elemBytes, uint64_t totalMemBytes)
 }
 
 struct SweepResult {
-  double peakGflops    = 0.0;   // best over the sweep
+  double peakFlops    = 0.0;   // best over the sweep
   uint64_t peakN       = 0;
-  double largestGflops = 0.0;   // rate at the largest size that ran
+  double largestFlops = 0.0;   // rate at the largest size that ran
   uint64_t largestN    = 0;
 };
 
@@ -98,8 +98,8 @@ SweepResult sweep(const std::vector<uint64_t> &sizes, size_t elemBytes,
       continue;
     CLPEAK_VLOG("  [accelerate] %s N=%llu: %.1f GFLOPS\n", label,
                 (unsigned long long)n, g);
-    if (g > res.peakGflops) { res.peakGflops = g; res.peakN = n; }
-    res.largestGflops = g;
+    if (g > res.peakFlops) { res.peakFlops = g; res.peakN = n; }
+    res.largestFlops = g;
     res.largestN      = n;
   }
   return res;
@@ -111,7 +111,7 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
 {
   (void)cfg;
 #if defined(__aarch64__)
-  const char *engine = " (AMX/SME)";
+  const char *engine = "AMX/SME";
 #else
   const char *engine = "";
 #endif
@@ -119,19 +119,22 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
   // ---- Accelerate BLAS GEMM: fp32 + fp64 ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"accelerate_gemm", std::string("Accelerate GEMM") + engine, "gflops",
+        {"accelerate_gemm", "Accelerate GEMM", "flops",
          Category::Unknown,
          "Matrix-multiply speed through Apple's Accelerate library, the only way "
          "to reach the matrix coprocessor Apple ships but does not expose as "
          "instructions.  The library uses every core itself, so there is no "
-         "single-thread row."});
+         "single-thread row.",
+         // Precision and problem size both vary, so no one noun heads the
+         // column -- but none of the three readings stands for the others.
+         TestShape::Heterogeneous, "", Direction::FromUnit, engine});
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     SweepResult sp = sweep({256, 512, 1024, 2048, 4096, 8192}, sizeof(float),
                            info.totalMemBytes, "sgemm", [](uint64_t n) {
       std::vector<float> a(n * n, 1.0f), b(n * n, 0.5f), c(n * n, 0.0f);
-      return bestGflops(n, [&] {
+      return bestFlops(n, [&] {
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                     (int)n, (int)n, (int)n,
                     1.0f, a.data(), (int)n, b.data(), (int)n,
@@ -144,7 +147,7 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
     SweepResult dp = sweep({256, 512, 1024, 2048, 4096}, sizeof(double),
                            info.totalMemBytes, "dgemm", [](uint64_t n) {
       std::vector<double> a(n * n, 1.0), b(n * n, 0.5), c(n * n, 0.0);
-      return bestGflops(n, [&] {
+      return bestFlops(n, [&] {
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                     (int)n, (int)n, (int)n,
                     1.0, a.data(), (int)n, b.data(), (int)n,
@@ -161,24 +164,25 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
     const char *spNote = "Best 32-bit result over a sweep of matrix sizes; the "
                          "coprocessor is fastest at one particular size.";
     const char *dpNote = "Best 64-bit result over the same size sweep.";
-    if (sp.peakGflops > 0.0) test.emit("sgemm", (float)sp.peakGflops, spNote);
+    if (sp.peakFlops > 0.0) test.emit("sgemm", (float)sp.peakFlops, spNote);
     else                     test.skip("sgemm", ResultStatus::Error, "sgemm sweep failed", spNote);
     // Large-N sustained row only when the 8k size actually ran (RAM-gated).
     if (sp.largestN >= 8192)
-      test.emit("sgemm 8k", (float)sp.largestGflops,
+      test.emit("sgemm 8k", (float)sp.largestFlops,
                 "The 32-bit rate on 8192x8192 matrices -- what large, realistic "
                 "problems actually sustain.");
-    if (dp.peakGflops > 0.0) test.emit("dgemm", (float)dp.peakGflops, dpNote);
+    if (dp.peakFlops > 0.0) test.emit("dgemm", (float)dp.peakFlops, dpNote);
     else                     test.skip("dgemm", ResultStatus::Error, "dgemm sweep failed", dpNote);
   }
 
   // ---- BNNS matmul: fp16 / bf16 (+ int8 unsupported row) ----
   {
     auto test = currentDeviceScope->beginTest(
-        {"bnns_matmul", std::string("BNNS matmul") + engine, "gflops",
+        {"bnns_matmul", "BNNS matmul", "flops",
          Category::Unknown,
          "Matrix-multiply speed through Apple's BNNS library, the only public "
-         "route to reduced-precision (16-bit) matrix maths on Apple Silicon."});
+         "route to reduced-precision (16-bit) matrix maths on Apple Silicon.",
+         TestShape::Heterogeneous, "data type", Direction::FromUnit, engine});
 
     const char *fp16Note = "16-bit float inputs.";
     const char *bf16Note = "bfloat16 inputs, the AI-oriented 16-bit format.  On "
@@ -214,11 +218,11 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
           void *wkp = wk.empty() ? nullptr : wk.data();
           if (BNNSMatMul(false, false, 1.0f, &da, &db, &dc, wkp, nullptr) != 0)
             return 0.0;
-          return bestGflops(n, [&] {
+          return bestFlops(n, [&] {
             BNNSMatMul(false, false, 1.0f, &da, &db, &dc, wkp, nullptr);
           });
         });
-        return r.peakGflops;
+        return r.peakFlops;
       };
 
       double fp16 = runBnns(BNNSDataTypeFloat16, 2, "bnns fp16");
