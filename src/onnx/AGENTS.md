@@ -1561,7 +1561,8 @@ list as a device that only ever reports Unsupported. `onnxAvailableEps()`
 through `onnxEpViable()` (`onnx_probe.cpp`), one tiny creation-only session
 each for fp32, fp16 and int8 QDQ, stopping at the first success. Both
 `enumerate()` and `runAll()` consume the filtered list, so listing and runs
-agree; skipped entries surface once as a note with the refusal reason.
+agree; skipped entries surface once as a verbose-only note with the refusal
+reason.
 OpenVINO enumerates as three targets (NPU/GPU/CPU, see `onnx_peak.cpp`) and
 each is filtered independently. Answers are memoized per runtime and target.
 The probe tries cheapest first -- provider attach with no model, then the

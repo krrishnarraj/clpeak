@@ -224,9 +224,12 @@ int OnnxPeak::runAll()
 
   std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
   auto eps = onnxUsableEps(*rt, &skipped);
+  // Verbose only: a provider that cannot run here is the normal case for a
+  // missing accelerator (OpenVINO NPU with no NPU, a declining NNAPI), not
+  // a warning, so the default output stays a device table.
   for (const auto &sk : skipped)
-    log->note("ONNX: skipping " + sk.first.displayName + " (" +
-              sk.second + ")\n");
+    CLPEAK_VLOG("ONNX: skipping %s (%s)\n", sk.first.displayName.c_str(),
+                sk.second.c_str());
   if (eps.empty())
   {
     log->note("ONNX: no execution providers available\n");
@@ -383,18 +386,20 @@ void OnnxPeak::printInventory(const BackendInventory &b, std::ostream &os)
       os << "\n";
     }
   }
-  // Providers the runtime names but nothing here can run: not devices (no
-  // index, not selectable), but named with the reason, so a missing NPU
-  // reads as absent hardware rather than a detection failure.  Answers are
-  // memoized, so this re-probe after enumerate() costs nothing.
-  if (const OrtRuntime *rt = ortRuntime())
-  {
-    std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
-    (void)onnxUsableEps(*rt, &skipped);
-    for (const auto &sk : skipped)
-      os << "  (skipping " << sk.first.displayName << ": " << sk.second
-         << ")\n";
-  }
+  // Providers the runtime names but nothing here can run: named with the
+  // reason under --verbose only, so a missing NPU reads as absent hardware
+  // rather than a detection failure when debugging, while the default
+  // listing stays a device table.  Answers are memoized, so this re-probe
+  // after enumerate() costs nothing.
+  if (clpeak::verboseEnabled())
+    if (const OrtRuntime *rt = ortRuntime())
+    {
+      std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
+      (void)onnxUsableEps(*rt, &skipped);
+      for (const auto &sk : skipped)
+        os << "  (skipping " << sk.first.displayName << ": " << sk.second
+           << ")\n";
+    }
 }
 
 #endif // ENABLE_ONNX

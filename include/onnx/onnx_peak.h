@@ -127,7 +127,8 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt);
 // no NPU, NNAPI declining every graph -- is dropped instead of listing
 // as a device that only ever reports Unsupported.  When `skipped` is
 // given it also receives each dropped entry with its refusal reason, for
-// the one-line notes in runAll() and --list-devices.
+// the verbose-only notes in runAll() and --list-devices (a missing
+// accelerator is the normal case, not a warning).
 std::vector<onnx_ep_info_t> onnxUsableEps(
     const OrtRuntime &rt,
     std::vector<std::pair<onnx_ep_info_t, std::string>> *skipped = nullptr);
