@@ -33,9 +33,9 @@ using OnnxProbeCache = std::unordered_map<std::string, OnnxProbeResult>;
 
 // Probe every gemm variant once at 32^3 (tiny) and cache result.
 // The cache is keyed by variant label (e.g. "fp16", "int8_qdq").
-// Returned reference is cached per EP (providerKey) for the lifetime
-// of the process - subsequent calls for same EP return the same map
-// without rebuilding.
+// Returned reference is cached per EP (providerKey plus OpenVINO target)
+// for the lifetime of the process - subsequent calls for same EP return
+// the same map without rebuilding.
 const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt,
                                          const onnx_ep_info_t &ep);
 

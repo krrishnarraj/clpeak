@@ -138,8 +138,9 @@ struct EpOptions
 
 // Providers registered through the generic string-keyed API.  Returns false
 // for anything not handled here; the caller then tries the typed paths.
-bool genericEpOptions(const std::string &providerKey, EpOptions &out)
+bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
 {
+  const std::string &providerKey = ep.providerKey;
   if (providerKey == "CoreMLExecutionProvider")
   {
     // MLProgram + Neural Engine: the fp16-native ANE path.  CoreML has no
@@ -162,7 +163,12 @@ bool genericEpOptions(const std::string &providerKey, EpOptions &out)
   }
   if (providerKey == "OpenVINOExecutionProvider")
   {
-    out = {"OpenVINO", {{"device_type", "NPU"}}};
+    // One registration per enumerated target (see onnxAvailableEps):
+    // NPU, GPU and CPU are different silicon behind one provider name,
+    // and the target is part of what the row measures.  The pointer
+    // borrows ep.epDevice, which outlives the append call below.
+    const char *dev = ep.epDevice.empty() ? "NPU" : ep.epDevice.c_str();
+    out = {"OpenVINO", {{"device_type", dev}}};
     return true;
   }
   if (providerKey == "VitisAIExecutionProvider")
@@ -193,16 +199,17 @@ bool genericEpOptions(const std::string &providerKey, EpOptions &out)
   return false;
 }
 
-// Register `providerKey` on `so`.  Returns an empty string on success, or a
+// Register `ep` on `so`.  Returns an empty string on success, or a
 // one-line reason -- including "no wiring", so an unknown provider is
 // reported as unsupported rather than silently run with defaults.
 std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
-                           const std::string &providerKey)
+                           const onnx_ep_info_t &ep)
 {
   const OrtApi *api = rt.api;
+  const std::string &providerKey = ep.providerKey;
 
   EpOptions opts;
-  if (genericEpOptions(providerKey, opts))
+  if (genericEpOptions(ep, opts))
   {
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
@@ -577,7 +584,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // one provider that needs no registration and keeps its fallback.
   if (ep.providerKey != "CPUExecutionProvider")
   {
-    res.error = appendProvider(rt, so, ep.providerKey);
+    res.error = appendProvider(rt, so, ep);
     if (!res.error.empty())
     {
       api->ReleaseSessionOptions(so);

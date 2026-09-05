@@ -67,12 +67,21 @@ constexpr double kOnnxTinyMaxCreateUs = 10.0e6;
 // loaded runtime offers is enumerated as a device, including CPU/GPU EPs:
 // running the same micro-graphs on them makes NPU-vs-GPU-vs-CPU numbers
 // comparable on one machine.
+//
+// OpenVINO is the exception: one EP fronts three different pieces of
+// silicon (NPU, GPU, CPU) selected by its `device_type` option, so it
+// enumerates as three devices sharing one providerKey and differing only
+// in epDevice.  Hard-coding NPU mislabels an Arc discrete GPU as an NPU
+// and fails outright on machines with no NPU ("Device NPU is not
+// available"); a missing target then reports Unsupported on its own row
+// while the present ones still measure.
 struct onnx_ep_info_t
 {
   std::string providerKey; // ORT registration name, e.g. "CoreMLExecutionProvider"
   std::string displayName; // e.g. "CoreML (Apple Neural Engine)"
   std::string typeStr;     // "NPU" / "GPU" / "CPU"
   DeviceType deviceType = DeviceType::Unknown;
+  std::string epDevice;    // OpenVINO `device_type` ("NPU"/"GPU"/"CPU"); empty otherwise
 };
 
 class OnnxPeak : public Peak

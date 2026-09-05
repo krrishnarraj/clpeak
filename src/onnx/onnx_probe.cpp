@@ -484,12 +484,17 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
 {
   static std::unordered_map<std::string, OnnxProbeCache> memo;
   static std::mutex mtx;
+  // OpenVINO shares one providerKey across its NPU/GPU/CPU targets, which
+  // compile and fuse independently -- key by target too, or the GPU row
+  // would reuse the NPU probe.
+  const std::string memoKey =
+      ep.providerKey + '\x1f' + ep.epDevice;
   std::lock_guard<std::mutex> lk(mtx);
-  auto it = memo.find(ep.providerKey);
+  auto it = memo.find(memoKey);
   if (it != memo.end())
     return it->second;
   auto cache = onnxProbeGemmVariants(rt, ep);
-  auto res = memo.emplace(ep.providerKey, std::move(cache));
+  auto res = memo.emplace(memoKey, std::move(cache));
   return res.first->second;
 }
 

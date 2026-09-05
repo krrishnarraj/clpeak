@@ -27,9 +27,10 @@ struct EpTableEntry
 };
 
 static const EpTableEntry kEpTable[] = {
-  // NPU-class providers (vendor AI runtimes)
+  // NPU-class providers (vendor AI runtimes).  OpenVINO is not listed
+  // here: one EP fronts NPU, GPU and CPU behind its `device_type` option
+  // (see onnxAvailableEps below), so a single table row cannot name it.
   {"QNNExecutionProvider",        "Qualcomm QNN (Hexagon NPU)",   "NPU", DeviceType::Accelerator},
-  {"OpenVINOExecutionProvider",   "Intel OpenVINO",               "NPU", DeviceType::Accelerator},
   {"VitisAIExecutionProvider",    "AMD Vitis AI (XDNA NPU)",      "NPU", DeviceType::Accelerator},
   {"CoreMLExecutionProvider",     "Apple CoreML (Neural Engine)", "NPU", DeviceType::Accelerator},
   {"NnapiExecutionProvider",      "Android NNAPI",                "NPU", DeviceType::Accelerator},
@@ -75,6 +76,32 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
     std::string key = providers[i] ? providers[i] : "";
     if (key.empty() || key == "AzureExecutionProvider")
       continue;
+
+    // OpenVINO selects its hardware per session through `device_type`,
+    // so one provider registration is three benchmarkable devices.  Each
+    // carries its target in epDevice; session creation passes it through
+    // (see onnx_session.cpp).  A target with no hardware behind it fails
+    // session creation and reports Unsupported on its own row -- an Arc
+    // dGPU box with no NPU measures GPU and CPU while NPU says why not.
+    if (key == "OpenVINOExecutionProvider")
+    {
+      static const struct { const char *dev; const char *display; const char *type; DeviceType dt; } kOv[] = {
+        {"NPU", "Intel OpenVINO (NPU)", "NPU", DeviceType::Accelerator},
+        {"GPU", "Intel OpenVINO (GPU)", "GPU", DeviceType::Gpu},
+        {"CPU", "Intel OpenVINO (CPU)", "CPU", DeviceType::Cpu},
+      };
+      for (const auto &t : kOv)
+      {
+        onnx_ep_info_t ep;
+        ep.providerKey = key;
+        ep.epDevice    = t.dev;
+        ep.displayName = t.display;
+        ep.typeStr     = t.type;
+        ep.deviceType  = t.dt;
+        out.push_back(std::move(ep));
+      }
+      continue;
+    }
 
     onnx_ep_info_t ep;
     ep.providerKey = key;
@@ -181,15 +208,22 @@ int OnnxPeak::runAll()
     benchmark_config_t cfg = benchmark_config_t::forDevice(ep.deviceType);
     cfg.targetTimeUs = targetTimeUs;
 
+    std::vector<DeviceProp> details = {
+        {"Execution provider", ep.providerKey},
+        {"Type", ep.typeStr.empty() ? "Unknown" : ep.typeStr},
+        {"ONNX Runtime", rt->versionString},
+    };
+    // The OpenVINO target is part of what was measured (NPU vs GPU vs
+    // CPU are different silicon behind one provider name), so record it
+    // alongside the provider rather than leaving rows to guess.
+    if (!ep.epDevice.empty())
+      details.push_back({"OpenVINO device", ep.epDevice});
+
     auto deviceScope = backendScope.beginDevice({
         ep.displayName,
         "",   // platform defaults to "ONNX"
         rt->versionString,
-        {
-            {"Execution provider", ep.providerKey},
-            {"Type", ep.typeStr.empty() ? "Unknown" : ep.typeStr},
-            {"ONNX Runtime", rt->versionString},
-        },
+        details,
         -1,
         idx,
     });
