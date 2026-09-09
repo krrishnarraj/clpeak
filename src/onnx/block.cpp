@@ -145,14 +145,14 @@ namespace
       {"int8_qdq", ONNX_DT_FLOAT16, ONNX_DT_INT8, 0, /*qdq=*/true,
        /*sweep=*/false, "ops",
        "8-bit weights and 8-bit arithmetic through the projections, quantized in "
-       "and quantized out -- the form an NPU's headline TOPS figure is quoted "
+       "and quantized out -- the form vendors usually quote headline TOPS figures "
        "for, now measured on a whole layer rather than one matmul.  Attention and "
        "the softmax stay 16-bit, as they do in every real deployment."},
 
       {"fp32", ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
        "Full precision, which nobody serves a language model in.  It is here as a "
        "control: a provider whose fp16 row fails to beat it is not running "
-       "half-precision hardware, and on some CPU providers this is the only row "
+       "half-precision hardware, and on some providers this is the only row "
        "with a native kernel behind it."},
 
       {"bf16", ONNX_DT_BFLOAT16, ONNX_DT_BFLOAT16, 0, false, /*sweep=*/false,

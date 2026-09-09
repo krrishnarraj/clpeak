@@ -196,9 +196,10 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   if (trivial.createUs > 0.0)
     test.emit("session_create", (float)(trivial.createUs * 1e-6),
-              "Preparing that trivial graph for execution.  On NPU providers "
-              "this runs a compiler rather than bookkeeping, which is why "
-              "starting up and running steadily are such different stories.");
+              "Preparing that trivial graph for execution.  On providers that "
+              "compile graphs ahead of time this runs a compiler rather than "
+              "bookkeeping, which is why starting up and running steadily are "
+              "such different stories.");
   else
     test.skip("session_create", trivial.status, trivial.error,
               "Preparing the trivial graph for execution.");
