@@ -395,6 +395,7 @@ static void detectIsa(cpu_device_info_t &info)
   info.hasSME     = f.sme;
   info.hasSME2    = f.sme2;
   info.smeSVLBytes = clpeak_cpu::smeSVLBytes();
+  info.emulatedX86OnArm = f.emulatedX86OnArm;
   info.isaName    = clpeak_cpu::isaName();
   // Report the active SVE vector length alongside the ISA name, e.g.
   // "SVE2 (VL=256b)" -- it's the defining knob for SVE peak throughput.
