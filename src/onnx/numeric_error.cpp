@@ -13,7 +13,10 @@
 // quantization scheme's rather than the integer unit's -- the same distinction
 // onnx_gemm refuses to publish a rate without.  Both tests now gate on the
 // same fusion check and try the same signed→unsigned schemes, so their
-// supported sets stay symmetric.
+// supported sets stay symmetric.  They also stay in step on folding: when
+// gemm's resident ladder proves the provider folded the operands, the rate is
+// refused and this row is suppressed with it (see onnxGemmFolded), even
+// though this test's non-resident graph would still run.
 //
 // The fp32 row does a second job.  clpeak's CPU-fallback guard works at
 // ORT's partitioning level, so it cannot see an EP that accepts a node and
@@ -328,6 +331,23 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
     {
       test.skip(v.label, ResultStatus::Unsupported, why, o.description);
+      continue;
+    }
+
+    // Paired suppression: gemm's ladder proved this provider folded the
+    // resident operands for this label, so its rate was refused as
+    // meaningless.  This test's non-resident graph cannot fold and would
+    // still produce a number -- but a rate without its accuracy is half a
+    // number, and so is an accuracy without its rate.  Suppress rather than
+    // publish one half of the pair alone.
+    if (onnxGemmFolded(ep, v.label))
+    {
+      CLPEAK_VLOG("onnx-numeric-error[%s/%s]: suppressed (gemm folded)\n",
+                  ep.providerKey.c_str(), v.label);
+      test.skip(v.label, ResultStatus::Unsupported,
+                "suppressed: onnx-gemm folded the operands for this datatype, "
+                "so no rate was published for the pair",
+                o.description);
       continue;
     }
 

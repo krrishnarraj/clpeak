@@ -1177,6 +1177,22 @@ than because it was convenient, and it is meant to stay fixed forever:
   of what the error means. Comparing accuracy across devices requires the same
   depth on each.
 
+## Rate and accuracy stay in step
+
+`onnx-gemm` and `onnx-numeric-error` are a pair over their overlapping labels
+(the plain-float dtypes plus int8_qdq; the weight-only and nvfp4 rows have no
+accuracy counterpart by design). They gate on the same fusion check and try
+the same signed→unsigned int8 schemes, so their supported sets stay symmetric.
+
+When `onnx-gemm`'s ladder proves the provider folded the resident operands at
+compile time, the rate row is refused as meaningless. `onnx-numeric-error` uses
+a non-resident graph that cannot fold, so it would still produce a number — but
+an accuracy without its rate is one half of a pair, and publishing it alone
+would look like a contradiction. It is therefore suppressed for the same label,
+with the reason noting that the paired gemm row folded. Other failure modes
+(session refused, no fused quantized matmul, dtype unsupported) remain
+independent: each test reports its own gate faithfully.
+
 ## Measuring the cable, and what it cost to try
 
 `onnx-transfer-bw` measures the thing every other test here is built to avoid:

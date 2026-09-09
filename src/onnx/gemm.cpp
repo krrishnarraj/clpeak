@@ -526,6 +526,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "Each reading is a different input format.",
        TestShape::Heterogeneous, "data type"});
 
+  // runAll also clears per EP before dispatching; this entry clear keeps
+  // direct runGemm callers (tests, future entry points) from inheriting a
+  // stale record from an earlier run in the same process.
+  onnxClearGemmFolded(ep);
+
   // ---- Sweep every variant (all data types in one test) ---------------
   // Helper to run one variant's sweep
   auto runVariant = [&](const Variant &v) {
@@ -545,6 +550,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t bestDim = 0;
     std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
+    // Set by either folding guard below; drives the paired suppression in
+    // runNumericError (see onnx_probe.h).
+    bool folded = false;
 
     // First and last timings with their sizes, to confirm the work actually
     // happened (see the folding check after the loop).
@@ -788,6 +796,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                    "the timings do not scale with the problem size and mean "
                    "nothing";
         errStatus = ResultStatus::Error;
+        folded = true;
         break;
       }
       prevRate = rate;
@@ -897,6 +906,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                  "which ONNX Runtime did before about 1.18, so the timings "
                  "do not scale with the problem size and mean nothing";
       errStatus = ResultStatus::Error;
+      folded = true;
     }
 
     logger::EmitOptions o;
@@ -929,6 +939,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
       if (isInt)
         o.unit = "ops";
+      if (folded)
+        onnxNoteGemmFolded(ep, v.label);
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "no supported datatype" : firstErr, o);
     }

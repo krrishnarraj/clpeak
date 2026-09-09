@@ -57,5 +57,21 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt,
 bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   std::string &reason);
 
+// onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
+// overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only
+// and nvfp4 rows have no accuracy counterpart by design).  When gemm's ladder
+// proves the provider folded the resident operands at compile time, its rate
+// is suppressed as an error -- and the accuracy row for the same label is
+// suppressed with it, even though its non-resident graph did run.  That graph
+// cannot fold (its activations are a runtime input), so without this its
+// number would stand alone beside a rate that was refused as meaningless.
+// runGemm records each folded label here; runNumericError consults it.
+// Keyed by EP exactly like the probe cache above.  Cleared per EP in runAll
+// (and again at runGemm entry for direct callers) so a stale run cannot
+// suppress a later one.
+void onnxNoteGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
+bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
+void onnxClearGemmFolded(const onnx_ep_info_t &ep);
+
 #endif // ENABLE_ONNX
 #endif // CLPEAK_ONNX_PROBE_H

@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <cmath>
 
@@ -497,6 +498,48 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
   auto cache = onnxProbeGemmVariants(rt, ep);
   auto res = memo.emplace(memoKey, std::move(cache));
   return res.first->second;
+}
+
+namespace
+{
+std::string foldKey(const onnx_ep_info_t &ep)
+{
+  return ep.providerKey + '\x1f' + ep.epDevice;
+}
+struct FoldStore
+{
+  std::mutex mtx;
+  std::unordered_map<std::string, std::unordered_set<std::string>> map;
+};
+FoldStore &foldStore()
+{
+  static FoldStore s;
+  return s;
+}
+} // namespace
+
+void onnxNoteGemmFolded(const onnx_ep_info_t &ep, const std::string &label)
+{
+  FoldStore &s = foldStore();
+  std::lock_guard<std::mutex> lk(s.mtx);
+  s.map[foldKey(ep)].insert(label);
+}
+
+bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label)
+{
+  FoldStore &s = foldStore();
+  std::lock_guard<std::mutex> lk(s.mtx);
+  auto it = s.map.find(foldKey(ep));
+  if (it == s.map.end())
+    return false;
+  return it->second.count(label) > 0;
+}
+
+void onnxClearGemmFolded(const onnx_ep_info_t &ep)
+{
+  FoldStore &s = foldStore();
+  std::lock_guard<std::mutex> lk(s.mtx);
+  s.map.erase(foldKey(ep));
 }
 
 bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
