@@ -71,7 +71,7 @@ const Size kSizes[] = {
    "Eight megabytes of weights -- small enough to sit in fast local memory on "
    "most devices, so this is usually the fastest rung."},
   {4096, "32mb",
-   "Thirty-two megabytes -- around the size of a large cache or an NPU's local memory."},
+   "Thirty-two megabytes -- around the size of a large cache or a device's fast local memory."},
   {8192, "128mb",
    "128 megabytes -- past the cache of most devices, though not all."},
   {16384, "512mb",

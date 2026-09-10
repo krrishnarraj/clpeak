@@ -138,6 +138,11 @@ int CpuPeak::runAll()
   std::vector<logger::Prop> props;
   props.push_back({"Vendor", info.vendor.empty() ? "Unknown" : info.vendor});
   props.push_back({"ISA",    info.isaName});
+  // An x86 binary translated on ARM64 (Prism/Rosetta/qemu-user) still reports
+  // guest CPUID widths, so name the translation: otherwise a suppressed AVX2
+  // divider row looks like a missing feature rather than a host-width cap.
+  if (info.emulatedX86OnArm)
+    props.push_back({"Emulation", "x64 on ARM64 (wider SIMD rows suppressed)"});
   {
     std::string cores = std::to_string(info.logicalCores) + " threads / " +
                         std::to_string(info.physicalCores) + " cores";

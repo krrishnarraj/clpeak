@@ -455,10 +455,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {ONNX_DT_FLOAT, false, "fp32",
        "FP32 graph inputs and outputs.  A provider may use a narrower internal "
        "format; read the fp32 numeric-error row beside this one to see whether "
-       "it did.  Many NPUs cannot run this at all, or route it away from the "
-       "matrix hardware -- that is a finding, not a failure."},
+       "it did.  Many providers cannot run this on their matrix hardware at "
+       "all, or route it away from that hardware -- that is a finding, not "
+       "a failure."},
       {ONNX_DT_FLOAT16, false, "fp16",
-       "16-bit floats, the native currency of most NPU matrix hardware."},
+       "16-bit floats, the native currency of most matrix hardware."},
       {ONNX_DT_BFLOAT16, false, "bf16",
        "The 16-bit float with fp32's exponent range and three fewer mantissa "
        "bits.  Modern matrix hardware usually runs it at the fp16 rate; a "
@@ -508,8 +509,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   static const Variant kIntVariants[] = {
       {ONNX_DT_INT8, true, "int8_qdq",
        "8-bit integers in QDQ form -- quantized in, quantized out, the shape "
-       "quantized inference actually ships in.  This is what an NPU's headline "
-       "TOPS figure is quoted for."},
+       "quantized inference actually ships in.  This is what vendors usually "
+       "quote headline TOPS figures for."},
   };
 
   auto test = currentDeviceScope->beginTest(
@@ -518,13 +519,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        Category::Unknown,
        "Matrix-multiply speed through ONNX Runtime on this execution "
        "provider, using a single-operation model with constant weights.  "
-       "The identical model runs on every provider, so NPU, GPU and CPU "
-       "rows are directly comparable -- and the gap against a vendor's "
+       "The identical model runs on every provider, so rows from different "
+       "providers are directly comparable -- and the gap against a vendor's "
        "advertised TOPS is real, not an artifact of different test code.  "
        "Providers that cannot run an operation entirely on their device "
        "report it as unsupported instead of quietly measuring the CPU.  "
        "Each reading is a different input format.",
        TestShape::Heterogeneous, "data type"});
+
+  // runAll also clears per EP before dispatching; this entry clear keeps
+  // direct runGemm callers (tests, future entry points) from inheriting a
+  // stale record from an earlier run in the same process.
+  onnxClearGemmFolded(ep);
 
   // ---- Sweep every variant (all data types in one test) ---------------
   // Helper to run one variant's sweep
@@ -545,6 +551,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t bestDim = 0;
     std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
+    // Set by either folding guard below; drives the paired suppression in
+    // runNumericError (see onnx_probe.h).
+    bool folded = false;
 
     // First and last timings with their sizes, to confirm the work actually
     // happened (see the folding check after the loop).
@@ -788,6 +797,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                    "the timings do not scale with the problem size and mean "
                    "nothing";
         errStatus = ResultStatus::Error;
+        folded = true;
         break;
       }
       prevRate = rate;
@@ -897,6 +907,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                  "which ONNX Runtime did before about 1.18, so the timings "
                  "do not scale with the problem size and mean nothing";
       errStatus = ResultStatus::Error;
+      folded = true;
     }
 
     logger::EmitOptions o;
@@ -929,6 +940,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
       if (isInt)
         o.unit = "ops";
+      if (folded)
+        onnxNoteGemmFolded(ep, v.label);
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "no supported datatype" : firstErr, o);
     }

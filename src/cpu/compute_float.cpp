@@ -76,13 +76,21 @@ int CpuPeak::runComputeDivSqrt(benchmark_config_t &cfg)
   // One test, four readings: divide and square root run on the same narrow
   // unit, and its profile across the two operations and both precisions is
   // one fact about the CPU, not four.
+  std::string divDesc =
+      "How many divisions and square roots per second the CPU sustains. "
+      "Both run on their own narrow unit rather than the wide "
+      "multiply-add pipeline, so these land far below the compute rows "
+      "-- and the gap between CPU generations here is much larger.";
+  // Under x64-on-ARM64 translation only the 128-bit row is shown: a 256-bit
+  // guest divide is cracked to 2x128-bit host ops, so counting guest lanes
+  // would report emulation overhead as silicon peak (Snapdragon X read AVX2
+  // fdiv 1.4-1.6x above NEON for the same divider).
+  if (info.emulatedX86OnArm)
+    divDesc += "  This x64 binary is translated on an ARM64 host, so only "
+               "the 128-bit row is reported.";
   emitFamily(*this,
              {"divide_sqrt", "Divide and square-root throughput", "flops",
-              Category::Unknown,
-              "How many divisions and square roots per second the CPU sustains. "
-              "Both run on their own narrow unit rather than the wide "
-              "multiply-add pipeline, so these land far below the compute rows "
-              "-- and the gap between CPU generations here is much larger.",
+              Category::Unknown, divDesc,
               TestShape::Heterogeneous, "operation"},
              {{ "fdiv fp32", "Division on 32-bit floats.",
                 "no SIMD fp32 divide path for this CPU", &kernelMenu().div32 },

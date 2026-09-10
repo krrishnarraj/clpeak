@@ -86,7 +86,7 @@ namespace
   const Shape kShapes[] = {
       {3, false, "conv3x3",
        "A 3x3 convolution over 256 channels -- the shape most vision networks "
-       "are built from, and the one neural accelerators were designed "
+       "are built from, and the one accelerators were designed "
        "around."},
       {1, false, "conv1x1",
        "A 1x1 convolution: arithmetically a matrix multiply applied at every "
@@ -265,7 +265,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
        "Convolution speed at the precision each row names, swept over "
-       "feature-map sizes and reported at its best.  Neural accelerators were "
+       "feature-map sizes and reported at its best.  Accelerators were "
        "built for this operation before they were asked to do anything else, "
        "and many reach a higher share of their arithmetic peak here than on a "
        "plain matrix multiply.  Read alongside the matmul rows: the gap "

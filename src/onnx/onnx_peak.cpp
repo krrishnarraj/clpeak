@@ -294,6 +294,12 @@ int OnnxPeak::runAll()
     {
       (void)onnxProbeGemmCache(*rt, ep);
     }
+    // Fresh folding record for this EP even when gemm itself is filtered
+    // out: otherwise a stale entry from an earlier run in the same process
+    // would suppress numeric-error rows that have no paired rate to stay in
+    // step with.  runGemm clears again and repopulates when it runs.
+    if (isAllowed(Benchmark::OnnxGemm) || isAllowed(Benchmark::OnnxNumericError))
+      onnxClearGemmFolded(ep);
 
     // ---- Compute (FLOPS + OPS) ---------------------------
     if (isAllowed(Benchmark::OnnxGemm))

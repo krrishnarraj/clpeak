@@ -228,6 +228,14 @@ changing a kernel.
   target features, so it must enter intrinsic branches via the GNU macros only.
 - **The NEON kernels are AArch64-only** (fused FMA, horizontal reduce and fp16
   store have no ARMv7 equivalent), so armeabi-v7a uses the scalar `generic` TU.
+- **Wider-than-128b divide/sqrt rows are suppressed for x86 binaries translated
+  on ARM64** (Windows Prism, Apple Rosetta 2, Linux qemu-user).  Guest CPUID
+  still advertises AVX2/AVX-512, but the host only executes 128-bit NEON, so
+  counting 256-bit guest lanes inflates the result (Snapdragon X: AVX2 fdiv
+  read 1.4-1.6x above native NEON).  `kernelMenu()` skips `addDivSqrt()` for
+  the AVX2/AVX-512 TUs when `CpuFeatures::emulatedX86OnArm` is true; other
+  compute families are left untouched.  System-VM emulation (qemu-system-x86_64
+  on ARM) is not detected because the guest kernel reports x86_64 in `uname`.
 
 ## Reference points
 
