@@ -8,6 +8,7 @@
 #include <onnx/onnx_peak.h>
 #include <common/common.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -69,11 +70,20 @@ Build probeBuild(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return b;
   }
   b.built = true;
-  // Warm once, then time one run.  At 32^3 the arithmetic is negligible, so
-  // what this measures is what the provider charges to accept a submission
-  // of this graph -- the floor the ladder's fold test subtracts.
-  timeRuns(rt, s, 1);
-  const double runUs = timeRuns(rt, s, 1);
+  // What the provider charges to accept a submission of this graph: at 32^3
+  // the arithmetic is 65 kFLOP, so the time is all overhead.  The ladder
+  // subtracts this, so over-measuring it is not harmless -- a first rung
+  // then looks like it computed nothing and the row is called folded.
+  //
+  // Two warmups and the best of two batches, because a single run after a
+  // single warmup catches whatever the provider defers to first use.  On
+  // CUDA that read 199 us against a 17 us dispatch, which condemned four
+  // rows that were working perfectly.
+  timeRuns(rt, s, 2);
+  const double a = timeRuns(rt, s, 5);
+  const double b2 = timeRuns(rt, s, 5);
+  const double runUs = (a > 0.0 && b2 > 0.0) ? std::min(a, b2)
+                                             : std::max(a, b2);
   b.runUs = (runUs > 0.0) ? runUs : 0.0;
   if (runUs < 0.0)
   {

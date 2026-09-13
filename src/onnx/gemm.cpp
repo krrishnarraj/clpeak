@@ -382,12 +382,19 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                             prevWork > 0.0 && work < prevWork * 2.0;
       if (computedNothing || workFlat)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld, "
-                    "less a %.1f us submission -- %.2fx for 8x the work, "
-                    "constants were folded\n",
-                    ep.providerKey.c_str(), v.label, prevUs,
-                    (long long)prevD, mean_us, (long long)D, dispatchUs,
-                    prevWork > 0.0 ? work / prevWork : 0.0);
+        if (computedNothing)
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 took %.1f us against a %.1f us "
+                      "submission -- it computed nothing, constants were "
+                      "folded\n",
+                      ep.providerKey.c_str(), v.label, (long long)D, mean_us,
+                      dispatchUs);
+        else
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld, "
+                      "less a %.1f us submission -- %.2fx for 8x the work, "
+                      "constants were folded\n",
+                      ep.providerKey.c_str(), v.label, prevUs,
+                      (long long)prevD, mean_us, (long long)D, dispatchUs,
+                      work / prevWork);
         best = 0.0;
         firstErr = "this provider folded the operands at compile time: the "
                    "timed runs measure dispatch plus a reduction of a "
