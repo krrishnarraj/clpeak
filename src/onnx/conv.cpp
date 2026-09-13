@@ -427,6 +427,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
 
         bool createCliff = (prevCreateUs > 0.0 &&
+                            createUs > kOnnxCreateGrowthFloor &&
                             createUs > prevCreateUs * kOnnxCreateGrowthFactor);
         if (createCliff)
         {

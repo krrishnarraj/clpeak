@@ -47,15 +47,24 @@ constexpr unsigned int kOnnxMaxIters = 500;
 //    conv), 60s for the fixed-geometry block whose 8192 context legitimately
 //    needs ~1 min on CoreML/TensorRT AOT toolchains.
 //
-//  * factor: create grew > kOnnxCreateGrowthFactor since previous rung
-//    (memory 4x, flops 8x per 2x dim; 6x tolerates jitter but catches QNN's
-//    9.3x).  Applies only to ladders where D doubles.
+//  * factor: create grew > kOnnxCreateGrowthFactor since previous rung, and
+//    is itself past kOnnxCreateGrowthFloor (memory 4x, flops 8x per 2x dim;
+//    6x tolerates jitter but catches QNN's 9.3x).  Applies only to ladders
+//    where D doubles.
 //
 // The first rung (kMinDim) is allowed to exceed the absolute once - its time
 // is the seed for the factor gate; truncating it would discard a valid peak.
 constexpr double kOnnxMaxCreateUs = 30.0e6;
 constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
 constexpr double kOnnxCreateGrowthFactor = 6.0;
+// ...and only once creation is expensive enough for its growth to mean
+// anything.  The factor exists to catch an ahead-of-time compiler's cliff
+// before the next model is built, but a ratio between two trivial numbers is
+// not a cliff: ONNX Runtime's CPU EP went from 0.1 s to 0.7 s simply
+// serializing a larger model, tripped 7.8x, and lost the rung that gave the
+// same provider on another OS 11% more.  Below this the absolute gate and
+// the predicted-create gate are the ones that matter, and both still apply.
+constexpr double kOnnxCreateGrowthFloor = 2.0e6;
 // Tiny probe budget: 64^3 model should compile in <10s even on AOT.
 // If it exceeds this, the dtype is emulated/slow and the full 1024
 // ladder will be minutes - skip the variant early.

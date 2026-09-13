@@ -459,6 +459,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // gate; truncating it would discard a valid peak.  Factor catches a
       // cliff before the next model is even built.
       bool createCliff = (prevCreateUs > 0.0 &&
+                          createUs > kOnnxCreateGrowthFloor &&
                           createUs > prevCreateUs * kOnnxCreateGrowthFactor);
       if (createCliff)
       {
