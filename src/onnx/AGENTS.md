@@ -1085,16 +1085,33 @@ type, which `onnxCollectExecutedOps()` reads out of the profile
 question of `Conv` and says so in the row: the CPU EP's fp16 convolutions
 land on its fp32 ones to three figures because that is literally what ran.
 
-**Folding is detected on time, not on rate.** A folded graph's time stops
-tracking the size -- QNN read ~170 us at both 1024 and 2048 -- so the test is
-`t(2D) < 2*t(D)` against the previous rung. A rate threshold was tried and is
-wrong: on a provider with expensive dispatch the first rung is mostly
-dispatch, so a real ladder's rate jumps several-fold across its first
-doubling, and a `>4x rate` rule failed OpenVINO's int8 row for doing nothing
-but working correctly. Two backstops remain: the whole-ladder 64x check, and
-a rule that a foldable ladder cut to a single rung by a compile-time gate
-cannot confirm scaling at all and says so (QNN published 12 TFLOPS fp32, 12
-TFLOPS fp16 and 12 TOPS int8 from one rung each, all the same 179 us).
+**Folding is detected on work, and work is time less the cost of asking.**
+Every raw-time or raw-rate test tried here failed on a provider with
+expensive dispatch, because on those the rungs are mostly dispatch and any
+ratio drawn from them is a ratio of dispatch:
+
+- `>4x rate in one doubling` failed OpenVINO's int8 row for working
+  correctly, and failed Windows TensorRT's nvfp4 at 4.02x.
+- `t(2D) < 2*t(D)` failed the same nvfp4 row at 1.99x -- 163.5 us against
+  325.9 us on a provider charging 114 us a submission. Net of that the rungs
+  are 49.5 and 211.9 us: 4.3x for 8x the work, a card climbing toward the
+  215 TFLOPS Linux measures on the same silicon.
+
+So the 32^3 probe records what one run of that row's own graph costs
+(`OnnxProbeResult::probeUs`) -- at that size the multiply is 65 kFLOP, so it
+is very nearly the submission charge -- and the ladder asks two questions of
+`t - probeUs`:
+
+- **Did this rung compute anything?** Work below a quarter of the submission
+  charge did not: DirectML spent 153.6 us on a 1024-cube it charges 156 us
+  merely to accept. One rung answers this, which is what lets a provider
+  whose compile budget affords a single size still be judged.
+- **Did the work grow with the size?** Eight times the arithmetic must cost
+  at least twice the time however much the rate improves, because a folded
+  graph's residue is the reduction and that grows with D rather than D cubed.
+
+The whole-ladder 64x check and the single-rung-on-a-compile-gate rule remain
+as backstops.
 
 **The block and conv graphs never needed any of this**: they have scaled the
 resident activations before the work all along, which is the `OperandScaled`
@@ -1397,15 +1414,27 @@ one, so a cheap operation is left resting on the difference of two big
 measurements.
 
 Two guards keep that honest.  The first is proportional -- the remainder has
-to be more than a tenth of the measurement.  The second is physical: an
+to be more than a tenth of the *work*, which is the measurement less the
+provider's submission charge (a one-row reference graph measures it).  Taking
+the share of wall time instead makes a well-resolved operation look marginal
+wherever dispatch is expensive, and DirectML charges 156 us against
+measurements of a few hundred.  The second is physical: an
 operation that reads a tensor and writes one back cannot beat the rate the
 same provider streams those bytes with no write at all, so a remainder above
 `onnxStreamBps()` is refused.  Core ML's softmax needs it.  It costs so little
-beyond the reference (7-16% of the measurement) that three consecutive runs
-gave a refusal, 122 GB/s and 139 GB/s, on a device that streams 85; it is
-refused consistently now, which is the honest report -- the operation is real
-but too cheap for this method to separate.  SiLU on the same provider is
-steady to 2% (35.9 / 35.5 / 36.3) because it costs 40% of its measurement.
+beyond the reference that three consecutive runs gave a refusal, 122 GB/s and
+139 GB/s; it is refused consistently now, which is the honest report -- the
+operation is real but too cheap for this method to separate.  SiLU on the
+same provider is steady to 2% (36.4 / 36.5) because it costs a real share.
+
+**That ceiling is only as good as the bandwidth behind it, and the first
+version was not.**  `onnxStreamDtype` timed eight megabytes through a GEMV
+without subtracting a submission floor, so on DirectML -- 156 us a
+submission -- it read 48 GB/s where that provider streams 717, and every
+activation row on DirectML, CUDA and TensorRT was refused against it.  It
+subtracts a floor now, measured with a matrix small in *both* dimensions:
+shrinking only the columns leaves 2 MB of the 8 being measured, which
+over-subtracts and reported Core ML at 150 GB/s against onnx-tensor-bw's 83.
 
 ## Why convolution is measured separately
 

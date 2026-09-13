@@ -51,6 +51,7 @@ struct Build
                                 // could not be read, or an opaque one
   std::string matmulInType;     // element type the MatMul kernel consumed
   size_t casts = 0;
+  double runUs = 0.0;           // one run at 32^3: essentially dispatch
 };
 
 Build probeBuild(const OrtRuntime &rt, const onnx_ep_info_t &ep,
@@ -68,7 +69,13 @@ Build probeBuild(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return b;
   }
   b.built = true;
-  if (timeRuns(rt, s, 1) < 0.0)
+  // Warm once, then time one run.  At 32^3 the arithmetic is negligible, so
+  // what this measures is what the provider charges to accept a submission
+  // of this graph -- the floor the ladder's fold test subtracts.
+  timeRuns(rt, s, 1);
+  const double runUs = timeRuns(rt, s, 1);
+  b.runUs = (runUs > 0.0) ? runUs : 0.0;
+  if (runUs < 0.0)
   {
     // Built but will not run: as good as refused, and the run's own message
     // is the one worth keeping.
@@ -186,6 +193,7 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
           r.ok = true;
           r.reduceInFloat = reduceInFloat;
           r.createUs = b.createUs;
+          r.probeUs = b.runUs;
           r.actDtype = qs.actDtype;
           r.wgtDtype = qs.wDtype;
           if (needsFusion)
@@ -277,23 +285,27 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
 
   // Eight megabytes of weights either way: [2048, 2048] in fp16, [2048, 1024]
   // in fp32, so the two time the same number of bytes through the same
-  // operation.  Well past any dispatch floor on every provider measured and
-  // small enough to compile in a moment on the ahead-of-time ones.
+  // operation.  Small enough to compile in a moment on the ahead-of-time
+  // providers.
+  //
+  // Both the choice and the rate are taken net of a dispatch floor, measured
+  // with a 256-square matrix whose 128 KB cannot matter -- exactly what
+  // onnx-tensor-bw does.  Without it the figure is mostly the cost of asking:
+  // DirectML charges 156 us a submission and read 48 GB/s raw where it
+  // actually streams 717, and the two widths came out 44.4 against 48.0,
+  // which is a comparison of dispatch rather than of bandwidth.
   constexpr int64_t kK = 2048;
+  constexpr int64_t kFloorDim = 256; // 128 KB either way: cannot matter
   constexpr uint64_t kBytes = 8ull << 20;
   const int candidates[2] = {ONNX_DT_FLOAT16, ONNX_DT_FLOAT};
   StreamProbe best;
 
-  for (int dtype : candidates)
-  {
-    if (clpeak::cancelRequested())
-      break;
+  // Time one [1,k]x[k,n] product of `dtype`; negative when it could not run.
+  auto timeGemv = [&](int dtype, int64_t k, int64_t n) -> double {
     const size_t es = dtypeSize(dtype);
-    const int64_t n = (int64_t)(kBytes / (kK * es));
-
     std::string w;
-    fillTensor(w, dtype, kK * n, 0x243f6a88u);
-    std::string model = onnxMatMulModel(1, kK, n, dtype, w);
+    fillTensor(w, dtype, k * n, 0x243f6a88u);
+    std::string model = onnxMatMulModel(1, k, n, dtype, w);
     std::string().swap(w);
     auto ses = onnxCreateSession(rt, ep, model);
     std::string().swap(model);
@@ -301,20 +313,20 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     {
       CLPEAK_VLOG("onnx-stream[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
                   dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", ses.error.c_str());
-      continue;
+      return -1.0;
     }
 
-    std::vector<uint8_t> x((size_t)kK * es, 0), y((size_t)n * es, 0);
+    std::vector<uint8_t> x((size_t)k * es, 0), y((size_t)n * es, 0);
     {
       std::string one = onnxFloatScalar(0.5f, dtype);
-      for (int64_t i = 0; i < kK; i++)
+      for (int64_t i = 0; i < k; i++)
         std::memcpy(&x[(size_t)i * es], one.data(), es);
     }
     OrtMemoryInfo *mi = nullptr;
     OrtValue *xv = nullptr, *yv = nullptr;
     OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
                                                 OrtMemTypeDefault, &mi);
-    const int64_t xs[2] = {1, kK}, ys[2] = {1, n};
+    const int64_t xs[2] = {1, k}, ys[2] = {1, n};
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
           mi, x.data(), x.size(), xs, 2, (ONNXTensorElementDataType)dtype, &xv);
@@ -363,12 +375,30 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     if (yv)
       rt.api->ReleaseValue(yv);
     rt.api->ReleaseSession(ses.session);
+    return us;
+  };
 
+  for (int dtype : candidates)
+  {
+    if (clpeak::cancelRequested())
+      break;
+    const size_t es = dtypeSize(dtype);
+    // The floor has to be small in *both* dimensions.  Shrinking only the
+    // columns leaves a [1,2048]x[2048,256] matrix -- 2 MB of the 8 being
+    // measured -- and subtracting a quarter of the transfer reported Core ML
+    // at 150 GB/s where onnx-tensor-bw, which subtracts a real floor, says 83.
+    const double floorUs = timeGemv(dtype, kFloorDim, kFloorDim);
+    const double us = timeGemv(dtype, kK, (int64_t)(kBytes / (kK * es)));
     if (us <= 0.0)
       continue;
-    const double bps = (double)kBytes / (us * 1.0e-6);
-    CLPEAK_VLOG("onnx-stream[%s]: %s %.1f GB/s\n", ep.providerKey.c_str(),
-                dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", bps / 1.0e9);
+    const double netUs = us - ((floorUs > 0.0) ? floorUs : 0.0);
+    if (netUs <= 0.0)
+      continue; // lost inside the cost of asking; no honest rate
+    const double bps = (double)kBytes / (netUs * 1.0e-6);
+    CLPEAK_VLOG("onnx-stream[%s]: %s %.1f GB/s (%.0f us less a %.0f us floor)\n",
+                ep.providerKey.c_str(),
+                dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", bps / 1.0e9,
+                us, floorUs);
     if (bps > best.bps)
     {
       best.bps = bps;

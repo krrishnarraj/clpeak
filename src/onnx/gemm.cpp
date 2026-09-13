@@ -70,6 +70,17 @@ namespace
   constexpr double kImproveFactor = 1.03;
   constexpr int kMaxStrikes = 2;
 
+  // A rung has to do at least this much work, as a share of what the provider
+  // charges to accept the submission, before it counts as having computed
+  // anything.  The two populations are far apart: across an RTX 5060 on
+  // DirectML, CUDA and TensorRT under three runtimes, the most dispatch-bound
+  // *real* rung is Windows TensorRT's nvfp4 at 1024, which does 43% of its
+  // submission cost, while every folded rung measured does under 4% or comes
+  // out negative.  0.15 sits in that gap with room on both sides -- room the
+  // threshold needs, because the charge is estimated by the 32^3 probe, whose
+  // graph carries a small reduction the estimate slightly overstates.
+  constexpr double kFoldWorkFloor = 0.15;
+
   // Ceilings that keep the search from running away on either axis.  The time
   // bound is predicted from the previous size's measured rate, so a slow
   // provider stops early instead of spending minutes on one matrix, and it
@@ -337,20 +348,48 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // Per-doubling fold detector, for the foldable shape only.  A folded
       // graph leaves dispatch plus a reduction over D elements, so its time
       // barely moves while the work grows 8x: QNN read ~170 us at both 1024
-      // and 2048.  The test is on the time, not the rate -- a provider with
-      // an expensive dispatch shows a rate that jumps several-fold across
-      // its first doubling on perfectly real work, because the first rung
-      // was mostly dispatch, and a rate threshold mistook that for folding.
-      // Real work at least doubles the time of the previous rung whatever
-      // the dispatch cost; a fold does not.  The live shapes cannot fold, so
+      // and 2048.
+      //
+      // The comparison is on *work* -- the time left once the provider's
+      // per-submission charge is taken off, which the 32^3 probe measured on
+      // this same graph.  Raw times will not do.  Windows TensorRT charges
+      // 114 us to accept anything, so its nvfp4 rungs read 163.5 and 325.9
+      // us: 1.99x, a hair under the 2x a raw test demands, and the row was
+      // refused as folded on a card that measures 215 TFLOPS there.  Net of
+      // dispatch those rungs are 49.5 and 211.9 us -- 4.3x for 8x the work,
+      // exactly the climb of a provider approaching its peak.  A rate test
+      // is worse still for the same reason.
+      //
+      // A rung whose whole time is inside the dispatch charge computed
+      // nothing at all, which is a fold by itself (DirectML: 153.6 us at
+      // 1024 against a 156 us submission).  The live shapes cannot fold, so
       // their ladders are never second-guessed.
-      if (foldable && prevUs > 0.0 && D == prevD * 2 && mean_us < prevUs * 2.0)
+      const double dispatchUs = (pr.probeUs > 0.0) ? pr.probeUs : 0.0;
+      const double work = mean_us - dispatchUs;
+      const double prevWork = prevUs - dispatchUs;
+
+      // Two questions, and the first needs only one rung.  A rung whose work
+      // disappears into the cost of submitting it computed nothing: DirectML
+      // spent 153.6 us on a 1024-cube it charges 156 us merely to accept.
+      // That is a fold on its own, and catching it here rather than by
+      // comparing rungs is what lets a provider whose compile budget affords
+      // a single size still be judged.
+      const bool computedNothing =
+          foldable && dispatchUs > 0.0 && work < kFoldWorkFloor * dispatchUs;
+      // And then: did the work grow with the size?  Eight times the arithmetic
+      // has to cost at least twice the time however much the rate improves --
+      // a folded graph's residue is the reduction, which grows with D rather
+      // than D cubed.
+      const bool workFlat = foldable && prevUs > 0.0 && D == prevD * 2 &&
+                            prevWork > 0.0 && work < prevWork * 2.0;
+      if (computedNothing || workFlat)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld "
-                    "(%.2fx for 8x the work) -- work does not scale, "
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld, "
+                    "less a %.1f us submission -- %.2fx for 8x the work, "
                     "constants were folded\n",
                     ep.providerKey.c_str(), v.label, prevUs,
-                    (long long)prevD, mean_us, (long long)D, mean_us / prevUs);
+                    (long long)prevD, mean_us, (long long)D, dispatchUs,
+                    prevWork > 0.0 ? work / prevWork : 0.0);
         best = 0.0;
         firstErr = "this provider folded the operands at compile time: the "
                    "timed runs measure dispatch plus a reduction of a "

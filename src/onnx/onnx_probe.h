@@ -26,6 +26,13 @@ struct OnnxProbeResult
   const char *schemeName = "";
   bool castedActs = false;
   bool reduceInFloat = false;
+  // What one run of the 32^3 probe cost.  At that size the multiply is 65
+  // kFLOP -- nothing -- so this is very nearly the provider's per-submission
+  // overhead, measured on the row's own graph.  The ladder subtracts it
+  // before asking whether a rung's time grew with the work: on a provider
+  // that charges 114 us to accept anything, raw times are mostly that charge
+  // and every ratio drawn from them is a ratio of dispatch.
+  double probeUs = 0.0;
   // Graph shapes the ladder may use, in preference order, each proven at
   // 32^3 to build, fuse where the row needs it, and run the multiply at the
   // row's own width (see OnnxLiveShape).  The first is the fastest safe
@@ -78,14 +85,17 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // The bandwidth that probe measured in the width it chose, in bytes/second,
-// or 0 when neither width could be timed.  It is a read of eight megabytes
-// of resident weights through the operation every provider tunes hardest, so
-// nothing that also has to *write* a tensor can honestly exceed it -- which
-// makes it the ceiling a differential measurement is checked against.  The
+// or 0 when neither width could be timed.  It is a read of eight megabytes of
+// resident weights through the operation every provider tunes hardest, *net
+// of the cost of submitting it* -- the same floor subtraction onnx-tensor-bw
+// makes, and for the same reason: DirectML charges 156 us per submission, so
+// the raw figure came out at 48 GB/s where that provider streams 717.
+//
+// Nothing that also has to write a tensor can honestly exceed it, which makes
+// it the ceiling a differential measurement is checked against.  The
 // activation rows subtract a reference graph from a measurement, and where
 // the operation costs little the remainder is mostly the noise of two large
-// numbers: Core ML's softmax swung between a refusal and 139 GB/s that way,
-// on a device that streams 85.
+// numbers.
 double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their

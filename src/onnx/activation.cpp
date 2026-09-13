@@ -288,6 +288,11 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // every variant -- three variants over one ladder otherwise pay for the
   // identical session three times over, and on providers that compile ahead
   // of time the session is the expensive part.
+  // One row of the same reference graph: 8-16 KB, so essentially all of its
+  // time is what the provider charges to accept a submission.  The guard
+  // below needs it because on a provider that charges 156 us the measurement
+  // and its reference are mostly that charge, and the share the operation
+  // accounts for looks far smaller than it is.
   std::map<int64_t, Run> floors;
   auto floorFor = [&](int64_t rows) -> const Run &
   {
@@ -299,6 +304,11 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                .first;
     return it->second;
   };
+
+  const Run &dispatch = floorFor(1);
+  const double dispatchUs = (dispatch.us > 0.0) ? dispatch.us : 0.0;
+  CLPEAK_VLOG("onnx-activation[%s]: submission floor %.0f us\n",
+              ep.providerKey.c_str(), dispatchUs);
 
   for (const Variant &v : kVariants)
   {
@@ -336,20 +346,27 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         continue;
       }
 
-      // The operation has to account for a real share of the time, not one
+      // The operation has to account for a real share of the work, not one
       // microsecond of difference between two noisy measurements.  TensorRT
       // reported 249 us against a 248 us reference, and the microsecond
       // between them divided out to 17 TB/s -- forty times the card's memory
-      // bandwidth, published as a peak.  A tenth is a low bar that still
-      // rejects anything the reference's own jitter could account for.
+      // bandwidth, published as a peak.
+      //
+      // The share is taken of the work, not of the wall time: both graphs pay
+      // the provider's submission charge and it cancels in the subtraction,
+      // so leaving it in the denominator makes a well-resolved operation look
+      // marginal wherever dispatch is expensive.  DirectML charges 156 us and
+      // CUDA 69 us against measurements of a few hundred.
       const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
       const double netUs = full.us - floorUs;
-      if (netUs <= 0.1 * full.us)
+      const double workUs = full.us - dispatchUs;
+      if (netUs <= 0.0 || workUs <= 0.0 || netUs <= 0.1 * workUs)
       {
         CLPEAK_VLOG("onnx-activation[%s/%s]: %s lost in the noise "
-                    "(%.0f us against a %.0f us reference)\n",
+                    "(%.0f us against a %.0f us reference, %.0f us of "
+                    "submission)\n",
                     ep.providerKey.c_str(), v.label, sz.label,
-                    full.us, floorUs);
+                    full.us, floorUs, dispatchUs);
         test.skip(metric, ResultStatus::Error,
                   "too close to the reference graph it is measured against",
                   note);
