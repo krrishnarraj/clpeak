@@ -448,13 +448,25 @@ static void removeProfileArtifacts(const std::string &prefix)
   }
 }
 
+const char *onnxProfileTypeName(int dtype)
+{
+  switch (dtype)
+  {
+  case ONNX_DT_FLOAT:    return "float";
+  case ONNX_DT_FLOAT16:  return "float16";
+  case ONNX_DT_BFLOAT16: return "bfloat16";
+  default:               return ""; // quantized: no plain kernel to check
+  }
+}
+
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
                                                 OrtSession *session,
-                                                std::string *matmulInType)
+                                                std::string *opInType,
+                                                const char *ofOp)
 {
   std::vector<std::string> ops;
-  if (matmulInType)
-    matmulInType->clear();
+  if (opInType)
+    opInType->clear();
   if (!session)
     return ops;
 
@@ -513,12 +525,14 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
     std::string name = json.substr(pos, end - pos);
     pos = end;
 
-    // For a MatMul-family kernel, capture the element type of its first
-    // input.  ORT writes `"input_type_shape" : [ { "float16" : [32,32] }, ...`
-    // in the same event's args; find it near this op_name and read the first
-    // quoted key inside the first brace.
-    if (matmulInType && matmulInType->empty() &&
-        (name == "MatMul" || name == "FusedMatMul" || name == "Gemm"))
+    // Capture the element type of the kernel's first input.  ORT writes
+    // `"input_type_shape" : [ { "float16" : [32,32] }, ...` in the same
+    // event's args; find it near this op_name and read the first quoted key
+    // inside the first brace.
+    const bool wanted = ofOp ? (name == ofOp)
+                             : (name == "MatMul" || name == "FusedMatMul" ||
+                                name == "Gemm");
+    if (opInType && opInType->empty() && wanted)
     {
       const std::string itsKey = "\"input_type_shape\"";
       // The args object holds op_name and input_type_shape together; search a
@@ -534,7 +548,7 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
         {
           size_t q2 = json.find('"', q1 + 1);
           if (q2 != std::string::npos)
-            *matmulInType = json.substr(q1 + 1, q2 - q1 - 1);
+            *opInType = json.substr(q1 + 1, q2 - q1 - 1);
         }
       }
     }

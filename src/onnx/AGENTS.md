@@ -34,9 +34,10 @@ backend.
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
+| `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
 | `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
 | `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
-| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
+| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--onnx-conv`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 | `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
@@ -414,7 +415,11 @@ pre-VNNI x86. clpeak deliberately does **not** reduce the range — the point
 is to report what full-range int8 actually costs on that hardware, and a
 throughput row alone would have called it a win.
 
-CPU-EP fp32 at exactly 0.0 is the methodology validating itself. CoreML's
+CPU-EP fp32 reads exactly 0.0, and that is a plumbing check rather than a
+validation of the arithmetic: the reference *is* the CPU EP's own fp32
+matmul, so that row compares a kernel with itself and could not read anything
+else. What the row is worth is on the other providers, where it is a
+downgrade detector. CoreML's
 fp16 error matching the CPU's says both accumulate in fp16 — combined with
 6.2 TFLOPS (1.5x this machine's MPS GEMM fp16 peak) that row is the ANE.
 CoreML's fp32 row is the interesting one: 0.4 ppm rules out fp16 arithmetic,
@@ -965,42 +970,19 @@ Three details are load-bearing:
 
 - **Constant folding must be off** (`keepConstantsUnfolded` on
   `onnxCreateSession`). Two constant operands are otherwise multiplied once at
-  load time and every timed run measures an empty graph. `gemm.cpp` guards
-  this per doubling (a >4x rate jump in one doubling is folding; legitimate
-  gains are gradual) with the whole-ladder 64x check as the backstop, so
-  timings that stay flat are reported as an error rather than as a
-  spectacular number. The flag only stops ORT's own folder -- a vendor AOT
-  backend folds in its own compiler instead, which is what the per-doubling
-  guard catches.
+  load time and every timed run measures an empty graph. The flag only stops
+  ORT's own folder -- a vendor AOT backend folds in its own compiler instead,
+  which is what `OnnxLiveShape` and the timing guards below are for.
 - **Reduce with `ReduceMax`, never `ReduceSum`.** Summing the rows of `A*B`
   equals multiplying the summed rows of `A` — a rewrite an optimiser is free
   to make, and it would quietly turn the matrix multiply into a matrix-vector
   one. Max does not distribute over the product. (At opset 17 `ReduceMax`
   takes its axes as an attribute while `ReduceSum` takes them as an input.)
-- **The runtime scalar scales the result, not an operand.** That leaves the
-  matmul a product of two constants, so the graph is correct only while
-  constant folding stays disabled — and ONNX Runtime before about 1.18
-  accepts `optimization.disable_specified_optimizers` and ignores it. It then
-  folds the multiply at load time and the timed phase measures an empty
-  graph: 6789 TFLOPS on an RTX 5060 through DirectML, 183000 on its CPU. The
-  scaling guard in `gemm.cpp` catches exactly this and reports an error.
-
-  Scaling an *operand* instead would make the graph unfoldable outright, and
-  it was tried twice. A `Mul` cannot be used: **the CPU provider has no fp16
-  kernel for the multiply**, so it inserts a `Cast` and runs the whole matmul
-  in fp32 — the half-precision row came back equal to the single-precision
-  one, 0.41 against 0.40, measuring the wrong arithmetic entirely. An `Add-0`
-  avoids the wrong arithmetic but costs ~20% on the ANE (2.30 -> 1.74 fp32,
-  8.60 -> 6.97 fp16 peaks, back-to-back against these graphs on the same hot
-  machine): a dynamic operand compiles to a different, slower ANE program.
-  A guarded fold beats both a silent upcast and a quiet regression, so the
-  plain rows keep this shape and folding providers report an error instead
-  (QNN folded it: flat ~170 us at 1024 and 2048, 98 TFLOPS fp32 against a 45
-  TOPS spec). The int8 QDQ row is the exception: its Add-0 profiles clean on
-  the CPU and its headline NPU needs it, so the probe uses it there — and
-  falls back to this shape wherever the profile shows an inserted `Cast`.
-  Adding any elementwise op to a half-precision graph risks this; check the
-  executed kernels for a `Cast` before believing an improvement.
+- **Where the runtime scalar enters is per provider, and the probe decides.**
+  See "Four shapes, and why no one of them wins" below. Scaling the *result*
+  is fastest and foldable; scaling an *operand* cannot be folded and costs a
+  pass. Neither is right everywhere, so `liveShapesFor()` lists both in
+  preference order and the ladder falls through on a detected fold.
 - **Every quantization scale is a build-time constant.** Supplying the
   activation scale as a runtime input is tidier — it keeps the dequantize out
   of constant folding's reach with no optimizer disabled — and ONNX Runtime
@@ -1059,6 +1041,65 @@ the provider, the more of its ladder lands in that regime.
 `onnx-dispatch-latency` is the one deliberate exception, and its own comment
 says why: there the per-submission overhead is the measurement rather than a
 thing to divide out, so it probes with five and carries a far larger cap.
+
+## Four shapes, and why no one of them wins
+
+A throughput graph holds both operands as constants so nothing large crosses
+the host boundary per run -- and a graph of constants is a constant
+expression, which a vendor compiler is entitled to evaluate while it builds.
+QNN and OpenVINO both do. ORT's `ConstantFolding` switch cannot reach them:
+it stops ORT's own folder and nothing else. So the graph has to carry a
+runtime dependency *in front of the work*, and `OnnxLiveShape`
+(`onnx_model.h`) names the four ways of doing that:
+
+| shape | where the runtime value enters | cost | foldable |
+|---|---|---|---|
+| `ResultScaled` | scales the reduced result | none | **yes** |
+| `OperandScaled` | scales A before the multiply | one elementwise pass | no |
+| `Add0` | adds a runtime zero to the int8 codes | one 1-byte pass | no |
+| `QdqAdd0` | the same as a quantized node unit (DQ/Add/Q) | one 1-byte pass | no |
+
+**No single choice is right, which is the whole reason there is a list.**
+`ResultScaled` is the fastest and the only one a compiler can fold;
+`OperandScaled` costs ~20% on the ANE, where a dynamic operand compiles to a
+different program (8.7 -> 7.0 TFLOPS fp16), and on the CPU EP it makes ORT
+insert a precision-free `Cast` and run the whole fp16 matmul in fp32 -- 416
+GFLOPS against 87 for the real thing. `Add0` is cheapest for int8 but QNN's
+HTP refuses a bare `ElementWiseAdd` on quantized codes, which is what
+`QdqAdd0` exists for.
+
+So `liveShapesFor()` (`gemm_setup.cpp`) returns them most-preferred-first,
+`ResultScaled` always leading, and the 32^3 probe keeps every one that
+**builds**, **fuses** where the row requires fusion, and **runs the multiply
+at the row's own width**. `gemm.cpp` then walks the kept list: it uses the
+first, and drops to the next only when it catches that one folding. A
+provider that does not fold never leaves the head of the list and pays
+nothing; one that does ends up on a shape it cannot fold.
+
+**The width check is the part that is easy to get wrong.** A cast *count*
+cannot see the widening: the widened graph carries *fewer* `Cast` nodes than
+the narrow one, because a fp16 matmul whose result is reduced in fp32 needs a
+cast the all-fp32 version does not. The signal is the kernel's own input
+type, which `onnxCollectExecutedOps()` reads out of the profile
+(`onnxProfileTypeName()` names the expected one). `conv.cpp` asks the same
+question of `Conv` and says so in the row: the CPU EP's fp16 convolutions
+land on its fp32 ones to three figures because that is literally what ran.
+
+**Folding is detected on time, not on rate.** A folded graph's time stops
+tracking the size -- QNN read ~170 us at both 1024 and 2048 -- so the test is
+`t(2D) < 2*t(D)` against the previous rung. A rate threshold was tried and is
+wrong: on a provider with expensive dispatch the first rung is mostly
+dispatch, so a real ladder's rate jumps several-fold across its first
+doubling, and a `>4x rate` rule failed OpenVINO's int8 row for doing nothing
+but working correctly. Two backstops remain: the whole-ladder 64x check, and
+a rule that a foldable ladder cut to a single rung by a compile-time gate
+cannot confirm scaling at all and says so (QNN published 12 TFLOPS fp32, 12
+TFLOPS fp16 and 12 TOPS int8 from one rung each, all the same 179 us).
+
+**The block and conv graphs never needed any of this**: they have scaled the
+resident activations before the work all along, which is the `OperandScaled`
+shape under another name, and it is why QNN's block rows were real while its
+gemm rows were dispatch.
 
 ## Bound a ladder on what it measured, not on what it predicts
 
@@ -1346,11 +1387,25 @@ worse, published it as the operation's rate. The 8 MB and 32 MB rungs hold to
 a few percent between runs; the 128 MB one moves by up to a fifth on a 16 GB
 machine, since it is a large allocation competing with everything else.
 
-How much the subtraction matters is entirely a property of the provider and it
-spans the whole range: negligible on CoreML, whose reference costs a flat
-44–46 µs at every size (under 1% of the measurement), half to three quarters of
-the measurement on the CPU EP, and on TensorRT proportional to the tensor. On
-the CPU EP the rows are correspondingly noisier than the accelerator ones.
+**The reference is no longer nearly free, and that changed what this test can
+resolve.**  It used to cost CoreML a flat 44-46 µs at every size -- because it
+was foldable, so the provider evaluated it at build time and the "reference"
+was dispatch.  Both graphs scale the tensor by a runtime value now, so neither
+folds and the reference is a real read: 681 µs at 8 MB there.  That is correct,
+and it means the subtraction removes a large number instead of a negligible
+one, so a cheap operation is left resting on the difference of two big
+measurements.
+
+Two guards keep that honest.  The first is proportional -- the remainder has
+to be more than a tenth of the measurement.  The second is physical: an
+operation that reads a tensor and writes one back cannot beat the rate the
+same provider streams those bytes with no write at all, so a remainder above
+`onnxStreamBps()` is refused.  Core ML's softmax needs it.  It costs so little
+beyond the reference (7-16% of the measurement) that three consecutive runs
+gave a refusal, 122 GB/s and 139 GB/s, on a device that streams 85; it is
+refused consistently now, which is the honest report -- the operation is real
+but too cheap for this method to separate.  SiLU on the same provider is
+steady to 2% (35.9 / 35.5 / 36.3) because it costs 40% of its measurement.
 
 ## Why convolution is measured separately
 
@@ -1405,9 +1460,17 @@ estimate lands relative to a bucket edge.
 
 ## Measuring bandwidth needs a matmul, not something simpler
 
-`onnx-tensor-bw` streams a resident fp16 weight matrix through a GEMV,
-because that is the operation generating a token performs and the one every
-provider tunes hardest. An elementwise-plus-reduction graph reads ~22 GB/s
+`onnx-tensor-bw` streams a resident weight matrix through a GEMV, because
+that is the operation generating a token performs and the one every provider
+tunes hardest.  **The width is measured, not assumed.**  It used to be fp16
+outright, which on a provider with no fp16 kernel measured the conversion
+ORT inserts on the way in and nothing else: the CPU EP read a flat 6.2 GB/s
+at every size on a machine whose fp32 rows stream 236 / 100 / 92, a real
+DRAM curve.  `onnxStreamDtype()` times eight megabytes through this same
+GEMV in fp16 and in fp32 and the ladder, the activation rows and the
+dispatch matmul all take the faster; the rungs are named for their byte
+size, so an fp32 matrix simply has half the columns and every reading still
+means what it says. An elementwise-plus-reduction graph reads ~22 GB/s
 on the M1 Pro against a machine that does roughly ten times that — it
 measures the reduction, not memory. Two operations per weight also puts the
 arithmetic far enough below the memory cost that only memory is left.

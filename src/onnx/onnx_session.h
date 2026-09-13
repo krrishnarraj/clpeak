@@ -59,18 +59,26 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
 // kept because counts matter too: a graph shape that adds one more Cast to
 // a provider that already casts once is running an extra pass, and the
 // shape probe compares the counts.
-// When `matmulInType` is non-null it also receives the element type the
-// MatMul-family kernel actually consumed, as ORT names it in the profile
-// ("float", "float16", "bfloat16", ...), or empty when no such kernel ran.
+// When `opInType` is non-null it also receives the element type the compute
+// kernel actually consumed, as ORT names it in the profile ("float",
+// "float16", "bfloat16", ...), or empty when no such kernel ran.  `ofOp`
+// picks which kernel to read it from; null means the MatMul family.
 // SessionEndProfiling is one-shot, so this is the only chance to read it.
-// It is the one signal that catches a graph shape quietly widening the
-// arithmetic: ORT inserts a "precision-free" Cast in front of a fp16 MatMul
-// when the kernel it picks wants fp32, and the row then measures fp32 at the
-// fp16 label.  A cast *count* cannot see it -- the widened shape can carry
-// fewer Cast nodes than the narrow one -- so the shape probe reads the type.
+//
+// It is the one signal that catches a provider quietly widening the
+// arithmetic: ORT inserts a "precision-free" Cast in front of an fp16 kernel
+// when the one it picks wants fp32, and the row then measures fp32 under the
+// fp16 label -- the CPU EP's fp16 convolution rows land on its fp32 rows to
+// three figures for exactly this reason.  A cast *count* cannot see it, since
+// the widened graph can carry fewer Cast nodes than the narrow one.
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
                                                 OrtSession *session,
-                                                std::string *matmulInType = nullptr);
+                                                std::string *opInType = nullptr,
+                                                const char *ofOp = nullptr);
+
+// The element type ORT names in a profile for `dtype` ("float", "float16",
+// "bfloat16"), or "" for a type with no plain kernel to read.
+const char *onnxProfileTypeName(int dtype);
 
 // How many times `name` appears among `ops`.
 size_t onnxCountOp(const std::vector<std::string> &ops, const char *name);

@@ -273,6 +273,10 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // conversion under this heading.  The working sets are in bytes, so the
   // row count halves in fp32 and each rung still names its size truthfully.
   const int dtype = onnxStreamDtype(rt, ep);
+  // What this provider streams eight megabytes at, in the same width.  An
+  // operation that reads a tensor and writes one back cannot beat a pure
+  // read, so a row above this did not measure the operation -- see below.
+  const double streamBps = onnxStreamBps(rt, ep);
   const size_t es = (size_t)onnxElemBytes(dtype, 1);
   const char *widthNote =
       (dtype == ONNX_DT_FLOAT)
@@ -354,6 +358,31 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       // One pass in, one pass out.
       const double bps = 2.0 * (double)bytes / (netUs * 1.0e-6);
+
+      // A differential measurement is only as good as the gap it rests on,
+      // and where the operation is nearly free the remainder is the noise of
+      // two large numbers rather than the operation.  The percentage guard
+      // above catches the worst of that; this catches the rest, physically:
+      // an operation that reads the tensor and writes one back cannot run
+      // faster than the provider streams the same bytes with no write at all.
+      // Core ML's softmax costs so little beyond the reference that the
+      // remainder swung between a refusal and 139 GB/s on a device that
+      // streams 85 -- three runs, three different answers, all of them this
+      // subtraction rather than the softmax.
+      if (streamBps > 0.0 && bps > streamBps)
+      {
+        CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s exceeds the "
+                    "%.1f GB/s this provider streams; the subtraction "
+                    "over-credited it\n",
+                    ep.providerKey.c_str(), v.label, sz.label,
+                    bps / 1.0e9, streamBps / 1.0e9);
+        test.skip(metric, ResultStatus::Error,
+                  "costs too little beyond the reference graph to separate "
+                  "from it -- the remainder came out faster than this "
+                  "provider streams the same bytes",
+                  note);
+        continue;
+      }
       CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n",
                   ep.providerKey.c_str(), v.label,

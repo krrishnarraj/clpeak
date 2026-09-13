@@ -77,6 +77,17 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 // stream 38).  Memoized per runtime and target.
 int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
+// The bandwidth that probe measured in the width it chose, in bytes/second,
+// or 0 when neither width could be timed.  It is a read of eight megabytes
+// of resident weights through the operation every provider tunes hardest, so
+// nothing that also has to *write* a tensor can honestly exceed it -- which
+// makes it the ceiling a differential measurement is checked against.  The
+// activation rows subtract a reference graph from a measurement, and where
+// the operation costs little the remainder is mostly the noise of two large
+// numbers: Core ML's softmax swung between a refusal and 139 GB/s that way,
+// on a device that streams 85.
+double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
 // overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only
 // and nvfp4 rows have no accuracy counterpart by design).  When gemm's ladder

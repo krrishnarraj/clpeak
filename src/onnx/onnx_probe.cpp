@@ -29,17 +29,6 @@ double elapsedUs(std::chrono::steady_clock::time_point t0)
       .count();
 }
 
-const char *dtypeProfileName(int dtype)
-{
-  switch (dtype)
-  {
-  case ONNX_DT_FLOAT:    return "float";
-  case ONNX_DT_FLOAT16:  return "float16";
-  case ONNX_DT_BFLOAT16: return "bfloat16";
-  default:               return ""; // quantized: no plain MatMul to check
-  }
-}
-
 const char *shapeName(OnnxLiveShape s)
 {
   switch (s)
@@ -128,7 +117,7 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
 
     const bool needsFusion = v.qdq || v.blockSize > 0 || v.nvfp4;
     const std::vector<OnnxLiveShape> shapes = liveShapesFor(v);
-    const char *want = dtypeProfileName(v.dtype);
+    const char *want = onnxProfileTypeName(v.dtype);
 
     QuantScheme schemes[2];
     const size_t nSchemes = schemesFor(v, schemes);
@@ -265,9 +254,16 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
 // Streaming width
 // ---------------------------------------------------------------------------
 
-int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+// Both answers come from one sweep, so they are memoized together.
+struct StreamProbe
 {
-  static std::unordered_map<std::string, int> memo;
+  int dtype = ONNX_DT_FLOAT16;
+  double bps = 0.0;
+};
+
+static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  static std::unordered_map<std::string, StreamProbe> memo;
   static std::mutex mtx;
   const std::string memoKey =
       std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
@@ -286,8 +282,7 @@ int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   constexpr int64_t kK = 2048;
   constexpr uint64_t kBytes = 8ull << 20;
   const int candidates[2] = {ONNX_DT_FLOAT16, ONNX_DT_FLOAT};
-  double bestBps = 0.0;
-  int best = ONNX_DT_FLOAT16;
+  StreamProbe best;
 
   for (int dtype : candidates)
   {
@@ -374,16 +369,26 @@ int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep)
     const double bps = (double)kBytes / (us * 1.0e-6);
     CLPEAK_VLOG("onnx-stream[%s]: %s %.1f GB/s\n", ep.providerKey.c_str(),
                 dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", bps / 1.0e9);
-    if (bps > bestBps)
+    if (bps > best.bps)
     {
-      bestBps = bps;
-      best = dtype;
+      best.bps = bps;
+      best.dtype = dtype;
     }
   }
 
   std::lock_guard<std::mutex> lk(mtx);
   memo.emplace(memoKey, best);
   return best;
+}
+
+int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  return onnxStreamProbe(rt, ep).dtype;
+}
+
+double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  return onnxStreamProbe(rt, ep).bps;
 }
 
 // ---------------------------------------------------------------------------

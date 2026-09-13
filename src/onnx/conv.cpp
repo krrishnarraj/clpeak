@@ -161,7 +161,8 @@ namespace
   }
 
   ConvSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                      int dtype, const Shape &v, int64_t spatial)
+                      int dtype, const Shape &v, int64_t spatial,
+                      bool profile = false)
   {
     ConvSetup c;
     const int64_t group = v.depthwise ? kChannels : 1;
@@ -179,7 +180,8 @@ namespace
       wRaw.clear();
       wRaw.shrink_to_fit();
 
-      auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
+      auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
+                                   profile);
       model.clear();
       model.shrink_to_fit();
       if (!ses.session)
@@ -306,6 +308,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       double best = 0.0;
       int64_t bestSpatial = 0;
+      std::string ranWider; // set when the provider widened the arithmetic
       double lastRate = 0.0;
       double prevCreateUs = 0.0;
       int strikes = 0;
@@ -337,8 +340,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
+        // The first rung is profiled: one run tells us the width the Conv
+        // kernel actually consumed.  A provider without an fp16 convolution
+        // runs the fp16 row in fp32 behind an inserted cast and the two
+        // precision rows then land on each other -- the CPU EP's do, to three
+        // figures -- which is worth saying rather than leaving to be noticed.
+        const bool profileThis = (sp == kMinSpatial);
         auto createStart = std::chrono::steady_clock::now();
-        ConvSetup c = makeSetup(rt, ep, dt.dtype, v, sp);
+        ConvSetup c = makeSetup(rt, ep, dt.dtype, v, sp, profileThis);
         auto createEnd = std::chrono::steady_clock::now();
         double createUs = std::chrono::duration<double, std::micro>(
                               createEnd - createStart).count();
@@ -355,6 +364,18 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         double per_iter_us = -1.0;
         if (timeRuns(rt, c, 1 + warmupCount) > 0.0)
           per_iter_us = timeRuns(rt, c, 1);
+        if (profileThis)
+        {
+          std::string ranIn;
+          (void)onnxCollectExecutedOps(rt, c.session, &ranIn, "Conv");
+          const char *want = onnxProfileTypeName(dt.dtype);
+          if (want[0] && !ranIn.empty() && ranIn != want)
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: ran in %s, not %s\n",
+                        ep.providerKey.c_str(), row.c_str(), ranIn.c_str(), want);
+            ranWider = ranIn;
+          }
+        }
         if (per_iter_us <= 0.0)
         {
           if (firstErr.empty())
@@ -453,6 +474,11 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         "  " + v.note;
         if (dt.dtype == ONNX_DT_FLOAT)
           o.description += fp32Note;
+        if (!ranWider.empty())
+          o.description += "  This provider has no " + std::string(dt.label) +
+                           " convolution kernel and ran it in " + ranWider +
+                           ", so this is that width rather than " +
+                           dt.label + ".";
         test.emit(row, (float)best, o);
       }
       else
