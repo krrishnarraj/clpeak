@@ -341,20 +341,31 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
       return it->second;
   }
 
-  // Eight megabytes of weights either way: [2048, 2048] in fp16, [2048, 1024]
-  // in fp32, so the two time the same number of bytes through the same
-  // operation.  Small enough to compile in a moment on the ahead-of-time
-  // providers.
-  //
   // Both the choice and the rate are taken net of a dispatch floor, measured
   // with a 256-square matrix whose 128 KB cannot matter -- exactly what
   // onnx-tensor-bw does.  Without it the figure is mostly the cost of asking:
   // DirectML charges 156 us a submission and read 48 GB/s raw where it
-  // actually streams 717, and the two widths came out 44.4 against 48.0,
-  // which is a comparison of dispatch rather than of bandwidth.
+  // actually streams 717.
+  //
+  // The working set has to be large enough that the transfer outweighs that
+  // charge, and eight megabytes is not.  A fast card moves them in about
+  // five microseconds against thirty of dispatch, so the remainder is the
+  // difference of two nearly equal numbers: CUDA read 2511 GB/s from a 3 us
+  // net, and TensorRT's two widths came out 561 and 965 on noise alone.
+  // Sixty-four megabytes is four times the dispatch on the fastest provider
+  // here and still one session per width -- but it is also 64 MB of weights
+  // three times over at peak, so a small device falls back to eight and
+  // reports whatever it can.
   constexpr int64_t kK = 2048;
   constexpr int64_t kFloorDim = 256; // 128 KB either way: cannot matter
-  constexpr uint64_t kBytes = 8ull << 20;
+  const uint64_t kBytes = (clpeak::memoryBudget(1ull << 30) > (192ull << 20))
+                              ? (64ull << 20)
+                              : (8ull << 20);
+  // Below this share the reading is dispatch, not bandwidth.  Reporting it
+  // would put a meaningless ceiling under the activation rows -- too low
+  // refuses every one of them, too high checks nothing -- so the probe says
+  // it has no answer instead, and only the proportional guard applies.
+  constexpr double kMinNetShare = 0.25;
   const int candidates[2] = {ONNX_DT_FLOAT16, ONNX_DT_FLOAT};
   StreamProbe best;
 
@@ -450,8 +461,14 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     if (us <= 0.0)
       continue;
     const double netUs = us - ((floorUs > 0.0) ? floorUs : 0.0);
-    if (netUs <= 0.0)
-      continue; // lost inside the cost of asking; no honest rate
+    if (netUs < kMinNetShare * us)
+    {
+      CLPEAK_VLOG("onnx-stream[%s]: %s %.0f us against a %.0f us floor -- "
+                  "dispatch, not bandwidth; no reading\n",
+                  ep.providerKey.c_str(),
+                  dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", us, floorUs);
+      continue;
+    }
     const double bps = (double)kBytes / (netUs * 1.0e-6);
     CLPEAK_VLOG("onnx-stream[%s]: %s %.1f GB/s (%.0f us less a %.0f us floor)\n",
                 ep.providerKey.c_str(),

@@ -90,6 +90,24 @@ namespace
 
   constexpr unsigned int kSizeBudgetUs = 1000000;
 
+  // The share of the work the operation itself has to account for before the
+  // difference is worth reporting.
+  //
+  // A ceiling was tried instead -- refuse a remainder faster than the
+  // provider streams the same bytes -- and it cannot be calibrated.  Measured
+  // on a small working set it is cache-resident and checks nothing; measured
+  // on a large one it is the DRAM rate and refuses a row that legitimately
+  // ran out of cache, which is most 8 MB rows on a GPU.  Between those two
+  // mistakes it produced false refusals on four providers and caught one real
+  // case.  This is dimensionless and needs no second graph to compare
+  // against, which is what makes it portable.
+  //
+  // A fifth is where the two populations separate.  Core ML's softmax costs
+  // 8-18% of its work and swung between a refusal, 122 GB/s and 139 GB/s over
+  // three runs; its SiLU costs 43% and holds to 2%.  Below a fifth the row is
+  // the noise of two large measurements rather than the operation.
+  constexpr double kMinOpShare = 0.20;
+
   struct Variant
   {
     OnnxActivation act;
@@ -273,10 +291,6 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // conversion under this heading.  The working sets are in bytes, so the
   // row count halves in fp32 and each rung still names its size truthfully.
   const int dtype = onnxStreamDtype(rt, ep);
-  // What this provider streams eight megabytes at, in the same width.  An
-  // operation that reads a tensor and writes one back cannot beat a pure
-  // read, so a row above this did not measure the operation -- see below.
-  const double streamBps = onnxStreamBps(rt, ep);
   const size_t es = (size_t)onnxElemBytes(dtype, 1);
   const char *widthNote =
       (dtype == ONNX_DT_FLOAT)
@@ -360,7 +374,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
       const double netUs = full.us - floorUs;
       const double workUs = full.us - dispatchUs;
-      if (netUs <= 0.0 || workUs <= 0.0 || netUs <= 0.1 * workUs)
+      if (netUs <= 0.0 || workUs <= 0.0 || netUs <= kMinOpShare * workUs)
       {
         CLPEAK_VLOG("onnx-activation[%s/%s]: %s lost in the noise "
                     "(%.0f us against a %.0f us reference, %.0f us of "
@@ -376,30 +390,6 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // One pass in, one pass out.
       const double bps = 2.0 * (double)bytes / (netUs * 1.0e-6);
 
-      // A differential measurement is only as good as the gap it rests on,
-      // and where the operation is nearly free the remainder is the noise of
-      // two large numbers rather than the operation.  The percentage guard
-      // above catches the worst of that; this catches the rest, physically:
-      // an operation that reads the tensor and writes one back cannot run
-      // faster than the provider streams the same bytes with no write at all.
-      // Core ML's softmax costs so little beyond the reference that the
-      // remainder swung between a refusal and 139 GB/s on a device that
-      // streams 85 -- three runs, three different answers, all of them this
-      // subtraction rather than the softmax.
-      if (streamBps > 0.0 && bps > streamBps)
-      {
-        CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s exceeds the "
-                    "%.1f GB/s this provider streams; the subtraction "
-                    "over-credited it\n",
-                    ep.providerKey.c_str(), v.label, sz.label,
-                    bps / 1.0e9, streamBps / 1.0e9);
-        test.skip(metric, ResultStatus::Error,
-                  "costs too little beyond the reference graph to separate "
-                  "from it -- the remainder came out faster than this "
-                  "provider streams the same bytes",
-                  note);
-        continue;
-      }
       CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n",
                   ep.providerKey.c_str(), v.label,

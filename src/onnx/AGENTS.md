@@ -1454,28 +1454,37 @@ and it means the subtraction removes a large number instead of a negligible
 one, so a cheap operation is left resting on the difference of two big
 measurements.
 
-Two guards keep that honest.  The first is proportional -- the remainder has
-to be more than a tenth of the *work*, which is the measurement less the
-provider's submission charge (a one-row reference graph measures it).  Taking
-the share of wall time instead makes a well-resolved operation look marginal
-wherever dispatch is expensive, and DirectML charges 156 us against
-measurements of a few hundred.  The second is physical: an
-operation that reads a tensor and writes one back cannot beat the rate the
-same provider streams those bytes with no write at all, so a remainder above
-`onnxStreamBps()` is refused.  Core ML's softmax needs it.  It costs so little
-beyond the reference that three consecutive runs gave a refusal, 122 GB/s and
-139 GB/s; it is refused consistently now, which is the honest report -- the
-operation is real but too cheap for this method to separate.  SiLU on the
-same provider is steady to 2% (36.4 / 36.5) because it costs a real share.
+One guard keeps that honest, and it is deliberately the simpler of the two
+that were tried: the operation has to account for at least a fifth of the
+*work*, which is the measurement less the provider's submission charge (a
+one-row reference graph measures it).  Taking the share of wall time instead
+makes a well-resolved operation look marginal wherever dispatch is expensive
+-- DirectML charges 156 us against measurements of a few hundred.
 
-**That ceiling is only as good as the bandwidth behind it, and the first
-version was not.**  `onnxStreamDtype` timed eight megabytes through a GEMV
-without subtracting a submission floor, so on DirectML -- 156 us a
-submission -- it read 48 GB/s where that provider streams 717, and every
-activation row on DirectML, CUDA and TensorRT was refused against it.  It
-subtracts a floor now, measured with a matrix small in *both* dimensions:
-shrinking only the columns leaves 2 MB of the 8 being measured, which
-over-subtracts and reported Core ML at 150 GB/s against onnx-tensor-bw's 83.
+**A bandwidth ceiling was tried for the same job and cannot be calibrated.**
+The idea was sound -- an operation that reads a tensor and writes one back
+cannot beat the rate the provider streams those bytes with no write at all --
+but there is no single size to measure that rate at.  Taken on a small
+working set it is cache-resident and permits anything: CUDA read 2511 GB/s
+from a 3 us net, which is no ceiling.  Taken on a large one it is the DRAM
+rate and refuses rows that legitimately ran out of cache, which is most 8 MB
+rows on a GPU.  Between those two mistakes it produced false refusals on four
+providers -- every activation row on DirectML, CUDA and TensorRT at one point
+-- and caught one real case.  The proportional guard is dimensionless and
+needs no second graph to compare against, which is what makes it portable to
+a provider nobody here has run.
+
+A fifth is where the two populations separate.  Core ML's softmax costs 8-18%
+of its work and gave a refusal, 122 GB/s and 139 GB/s over three runs; it is
+refused every run now.  Its SiLU costs 43% and holds to a few percent
+(33.3 / 34.7 / 38.4).  The CPU EP's 32 MB rung sits at 6-10% and swung between
+11.7 and 28.6 GB/s across runs, so it goes too -- fewer rows, and the ones
+that remain mean something.
+
+`onnxStreamBps()` survives for a job it *is* well sized for: the decode rows
+read a hundred megabytes of weights from main memory, and a 64 MB probe net
+of its dispatch floor is the right reference for whether a provider is
+actually moving the bytes a precision declares.
 
 ## Why convolution is measured separately
 
