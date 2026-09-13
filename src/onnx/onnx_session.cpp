@@ -582,15 +582,6 @@ std::string onnxJoinOps(const std::vector<std::string> &ops)
   return out;
 }
 
-bool onnxEpRunsFp32AsFp16(const onnx_ep_info_t &ep)
-{
-  if (ep.providerKey == "QNNExecutionProvider")
-    return true;
-  if (ep.providerKey == "OpenVINOExecutionProvider")
-    return ep.epDevice != "CPU";
-  return false;
-}
-
 // The kernels that do the multiply in integer arithmetic, across providers.
 // Matched loosely because providers prefix and suffix their own fusions.
 static const char *kQuantMarkers[] = {

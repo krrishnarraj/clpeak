@@ -102,13 +102,20 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
   // ladder walks the kept list, using the first and dropping to the next only
   // when it catches that one folding -- so a non-folding provider measures the
   // fast result-scaled shape and a folder falls through to a live one.  The
-  // width check is what stops a live operand being accepted after ORT quietly
-  // widened the multiply (CPU fp16 scaled on the operand runs the MatMul in
-  // fp32); a cast count cannot see that, since the widened graph can carry
-  // fewer Cast nodes than the narrow one.  The plain-float rows have a bare
-  // MatMul to read the type from; the quantized ones dequantize to float by
-  // design and the weight-only ones fuse to MatMulNBits, so neither is
-  // checked.
+  // The width check is a *preference*, not a veto.  It exists to stop a live
+  // operand being chosen after ORT quietly widened the multiply behind it --
+  // Apple's CPU EP keeps fp16 in the result-scaled shape and promotes it in
+  // the operand-scaled one, and picking the wrong one there reports the fp32
+  // rate under the fp16 label.  But where *no* shape keeps the width the
+  // cause is the provider rather than the shape: ONNX Runtime 1.17's x86 CPU
+  // EP has no fp16 MatMul at all and casts in every shape.  Refusing there
+  // would delete the fp16 row and, through this cache, every fp16 row in conv
+  // and the transformer block.  So widening shapes are kept as a second
+  // choice and the row reports the width it actually ran at.
+  //
+  // The plain-float rows have a bare MatMul to read the type from; the
+  // quantized ones dequantize to float by design and the weight-only ones
+  // fuse to MatMulNBits, so neither is checked.
   auto probeOne = [&](const Variant &v)
   {
     OnnxProbeResult r;
@@ -131,6 +138,17 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
 
     std::string firstErr;
     std::string tried; // executed ops of the last unfused build, for the skip
+    // Shapes that built and ran, but at a wider datatype than the row names.
+    // Kept as a second choice: see the note above.
+    struct Widened
+    {
+      OnnxLiveShape shape;
+      bool reduceInFloat;
+      double createUs;
+      double runUs;
+      std::string ranAs;
+    };
+    std::vector<Widened> wide;
 
     for (size_t si = 0; si < nSchemes && !r.ok; si++)
     {
@@ -176,18 +194,21 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
             tried = onnxJoinOps(b.ops);
           continue;
         }
-        if (!needsFusion && want[0] && !b.matmulInType.empty() &&
-            b.matmulInType != want)
+        const bool widened = !needsFusion && want[0] &&
+                             !b.matmulInType.empty() && b.matmulInType != want;
+        if (widened)
         {
-          CLPEAK_VLOG("onnx-probe[%s/%s]: %s ran the multiply in %s, not %s "
-                      "-- widened, dropping this shape\n",
+          CLPEAK_VLOG("onnx-probe[%s/%s]: %s ran the multiply in %s, not %s\n",
                       ep.providerKey.c_str(), v.label, shapeName(shape),
                       b.matmulInType.c_str(), want);
+          wide.push_back({shape, reduceInFloat, b.createUs, b.runUs,
+                          b.matmulInType});
           continue;
         }
 
-        // Viable.  The first viable shape settles the scheme and the
-        // reported provenance; later ones only extend the fallback list.
+        // Viable at the right width.  The first such shape settles the scheme
+        // and the reported provenance; later ones only extend the fallback
+        // list.
         if (!r.ok)
         {
           r.ok = true;
@@ -209,6 +230,24 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       }
     }
 
+    // Nothing kept the width, but something ran: this provider has no kernel
+    // for the row's datatype and computed it wider.  Report that rather than
+    // dropping the row.
+    if (!r.ok && !wide.empty())
+    {
+      const Widened &w = wide.front();
+      r.ok = true;
+      r.reduceInFloat = w.reduceInFloat;
+      r.createUs = w.createUs;
+      r.probeUs = w.runUs;
+      r.ranWider = w.ranAs;
+      for (const Widened &x : wide)
+        r.shapes.push_back(x.shape);
+      CLPEAK_VLOG("onnx-probe[%s/%s]: no shape keeps %s; the provider computes "
+                  "it in %s, measuring that\n",
+                  ep.providerKey.c_str(), v.label, want, w.ranAs.c_str());
+    }
+
     if (r.ok)
       CLPEAK_VLOG("onnx-probe[%s/%s]: shapes %zu (first %s)%s\n",
                   ep.providerKey.c_str(), v.label, r.shapes.size(),
@@ -226,9 +265,18 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
                  " s, exceeds tiny budget";
     }
     if (!r.ok && r.reason.empty())
-      r.reason = tried.empty()
-                     ? (firstErr.empty() ? "no fused quantized matmul" : firstErr)
-                     : "provider did not fuse a quantized matmul (ran: " + tried + ")";
+    {
+      if (!tried.empty())
+        r.reason = "provider did not fuse a quantized matmul (ran: " + tried + ")";
+      else if (!firstErr.empty())
+        r.reason = firstErr;
+      else
+        // Say what was actually being looked for.  "No fused quantized
+        // matmul" on a plain fp16 row named the wrong question entirely.
+        r.reason = needsFusion ? "no fused quantized matmul"
+                               : "this provider built no usable graph for " +
+                                     std::string(v.label);
+    }
     out[v.label] = r;
   };
 

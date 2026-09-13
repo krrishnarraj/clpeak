@@ -87,17 +87,6 @@ size_t onnxCountOp(const std::vector<std::string> &ops, const char *name);
 // the verbose log.
 std::string onnxJoinOps(const std::vector<std::string> &ops);
 
-// Does this provider, with the options clpeak registers it with, run an
-// fp32 graph at 16-bit precision and keep its weights in 16 bits?  True for
-// QNN's HTP backend (`enable_htp_fp16_precision`, on by default, is how an
-// fp32 model reaches the NPU at all) and OpenVINO's GPU and NPU targets
-// (their default inference precision is f16).  Those are the vendor's
-// defaults and what an fp32 model actually gets on that hardware, so the
-// rows keep measuring them -- but an fp32 row then moves half the bytes its
-// label implies, and the decode bandwidth rows count what moved.  The
-// numeric-error fp32 row is the runtime confirmation.
-bool onnxEpRunsFp32AsFp16(const onnx_ep_info_t &ep);
-
 // Did the provider actually multiply in integers?
 //
 // Evidence comes in two shapes.  A provider that executes ONNX operators one

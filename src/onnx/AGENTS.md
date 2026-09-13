@@ -1042,6 +1042,47 @@ the provider, the more of its ladder lands in that regime.
 says why: there the per-submission overhead is the measurement rather than a
 thing to divide out, so it probes with five and carries a far larger cap.
 
+## Nothing about a device may be hardcoded by its name
+
+The provider tables that map a registration name to its options
+(`epOptionsFor`) and to a display name (`kEpTable`) are the one legitimate
+place a provider is named: registration genuinely differs per provider and
+there is no way to discover it. **Everything that affects a number has to be
+measured**, because the providers this backend exists to reach are the ones
+nobody has run yet, and a table of known vendors is exactly what such a
+device falls off the end of.
+
+Two rules were written the wrong way round first, and both are worth
+remembering as shapes:
+
+- **A behaviour asserted by provider name.** Several accelerators serve an
+  fp32 graph at 16 bits by default -- QNN's HTP and OpenVINO's GPU and NPU
+  targets do -- and the decode row's byte count was corrected for them from a
+  hardcoded list. It gave the right answer on the two providers in the list
+  and no answer at all anywhere else. What replaced it is a measurement: the
+  decode rows count the bytes the model *declares*, and a row implying more
+  traffic than `onnxStreamBps()` saw the device move says so. A provider that
+  stores an fp32 graph narrower than asked is caught by arithmetic that never
+  needed to know whose it was.
+
+- **A capability assumed universal.** The shape probe rejects a graph shape
+  that widens the multiply, which is right when another shape keeps the width
+  and wrong when none does. ONNX Runtime 1.17's x86 CPU EP has no fp16 MatMul
+  at all and casts in every shape, so a veto deleted its fp16 row -- and
+  through the shared probe cache, every fp16 row in conv and the transformer
+  block. The width check is a preference now: a widening shape is a second
+  choice, and where it is the only choice the row is measured and reports the
+  width it ran at.
+
+The same discipline is why the int8 scheme is chosen by trying both spellings
+and reading the profile rather than by asking which vendor this is, and why
+the fold and resolvability guards are ratios against a measured submission
+cost rather than absolute times. The constants that remain are workload
+shapes (the block's geometry, the conv channel count), search bounds
+(`kImproveFactor`, `kMaxStrikes`), time budgets, and dimensionless thresholds
+calibrated across every provider available -- never a rate any particular
+device is expected to reach.
+
 ## Four shapes, and why no one of them wins
 
 A throughput graph holds both operands as constants so nothing large crosses

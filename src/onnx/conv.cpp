@@ -268,20 +268,6 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "rows says what the hardware was shaped for.",
        TestShape::Heterogeneous, "convolution shape and data type"});
 
-  // See onnxEpRunsFp32AsFp16: QNN's HTP and OpenVINO's GPU and NPU targets
-  // serve an fp32 graph at 16 bits by default.  That is the mode an fp32
-  // model actually gets there, so it stays measured -- but a row labelled
-  // fp32 whose arithmetic is not has to say so, and here there is no
-  // numeric-error row beside it to say it instead.  It is also why the two
-  // precision rows can land on top of each other on those providers.
-  const char *fp32Note =
-      onnxEpRunsFp32AsFp16(ep)
-          ? "  This provider runs fp32 graphs at 16-bit precision by default, "
-            "which is how an fp32 model reaches its hardware at all, so this "
-            "row is that conversion rather than full precision -- and why it "
-            "may match the fp16 row exactly."
-          : "";
-
   for (const DType &dt : kDTypes)
   {
     for (const Shape &v : kShapes)
@@ -472,8 +458,6 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         "fastest at " +
                         std::to_string(bestSpatial) + " square.  " + dt.note +
                         "  " + v.note;
-        if (dt.dtype == ONNX_DT_FLOAT)
-          o.description += fp32Note;
         if (!ranWider.empty())
           o.description += "  This provider has no " + std::string(dt.label) +
                            " convolution kernel and ran it in " + ranWider +

@@ -173,8 +173,6 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // stale record from an earlier run in the same process.
   onnxClearGemmFolded(ep);
 
-  const bool fp32As16 = onnxEpRunsFp32AsFp16(ep);
-
   auto runVariant = [&](const Variant &v) {
     const bool isInt = isIntVariant(v);
 
@@ -542,14 +540,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (pr.castedActs)
         o.description += "  The provider converts the activations first, a "
                          "full pass inside this figure.";
+      if (!pr.ranWider.empty())
+        o.description += "  This provider has no " + std::string(v.label) +
+                         " matmul kernel and ran it in " + pr.ranWider +
+                         ", so this is that width rather than " + v.label + ".";
       if (pr.reduceInFloat)
         o.description += "  The product is cast to fp32 before the reduction; "
                          "the multiply is unaffected.";
       o.description += shapeNote(v, shape);
-      if (fp32As16 && v.dtype == ONNX_DT_FLOAT && !v.qdq)
-        o.description += "  This provider serves fp32 at 16-bit precision by "
-                         "default, so this is that conversion rather than full "
-                         "precision; the fp32 numeric-error row prices it.";
       test.emit(v.label, (float)best, o);
     }
     else

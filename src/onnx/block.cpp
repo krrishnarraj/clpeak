@@ -196,33 +196,6 @@ namespace
     return 2ull * (uint64_t)kHeads * (uint64_t)kv * (uint64_t)kHeadDim * onnxElemBytes(dt, 1);
   }
 
-  // The same two, as the provider actually streams them -- the numerator of
-  // the decode row, which has to be what moved.
-  //
-  // They differ only where a provider stores an fp32 graph at 16 bits, which
-  // QNN's HTP and OpenVINO's GPU and NPU targets do by default: the model
-  // declares four bytes an element and the hardware reads two.  Counting the
-  // declared width there doubles the row -- OpenVINO's GPU reported fp32 at
-  // 110 GB/s against fp16's 54.8 off the identical 2.15 ms, which is one
-  // measurement wearing two numbers.  Every other row declares what it
-  // stores, so this is the fp32 rows and nothing else.
-  uint64_t streamedWeightBytes(const Variant &v, bool fp32As16)
-  {
-    uint64_t bytes = weightBytes(v);
-    if (fp32As16 && v.wDtype == ONNX_DT_FLOAT)
-      bytes /= 2;
-    return bytes;
-  }
-
-  uint64_t streamedKvBytes(const Variant &v, int64_t kv, bool fp32As16)
-  {
-    uint64_t bytes = kvBytes(v, kv);
-    const int dt = v.kvDtype ? v.kvDtype : v.actDtype;
-    if (fp32As16 && dt == ONNX_DT_FLOAT)
-      bytes /= 2;
-    return bytes;
-  }
-
   std::vector<int64_t> promptsFor(const Variant &v)
   {
     // A cache-format row has no prefill reading: prefill builds K and V from the
@@ -588,20 +561,14 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return v.unit != nullptr;
   };
 
-  // Providers that serve an fp32 graph at 16 bits by default (QNN HTP,
-  // OpenVINO GPU/NPU).  That is their default mode and what an fp32 model
-  // actually gets on that hardware, so it stays measured -- but the fp32 rows
-  // then say so, and the decode row counts the bytes that moved rather than
-  // the ones the model declared.
-  const bool fp32As16 = onnxEpRunsFp32AsFp16(ep);
-  auto fp32Note = [fp32As16](const Variant &v) -> const char * {
-    if (!fp32As16 || v.actDtype != ONNX_DT_FLOAT)
-      return "";
-    return "  This provider runs fp32 graphs at 16-bit precision by default, "
-           "which is how an fp32 model reaches its hardware at all, so this "
-           "row is that conversion rather than full precision; the fp32 "
-           "numeric-error row shows the cost.";
-  };
+  // What this provider demonstrably streams, measured (see onnxStreamBps).
+  // The decode rows count the bytes the model *declares*, which is all clpeak
+  // can know: a provider is free to store them narrower than asked, and no
+  // vendor publishes which do.  A row implying more traffic than the device
+  // has been seen to move is that happening, and it is caught by measurement
+  // rather than by a list of provider names -- the point being that a
+  // provider nobody here has run gets the same treatment.
+  const double streamBps = onnxStreamBps(rt, ep);
 
   // What only a run can say: the kernel the provider fused to, the scheme it
   // settled on, and whether it converted the activations first.
@@ -639,7 +606,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       std::to_string(sseq) +
                       " tokens in one pass, counting every multiply in the "
                       "layer." +
-                      prov + fp32Note(vv);
+                      prov;
       if (vv.unit)
         o.unit = vv.unit;
       if (!vvr.usable)
@@ -928,11 +895,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
-      const uint64_t wStreamed = streamedWeightBytes(v, fp32As16);
-      const uint64_t kvStreamed = streamedKvBytes(v, kDecodeKv, fp32As16);
-      const double bytes = (double)(wStreamed + kvStreamed);
+      const uint64_t wBytes = weightBytes(v);
+      const uint64_t kvB = kvBytes(v, kDecodeKv);
+      const double bytes = (double)(wBytes + kvB);
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  One token with 2048 of context: " + std::to_string((unsigned long long)(wStreamed >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvStreamed >> 20)) + " MB of cached context, read in full for one token." + provenance(v, vr) + fp32Note(v);
+      o.description = std::string(v.note) + "  One token with 2048 of context: " + std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvB >> 20)) + " MB of cached context, read in full for one token." + provenance(v, vr);
 
       // Prefill settled most variants already; validateVariant answers from
       // what it recorded and only probes the ones it has not seen -- the
@@ -968,7 +935,21 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       if (it != vr.decode.end())
       {
-        if (it->second.us > 0.0) test.emit(metric, (float)(bytes / (it->second.us * 1.0e-6)), o);
+        if (it->second.us > 0.0)
+        {
+          const double bps = bytes / (it->second.us * 1.0e-6);
+          // More traffic than this provider has been seen to move means it is
+          // not moving what the format declares -- it stored the weights
+          // narrower than asked, which several accelerators do to an fp32
+          // graph by default.  Measured, so it holds for any provider.
+          if (streamBps > 0.0 && bps > streamBps)
+            o.description += "  This is more than the " +
+                             std::to_string((long long)(streamBps / 1.0e9)) +
+                             " GB/s this provider was measured streaming, so "
+                             "it is not moving the bytes this precision "
+                             "declares -- it is storing them narrower.";
+          test.emit(metric, (float)bps, o);
+        }
         else test.skip(metric, it->second.status, it->second.error, o);
       }
     }
@@ -989,7 +970,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note + prov + fp32Note(v);
+        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note + prov;
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
         else
         {
@@ -1019,7 +1000,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       for (int64_t kv : contextsFor(v))
       {
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
-        const std::string note = "One generated token with " + std::to_string(kv) + " tokens of context behind it.  " + v.note + prov + fp32Note(v);
+        const std::string note = "One generated token with " + std::to_string(kv) + " tokens of context behind it.  " + v.note + prov;
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); continue; }
         auto it = vr.decode.find(kv);
         if (it == vr.decode.end() || it->second.us <= 0.0)

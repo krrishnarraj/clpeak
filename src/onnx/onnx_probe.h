@@ -26,6 +26,12 @@ struct OnnxProbeResult
   const char *schemeName = "";
   bool castedActs = false;
   bool reduceInFloat = false;
+  // Non-empty when no graph shape could keep the multiply at the row's own
+  // width, and this is the width the provider used instead ("float").  That
+  // is a fact about the provider, not about the shape -- ONNX Runtime's x86
+  // CPU EP has no fp16 MatMul at all on some versions and casts in every
+  // shape -- so the row is measured and says so, rather than refused.
+  std::string ranWider;
   // What one run of the 32^3 probe cost.  At that size the multiply is 65
   // kFLOP -- nothing -- so this is very nearly the provider's per-submission
   // overhead, measured on the row's own graph.  The ladder subtracts it
