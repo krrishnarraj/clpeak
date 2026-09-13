@@ -76,28 +76,24 @@ namespace
   // bfloat16 among its types at opset 14, which is why gemm keeps its row.
   const DType kDTypes[] = {
       {ONNX_DT_FLOAT, "fp32",
-       "FP32 inputs and outputs, like the fp32 matmul row.  An accelerator "
-       "that refuses it, or falls far short of its own fp16 row, has no full-"
-       "precision convolution path."},
+       "FP32 in and out; far short of this provider's own fp16 row means no "
+       "full-precision convolution path."},
       {ONNX_DT_FLOAT16, "fp16",
        "16-bit floats, the native currency of most convolution engines."},
   };
 
   const Shape kShapes[] = {
       {3, false, "conv3x3",
-       "A 3x3 convolution over 256 channels -- the shape most vision networks "
-       "are built from, and the one accelerators were designed "
-       "around."},
+       "A 3x3 convolution over 256 channels, the shape most vision networks "
+       "are built from and the one accelerators were designed around."},
       {1, false, "conv1x1",
-       "A 1x1 convolution: arithmetically a matrix multiply applied at every "
-       "pixel, so it should land near the matmul rows.  Where it does not, "
-       "the provider is handling the two shapes with different machinery."},
+       "Arithmetically a matrix multiply at every pixel, so it should land "
+       "near the matmul rows; where it does not, the two shapes reach "
+       "different machinery."},
       {3, true, "depthwise3x3",
-       "A depthwise 3x3 convolution -- the same shape as the first but with "
-       "each channel kept separate, so there is far less arithmetic per value "
-       "loaded.  Hardware built around dense multiply-accumulate arrays "
-       "usually collapses here, which is why efficient mobile networks are "
-       "often slower than their arithmetic suggests."},
+       "The 3x3 shape with each channel kept separate, so far less arithmetic "
+       "per value loaded.  Hardware built around dense arrays collapses here, "
+       "which is why mobile networks run slower than their FLOP counts."},
   };
 
   // Deterministic fp values in [-0.5, 0.5), as in gemm.cpp's filler: small
@@ -264,13 +260,25 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
-       "Convolution speed at the precision each row names, swept over "
-       "feature-map sizes and reported at its best.  Accelerators were "
-       "built for this operation before they were asked to do anything else, "
-       "and many reach a higher share of their arithmetic peak here than on a "
-       "plain matrix multiply.  Read alongside the matmul rows: the gap "
-       "between them says what the hardware was shaped for.",
+       "Convolution rate at the precision and shape each row names, swept "
+       "over feature-map sizes and reported at its best.  Accelerators were "
+       "built for this before anything else, so the gap against the matmul "
+       "rows says what the hardware was shaped for.",
        TestShape::Heterogeneous, "convolution shape and data type"});
+
+  // See onnxEpRunsFp32AsFp16: QNN's HTP and OpenVINO's GPU and NPU targets
+  // serve an fp32 graph at 16 bits by default.  That is the mode an fp32
+  // model actually gets there, so it stays measured -- but a row labelled
+  // fp32 whose arithmetic is not has to say so, and here there is no
+  // numeric-error row beside it to say it instead.  It is also why the two
+  // precision rows can land on top of each other on those providers.
+  const char *fp32Note =
+      onnxEpRunsFp32AsFp16(ep)
+          ? "  This provider runs fp32 graphs at 16-bit precision by default, "
+            "which is how an fp32 model reaches its hardware at all, so this "
+            "row is that conversion rather than full precision -- and why it "
+            "may match the fp16 row exactly."
+          : "";
 
   for (const DType &dt : kDTypes)
   {
@@ -443,6 +451,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         "fastest at " +
                         std::to_string(bestSpatial) + " square.  " + dt.note +
                         "  " + v.note;
+        if (dt.dtype == ONNX_DT_FLOAT)
+          o.description += fp32Note;
         test.emit(row, (float)best, o);
       }
       else

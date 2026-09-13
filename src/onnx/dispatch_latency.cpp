@@ -181,12 +181,10 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_dispatch_latency", "ONNX dispatch latency", "s",
        Category::Latency,
-       "The fixed cost of handing one piece of work to this execution "
-       "provider, with the arithmetic made deliberately negligible.  Reaching "
-       "an accelerator means crossing a runtime, a driver and sometimes an "
-       "on-device compiler, and each crossing is charged per submission.  "
-       "This is why a chip advertising tens of TOPS can still lose to the CPU "
-       "on small work, and none of the throughput rows can show it.",
+       "The fixed cost of handing one piece of work to this provider, with "
+       "the arithmetic made deliberately negligible.  It is why a chip "
+       "advertising tens of TOPS can still lose to the host on small work, "
+       "and no throughput row can show it.",
        TestShape::Heterogeneous, "what is submitted"});
 
   if (trivial.perRunUs > 0.0)
@@ -211,10 +209,9 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   if (trivial.createUs > 0.0)
     test.emit("session_create", (float)(trivial.createUs * 1e-6),
-              "Preparing that trivial graph for execution.  On providers that "
-              "compile graphs ahead of time this runs a compiler rather than "
-              "bookkeeping, which is why starting up and running steadily are "
-              "such different stories.");
+              "Preparing that trivial graph for execution.  On providers "
+              "that compile ahead of time this runs a compiler, not "
+              "bookkeeping.");
   else
     test.skip("session_create", trivial.status, trivial.error,
               "Preparing the trivial graph for execution.");

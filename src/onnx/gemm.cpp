@@ -121,21 +121,20 @@ namespace
       return "";
     case OnnxLiveShape::OperandScaled:
       return v.qdq
-                 ? "  The activations are scaled by a runtime value and "
-                   "quantized on the device before the multiply, so it cannot "
-                   "be evaluated at compile time; that pass is inside this "
-                   "figure."
-                 : "  The activations are scaled by a runtime value before the "
-                   "multiply, so it cannot be evaluated at compile time; that "
-                   "one elementwise pass is inside this figure.";
+                 ? "  The activations are scaled at run time and quantized on "
+                   "device, so this provider's compiler cannot fold the "
+                   "multiply away; that pass is inside the figure."
+                 : "  The activations are scaled at run time, so this "
+                   "provider's compiler cannot fold the multiply away; that "
+                   "pass is inside the figure.";
     case OnnxLiveShape::Add0:
-      return "  The activations add a runtime zero on the way in, so the "
-             "multiply cannot be evaluated at compile time; that pass is "
-             "inside this figure.";
+      return "  The activations take a runtime zero on the way in, so this "
+             "provider's compiler cannot fold the multiply away; that pass is "
+             "inside the figure.";
     case OnnxLiveShape::QdqAdd0:
-      return "  The activations add a runtime zero as a quantized op on the "
-             "way in, so the multiply cannot be evaluated at compile time; "
-             "that pass is inside this figure.";
+      return "  The activations take a runtime zero as a quantized op, so this "
+             "provider's compiler cannot fold the multiply away; that pass is "
+             "inside the figure.";
     }
     return "";
   }
@@ -151,14 +150,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {"onnx_gemm", "ONNX MatMul peak",
        "flops",
        Category::Unknown,
-       "Matrix-multiply speed through ONNX Runtime on this execution "
-       "provider, using a single-operation model with constant weights.  "
-       "The identical model runs on every provider, so rows from different "
-       "providers are directly comparable -- and the gap against a vendor's "
-       "advertised TOPS is real, not an artifact of different test code.  "
-       "Providers that cannot run an operation entirely on their device "
-       "report it as unsupported instead of quietly measuring the CPU.  "
-       "Each reading is a different input format.",
+       "Matrix-multiply rate through this execution provider, one data type "
+       "per row, swept over square sizes and reported at its best.  The same "
+       "model runs on every provider, and one that cannot run it entirely on "
+       "its own device reports unsupported rather than quietly measuring the "
+       "host.",
        TestShape::Heterogeneous, "data type"});
 
   // runAll also clears per EP before dispatching; this entry clear keeps
@@ -503,25 +499,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       o.description = "Peak over a doubling sweep of square sizes; fastest at " + std::to_string(bestDim) + " cubed.  " + v.note;
       if (!pr.ranAs.empty())
-        o.description += "  The provider ran the multiply as " + pr.ranAs +
-                         " with " + pr.schemeName +
-                         ", confirming it really ran in " + v.label + ".";
+        o.description += "  Ran as " + pr.ranAs + " (" + pr.schemeName + ").";
       if (pr.castedActs)
-        o.description += "  This provider does not take the activations in the "
-                         "width they were given, so it converts them first: "
-                         "that is a full pass over them on every run and it is "
-                         "inside this figure.";
+        o.description += "  The provider converts the activations first, a "
+                         "full pass inside this figure.";
       if (pr.reduceInFloat)
-        o.description += "  This provider has no reduction for the datatype, "
-                         "so the product is cast to fp32 before being reduced; "
-                         "the multiply itself is unaffected, but the cast is a "
-                         "full pass over the result and costs a few percent.";
+        o.description += "  The product is cast to fp32 before the reduction; "
+                         "the multiply is unaffected.";
       o.description += shapeNote(v, shape);
       if (fp32As16 && v.dtype == ONNX_DT_FLOAT && !v.qdq)
-        o.description += "  This provider runs fp32 graphs at 16-bit precision "
-                         "by default, which is how an fp32 model reaches its "
-                         "hardware at all; the fp32 numeric-error row shows "
-                         "the cost.";
+        o.description += "  This provider serves fp32 at 16-bit precision by "
+                         "default, so this is that conversion rather than full "
+                         "precision; the fp32 numeric-error row prices it.";
       test.emit(v.label, (float)best, o);
     }
     else

@@ -267,20 +267,12 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_tensor_bw", "ONNX resident-tensor bandwidth", "bps",
        Category::Bandwidth,
-       "How fast this provider streams model weights out of its own memory, "
-       "measured on the exact operation that generating a token performs -- "
-       "one row of numbers multiplied through a weight matrix, in whichever "
-       "of fp16 and fp32 the provider streams faster -- at three "
-       "weight sizes.  Producing each word of text requires reading every "
-       "weight, so this is the ceiling on how fast words can appear.  The "
-       "size at which the rate drops is the size at which a model stopped "
-       "fitting in the device's fast local memory; past that point its "
-       "weights come from main memory on every single token.  The fixed cost "
-       "of handing work to the device is measured separately and subtracted, "
-       "so these are transfer rates rather than round-trip times.  A rate "
-       "that is flat across every size, and low, means the provider is "
-       "limited by its own arithmetic rather than by memory -- read it as "
-       "what this provider can stream, not as what the memory could do.",
+       "How fast this provider streams weights out of its own memory, on the "
+       "operation generating a token performs: one row of numbers multiplied "
+       "through a weight matrix, in whichever of fp16 and fp32 it streams "
+       "faster.  The size at which the rate drops is where a model stops "
+       "fitting in fast local memory, and the cost of handing work over is "
+       "subtracted, so these are transfer rates rather than round trips.",
        // The point of the ladder is where the rate drops, so the rungs are
        // not interchangeable and the fastest of them is not the answer.
        TestShape::Heterogeneous, "weight size"});

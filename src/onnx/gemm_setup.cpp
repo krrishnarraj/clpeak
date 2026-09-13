@@ -13,71 +13,55 @@ namespace onnxgemm
 
 const Variant kFpVariants[] = {
     {ONNX_DT_FLOAT, false, "fp32",
-     "FP32 graph inputs and outputs.  A provider may use a narrower internal "
-     "format; read the fp32 numeric-error row beside this one to see whether "
-     "it did.  Many providers cannot run this on their matrix hardware at "
-     "all, or route it away from that hardware -- that is a finding, not "
-     "a failure.",
+     "FP32 in and out.  Some providers compute it narrower or route it off "
+     "their matrix hardware entirely; the fp32 numeric-error row says which.",
      0, false},
     {ONNX_DT_FLOAT16, false, "fp16",
      "16-bit floats, the native currency of most matrix hardware.", 0, false},
     {ONNX_DT_BFLOAT16, false, "bf16",
      "The 16-bit float with fp32's exponent range and three fewer mantissa "
-     "bits.  Modern matrix hardware usually runs it at the fp16 rate; a "
-     "provider that falls well short of its own fp16 row is emulating it, "
-     "and one that refuses it outright has no bf16 path at all.",
+     "bits.  Hardware with a real bf16 path runs it at the fp16 rate; well "
+     "short of that is emulation.",
      0, false},
     {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
-     "8-bit floats in QDQ form, in the variant that spends its bits on "
-     "precision: four exponent bits and three of mantissa, reaching 448.  "
-     "This is the format quantized inference actually uses when it moves below "
-     "16 bits without going to integers.",
+     "The 8-bit float that spends its bits on precision -- four exponent, "
+     "three mantissa, reaching 448 -- quantized in and out.  This is what "
+     "inference uses below 16 bits without going to integers.",
      0, false},
     {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
-     "The other 8-bit float, trading a mantissa bit for an exponent one: it "
-     "reaches 57344 and rounds more coarsely.  Hardware usually runs both at "
-     "the same rate, so a difference between these two rows is the provider "
-     "choosing different machinery, and the accuracy rows say what each costs.",
+     "The other 8-bit float, a mantissa bit traded for an exponent one: it "
+     "reaches 57344 and rounds more coarsely.  A gap against the e4m3 row is "
+     "the provider reaching for different machinery.",
      0, false},
     {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1",
-     "4-bit floating point on both operands: two exponent bits, one of "
-     "mantissa, eight magnitudes in all and a largest value of 6.  This is the "
-     "narrowest format current tensor cores implement, and unlike int4 there "
-     "is a chance a provider fuses it into a real 4-bit multiply rather than "
-     "unpacking it -- the row says which happened.",
+     "4-bit floating point on both operands, one scale for the whole tensor: "
+     "eight magnitudes in all, the largest 6.  Unlike int4 a provider may fuse "
+     "it into real 4-bit arithmetic, and the row says whether this one did.",
      0, false},
     {ONNX_DT_FLOAT4E2M1, false, "nvfp4",
-     "NVIDIA's 4-bit block format on both operands: E2M1 values, an 8-bit "
-     "float scale for every 16 of them along the reduction axis, and one more "
-     "scale for the whole tensor.  Two levels are what let four bits carry a "
-     "real model, and this is the arrangement a float4 tensor core expects -- "
-     "so unlike every other narrow row here, a number in it would be genuine "
-     "4-bit arithmetic rather than four bits unpacked into something wider.",
+     "NVIDIA's 4-bit block format on both operands: an 8-bit float scale for "
+     "every 16 values along the reduction axis, and one more for the tensor.  "
+     "It is the only row here whose arithmetic is genuinely four-bit rather "
+     "than four bits unpacked into something wider.",
      /*blockSize=*/16, /*nvfp4=*/true},
     {ONNX_DT_FLOAT4E2M1, false, "fp4_weight",
-     "The same 4-bit float used only for the weights, one scale per 32 of "
-     "them, against 16-bit activations.  Directly comparable with the int4 "
-     "row above it: identical geometry, identical block size, and the only "
-     "difference is whether those four bits are spent on a float or an "
-     "integer.",
+     "4-bit float weights, one scale per 32, against 16-bit activations.  "
+     "Identical to the int4 row in every respect but whether the four bits "
+     "are a float or an integer.",
      /*blockSize=*/32, false},
     {ONNX_DT_INT4, false, "int4_weight",
-     "4-bit weights with one scale per 32 of them, against 16-bit activations "
-     "-- the form quantized language models actually ship in.  The arithmetic "
-     "is still 16-bit, because ONNX has no 4-bit multiply and the weights are "
-     "unpacked on the way in, so this row is reported in TFLOPS and what four "
-     "bits buys is a quarter of the weight traffic rather than a faster "
-     "multiply.  On a square problem like this one that mostly shows up as "
-     "matching the fp16 row; a provider well below it is unpacking badly.",
+     "4-bit integer weights, one scale per 32, against 16-bit activations -- "
+     "how quantized language models ship.  They unpack into a 16-bit "
+     "multiply, so this reads in TFLOPS: four bits buys weight traffic, not "
+     "rate, and well below the fp16 row is a costly unpack.",
      /*blockSize=*/32, false},
 };
 const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 
 const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
-     "8-bit integers in QDQ form -- quantized in, quantized out, the shape "
-     "quantized inference actually ships in.  This is what vendors usually "
-     "quote headline TOPS figures for.",
+     "8-bit integers quantized in and quantized out, the shape quantized "
+     "inference ships in and what vendors quote headline TOPS figures for.",
      0, false},
 };
 const size_t kIntVariantCount = sizeof(kIntVariants) / sizeof(kIntVariants[0]);

@@ -102,12 +102,11 @@ namespace
        "x times sigmoid(x) -- the gate in the feed-forward network of most "
        "current language models."},
       {OnnxActivation::Softmax, "softmax",
-       "Softmax across the row, the operation at the heart of attention.  It "
-       "needs two passes over the data and a maximum before it can divide, which "
-       "makes it far harder for fixed-function hardware than its cost suggests."},
+       "Softmax across the row, at the heart of attention: two passes and a "
+       "maximum before it can divide."},
       {OnnxActivation::LayerNorm, "layernorm",
-       "Layer normalisation: mean and variance across each row, then rescale.  "
-       "Every transformer layer does this at least twice."},
+       "Mean and variance across each row, then rescale -- every transformer "
+       "layer does this at least twice."},
   };
 
   struct Run
@@ -260,17 +259,10 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        Category::Bandwidth,
        "How fast this provider runs the operations between the matrix "
        "multiplies -- normalisation, softmax, the feed-forward gate.  They do "
-       "almost no arithmetic, so their limit is how fast data moves, and the "
-       "figure here is the bandwidth each one achieves.  Held against the "
-       "resident-tensor rows, it shows how much of a layer goes on the cheap "
-       "parts: hardware built for matrix multiplication often runs these at a "
-       "small fraction of its streaming speed, and they are also the "
-       "operations a provider is most likely to hand back to the CPU.  Each "
-       "row is net of a reference graph that reads the same tensor and "
-       "applies nothing, and is measured at the same three working-set sizes "
-       "as the resident-tensor rows, so the two divide row for row.  Where a "
-       "row drops sharply against the one above it, the activations have "
-       "outgrown the memory the provider keeps close.",
+       "almost no arithmetic, so their limit is memory and the figure is the "
+       "bandwidth each achieves, net of a reference graph that reads the same "
+       "tensor and applies nothing.  The sizes are the resident-tensor rows' "
+       "own, so the two ladders divide row for row.",
        // Three operations across three working-set sizes: nine separate
        // measurements, no one of which stands for the rest.
        TestShape::Heterogeneous, "operation and size"});
@@ -319,9 +311,9 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const std::string metric = std::string(v.label) + "_" + sz.label;
       const std::string note =
           std::string(sz.label) + " of activations -- " + v.note +
-          "  Read against onnx-tensor-bw's rung of the same name: the ratio is "
-          "how much of its streaming rate this provider keeps once it has to "
-          "apply a function to the data." + widthNote;
+          "  Against onnx-tensor-bw's rung of the same name, the ratio is how "
+          "much of its streaming rate this provider keeps once it has to touch "
+          "the data." + widthNote;
 
       if (bytes * kCopiesAtPeak > maxTensorBytes())
       {

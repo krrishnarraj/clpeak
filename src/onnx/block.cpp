@@ -116,75 +116,57 @@ namespace
   const Variant kVariants[] = {
       {"fp16", ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true, nullptr,
        "16-bit weights and 16-bit arithmetic, the form an unquantized model is "
-       "served in and the reference every other row here is read against."},
+       "served in and the reference the other rows are read against."},
 
       {"int4_weight", ONNX_DT_FLOAT16, ONNX_DT_INT4, kWeightBlock, false,
        /*sweep=*/true, nullptr,
-       "4-bit weights with one scale per 32 of them, against 16-bit activations "
-       "-- what a quantized language model actually ships as.  The arithmetic is "
-       "still 16-bit, because the weights are unpacked on the way into the "
-       "multiply, so what four bits buys is a quarter of the weight traffic.  "
-       "That is worth nothing while the layer is compute-bound and worth "
-       "everything while it is not, which is exactly what the prompt ladder and "
-       "the decode rows respectively show."},
+       "4-bit weights, one scale per 32, against 16-bit activations -- what a "
+       "quantized language model ships as.  The arithmetic stays 16-bit, so "
+       "four bits buys weight traffic rather than rate."},
 
       {"fp4_weight", ONNX_DT_FLOAT16, ONNX_DT_FLOAT4E2M1, kWeightBlock, false,
        /*sweep=*/false, nullptr,
-       "The same shape as the int4 row -- identical geometry, identical block of "
-       "32, identical 16-bit activations -- with the four bits spent on a float "
-       "instead of an integer.  Nothing else differs, so a gap between the two is "
-       "the format and not the arrangement."},
+       "The int4 row's shape exactly, with the four bits spent on a float "
+       "instead of an integer, so a gap between the two is the format alone."},
 
       {"int8_weight", ONNX_DT_FLOAT16, ONNX_DT_INT8, kWeightBlock, false,
        /*sweep=*/false, nullptr,
-       "8-bit weights, blocked the same way, against 16-bit activations.  Read "
-       "beside int8_qdq it separates the two things quantization does: this row "
-       "narrows only the weights, that one narrows the arithmetic as well, and "
-       "the difference between them is what the integer units are worth."},
+       "8-bit weights, blocked the same way, against 16-bit activations.  This "
+       "narrows only the weights where int8_qdq narrows the arithmetic too, so "
+       "the gap between them is what the integer units are worth."},
 
       {"int8_qdq", ONNX_DT_FLOAT16, ONNX_DT_INT8, 0, /*qdq=*/true,
        /*sweep=*/false, "ops",
-       "8-bit weights and 8-bit arithmetic through the projections, quantized in "
-       "and quantized out -- the form vendors usually quote headline TOPS figures "
-       "for, now measured on a whole layer rather than one matmul.  Attention and "
-       "the softmax stay 16-bit, as they do in every real deployment."},
+       "8-bit weights and 8-bit arithmetic through the projections, quantized "
+       "in and out -- what headline TOPS figures are quoted for, measured on a "
+       "whole layer.  Attention and the softmax stay 16-bit, as they do in "
+       "every real deployment."},
 
       {"fp32", ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
-       "Full precision, which nobody serves a language model in.  It is here as a "
+       "Full precision, which nobody serves a language model in, here as a "
        "control: a provider whose fp16 row fails to beat it is not running "
-       "half-precision hardware, and on some providers this is the only row "
-       "with a native kernel behind it."},
+       "half-precision hardware."},
 
       {"bf16", ONNX_DT_BFLOAT16, ONNX_DT_BFLOAT16, 0, false, /*sweep=*/false,
        nullptr,
-       "The 16-bit float with fp32's exponent range and three fewer mantissa bits. "
-       " A whole layer is a far harder test of it than a matmul is: it needs bf16 "
-       "kernels for every operation in the block -- the elementwise multiplies, "
-       "the softmax, the sigmoid, the residual adds and the reduction -- and not "
-       "merely for the matrix multiply.  A refusal here beside a working bf16 row "
-       "in the MatMul test is exactly that gap, and it is why a model in this "
-       "format can fail to run at all on hardware whose spec sheet advertises "
-       "it."},
+       "The 16-bit float with fp32's exponent range and three fewer mantissa "
+       "bits.  A layer needs bf16 kernels for every operation in it, not just "
+       "the matmul, so a refusal here beside a working MatMul bf16 row is that "
+       "gap."},
 
       {"fp8_e4m3", ONNX_DT_FLOAT16, ONNX_DT_FLOAT8E4M3FN, 0, /*qdq=*/true,
        /*sweep=*/false, nullptr,
-       "8-bit floats through the projections -- four exponent bits and three of "
-       "mantissa -- quantized in and quantized out, against 16-bit attention.  "
-       "This is what quantized inference uses when it goes below 16 bits without "
-       "going to integers, and unlike int8 it keeps enough exponent range for "
-       "activations that have some.  Reported in TFLOPS, not TOPS: it is a "
-       "floating-point format."},
+       "8-bit floats through the projections, quantized in and out, against "
+       "16-bit attention.  Unlike int8 it keeps exponent range for activations "
+       "that have some, and it reports in TFLOPS because it is a float."},
 
       {"int8_kv", ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true,
        nullptr,
-       "16-bit weights and arithmetic throughout, with only the cached context "
-       "stored as 8-bit integers -- an axis of its own, and the one that decides "
-       "how long a conversation a device can hold.  At 8192 tokens the cache is "
-       "67 MB against 101 MB of weights, so halving it moves the total meaningfully "
-       "in a way it does not at short context, which is why this row sweeps.  It "
-       "is only a real measurement if the provider folds the dequantize into its "
-       "attention kernel; if it reads the whole cache back at full width every "
-       "token the row is refused, because that is slower than not quantizing.",
+       "16-bit throughout with only the cached context stored as 8-bit "
+       "integers -- the axis that decides how long a conversation a device can "
+       "hold, which is why this row sweeps context.  It counts only if the "
+       "provider folds the dequantize into its attention kernel; reading the "
+       "cache back at full width every token is refused.",
        /*kvDtype=*/ONNX_DT_INT8, /*decodeOnly=*/true},
   };
 
@@ -195,9 +177,9 @@ namespace
            + kFfnHidden * kDModel;    // Wd
   }
 
-  // Bytes of projection weights this variant actually keeps resident, blocked
-  // scales included.  This is the numerator of the decode row, so it has to be
-  // what moves rather than what an fp16 model would have moved.
+  // Bytes of projection weights this variant declares, blocked scales
+  // included.  This is the model's own size: what has to be built, uploaded
+  // and held, which is what the memory gate asks about.
   uint64_t weightBytes(const Variant &v)
   {
     const int64_t n = weightParams();
@@ -212,6 +194,33 @@ namespace
     // K and V, every head, at whatever width the cache is stored in.
     const int dt = v.kvDtype ? v.kvDtype : v.actDtype;
     return 2ull * (uint64_t)kHeads * (uint64_t)kv * (uint64_t)kHeadDim * onnxElemBytes(dt, 1);
+  }
+
+  // The same two, as the provider actually streams them -- the numerator of
+  // the decode row, which has to be what moved.
+  //
+  // They differ only where a provider stores an fp32 graph at 16 bits, which
+  // QNN's HTP and OpenVINO's GPU and NPU targets do by default: the model
+  // declares four bytes an element and the hardware reads two.  Counting the
+  // declared width there doubles the row -- OpenVINO's GPU reported fp32 at
+  // 110 GB/s against fp16's 54.8 off the identical 2.15 ms, which is one
+  // measurement wearing two numbers.  Every other row declares what it
+  // stores, so this is the fp32 rows and nothing else.
+  uint64_t streamedWeightBytes(const Variant &v, bool fp32As16)
+  {
+    uint64_t bytes = weightBytes(v);
+    if (fp32As16 && v.wDtype == ONNX_DT_FLOAT)
+      bytes /= 2;
+    return bytes;
+  }
+
+  uint64_t streamedKvBytes(const Variant &v, int64_t kv, bool fp32As16)
+  {
+    uint64_t bytes = kvBytes(v, kv);
+    const int dt = v.kvDtype ? v.kvDtype : v.actDtype;
+    if (fp32As16 && dt == ONNX_DT_FLOAT)
+      bytes /= 2;
+    return bytes;
   }
 
   std::vector<int64_t> promptsFor(const Variant &v)
@@ -579,26 +588,38 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return v.unit != nullptr;
   };
 
-  auto provenanceEarly = [](const Variant &v, const VariantResult &vr)
-  {
-    std::string s = "  " +
-                    std::to_string((unsigned long long)(weightBytes(v) >> 20)) +
-                    " MB of weights";
-    if (!vr.ranAs.empty())
-    {
-      s += ", run as " + vr.ranAs;
-      if (vr.schemeName[0])
-        s += " with " + std::string(vr.schemeName);
-      if (vr.castedActs)
-        s += ", after casting the activations to the width its kernel wanted "
-             "-- a full pass over them inside this figure";
-    }
-    return s + ".";
+  // Providers that serve an fp32 graph at 16 bits by default (QNN HTP,
+  // OpenVINO GPU/NPU).  That is their default mode and what an fp32 model
+  // actually gets on that hardware, so it stays measured -- but the fp32 rows
+  // then say so, and the decode row counts the bytes that moved rather than
+  // the ones the model declared.
+  const bool fp32As16 = onnxEpRunsFp32AsFp16(ep);
+  auto fp32Note = [fp32As16](const Variant &v) -> const char * {
+    if (!fp32As16 || v.actDtype != ONNX_DT_FLOAT)
+      return "";
+    return "  This provider runs fp32 graphs at 16-bit precision by default, "
+           "which is how an fp32 model reaches its hardware at all, so this "
+           "row is that conversion rather than full precision; the fp32 "
+           "numeric-error row shows the cost.";
   };
 
-  const char *geometryEarly =
-      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
-      "(50.6M parameters).  ";
+  auto provenanceEarly = [](const Variant &v, const VariantResult &vr)
+  {
+    if (vr.ranAs.empty())
+      return std::string();
+    std::string s = "  Ran as " + vr.ranAs;
+    if (vr.schemeName[0])
+      s += " (" + std::string(vr.schemeName) + ")";
+    s += ".";
+    if (vr.castedActs)
+      s += "  The provider casts the activations to the width its kernel "
+           "wanted, a full pass inside this figure.";
+    return s;
+  };
+
+  // The geometry is identical on every row of every variant, so it is stated
+  // once in each test description rather than pasted onto each reading.
+  const char *geometryEarly = "";
 
   // The affordability seed, carried across variants.  Each one's first point
   // has no measurement of its own to predict from, and letting all six pay
@@ -619,7 +640,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       std::to_string(sseq) +
                       " tokens in one pass, counting every multiply in the "
                       "layer." +
-                      prov;
+                      prov + fp32Note(vv);
       if (vv.unit)
         o.unit = vv.unit;
       if (!vvr.usable)
@@ -643,88 +664,59 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const logger::TestSpec prefillFlopsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "flops",
       Category::Ai,
-      "Speed of one whole transformer layer while it is chewing through a "
-      "prompt, at each precision a model ships in.  This is the phase that "
-      "decides how long you wait before the first word appears.  Unlike "
-      "the raw matmul rows, everything a real layer does is in here: "
-      "attention, softmax, the feed-forward network and the data shuffling "
-      "between them, so it is what a device actually delivers rather than "
-      "what its silicon could do in principle.  Only the seven projection "
-      "matmuls change precision -- attention and the softmax stay 16-bit, "
-      "as they do in every real deployment -- so whatever separates two "
-      "rows is the projection format and nothing else.  A short prompt "
-      "cannot fill wide hardware, so the fp16 rate climbs with the prompt "
-      "and then flattens; where it flattens is how much text has to arrive "
-      "together before batching requests stops helping.",
+      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
+      "(50.6M parameters), working through a prompt -- the "
+      "phase that decides how long you wait for the first word -- at each "
+      "precision a model ships in.  Everything a real layer does is in here, "
+      "and only the seven projection matmuls change precision, so whatever "
+      "separates two rows is the projection format.",
       TestShape::Heterogeneous, "data type and prompt length"};
   const logger::TestSpec prefillOpsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "ops",
       Category::Ai,
-      "Speed of one whole transformer layer while it is chewing through a "
-      "prompt, at each precision a model ships in.  This is the phase that "
-      "decides how long you wait before the first word appears.  Unlike "
-      "the raw matmul rows, everything a real layer does is in here: "
-      "attention, softmax, the feed-forward network and the data shuffling "
-      "between them, so it is what a device actually delivers rather than "
-      "what its silicon could do in principle.  Only the seven projection "
-      "matmuls change precision -- attention and the softmax stay 16-bit, "
-      "as they do in every real deployment -- so whatever separates two "
-      "rows is the projection format and nothing else.  A short prompt "
-      "cannot fill wide hardware, so the fp16 rate climbs with the prompt "
-      "and then flattens; where it flattens is how much text has to arrive "
-      "together before batching requests stops helping.",
+      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
+      "(50.6M parameters), working through a prompt -- the "
+      "phase that decides how long you wait for the first word -- at each "
+      "precision a model ships in.  Everything a real layer does is in here, "
+      "and only the seven projection matmuls change precision, so whatever "
+      "separates two rows is the projection format.",
       TestShape::Heterogeneous, "data type and prompt length"};
   const logger::TestSpec decodeSpec = {
       "onnx_block_decode", "Transformer block, decode", "bps",
       Category::Ai,
-      "How fast the same layer streams its weights while generating one "
-      "token with 2048 tokens of context behind it, at each precision.  "
-      "Generating text one token at a time is limited by memory, not "
-      "arithmetic: every weight has to be read to produce a single word, "
-      "which is the whole reason quantized models exist.  Each row counts "
-      "the bytes that format actually moves, so the rows are a measure of "
-      "how much of the device's bandwidth the AI stack keeps -- compare "
-      "them with the plain memory-bandwidth rows, and expect them to agree "
-      "with each other.  A narrow-weight row far below the 16-bit one is a "
-      "provider unpacking the weights to full width before using them.",
+      "How fast one 2048-wide, 16-head decoder block (50.6M parameters) "
+      "streams its weights while generating a token with 2048 of context, at "
+      "each precision.  Each row counts the bytes "
+      "that format actually moves, so it compares directly against the plain "
+      "memory-bandwidth rows -- and a narrow-weight row far below the 16-bit "
+      "one is a provider unpacking to full width before using them.",
       TestShape::Heterogeneous, "data type"};
   const logger::TestSpec latencySpec = {
       "onnx_block_latency", "Transformer block latency", "s",
       Category::Ai,
-       "How long one layer takes, in seconds, at each precision.  "
-      "Multiply by a model's layer count for a floor on that model's "
-      "time-to-first-token and per-token time on this device -- a 32-layer "
-      "7B model runs 32 of these back to back per token.  It is the honest "
-      "way to check a tokens-per-second claim without downloading "
-      "anything, and the only scope here where a quantized format's "
-      "advantage appears as the thing a user feels: less time.  The decode "
-      "rows also show what a longer conversation costs -- everything but "
-      "attention takes the same time at every context length, so whatever "
-      "they add as the context grows is attention.  A device whose time "
-      "barely moves is reading its cached context efficiently; one that "
-      "climbs steeply will feel fine in a demo and poor in use.",
+      "How long one 2048-wide, 16-head decoder block (50.6M parameters) takes "
+      "at each precision: multiply by a model's "
+      "layer count for a floor on its time-to-first-token and per-token time "
+      "here, without downloading anything.  Everything but attention costs "
+      "the same at every context length, so whatever the decode rows add as "
+      "the context grows is attention.",
       TestShape::Heterogeneous, "data type, phase and context length"};
 
   auto provenance = [](const Variant &v, const VariantResult &vr)
   {
-    std::string s = "  " +
-                    std::to_string((unsigned long long)(weightBytes(v) >> 20)) +
-                    " MB of weights";
-    if (!vr.ranAs.empty())
-    {
-      s += ", run as " + vr.ranAs;
-      if (vr.schemeName[0])
-        s += " with " + std::string(vr.schemeName);
-      if (vr.castedActs)
-        s += ", after casting the activations to the width its kernel wanted "
-             "-- a full pass over them inside this figure";
-    }
-    return s + ".";
+    if (vr.ranAs.empty())
+      return std::string();
+    std::string s = "  Ran as " + vr.ranAs;
+    if (vr.schemeName[0])
+      s += " (" + std::string(vr.schemeName) + ")";
+    s += ".";
+    if (vr.castedActs)
+      s += "  The provider casts the activations to the width its kernel "
+           "wanted, a full pass inside this figure.";
+    return s;
   };
 
-  const char *geometry =
-      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
-      "(50.6M parameters).  ";
+  const char *geometry = "";
 
   auto doVariant = [&](const Variant &v, VariantResult &vr,
                        logger::TestScope &test)
@@ -951,9 +943,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
-      const double bytes = (double)(weightBytes(v) + kvBytes(v, kDecodeKv));
+      const uint64_t wStreamed = streamedWeightBytes(v, fp32As16);
+      const uint64_t kvStreamed = streamedKvBytes(v, kDecodeKv, fp32As16);
+      const double bytes = (double)(wStreamed + kvStreamed);
       logger::EmitOptions o;
-      o.description = std::string(geometry) + v.note + "  One token with 2048 of context: " + std::to_string((unsigned long long)(weightBytes(v) >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvBytes(v, kDecodeKv) >> 20)) + " MB of cached context, all of which must be read to emit a single token." + provenance(v, vr);
+      o.description = std::string(geometry) + v.note + "  One token with 2048 of context: " + std::to_string((unsigned long long)(wStreamed >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvStreamed >> 20)) + " MB of cached context, read in full for one token." + provenance(v, vr) + fp32Note(v);
 
       // If variant was already determined unusable in prefill phase, reuse skip
       if (!vr.usable && !vr.skipReason.empty())
@@ -1048,7 +1042,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note + prov;
+        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note + prov + fp32Note(v);
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
         else
         {
@@ -1078,7 +1072,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       for (int64_t kv : contextsFor(v))
       {
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
-        const std::string note = "One generated token with " + std::to_string(kv) + " tokens of context behind it.  " + v.note + prov;
+        const std::string note = "One generated token with " + std::to_string(kv) + " tokens of context behind it.  " + v.note + prov + fp32Note(v);
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); continue; }
         auto it = vr.decode.find(kv);
         if (it == vr.decode.end() || it->second.us <= 0.0)

@@ -172,16 +172,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   auto test = currentDeviceScope->beginTest(
       {"onnx_transfer_bw", "ONNX host transfer bandwidth", "bps",
        Category::Bandwidth,
-       "How fast data reaches this provider and comes back.  Every other test "
-       "here keeps its tensors on the device on purpose, because otherwise a "
-       "discrete accelerator gets measured through the cable rather than its "
-       "arithmetic.  This measures that cable.  It decides whether offloading "
-       "is worth doing at all -- an accelerator ten times faster than the host "
-       "is no help if reaching it costs more than the work saved -- and "
-       "vendors never quote it.  A device that shares memory with the host has "
-       "no real transfer to make and should read near memory speed; a "
-       "discrete one reports what its link actually delivers, which is "
-       "usually far below the number on the box.",
+       "How fast data reaches this provider and comes back -- the cable every "
+       "other test here keeps its tensors resident to avoid measuring.  It "
+       "decides whether offloading is worth doing at all, and vendors never "
+       "quote it.  A device sharing memory with the host makes no real "
+       "transfer and says so.",
        TestShape::Heterogeneous, "direction"});
 
   // ---- Trip out ----------------------------------------------------------
@@ -291,14 +286,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                   ep.providerKey.c_str(),
                   (long long)((firstElems * 2) >> 20), bps);
       test.emit("roundtrip", (float)bps,
-                "The full cost of offloading: sending a tensor, applying one "
-                "trivial operation to it, and getting the result back.  This "
-                "is the bar any offloaded work has to clear -- a calculation "
-                "the host finishes faster than this number moves the data is "
-                "not worth sending away.  It includes one pass over the data "
-                "on the device, so on hardware that is slow at simple "
-                "elementwise work (compare the activation rows) that pass, "
-                "rather than the transfer, is what this measures.");
+                "The full cost of offloading: a tensor out, one trivial "
+                "operation, the result back -- the bar any offloaded work has "
+                "to clear.  It includes one elementwise pass on the device, "
+                "which on hardware slow at that (see the activation rows) is "
+                "what dominates.");
     }
     else
     {
