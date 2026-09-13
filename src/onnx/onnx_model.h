@@ -160,6 +160,46 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                int actDtype, int wDtype = ONNX_DT_INT8,
                                bool floatIo = false);
 
+// How a throughput graph is kept from being evaluated at build time.
+//
+// Every throughput model here holds its operands as constants so that nothing
+// large crosses the host boundary per run -- and a graph of constants is a
+// constant expression, which a vendor compiler is entitled to evaluate once
+// while it builds.  QNN and OpenVINO both do: the compiled graph then reads
+// 64 KB where the operands are 8 MB, and the timed runs measure dispatch.
+// ORT's own ConstantFolding switch cannot reach a vendor compiler, so the
+// graph itself has to carry a runtime dependency *before* the work.
+enum class OnnxLiveShape
+{
+  // The runtime scalar scales the *result*.  The multiply is still a product
+  // of two constants, so this shape is foldable and gemm.cpp guards it by
+  // checking the timings scale with the size.  Kept only where a live operand
+  // costs the measurement something a folding guard does not: the CPU EP has
+  // no fp16 elementwise kernel and would insert a Cast in front of the
+  // multiply, running the wrong arithmetic (see the probe).
+  ResultScaled,
+
+  // The runtime scalar scales the *activation operand*, so nothing downstream
+  // is constant and no compiler can fold the multiply.  One elementwise pass
+  // over A per run, which is the shape every conv and block graph here has
+  // had all along.  For the QDQ form the scaling happens in floating point
+  // before the activations are quantized -- the block's projection shape --
+  // so A is held as fp32 values and costs four bytes per element.
+  OperandScaled,
+
+  // QDQ only: a runtime zero is added to the int8 codes before the
+  // dequantize.  Values stay bit-identical, the DQ -> MatMul -> Q pattern is
+  // untouched, and the pass is one byte per element.  Providers that take
+  // int8 only inside quantized node units refuse it (QNN HTP fails the bare
+  // ElementWiseAdd at backend validation).
+  Add0,
+
+  // QDQ only: the same Add-0 spelled as a quantized op, DQ -> Add -> Q with
+  // the same scale on both sides, so the codes come back unchanged.  This is
+  // the shape a quantized model actually uses for an elementwise op.
+  QdqAdd0,
+};
+
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each
 // run.  With A as a graph input and C returned to the host -- the obvious
@@ -167,13 +207,10 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 // tensor cores: on an RTX 5060 that reported 15 TFLOPS for a fp16 matmul
 // while a whole transformer block, whose weights are resident, reached 28.
 //
-// A scalar input scales the reduced result, so the graph has a runtime
-// dependency, and the session must disable constant folding or ORT will
-// evaluate the entire matmul once at load time.  `gemm.cpp` cross-checks that
-// timings still scale with the cube of the size, per doubling, which is what
-// folding would break.  (An operand-scaling Add-0 was tried to make the
-// graph unfoldable outright and reverted: it cost ~20% on the ANE against
-// these graphs measured back-to-back.)
+// `shape` says where the runtime scalar `S` enters (see OnnxLiveShape); only
+// ResultScaled and OperandScaled apply here.  The ResultScaled form runs
+// correctly only while constant folding stays disabled, and gemm.cpp checks
+// that its timings scale with the cube of the size.
 //
 // `reduceInFloat` casts the product to fp32 before reducing it, and makes the
 // runtime scalar and the output fp32 with it.  A provider can have a matmul
@@ -223,38 +260,44 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               int wDtype, int64_t blockSize,
                                               const std::string &aRaw,
                                               const std::string &wPacked,
-                                              const std::string &wScalesRaw);
+                                              const std::string &wScalesRaw,
+                                              OnnxLiveShape shape);
 
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
+                                     OnnxLiveShape shape,
                                      bool reduceInFloat = false);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the
 // matmul stops ORT recognising it as a quantized matmul at all, which would
-// silently measure float arithmetic.  With `unfoldActs` the runtime
-// dependency instead sits before the dequantize as an Add-0 on the quantized
-// codes (`ZA` holds literal zero), which leaves every value bit-identical
-// while keeping a vendor backend from folding the multiply at load time.
-// Takes a second runtime input then, so callers bind `S` and `ZA` (see
-// `finishSetup`).  Pass false for the types QLinearMatMul cannot carry: Add
-// has no float8/float4 type constraint, so those graphs keep the old shape.
-// Activations are uint8 and weights int8 -- the combination ONNX Runtime's
-// own quantizer emits for deployment, and the one x86 implements without
-// VNNI.  Signed activations fuse on ARM but not there, which showed up as an
-// unfused graph on a Threadripper while the same code fused on an M1.
+// silently measure float arithmetic.  The runtime dependency therefore sits
+// in front of the activations' dequantize, in whichever of the four
+// OnnxLiveShape forms the caller asks for:
+//
+//   ResultScaled   S scales the reduced result; foldable, guarded by timing.
+//   Add0           ZA (a runtime int8 zero) is added to the codes.
+//   QdqAdd0        the same, as DQ -> Add -> Q around the codes.
+//   OperandScaled  A is held as fp32 values, scaled by S and quantized on
+//                  device -- the transformer block's projection shape.
+//
+// The Add forms take a second runtime input, so callers bind `S` and `ZA`
+// (see gemm_setup.cpp).  Only int8/uint8 activations may use them: Add has
+// no float8/float4 type constraint, and the float8 rows only run on
+// providers that were never seen to fold, so those keep ResultScaled.
+//
 // `actDtype` is ONNX_DT_UINT8 (zero point 128) or ONNX_DT_INT8 (zero point 0).
 // No single choice works everywhere: x86 MLAS without VNNI implements uint8
 // activations against int8 weights and will not fuse signed ones, while
 // TensorRT rejects uint8 outright and requires a zero point of zero.  The
-// caller picks by trying, and `gemm.cpp` uses the fusion check to decide.
+// caller picks by trying, and the fusion check decides.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
-                                       bool unfoldActs);
+                                       OnnxLiveShape shape);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per
@@ -275,11 +318,14 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
 // applied, so subtracting its time leaves the operation's own cost.
 enum class OnnxActivation { None, Silu, Softmax, LayerNorm };
 
-// One activation applied to a resident [rows, cols] fp16 constant, reduced to
-// a single row on the way out.  Built like the other throughput models: the
-// operand never crosses the host boundary, and a runtime scalar scales the
-// reduced result so the graph is not entirely constant.
-std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
+// One activation applied to a resident [rows, cols] constant of `dtype` (fp16
+// or fp32), reduced to a single row on the way out.  Built like the other
+// throughput models: the operand never crosses the host boundary, and a
+// runtime scalar scales it *before* the operation, so nothing in the graph
+// is constant and a vendor compiler cannot evaluate it at build time.  The
+// reference graph (`None`) carries the same scaling multiply, so the
+// subtraction removes it along with the read and the reduction.
+std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
                                         OnnxActivation act,
                                         const std::string &xRaw);
 
@@ -359,6 +405,9 @@ struct OnnxBlockShape
 // Weights and KV cache are initializers, so the EP sees them as constants it
 // may pre-pack, exactly as it would a real model's.
 std::string onnxBlockModel(const OnnxBlockShape &s);
+
+// One scalar of `dtype` (fp32, fp16 or bf16) as the raw bytes a tensor holds.
+std::string onnxFloatScalar(float v, int dtype);
 
 // Scalar float -> IEEE fp16 / bfloat16 bit conversion for weight buffers.
 uint16_t floatToHalf(float f);

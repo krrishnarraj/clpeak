@@ -299,6 +299,26 @@ std::string onnxTrivialMulModel(int64_t width)
   return g.build();
 }
 
+// A [count] vector of one value in `dtype` (fp32 or fp16), as raw bytes.
+static std::string constVector(int64_t count, float v, int dtype)
+{
+  std::string raw((size_t)onnxElemBytes(dtype, count), '\0');
+  if (dtype == ONNX_DT_FLOAT)
+  {
+    float *f = reinterpret_cast<float *>(&raw[0]);
+    for (int64_t i = 0; i < count; i++)
+      f[i] = v;
+  }
+  else
+  {
+    uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
+    const uint16_t hv = floatToHalf(v);
+    for (int64_t i = 0; i < count; i++)
+      h[i] = hv;
+  }
+  return raw;
+}
+
 // Zero point for a quantized element type, as its own one-byte encoding.
 // int8 and the float8 types are symmetric so it is a literal zero; uint8
 // centres on 128.  ONNX requires the float8 zero point to be zero, which 0x00
@@ -411,66 +431,72 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               int wDtype, int64_t blockSize,
                                               const std::string &aRaw,
                                               const std::string &wPacked,
-                                              const std::string &wScalesRaw)
+                                              const std::string &wScalesRaw,
+                                              OnnxLiveShape shape)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(wDtype));
 
   // Activations are fp16 and resident, exactly as in the plain throughput
   // model: only the weights are narrow, and only the weights are what a
-  // quantized model actually shrinks.  Deliberately the old result-scaled
-  // shape, with no operand trick: no EP observed to fold has the dequantize
-  // kernel this needs (QNN refuses it outright), while the trick's own Add
-  // drew inserted precision casts on the CPU.  The weight dequantize folding
-  // into a prepack is legitimate and is what a deployment does; the timing
-  // guard stays the backstop for the multiply itself.
+  // quantized model actually shrinks.  The weight dequantize has nothing but
+  // constants on its inputs and a provider is welcome to fold it into a
+  // prepack -- that is what a deployment does -- so the runtime dependency
+  // goes on the activations, where it keeps the multiply itself live.
+  const bool live = (shape == OnnxLiveShape::OperandScaled);
   g.input("S", ONNX_DT_FLOAT16, {});
-  g.initializer("A",       ONNX_DT_FLOAT16, {M, K}, aRaw);
+  g.initializer(live ? "A0" : "A", ONNX_DT_FLOAT16, {M, K}, aRaw);
   g.initializer("B_q",     wDtype,          {K, N}, wPacked);
   g.initializer("b_scale", ONNX_DT_FLOAT16, {K / blockSize, N}, wScalesRaw);
+  if (live)
+    g.node("Mul", {"A0", "S"}, {"A"});
   // Blocked dequantize: one scale per `blockSize` rows per column, which is
   // the axis the reduction runs along and therefore the axis a group-quantized
   // model groups on.  No zero point -- the quantization is symmetric.
   g.node("DequantizeLinear", {"B_q", "b_scale"}, {"B_f"},
          {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
   g.node("MatMul", {"A", "B_f"}, {"C"});
-  g.reduceMax("C", "R", {0});
-  g.node("Mul", {"R", "S"}, {"Y"});
+  // Output is always Y so every shape is driven identically; only the
+  // result-scaled form has a tail multiply to feed it.
+  g.reduceMax("C", live ? "Y" : "R", {0});
+  if (!live)
+    g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT16, {N});
   return g.build();
 }
-
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
+                                     OnnxLiveShape shape,
                                      bool reduceInFloat)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(dtype));
+  const bool live = (shape == OnnxLiveShape::OperandScaled);
   // The scalar and the output follow the reduction, not the matmul: casting
   // the product to fp32 means everything downstream of it is fp32 too.
   const int tailDtype = reduceInFloat ? ONNX_DT_FLOAT : dtype;
-  // The runtime scalar multiplies the *result*, leaving the matmul itself a
-  // product of two constants -- so this graph runs correctly only while
-  // constant folding stays disabled, and ONNX Runtime 1.17 accepts the
-  // request to disable it and ignores it.  gemm.cpp guards against that by
-  // checking the timings scale with the problem size, per doubling.
+
+  // OperandScaled: the runtime scalar multiplies A before the matmul, so
+  // nothing downstream is constant and no compiler can evaluate the multiply
+  // at build time.  It costs one elementwise pass over A per run -- and on a
+  // provider without an elementwise kernel for the datatype it costs an
+  // inserted Cast that runs the whole matmul in the wrong width (the CPU EP
+  // on fp16 came back equal to its fp32 row, 0.41 against 0.40).  The probe
+  // profiles for that and falls back to ResultScaled there.
   //
-  // Scaling an operand instead would make the graph unfoldable outright, and
-  // that was tried twice.  A Mul against the tail scalar cannot be used: the
-  // CPU provider has no fp16 Mul kernel, so it inserts a Cast and carries
-  // out the whole matmul in fp32 -- the half-precision row came back equal
-  // to the single-precision one, 0.41 against 0.40.  An Add-0 avoids the
-  // wrong arithmetic but costs ~20% on the ANE (2.30 -> 1.74 fp32, 8.60 ->
-  // 6.97 fp16 peaks, measured back-to-back against these old graphs on the
-  // same hot machine): a dynamic operand compiles to a different, slower ANE
-  // program.  A guarded fold beats both a silent upcast and a quiet
-  // regression, so the plain rows keep this shape and the folding EPs report
-  // an error (QNN did fold it: flat ~170 us at 1024 and 2048, 98 TFLOPS fp32
-  // against a 45 TOPS spec).
-  g.input("S", tailDtype, {});
-  g.initializer("A", dtype, {M, K}, aRaw);
+  // ResultScaled: the scalar multiplies the reduced result instead, which
+  // leaves the matmul a product of two constants.  Correct only while
+  // constant folding stays disabled, and only on providers whose compiler
+  // does not fold on its own -- QNN and OpenVINO both did, leaving the timed
+  // runs flat at ~170 us from 1024 to 2048 (98 "TFLOPS" fp32 against a 45
+  // TOPS spec).  gemm.cpp guards this form by checking the timings scale
+  // with the size.
+  g.input("S", live ? dtype : tailDtype, {});
+  g.initializer(live ? "A0" : "A", dtype, {M, K}, aRaw);
   g.initializer("B", dtype, {K, N}, bRaw);
+  if (live)
+    g.node("Mul", {"A0", "S"}, {"A"});
 
   // ReduceMax, not ReduceSum: summing the rows of A*B equals multiplying the
   // summed rows of A, a rewrite an optimiser is free to make and which would
@@ -487,18 +513,18 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
     g.node("Cast", {"C"}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
     reduceIn = "Cf";
   }
-  g.reduceMax(reduceIn, "R", {0});
-  g.node("Mul",    {"R", "S"}, {"Y"});
+  g.reduceMax(reduceIn, live ? "Y" : "R", {0});
+  if (!live)
+    g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", tailDtype, {N});
   return g.build();
 }
-
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
-                                       bool unfoldActs)
+                                       OnnxLiveShape shape)
 {
   // Signed activations are symmetric (zero point 0); unsigned ones centre on
   // 128.  TensorRT accepts only the former, x86 MLAS only fuses the latter.
@@ -511,18 +537,16 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
-  // Every quantization scale is a build-time constant, and the runtime scalar
-  // scales the reduced result instead -- exactly as in the floating-point
-  // model.  A runtime scale looks tidier, since it keeps the dequantize out
-  // of constant folding's reach without disabling anything, and ONNX Runtime
-  // is happy with it: QLinearMatMul takes its scales as inputs.  TensorRT is
-  // not.  It bakes quantization into the engine at build time, and a scale it
-  // cannot see until the run means it cannot commit to integer arithmetic.
-  // On an RTX 5060 that showed as 20 TOPS -- indistinguishable from the same
-  // card's fp32 and a third of its fp16.  With constant scales the same test
-  // reads 125 TOPS, 1.9x the fp16 rate, which is what int8 tensor cores are
-  // supposed to do.  The cost is one disabled optimizer, see
-  // `keepConstantsUnfolded`.
+  // Every quantization scale is a build-time constant, and the runtime
+  // dependency enters elsewhere.  A runtime scale looks tidier, since it keeps
+  // the dequantize out of constant folding's reach without disabling anything,
+  // and ONNX Runtime is happy with it: QLinearMatMul takes its scales as
+  // inputs.  TensorRT is not.  It bakes quantization into the engine at build
+  // time, and a scale it cannot see until the run means it cannot commit to
+  // integer arithmetic.  On an RTX 5060 that showed as 20 TOPS --
+  // indistinguishable from the same card's fp32 and a third of its fp16.
+  // With constant scales the same test reads 125 TOPS, 1.9x the fp16 rate,
+  // which is what int8 tensor cores are supposed to do.
   g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
   g.input("S", ONNX_DT_FLOAT, {});
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
@@ -533,24 +557,73 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
   g.initializer("c_zp",    actDtype, {}, actZp);
 
-  // With `unfoldActs`, Add-0 on the quantized codes (ZA holds literal zero)
-  // makes the activations runtime-dependent while leaving every value
-  // bit-identical -- a+0 is a in every dtype here, with no overflow, NaN or
-  // denormal risk.  That keeps a vendor AOT backend from evaluating the
-  // matmul once at load time (QNN reported 90 TOPS int8 this way against a
-  // 45 TOPS spec).  The Add sits *before* the dequantize, so the DQ ->
-  // MatMul -> Q adjacency ORT matches on is untouched, and the scales stay
-  // build-time constants, which is what TensorRT needs to commit to integer
-  // arithmetic.  Callers pass false for the types QLinearMatMul cannot carry:
-  // Add has no float8/float4 type constraint, so those graphs keep the old
-  // shape and the timing guard stays their backstop (no EP observed to fold
-  // them).
-  g.initializer(unfoldActs ? "A_q0" : "A_q", actDtype, {M, K}, aRaw);
-  if (unfoldActs)
+  // Where the runtime dependency enters, by shape.  Every form leaves the
+  // DQ -> MatMul -> Q adjacency ORT matches on untouched and every scale a
+  // build-time constant, which is what TensorRT needs to commit to integer
+  // arithmetic; they differ in what sits in front of the activations'
+  // dequantize and what that costs per run.
+  switch (shape)
   {
+  case OnnxLiveShape::ResultScaled:
+    // Nothing in front: the multiply is a product of constants and the
+    // scalar scales the reduced result.  Foldable, guarded by timing.
+    g.initializer("A_q", actDtype, {M, K}, aRaw);
+    break;
+
+  case OnnxLiveShape::Add0:
+    // A runtime zero added to the codes (ZA holds literal zero): a+0 is a in
+    // every dtype here, with no overflow, NaN or denormal risk, so every
+    // value is bit-identical and only the load-time folding becomes
+    // impossible.  One int8 pass over A.  Not a quantized node unit, so a
+    // provider that takes int8 only inside QDQ patterns refuses it -- QNN
+    // HTP fails the bare ElementWiseAdd at backend validation.
+    g.initializer("A_q0", actDtype, {M, K}, aRaw);
     g.input("ZA", actDtype, {});
     g.node("Add", {"A_q0", "ZA"}, {"A_q"});
+    break;
+
+  case OnnxLiveShape::QdqAdd0:
+    // The same zero, added as a quantized op: both operands dequantized by
+    // the activation scale, the sum requantized by it.  Requantizing a+0
+    // with the scale a was quantized by returns a's own code, so the values
+    // are still bit-identical, and this is the shape a quantized model uses
+    // for an elementwise op -- ORT fuses it to QLinearAdd on the CPU and a
+    // QDQ-only backend compiles it as a quantized add.
+    g.initializer("A_q0", actDtype, {M, K}, aRaw);
+    g.input("ZA", actDtype, {});
+    g.node("DequantizeLinear", {"A_q0", "a_scale", "a_zp"}, {"A_f0"});
+    g.node("DequantizeLinear", {"ZA",   "a_scale", "a_zp"}, {"ZA_f"});
+    g.node("Add",              {"A_f0", "ZA_f"},            {"A_fs"});
+    g.node("QuantizeLinear",   {"A_fs", "a_scale", "a_zp"}, {"A_q"});
+    break;
+
+  case OnnxLiveShape::OperandScaled:
+  {
+    // The transformer block's projection shape: the activations are held as
+    // the fp32 values their codes dequantize to, scaled by the runtime
+    // scalar and quantized on device.  Every value is exactly a code times
+    // the scale, so quantizing it back returns the same code and the
+    // multiply sees the same operands as every other form.  Costs an fp32
+    // pass and a quantize over A per run, and four bytes per element of
+    // model -- the price of a form that any QDQ-capable provider accepts.
+    const int64_t count = M * K;
+    std::string af((size_t)count * 4, '\0');
+    float *f = reinterpret_cast<float *>(&af[0]);
+    const bool unsigned8 = (actDtype == ONNX_DT_UINT8);
+    for (int64_t i = 0; i < count; i++)
+    {
+      const int code = unsigned8
+          ? (int)(unsigned char)aRaw[(size_t)i] - 128
+          : (int)(signed char)aRaw[(size_t)i];
+      f[i] = (float)code * aScale;
+    }
+    g.initializer("A_f0", ONNX_DT_FLOAT, {M, K}, af);
+    g.node("Mul",            {"A_f0", "S"},               {"A_fs"});
+    g.node("QuantizeLinear", {"A_fs", "a_scale", "a_zp"}, {"A_q"});
+    break;
   }
+  }
+
   // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
   g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
@@ -564,8 +637,14 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // node before n4."  The standard pattern costs one full-width pass, about a
   // fifth of the measured rate, and is what real quantized layers do anyway.
   g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C_d"});
-  g.reduceMax("C_d", "R", {0});
-  g.node("Mul",              {"R", "S"}, {"Y"});
+  // The result-scaled form needs the tail multiply to depend on S; the live
+  // forms already do (through the operand, or through ZA) and reduce
+  // straight into the output.  In the Add forms S is a graph input nothing
+  // consumes, which is legal and free, so every form is driven identically.
+  const bool resultScaled = (shape == OnnxLiveShape::ResultScaled);
+  g.reduceMax("C_d", resultScaled ? "R" : "Y", {0});
+  if (resultScaled)
+    g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
 }
@@ -600,13 +679,21 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
   return g.build();
 }
 
-std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
+std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
                                         OnnxActivation act,
                                         const std::string &xRaw)
 {
   OnnxGraph g;
-  g.input("S", ONNX_DT_FLOAT16, {});
-  g.initializer("X", ONNX_DT_FLOAT16, {rows, cols}, xRaw);
+  // The runtime scalar scales the resident tensor *before* the operation.
+  // Scaling the reduced result instead leaves everything up to the reduction
+  // a constant expression, and a vendor compiler evaluates it at build time
+  // -- OpenVINO did, and so did Core ML for the reference graph (a flat
+  // 46 us at every size), which left the rows measuring dispatch against
+  // dispatch.  The multiply is in the reference graph too, so it subtracts
+  // out of every row along with the read and the reduction.
+  g.input("S", dtype, {});
+  g.initializer("X0", dtype, {rows, cols}, xRaw);
+  g.node("Mul", {"X0", "S"}, {"X"});
 
   std::string out = "X";
   switch (act)
@@ -629,17 +716,8 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
   case OnnxActivation::LayerNorm:
   {
     // Opset 17 has LayerNormalization as one node, scale and bias supplied.
-    std::string scale((size_t)cols * 2, '\0');
-    std::string bias((size_t)cols * 2, '\0');
-    uint16_t *sh = reinterpret_cast<uint16_t *>(&scale[0]);
-    uint16_t *bh = reinterpret_cast<uint16_t *>(&bias[0]);
-    for (int64_t i = 0; i < cols; i++)
-    {
-      sh[i] = floatToHalf(1.0f);
-      bh[i] = floatToHalf(0.0f);
-    }
-    g.initializer("Ln_scale", ONNX_DT_FLOAT16, {cols}, scale);
-    g.initializer("Ln_bias",  ONNX_DT_FLOAT16, {cols}, bias);
+    g.initializer("Ln_scale", dtype, {cols}, constVector(cols, 1.0f, dtype));
+    g.initializer("Ln_bias",  dtype, {cols}, constVector(cols, 0.0f, dtype));
     g.node("LayerNormalization", {"X", "Ln_scale", "Ln_bias"}, {"A"},
            {OnnxAttr::num("axis", -1)});
     out = "A";
@@ -647,9 +725,8 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols,
   }
   }
 
-  g.reduceMax(out, "R", {0});
-  g.node("Mul", {"R", "S"}, {"Y"});
-  g.output("Y", ONNX_DT_FLOAT16, {cols});
+  g.reduceMax(out, "Y", {0});
+  g.output("Y", dtype, {cols});
   return g.build();
 }
 
@@ -1252,6 +1329,20 @@ void onnxFillNvfp4(std::string &packed, std::string &blockScales,
       }
     }
   }
+}
+
+std::string onnxFloatScalar(float v, int dtype)
+{
+  if (dtype == ONNX_DT_FLOAT)
+  {
+    std::string s(4, '\0');
+    std::memcpy(&s[0], &v, 4);
+    return s;
+  }
+  std::string s(2, '\0');
+  const uint16_t h = (dtype == ONNX_DT_BFLOAT16) ? floatToBf16(v) : floatToHalf(v);
+  std::memcpy(&s[0], &h, 2);
+  return s;
 }
 
 bool onnxIsQuantElem(int dtype)

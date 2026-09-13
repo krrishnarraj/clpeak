@@ -3,14 +3,21 @@
 // onnx-tensor-bw: how fast this execution provider can stream weights out of
 // its own memory.
 //
-// The graph is a chain of matrix-vector products, y <- y * W, against one
-// square fp16 weight matrix held as an initializer.  Several properties make
-// that the right probe.  W being a constant means it sits wherever the
-// provider keeps weights after session creation, so this measures the
-// provider's read path and not the host handing a buffer over; the vector is
-// one row, so the return trip is free; and at two operations per weight the
-// arithmetic cannot be the limit, which leaves memory as the only thing
-// being measured.
+// The graph is one matrix-vector product, y = x * W, against a weight matrix
+// held as an initializer.  Several properties make that the right probe.  W
+// being a constant means it sits wherever the provider keeps weights after
+// session creation, so this measures the provider's read path and not the
+// host handing a buffer over; the vector is one row, so the return trip is
+// free; and at two operations per weight the arithmetic cannot be the limit,
+// which leaves memory as the only thing being measured.
+//
+// The element width is whichever of fp16 and fp32 the provider streams
+// faster (onnxStreamDtype), not fp16 by assumption.  A provider without a
+// native fp16 kernel for the operation converts every fp16 tensor on the way
+// in and reports the conversion under this heading -- ONNX Runtime's CPU EP
+// read a flat 2 GB/s at every size on a Threadripper whose fp32 decode row
+// streams 38.  The rungs are named for their byte size, so a fp32 matrix has
+// half the columns and every reading still means what its name says.
 //
 // One matmul per dispatch, deliberately.  Chaining several against the same
 // weights would amortise submission overhead -- but the Apple Neural Engine
@@ -39,6 +46,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -52,7 +60,7 @@ namespace
 
 struct Size
 {
-  int64_t     dim;         // square weight matrix [dim, dim]; bytes = dim^2 * 2
+  int64_t     dim;         // [dim, dim] in fp16, [dim, dim/2] in fp32: dim^2 * 2 bytes
   const char *label;
   const char *note;
 };
@@ -96,24 +104,36 @@ constexpr double kFallingRatio = 0.9;
 // reading taken at a size no cache could hold.
 constexpr size_t kAlwaysMeasured = 3;
 
-// One matrix-vector product against a square fp16 weight matrix.
-std::string streamModel(int64_t d)
+// Columns of the weight matrix for `d` rows: d^2 * 2 bytes either way.
+int64_t streamCols(int64_t d, int dtype)
 {
-  std::string w((size_t)d * d * 2, '\0');
+  return dtype == ONNX_DT_FLOAT ? d / 2 : d;
+}
+
+// One matrix-vector product against a [d, cols] weight matrix of `dtype`.
+std::string streamModel(int64_t d, int dtype)
+{
+  const int64_t cols = streamCols(d, dtype);
+  std::string w((size_t)onnxElemBytes(dtype, d * cols), '\0');
   {
     // Uniform over +/-sqrt(3/d) so the result keeps the vector's magnitude:
     // a d-deep fp16 dot product of larger values would saturate.
     const float lim = std::sqrt(3.0f / (float)d);
+    float *f = reinterpret_cast<float *>(&w[0]);
     uint16_t *h = reinterpret_cast<uint16_t *>(&w[0]);
     uint32_t s = 0x243f6a88u;
-    for (int64_t i = 0; i < d * d; i++)
+    for (int64_t i = 0; i < d * cols; i++)
     {
       s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-      h[i] = floatToHalf(((float)(s >> 8) / 16777216.0f - 0.5f) * 2.0f * lim);
+      const float v = ((float)(s >> 8) / 16777216.0f - 0.5f) * 2.0f * lim;
+      if (dtype == ONNX_DT_FLOAT)
+        f[i] = v;
+      else
+        h[i] = floatToHalf(v);
     }
   }
 
-  return onnxMatMulModel(1, d, d, ONNX_DT_FLOAT16, w);
+  return onnxMatMulModel(1, d, cols, dtype, w);
 }
 
 struct Result
@@ -129,13 +149,16 @@ struct Result
 constexpr int64_t kFloorDim = 256;
 
 Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
-               unsigned int warmup, bool forceIters, unsigned int forced)
+               int dtype, unsigned int warmup, bool forceIters,
+               unsigned int forced)
 {
   Result r;
+  const size_t es = (size_t)onnxElemBytes(dtype, 1);
+  const int64_t cols = streamCols(d, dtype);
 
   OrtSession *session = nullptr;
   {
-    std::string model = streamModel(d);
+    std::string model = streamModel(d, dtype);
     auto createStart = std::chrono::steady_clock::now();
     auto ses = onnxCreateSession(rt, ep, model);
     auto createEnd = std::chrono::steady_clock::now();
@@ -168,23 +191,28 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
     session = ses.session;
   }
 
-  std::vector<uint16_t> xBuf((size_t)d, floatToHalf(0.5f));
-  std::vector<uint16_t> yBuf((size_t)d, 0);
+  std::vector<uint8_t> xBuf((size_t)d * es, 0);
+  std::vector<uint8_t> yBuf((size_t)cols * es, 0);
+  {
+    const std::string half = onnxFloatScalar(0.5f, dtype);
+    for (int64_t i = 0; i < d; i++)
+      std::memcpy(&xBuf[(size_t)i * es], half.data(), es);
+  }
 
   OrtMemoryInfo *mi = nullptr;
   OrtValue *inVal = nullptr, *outVal = nullptr;
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
                                               OrtMemTypeDefault, &mi);
   const int64_t inShape[2]  = {1, d};
-  const int64_t outShape[2] = {1, d};
+  const int64_t outShape[2] = {1, cols};
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, xBuf.data(), xBuf.size() * 2, inShape, 2,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
+        mi, xBuf.data(), xBuf.size(), inShape, 2,
+        (ONNXTensorElementDataType)dtype, &inVal);
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, yBuf.data(), yBuf.size() * 2, outShape, 2,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &outVal);
+        mi, yBuf.data(), yBuf.size(), outShape, 2,
+        (ONNXTensorElementDataType)dtype, &outVal);
   if (mi) rt.api->ReleaseMemoryInfo(mi);
 
   auto run = [&](unsigned int n) -> double {
@@ -241,7 +269,8 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        Category::Bandwidth,
        "How fast this provider streams model weights out of its own memory, "
        "measured on the exact operation that generating a token performs -- "
-       "one row of numbers multiplied through a weight matrix -- at three "
+       "one row of numbers multiplied through a weight matrix, in whichever "
+       "of fp16 and fp32 the provider streams faster -- at three "
        "weight sizes.  Producing each word of text requires reading every "
        "weight, so this is the ceiling on how fast words can appear.  The "
        "size at which the rate drops is the size at which a model stopped "
@@ -256,8 +285,16 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        // not interchangeable and the fastest of them is not the answer.
        TestShape::Heterogeneous, "weight size"});
 
+  // The width this provider streams fastest, decided once per provider and
+  // shared with the activation rows so the two ladders divide row for row.
+  const int dtype = onnxStreamDtype(rt, ep);
+  const char *widthNote =
+      (dtype == ONNX_DT_FLOAT)
+          ? "  Measured in fp32, which this provider streams faster than fp16."
+          : "";
+
   // The floor first: every rung is reported net of it.
-  Result floor = measure(rt, ep, kFloorDim, warmupCount, forceIters,
+  Result floor = measure(rt, ep, kFloorDim, dtype, warmupCount, forceIters,
                          specifiedIters);
   const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
   CLPEAK_VLOG("onnx-tensor-bw[%s]: dispatch floor %.2f us\n",
@@ -295,7 +332,9 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       break;
     }
 
-    Result r = measure(rt, ep, s.dim, warmupCount, forceIters, specifiedIters);
+    const std::string note = std::string(s.note) + widthNote;
+    Result r = measure(rt, ep, s.dim, dtype, warmupCount, forceIters,
+                       specifiedIters);
     if (r.us <= 0.0)
     {
       // A rung past the standard three is exploratory: a device that cannot
@@ -308,7 +347,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
       test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error,
-                s.note);
+                note.c_str());
       continue;
     }
 
@@ -320,12 +359,12 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // wearing a bandwidth label.
       test.skip(s.label, ResultStatus::Error,
                 "too small to measure against this provider's dispatch cost",
-                s.note);
+                note.c_str());
       continue;
     }
     const double bytes = (double)s.dim * (double)s.dim * 2.0;
     const double bps  = bytes / (netUs * 1.0e-6);
-    test.emit(s.label, (float)bps, s.note);
+    test.emit(s.label, (float)bps, note.c_str());
 
     stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
     prevBps = bps;

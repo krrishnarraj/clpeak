@@ -10,6 +10,7 @@ add_library(peak_onnx STATIC
     onnx_session.cpp
     onnx_model.cpp
     onnx_probe.cpp
+    gemm_setup.cpp
     gemm.cpp
     conv.cpp
     activation.cpp

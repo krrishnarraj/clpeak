@@ -155,10 +155,27 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
     // HTP is the NPU proper; without this the EP would settle for the DSP or
     // the CPU reference backend and the row would not mean what it says.
 #if defined(_WIN32)
-    out = {"QNN", {{"backend_path", "QnnHtp.dll"}}};
+    const char *htp = "QnnHtp.dll";
 #else
-    out = {"QNN", {{"backend_path", "libQnnHtp.so"}}};
+    const char *htp = "libQnnHtp.so";
 #endif
+    out = {"QNN",
+           {{"backend_path", htp},
+            // Peak clocks.  The HTP's default performance mode is a power
+            // saver; "burst" is what a benchmark -- and Qualcomm's own
+            // profiling tools -- ask for, and the difference is a large
+            // multiple on sustained work.
+            {"htp_performance_mode", "burst"},
+            {"qnn_context_priority", "high"},
+            // The most optimised graph the finalizer will produce.  Costs
+            // preparation time, which the session-creation budgets bound.
+            {"htp_graph_finalization_optimization_mode", "3"},
+            // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
+            // HTP.  The default hands them to the CPU EP, which the fallback
+            // guard then refuses -- and a quantized input arriving through
+            // a dequantize is exactly what the numeric-error and live QDQ
+            // graphs have at their boundary.
+            {"offload_graph_io_quantization", "0"}}};
     return true;
   }
   if (providerKey == "OpenVINOExecutionProvider")
@@ -432,9 +449,12 @@ static void removeProfileArtifacts(const std::string &prefix)
 }
 
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
-                                                OrtSession *session)
+                                                OrtSession *session,
+                                                std::string *matmulInType)
 {
   std::vector<std::string> ops;
+  if (matmulInType)
+    matmulInType->clear();
   if (!session)
     return ops;
 
@@ -492,11 +512,69 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
       break;
     std::string name = json.substr(pos, end - pos);
     pos = end;
-    if (!name.empty() &&
-        std::find(ops.begin(), ops.end(), name) == ops.end())
+
+    // For a MatMul-family kernel, capture the element type of its first
+    // input.  ORT writes `"input_type_shape" : [ { "float16" : [32,32] }, ...`
+    // in the same event's args; find it near this op_name and read the first
+    // quoted key inside the first brace.
+    if (matmulInType && matmulInType->empty() &&
+        (name == "MatMul" || name == "FusedMatMul" || name == "Gemm"))
+    {
+      const std::string itsKey = "\"input_type_shape\"";
+      // The args object holds op_name and input_type_shape together; search a
+      // bounded window on either side rather than counting braces.
+      size_t lo = (pos > 800) ? pos - 800 : 0;
+      size_t its = json.find(itsKey, lo);
+      if (its != std::string::npos && its < pos + 800)
+      {
+        size_t br = json.find('{', its); // first tensor's { "<type>": ... }
+        size_t q1 = (br == std::string::npos) ? std::string::npos
+                                              : json.find('"', br);
+        if (q1 != std::string::npos)
+        {
+          size_t q2 = json.find('"', q1 + 1);
+          if (q2 != std::string::npos)
+            *matmulInType = json.substr(q1 + 1, q2 - q1 - 1);
+        }
+      }
+    }
+
+    if (!name.empty())
       ops.push_back(std::move(name));
   }
   return ops;
+}
+
+size_t onnxCountOp(const std::vector<std::string> &ops, const char *name)
+{
+  size_t n = 0;
+  for (const auto &op : ops)
+    if (op == name)
+      n++;
+  return n;
+}
+
+std::string onnxJoinOps(const std::vector<std::string> &ops)
+{
+  std::string out;
+  std::vector<std::string> seen;
+  for (const auto &op : ops)
+  {
+    if (std::find(seen.begin(), seen.end(), op) != seen.end())
+      continue;
+    seen.push_back(op);
+    out += (out.empty() ? "" : ", ") + op;
+  }
+  return out;
+}
+
+bool onnxEpRunsFp32AsFp16(const onnx_ep_info_t &ep)
+{
+  if (ep.providerKey == "QNNExecutionProvider")
+    return true;
+  if (ep.providerKey == "OpenVINOExecutionProvider")
+    return ep.epDevice != "CPU";
+  return false;
 }
 
 // The kernels that do the multiply in integer arithmetic, across providers.

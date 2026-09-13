@@ -2,13 +2,22 @@
 
 // onnx-gemm: MatMul peak through an ONNX Runtime execution provider.
 //
-// Both operands are model constants and the result is summed down to a single
+// Both operands are model constants and the result is reduced to a single
 // row, so nothing large crosses the host boundary per run.  That shape is
 // forced by discrete GPUs: with A as a graph input and C returned to the
 // host, an RTX 5060 reported 15 TFLOPS for fp16 while a whole transformer
 // block -- whose weights are resident -- reached 28 on the same device.  The
 // peak was measuring PCIe.  On unified-memory devices the difference is
 // small, but the graph is identical everywhere so the rows stay comparable.
+//
+// A graph of constants is a constant expression, though, and a vendor
+// compiler is entitled to evaluate it while it builds: QNN and OpenVINO
+// both did, and their timed runs measured dispatch.  So a runtime scalar
+// scales the activation operand *before* the multiply wherever the probe
+// finds that costs nothing but one elementwise pass (see OnnxLiveShape and
+// onnx_probe.cpp); the older result-scaled form survives only where a live
+// operand would drag in a precision cast, and there the fold check below
+// stands guard over it.
 //
 // One test, `onnx_gemm`: the same single-operation model on whichever
 // formats the provider accepts.  The int8 QDQ reading is measured in ops
@@ -17,6 +26,7 @@
 // measured reading is the int8 one is the expected shape, not a gap.
 
 #include <onnx/onnx_peak.h>
+#include "gemm_setup.h"
 #include "onnx_model.h"
 #include "onnx_probe.h"
 #include "onnx_session.h"
@@ -26,6 +36,8 @@
 #include <algorithm>
 #include <cstring>
 #include <vector>
+
+using namespace onnxgemm;
 
 namespace
 {
@@ -49,14 +61,6 @@ namespace
   // And no single size is right anyway: fp32 there peaks at 4096 while fp16
   // peaks at 2048, because different engines serve them.
   constexpr int64_t kMinDim = 1024;
-  // Tiny probe dimension: large enough to exercise the same kernels, small
-  // enough that AOT compilation stays cheap (QNN HTP: 32^3 ~0.2s vs 1024^3 33s,
-  // TensorRT 32^3 ~0.8s vs 64^3 3.6s).
-  constexpr int64_t kProbeDim = 32;
-
-  // NVFP4's second scale.  A power of two so factoring it out of the block scales
-  // is exact and the row measures the format rather than an arithmetic accident.
-  constexpr float kNvfp4GlobalScale = 0.125f;
   constexpr int64_t kMaxDim = 32768;
 
   // A size counts as an improvement only if it beats the best so far by this
@@ -94,354 +98,46 @@ namespace
   // would use, since the ladder measures several.
   constexpr unsigned int kSizeBudgetUs = 2000000;
 
-  struct Variant
+  const char *shapeNameFor(OnnxLiveShape s)
   {
-    int dtype; // element type of the graph's input/output
-    bool qdq;  // build the quantized (DequantizeLinear/MatMul/Q) form
-    const char *label;
-    const char *note;
-    int64_t blockSize; // >0: blocked, one scale per this many elements
-    bool nvfp4;        // blocked on *both* operands, with a second scale
-  };
-
-  // Quantization schemes, tried in order until one fuses.  There is no single
-  // choice that works everywhere: TensorRT rejects unsigned activations and
-  // demands a zero point of zero, while x86 MLAS without VNNI implements only
-  // the unsigned form and quietly declines to fuse the signed one.  Trying is
-  // the only way to know, and the fusion check is what decides.
-  struct QuantScheme
-  {
-    int actDtype;
-    int wDtype;
-    const char *name;
-  };
-
-  // int8 has two spellings and no provider takes both.  The float8 formats have
-  // one: activations and weights share the type, and there is no signed/unsigned
-  // question because they are signed floats.
-  const QuantScheme kInt8Schemes[] = {
-      {ONNX_DT_INT8, ONNX_DT_INT8, "signed activations"},    // TensorRT, ARM
-      {ONNX_DT_UINT8, ONNX_DT_INT8, "unsigned activations"}, // x86 without VNNI
-  };
-
-  struct Variant;
-  size_t schemesFor(const Variant &v, QuantScheme out[2]);
-
-  struct GemmSetup
-  {
-    OrtSession *session = nullptr;
-    OrtValue *inVal = nullptr;  // the scalar that keeps the graph live
-    OrtValue *zaVal = nullptr;  // QDQ only: literal zero the activations add
-    OrtValue *outVal = nullptr; // reduced row
-    std::vector<uint8_t> inBuf, zaBuf, outBuf;
-    std::string error;
-
-    // Not copyable, and the compiler has to enforce it: inVal and outVal are
-    // OrtValues built over inBuf and outBuf, so a copy leaves them pointing at
-    // the original's buffers.  Moving is fine -- a moved vector keeps its
-    // allocation -- which is why returning one of these by value works and
-    // handing back a reference to one does not.
-    GemmSetup() = default;
-    GemmSetup(const GemmSetup &) = delete;
-    GemmSetup &operator=(const GemmSetup &) = delete;
-    GemmSetup(GemmSetup &&) = default;
-    GemmSetup &operator=(GemmSetup &&) = default;
-  };
-
-  size_t dtypeSize(int dtype)
-  {
-    switch (dtype)
+    switch (s)
     {
-    case ONNX_DT_FLOAT:
-      return 4;
-    case ONNX_DT_FLOAT16:
-    case ONNX_DT_BFLOAT16:
-      return 2;
-    default:
-      return 1; // int8 / uint8 / float8
+    case OnnxLiveShape::ResultScaled:  return "result-scaled";
+    case OnnxLiveShape::OperandScaled: return "operand-scaled";
+    case OnnxLiveShape::Add0:          return "add-0";
+    case OnnxLiveShape::QdqAdd0:       return "qdq-add-0";
     }
+    return "?";
   }
 
-  // Deterministic values, generated once and reused for inputs and weights.
-  // Floats land in [-0.5, 0.5) and int8 in [-127, 127]: small magnitudes keep
-  // fp16 accumulation over a 4096-deep dot product far from overflow, and
-  // avoid the NaN/denormal slow paths raw random bit patterns would hit.
-  void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
+  // What the description says about where the runtime dependency entered.
+  // Only the live forms need a sentence: they cost a pass over the operand
+  // that is inside the figure, and a reader dividing rows should know it.
+  const char *shapeNote(const Variant &v, OnnxLiveShape shape)
   {
-    uint32_t s = seed;
-    // assign, not resize: the sub-byte types write one nibble at a time over
-    // whatever is already there, so the buffer has to start at zero.
-    raw.assign((size_t)onnxElemBytes(dtype, count), '\0');
-    float *f = reinterpret_cast<float *>(&raw[0]);
-    uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-    for (int64_t i = 0; i < count; i++)
+    switch (shape)
     {
-      s ^= s << 13;
-      s ^= s >> 17;
-      s ^= s << 5;
-      float v = (float)(s >> 8) / 16777216.0f - 0.5f; // [-0.5, 0.5)
-      switch (dtype)
-      {
-      case ONNX_DT_FLOAT:
-        f[i] = v;
-        break;
-      case ONNX_DT_FLOAT16:
-        h[i] = floatToHalf(v);
-        break;
-      case ONNX_DT_BFLOAT16:
-        h[i] = floatToBf16(v);
-        break;
-      // Quantized types all store a value already spread over [-1, 1], so the
-      // dequantized operands match whatever the format's rounding leaves of
-      // them and nothing else differs between the rows.
-      default:
-        onnxStoreQuantElem(&raw[0], i, dtype, v * 2.0f);
-        break;
-      }
+    case OnnxLiveShape::ResultScaled:
+      return "";
+    case OnnxLiveShape::OperandScaled:
+      return v.qdq
+                 ? "  The activations are scaled by a runtime value and "
+                   "quantized on the device before the multiply, so it cannot "
+                   "be evaluated at compile time; that pass is inside this "
+                   "figure."
+                 : "  The activations are scaled by a runtime value before the "
+                   "multiply, so it cannot be evaluated at compile time; that "
+                   "one elementwise pass is inside this figure.";
+    case OnnxLiveShape::Add0:
+      return "  The activations add a runtime zero on the way in, so the "
+             "multiply cannot be evaluated at compile time; that pass is "
+             "inside this figure.";
+    case OnnxLiveShape::QdqAdd0:
+      return "  The activations add a runtime zero as a quantized op on the "
+             "way in, so the multiply cannot be evaluated at compile time; "
+             "that pass is inside this figure.";
     }
-  }
-
-  size_t schemesFor(const Variant &v, QuantScheme out[2])
-  {
-    if (v.nvfp4)
-    {
-      out[0] = {v.dtype, v.dtype, "both operands blocked, with a global scale"};
-      return 1;
-    }
-    if (v.blockSize > 0)
-    {
-      // Weight-only has no activation type to choose: the activations are fp16
-      // and only the weights are narrow.
-      out[0] = {ONNX_DT_FLOAT16, v.dtype, "16-bit activations against blocked weights"};
-      return 1;
-    }
-    if (v.dtype == ONNX_DT_INT8)
-    {
-      out[0] = kInt8Schemes[0];
-      out[1] = kInt8Schemes[1];
-      return 2;
-    }
-    out[0] = {v.dtype, v.dtype, "matching activations and weights"};
-    return 1;
-  }
-
-  // Output scale for the QDQ form.  Each dequantized product is a pair of
-  // values in [-1, 1], so a K-deep dot product has standard deviation
-  // sqrt(K)/3; four sigma keeps nearly every output inside int8 without
-  // compressing the useful range into a handful of codes.
-  float qdqOutputScale(int64_t K, int outDtype)
-  {
-    // Four sigma of a K-deep dot product mapped onto the widest code the output
-    // type has.  For the 8-bit types that is 127 -- float8 reaches further but
-    // its precision is scale-invariant, so the choice does not matter and the
-    // established figures stay comparable.  Float4 tops out at 6, and using 127
-    // there would saturate almost every value it was handed.
-    const double top = (outDtype == ONNX_DT_FLOAT4E2M1) ? 6.0 : 127.0;
-    return (float)(4.0 * std::sqrt((double)K) / 3.0 / top);
-  }
-
-  void destroySetup(const OrtRuntime &rt, GemmSetup &g)
-  {
-    if (g.inVal)
-      rt.api->ReleaseValue(g.inVal);
-    if (g.zaVal)
-      rt.api->ReleaseValue(g.zaVal);
-    if (g.outVal)
-      rt.api->ReleaseValue(g.outVal);
-    if (g.session)
-      rt.api->ReleaseSession(g.session);
-    g.inVal = nullptr;
-    g.zaVal = nullptr;
-    g.outVal = nullptr;
-    g.session = nullptr;
-    g.inBuf.clear();
-    g.inBuf.shrink_to_fit();
-    g.outBuf.clear();
-    g.outBuf.shrink_to_fit();
-    // `error` is deliberately left intact: callers tear a failed setup down
-    // and then report its message.
-  }
-
-  // Build model + session + bound input/output tensors for one (variant, D).
-  // Create the session and bind the scalar input and reduced output.  Shared by
-  // every model shape here: they differ in what they compute and agree entirely
-  // on how they are driven.  `zaDtype` is nonzero only for the QDQ form, whose
-  // activations add a stored-zero second input.
-  void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                   GemmSetup &g, const std::string &modelBytes,
-                   int ioDtype, int64_t D, bool profile,
-                   bool keepQdqUnfused, int zaDtype = 0)
-  {
-    // Every model here holds its operands as constants and needs folding held
-    // off, or the whole multiply is evaluated once at load time.
-    auto ses = onnxCreateSession(rt, ep, modelBytes,
-                                 /*keepConstantsUnfolded=*/true, profile,
-                                 keepQdqUnfused);
-    if (!ses.session)
-    {
-      g.error = ses.error;
-      return;
-    }
-    g.session = ses.session;
-
-    const size_t es = dtypeSize(ioDtype);
-    {
-      // Scales the reduced result; exists only so the graph depends on
-      // something supplied at run time.
-      std::string one;
-      fillTensor(one, ioDtype, 1, 0x12345678u);
-      g.inBuf.assign(one.begin(), one.end());
-    }
-    g.outBuf.assign((size_t)D * es, 0);
-
-    OrtMemoryInfo *mi = nullptr;
-    OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
-                                                OrtMemTypeDefault, &mi);
-    if (st)
-    {
-      g.error = onnxStatusText(rt, st);
-      destroySetup(rt, g);
-      return;
-    }
-
-    if (!st && zaDtype)
-    {
-      // Literal zero bytes: adding them is bit-identical in every dtype here
-      // (0 for int, +0.0 for float), so the values -- and the fusion pattern
-      // -- are unchanged, and only the load-time folding becomes impossible.
-      g.zaBuf.assign((size_t)onnxElemBytes(zaDtype, 1), 0);
-      st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, g.zaBuf.data(), g.zaBuf.size(), nullptr, 0,
-          (ONNXTensorElementDataType)zaDtype, &g.zaVal);
-    }
-    const int64_t outShape[1] = {D};
-    if (!st)
-      st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, g.inBuf.data(), g.inBuf.size(), nullptr, 0,
-          (ONNXTensorElementDataType)ioDtype, &g.inVal);
-    if (!st)
-      st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, g.outBuf.data(), g.outBuf.size(), outShape, 1,
-          (ONNXTensorElementDataType)ioDtype, &g.outVal);
-    rt.api->ReleaseMemoryInfo(mi);
-    if (st)
-    {
-      g.error = onnxStatusText(rt, st);
-      destroySetup(rt, g);
-    }
-  }
-
-  GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                      const Variant &v, int64_t D, bool profile = false,
-                      int actDtype = ONNX_DT_UINT8,
-                      bool reduceInFloat = false,
-                      int wgtDtype = ONNX_DT_INT8,
-                      bool unfoldActs = false)
-  {
-    GemmSetup g;
-
-    std::string modelBytes;
-    if (v.nvfp4)
-    {
-      std::string aPacked, aScales, bPacked, bScales;
-      onnxFillNvfp4(aPacked, aScales, D, D, /*blockAxis=*/1, v.blockSize,
-                    kNvfp4GlobalScale, 0x9e3779b9u);
-      onnxFillNvfp4(bPacked, bScales, D, D, /*blockAxis=*/0, v.blockSize,
-                    kNvfp4GlobalScale, 0x243f6a88u);
-      modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
-                                                aScales, bPacked, bScales,
-                                                kNvfp4GlobalScale);
-      aPacked.clear();
-      aPacked.shrink_to_fit();
-      aScales.clear();
-      aScales.shrink_to_fit();
-      bPacked.clear();
-      bPacked.shrink_to_fit();
-      bScales.clear();
-      bScales.shrink_to_fit();
-      finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT, D, profile,
-                  /*keepQdqUnfused=*/true);
-      return g;
-    }
-
-    if (v.blockSize > 0)
-    {
-      // Weight-only: fp16 activations, blocked-quantized weights, no quantized
-      // tensor anywhere near the graph boundary.
-      std::string aRaw, wPacked, wScales;
-      fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
-      onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
-                             v.dtype);
-      modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
-                                                     v.blockSize, aRaw, wPacked,
-                                                     wScales);
-      aRaw.clear();
-      aRaw.shrink_to_fit();
-      wPacked.clear();
-      wPacked.shrink_to_fit();
-      wScales.clear();
-      wScales.shrink_to_fit();
-      finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, D, profile,
-                  /*keepQdqUnfused=*/false);
-      return g;
-    }
-
-    std::string aRaw, bRaw;
-    const int wDtype = v.qdq ? wgtDtype : v.dtype;
-    fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
-    fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
-
-    if (v.qdq)
-    {
-      modelBytes = onnxResidentQdqMatMulModel(
-          D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
-          onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
-          actDtype, wDtype, unfoldActs);
-    }
-    else
-    {
-      modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw,
-                                           reduceInFloat);
-    }
-    aRaw.clear();
-    aRaw.shrink_to_fit();
-    bRaw.clear();
-    bRaw.shrink_to_fit();
-
-    // Anything QLinearMatMul cannot carry must not be fused into it.
-    const bool unfusable = !onnxQdqFusionIsLegal(actDtype) ||
-                           !onnxQdqFusionIsLegal(wDtype);
-    // The QDQ graph reduces in float, and so does a plain one whose reduction
-    // had to be cast; otherwise the tail keeps the matmul's dtype.
-    const int ioDtype = (v.qdq || reduceInFloat) ? ONNX_DT_FLOAT : v.dtype;
-    // Second input exists exactly when the QDQ model builds Add-0.
-    const int zaDtype = (unfoldActs && v.qdq) ? actDtype : 0;
-    finishSetup(rt, ep, g, modelBytes, ioDtype, D, profile,
-                /*keepQdqUnfused=*/v.qdq && unfusable, zaDtype);
-    return g;
-  }
-
-  // Mean microseconds per Run() over n runs; negative on failure.
-  double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n)
-  {
-    static const char *inNames[] = {"S", "ZA"};
-    static const char *outNames[] = {"Y"};
-
-    auto t0 = std::chrono::steady_clock::now();
-    for (unsigned int i = 0; i < n; i++)
-    {
-      const OrtValue *ins[] = {g.inVal, g.zaVal};
-      OrtStatus *st = rt.api->Run(g.session, nullptr,
-                                  inNames, ins, g.zaVal ? 2 : 1,
-                                  outNames, 1, &g.outVal);
-      if (st)
-      {
-        g.error = onnxStatusText(rt, st);
-        return -1.0;
-      }
-    }
-    auto t1 = std::chrono::steady_clock::now();
-    return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
+    return "";
   }
 
 } // namespace
@@ -450,68 +146,6 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg)
 {
   (void)cfg;
-
-  static const Variant kFpVariants[] = {
-      {ONNX_DT_FLOAT, false, "fp32",
-       "FP32 graph inputs and outputs.  A provider may use a narrower internal "
-       "format; read the fp32 numeric-error row beside this one to see whether "
-       "it did.  Many providers cannot run this on their matrix hardware at "
-       "all, or route it away from that hardware -- that is a finding, not "
-       "a failure."},
-      {ONNX_DT_FLOAT16, false, "fp16",
-       "16-bit floats, the native currency of most matrix hardware."},
-      {ONNX_DT_BFLOAT16, false, "bf16",
-       "The 16-bit float with fp32's exponent range and three fewer mantissa "
-       "bits.  Modern matrix hardware usually runs it at the fp16 rate; a "
-       "provider that falls well short of its own fp16 row is emulating it, "
-       "and one that refuses it outright has no bf16 path at all."},
-      {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
-       "8-bit floats in QDQ form, in the variant that spends its bits on "
-       "precision: four exponent bits and three of mantissa, reaching 448.  "
-       "This is the format quantized inference actually uses when it moves below "
-       "16 bits without going to integers."},
-      {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
-       "The other 8-bit float, trading a mantissa bit for an exponent one: it "
-       "reaches 57344 and rounds more coarsely.  Hardware usually runs both at "
-       "the same rate, so a difference between these two rows is the provider "
-       "choosing different machinery, and the accuracy rows say what each costs."},
-      {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1",
-       "4-bit floating point on both operands: two exponent bits, one of "
-       "mantissa, eight magnitudes in all and a largest value of 6.  This is the "
-       "narrowest format current tensor cores implement, and unlike int4 there "
-       "is a chance a provider fuses it into a real 4-bit multiply rather than "
-       "unpacking it -- the row says which happened."},
-      {ONNX_DT_FLOAT4E2M1, false, "nvfp4",
-       "NVIDIA's 4-bit block format on both operands: E2M1 values, an 8-bit "
-       "float scale for every 16 of them along the reduction axis, and one more "
-       "scale for the whole tensor.  Two levels are what let four bits carry a "
-       "real model, and this is the arrangement a float4 tensor core expects -- "
-       "so unlike every other narrow row here, a number in it would be genuine "
-       "4-bit arithmetic rather than four bits unpacked into something wider.",
-       /*blockSize=*/16, /*nvfp4=*/true},
-      {ONNX_DT_FLOAT4E2M1, false, "fp4_weight",
-       "The same 4-bit float used only for the weights, one scale per 32 of "
-       "them, against 16-bit activations.  Directly comparable with the int4 "
-       "row above it: identical geometry, identical block size, and the only "
-       "difference is whether those four bits are spent on a float or an "
-       "integer.",
-       /*blockSize=*/32},
-      {ONNX_DT_INT4, false, "int4_weight",
-       "4-bit weights with one scale per 32 of them, against 16-bit activations "
-       "-- the form quantized language models actually ship in.  The arithmetic "
-       "is still 16-bit, because ONNX has no 4-bit multiply and the weights are "
-       "unpacked on the way in, so this row is reported in TFLOPS and what four "
-       "bits buys is a quarter of the weight traffic rather than a faster "
-       "multiply.  On a square problem like this one that mostly shows up as "
-       "matching the fp16 row; a provider well below it is unpacking badly.",
-       /*blockSize=*/32},
-  };
-  static const Variant kIntVariants[] = {
-      {ONNX_DT_INT8, true, "int8_qdq",
-       "8-bit integers in QDQ form -- quantized in, quantized out, the shape "
-       "quantized inference actually ships in.  This is what vendors usually "
-       "quote headline TOPS figures for."},
-  };
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_gemm", "ONNX MatMul peak",
@@ -532,28 +166,53 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // stale record from an earlier run in the same process.
   onnxClearGemmFolded(ep);
 
-  // ---- Sweep every variant (all data types in one test) ---------------
-  // Helper to run one variant's sweep
-  auto runVariant = [&](const Variant &v) {
-    const bool isInt = (v.dtype == ONNX_DT_INT8 && v.qdq);
+  const bool fp32As16 = onnxEpRunsFp32AsFp16(ep);
 
-    if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
+  auto runVariant = [&](const Variant &v) {
+    const bool isInt = isIntVariant(v);
+
+    logger::EmitOptions o;
+    o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
+    if (isInt)
+      o.unit = "ops";
+
+    // The probe already learned, at 32^3, whether this provider can run the
+    // variant at all, which quantization scheme fuses, and which graph shape
+    // keeps the multiply live without changing its arithmetic.  The ladder
+    // reproduces exactly that.
+    const auto &cache = onnxProbeGemmCache(rt, ep);
+    auto it = cache.find(v.label);
+    if (it == cache.end())
     {
-      logger::EmitOptions o;
-      o.description = v.note;
-      if (isInt)
-        o.unit = "ops";
-      test.skip(v.label, ResultStatus::Unsupported, why, o);
+      test.skip(v.label, ResultStatus::Unsupported,
+                "no probe result for " + std::string(v.label), o);
       return;
     }
+    const OnnxProbeResult &pr = it->second;
+    if (!pr.ok)
+    {
+      test.skip(v.label, ResultStatus::Unsupported, pr.reason, o);
+      return;
+    }
+    // The probe left one or more viable shapes, result-scaled first.  Try
+    // them in order: the first that is not caught folding is the measurement,
+    // and a fold drops to the next (a live shape a vendor compiler cannot
+    // evaluate at build time).  A non-folding provider never leaves the first.
+    for (size_t shapeIdx = 0; shapeIdx < pr.shapes.size(); shapeIdx++)
+    {
+    const OnnxLiveShape shape = pr.shapes[shapeIdx];
+    const bool foldable = (shape == OnnxLiveShape::ResultScaled);
 
     double best = 0.0;
     int64_t bestDim = 0;
     std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
-    // Set by either folding guard below; drives the paired suppression in
+    // Set by the folding guards below; drives the paired suppression in
     // runNumericError (see onnx_probe.h).
     bool folded = false;
+    int rungs = 0;
+    // Why the ladder ended, for the single-rung verdict below.
+    bool endedOnWork = false; // memory or measured time: real work happened
 
     // First and last timings with their sizes, to confirm the work actually
     // happened (see the folding check after the loop).
@@ -561,78 +220,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t firstDim = 0, lastDim = 0;
     double lastRate = 0.0;
     double prevCreateUs = 0.0;
-    double prevRate = 0.0;
+    double prevUs = 0.0;
     int64_t prevD = 0;
     int strikes = 0;
-    std::string ranAs; // kernel the provider actually used (quantized only)
-    int actDtype = ONNX_DT_UINT8;
-    int wgtDtype = ONNX_DT_INT8;
-    const char *schemeName = "";
-    bool castedActs = false; // provider converted the activations first
-    // A provider can implement the matmul for a datatype and not the reduction
-    // that keeps the result on the device: the CUDA EP multiplies bf16 and has
-    // no bf16 ReduceMax.  Retried once, lazily, so a provider that needs
-    // nothing pays nothing -- and never for the quantized form, whose reduction
-    // already runs on a dequantized fp32 result.
-    bool reduceInFloat = false, triedFloatReduce = false;
-    // Graph shape from the probe: Add-0 operand trick or old result-scaled.
-    bool unfoldActs = false;
-
-    // Global probe once per EP (tiny 32^3) - consult cache instead of
-    // per-variant probing.  The cache was populated in onnx_peak.cpp
-    // before any runGemm call, at 32^3 per variant.  This deduplicates fp16
-    // across gemm/conv/block etc.
-    {
-      const auto &cache = onnxProbeGemmCache(rt, ep);
-      auto it = cache.find(v.label);
-      if (it == cache.end())
-      {
-        logger::EmitOptions o;
-        o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
-        if (isInt)
-          o.unit = "ops";
-        test.skip(v.label, ResultStatus::Unsupported, "no probe result for " + std::string(v.label), o);
-        return;
-      }
-      const auto &pr = it->second;
-      if (!pr.ok)
-      {
-        logger::EmitOptions o;
-        o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
-        if (isInt)
-          o.unit = "ops";
-        test.skip(v.label, ResultStatus::Unsupported, pr.reason, o);
-        return;
-      }
-      actDtype = pr.actDtype;
-      wgtDtype = pr.wgtDtype;
-      schemeName = pr.schemeName;
-      ranAs = pr.ranAs;
-      castedActs = pr.castedActs;
-      reduceInFloat = pr.reduceInFloat;
-      unfoldActs = pr.unfoldActs;
-      // For quantized/weight-only, the cache already verified fusion;
-      // no need to re-probe schemes.  Plain variants keep reduceInFloat.
-    }
-    if (v.qdq || v.blockSize > 0)
-    {
-      // Quantized fusion already verified by global probe; keep ranAs etc.
-      // This block is retained only for the skip path when global probe
-      // said ok but per-variant scheme would have failed - now handled above.
-      // Verify we have a fused kernel name; if not, skip (should not happen).
-      if (ranAs.empty())
-      {
-        logger::EmitOptions o;
-        o.description = std::string("Peak over a doubling sweep of square "
-                                    "sizes.  ") +
-                        v.note;
-        if (isInt)
-          o.unit = "ops";
-        test.skip(v.label, ResultStatus::Unsupported,
-                  "no fused quantized matmul for " + std::string(v.label), o);
-        return;
-      }
-    }
 
     for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
@@ -640,25 +230,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
 
       // Would this size fit, and would one iteration finish in reasonable
-      // time at the rate the previous size managed?
-      // Weight-only carries fp16 activations, packed nibbles and a scale per
-      // block, not two equal operands -- and on a phone an under-estimate here
-      // is an out-of-memory kill rather than a slow row.
-      const uint64_t elems = (uint64_t)D * (uint64_t)D;
-      const uint64_t weightBytes =
-          v.nvfp4
-              ? 2ull * (onnxElemBytes(ONNX_DT_FLOAT4E2M1, (int64_t)elems) + elems / (uint64_t)v.blockSize)
-          : (v.blockSize > 0)
-              ? (elems * 2ull                             // fp16 A
-                 + onnxElemBytes(v.dtype, (int64_t)elems) // packed weights
-                 + elems / (uint64_t)v.blockSize * 2ull)  // fp16 scales
-              : 2ull * onnxElemBytes(v.dtype, (int64_t)elems);
+      // time at the rate the previous size managed?  The operand estimate
+      // follows the shape -- the float-scaled QDQ form holds its activations
+      // as fp32 -- and on a phone an under-estimate here is an out-of-memory
+      // kill rather than a slow row.
+      const uint64_t weightBytes = operandBytes(v, D, shape);
       if (weightBytes > maxWeightBytes())
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
                     "stopping\n",
                     ep.providerKey.c_str(), v.label,
                     (long long)D, (unsigned long long)(weightBytes >> 20));
+        endedOnWork = true;
         break;
       }
       if (lastRate > 0.0)
@@ -671,17 +254,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       "iteration, stopping\n",
                       ep.providerKey.c_str(),
                       v.label, (long long)D, predictedUs / 1.0e6);
+          endedOnWork = true;
           break;
         }
       }
       // Predicted compilation gate: skip the next rung before paying its
-      // Graph Optimizations when the previous rung already predicts worse
-      // than the budget (compilation scales ~4x memory per 2x dim, so prev
-      // 33s predicts 132s).  The first rung is always attempted -- its time
-      // seeds this prediction.  Verified against the TensorRT ladder to stop
-      // exactly where the old narrower gates did (fp32 8192 predicted
-      // 35.4s, nvfp4 32768 predicted 74.4s) while also saving QNN's 2048
-      // (45s predicts 180s).
+      // build when the previous rung already predicts worse than the budget
+      // (compilation scales roughly 4x memory per 2x dim).  The first rung
+      // is always attempted -- its time seeds this prediction.
       if (D > kMinDim && prevCreateUs > 0.0 &&
           prevCreateUs * 4.0 > kOnnxMaxCreateUs)
       {
@@ -693,26 +273,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       auto createStart = std::chrono::steady_clock::now();
-      GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
-                              reduceInFloat, wgtDtype, unfoldActs);
-      if (!g.session && !v.qdq && !triedFloatReduce)
-      {
-        triedFloatReduce = true;
-        // Keep the native refusal: when the cast form fails too, the cause is
-        // almost always the matmul rather than the reduction, and the first
-        // message is the one that says so.
-        const std::string nativeErr = g.error;
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: native reduction refused (%s), "
-                    "retrying with the product cast to fp32\n",
-                    ep.providerKey.c_str(), v.label, nativeErr.c_str());
-        destroySetup(rt, g);
-        g = makeSetup(rt, ep, v, D, /*profile=*/false, actDtype,
-                      /*reduceInFloat=*/true, wgtDtype, unfoldActs);
-        if (g.session)
-          reduceInFloat = true;
-        else
-          g.error = nativeErr;
-      }
+      GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, pr.actDtype,
+                              pr.reduceInFloat, pr.wgtDtype, shape);
       auto createEnd = std::chrono::steady_clock::now();
       double createUs = std::chrono::duration<double, std::micro>(
                             createEnd - createStart).count();
@@ -759,6 +321,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (mean_us <= 0.0)
         break;
 
+      rungs++;
       if (firstUs == 0.0)
       {
         firstUs = mean_us;
@@ -775,21 +338,23 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 -> %.3f\n", ep.providerKey.c_str(),
                   v.label, (long long)D, rate);
 
-      // Per-doubling fold detector.  A folded graph leaves only dispatch plus
-      // a Mul over D elements, so the time stays flat while the work grows
-      // 8x and the rate jumps ~8x in a single doubling (QNN HTP: 7-10x, e.g.
-      // fp32 13.3 -> 98.4 TFLOPS from 1024 to 2048).  Real rate gains are
-      // gradual: TensorRT int8 improves 9.4x over four doublings (~1.75x per
-      // step), so 4x in one step clears every legitimate ladder measured
-      // while catching a fold at the rung where it happens.  The whole-ladder
-      // 64x guard below stays as the backstop.
-      if (prevRate > 0.0 && D == prevD * 2 && rate > prevRate * 4.0)
+      // Per-doubling fold detector, for the foldable shape only.  A folded
+      // graph leaves dispatch plus a reduction over D elements, so its time
+      // barely moves while the work grows 8x: QNN read ~170 us at both 1024
+      // and 2048.  The test is on the time, not the rate -- a provider with
+      // an expensive dispatch shows a rate that jumps several-fold across
+      // its first doubling on perfectly real work, because the first rung
+      // was mostly dispatch, and a rate threshold mistook that for folding.
+      // Real work at least doubles the time of the previous rung whatever
+      // the dispatch cost; a fold does not.  The live shapes cannot fold, so
+      // their ladders are never second-guessed.
+      if (foldable && prevUs > 0.0 && D == prevD * 2 && mean_us < prevUs * 2.0)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: rate %.3f at %lld vs %.3f at %lld "
-                    "(%.1fx in one doubling) -- work does not scale, "
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld "
+                    "(%.2fx for 8x the work) -- work does not scale, "
                     "constants were folded\n",
-                    ep.providerKey.c_str(), v.label, prevRate,
-                    (long long)prevD, rate, (long long)D, rate / prevRate);
+                    ep.providerKey.c_str(), v.label, prevUs,
+                    (long long)prevD, mean_us, (long long)D, mean_us / prevUs);
         best = 0.0;
         firstErr = "this provider folded the operands at compile time: the "
                    "timed runs measure dispatch plus a reduction of a "
@@ -800,7 +365,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         folded = true;
         break;
       }
-      prevRate = rate;
+      prevUs = mean_us;
       prevD = D;
 
       if (rate > best * kImproveFactor)
@@ -844,15 +409,15 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     "stopping\n",
                     ep.providerKey.c_str(), v.label,
                     (long long)D, per_iter_us / 1.0e6);
+        endedOnWork = true;
         break;
       }
 
-      // Session creation (graph compilation) dominates on AOT providers
-      // (QNN HTP: 33s at 1024, 313s at 2048, ~9x per 2x dim).  Two guards:
-      // absolute and factor.  The first rung is allowed to exceed the
-      // absolute once - its time seeds the factor gate; truncating it would
-      // discard a valid peak.  Factor catches the cliff before the next
-      // model is even built.
+      // Session creation (graph compilation) can dominate on ahead-of-time
+      // providers.  Two guards: absolute and factor.  The first rung is
+      // allowed to exceed the absolute once -- its time seeds the factor
+      // gate; truncating it would discard a valid peak.  Factor catches a
+      // cliff before the next model is even built.
       bool createCliff = (prevCreateUs > 0.0 &&
                           createUs > prevCreateUs * kOnnxCreateGrowthFactor);
       if (createCliff)
@@ -876,25 +441,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       prevCreateUs = createUs;
     }
 
-    // Both operands are constants, so this test depends on ORT honouring the
-    // request not to fold them; if it ever stopped, the matmul would be
-    // evaluated once at load time and every timed run would measure an empty
-    // graph.  Real work grows with the cube of the size -- 64x across this
-    // ladder -- so anything close to flat means nothing was computed.  Better
-    // an error than a spectacular number.
-    // Folding collapses the graph to a constant, so what remains is dispatch
-    // and the time stops tracking the size at all -- 143 us at 1024 against
-    // 162 us at 8192.  Real work grows as the cube of the size divided by
-    // whatever the rate gained along the way, and that gain can be large:
-    // TensorRT's int8 rate improves 9.4x between 1024 and 16384, so its time
-    // grows 433x where the work grew 4096x.  The tolerance has to clear that
-    // comfortably or the guard discards the very measurements it exists to
-    // protect -- a factor of 8 threw away a correct 124 TOPS reading.  A rate
-    // improving 64x across one ladder has never been observed.
+    // Whole-ladder backstop for the foldable shape: real work grows with the
+    // cube of the size -- 64x across a 1024-to-8192 ladder -- so anything
+    // close to flat means nothing was computed.  The tolerance has to clear
+    // what a legitimately improving rate does to the time: TensorRT's int8
+    // improves 9.4x between 1024 and 16384, so its time grows 433x where the
+    // work grew 4096x, and a factor of 8 once threw away a correct 124 TOPS
+    // reading.  A rate improving 64x across one ladder has never been
+    // observed.
     double expectedGrowth = 1.0;
     for (int64_t d = firstDim; d > 0 && d < lastDim; d *= 2)
       expectedGrowth *= 8.0; // each doubling is 8x work
-    if (best > 0.0 && firstUs > 0.0 && lastDim > firstDim &&
+    if (foldable && best > 0.0 && firstUs > 0.0 && lastDim > firstDim &&
         lastUs < firstUs * expectedGrowth / 64.0)
     {
       CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld -- "
@@ -910,48 +468,78 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       folded = true;
     }
 
-    logger::EmitOptions o;
+    // A foldable ladder that ended after one rung has nothing to compare
+    // that rung against.  When it ended because the next size would not fit
+    // or the rung itself took seconds, real work demonstrably happened; when
+    // a compile-time gate ended it, the gate is the fold's own signature --
+    // a compiler evaluating 2 GFLOP with reference code takes a minute --
+    // and the one timing is indistinguishable from dispatch.  QNN published
+    // 12 TFLOPS fp32, 12 TFLOPS fp16 and 12 TOPS int8 from one rung each,
+    // all the same 179 us, before this rule existed.
+    if (foldable && best > 0.0 && rungs == 1 && !endedOnWork)
+    {
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: one rung, ended on a compile-time gate; "
+                  "cannot rule out folding\n",
+                  ep.providerKey.c_str(), v.label);
+      best = 0.0;
+      firstErr = "only one size could be measured before the provider's "
+                 "compile time ran out, so nothing confirms the timing "
+                 "scaled with the work rather than measuring dispatch";
+      errStatus = ResultStatus::Error;
+      folded = true;
+    }
+
+    // Caught folding and another shape remains: drop to it (a live shape the
+    // compiler cannot evaluate at build time) rather than reporting an error.
+    if (folded && shapeIdx + 1 < pr.shapes.size())
+    {
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %s folded, retrying %s\n",
+                  ep.providerKey.c_str(), v.label, shapeNameFor(shape),
+                  shapeNameFor(pr.shapes[shapeIdx + 1]));
+      continue;
+    }
+
     if (best > 0.0)
     {
       o.description = "Peak over a doubling sweep of square sizes; fastest at " + std::to_string(bestDim) + " cubed.  " + v.note;
-      if (!ranAs.empty())
-        o.description += "  The provider ran the multiply as " + ranAs +
-                         " with " + schemeName +
+      if (!pr.ranAs.empty())
+        o.description += "  The provider ran the multiply as " + pr.ranAs +
+                         " with " + pr.schemeName +
                          ", confirming it really ran in " + v.label + ".";
-      if (castedActs)
+      if (pr.castedActs)
         o.description += "  This provider does not take the activations in the "
                          "width they were given, so it converts them first: "
                          "that is a full pass over them on every run and it is "
                          "inside this figure.";
-      if (reduceInFloat)
+      if (pr.reduceInFloat)
         o.description += "  This provider has no reduction for the datatype, "
                          "so the product is cast to fp32 before being reduced; "
                          "the multiply itself is unaffected, but the cast is a "
                          "full pass over the result and costs a few percent.";
-      if (unfoldActs)
-        o.description += "  The activations add a runtime zero on the way in, "
-                         "so the multiply cannot be folded away at load time.";
-      if (isInt)
-        o.unit = "ops";
+      o.description += shapeNote(v, shape);
+      if (fp32As16 && v.dtype == ONNX_DT_FLOAT && !v.qdq)
+        o.description += "  This provider runs fp32 graphs at 16-bit precision "
+                         "by default, which is how an fp32 model reaches its "
+                         "hardware at all; the fp32 numeric-error row shows "
+                         "the cost.";
       test.emit(v.label, (float)best, o);
     }
     else
     {
-      o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
-      if (isInt)
-        o.unit = "ops";
       if (folded)
         onnxNoteGemmFolded(ep, v.label);
       test.skip(v.label, errStatus,
                 firstErr.empty() ? "no supported datatype" : firstErr, o);
     }
+    break; // settled: this shape produced the row (measurement or error)
+    }      // shape-retry loop
   };
-  for (size_t i = 0; i < sizeof(kFpVariants)/sizeof(kFpVariants[0]); i++)
+  for (size_t i = 0; i < kFpVariantCount; i++)
   {
     if (clpeak::cancelRequested()) break;
     runVariant(kFpVariants[i]);
   }
-  for (size_t i = 0; i < sizeof(kIntVariants)/sizeof(kIntVariants[0]); i++)
+  for (size_t i = 0; i < kIntVariantCount; i++)
   {
     if (clpeak::cancelRequested()) break;
     runVariant(kIntVariants[i]);

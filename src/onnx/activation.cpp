@@ -17,7 +17,11 @@
 // same constant with no operation applied.  Subtracting it leaves the
 // operation's own cost rather than the cost of the scaffolding around it.
 // The reference depends only on the tensor size, so it is timed once per size
-// and shared by all three operations rather than re-timed for each.
+// and shared by all three operations rather than re-timed for each.  Both
+// graphs scale the tensor by a runtime value before doing anything else, so
+// neither is a constant expression a vendor compiler can evaluate at build
+// time -- OpenVINO did exactly that to the earlier result-scaled form and
+// every row read "too close to the reference", both being dispatch.
 //
 // Every rung is reported, at the same three working-set sizes onnx-tensor-bw
 // uses, so the two ladders divide row for row: silu_32mb against that test's
@@ -41,6 +45,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -63,14 +68,14 @@ namespace
 
   struct Size
   {
-    int64_t rows; // bytes = rows * kCols * 2
+    uint64_t bytes; // the working set; rows follow from the element width
     const char *label;
   };
 
   const Size kSizes[] = {
-      {1024, "8mb"},
-      {4096, "32mb"},
-      {16384, "128mb"},
+      {8ull << 20, "8mb"},
+      {32ull << 20, "32mb"},
+      {128ull << 20, "128mb"},
   };
 
   // The rungs are fixed, so the budget check is the only thing standing between
@@ -112,16 +117,18 @@ namespace
     ResultStatus status = ResultStatus::Ok;
   };
 
-  Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+  Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int dtype,
               OnnxActivation act, int64_t rows,
               unsigned int warmup, bool forceIters, unsigned int forced)
   {
     Run r;
+    const size_t es = (size_t)onnxElemBytes(dtype, 1);
 
     OrtSession *session = nullptr;
     {
-      std::string xRaw((size_t)rows * kCols * 2, '\0');
+      std::string xRaw((size_t)rows * kCols * es, '\0');
       {
+        float *f = reinterpret_cast<float *>(&xRaw[0]);
         uint16_t *h = reinterpret_cast<uint16_t *>(&xRaw[0]);
         uint32_t s = 0x9e3779b9u;
         for (int64_t i = 0; i < rows * kCols; i++)
@@ -129,10 +136,14 @@ namespace
           s ^= s << 13;
           s ^= s >> 17;
           s ^= s << 5;
-          h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
+          const float v = (float)(s >> 8) / 16777216.0f - 0.5f;
+          if (dtype == ONNX_DT_FLOAT)
+            f[i] = v;
+          else
+            h[i] = floatToHalf(v);
         }
       }
-      std::string model = onnxResidentActivationModel(rows, kCols, act, xRaw);
+      std::string model = onnxResidentActivationModel(rows, kCols, dtype, act, xRaw);
       xRaw.clear();
       xRaw.shrink_to_fit();
 
@@ -168,8 +179,11 @@ namespace
       session = ses.session;
     }
 
-    uint16_t sVal = floatToHalf(1.0009765625f);
-    std::vector<uint16_t> outBuf((size_t)kCols, 0);
+    // Exactly one: the scalar scales the tensor before the operation, so
+    // one keeps every value the operation sees identical to the constant
+    // -- and a compiler cannot know it is one.
+    const std::string sVal = onnxFloatScalar(1.0f, dtype);
+    std::vector<uint8_t> outBuf((size_t)kCols * es, 0);
 
     OrtMemoryInfo *mi = nullptr;
     OrtValue *inVal = nullptr, *outVal = nullptr;
@@ -178,12 +192,12 @@ namespace
     const int64_t outShape[1] = {kCols};
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, &sVal, sizeof(sVal), nullptr, 0,
-          ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
+          mi, const_cast<char *>(sVal.data()), sVal.size(), nullptr, 0,
+          (ONNXTensorElementDataType)dtype, &inVal);
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, outBuf.data(), outBuf.size() * 2, outShape, 1,
-          ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &outVal);
+          mi, outBuf.data(), outBuf.size(), outShape, 1,
+          (ONNXTensorElementDataType)dtype, &outVal);
     if (mi)
       rt.api->ReleaseMemoryInfo(mi);
 
@@ -261,6 +275,18 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        // measurements, no one of which stands for the rest.
        TestShape::Heterogeneous, "operation and size"});
 
+  // The width this provider streams fastest (see onnxStreamDtype): fp16
+  // wherever the accelerator has fp16 kernels, fp32 on a provider that would
+  // otherwise convert every fp16 tensor on the way in and report the
+  // conversion under this heading.  The working sets are in bytes, so the
+  // row count halves in fp32 and each rung still names its size truthfully.
+  const int dtype = onnxStreamDtype(rt, ep);
+  const size_t es = (size_t)onnxElemBytes(dtype, 1);
+  const char *widthNote =
+      (dtype == ONNX_DT_FLOAT)
+          ? "  Measured in fp32, which this provider streams faster than fp16."
+          : "";
+
   // The reference: same tensor, same read and reduction, no operation.  It
   // depends only on the size, so it is measured once per size and reused by
   // every variant -- three variants over one ladder otherwise pay for the
@@ -272,7 +298,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto it = floors.find(rows);
     if (it == floors.end())
       it = floors.emplace(rows,
-                          measure(rt, ep, OnnxActivation::None, rows,
+                          measure(rt, ep, dtype, OnnxActivation::None, rows,
                                   warmupCount, forceIters, specifiedIters))
                .first;
     return it->second;
@@ -288,13 +314,14 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (clpeak::cancelRequested())
         break;
 
-      const uint64_t bytes = (uint64_t)sz.rows * kCols * 2ull;
+      const uint64_t bytes = sz.bytes;
+      const int64_t rows = (int64_t)(bytes / ((uint64_t)kCols * es));
       const std::string metric = std::string(v.label) + "_" + sz.label;
       const std::string note =
           std::string(sz.label) + " of activations -- " + v.note +
           "  Read against onnx-tensor-bw's rung of the same name: the ratio is "
           "how much of its streaming rate this provider keeps once it has to "
-          "apply a function to the data.";
+          "apply a function to the data." + widthNote;
 
       if (bytes * kCopiesAtPeak > maxTensorBytes())
       {
@@ -303,8 +330,8 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         continue;
       }
 
-      const Run &floor = floorFor(sz.rows);
-      Run full = measure(rt, ep, v.act, sz.rows, warmupCount, forceIters,
+      const Run &floor = floorFor(rows);
+      Run full = measure(rt, ep, dtype, v.act, rows, warmupCount, forceIters,
                          specifiedIters);
       if (full.us <= 0.0)
       {

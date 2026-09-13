@@ -3,12 +3,17 @@
 
 #ifdef ENABLE_ONNX
 
+#include "onnx_model.h"
+
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 struct OrtRuntime;
 struct onnx_ep_info_t;
 
+// What one tiny (32^3) build of a gemm variant found out about a provider,
+// and the graph shape the ladder must therefore reproduce.
 struct OnnxProbeResult
 {
   bool ok = false;
@@ -21,12 +26,16 @@ struct OnnxProbeResult
   const char *schemeName = "";
   bool castedActs = false;
   bool reduceInFloat = false;
-  // Graph shape the ladder must reproduce: true = Add-0 operand trick
-  // (unfoldable), false = old result-scaled-only shape.  Decided per
-  // (provider, dtype) by profiling the 32^3 session for an inserted Cast --
-  // a trick whose elementwise promotes (CPU fp16) measures the wrong
-  // arithmetic, so the probe falls back to the old shape there.
-  bool unfoldActs = false;
+  // Graph shapes the ladder may use, in preference order, each proven at
+  // 32^3 to build, fuse where the row needs it, and run the multiply at the
+  // row's own width (see OnnxLiveShape).  The first is the fastest safe
+  // choice -- result-scaled where it is viable, since a live operand costs a
+  // pass and, on the ANE, compiles to a ~20% slower program -- and the rest
+  // are fallbacks the ladder drops to only when the one before it is caught
+  // folding.  Result-scaled is the only foldable shape; the live ones cannot
+  // be evaluated at build time, so a provider whose compiler folds ends up on
+  // one of them, and a provider that does not keeps the fast result-scaled.
+  std::vector<OnnxLiveShape> shapes;
 };
 
 using OnnxProbeCache = std::unordered_map<std::string, OnnxProbeResult>;
@@ -56,6 +65,17 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt,
 // answers false.
 bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   std::string &reason);
+
+// The floating-point width this provider streams a resident tensor through
+// fastest: ONNX_DT_FLOAT16 or ONNX_DT_FLOAT.  One [1, K] x [K, N] matrix-
+// vector product over eight megabytes of weights, timed in each, and the
+// faster kept (fp16 on a tie).  The bandwidth-shaped tests take their
+// element type from this rather than assuming fp16: a provider without a
+// native fp16 kernel for the operation -- ONNX Runtime's CPU EP converts
+// every fp16 tensor on the way in -- would otherwise report its conversion
+// rate under a bandwidth heading (2 GB/s on a Threadripper whose fp32 rows
+// stream 38).  Memoized per runtime and target.
+int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
 // overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only
