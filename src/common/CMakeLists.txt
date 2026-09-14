@@ -14,6 +14,17 @@ add_library(peak_common STATIC
 )
 # dlopen lives in libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it's in libc.
 target_link_libraries(peak_common PUBLIC ${CMAKE_DL_LIBS})
+# Core ML's compile cache has to be cleared by whichever backend fills it
+# (include/common/coreml_cache.h); the Objective-C++ implementation is Apple
+# only and the header is a no-op stub elsewhere.
+if(APPLE)
+    target_sources(peak_common PRIVATE coreml_cache.mm)
+    set_source_files_properties(coreml_cache.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    find_library(COMMON_FOUNDATION_FRAMEWORK Foundation)
+    target_link_libraries(peak_common PUBLIC ${COMMON_FOUNDATION_FRAMEWORK})
+else()
+    target_sources(peak_common PRIVATE coreml_cache_stub.cpp)
+endif()
 # logger.cpp (base) + logger_text.cpp (shared text formatter, writes to an
 # injectable std::ostream) live here.  Consumers that need a non-text channel
 # (Android JNI, iOS callbacks) subclass these in their own tree.

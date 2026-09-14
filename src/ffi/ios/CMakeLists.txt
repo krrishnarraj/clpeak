@@ -74,6 +74,12 @@ add_subdirectory(${CLPEAK_ROOT}/src/metal ${CMAKE_BINARY_DIR}/metal)
 set(CLPEAK_ENABLE_CPU ON CACHE BOOL "" FORCE)
 add_subdirectory(${CLPEAK_ROOT}/src/cpu ${CMAKE_BINARY_DIR}/cpu)
 
+# Core ML backend — the Neural Engine, GPU and CPU through the system
+# framework, no pod needed.  On the simulator Core ML enumerates the CPU (and
+# GPU) only; a device gets the Neural Engine.
+set(CLPEAK_ENABLE_COREML ON CACHE BOOL "" FORCE)
+add_subdirectory(${CLPEAK_ROOT}/src/coreml ${CMAKE_BINARY_DIR}/coreml)
+
 # ---- ONNX Runtime backend (CoreML / XNNPACK / CPU) -------------------------
 # Statically linked, and it has to be: Apple's official pod ships
 # onnxruntime.xcframework as a *static* framework (`static_framework = true`
@@ -140,7 +146,7 @@ if(CLPEAK_IOS_ONNX_AVAILABLE)
       "-framework UIKit")
 endif()
 
-foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx)
+foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx peak_coreml)
   if(TARGET ${_dep})
     set_target_properties(${_dep} PROPERTIES
       "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"

@@ -67,6 +67,14 @@ enum class Benchmark : unsigned int {
     OnnxTensorBW,       // resident-tensor read bandwidth through an ONNX EP
     OnnxTransferBW,     // host<->device transfer cost through an ONNX EP
     OnnxDispatchLatency,// per-submission overhead of an ONNX EP
+    CoremlGemm,           // single-op matmul through Core ML (ANE/GPU/CPU)
+    CoremlNumericError,   // accuracy cost of each dtype vs an fp32 reference
+    CoremlBlock,          // fixed transformer decoder block: prefill + decode
+    CoremlConv,           // 2-D convolution peak through Core ML
+    CoremlActivation,     // softmax / layernorm / gate throughput through Core ML
+    CoremlTensorBW,       // resident-weight read bandwidth through Core ML
+    CoremlTransferBW,     // host<->compute-unit transfer cost through Core ML
+    CoremlDispatchLatency,// per-prediction overhead of a Core ML compute unit
     KernelLatency,
     COUNT
 };
@@ -93,6 +101,9 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::OnnxActivation:
     case Benchmark::OnnxTensorBW:
     case Benchmark::OnnxTransferBW:
+    case Benchmark::CoremlActivation:
+    case Benchmark::CoremlTensorBW:
+    case Benchmark::CoremlTransferBW:
     case Benchmark::CacheBandwidth:
     case Benchmark::TextureSample:
         return Category::Bandwidth;
@@ -128,6 +139,9 @@ inline Category categoryOf(Benchmark b)
     case Benchmark::OnnxGemm:
     case Benchmark::OnnxNumericError:
     case Benchmark::OnnxConv:
+    case Benchmark::CoremlGemm:
+    case Benchmark::CoremlNumericError:
+    case Benchmark::CoremlConv:
         return Category::Compute;
 
     case Benchmark::CryptoAes:
@@ -141,10 +155,12 @@ inline Category categoryOf(Benchmark b)
         return Category::String;
 
     case Benchmark::OnnxBlock:
+    case Benchmark::CoremlBlock:
         return Category::Ai;
 
     case Benchmark::KernelLatency:
     case Benchmark::OnnxDispatchLatency:
+    case Benchmark::CoremlDispatchLatency:
     case Benchmark::MemoryLatency:
     case Benchmark::Atomics:
     case Benchmark::BranchPenalty:

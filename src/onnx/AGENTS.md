@@ -163,6 +163,16 @@ answers the only question clpeak asks — all of it, or none. Measured on the
 same E5M2 graph that produced the flood: **four seconds and dozens of identical
 errors became one millisecond and two lines.**
 
+## The CoreML provider fills Core ML's compile cache; runAll purges it
+
+Every model the CoreML execution provider compiles is cached by Core ML's
+runtime under `~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`
+with its weights, and never evicted -- 292 GB had accumulated on the
+development Mac before it was noticed.  `OnnxPeak::runAll` calls
+`clpeak::purgeCoreMLCompileCache()` (`include/common/coreml_cache.h`, a
+no-op off Apple) after each provider; the Core ML backend does the same per
+session, and the header says why.
+
 ## Vendor console spam is muted, not tolerated
 
 Registering a provider can pull in a second copy of the ONNX schema registry:

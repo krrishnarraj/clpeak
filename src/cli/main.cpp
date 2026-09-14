@@ -34,6 +34,9 @@
 #ifdef ENABLE_ONNX
 #include <onnx/onnx_peak.h>
 #endif
+#ifdef ENABLE_COREML
+#include <coreml/coreml_peak.h>
+#endif
 
 // A thin wrapper that captures everything we need per backend so the rest of
 // main() can iterate instead of repeating #ifdef-guarded blocks.
@@ -146,6 +149,18 @@ static std::vector<BackendEntry> buildBackends()
         []
         { return std::make_unique<OnnxPeak>(); },
         &CliOptions::skipOnnx,
+    });
+#endif
+#ifdef ENABLE_COREML
+    out.push_back({
+        "CoreML",
+        []
+        { return CoreMLPeak::enumerate(); },
+        [](const BackendInventory &inv, std::ostream &os)
+        { CoreMLPeak::printInventory(inv, os); },
+        []
+        { return std::make_unique<CoreMLPeak>(); },
+        &CliOptions::skipCoreml,
     });
 #endif
     return out;

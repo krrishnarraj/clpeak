@@ -21,6 +21,7 @@ struct CliOptions {
   bool skipOneapi = false;
   bool skipCpu    = false;
   bool skipOnnx   = false;
+  bool skipCoreml = false;
 
   // OpenCL platform/device selection (OpenCL-only concept; kept here so
   // applyOptions can copy it).  Empty = run all enumerated platforms/devices.
@@ -34,6 +35,7 @@ struct CliOptions {
   std::vector<int> mtlDeviceIndices;
   std::vector<int> oneapiDeviceIndices;
   std::vector<int> onnxDeviceIndices;
+  std::vector<int> coremlDeviceIndices;
 
   // --onnx-lib: absolute path to the onnxruntime shared library to load,
   // overriding the platform's conventional names.  Empty = search the

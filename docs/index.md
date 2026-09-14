@@ -37,7 +37,7 @@ same tests can be compared across APIs on the same machine.
   DRAM levels; NPU resident-tensor and transfer bandwidth.
 - **Latency** — kernel launch round-trip, memory latency, atomics and
   branch-mispredict cost; NPU dispatch overhead.
-- **AI composites** — ONNX transformer-block prefill/decode, convolution and
+- **AI composites** — ONNX and Core ML transformer-block prefill/decode, convolution and
   activation throughput, plus per-dtype numeric error, so a rate always ships
   with its accuracy cost.
 
@@ -59,6 +59,7 @@ both in the app (the info glyph beside each row) and on the CLI
 | oneAPI/SYCL | Intel GPUs |
 | CPU | x86-64 and AArch64, runtime-dispatched per ISA |
 | ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
+| Core ML | Apple's Neural Engine, GPU and CPU through the system framework, no runtime to install (macOS 14.4+ / iOS 17.4+) |
 
 </div>
 
@@ -67,6 +68,16 @@ time, never linked (except on iOS), so no ONNX install is needed to build:
 a machine without one reports "library not found", and `--onnx-lib PATH`
 points at another build. A graph a provider can't fully own reports
 `unsupported` rather than silently measuring the CPU.
+
+The Core ML backend reaches the same Neural Engine without ONNX Runtime: it
+emits Core ML's ML Program format directly, compiles it on the device, and
+reads Core ML's compute plan to prove per operation which unit ran it — so a
+row that Core ML would have moved to the CPU reports so, with the reason.
+Its tests mirror the ONNX ones (matmul, numeric error, convolution,
+transformer-block prefill/decode, activations, bandwidth, transfer,
+dispatch), across every weight format Core ML can store: fp32, fp16, int8
+per-channel, int4 blockwise and palettized, 8-bit quantized activations —
+and bf16 and fp8, which it reports as Core ML refuses them.
 
 ## The desktop app
 
@@ -173,6 +184,7 @@ whichever API is doing the work.
 ./clpeak --metal                    # one backend
 ./clpeak --cuda --vulkan            # or several
 ./clpeak --onnx --onnx-device 0     # one NPU/GPU provider (--onnx-lib PATH picks the runtime)
+./clpeak --coreml --coreml-device 0 # Core ML on the Neural Engine (1: GPU, 2: CPU)
 ./clpeak --single-precision-compute # one test, everywhere
 ./clpeak --describe                 # explain what each reading measures
 ./clpeak -o out.clpeak.json         # save results (one JSON document)

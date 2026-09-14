@@ -27,6 +27,7 @@ const Map<String, _BackendFlags> _backendFlags = {
   'oneAPI': _BackendFlags('oneapi', '--oneapi-device'),
   'CPU': _BackendFlags('cpu', null),
   'ONNX': _BackendFlags('onnx', '--onnx-device'), // device index = EP index
+  'CoreML': _BackendFlags('coreml', '--coreml-device'), // ANE / GPU / CPU
 };
 
 /// A device reference within a backend: platform index (OpenCL) + device

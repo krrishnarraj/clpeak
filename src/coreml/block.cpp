@@ -1,0 +1,535 @@
+#ifdef ENABLE_COREML
+
+// coreml-block: one fixed transformer decoder block through Core ML, run in
+// the two regimes that bound all LLM inference, at each precision a language
+// model ships in -- the rung above a raw matmul peak and below tokens per
+// second, on the compute unit this device row names.
+//
+//   prefill (64/512/2048 tokens at once)      compute-bound -> effective FLOPS
+//   decode  (1 token, 512/2048/8192 context)  memory-bound  -> effective B/s
+//
+// Geometry, ladders, precisions and reporting are the ONNX backend's
+// (src/onnx/block.cpp), so a Core ML row divides by an ONNX one: the block
+// is 2048 wide, 16 heads of 128, a 5504-wide SwiGLU feed-forward -- 50.6M
+// parameters, 101 MB at fp16.  Attention is Core ML's own fused op where
+// the OS has it (macOS 15 / iOS 18), which is what a converted model
+// carries; older systems get explicit matmul / softmax / matmul.
+//
+// The block is where the Neural Engine's real answer on compressed weights
+// lives.  A single matmul with resident activations can be decompressed at
+// load time and run as fp16; a layer's activations are live, and whether
+// the Neural Engine takes a 4-bit projection *there* is what a model would
+// meet.  The compute plan settles it per session, and a row it declines
+// reports so instead of measuring the CPU.
+
+#include <coreml/coreml_peak.h>
+#include "coreml_bench.h"
+#include "coreml_model.h"
+#include "coreml_session.h"
+
+#include <cstring>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace
+{
+
+constexpr int64_t kDModel = 2048;
+constexpr int64_t kHeads = 16;
+constexpr int64_t kHeadDim = 128;
+constexpr int64_t kFfnHidden = 5504;
+constexpr int64_t kPrefillSeq = 512;
+constexpr int64_t kDecodeKv = 2048;
+const int64_t kKvLadder[] = {512, 2048, 8192};
+const int64_t kPromptLadder[] = {64, 512, 2048};
+constexpr unsigned int kBlockBudgetUs = 5000000;
+
+struct Variant
+{
+  const char *label;
+  CoremlWeight w;
+  bool sweep;         // walk the whole prompt and context ladders
+  const char *unit;   // nullptr: the scope's own unit
+  const char *note;
+  bool int8Kv;        // the cache stored as int8
+  bool decodeOnly;    // a cache format has no prefill row
+};
+
+const Variant kVariants[] = {
+    {"fp16", CoremlWeight::Fp16, true, nullptr,
+     "16-bit weights and 16-bit arithmetic, the form an unquantized Core ML "
+     "model is served in and the reference the other rows are read against.",
+     false, false},
+    {"int4_weight", CoremlWeight::Int4Block, true, nullptr,
+     "4-bit weights, one scale per 32, against 16-bit activations -- what a "
+     "quantized language model ships as.  The arithmetic stays 16-bit, so "
+     "four bits buys weight traffic rather than rate; whether this compute "
+     "unit takes the blocked form with live activations is the finding.",
+     false, false},
+    {"int4_lut", CoremlWeight::Int4Lut, false, nullptr,
+     "4-bit palettized weights -- a 16-entry table per matrix, the compression "
+     "Apple's Neural Engine decodes natively -- against 16-bit activations.",
+     false, false},
+    {"int8_weight", CoremlWeight::Int8Channel, false, nullptr,
+     "8-bit weights, one scale per output column, against 16-bit activations.  "
+     "This narrows only the weights where int8_qdq narrows the arithmetic too, "
+     "so the gap between them is what integer multipliers are worth.",
+     false, false},
+    {"int8_qdq", CoremlWeight::Int8Qdq, false, "ops",
+     "8-bit weights and 8-bit arithmetic through the projections, quantized in "
+     "and out -- what headline TOPS figures are quoted for, measured on a whole "
+     "layer.  Attention and the softmax stay 16-bit, as they do in every real "
+     "deployment.",
+     false, false},
+    {"fp32", CoremlWeight::Fp32, false, nullptr,
+     "Full precision, which nobody serves a language model in, here as a "
+     "control -- and on the Neural Engine row, a layer Core ML has to send "
+     "elsewhere, which the plan reports.",
+     false, false},
+    {"bf16", CoremlWeight::Bf16, false, nullptr,
+     "bfloat16 has no arithmetic in Core ML; the row records the refusal.",
+     false, false},
+    {"fp8_weight", CoremlWeight::Fp8Block, false, nullptr,
+     "8-bit float weights with block scales, if this OS takes them.",
+     false, false},
+    {"int8_kv", CoremlWeight::Fp16, true, nullptr,
+     "16-bit throughout with only the cached context stored as 8-bit integers "
+     "and decompressed into attention -- the axis that decides how long a "
+     "conversation a device can hold, which is why this row sweeps context.",
+     true, true},
+};
+
+int64_t weightParams()
+{
+  return 4 * kDModel * kDModel + 2 * kDModel * kFfnHidden + kFfnHidden * kDModel;
+}
+
+uint64_t weightBytes(const Variant &v)
+{
+  return 4 * coremlWeightBytes(v.w, kDModel, kDModel) +
+         2 * coremlWeightBytes(v.w, kDModel, kFfnHidden) +
+         coremlWeightBytes(v.w, kFfnHidden, kDModel);
+}
+
+uint64_t kvBytes(const Variant &v, int64_t kv)
+{
+  const uint64_t elem = v.int8Kv ? 1 : coremlElemBytes(coremlActDtype(v.w), 1);
+  return 2ull * (uint64_t)kHeads * (uint64_t)kv * (uint64_t)kHeadDim * elem;
+}
+
+std::vector<int64_t> promptsFor(const Variant &v)
+{
+  if (v.decodeOnly)
+    return {};
+  if (v.sweep)
+    return {kPromptLadder[0], kPromptLadder[1], kPromptLadder[2]};
+  return {kPrefillSeq};
+}
+
+std::vector<int64_t> contextsFor(const Variant &v)
+{
+  if (v.sweep)
+    return {kKvLadder[0], kKvLadder[1], kKvLadder[2]};
+  return {kDecodeKv};
+}
+
+double blockFlops(int64_t seq, int64_t ctx)
+{
+  const double S = (double)seq, C = (double)ctx;
+  const double d = (double)kDModel, ffn = (double)kFfnHidden;
+  const double H = (double)kHeads, Dh = (double)kHeadDim;
+  const double qkv = 3.0 * 2.0 * S * d * d;
+  const double attn = 2.0 * 2.0 * H * S * C * Dh;
+  const double proj = 2.0 * S * d * d;
+  const double ff = 2.0 * 2.0 * S * d * ffn + 2.0 * S * ffn * d;
+  return qkv + attn + proj + ff;
+}
+
+struct Point
+{
+  double us = -1.0;
+  std::string error;
+  ResultStatus status = ResultStatus::Ok;
+  std::string glue;   // negligible operations the plan placed elsewhere
+};
+
+struct VariantResult
+{
+  bool usable = false;
+  std::string skipReason;
+  ResultStatus skipStatus = ResultStatus::Unsupported;
+  std::map<int64_t, Point> prefill, decode;
+};
+
+CoremlBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq, int spec)
+{
+  CoremlBlockShape sh;
+  sh.dModel = kDModel;
+  sh.heads = kHeads;
+  sh.headDim = kHeadDim;
+  sh.ffnHidden = kFfnHidden;
+  sh.seq = decode ? 1 : prefillSeq;
+  sh.kvLen = decode ? kvLen : 0;
+  sh.weights = v.w;
+  sh.int8Kv = v.int8Kv;
+  sh.fusedAttention = spec >= 9;
+  return sh;
+}
+
+} // namespace
+
+int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cfg)
+{
+  (void)cfg;
+  const int spec = coremlSpecVersion();
+  constexpr size_t kNVariants = sizeof(kVariants) / sizeof(kVariants[0]);
+  std::vector<VariantResult> results(kNVariants);
+
+  // Time one regime end to end: mean us per block, or negative with the
+  // point's status and error set.
+  auto measure = [&](const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq, Point &pt)
+  {
+    std::string err;
+    auto s = CoremlSession::create(dev, coremlBlockModel(spec, shapeFor(v, decode, kvLen, prefillSeq, spec)), err);
+    const std::string what = decode ? "decode_kv" + std::to_string(kvLen)
+                                    : "prefill_s" + std::to_string(prefillSeq);
+    if (!s)
+    {
+      CLPEAK_VLOG("coreml-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
+                  what.c_str(), err.c_str());
+      pt.error = err;
+      pt.status = ResultStatus::Unsupported;
+      return;
+    }
+    const double createUs = coremlCreateUs(*s);
+    CLPEAK_VLOG("coreml-block[%s/%s]: %s create %.1f s\n", dev.displayName.c_str(), v.label, what.c_str(),
+                createUs / 1.0e6);
+    if (!s->onDevice())
+    {
+      pt.error = coremlOffDeviceReason(dev, *s);
+      pt.status = ResultStatus::Unsupported;
+      CLPEAK_VLOG("coreml-block[%s/%s]: %s %s\n", dev.displayName.c_str(), v.label, what.c_str(),
+                  pt.error.c_str());
+      return;
+    }
+    if (createUs > kCoremlMaxBlockCreateUs)
+    {
+      pt.error = "model creation took " + std::to_string((long long)(createUs / 1.0e6)) + " s, exceeds " +
+                 std::to_string((long long)(kCoremlMaxBlockCreateUs / 1.0e6)) + " s compilation budget";
+      pt.status = ResultStatus::Unsupported;
+      return;
+    }
+    const int act = coremlActDtype(v.w);
+    if (!coremlBindScalar(*s, "s", act == CML_BF16 ? CML_FP16 : act, err))
+    {
+      pt.error = err;
+      pt.status = ResultStatus::Error;
+      return;
+    }
+    auto m = coremlMeasure(*s, warmupCount, kBlockBudgetUs, forceIters, specifiedIters);
+    if (m.meanUs <= 0.0)
+    {
+      pt.error = m.error.empty() ? "run failed" : m.error;
+      pt.status = m.status;
+      return;
+    }
+    pt.us = m.meanUs;
+    pt.status = ResultStatus::Ok;
+    pt.glue = coremlGlueNote(*s);
+  };
+
+  // Everything that has to be true before a variant is worth timing: the OS
+  // accepts its format, the fixed geometry fits, and one small session
+  // compiles and lands on this compute unit.
+  auto validateVariant = [&](const Variant &v, VariantResult &vr) -> bool
+  {
+    if (vr.usable || !vr.skipReason.empty())
+      return vr.usable;
+    if (coremlSpecForWeight(v.w) > spec)
+    {
+      vr.skipReason = "needs " + coremlOsForSpec(coremlSpecForWeight(v.w)) + " (model specification " +
+                      std::to_string(coremlSpecForWeight(v.w)) + "); this OS accepts " + std::to_string(spec);
+      return false;
+    }
+    {
+      const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) +
+                              (64ull << 20) * coremlElemBytes(coremlActDtype(v.w), 1) / 2;
+      const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
+      if (budget && budget < needed)
+      {
+        vr.skipReason = "not enough memory for the canonical block; its geometry is fixed so the "
+                        "numbers stay comparable, and a smaller layer would not be the same test";
+        return false;
+      }
+    }
+    // The probe is the smallest point of the regime the row has, and its
+    // timing is kept: a point measured is a point measured.
+    Point pt;
+    const bool decode = v.decodeOnly;
+    measure(v, decode, kKvLadder[0], kPromptLadder[0], pt);
+    if (pt.us <= 0.0)
+    {
+      vr.skipReason = pt.error.empty() ? std::string("the block could not be built for ") + v.label : pt.error;
+      vr.skipStatus = pt.status;
+      return false;
+    }
+    if (decode)
+      vr.decode[kKvLadder[0]] = pt;
+    else
+      vr.prefill[kPromptLadder[0]] = pt;
+    vr.usable = true;
+    return true;
+  };
+
+  double refPrefillRate = 0.0, refDecodeRate = 0.0;
+  auto affordable = [&](double flops, double rate) { return rate <= 0.0 || (flops / rate) <= (double)kBlockBudgetUs; };
+
+  auto measurePrefill = [&](const Variant &v, VariantResult &vr, int64_t seq)
+  {
+    auto it = vr.prefill.find(seq);
+    if (it != vr.prefill.end())
+      return;
+    Point pt;
+    const double flops = blockFlops(seq, seq);
+    if (!affordable(flops, refPrefillRate))
+    {
+      pt.status = ResultStatus::Error;
+      pt.error = "one pass would take about " + std::to_string((long long)(flops / refPrefillRate / 1.0e6)) +
+                 " s on this compute unit, too slow to measure";
+    }
+    else
+    {
+      measure(v, false, kDecodeKv, seq, pt);
+      if (pt.us > 0.0)
+        refPrefillRate = flops / pt.us;
+    }
+    vr.prefill[seq] = pt;
+  };
+
+  auto measureDecode = [&](const Variant &v, VariantResult &vr, int64_t kv)
+  {
+    auto it = vr.decode.find(kv);
+    if (it != vr.decode.end())
+      return;
+    Point pt;
+    const double flops = blockFlops(1, kv);
+    if (!affordable(flops, refDecodeRate))
+    {
+      pt.status = ResultStatus::Error;
+      pt.error = "one token would take about " + std::to_string((long long)(flops / refDecodeRate / 1.0e6)) +
+                 " s on this compute unit, too slow to measure";
+    }
+    else
+    {
+      measure(v, true, kv, kPrefillSeq, pt);
+      if (pt.us > 0.0)
+        refDecodeRate = flops / pt.us;
+    }
+    vr.decode[kv] = pt;
+  };
+
+  auto emitPrefillTo = [&](logger::TestScope &test, const Variant &v, const VariantResult &vr)
+  {
+    for (int64_t seq : promptsFor(v))
+    {
+      const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
+      logger::EmitOptions o;
+      o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
+                      " tokens in one pass, counting every multiply in the layer.";
+      if (v.unit)
+        o.unit = v.unit;
+      if (!vr.usable)
+      {
+        test.skip(metric, vr.skipStatus, vr.skipReason, o);
+        continue;
+      }
+      auto it = vr.prefill.find(seq);
+      if (it == vr.prefill.end())
+        continue;
+      if (it->second.us > 0.0)
+      {
+        o.description += it->second.glue;
+        test.emit(metric, (float)(blockFlops(seq, seq) * 1.0e6 / it->second.us), o);
+      }
+      else
+        test.skip(metric, it->second.status, it->second.error, o);
+    }
+  };
+
+  const std::string geometry =
+      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters)";
+  const std::string attention = spec >= 9 ? "attention as Core ML's fused scaled-dot-product op"
+                                          : "attention as explicit matmul, softmax and matmul";
+
+  const logger::TestSpec prefillSpec = {
+      "coreml_block_prefill", "Transformer block, prefill", "flops", Category::Ai,
+      geometry + ", working through a prompt on this compute unit -- the phase that decides "
+      "how long you wait for the first word -- at each precision a model ships in, with " +
+      attention + ".  Only the seven projection matmuls change precision, so whatever separates "
+      "two rows is the projection format; and the compute plan proves every operation ran here.",
+      TestShape::Heterogeneous, "data type and prompt length"};
+  const logger::TestSpec prefillOpsSpec = {
+      "coreml_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
+      prefillSpec.description, TestShape::Heterogeneous, "data type and prompt length"};
+  const logger::TestSpec decodeSpec = {
+      "coreml_block_decode", "Transformer block, decode", "bps", Category::Ai,
+      "How fast " + geometry + " streams its weights on this compute unit while generating a "
+      "token with 2048 of context, at each precision.  Each row counts the bytes that format "
+      "actually moves, so it compares directly against the resident-weight bandwidth rows -- "
+      "and a narrow-weight row far below the 16-bit one is a unit unpacking to full width "
+      "before using them.",
+      TestShape::Heterogeneous, "data type"};
+  const logger::TestSpec latencySpec = {
+      "coreml_block_latency", "Transformer block latency", "s", Category::Ai,
+      "How long " + geometry + " takes on this compute unit at each precision: multiply by a "
+      "model's layer count for a floor on its time-to-first-token and per-token time here.  "
+      "Everything but attention costs the same at every context length, so whatever the decode "
+      "rows add as the context grows is attention.",
+      TestShape::Heterogeneous, "data type, phase and context length"};
+
+  // ---- Prefill, flops ------------------------------------------------------
+  {
+    auto test = currentDeviceScope->beginTest(prefillSpec);
+    for (size_t vi = 0; vi < kNVariants; vi++)
+    {
+      if (clpeak::cancelRequested())
+        break;
+      const Variant &v = kVariants[vi];
+      if (v.unit || v.decodeOnly)
+        continue;
+      VariantResult &vr = results[vi];
+      if (!validateVariant(v, vr))
+      {
+        emitPrefillTo(test, v, vr);
+        continue;
+      }
+      for (int64_t seq : promptsFor(v))
+      {
+        if (clpeak::cancelRequested())
+          break;
+        measurePrefill(v, vr, seq);
+      }
+      if (auto it = vr.prefill.find(kPrefillSeq); it != vr.prefill.end() && it->second.us > 0.0)
+        refDecodeRate = blockFlops(kPrefillSeq, kPrefillSeq) / it->second.us;
+      emitPrefillTo(test, v, vr);
+    }
+    test.end();
+  }
+  // ---- Prefill, ops --------------------------------------------------------
+  {
+    auto test = currentDeviceScope->beginTest(prefillOpsSpec);
+    for (size_t vi = 0; vi < kNVariants; vi++)
+    {
+      if (clpeak::cancelRequested())
+        break;
+      const Variant &v = kVariants[vi];
+      if (!v.unit || v.decodeOnly)
+        continue;
+      VariantResult &vr = results[vi];
+      if (!validateVariant(v, vr))
+      {
+        emitPrefillTo(test, v, vr);
+        continue;
+      }
+      for (int64_t seq : promptsFor(v))
+      {
+        if (clpeak::cancelRequested())
+          break;
+        measurePrefill(v, vr, seq);
+      }
+      emitPrefillTo(test, v, vr);
+    }
+    test.end();
+  }
+
+  // ---- Decode --------------------------------------------------------------
+  {
+    auto test = currentDeviceScope->beginTest(decodeSpec);
+    for (size_t vi = 0; vi < kNVariants; vi++)
+    {
+      if (clpeak::cancelRequested())
+        break;
+      const Variant &v = kVariants[vi];
+      VariantResult &vr = results[vi];
+      const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
+      const uint64_t wBytes = weightBytes(v);
+      const uint64_t kvB = kvBytes(v, kDecodeKv);
+      logger::EmitOptions o;
+      o.description = std::string(v.note) + "  One token with 2048 of context: " +
+                      std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " +
+                      std::to_string((unsigned long long)(kvB >> 20)) +
+                      " MB of cached context, read in full for one token.";
+      if (!validateVariant(v, vr))
+      {
+        test.skip(metric, vr.skipStatus, vr.skipReason, o);
+        continue;
+      }
+      measureDecode(v, vr, kDecodeKv);
+      const Point &pt = vr.decode[kDecodeKv];
+      if (pt.us > 0.0)
+      {
+        o.description += pt.glue;
+        test.emit(metric, (float)((double)(wBytes + kvB) / (pt.us * 1.0e-6)), o);
+      }
+      else
+        test.skip(metric, pt.status, pt.error, o);
+    }
+    test.end();
+  }
+
+  // ---- Latency -------------------------------------------------------------
+  {
+    auto test = currentDeviceScope->beginTest(latencySpec);
+    for (size_t vi = 0; vi < kNVariants; vi++)
+    {
+      if (clpeak::cancelRequested())
+        break;
+      const Variant &v = kVariants[vi];
+      VariantResult &vr = results[vi];
+      if (!v.decodeOnly)
+      {
+        const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
+        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note;
+        if (!vr.usable)
+          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+        else
+        {
+          measurePrefill(v, vr, kPrefillSeq);
+          const Point &pt = vr.prefill[kPrefillSeq];
+          if (pt.us > 0.0)
+            test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
+          else
+            test.skip(metric, pt.status, pt.error, note);
+        }
+      }
+      for (int64_t kv : contextsFor(v))
+      {
+        if (clpeak::cancelRequested())
+          break;
+        const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
+        const std::string note = "One generated token with " + std::to_string(kv) +
+                                 " tokens of context behind it.  " + v.note;
+        if (!vr.usable)
+        {
+          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          continue;
+        }
+        measureDecode(v, vr, kv);
+        const Point &pt = vr.decode[kv];
+        if (pt.us > 0.0)
+          test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
+        else
+        {
+          test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, note);
+          break;
+        }
+      }
+    }
+    test.end();
+  }
+
+  return 0;
+}
+
+#endif // ENABLE_COREML

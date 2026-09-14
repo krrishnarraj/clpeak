@@ -33,6 +33,9 @@
 #ifdef ENABLE_ONNX
 #include <onnx/onnx_peak.h>
 #endif
+#ifdef ENABLE_COREML
+#include <coreml/coreml_peak.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -114,6 +117,12 @@ std::vector<BackendEntry> buildBackends()
                    [] { return OnnxPeak::enumerate(); },
                    [] { return std::unique_ptr<Peak>(new OnnxPeak()); },
                    &CliOptions::skipOnnx});
+#endif
+#ifdef ENABLE_COREML
+    out.push_back({"CoreML",
+                   [] { return CoreMLPeak::enumerate(); },
+                   [] { return std::unique_ptr<Peak>(new CoreMLPeak()); },
+                   &CliOptions::skipCoreml});
 #endif
     return out;
 }

@@ -7,7 +7,7 @@
 
 **clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs, GPUs and NPUs. It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.
 
-Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
+Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX, Core ML and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
 
 [![clpeak desktop app showing Metal results on an Apple M1 Pro](docs/assets/img/results-dark.png)](https://krrishnarraj.github.io/clpeak/)
 
@@ -82,6 +82,7 @@ Backends auto-enable when their SDK is found; opt out with `-DCLPEAK_ENABLE_<X>=
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (otherwise always available) |
 | `CLPEAK_ENABLE_ONNX` | `ON` | Skip ONNX Runtime backend (otherwise always built; runtime loaded at run time) |
+| `CLPEAK_ENABLE_COREML` | `ON` | Skip Core ML backend (Apple only; Neural Engine / GPU / CPU through the system framework) |
 | `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped when no Flutter SDK is found) |
 
 The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmake --build build --target clpeak-gui`).
@@ -92,10 +93,11 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 
 ```console
 ./clpeak                              # everything, everywhere
-./clpeak --cuda --vulkan              # one or more backends (--onnx, --metal, --rocm, --oneapi, --cpu, …)
+./clpeak --cuda --vulkan              # one or more backends (--onnx, --coreml, --metal, --rocm, --oneapi, --cpu, …)
 ./clpeak --single-precision-compute   # one test, on every backend
 ./clpeak --onnx-gemm --onnx-block     # ONNX tests (--onnx-conv, --onnx-numeric-error, --onnx-tensor-bandwidth, …)
 ./clpeak --onnx --onnx-device 0       # one ONNX provider; --onnx-lib PATH picks the runtime
+./clpeak --coreml --coreml-device 0   # Core ML on the Neural Engine (--coreml-gemm, --coreml-block, …)
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
 ./clpeak --compare baseline.clpeak.json   # diff against a saved baseline

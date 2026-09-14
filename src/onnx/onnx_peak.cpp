@@ -4,6 +4,7 @@
 #include "onnx_runtime.h"
 #include "onnx_probe.h"
 
+#include <common/coreml_cache.h>
 #include <common/options.h>
 
 #include <algorithm>
@@ -329,6 +330,11 @@ int OnnxPeak::runAll()
       runDispatchLatency(*rt, ep, cfg);
 
     currentDeviceScope = nullptr;
+
+    // The CoreML execution provider leaves every model it compiled, weights
+    // included, in Core ML's compile cache, which nothing evicts; see
+    // include/common/coreml_cache.h.  A no-op everywhere else.
+    clpeak::purgeCoreMLCompileCache();
   }
 
   return 0;

@@ -34,6 +34,7 @@ used by the Flutter GUI on every platform).
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`) |
 | `console_mute.cpp` | `clpeak::ScopedConsoleMute` — silences stdout+stderr at the fd level for a scope, so vendor runtimes that print below any log level (hipBLASLt's Tensile internals, the ONNX schema registry) cannot wreck the results table. A no-op under `--verbose` |
+| `coreml_cache.mm` / `coreml_cache_stub.cpp` | `clpeak::purgeCoreMLCompileCache()` — removes this process's Core ML runtime cache (`~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`), which keeps every compiled model with its weights and never evicts; called by the Core ML backend per session and by the ONNX backend per provider. Apple-only, a stub elsewhere |
 | `dynlib.cpp` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS) so the shipped binary needs only the driver |
 
 ## Scope invariant: one open test at a time
@@ -64,7 +65,7 @@ A backend passes what its API knows, and nothing more:
 | CUDA, oneAPI, OpenCL | cache size only — their query returns the true last level |
 | ROCm | cache size **and** board memory — HIP's `l2CacheSize` excludes the MALL / Infinity Cache |
 | Vulkan | device-local heap only, and only for a discrete GPU — Vulkan has no cache query at all |
-| Metal, ONNX | neither — unified memory, so the memory proxy would be system RAM |
+| Metal, ONNX, Core ML | neither — unified memory, so the memory proxy would be system RAM |
 
 Never pass memory that is not the device's own (an iGPU heap, a unified-memory
 part): the proxy assumes the last level is a fixed fraction of board memory, and

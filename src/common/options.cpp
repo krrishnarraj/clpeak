@@ -56,6 +56,9 @@ static const char *helpStr =
 #ifdef ENABLE_ONNX
     "\n  --onnx                      run only the ONNX Runtime backend"
 #endif
+#ifdef ENABLE_COREML
+    "\n  --coreml                    run only the Core ML backend"
+#endif
     "\n  (multiple --<backend> flags can be combined)"
 #ifdef ENABLE_OPENCL
     "\n  --no-opencl                 skip the OpenCL backend"
@@ -80,6 +83,9 @@ static const char *helpStr =
 #endif
 #ifdef ENABLE_ONNX
     "\n  --no-onnx                   skip the ONNX Runtime backend"
+#endif
+#ifdef ENABLE_COREML
+    "\n  --no-coreml                 skip the Core ML backend"
 #endif
     "\n"
     "\n DEVICE SELECTION (indices are 0-based; comma-separated for multiple,"
@@ -108,6 +114,9 @@ static const char *helpStr =
     "\n  --onnx-lib path             onnxruntime shared library to load"
     "\n                              (default: the platform's conventional names)"
 #endif
+#ifdef ENABLE_COREML
+    "\n  --coreml-device list        Core ML compute-device index/indices"
+#endif
     "\n"
     "\n TEST CATEGORY SELECTION (default: run every category):"
     "\n  --compute     / --no-compute         compute (flops / ops)"
@@ -117,8 +126,8 @@ static const char *helpStr =
 #endif
     "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (bps)"
     "\n  --latency     / --no-latency         kernel-launch latency (s)"
-#ifdef ENABLE_ONNX
-    "\n  --ai          / --no-ai              AI-composite micro-graphs      [ONNX]"
+#if defined(ENABLE_ONNX) || defined(ENABLE_COREML)
+    "\n  --ai          / --no-ai              AI-composite micro-graphs      [ONNX/Core ML]"
 #endif
     "\n  Any positive --<category> flag switches to allow-list mode."
     "\n"
@@ -197,6 +206,16 @@ static const char *helpStr =
     "\n  --onnx-tensor-bandwidth           | --no-onnx-tensor-bandwidth     [ONNX: resident-tensor GB/s]"
     "\n  --onnx-transfer-bandwidth         | --no-onnx-transfer-bandwidth   [ONNX: host<->device GB/s]"
     "\n  --onnx-dispatch-latency           | --no-onnx-dispatch-latency     [ONNX: submission overhead]"
+#endif
+#ifdef ENABLE_COREML
+    "\n  --coreml-gemm                     | --no-coreml-gemm               [Core ML: matmul on ANE/GPU/CPU]"
+    "\n  --coreml-numeric-error            | --no-coreml-numeric-error      [Core ML: dtype accuracy cost]"
+    "\n  --coreml-conv                     | --no-coreml-conv               [Core ML: convolution peak]"
+    "\n  --coreml-block                    | --no-coreml-block              [Core ML: transformer block]"
+    "\n  --coreml-activation               | --no-coreml-activation         [Core ML: softmax/norm GB/s]"
+    "\n  --coreml-tensor-bandwidth         | --no-coreml-tensor-bandwidth   [Core ML: resident-weight GB/s]"
+    "\n  --coreml-transfer-bandwidth       | --no-coreml-transfer-bandwidth [Core ML: host<->device GB/s]"
+    "\n  --coreml-dispatch-latency         | --no-coreml-dispatch-latency   [Core ML: prediction overhead]"
 #endif
     "\n"
 ;
@@ -286,6 +305,14 @@ static const TestFlag testFlags[] = {
   {"onnx-tensor-bandwidth",     Benchmark::OnnxTensorBW},
   {"onnx-transfer-bandwidth",   Benchmark::OnnxTransferBW},
   {"onnx-dispatch-latency",     Benchmark::OnnxDispatchLatency},
+  {"coreml-gemm",               Benchmark::CoremlGemm},
+  {"coreml-numeric-error",      Benchmark::CoremlNumericError},
+  {"coreml-conv",               Benchmark::CoremlConv},
+  {"coreml-block",              Benchmark::CoremlBlock},
+  {"coreml-activation",         Benchmark::CoremlActivation},
+  {"coreml-tensor-bandwidth",   Benchmark::CoremlTensorBW},
+  {"coreml-transfer-bandwidth", Benchmark::CoremlTransferBW},
+  {"coreml-dispatch-latency",   Benchmark::CoremlDispatchLatency},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 
@@ -464,7 +491,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
   // Positive backend includes.  When any --<backend> flag is present, only
   // listed backends run; everything else gets skipped at the end of parsing.
   bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false, incOnnx = false;
+  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false, incOnnx = false, incCoreml = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
@@ -522,6 +549,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
 #ifdef ENABLE_ONNX
     else if (!strcmp(a, "--no-onnx"))   out.skipOnnx = true;
     else if (!strcmp(a, "--onnx"))      { incOnnx = true; includeAny = true; }
+#endif
+#ifdef ENABLE_COREML
+    else if (!strcmp(a, "--no-coreml")) out.skipCoreml = true;
+    else if (!strcmp(a, "--coreml"))    { incCoreml = true; includeAny = true; }
 #endif
 
     // ---- iters / warmup -------------------------------------------------
@@ -659,6 +690,16 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       out.onnxLibPath = v;
     }
 #endif
+#ifdef ENABLE_COREML
+    else if (!strcmp(a, "--coreml-device"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      if (!parseIndexList(v, out.coremlDeviceIndices))
+        return invalidList(err, "Core ML device index list", v);
+    }
+#endif
 
     // ---- Modes ----------------------------------------------------------
     else if (!strcmp(a, "--list-devices"))
@@ -725,6 +766,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     if (!incOneapi) out.skipOneapi = true;
     if (!incCpu)    out.skipCpu    = true;
     if (!incOnnx)   out.skipOnnx   = true;
+    if (!incCoreml) out.skipCoreml = true;
   }
 
   return ParseResult::Ok;
