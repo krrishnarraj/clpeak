@@ -89,22 +89,24 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 
 ## CLI
 
-`./clpeak --help` prints all flags. Selection is uniform: `--<backend>` runs only that backend, `--<test>` runs only that test, `--no-<x>` always subtracts.
+`./clpeak --help` prints all flags. Selection is uniform: `--<backend>` runs only that backend, `--<category>` or `--<test>` runs only that test, `--no-<x>` always subtracts. Backends say where and tests say what: a test flag applies to every backend that runs, so there are no backend-specific test flags.
 
 ```console
 ./clpeak                              # everything, everywhere
 ./clpeak --cuda --vulkan              # one or more backends (--onnx, --coreml, --metal, --rocm, --oneapi, --cpu, …)
 ./clpeak --single-precision-compute   # one test, on every backend
-./clpeak --onnx-gemm --onnx-block     # ONNX tests (--onnx-conv, --onnx-numeric-error, --onnx-tensor-bandwidth, …)
-./clpeak --onnx --onnx-device 0       # one ONNX provider; --onnx-lib PATH picks the runtime
-./clpeak --coreml --coreml-device 0   # Core ML on the Neural Engine (--coreml-gemm, --coreml-block, …)
+./clpeak --gemm                       # the vendor's tuned matmul on every backend: cuBLASLt, MPS, Accelerate, ONNX, Core ML, …
+./clpeak --onnx --transformer-block   # the AI composite on every ONNX provider (--convolution, --numeric-error, --tensor-bandwidth, …)
+./clpeak --coreml --device 0          # Core ML on the Neural Engine only
+./clpeak --device cuda:0,vulkan:1     # narrow one backend's devices without narrowing the others
+./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
 ./clpeak --compare baseline.clpeak.json   # diff against a saved baseline
 ./clpeak --list-devices               # enumerate devices, no benchmarks
 ```
 
-`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. Device indices (`--cl-platform/--cl-device`, `--vk-device`, `--cuda-device`, `--rocm-device`, `--mtl-device`, `--oneapi-device`) take one index or a comma-separated list; the CPU backend has no index (`--no-cpu` skips it).
+`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. `--device` takes the index `--list-devices` prints: a bare index applies to every backend that runs, `backend:index` to one; items are comma-separated. Every flag parses in every build, so a script can say `--no-cuda` on a Mac.
 
 ## For AI agents
 

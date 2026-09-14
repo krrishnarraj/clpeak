@@ -80,12 +80,10 @@ public:
 class OneapiPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices;  // empty = run all
-
   OneapiPeak();
   ~OneapiPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Oneapi; }
   int  runAll() override;
 
   static BackendInventory enumerate();

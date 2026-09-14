@@ -23,12 +23,6 @@ RocmPeak::RocmPeak()
 
 RocmPeak::~RocmPeak() {}
 
-void RocmPeak::applyOptions(const CliOptions &opts)
-{
-  Peak::applyOptions(opts);
-  deviceIndices = opts.rocmDeviceIndices;
-}
-
 bool RocmPeak::initRuntime()
 {
   if (initialised)
@@ -138,8 +132,7 @@ int RocmPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     RocmDevice dev;
@@ -189,17 +182,21 @@ int RocmPeak::runAll()
       runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-    if (isAllowed(Benchmark::Wmma))
+    // One flag, every matrix-core path: native WMMA (RDNA) or MFMA + sparse
+    // MFMA (CDNA) -- the arch decides which of those two exists -- plus the
+    // rocWMMA library over the same silicon.  Gated per call, not once for
+    // the group: isAllowed also carries the cancel request.
+    if (isAllowed(Benchmark::MatrixCompute))
       runWmma(dev, cfg);
-    if (isAllowed(Benchmark::Rocwmma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runRocwmma(dev, cfg);
-    if (isAllowed(Benchmark::Mfma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runMfma(dev, cfg);
-    if (isAllowed(Benchmark::Mfma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runSparseMfma(dev, cfg);
-    if (isAllowed(Benchmark::Rocblas))
+    if (isAllowed(Benchmark::Gemm))
       runRocblas(dev, cfg);
-    if (isAllowed(Benchmark::Rocblas))
+    if (isAllowed(Benchmark::Gemm))
       runHipblasLt(dev, cfg);
 
 

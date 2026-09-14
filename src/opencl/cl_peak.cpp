@@ -16,16 +16,6 @@ clPeak::clPeak()
 {
 }
 
-void clPeak::applyOptions(const CliOptions &opts)
-{
-    // Common fields handled by base class
-    Peak::applyOptions(opts);
-
-    // OpenCL-specific device selection
-    platformIndices = opts.platformIndices;
-    deviceIndices   = opts.deviceIndices;
-}
-
 int clPeak::runAll()
 {
   auto backendScope = log->beginBackend("OpenCL");
@@ -34,14 +24,16 @@ int clPeak::runAll()
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
 
+    // Devices are numbered consecutively across platforms -- the index
+    // --device takes, --list-devices prints and the document records -- so
+    // OpenCL selects like every other backend.  The platform is still part
+    // of the device's identity in the output; it is just not a selector.
+    int deviceIndex = 0;
+
     for (size_t p = 0; p < platforms.size(); p++)
     {
       if (clpeak::cancelRequested())
         break;
-      if (!platformIndices.empty() &&
-          std::find(platformIndices.begin(), platformIndices.end(),
-                    static_cast<unsigned long>(p)) == platformIndices.end())
-        continue;
 
       std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
       trimString(platformName);
@@ -64,13 +56,11 @@ int clPeak::runAll()
         continue;
       }
 
-      for (size_t d = 0; d < devices.size(); d++)
+      for (size_t d = 0; d < devices.size(); d++, deviceIndex++)
       {
         if (clpeak::cancelRequested())
           break;
-        if (!deviceIndices.empty() &&
-            std::find(deviceIndices.begin(), deviceIndices.end(),
-                      static_cast<unsigned long>(d)) == deviceIndices.end())
+        if (!isDeviceSelected(deviceIndex))
           continue;
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
@@ -88,7 +78,7 @@ int clPeak::runAll()
             {"Clock frequency", std::to_string(devInfo.maxClockFreq) + " MHz"},
           },
           static_cast<int>(p),
-          static_cast<int>(d)
+          deviceIndex
         });
         currentDeviceScope = &deviceScope;
 
@@ -359,6 +349,7 @@ BackendInventory clPeak::enumerate()
     cl::Platform::get(&platforms);
     inv.available = !platforms.empty();
 
+    int deviceIndex = 0;  // consecutive across platforms, as runAll numbers them
     for (size_t p = 0; p < platforms.size(); p++)
     {
       InventoryPlatform plat;
@@ -379,7 +370,7 @@ BackendInventory clPeak::enumerate()
         {
           device_info_t info = getDeviceInfo(devices[d]);
           InventoryDevice dev;
-          dev.index           = static_cast<int>(d);
+          dev.index           = deviceIndex++;
           dev.name            = info.deviceName;
           dev.typeStr         = (info.clDeviceType & CL_DEVICE_TYPE_CPU) ? "CPU"
                               : (info.clDeviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
@@ -420,7 +411,7 @@ void clPeak::printInventory(const BackendInventory &b, std::ostream &os)
         os << "Platform " << plat.index << ": " << plat.name << "\n";
         for (const auto &d : plat.devices)
         {
-            os << "  Device " << d.index << ": " << d.name;
+            os << "  OpenCL Device " << d.index << ": " << d.name;
             if (!d.typeStr.empty())
                 os << " [" << d.typeStr << "]";
             os << "\n";

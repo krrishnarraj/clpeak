@@ -16,14 +16,14 @@ used by the Flutter GUI on every platform).
 - Understanding result output format? → `run_document.cpp` + `include/common/run_document.h`, schema in `docs/format-v3.md`
 - Understanding calibration? → `common.cpp` (`pickIters()`) + `include/common/common.h`
 - Understanding gating? → `peak.cpp` + `include/common/peak.h` (gating lives in Peak)
-- Adding a new backend? → The `Peak` interface is in `include/common/peak.h`
+- Adding a new backend? → The `Peak` interface is in `include/common/peak.h` (`backend()`, `runAll()`, `isAllowed()`, `isDeviceSelected()`); a `Backend` enum value in `include/common/benchmark_enums.h` and a row in the backend table in `options.cpp` give it its flags
 - Understanding device inventory structs / JSON? → `inventory.cpp` + `include/common/inventory.h`
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (including gating) |
+| `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, and the `--device` items that name `backend()`) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
 | `run_document.cpp` | The result tree + its single JSON serialization. Also `RunDocument::append`, which folds each backend's logger into the document a host saves |
 | `units.cpp` | The unit table: token → symbol, quantity, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
@@ -32,7 +32,7 @@ used by the Flutter GUI on every platform).
 | `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook. Also whitespace-collapses the documentation strings to one line, since all three dump formats are line-oriented |
 | `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text with per-row units + baseline deltas, and under `--describe` the wrapped test/reading documentation (desktop CLI) |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer (no backend includes) |
-| `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`) |
+| `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`); the backend table (`backendInfo()`: name, flag, built-in), the category and test flag tables, and `--help` generated from them |
 | `console_mute.cpp` | `clpeak::ScopedConsoleMute` — silences stdout+stderr at the fd level for a scope, so vendor runtimes that print below any log level (hipBLASLt's Tensile internals, the ONNX schema registry) cannot wreck the results table. A no-op under `--verbose` |
 | `coreml_cache.mm` / `coreml_cache_stub.cpp` | `clpeak::purgeCoreMLCompileCache()` — removes this process's Core ML runtime cache (`~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`), which keeps every compiled model with its weights and never evicts; called by the Core ML backend per session and by the ONNX backend per provider. Apple-only, a stub elsewhere |
 | `dynlib.cpp` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS) so the shipped binary needs only the driver |

@@ -205,12 +205,6 @@ OnnxRuntimeStatus onnxRuntimeStatus()
 OnnxPeak::OnnxPeak() = default;
 OnnxPeak::~OnnxPeak() = default;
 
-void OnnxPeak::applyOptions(const CliOptions &opts)
-{
-  Peak::applyOptions(opts);
-  deviceIndices = opts.onnxDeviceIndices;
-}
-
 int OnnxPeak::runAll()
 {
   const OrtRuntime *rt = ortRuntime();
@@ -256,8 +250,7 @@ int OnnxPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     const onnx_ep_info_t &ep = eps[idx];
@@ -290,8 +283,8 @@ int OnnxPeak::runAll()
     // actually run at 64^3 before paying 1024^3 (QNN HTP: 0.5s vs 33s).
     // Subsequent runGemm/runConv etc consult the cache instead of
     // re-probing per variant.
-    if (isAllowed(Benchmark::OnnxGemm) || isAllowed(Benchmark::OnnxConv) ||
-        isAllowed(Benchmark::OnnxNumericError) || isAllowed(Benchmark::OnnxBlock))
+    if (isAllowed(Benchmark::Gemm) || isAllowed(Benchmark::Conv) ||
+        isAllowed(Benchmark::NumericError) || isAllowed(Benchmark::TransformerBlock))
     {
       (void)onnxProbeGemmCache(*rt, ep);
     }
@@ -299,34 +292,34 @@ int OnnxPeak::runAll()
     // out: otherwise a stale entry from an earlier run in the same process
     // would suppress numeric-error rows that have no paired rate to stay in
     // step with.  runGemm clears again and repopulates when it runs.
-    if (isAllowed(Benchmark::OnnxGemm) || isAllowed(Benchmark::OnnxNumericError))
+    if (isAllowed(Benchmark::Gemm) || isAllowed(Benchmark::NumericError))
       onnxClearGemmFolded(ep);
 
     // ---- Compute (FLOPS + OPS) ---------------------------
-    if (isAllowed(Benchmark::OnnxGemm))
+    if (isAllowed(Benchmark::Gemm))
       runGemm(*rt, ep, cfg);
 
-    if (isAllowed(Benchmark::OnnxConv))
+    if (isAllowed(Benchmark::Conv))
       runConv(*rt, ep, cfg);
 
     // ---- Phase 3: what the speed rows above cost in accuracy -------------
-    if (isAllowed(Benchmark::OnnxNumericError))
+    if (isAllowed(Benchmark::NumericError))
       runNumericError(*rt, ep, cfg);
 
     // ---- Phase 4: AI composite (whole transformer block) -----------------
-    if (isAllowed(Benchmark::OnnxBlock))
+    if (isAllowed(Benchmark::TransformerBlock))
       runBlock(*rt, ep, cfg);
 
     // ---- Phase 5: bandwidth ----------------------------------------------
-    if (isAllowed(Benchmark::OnnxActivation))
+    if (isAllowed(Benchmark::Activation))
       runActivation(*rt, ep, cfg);
-    if (isAllowed(Benchmark::OnnxTensorBW))
+    if (isAllowed(Benchmark::TensorBW))
       runTensorBandwidth(*rt, ep, cfg);
-    if (isAllowed(Benchmark::OnnxTransferBW))
+    if (isAllowed(Benchmark::TransferBW))
       runTransferBandwidth(*rt, ep, cfg);
 
     // ---- Phase 6: latency ------------------------------------------------
-    if (isAllowed(Benchmark::OnnxDispatchLatency))
+    if (isAllowed(Benchmark::KernelLatency))
       runDispatchLatency(*rt, ep, cfg);
 
     currentDeviceScope = nullptr;

@@ -74,12 +74,6 @@ vkPeak::~vkPeak()
   cleanup();
 }
 
-void vkPeak::applyOptions(const CliOptions &opts)
-{
-    Peak::applyOptions(opts);
-    deviceIndices = opts.vkDeviceIndices;
-}
-
 bool vkPeak::initInstance()
 {
   VkApplicationInfo appInfo = {};
@@ -279,8 +273,7 @@ int vkPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
+    if (!isDeviceSelected(static_cast<int>(d)))
       continue;
 
     VulkanDevice dev;
@@ -498,7 +491,7 @@ int vkPeak::runAll()
     if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (isAllowed(Benchmark::CoopMatrix))
+    if (isAllowed(Benchmark::MatrixCompute))
         runCoopMatrix(dev, cfg);
 #endif
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------

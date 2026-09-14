@@ -36,9 +36,6 @@ const std::string& clGetInt8DpKernels();
 class clPeak : public Peak
 {
 public:
-    // OpenCL-specific device selection.  Empty index list = run all.
-    std::vector<unsigned long> platformIndices, deviceIndices;
-
     clPeak();
     ~clPeak() override = default;
 
@@ -46,7 +43,7 @@ public:
     // and the per-benchmark methods.
     logger::DeviceScope *currentDeviceScope = nullptr;
 
-    void applyOptions(const CliOptions &opts) override;
+    Backend backend() const override { return Backend::OpenCL; }
     int runAll() override;
 
     // Inventory.

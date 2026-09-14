@@ -94,12 +94,10 @@ struct onnx_ep_info_t
 class OnnxPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices; // empty = run all enumerated EPs
-
   OnnxPeak();
   ~OnnxPeak() override;
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Onnx; }
   int runAll() override;
 
   static BackendInventory enumerate();

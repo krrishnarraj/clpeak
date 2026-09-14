@@ -129,6 +129,10 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
 
 int CpuPeak::runAll()
 {
+  // The one CPU is device 0; a --device that names another index means it.
+  if (!isDeviceSelected(0))
+    return 0;
+
   detectCpuInfo(info);
   if (!pool)
     pool = new CpuThreadPool(info.logicalCores);
@@ -207,9 +211,9 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
   if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
   if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
-  if (isAllowed(Benchmark::Amx))         runCpuMatrix(cfg);
+  if (isAllowed(Benchmark::MatrixCompute)) runCpuMatrix(cfg);
 #ifdef __APPLE__
-  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
+  if (isAllowed(Benchmark::Gemm))          runAppleBlas(cfg);
 #endif
   if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
 

@@ -4,31 +4,12 @@ import 'result_model.dart';
 /// Time-budget presets.  Custom keeps whatever the user configured.
 enum RunPreset { full, custom }
 
-/// Per-backend CLI flag vocabulary (mirrors src/common/options.cpp).
-/// Only backend/device/category/time flags are ever emitted — never
-/// individual test flags, so test churn in the core needs no app changes.
-class _BackendFlags {
-  const _BackendFlags(this.skipFlag, this.deviceFlag);
-
-  /// `--no-<skipFlag>` disables the backend entirely.
-  final String skipFlag;
-
-  /// Flag for a partial device selection (comma-separated indices); null
-  /// means the backend has no per-device selector (CPU).
-  final String? deviceFlag;
-}
-
-const Map<String, _BackendFlags> _backendFlags = {
-  'OpenCL': _BackendFlags('opencl', null), // uses --cl-platform/--cl-device
-  'Vulkan': _BackendFlags('vulkan', '--vk-device'),
-  'CUDA': _BackendFlags('cuda', '--cuda-device'),
-  'ROCm': _BackendFlags('rocm', '--rocm-device'),
-  'Metal': _BackendFlags('metal', '--mtl-device'),
-  'oneAPI': _BackendFlags('oneapi', '--oneapi-device'),
-  'CPU': _BackendFlags('cpu', null),
-  'ONNX': _BackendFlags('onnx', '--onnx-device'), // device index = EP index
-  'CoreML': _BackendFlags('coreml', '--coreml-device'), // ANE / GPU / CPU
-};
+/// A backend's CLI flag is its catalog name in lower case: `--no-<flag>`
+/// skips it and `--device <flag>:<index>` narrows it (mirrors the backend
+/// table in src/common/options.cpp).  Only backend/device/category/time
+/// flags are ever emitted -- never individual test flags, so test churn in
+/// the core needs no app changes.
+String _backendFlag(String backendName) => backendName.toLowerCase();
 
 /// A device reference within a backend: platform index (OpenCL) + device
 /// index.  For single-platform backends platformIndex is the synthetic 0.
@@ -98,13 +79,16 @@ class RunConfig {
   List<String> toArgs(BackendCatalog catalog) {
     final args = <String>[];
 
+    // Every partial selection goes into one --device list.  Device indices
+    // are per backend and already unique across platforms (OpenCL numbers
+    // its devices consecutively), so `backend:index` names a device exactly.
+    final deviceItems = <String>[];
     for (final backend in catalog.usable) {
-      final flags = _backendFlags[backend.name];
-      if (flags == null) continue; // unknown backend: let native defaults run
+      final flag = _backendFlag(backend.name);
       final selected = selectedDevices[backend.name] ?? const <DeviceRef>{};
 
       if (selected.isEmpty) {
-        args.add('--no-${flags.skipFlag}');
+        args.add('--no-$flag');
         continue;
       }
 
@@ -115,17 +99,12 @@ class RunConfig {
       };
       if (selected.containsAll(all)) continue; // full selection: no flags
 
-      if (backend.name == 'OpenCL') {
-        final platforms = selected.map((r) => r.platformIndex).toSet().toList()
-          ..sort();
-        final devices = selected.map((r) => r.deviceIndex).toSet().toList()
-          ..sort();
-        args.addAll(['--cl-platform', platforms.join(',')]);
-        args.addAll(['--cl-device', devices.join(',')]);
-      } else if (flags.deviceFlag != null) {
-        final devices = selected.map((r) => r.deviceIndex).toList()..sort();
-        args.addAll([flags.deviceFlag!, devices.join(',')]);
-      }
+      final devices = selected.map((r) => r.deviceIndex).toSet().toList()
+        ..sort();
+      deviceItems.addAll(devices.map((d) => '$flag:$d'));
+    }
+    if (deviceItems.isNotEmpty) {
+      args.addAll(['--device', deviceItems.join(',')]);
     }
 
     // Categories: all selected = default; otherwise positive flags flip the

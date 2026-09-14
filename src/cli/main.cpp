@@ -39,14 +39,14 @@
 #endif
 
 // A thin wrapper that captures everything we need per backend so the rest of
-// main() can iterate instead of repeating #ifdef-guarded blocks.
+// main() can iterate instead of repeating #ifdef-guarded blocks.  Name and
+// flag come from the backend table in options.cpp.
 struct BackendEntry
 {
-    const char *name;
+    Backend id;
     std::function<BackendInventory()> enumerate;
     std::function<void(const BackendInventory &, std::ostream &)> printInv;
     std::function<std::unique_ptr<Peak>()> create;
-    bool CliOptions::*skip;
 };
 
 // Build the backend list once.  Each enabled backend registers its static
@@ -57,122 +57,103 @@ static std::vector<BackendEntry> buildBackends()
     std::vector<BackendEntry> out;
 #ifdef ENABLE_CUDA
     out.push_back({
-        "CUDA",
+        Backend::Cuda,
         []
         { return CudaPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { CudaPeak::printInventory(inv, os); },
         []
         { return std::make_unique<CudaPeak>(); },
-        &CliOptions::skipCuda,
     });
 #endif
 #ifdef ENABLE_ROCM
     out.push_back({
-        "ROCm",
+        Backend::Rocm,
         []
         { return RocmPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { RocmPeak::printInventory(inv, os); },
         []
         { return std::make_unique<RocmPeak>(); },
-        &CliOptions::skipRocm,
     });
 #endif
 #ifdef ENABLE_METAL
     out.push_back({
-        "Metal",
+        Backend::Metal,
         []
         { return MetalPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { MetalPeak::printInventory(inv, os); },
         []
         { return std::make_unique<MetalPeak>(); },
-        &CliOptions::skipMetal,
     });
 #endif
 #ifdef ENABLE_ONEAPI
     out.push_back({
-        "oneAPI",
+        Backend::Oneapi,
         []
         { return OneapiPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { OneapiPeak::printInventory(inv, os); },
         []
         { return std::make_unique<OneapiPeak>(); },
-        &CliOptions::skipOneapi,
     });
 #endif
 #ifdef ENABLE_VULKAN
     out.push_back({
-        "Vulkan",
+        Backend::Vulkan,
         []
         { return vkPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { vkPeak::printInventory(inv, os); },
         []
         { return std::make_unique<vkPeak>(); },
-        &CliOptions::skipVulkan,
     });
 #endif
 #ifdef ENABLE_OPENCL
     out.push_back({
-        "OpenCL",
+        Backend::OpenCL,
         []
         { return clPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { clPeak::printInventory(inv, os); },
         []
         { return std::make_unique<clPeak>(); },
-        &CliOptions::skipOpenCL,
     });
 #endif
 #ifdef ENABLE_CPU
     out.push_back({
-        "CPU",
+        Backend::Cpu,
         []
         { return CpuPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { CpuPeak::printInventory(inv, os); },
         []
         { return std::make_unique<CpuPeak>(); },
-        &CliOptions::skipCpu,
     });
 #endif
 #ifdef ENABLE_ONNX
     out.push_back({
-        "ONNX",
+        Backend::Onnx,
         []
         { return OnnxPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { OnnxPeak::printInventory(inv, os); },
         []
         { return std::make_unique<OnnxPeak>(); },
-        &CliOptions::skipOnnx,
     });
 #endif
 #ifdef ENABLE_COREML
     out.push_back({
-        "CoreML",
+        Backend::Coreml,
         []
         { return CoreMLPeak::enumerate(); },
         [](const BackendInventory &inv, std::ostream &os)
         { CoreMLPeak::printInventory(inv, os); },
         []
         { return std::make_unique<CoreMLPeak>(); },
-        &CliOptions::skipCoreml,
     });
 #endif
-    return out;
-}
-
-static std::vector<BackendInventory> enumerateAllBackends(
-    const CliOptions &opts, const std::vector<BackendEntry> &backends)
-{
-    std::vector<BackendInventory> out;
-    for (const auto &be : backends)
-        if (!(opts.*(be.skip)))
-            out.push_back(be.enumerate());
     return out;
 }
 
@@ -190,17 +171,18 @@ int main(int argc, char **argv)
 
     auto backends = buildBackends();
 
-    // --list-devices: print every backend's inventory.
+    // A backend asked for by name that this binary does not carry: say so,
+    // or the run reads as "no devices".
+    for (Backend b : opts.requestedButNotBuilt())
+        std::cout << "clpeak: the " << backendInfo(b).name
+                  << " backend is not in this build\n";
+
+    // --list-devices: print every enabled backend's inventory.
     if (opts.listDevices)
     {
-        auto invs = enumerateAllBackends(opts, backends);
-        for (const auto &inv : invs)
-            for (const auto &be : backends)
-                if (inv.backend == be.name)
-                {
-                    be.printInv(inv, std::cout);
-                    break;
-                }
+        for (const auto &be : backends)
+            if (opts.backendEnabled(be.id))
+                be.printInv(be.enumerate(), std::cout);
         return 0;
     }
 
@@ -219,7 +201,7 @@ int main(int argc, char **argv)
 
     for (const auto &be : backends)
     {
-        if (opts.*(be.skip))
+        if (!opts.backendEnabled(be.id))
             continue;
 
         auto peak = be.create();

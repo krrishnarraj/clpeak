@@ -61,68 +61,58 @@ char *copyString(const std::string &value)
 // Same registration order as the CLI (src/cli/main.cpp).
 struct BackendEntry
 {
-    const char *name;
+    Backend id;
     std::function<BackendInventory()> enumerate;
     std::function<std::unique_ptr<Peak>()> create;
-    bool CliOptions::*skip;
 };
 
 std::vector<BackendEntry> buildBackends()
 {
     std::vector<BackendEntry> out;
 #ifdef ENABLE_CUDA
-    out.push_back({"CUDA",
+    out.push_back({Backend::Cuda,
                    [] { return CudaPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new CudaPeak()); },
-                   &CliOptions::skipCuda});
+                   [] { return std::unique_ptr<Peak>(new CudaPeak()); }});
 #endif
 #ifdef ENABLE_ROCM
-    out.push_back({"ROCm",
+    out.push_back({Backend::Rocm,
                    [] { return RocmPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new RocmPeak()); },
-                   &CliOptions::skipRocm});
+                   [] { return std::unique_ptr<Peak>(new RocmPeak()); }});
 #endif
 #ifdef ENABLE_METAL
-    out.push_back({"Metal",
+    out.push_back({Backend::Metal,
                    [] { return MetalPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new MetalPeak()); },
-                   &CliOptions::skipMetal});
+                   [] { return std::unique_ptr<Peak>(new MetalPeak()); }});
 #endif
 #ifdef ENABLE_ONEAPI
-    out.push_back({"oneAPI",
+    out.push_back({Backend::Oneapi,
                    [] { return OneapiPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new OneapiPeak()); },
-                   &CliOptions::skipOneapi});
+                   [] { return std::unique_ptr<Peak>(new OneapiPeak()); }});
 #endif
 #ifdef ENABLE_VULKAN
-    out.push_back({"Vulkan",
+    out.push_back({Backend::Vulkan,
                    [] { return vkPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new vkPeak()); },
-                   &CliOptions::skipVulkan});
+                   [] { return std::unique_ptr<Peak>(new vkPeak()); }});
 #endif
 #ifdef ENABLE_OPENCL
-    out.push_back({"OpenCL",
+    out.push_back({Backend::OpenCL,
                    [] { return clPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new clPeak()); },
-                   &CliOptions::skipOpenCL});
+                   [] { return std::unique_ptr<Peak>(new clPeak()); }});
 #endif
 #ifdef ENABLE_CPU
-    out.push_back({"CPU",
+    out.push_back({Backend::Cpu,
                    [] { return CpuPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new CpuPeak()); },
-                   &CliOptions::skipCpu});
+                   [] { return std::unique_ptr<Peak>(new CpuPeak()); }});
 #endif
 #ifdef ENABLE_ONNX
-    out.push_back({"ONNX",
+    out.push_back({Backend::Onnx,
                    [] { return OnnxPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new OnnxPeak()); },
-                   &CliOptions::skipOnnx});
+                   [] { return std::unique_ptr<Peak>(new OnnxPeak()); }});
 #endif
 #ifdef ENABLE_COREML
-    out.push_back({"CoreML",
+    out.push_back({Backend::Coreml,
                    [] { return CoreMLPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new CoreMLPeak()); },
-                   &CliOptions::skipCoreml});
+                   [] { return std::unique_ptr<Peak>(new CoreMLPeak()); }});
 #endif
     return out;
 }
@@ -236,9 +226,14 @@ int clpeak_launch(int argc, const char **argv,
     const auto runStart = std::chrono::steady_clock::now();
     int status = 0;
 
+    for (Backend b : opts.requestedButNotBuilt())
+        emitNote(on_event, user_data,
+                 std::string("clpeak: the ") + backendInfo(b).name +
+                     " backend is not in this build\n");
+
     for (const auto &be : buildBackends())
     {
-        if (opts.*(be.skip) || clpeak::cancelRequested())
+        if (!opts.backendEnabled(be.id) || clpeak::cancelRequested())
             continue;
 
         auto peak = be.create();

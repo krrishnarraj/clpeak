@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <bitset>
+#include <vector>
 #include "common.h"
 #include "logger.h"
 
@@ -12,6 +13,9 @@ struct CliOptions;
 class Peak {
 public:
     std::unique_ptr<logger> log;
+
+    // Which backend this is, for the device selector and the run loop.
+    virtual Backend backend() const = 0;
 
     unsigned int warmupCount = 2;
     unsigned int specifiedIters = 0;
@@ -44,12 +48,26 @@ public:
         return !clpeak::cancelRequested() &&
                isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
     }
+
+    // ---- Device selection ------------------------------------------------
+    // The --device items that name this backend (or none), resolved by
+    // applyOptions.  Empty = every device.  `index` is the backend's own
+    // numbering, the one --list-devices prints and the document records.
+    std::vector<int> selectedDevices;
+
+    bool isDeviceSelected(int index) const {
+        if (selectedDevices.empty()) return true;
+        for (int i : selectedDevices)
+            if (i == index) return true;
+        return false;
+    }
     // --------------------------------------------------------------------
 
     virtual ~Peak() = default;
 
-    // Copy common fields from CliOptions.  Derived classes MUST call this
-    // base implementation in their override.
+    // Copy common fields from CliOptions, including the device selection
+    // for backend().  A derived class that overrides this MUST call the base
+    // implementation.
     virtual void applyOptions(const CliOptions &opts);
 
     // Run all enabled benchmarks on available devices.

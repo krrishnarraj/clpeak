@@ -35,14 +35,14 @@ backend.
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
-| `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
-| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
-| `conv.cpp` | `runConv` (`--onnx-conv`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
-| `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
-| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
-| `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (s) |
+| `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
+| `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
+| `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
+| `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
+| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
+| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
+| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
+| `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — per-submission overhead and session-creation cost (s) |
 
 ## The runtime is dlopen'd, never linked (except on iOS)
 
@@ -230,8 +230,12 @@ at the moment it emits.
 
 ## Test shape and ids
 
-Test ids are lower_snake (`onnx_gemm`, `onnx_tensor_bw`) — the `--onnx-*` CLI
-flags are a separate namespace and keep their hyphens.
+Test ids are lower_snake and keep the `onnx_` prefix (`onnx_gemm`,
+`onnx_tensor_bw`): the id is the record, and it stays stable so a saved
+baseline still compares.  The CLI flags that gate them are backend-neutral
+(`--gemm`, `--tensor-bandwidth`, …) and apply to every backend that runs;
+the `Benchmark` values behind them are shared with Core ML, and the transfer
+and dispatch rows share `TransferBW` / `KernelLatency` with the GPUs.
 
 Every ONNX test here is heterogeneous: each reading is a different data type,
 operation, working-set size or context length, and for several of them the
@@ -866,7 +870,7 @@ lives in the latency scope. Reporting fp16-equivalent bytes would inflate the
 four-bit row four-fold and hide the failure the row exists to catch.
 
 Measured, M1 Pro, ONNX Runtime 1.29 — prefill at 512 tokens, decode at 2048 of
-context. The CPU-EP figures are from a `--onnx-device 1` run: measured straight
+context. The CPU-EP figures are from a `--onnx --device 1` run: measured straight
 after Core ML's session compiles they come out about 30% lower across the board,
 with every ordering below intact, so only same-run comparisons mean anything.
 
@@ -1775,8 +1779,11 @@ session wiring in `onnx_session.cpp` stays for them.
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `src/onnx/CMakeLists.txt`,
-  a `Benchmark` enum value + CLI flag (`include/common/benchmark_enums.h`,
-  `src/common/options.cpp`), a call in `runAll()`, and a row in Key Files above.
+  a call in `runAll()` gated on a `Benchmark` value, and a row in Key Files
+  above.  Reuse an existing value when the measurement already has a name on
+  another backend (`include/common/benchmark_enums.h`); a new one needs a
+  flag row in `src/common/options.cpp` -- named for what it measures, never
+  for ONNX.
 - Adding EP support → `kEpTable` (`onnx_peak.cpp`) **and** `epOptionsFor()`
   (`onnx_session.cpp`). Both, or the EP enumerates but refuses to run.
 - Bumping the vendored header → `tool/update_onnx_headers.sh <tag>` (never by

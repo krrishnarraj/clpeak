@@ -35,18 +35,20 @@ micro-graphs on all three side by side.
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlResidentMatMulModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
 | `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()` |
-| `gemm.cpp` | `runGemm` (`--coreml-gemm`) — `coreml_gemm`: matmul peak per weight format over a doubling size ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
-| `numeric_error.cpp` | `runNumericError` (`--coreml-numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
-| `conv.cpp` | `runConv` (`--coreml-conv`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
-| `block.cpp` | `runBlock` (`--coreml-block`) — the ONNX backend's decoder block through Core ML: `coreml_block_prefill` (flops, `ops` for int8_qdq), `coreml_block_decode` (bps), `coreml_block_latency` (s) |
-| `activation.cpp` | `runActivation` (`--coreml-activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
-| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--coreml-tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
-| `transfer.cpp` | `runTransferBandwidth` (`--coreml-transfer-bandwidth`) — h2d / d2h / round trip as differences between three spellings of one matmul |
-| `dispatch_latency.cpp` | `runDispatchLatency` (`--coreml-dispatch-latency`) — the smallest work the planner sends to the unit, and model creation |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format over a doubling size ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
+| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
+| `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
+| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block through Core ML: `coreml_block_prefill` (flops, `ops` for int8_qdq), `coreml_block_decode` (bps), `coreml_block_latency` (s) |
+| `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
+| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
+| `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / d2h / round trip as differences between three spellings of one matmul |
+| `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — the smallest work the planner sends to the unit, and model creation |
 
-Test ids are lower_snake (`coreml_gemm`, `coreml_block_decode`); the CLI flags
-keep their hyphens.  Every test is heterogeneous: each reading is a different
-format, size or context length.
+Test ids are lower_snake and keep the `coreml_` prefix (`coreml_gemm`,
+`coreml_block_decode`); the CLI flags that gate them are backend-neutral
+(`--gemm`, `--transformer-block`, …) and shared with the ONNX backend through
+the same `Benchmark` values.  Every test is heterogeneous: each reading is a
+different format, size or context length.
 
 ## Models are emitted as protobuf bytes, not built with coremltools
 
@@ -293,9 +295,11 @@ it (spec 9), which is what a converted model carries.
 
 ## When You Change This Directory
 
-- Adding a benchmark → new `.cpp` here, entry in `CMakeLists.txt`, a
-  `Benchmark` enum value + CLI flag (`include/common/benchmark_enums.h`,
-  `src/common/options.cpp`), a call in `runAll()`, and a row in Key Files.
+- Adding a benchmark → new `.cpp` here, entry in `CMakeLists.txt`, a call in
+  `runAll()` gated on a `Benchmark` value, and a row in Key Files.  Reuse an
+  existing value when the measurement already has a name on another backend
+  (`include/common/benchmark_enums.h`); a new one needs a flag row in
+  `src/common/options.cpp` -- named for what it measures, never for Core ML.
 - Adding a weight format → `CoremlWeight` + `coremlEmitWeight` (+ its
   `dequantized` values, which the accuracy reference depends on),
   `coremlWeightBytes`, `coremlSpecForWeight`, `coremlWeightLabel`, and a

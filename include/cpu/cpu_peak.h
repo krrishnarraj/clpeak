@@ -110,6 +110,7 @@ public:
   CpuPeak();
   ~CpuPeak();
 
+  Backend backend() const override { return Backend::Cpu; }
   void applyOptions(const CliOptions &opts) override;
   int  runAll() override;
 

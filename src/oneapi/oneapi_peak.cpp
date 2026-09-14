@@ -17,12 +17,6 @@ OneapiPeak::OneapiPeak()
 
 OneapiPeak::~OneapiPeak() {}
 
-void OneapiPeak::applyOptions(const CliOptions &opts)
-{
-  Peak::applyOptions(opts);
-  deviceIndices = opts.oneapiDeviceIndices;
-}
-
 // Collect every SYCL device of a given type across all platforms.
 static void collectDevices(sycl::info::device_type type,
                            std::vector<sycl::device> &out)
@@ -145,8 +139,7 @@ int OneapiPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     OneapiDevice dev;
@@ -185,8 +178,8 @@ int OneapiPeak::runAll()
     if (isAllowed(Benchmark::ComputeMP))     runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))   runComputeBF16(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-    if (isAllowed(Benchmark::JointMatrix))   runJointMatrix(dev, cfg);
-    if (isAllowed(Benchmark::Onemkl))        runOnemkl(dev, cfg);
+    if (isAllowed(Benchmark::MatrixCompute)) runJointMatrix(dev, cfg);
+    if (isAllowed(Benchmark::Gemm))          runOnemkl(dev, cfg);
 
 
     if (isAllowed(Benchmark::GlobalBW))     runGlobalBandwidth(dev, cfg);

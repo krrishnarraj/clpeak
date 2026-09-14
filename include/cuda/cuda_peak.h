@@ -193,12 +193,10 @@ struct cuda_compute_desc_t
 class CudaPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices;  // empty = run all
-
   CudaPeak();
   ~CudaPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Cuda; }
   int runAll() override;
 
   // Inventory.

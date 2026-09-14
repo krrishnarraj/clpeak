@@ -113,12 +113,6 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
 CoreMLPeak::CoreMLPeak() = default;
 CoreMLPeak::~CoreMLPeak() = default;
 
-void CoreMLPeak::applyOptions(const CliOptions &opts)
-{
-  Peak::applyOptions(opts);
-  deviceIndices = opts.coremlDeviceIndices;
-}
-
 int CoreMLPeak::runAll()
 {
   std::string why;
@@ -142,8 +136,7 @@ int CoreMLPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     const coreml_device_info_t &dev = devs[idx];
@@ -173,29 +166,29 @@ int CoreMLPeak::runAll()
     currentDeviceScope = &deviceScope;
 
     // ---- Compute (FLOPS + OPS) ---------------------------------------------
-    if (isAllowed(Benchmark::CoremlGemm))
+    if (isAllowed(Benchmark::Gemm))
       runGemm(dev, cfg);
-    if (isAllowed(Benchmark::CoremlConv))
+    if (isAllowed(Benchmark::Conv))
       runConv(dev, cfg);
 
     // ---- What the speed rows cost in accuracy ------------------------------
-    if (isAllowed(Benchmark::CoremlNumericError))
+    if (isAllowed(Benchmark::NumericError))
       runNumericError(dev, cfg);
 
     // ---- AI composite (whole transformer block) ----------------------------
-    if (isAllowed(Benchmark::CoremlBlock))
+    if (isAllowed(Benchmark::TransformerBlock))
       runBlock(dev, cfg);
 
     // ---- Bandwidth ---------------------------------------------------------
-    if (isAllowed(Benchmark::CoremlActivation))
+    if (isAllowed(Benchmark::Activation))
       runActivation(dev, cfg);
-    if (isAllowed(Benchmark::CoremlTensorBW))
+    if (isAllowed(Benchmark::TensorBW))
       runTensorBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::CoremlTransferBW))
+    if (isAllowed(Benchmark::TransferBW))
       runTransferBandwidth(dev, cfg);
 
     // ---- Latency -----------------------------------------------------------
-    if (isAllowed(Benchmark::CoremlDispatchLatency))
+    if (isAllowed(Benchmark::KernelLatency))
       runDispatchLatency(dev, cfg);
 
     currentDeviceScope = nullptr;

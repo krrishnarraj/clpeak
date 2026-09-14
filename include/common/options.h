@@ -4,38 +4,48 @@
 #include <bitset>
 #include <string>
 #include <vector>
-#include <common/benchmark_enums.h>  // Benchmark, Category
+#include <common/benchmark_enums.h>  // Backend, Benchmark, Category
 #include <common/common.h>           // DEFAULT_TARGET_TIME_US
 #include <common/run_document.h>     // Invocation
 
-// Shared CLI options populated once in entry.cpp and consumed by every
-// backend.  Each backend's applyOptions() copies the relevant fields into
-// its own state so the rest of its code can stay backend-flavored.
+// One backend as the command line and the result document know it.  The
+// flag is the name in lower case; `builtIn` says whether this binary
+// carries the backend at all.  Every flag parses in every build -- a script
+// may say --no-cuda on a Mac -- and a backend that is asked for by name but
+// not built in is reported, not rejected (see requestedButNotBuilt).
+struct BackendInfo {
+  Backend     id;
+  const char *name;     // "OpenCL", "CUDA", "CoreML" -- as printed and as the document's `backend`
+  const char *flag;     // "opencl", "cuda", "coreml" -- --<flag> / --no-<flag>
+  bool        builtIn;
+};
+
+const BackendInfo &backendInfo(Backend b);
+
+// One item of --device.  A bare index applies to every backend that runs;
+// `backend:index` narrows it to one.  The index is the number
+// --list-devices prints for that backend.
+struct DeviceSelector {
+  Backend backend = Backend::COUNT;  // COUNT = any backend
+  int     index   = 0;
+};
+
+// Shared CLI options populated once by parseCliOptions and consumed by every
+// backend.  Peak::applyOptions copies the relevant fields into the backend
+// so the rest of its code can stay backend-flavored.
 struct CliOptions {
-  // Backend on/off (consumed by entry.cpp dispatcher)
-  bool skipOpenCL = false;
-  bool skipVulkan = false;
-  bool skipCuda   = false;
-  bool skipRocm   = false;
-  bool skipMetal  = false;
-  bool skipOneapi = false;
-  bool skipCpu    = false;
-  bool skipOnnx   = false;
-  bool skipCoreml = false;
+  // Which backends run.  Default: every one that is built in.  The first
+  // positive --<backend> flag flips this to allow-list mode ("only the
+  // listed"); --no-<backend> always subtracts.
+  std::bitset<static_cast<size_t>(Backend::COUNT)> enabledBackends;
+  // The backends named positively on the command line, kept apart from
+  // enabledBackends so the caller can tell "asked for CUDA and it is not in
+  // this build" from "CUDA is simply not in this build".
+  std::bitset<static_cast<size_t>(Backend::COUNT)> requestedBackends;
 
-  // OpenCL platform/device selection (OpenCL-only concept; kept here so
-  // applyOptions can copy it).  Empty = run all enumerated platforms/devices.
-  std::vector<unsigned long> platformIndices;
-  std::vector<unsigned long> deviceIndices;
-
-  // Per-backend device selectors.  Empty = run all enumerated devices.
-  std::vector<int> vkDeviceIndices;
-  std::vector<int> cudaDeviceIndices;
-  std::vector<int> rocmDeviceIndices;
-  std::vector<int> mtlDeviceIndices;
-  std::vector<int> oneapiDeviceIndices;
-  std::vector<int> onnxDeviceIndices;
-  std::vector<int> coremlDeviceIndices;
+  // --device: which devices run, by the index --list-devices prints.  Empty
+  // = every device of every backend.
+  std::vector<DeviceSelector> devices;
 
   // --onnx-lib: absolute path to the onnxruntime shared library to load,
   // overriding the platform's conventional names.  Empty = search the
@@ -63,9 +73,7 @@ struct CliOptions {
   std::bitset<static_cast<size_t>(Category::Unknown)> enabledCategories;
 
   // Output / compare.  One format, one flag: `-o file` writes the v3 JSON
-  // document (run_document.h).  The XML and CSV writers are gone -- XML's
-  // only advantage over JSON was nesting, and CSV could carry neither device
-  // metadata nor the per-test documentation.
+  // document (run_document.h).
   bool        enableOutput = false;
   std::string outputFile;
   std::string compareFile;
@@ -84,10 +92,20 @@ struct CliOptions {
 
   CliOptions()
   {
+    enabledBackends.set();
     enabledTests.set();
     enabledCategories.set();
   }
 
+  bool backendEnabled(Backend b) const
+  {
+    return enabledBackends.test(static_cast<size_t>(b));
+  }
+
+  // Backends named with a positive flag that this binary does not carry.
+  // The caller tells the user; running nothing silently would read as "no
+  // devices".
+  std::vector<Backend> requestedButNotBuilt() const;
 };
 
 // Describe how clpeak was asked to run, for the result document's `invocation`
@@ -98,7 +116,7 @@ struct CliOptions {
 Invocation invocationFrom(const CliOptions &opts, int argc, char **argv);
 
 // Parse argv into out.  On --help / --version / parse error this calls
-// exit() directly (matching the previous behavior).  Returns 0 on success.
+// exit() directly.  Returns 0 on success.
 int parseCliOptions(int argc, char **argv, CliOptions &out);
 
 // Embedding-safe variant: never calls exit().  Returns true on success;

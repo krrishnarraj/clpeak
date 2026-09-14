@@ -59,12 +59,10 @@ struct coreml_device_info_t
 class CoreMLPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices; // empty = run every enumerated device
-
   CoreMLPeak();
   ~CoreMLPeak() override;
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Coreml; }
   int runAll() override;
 
   static BackendInventory enumerate();

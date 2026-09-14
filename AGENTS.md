@@ -78,7 +78,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 
 ## Quick Lookups
 
-- **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h`
+- **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h` (a `Benchmark` names what is measured, never which backend; reuse one when the measurement exists elsewhere)
 - **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)

@@ -134,12 +134,10 @@ struct rocm_compute_desc_t
 class RocmPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices;  // empty = run all
-
   RocmPeak();
   ~RocmPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Rocm; }
   int runAll() override;
 
   static BackendInventory enumerate();

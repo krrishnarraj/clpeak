@@ -120,12 +120,10 @@ struct mtl_compute_desc_t
 class MetalPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices; // empty = run all
-
   MetalPeak();
   ~MetalPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Metal; }
   static BackendInventory enumerate();
   static void printInventory(const BackendInventory &inv, std::ostream &os);
   int runAll() override;

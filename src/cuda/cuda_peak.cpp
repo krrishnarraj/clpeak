@@ -31,12 +31,6 @@ CudaPeak::CudaPeak()
 
 CudaPeak::~CudaPeak() {}
 
-void CudaPeak::applyOptions(const CliOptions &opts)
-{
-    Peak::applyOptions(opts);
-    deviceIndices = opts.cudaDeviceIndices;
-}
-
 bool CudaPeak::initDriver()
 {
   if (initialised)
@@ -130,8 +124,7 @@ int CudaPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     CudaDevice dev;
@@ -176,9 +169,9 @@ int CudaPeak::runAll()
       runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-    if (isAllowed(Benchmark::Wmma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runWmma(dev, cfg);
-    if (isAllowed(Benchmark::Cublas))
+    if (isAllowed(Benchmark::Gemm))
       runCublas(dev, cfg);
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
     if (isAllowed(Benchmark::GlobalBW))

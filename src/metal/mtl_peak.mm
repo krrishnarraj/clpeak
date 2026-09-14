@@ -13,12 +13,6 @@ MetalPeak::MetalPeak()
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
 
-void MetalPeak::applyOptions(const CliOptions &opts)
-{
-    Peak::applyOptions(opts);
-    deviceIndices = opts.mtlDeviceIndices;
-}
-
 // ---------------------------------------------------------------------------
 // Benchmark methods live in separate files:
 //   mtl_device.mm          compute_kernel.mm     mtl_utils.mm
@@ -43,8 +37,7 @@ int MetalPeak::runAll()
     {
         if (clpeak::cancelRequested())
             break;
-        if (!deviceIndices.empty() &&
-            std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
+        if (!isDeviceSelected(static_cast<int>(d)))
             continue;
 
         MetalDevice dev;
@@ -90,9 +83,9 @@ int MetalPeak::runAll()
         if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
         if (isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
         if (isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isAllowed(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
-        if (isAllowed(Benchmark::MpsGemm))           runMpsGemm(dev, cfg);
-        if (isAllowed(Benchmark::MpsAttention))      runMpsAttention(dev, cfg);
+        if (isAllowed(Benchmark::MatrixCompute))     runSimdgroupMatrix(dev, cfg);
+        if (isAllowed(Benchmark::Gemm))              runMpsGemm(dev, cfg);
+        if (isAllowed(Benchmark::Attention))         runMpsAttention(dev, cfg);
 
         // ---- Phase 2: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);

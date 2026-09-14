@@ -95,8 +95,10 @@ calibrated to a time budget, which is the normal and comparable mode).
 
 ## Device
 
-`backend` / `platform` / `name` / `device_index` identify it. All three
-strings are whitespace-trimmed: drivers pad them (Intel's OpenCL runtime
+`backend` / `platform` / `name` / `device_index` identify it. `device_index`
+is the backend's own numbering -- the one `--list-devices` prints and
+`--device` takes -- and runs consecutively across an OpenCL backend's
+platforms. All three strings are whitespace-trimmed: drivers pad them (Intel's OpenCL runtime
 returns its CPU name with five trailing spaces), and padding in an identity is
 two names for one device the day a driver changes how much of it there is. The index is
 part of that identity because a name is not unique — MoltenVK exposes one GPU

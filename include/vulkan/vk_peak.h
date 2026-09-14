@@ -328,12 +328,10 @@ struct vk_compute_desc_t
 class vkPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices; // empty = run all
-
   vkPeak();
   ~vkPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  Backend backend() const override { return Backend::Vulkan; }
   int runAll() override;
 
   // Individual benchmarks

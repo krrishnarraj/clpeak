@@ -81,13 +81,13 @@ void main() {
       expect(config.toArgs(catalog), ['--no-metal']);
     });
 
-    test('partial OpenCL selection emits platform+device lists', () {
+    test('partial OpenCL selection emits a backend:index device item', () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
       config.toggleDevice(
           'OpenCL', (platformIndex: 0, deviceIndex: 0), false);
       final args = config.toArgs(catalog);
-      expect(args, ['--cl-platform', '0', '--cl-device', '1']);
+      expect(args, ['--device', 'opencl:1']);
     });
 
     test('deselected ONNX backend emits --no-onnx', () {
@@ -97,11 +97,20 @@ void main() {
       expect(config.toArgs(catalog), ['--no-onnx']);
     });
 
-    test('partial ONNX selection emits an EP index list', () {
+    test('partial ONNX selection emits an EP index item', () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
       config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 0), false);
-      expect(config.toArgs(catalog), ['--onnx-device', '1']);
+      expect(config.toArgs(catalog), ['--device', 'onnx:1']);
+    });
+
+    test('partial selections on several backends share one --device', () {
+      final catalog = _catalog();
+      final config = RunConfig.allDevices(catalog);
+      config.toggleDevice(
+          'OpenCL', (platformIndex: 0, deviceIndex: 1), false);
+      config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 1), false);
+      expect(config.toArgs(catalog), ['--device', 'opencl:0,onnx:0']);
     });
 
     test('category subset flips to allow-list flags', () {
