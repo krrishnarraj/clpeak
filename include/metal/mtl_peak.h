@@ -125,7 +125,6 @@ public:
 
   Backend backend() const override { return Backend::Metal; }
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
   int runAll() override;
 
   int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);

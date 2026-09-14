@@ -341,13 +341,15 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
 BackendInventory clPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "OpenCL";
+  inv.id = Backend::OpenCL;
 
   try
   {
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
     inv.available = !platforms.empty();
+    if (!inv.available)
+      inv.unavailableReason = "no platforms found";
 
     int deviceIndex = 0;  // consecutive across platforms, as runAll numbers them
     for (size_t p = 0; p < platforms.size(); p++)
@@ -394,39 +396,13 @@ BackendInventory clPeak::enumerate()
       inv.platforms.push_back(std::move(plat));
     }
   }
-  catch (cl::Error &)
+  catch (cl::Error &error)
   {
     inv.available = false;
+    inv.unavailableReason = std::string("no platforms found (") + error.what() +
+                            " " + std::to_string(error.err()) + ")";
     inv.platforms.clear();
   }
 
   return inv;
-}
-
-void clPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-    os << "\n=== OpenCL backend ===\n";
-    for (const auto &plat : b.platforms)
-    {
-        os << "Platform " << plat.index << ": " << plat.name << "\n";
-        for (const auto &d : plat.devices)
-        {
-            os << "  OpenCL Device " << d.index << ": " << d.name;
-            if (!d.typeStr.empty())
-                os << " [" << d.typeStr << "]";
-            os << "\n";
-            if (!d.driverVersion.empty())
-                os << "    Driver    : " << d.driverVersion << "\n";
-            if (d.numComputeUnits)
-                os << "    CUs       : " << d.numComputeUnits << "\n";
-            if (d.maxClockMHz)
-                os << "    Clock     : " << d.maxClockMHz << " MHz\n";
-            if (d.globalMemBytes)
-                os << "    Global mem: " << (d.globalMemBytes / (1024 * 1024)) << " MB\n";
-            if (d.maxAllocBytes)
-                os << "    Max alloc : " << (d.maxAllocBytes / (1024 * 1024)) << " MB\n";
-            os << "    FP16      : " << (d.hasFp16 ? "yes" : "no") << "\n";
-            os << "    FP64      : " << (d.hasFp64 ? "yes" : "no") << "\n";
-        }
-    }
 }

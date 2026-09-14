@@ -65,12 +65,27 @@ class CatalogPlatform {
 class CatalogBackend {
   const CatalogBackend({
     required this.name,
+    required this.flag,
     required this.available,
+    required this.info,
+    required this.reason,
     required this.platforms,
   });
 
   final String name; // "OpenCL" / "Vulkan" / "CUDA" / ... / "CPU"
+
+  /// The backend's command-line name: `--device <flag>:<index>` names one
+  /// of its devices.  Authored natively (the backend table in
+  /// src/common/options.cpp), never derived here.
+  final String flag;
   final bool available;
+
+  /// A backend-level fact worth showing: the ONNX Runtime version, the OS
+  /// release Core ML comes with.  Empty when there is none.
+  final String info;
+
+  /// Why `available` is false.  Empty when it is true.
+  final String reason;
   final List<CatalogPlatform> platforms;
 
   bool get hasDevices => platforms.any((p) => p.devices.isNotEmpty);
@@ -79,7 +94,10 @@ class CatalogBackend {
 
   factory CatalogBackend.fromJson(Map<String, dynamic> m) => CatalogBackend(
         name: m['name'] as String? ?? '',
+        flag: m['flag'] as String? ?? '',
         available: m['available'] as bool? ?? false,
+        info: m['info'] as String? ?? '',
+        reason: m['reason'] as String? ?? '',
         platforms: [
           for (final p in (m['platforms'] as List? ?? const []))
             CatalogPlatform.fromJson(p as Map<String, dynamic>)

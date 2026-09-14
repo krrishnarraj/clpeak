@@ -5,6 +5,7 @@
 #include <iosfwd>
 #include <string>
 #include <vector>
+#include <common/benchmark_enums.h>  // Backend
 
 // Backend-neutral description of one device. Per-backend enumerators fill the
 // fields that make sense for them and leave the rest at their defaults; the
@@ -13,9 +14,10 @@
 // without forcing a discriminated union.
 struct InventoryDevice
 {
-  int           index = -1;
+  int           index = -1;       // the backend's own numbering: what --device takes
   std::string   name;
-  std::string   typeStr;          // "GPU" / "CPU" / "Discrete GPU" / ...
+  std::string   typeStr;          // "GPU" / "CPU" / "NPU" / "Discrete GPU" / ...
+  std::string   arch;             // "sm_120" (CUDA), "gfx1201" (ROCm)
   std::string   driverVersion;    // OpenCL
   std::string   apiVersion;       // Vulkan ("1.2.3")
   unsigned int  numComputeUnits = 0;
@@ -29,19 +31,37 @@ struct InventoryDevice
 struct InventoryPlatform
 {
   int                          index = -1;
-  std::string                  name;          // OpenCL: real platform; Vulkan: "Vulkan"
+  std::string                  name;          // OpenCL: real platform; others: one synthetic platform
   std::vector<InventoryDevice> devices;
 };
 
 struct BackendInventory
 {
-  std::string                    backend;     // "OpenCL" / "Vulkan" / ...
+  Backend                        id = Backend::COUNT;
   bool                           available = false;
+  // Why `available` is false: "onnxruntime library not found", "driver init
+  // failed or no devices found".  Printed in place of the device list.
+  std::string                    unavailableReason;
+  // Backend-level fact worth a line in the listing: the runtime version
+  // ("ONNX Runtime 1.29.0"), the OS release Core ML comes with.
+  std::string                    info;
+  // Diagnostics from enumeration that are not devices -- a provider the
+  // runtime names but nothing here can run, with the reason.  Shown under
+  // --verbose only, so a missing NPU reads as absent hardware in the
+  // default listing.
+  std::vector<std::string>       notes;
   std::vector<InventoryPlatform> platforms;   // Vulkan/CUDA: a single synthetic platform
 };
 
-// JSON serializer used by the Android JNI surface and --list-devices.
-// Schema is stable and consumed by BackendCatalog.kt.
+// JSON serializer used by the GUI catalog (clpeak_copy_backend_catalog_json).
+// Schema is stable and consumed by app/lib/src/model/catalog.dart.
 std::string inventoryToJson(const std::vector<BackendInventory> &inv);
+
+// --list-devices.  One format for every backend: a header per backend, then
+// one line per device that starts with the exact `backend:index` token
+// --device takes, so what a user reads is what they pass.  `showAbsent`
+// adds a closing line naming the backends this binary was built without.
+void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os,
+                    bool showAbsent);
 
 #endif // CLPEAK_INVENTORY_H

@@ -363,7 +363,6 @@ public:
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
 private:
   VkInstance instance;

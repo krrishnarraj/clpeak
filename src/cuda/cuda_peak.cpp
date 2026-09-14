@@ -207,13 +207,19 @@ int CudaPeak::runAll()
 BackendInventory CudaPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "CUDA";
+  inv.id = Backend::Cuda;
 
   if (cuInit(0) != CUDA_SUCCESS)
+  {
+    inv.unavailableReason = "driver init failed";
     return inv;
+  }
   int n = 0;
   if (cuDeviceGetCount(&n) != CUDA_SUCCESS || n == 0)
+  {
+    inv.unavailableReason = "no devices found";
     return inv;
+  }
   inv.available = true;
 
   InventoryPlatform plat;
@@ -234,30 +240,13 @@ BackendInventory CudaPeak::enumerate()
     InventoryDevice dev;
     dev.index = i;
     dev.name = name;
-    dev.typeStr = "sm_" + std::to_string(maj) + std::to_string(min);
+    dev.typeStr = "GPU";
+    dev.arch = "sm_" + std::to_string(maj) + std::to_string(min);
     plat.devices.push_back(std::move(dev));
   }
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void CudaPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-    os << "\n=== CUDA backend ===\n";
-    if (!b.available)
-    {
-        os << "CUDA: driver init failed or no devices found\n";
-        return;
-    }
-    for (const auto &plat : b.platforms)
-        for (const auto &d : plat.devices)
-        {
-            os << "  CUDA Device " << d.index << ": " << d.name;
-            if (!d.typeStr.empty())
-                os << " [" << d.typeStr << "]";
-            os << "\n";
-        }
 }
 
 #endif // ENABLE_CUDA

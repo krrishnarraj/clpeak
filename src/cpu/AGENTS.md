@@ -35,7 +35,7 @@ local memory, DRAM ↔ global memory.
 
 | File | Purpose |
 |------|---------|
-| `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup → MT clock settle → probe → `pickIters` timed batch), `enumerate`, `printInventory` |
+| `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup → MT clock settle → probe → `pickIters` timed batch), `enumerate` |
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, per-instance **and aggregate** cache sizes, ISA flags from the `cpu_dispatch.cpp` probe |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |

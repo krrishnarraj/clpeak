@@ -97,8 +97,8 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 ./clpeak --single-precision-compute   # one test, on every backend
 ./clpeak --gemm                       # the vendor's tuned matmul on every backend: cuBLASLt, MPS, Accelerate, ONNX, Core ML, …
 ./clpeak --onnx --transformer-block   # the AI composite on every ONNX provider (--convolution, --numeric-error, --tensor-bandwidth, …)
-./clpeak --coreml --device 0          # Core ML on the Neural Engine only
-./clpeak --device cuda:0,vulkan:1     # narrow one backend's devices without narrowing the others
+./clpeak --device coreml:0            # one device, as --list-devices names it (here: the Neural Engine)
+./clpeak --device cuda:0,vulkan:1     # a few devices across backends; nothing else runs
 ./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
@@ -106,7 +106,7 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 ./clpeak --list-devices               # enumerate devices, no benchmarks
 ```
 
-`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. `--device` takes the index `--list-devices` prints: a bare index applies to every backend that runs, `backend:index` to one; items are comma-separated. Every flag parses in every build, so a script can say `--no-cuda` on a Mac.
+`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. `--list-devices` prints one line per device that starts with its `backend:index` name; `--device` takes a comma-separated list of exactly those and runs only them. Every flag parses in every build, so a script can say `--no-cuda` on a Mac.
 
 ## For AI agents
 

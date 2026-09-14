@@ -26,7 +26,7 @@ Built as `peak_cuda` static library.
 
 | File | Purpose |
 |------|---------|
-| `cuda_peak.cpp` | `CudaPeak` class: ctor, `applyOptions()`, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `cuda_peak.cpp` | `CudaPeak` class: ctor, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()` |
 | `cuda_device.cpp` | `CudaDevice` class: `init()`, `cleanup()`, `getKernel()` (fatbin `cuModuleLoadData` + module caching) |
 | `compute_kernel.cpp` | `CudaPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |

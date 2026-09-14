@@ -115,7 +115,6 @@ public:
   int  runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   // Timed launcher: runs body(tid, iters) across nThreads (warmups + one probe
   // + pickIters() timed batch) and returns the mean wall-clock microseconds per

@@ -221,11 +221,14 @@ int RocmPeak::runAll()
 BackendInventory RocmPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "ROCm";
+  inv.id = Backend::Rocm;
 
   int n = 0;
   if (hipGetDeviceCount(&n) != hipSuccess || n == 0)
+  {
+    inv.unavailableReason = "runtime init failed or no devices found";
     return inv;
+  }
   inv.available = true;
 
   InventoryPlatform plat;
@@ -242,29 +245,12 @@ BackendInventory RocmPeak::enumerate()
     dev.index = i;
     dev.name = props.name;
     dev.typeStr = "GPU";
+    dev.arch = props.gcnArchName;
     plat.devices.push_back(std::move(dev));
   }
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void RocmPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== ROCm backend ===\n";
-  if (!b.available)
-  {
-    os << "ROCm: runtime init failed or no devices found\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-    for (const auto &d : plat.devices)
-    {
-      os << "  ROCm Device " << d.index << ": " << d.name;
-      if (!d.typeStr.empty())
-        os << " [" << d.typeStr << "]";
-      os << "\n";
-    }
 }
 
 #endif // ENABLE_ROCM

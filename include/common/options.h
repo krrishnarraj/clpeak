@@ -22,11 +22,11 @@ struct BackendInfo {
 
 const BackendInfo &backendInfo(Backend b);
 
-// One item of --device.  A bare index applies to every backend that runs;
-// `backend:index` narrows it to one.  The index is the number
-// --list-devices prints for that backend.
+// One item of --device, `backend:index`, exactly as --list-devices prints
+// it.  The list is an allow-list: when it is given, only the devices on it
+// run, and a backend with none of its devices listed does not run at all.
 struct DeviceSelector {
-  Backend backend = Backend::COUNT;  // COUNT = any backend
+  Backend backend = Backend::COUNT;
   int     index   = 0;
 };
 
@@ -43,8 +43,8 @@ struct CliOptions {
   // this build" from "CUDA is simply not in this build".
   std::bitset<static_cast<size_t>(Backend::COUNT)> requestedBackends;
 
-  // --device: which devices run, by the index --list-devices prints.  Empty
-  // = every device of every backend.
+  // --device: the devices that run.  Empty = every device of every enabled
+  // backend.
   std::vector<DeviceSelector> devices;
 
   // --onnx-lib: absolute path to the onnxruntime shared library to load,
@@ -97,9 +97,20 @@ struct CliOptions {
     enabledCategories.set();
   }
 
+  // Whether a backend has anything to run: its flag is on, and if --device
+  // was given, at least one of its devices is on the list.  The run loop
+  // skips the rest without constructing them, so `--device cuda:0` never
+  // loads the ONNX runtime.
   bool backendEnabled(Backend b) const
   {
-    return enabledBackends.test(static_cast<size_t>(b));
+    if (!enabledBackends.test(static_cast<size_t>(b)))
+      return false;
+    if (devices.empty())
+      return true;
+    for (const DeviceSelector &sel : devices)
+      if (sel.backend == b)
+        return true;
+    return false;
   }
 
   // Backends named with a positive flag that this binary does not carry.

@@ -101,7 +101,6 @@ public:
   int runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   // Per-benchmark entry points (one .cpp each, like the other backends).
   int runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,

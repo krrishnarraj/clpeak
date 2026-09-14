@@ -10,6 +10,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
       'backends': [
         {
           'name': 'Metal',
+          'flag': 'metal',
           'available': true,
           'platforms': [
             {
@@ -23,6 +24,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
         },
         {
           'name': 'OpenCL',
+          'flag': 'opencl',
           'available': true,
           'platforms': [
             {
@@ -37,6 +39,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
         },
         {
           'name': 'CPU',
+          'flag': 'cpu',
           'available': true,
           'platforms': [
             {
@@ -50,6 +53,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
         },
         {
           'name': 'ONNX',
+          'flag': 'onnx',
           'available': true,
           'platforms': [
             {
@@ -62,7 +66,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
             }
           ]
         },
-        {'name': 'Vulkan', 'available': false, 'platforms': []},
+        {'name': 'Vulkan', 'flag': 'vulkan', 'available': false, 'platforms': []},
       ]
     });
 
@@ -74,43 +78,56 @@ void main() {
       expect(config.toArgs(catalog), isEmpty);
     });
 
-    test('deselected backend emits --no-<backend>', () {
+    test('a deselected backend leaves the explicit list of everything else',
+        () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
       config.selectedDevices.remove('Metal');
-      expect(config.toArgs(catalog), ['--no-metal']);
+      expect(config.toArgs(catalog),
+          ['--device', 'opencl:0,opencl:1,cpu:0,onnx:0,onnx:1']);
     });
 
-    test('partial OpenCL selection emits a backend:index device item', () {
+    test('a partial selection names every selected device as flag:index', () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
       config.toggleDevice(
           'OpenCL', (platformIndex: 0, deviceIndex: 0), false);
-      final args = config.toArgs(catalog);
-      expect(args, ['--device', 'opencl:1']);
-    });
-
-    test('deselected ONNX backend emits --no-onnx', () {
-      final catalog = _catalog();
-      final config = RunConfig.allDevices(catalog);
-      config.selectedDevices.remove('ONNX');
-      expect(config.toArgs(catalog), ['--no-onnx']);
-    });
-
-    test('partial ONNX selection emits an EP index item', () {
-      final catalog = _catalog();
-      final config = RunConfig.allDevices(catalog);
-      config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 0), false);
-      expect(config.toArgs(catalog), ['--device', 'onnx:1']);
-    });
-
-    test('partial selections on several backends share one --device', () {
-      final catalog = _catalog();
-      final config = RunConfig.allDevices(catalog);
-      config.toggleDevice(
-          'OpenCL', (platformIndex: 0, deviceIndex: 1), false);
       config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 1), false);
-      expect(config.toArgs(catalog), ['--device', 'opencl:0,onnx:0']);
+      expect(config.toArgs(catalog),
+          ['--device', 'metal:0,opencl:1,cpu:0,onnx:0']);
+    });
+
+    test('the flag comes from the catalog, not the display name', () {
+      final catalog = BackendCatalog.fromJson({
+        'backends': [
+          {
+            'name': 'Core ML',
+            'flag': 'coreml',
+            'available': true,
+            'platforms': [
+              {
+                'index': 0,
+                'name': 'Core ML',
+                'devices': [
+                  {'index': 0, 'name': 'Apple Neural Engine', 'type': 'NPU'},
+                  {'index': 1, 'name': 'CPU via Core ML', 'type': 'CPU'},
+                ]
+              }
+            ]
+          },
+        ]
+      });
+      final config = RunConfig.allDevices(catalog);
+      config.toggleDevice('Core ML', (platformIndex: 0, deviceIndex: 1), false);
+      expect(config.toArgs(catalog), ['--device', 'coreml:0']);
+    });
+
+    test('nothing selected runs nothing', () {
+      final catalog = _catalog();
+      final config = RunConfig.allDevices(catalog);
+      config.selectedDevices.clear();
+      expect(config.toArgs(catalog),
+          ['--no-metal', '--no-opencl', '--no-cpu', '--no-onnx']);
     });
 
     test('category subset flips to allow-list flags', () {

@@ -27,7 +27,7 @@ build time and the SYCL runtime JITs it on first launch.
 
 | File | Purpose |
 |------|---------|
-| `oneapi_peak.cpp` | `OneapiPeak`: ctor, `applyOptions()`, `runAll()`, `runKernel()`, `enumerate()`, `printInventory()`, `enumerateDevices()` |
+| `oneapi_peak.cpp` | `OneapiPeak`: ctor, `runAll()`, `runKernel()`, `enumerate()`, `enumerateDevices()` |
 | `oneapi_device.cpp` | `OneapiDevice::init()` — sets up `sycl::queue`, populates `oneapi_device_info_t` (vendor, CUs, sub-group sizes, fp16/fp64/bf16/XMX flags) |
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeFlops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |

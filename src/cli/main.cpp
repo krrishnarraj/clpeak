@@ -45,13 +45,11 @@ struct BackendEntry
 {
     Backend id;
     std::function<BackendInventory()> enumerate;
-    std::function<void(const BackendInventory &, std::ostream &)> printInv;
     std::function<std::unique_ptr<Peak>()> create;
 };
 
 // Build the backend list once.  Each enabled backend registers its static
-// enumerate / printInventory / factory lambdas here so that main() only
-// has simple loops.
+// enumerate / factory lambdas here so that main() only has simple loops.
 static std::vector<BackendEntry> buildBackends()
 {
     std::vector<BackendEntry> out;
@@ -60,8 +58,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Cuda,
         []
         { return CudaPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { CudaPeak::printInventory(inv, os); },
         []
         { return std::make_unique<CudaPeak>(); },
     });
@@ -71,8 +67,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Rocm,
         []
         { return RocmPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { RocmPeak::printInventory(inv, os); },
         []
         { return std::make_unique<RocmPeak>(); },
     });
@@ -82,8 +76,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Metal,
         []
         { return MetalPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { MetalPeak::printInventory(inv, os); },
         []
         { return std::make_unique<MetalPeak>(); },
     });
@@ -93,8 +85,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Oneapi,
         []
         { return OneapiPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { OneapiPeak::printInventory(inv, os); },
         []
         { return std::make_unique<OneapiPeak>(); },
     });
@@ -104,8 +94,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Vulkan,
         []
         { return vkPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { vkPeak::printInventory(inv, os); },
         []
         { return std::make_unique<vkPeak>(); },
     });
@@ -115,8 +103,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::OpenCL,
         []
         { return clPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { clPeak::printInventory(inv, os); },
         []
         { return std::make_unique<clPeak>(); },
     });
@@ -126,8 +112,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Cpu,
         []
         { return CpuPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { CpuPeak::printInventory(inv, os); },
         []
         { return std::make_unique<CpuPeak>(); },
     });
@@ -137,8 +121,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Onnx,
         []
         { return OnnxPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { OnnxPeak::printInventory(inv, os); },
         []
         { return std::make_unique<OnnxPeak>(); },
     });
@@ -148,8 +130,6 @@ static std::vector<BackendEntry> buildBackends()
         Backend::Coreml,
         []
         { return CoreMLPeak::enumerate(); },
-        [](const BackendInventory &inv, std::ostream &os)
-        { CoreMLPeak::printInventory(inv, os); },
         []
         { return std::make_unique<CoreMLPeak>(); },
     });
@@ -177,12 +157,16 @@ int main(int argc, char **argv)
         std::cout << "clpeak: the " << backendInfo(b).name
                   << " backend is not in this build\n";
 
-    // --list-devices: print every enabled backend's inventory.
+    // --list-devices: every enabled backend's inventory, in one format.  The
+    // backends this binary lacks are named too, unless the listing was
+    // narrowed to particular backends.
     if (opts.listDevices)
     {
+        std::vector<BackendInventory> invs;
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
-                be.printInv(be.enumerate(), std::cout);
+                invs.push_back(be.enumerate());
+        printInventory(invs, std::cout, /*showAbsent=*/opts.requestedBackends.none());
         return 0;
     }
 

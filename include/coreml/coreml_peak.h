@@ -48,7 +48,7 @@ enum class CoremlDeviceKind { NeuralEngine, Gpu, Cpu };
 struct coreml_device_info_t
 {
   CoremlDeviceKind kind = CoremlDeviceKind::Cpu;
-  std::string displayName;   // "Apple Neural Engine (16 cores)"
+  std::string displayName;   // "Apple Neural Engine", "GPU via Core ML (Apple M1 Pro)"
   std::string typeStr;       // "NPU" / "GPU" / "CPU"
   DeviceType deviceType = DeviceType::Unknown;
   int coreCount = 0;         // ANE only
@@ -66,7 +66,6 @@ public:
   int runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   // Per-benchmark entry points (one .cpp each, like the other backends).
   int runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg);

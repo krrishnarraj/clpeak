@@ -30,7 +30,7 @@ backend.
 
 | File | Purpose |
 |------|---------|
-| `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()`, `runAll()`, `enumerate()`, `printInventory()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
+| `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
@@ -870,7 +870,7 @@ lives in the latency scope. Reporting fp16-equivalent bytes would inflate the
 four-bit row four-fold and hide the failure the row exists to catch.
 
 Measured, M1 Pro, ONNX Runtime 1.29 — prefill at 512 tokens, decode at 2048 of
-context. The CPU-EP figures are from a `--onnx --device 1` run: measured straight
+context. The CPU-EP figures are from a `--device onnx:1` run: measured straight
 after Core ML's session compiles they come out about 30% lower across the board,
 with every ordering below intact, so only same-run comparisons mean anything.
 

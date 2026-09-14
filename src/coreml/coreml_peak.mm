@@ -73,8 +73,6 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
       case CoremlDeviceKind::NeuralEngine:
         dev.coreCount = (int)[(MLNeuralEngineComputeDevice *)d totalCoreCount];
         dev.displayName = "Apple Neural Engine";
-        if (dev.coreCount > 0)
-          dev.displayName += " (" + std::to_string(dev.coreCount) + " cores)";
         dev.typeStr = "NPU";
         dev.deviceType = DeviceType::Accelerator;
         out.push_back(dev);   // accelerators first
@@ -200,52 +198,32 @@ int CoreMLPeak::runAll()
 BackendInventory CoreMLPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "CoreML";
+  inv.id = Backend::Coreml;
+  inv.info = coremlOsVersionString();
 
-  auto devs = coremlDevices();
+  std::string why;
+  auto devs = coremlDevices(&why);
   if (devs.empty())
+  {
+    inv.unavailableReason = why.empty() ? "no compute devices" : why;
     return inv;
+  }
   inv.available = true;
 
   InventoryPlatform plat;
   plat.index = 0;
-  plat.name = "Core ML (" + coremlOsVersionString() + ")";
+  plat.name = "Core ML";
   for (int i = 0; i < (int)devs.size(); i++)
   {
     InventoryDevice d;
     d.index = i;
     d.name = devs[i].displayName;
     d.typeStr = devs[i].typeStr;
-    d.driverVersion = coremlOsVersionString();
     d.numComputeUnits = devs[i].coreCount > 0 ? (unsigned)devs[i].coreCount : 0;
-    d.hasFp16 = true;
     plat.devices.push_back(std::move(d));
   }
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void CoreMLPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== Core ML backend ===\n";
-  if (!b.available)
-  {
-    std::string why;
-    (void)coremlDevices(&why);
-    os << "Core ML: " << (why.empty() ? std::string("no compute devices") : why) << "\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-  {
-    os << plat.name << "\n";
-    for (const auto &d : plat.devices)
-    {
-      os << "  Core ML Device " << d.index << ": " << d.name;
-      if (!d.typeStr.empty())
-        os << " [" << d.typeStr << "]";
-      os << "\n";
-    }
-  }
 }
 
 #endif // ENABLE_COREML

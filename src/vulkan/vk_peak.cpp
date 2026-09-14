@@ -525,13 +525,18 @@ int vkPeak::runAll()
 BackendInventory vkPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "Vulkan";
+  inv.id = Backend::Vulkan;
 
   vkPeak vk;
   if (!vk.initInstance())
+  {
+    inv.unavailableReason = "failed to create a Vulkan instance";
     return inv;  // available stays false
+  }
 
   inv.available = !vk.physicalDevices.empty();
+  if (!inv.available)
+    inv.unavailableReason = "no devices found";
 
   InventoryPlatform plat;
   plat.index = 0;
@@ -561,26 +566,6 @@ BackendInventory vkPeak::enumerate()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void vkPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-    os << "\n=== Vulkan backend ===\n";
-    if (!b.available)
-    {
-        os << "Vulkan: failed to create instance or no devices found\n";
-        return;
-    }
-    for (const auto &plat : b.platforms)
-        for (const auto &d : plat.devices)
-        {
-            os << "  Vulkan Device " << d.index << ": " << d.name;
-            if (!d.typeStr.empty())
-                os << " [" << d.typeStr << "]";
-            os << "\n";
-            if (!d.apiVersion.empty())
-                os << "    API       : " << d.apiVersion << "\n";
-        }
 }
 
 #endif // ENABLE_VULKAN

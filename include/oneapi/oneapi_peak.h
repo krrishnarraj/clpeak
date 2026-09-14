@@ -87,7 +87,6 @@ public:
   int  runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   int runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg);

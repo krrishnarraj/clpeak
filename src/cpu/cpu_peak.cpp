@@ -246,7 +246,7 @@ int CpuPeak::runAll()
 BackendInventory CpuPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "CPU";
+  inv.id = Backend::Cpu;
 
   cpu_device_info_t info;
   detectCpuInfo(info);
@@ -267,23 +267,6 @@ BackendInventory CpuPeak::enumerate()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void CpuPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== CPU backend ===\n";
-  if (!b.available)
-  {
-    os << "CPU: no host CPU detected\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-    for (const auto &d : plat.devices)
-    {
-      os << "  CPU Device " << d.index << ": " << d.name;
-      if (d.numComputeUnits) os << " [" << d.numComputeUnits << " threads]";
-      os << "\n";
-    }
 }
 
 #endif // ENABLE_CPU

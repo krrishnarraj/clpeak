@@ -141,7 +141,6 @@ public:
   int runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   int runComputeSP(RocmDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(RocmDevice &dev, benchmark_config_t &cfg);

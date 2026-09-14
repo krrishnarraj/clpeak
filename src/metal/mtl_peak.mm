@@ -108,10 +108,14 @@ int MetalPeak::runAll()
 BackendInventory MetalPeak::enumerate()
 {
     BackendInventory inv;
-    inv.backend = "Metal";
+    inv.id = Backend::Metal;
 
     NSArray<id<MTLDevice>> *devs = copyClpeakMetalDevices();
-    if (devs.count == 0) return inv;
+    if (devs.count == 0)
+    {
+        inv.unavailableReason = "no devices found";
+        return inv;
+    }
 
     inv.available = true;
     InventoryPlatform plat;
@@ -121,26 +125,14 @@ BackendInventory MetalPeak::enumerate()
     for (NSUInteger i = 0; i < devs.count; i++)
     {
         InventoryDevice dev;
-        dev.index = static_cast<int>(i);
-        dev.name  = [devs[i].name UTF8String];
+        dev.index   = static_cast<int>(i);
+        dev.name    = [devs[i].name UTF8String];
+        dev.typeStr = "GPU";
         plat.devices.push_back(std::move(dev));
     }
 
     inv.platforms.push_back(std::move(plat));
     return inv;
-}
-
-void MetalPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-    os << "\n=== Metal backend ===\n";
-    if (!b.available)
-    {
-        os << "Metal: no devices found\n";
-        return;
-    }
-    for (const auto &plat : b.platforms)
-        for (const auto &d : plat.devices)
-            os << "  Metal Device " << d.index << ": " << d.name << "\n";
 }
 
 #endif // ENABLE_METAL

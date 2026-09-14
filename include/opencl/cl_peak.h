@@ -48,7 +48,6 @@ public:
 
     // Inventory.
     static BackendInventory enumerate();
-    static void printInventory(const BackendInventory &inv, std::ostream &os);
 
     // Time a kernel batched as `iters` dispatches, where `iters` is calibrated
     // from a one-shot warmup so the timed phase lands at ~targetTimeUs.

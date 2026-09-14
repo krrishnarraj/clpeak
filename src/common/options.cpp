@@ -249,10 +249,9 @@ static std::string helpText()
   }
   s += "\n";
   s += " DEVICES (default: every device of every backend that runs):\n";
-  helpLine(s, "--device list",     "comma-separated.  An item is an index as --list-devices\n"
-                                   "prints it, applying to every backend that runs, or\n"
-                                   "backend:index for one backend -- e.g. 0, 0,2 or\n"
-                                   "cuda:0,vulkan:1");
+  helpLine(s, "--device list",     "run only these devices: comma-separated backend:index\n"
+                                   "items, exactly as --list-devices prints them\n"
+                                   "(e.g. --device cuda:0,vulkan:1)");
   s += "\n";
   s += " CATEGORIES (--<category> / --no-<category>; default: all):\n";
   for (int i = 0; i < numCategoryFlags; i++)
@@ -318,10 +317,11 @@ static const BackendRow *findBackendFlag(const std::string &flag)
   return nullptr;
 }
 
-// Parse the --device list: comma-separated `index` or `backend:index`
-// items.  Empty items ("0,,2") and negative indices fail.  On failure `why`
-// names the offending item.
+// Parse the --device list: comma-separated `backend:index` items, the
+// tokens --list-devices prints.  Empty items ("cuda:0,,cuda:2"), unknown
+// backends and negative indices fail; `why` names the offending item.
 static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
+                            std::bitset<static_cast<size_t>(Backend::COUNT)> &requested,
                             std::string &why)
 {
   std::vector<DeviceSelector> parsed;
@@ -330,23 +330,25 @@ static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
   while (std::getline(ss, tok, ','))
   {
     DeviceSelector sel;
-    std::string indexPart = tok;
     const size_t colon = tok.find(':');
-    if (colon != std::string::npos)
+    if (colon == std::string::npos)
     {
-      const std::string backendPart = tok.substr(0, colon);
-      const BackendRow *row = findBackendFlag(backendPart);
-      if (!row)
-      {
-        why = "'" + tok + "': unknown backend '" + backendPart + "'";
-        return false;
-      }
-      sel.backend = row->info.id;
-      indexPart   = tok.substr(colon + 1);
+      why = "'" + tok + "': expected backend:index, as --list-devices prints it";
+      return false;
     }
+    const std::string backendPart = tok.substr(0, colon);
+    const BackendRow *row = findBackendFlag(backendPart);
+    if (!row)
+    {
+      why = "'" + tok + "': unknown backend '" + backendPart + "'";
+      return false;
+    }
+    sel.backend = row->info.id;
+    requested.set(static_cast<size_t>(row->info.id));
+    const std::string indexPart = tok.substr(colon + 1);
     if (indexPart.empty() || !parseIntArg(indexPart.c_str(), sel.index))
     {
-      why = "'" + tok + "': expected index or backend:index";
+      why = "'" + tok + "': expected backend:index, as --list-devices prints it";
       return false;
     }
     parsed.push_back(sel);
@@ -491,8 +493,11 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       const char *v = nextArg(argc, argv, i);
       if (!v)
         return missingArg(err, a);
+      // Naming a device is asking for its backend, so a backend this build
+      // lacks gets reported (CliOptions::requestedButNotBuilt) rather than
+      // silently running nothing.
       std::string why;
-      if (!parseDeviceList(v, out.devices, why))
+      if (!parseDeviceList(v, out.devices, out.requestedBackends, why))
       {
         err = std::string("clpeak: invalid --device ") + why + "\n";
         return ParseResult::Error;
@@ -563,6 +568,21 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
 
     err = std::string("clpeak: unknown option '") + a + "'\n";
     return ParseResult::Error;
+  }
+
+  // `--device cuda:0 --vulkan` selects nothing: every device named is on a
+  // backend the backend flags switched off.  Contradictory, so say so.
+  if (!out.devices.empty())
+  {
+    bool any = false;
+    for (const DeviceSelector &sel : out.devices)
+      if (out.enabledBackends.test(static_cast<size_t>(sel.backend)))
+        any = true;
+    if (!any)
+    {
+      err = "clpeak: --device names only devices of backends that are switched off\n";
+      return ParseResult::Error;
+    }
   }
 
   return ParseResult::Ok;

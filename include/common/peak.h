@@ -50,9 +50,9 @@ public:
     }
 
     // ---- Device selection ------------------------------------------------
-    // The --device items that name this backend (or none), resolved by
-    // applyOptions.  Empty = every device.  `index` is the backend's own
-    // numbering, the one --list-devices prints and the document records.
+    // The --device items that name this backend, resolved by applyOptions.
+    // Empty = every device.  `index` is the backend's own numbering, the one
+    // --list-devices prints and the document records.
     std::vector<int> selectedDevices;
 
     bool isDeviceSelected(int index) const {

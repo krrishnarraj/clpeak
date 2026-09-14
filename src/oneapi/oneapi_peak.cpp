@@ -198,11 +198,14 @@ int OneapiPeak::runAll()
 BackendInventory OneapiPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "oneAPI";
+  inv.id = Backend::Oneapi;
 
   auto devs = enumerateDevices();
   if (devs.empty())
+  {
+    inv.unavailableReason = "no SYCL devices found";
     return inv;
+  }
   inv.available = true;
 
   InventoryPlatform plat;
@@ -221,24 +224,6 @@ BackendInventory OneapiPeak::enumerate()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void OneapiPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== oneAPI backend ===\n";
-  if (!b.available)
-  {
-    os << "oneAPI: no SYCL devices found\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-    for (const auto &d : plat.devices)
-    {
-      os << "  oneAPI Device " << d.index << ": " << d.name;
-      if (!d.typeStr.empty())
-        os << " [" << d.typeStr << "]";
-      os << "\n";
-    }
 }
 
 #endif // ENABLE_ONEAPI

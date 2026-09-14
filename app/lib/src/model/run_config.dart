@@ -4,13 +4,6 @@ import 'result_model.dart';
 /// Time-budget presets.  Custom keeps whatever the user configured.
 enum RunPreset { full, custom }
 
-/// A backend's CLI flag is its catalog name in lower case: `--no-<flag>`
-/// skips it and `--device <flag>:<index>` narrows it (mirrors the backend
-/// table in src/common/options.cpp).  Only backend/device/category/time
-/// flags are ever emitted -- never individual test flags, so test churn in
-/// the core needs no app changes.
-String _backendFlag(String backendName) => backendName.toLowerCase();
-
 /// A device reference within a backend: platform index (OpenCL) + device
 /// index.  For single-platform backends platformIndex is the synthetic 0.
 typedef DeviceRef = ({int platformIndex, int deviceIndex});
@@ -73,38 +66,43 @@ class RunConfig {
 
   /// Build the clpeak_launch argv (without the program name).
   ///
-  /// Semantics match the retired mobile apps: a fully-selected backend emits
-  /// no device flags (native runs all), a deselected backend emits
-  /// `--no-<backend>`, and a partial selection emits index lists.
+  /// Only backend/device/category/time flags are ever emitted -- never
+  /// individual test flags, so test churn in the core needs no app changes.
+  /// Devices: the whole catalog selected means no flags (native runs
+  /// everything); anything less is one `--device` list naming every selected
+  /// device as `<flag>:<index>`, which is exactly the set that runs -- a
+  /// backend with nothing on the list is skipped natively, so there is no
+  /// separate `--no-<backend>`.
   List<String> toArgs(BackendCatalog catalog) {
     final args = <String>[];
 
-    // Every partial selection goes into one --device list.  Device indices
-    // are per backend and already unique across platforms (OpenCL numbers
-    // its devices consecutively), so `backend:index` names a device exactly.
     final deviceItems = <String>[];
+    var complete = true;
     for (final backend in catalog.usable) {
-      final flag = _backendFlag(backend.name);
       final selected = selectedDevices[backend.name] ?? const <DeviceRef>{};
-
-      if (selected.isEmpty) {
-        args.add('--no-$flag');
-        continue;
-      }
-
       final all = <DeviceRef>{
         for (final p in backend.platforms)
           for (final d in p.devices)
             (platformIndex: p.index, deviceIndex: d.index)
       };
-      if (selected.containsAll(all)) continue; // full selection: no flags
+      if (!selected.containsAll(all)) complete = false;
 
+      // Device indices are per backend and unique across platforms (OpenCL
+      // numbers its devices consecutively), so flag:index names one device.
       final devices = selected.map((r) => r.deviceIndex).toSet().toList()
         ..sort();
-      deviceItems.addAll(devices.map((d) => '$flag:$d'));
+      deviceItems.addAll(devices.map((d) => '${backend.flag}:$d'));
     }
-    if (deviceItems.isNotEmpty) {
-      args.addAll(['--device', deviceItems.join(',')]);
+    if (!complete) {
+      if (deviceItems.isNotEmpty) {
+        args.addAll(['--device', deviceItems.join(',')]);
+      } else {
+        // Nothing selected.  Callers gate on hasSelection, but an empty
+        // --device list cannot say "run nothing", so say it per backend.
+        for (final backend in catalog.usable) {
+          args.add('--no-${backend.flag}');
+        }
+      }
     }
 
     // Categories: all selected = default; otherwise positive flags flip the

@@ -22,7 +22,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 
 | File | Purpose |
 |------|---------|
-| `vk_peak.cpp` | `vkPeak` class: ctor, `applyOptions()`, `initInstance()`, `cleanup()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `vk_peak.cpp` | `vkPeak` class: ctor, `initInstance()`, `cleanup()`, `runKernel()`, `runAll()`, `enumerate()` |
 | `vulkan_device.cpp` | `VulkanDevice` class: `init()` (4-step: basic info → CU count → optional features → logical device), `cleanup()`, `createBuffer()`, `createComputePipeline()`, `submitAndWait()`, `zeroBuffer()` |
 | `compute_kernel.cpp` | `vkPeak::runComputeKernel()` — shared compute-peak driver: buffer/descriptor/pipeline scaffolding used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |

@@ -12,9 +12,11 @@ void Peak::applyOptions(const CliOptions &opts)
     enabledTests      = opts.enabledTests;
     enabledCategories = opts.enabledCategories;
 
-    // A bare index applies to every backend; backend:index only to its own.
+    // Only the items that name this backend.  The run loop already skips a
+    // backend with none when --device was given (CliOptions::backendEnabled),
+    // so an empty list here means "every device".
     selectedDevices.clear();
     for (const DeviceSelector &sel : opts.devices)
-        if (sel.backend == Backend::COUNT || sel.backend == backend())
+        if (sel.backend == backend())
             selectedDevices.push_back(sel.index);
 }

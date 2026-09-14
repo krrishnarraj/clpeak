@@ -30,7 +30,7 @@ micro-graphs on all three side by side.
 
 | File | Purpose |
 |------|---------|
-| `coreml_peak.mm` | `CoreMLPeak`: `runAll()`, `enumerate()`, `printInventory()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
+| `coreml_peak.mm` | `CoreMLPeak`: `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlResidentMatMulModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |

@@ -336,24 +336,37 @@ int OnnxPeak::runAll()
 BackendInventory OnnxPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "ONNX";
+  inv.id = Backend::Onnx;
 
   const OrtRuntime *rt = ortRuntime();
   if (!rt)
+  {
+    const std::string why = onnxLoadDiagnostic();
+    inv.unavailableReason = why.empty() ? "onnxruntime library not found" : why;
     return inv;
+  }
+  inv.info = "ONNX Runtime " + rt->versionString;
 
   // Capabilities, not viability: a backend with providers that all fail
   // the probe still counts as available (with an empty device list), so
   // --list-devices reports the runtime rather than "library not found".
   if (onnxAvailableEps(*rt).empty())
+  {
+    inv.unavailableReason = "the runtime registers no execution providers";
     return inv;
+  }
   inv.available = true;
 
-  auto eps = onnxUsableEps(*rt);
+  // Providers the runtime names but nothing here can run, with the reason.
+  // Answers are memoized, so asking again costs nothing.
+  std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
+  auto eps = onnxUsableEps(*rt, &skipped);
+  for (const auto &sk : skipped)
+    inv.notes.push_back("skipping " + sk.first.displayName + ": " + sk.second);
 
   InventoryPlatform plat;
   plat.index = 0;
-  plat.name  = "ONNX Runtime " + rt->versionString;
+  plat.name  = "ONNX Runtime";
 
   for (int i = 0; i < (int)eps.size(); i++)
   {
@@ -361,50 +374,11 @@ BackendInventory OnnxPeak::enumerate()
     dev.index         = i;
     dev.name          = eps[i].displayName;
     dev.typeStr       = eps[i].typeStr;
-    dev.driverVersion = rt->versionString;
     plat.devices.push_back(std::move(dev));
   }
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void OnnxPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== ONNX backend ===\n";
-  if (!b.available)
-  {
-    std::string why = onnxLoadDiagnostic();
-    os << "ONNX: "
-       << (why.empty() ? std::string("onnxruntime library not found") : why)
-       << "\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-  {
-    os << plat.name << "\n";
-    for (const auto &d : plat.devices)
-    {
-      os << "  ONNX Device " << d.index << ": " << d.name;
-      if (!d.typeStr.empty())
-        os << " [" << d.typeStr << "]";
-      os << "\n";
-    }
-  }
-  // Providers the runtime names but nothing here can run: named with the
-  // reason under --verbose only, so a missing NPU reads as absent hardware
-  // rather than a detection failure when debugging, while the default
-  // listing stays a device table.  Answers are memoized, so this re-probe
-  // after enumerate() costs nothing.
-  if (clpeak::verboseEnabled())
-    if (const OrtRuntime *rt = ortRuntime())
-    {
-      std::vector<std::pair<onnx_ep_info_t, std::string>> skipped;
-      (void)onnxUsableEps(*rt, &skipped);
-      for (const auto &sk : skipped)
-        os << "  (skipping " << sk.first.displayName << ": " << sk.second
-           << ")\n";
-    }
 }
 
 #endif // ENABLE_ONNX
