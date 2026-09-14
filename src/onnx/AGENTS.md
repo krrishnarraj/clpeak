@@ -1056,6 +1056,34 @@ the provider, the more of its ladder lands in that regime.
 says why: there the per-submission overhead is the measurement rather than a
 thing to divide out, so it probes with five and carries a far larger cap.
 
+## The decode rows declare bytes; two providers do not move them
+
+`onnx-block-decode`'s numerator is what the *model declares* -- that is all
+clpeak can know, and a provider is free to store the weights narrower than
+asked.  Two of them do, from opposite directions, and both land in the same
+place: a row reading twice its neighbour off the same wall clock.
+
+| provider | fp16 | fp32 | same block, same context |
+|---|---|---|---|
+| OpenVINO GPU | 52.6 GB/s @ 2.24 ms | 104 GB/s @ 2.28 ms | serves fp32 at 16 bits |
+| ORT x86 CPU EP | 31.0 GB/s @ 3.80 ms | 62.6 GB/s @ 3.77 ms | converts fp16 *up* |
+
+**The absolute check misses both.**  Comparing the row against what the
+device was measured streaming only fires when the implied traffic is
+impossible, and 104 GB/s on a part that streams 191 is not.  What gives it
+away is the pair: the two rows run the identical layer and differ only in
+the width each declares, so if one declares half again as many bytes as the
+other and takes the same time, the byte count is not describing the traffic.
+
+The rule is therefore a comparison against the fp16 row -- declared bytes
+1.5x or more, wall time within a quarter -- and the row says that one of the
+two is not moving what it declares rather than guessing which, because that
+differs by provider and the fp32 numeric-error row already answers it (261
+ppm on the OpenVINO GPU, 0.00 on the CPU EP).  The window's lower bound
+matters as much as its upper: ONNX Runtime's CPU EP runs fp32 decode in a
+quarter of fp16's time because its fp16 path has no kernel at all, and that
+is a different fault which this row must not claim.
+
 ## Nothing about a device may be hardcoded by its name
 
 The provider tables that map a registration name to its options

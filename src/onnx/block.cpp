@@ -561,6 +561,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return v.unit != nullptr;
   };
 
+  // The fp16 variant is kVariants[0] and is measured first, which makes it
+  // the reference every other decode row is compared against: same layer,
+  // same context, differing only in the width each declares.
+  constexpr size_t kRefVariant = 0;
+  double refDecodeUs = 0.0, refDecodeBytes = 0.0;
+
   // What this provider demonstrably streams, measured (see onnxStreamBps).
   // The decode rows count the bytes the model *declares*, which is all clpeak
   // can know: a provider is free to store them narrower than asked, and no
@@ -948,6 +954,41 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                              " GB/s this provider was measured streaming, so "
                              "it is not moving the bytes this precision "
                              "declares -- it is storing them narrower.";
+
+          // The cheaper and far more sensitive version of the same question,
+          // and it needs no second measurement: this row and the fp16
+          // reference ran the identical layer and differ only in the width
+          // they declare.  If one declares half again as many bytes as the
+          // other and takes the same time to move them, the byte count is not
+          // describing the traffic -- and which of the two is wrong depends on
+          // the provider, so the row says what was seen rather than guessing.
+          //
+          // OpenVINO's GPU serves an fp32 graph at 16 bits, so its fp32 row
+          // declares 235 MB against fp16's 117 and reads 104 GB/s against
+          // 52.6 -- off the same 2.2 ms.  ONNX Runtime's x86 CPU EP has the
+          // opposite fault, converting fp16 up, and lands in exactly the same
+          // place from the other side.  The absolute check above misses both:
+          // 104 GB/s is comfortably under what that device streams.
+          if (refDecodeUs > 0.0 && refDecodeBytes > 0.0 && vi != kRefVariant)
+          {
+            const double byteRatio = bytes / refDecodeBytes;
+            const double timeRatio = it->second.us / refDecodeUs;
+            if (byteRatio >= 1.5 && timeRatio > 0.9 && timeRatio < 1.25)
+              o.description += "  It declares " +
+                               std::to_string((long long)(byteRatio * 10) / 10) +
+                               "." +
+                               std::to_string((long long)(byteRatio * 10) % 10) +
+                               " times the bytes of the fp16 row and took the "
+                               "same time, so one of the two is not moving "
+                               "what it declares; the fp32 numeric-error row "
+                               "says whether this provider computes fp32 at "
+                               "full width.";
+          }
+          if (vi == kRefVariant)
+          {
+            refDecodeUs = it->second.us;
+            refDecodeBytes = bytes;
+          }
           test.emit(metric, (float)bps, o);
         }
         else test.skip(metric, it->second.status, it->second.error, o);
