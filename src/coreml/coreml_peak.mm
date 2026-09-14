@@ -198,7 +198,7 @@ int CoreMLPeak::runAll()
 BackendInventory CoreMLPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Coreml;
+  inv.id = kBackend;
   inv.info = coremlOsVersionString();
 
   std::string why;

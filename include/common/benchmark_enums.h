@@ -13,21 +13,30 @@ enum class DeviceType : unsigned int {
     Unknown     = 0
 };
 
-// Every backend clpeak can be built with, in the order they appear on the
-// command line and in the result document.  A backend's flag is its name
-// in lower case (--opencl, --coreml); the table in options.cpp holds both.
-// Adding one is a value here, a row in that table, and a BackendEntry in
-// src/cli/main.cpp -- the parser, the help and the GUI need nothing else.
+// Every backend clpeak can be built with.  This order is THE order: --help
+// lists backends in it, --list-devices and the GUI catalog enumerate in it,
+// a run executes in it, and the result document records devices in it.
+// Nothing else holds an order -- the registry (src/registry) sorts by this
+// enum, and the table in options.cpp is checked against it at compile time.
+// Vendor-native APIs first, then the portable layers over the same silicon,
+// then the CPU, then the NPU runtimes (again native before portable): the
+// most representative numbers come out first, and a run cut short still has
+// them.
+//
+// A backend's flag is its name in lower case (--opencl, --coreml); the
+// table in options.cpp holds both.  Adding one is a value here, a row in
+// that table, and an entry in src/registry/backend_registry.cpp; the
+// parser, the help, the listing, the run loops and the GUI need nothing.
 enum class Backend : unsigned int {
-    OpenCL = 0,
-    Vulkan,
-    Cuda,
+    Cuda = 0,
     Rocm,
     Metal,
     Oneapi,
+    Vulkan,
+    OpenCL,
     Cpu,
-    Onnx,
     Coreml,
+    Onnx,
     COUNT
 };
 

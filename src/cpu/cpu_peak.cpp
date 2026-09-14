@@ -246,7 +246,7 @@ int CpuPeak::runAll()
 BackendInventory CpuPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Cpu;
+  inv.id = kBackend;
 
   cpu_device_info_t info;
   detectCpuInfo(info);

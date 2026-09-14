@@ -108,7 +108,7 @@ int MetalPeak::runAll()
 BackendInventory MetalPeak::enumerate()
 {
     BackendInventory inv;
-    inv.id = Backend::Metal;
+    inv.id = kBackend;
 
     NSArray<id<MTLDevice>> *devs = copyClpeakMetalDevices();
     if (devs.count == 0)

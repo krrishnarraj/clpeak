@@ -74,21 +74,33 @@ struct BackendRow {
   const char *blurb;   // one line for --help
 };
 
-// Indexed by Backend; the static_assert below keeps it that way.
-static const BackendRow backendTable[] = {
-  {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
-  {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
+// Indexed by Backend: one row per enum value, in enum order, which the
+// static_asserts below enforce so a row can never describe the wrong
+// backend.
+static constexpr BackendRow backendTable[] = {
   {{Backend::Cuda,   "CUDA",   "cuda",   CLPEAK_BUILT_CUDA},   "CUDA"},
   {{Backend::Rocm,   "ROCm",   "rocm",   CLPEAK_BUILT_ROCM},   "ROCm/HIP"},
   {{Backend::Metal,  "Metal",  "metal",  CLPEAK_BUILT_METAL},  "Metal"},
   {{Backend::Oneapi, "oneAPI", "oneapi", CLPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
+  {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
+  {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
   {{Backend::Cpu,    "CPU",    "cpu",    CLPEAK_BUILT_CPU},    "native CPU"},
-  {{Backend::Onnx,   "ONNX",   "onnx",   CLPEAK_BUILT_ONNX},   "ONNX Runtime (NPUs via execution providers)"},
   {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
+  {{Backend::Onnx,   "ONNX",   "onnx",   CLPEAK_BUILT_ONNX},   "ONNX Runtime (NPUs via execution providers)"},
 };
-static const int numBackends = sizeof(backendTable) / sizeof(backendTable[0]);
+static constexpr int numBackends = sizeof(backendTable) / sizeof(backendTable[0]);
 static_assert(numBackends == static_cast<int>(Backend::COUNT),
-              "backendTable must have one row per Backend, in enum order");
+              "backendTable must have one row per Backend");
+
+static constexpr bool backendTableInEnumOrder()
+{
+  for (int i = 0; i < numBackends; i++)
+    if (backendTable[i].info.id != static_cast<Backend>(i))
+      return false;
+  return true;
+}
+static_assert(backendTableInEnumOrder(),
+              "backendTable rows must be in Backend enum order");
 
 const BackendInfo &backendInfo(Backend b)
 {

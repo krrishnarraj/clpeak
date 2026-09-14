@@ -207,7 +207,7 @@ int CudaPeak::runAll()
 BackendInventory CudaPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Cuda;
+  inv.id = kBackend;
 
   if (cuInit(0) != CUDA_SUCCESS)
   {

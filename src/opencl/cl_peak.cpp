@@ -341,7 +341,7 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
 BackendInventory clPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::OpenCL;
+  inv.id = kBackend;
 
   try
   {

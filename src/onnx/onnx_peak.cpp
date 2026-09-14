@@ -336,7 +336,7 @@ int OnnxPeak::runAll()
 BackendInventory OnnxPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Onnx;
+  inv.id = kBackend;
 
   const OrtRuntime *rt = ortRuntime();
   if (!rt)

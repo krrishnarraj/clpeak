@@ -170,8 +170,7 @@ std::string inventoryToJson(const std::vector<BackendInventory> &inv)
   return os.str();
 }
 
-void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os,
-                    bool showAbsent)
+void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os)
 {
   // Column widths from the whole listing, so every backend's rows line up.
   size_t tokenWidth = 0, nameWidth = 0;
@@ -226,20 +225,5 @@ void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os,
         os << "   (" << n << ")\n";
   }
 
-  if (showAbsent)
-  {
-    std::string absent;
-    for (size_t i = 0; i < static_cast<size_t>(Backend::COUNT); ++i)
-    {
-      const BackendInfo &be = backendInfo(static_cast<Backend>(i));
-      if (be.builtIn)
-        continue;
-      if (!absent.empty())
-        absent += ", ";
-      absent += be.name;
-    }
-    if (!absent.empty())
-      os << "\n Not in this build: " << absent << "\n";
-  }
   os << "\n";
 }

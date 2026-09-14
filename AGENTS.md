@@ -23,7 +23,10 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
 own `CMakeLists.txt` that builds a static library (`peak_opencl`, etc.).
 The CLI entry point is `src/cli/main.cpp`. The Flutter GUI (`app/`) drives the
-same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
+same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`). Both iterate
+the one backend registry (`src/registry/`), which is sorted by the `Backend`
+enum -- the single order that `--help`, `--list-devices`, the GUI catalog, a
+run and the result document all share.
 
 ## Directory Map
 
@@ -49,6 +52,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 | `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (one feature TU per ISA, runtime-dispatched); cache/DRAM bandwidth + memory latency |
 | `src/onnx/` | ONNX Runtime backend: `OnnxPeak` class + per-benchmark `.cpp`. Each execution provider (QNN / OpenVINO / VitisAI / CoreML / NNAPI / GPU / CPU) is one device; the runtime is dlopen'd and models are emitted as protobuf bytes in memory |
 | `src/coreml/` | Core ML backend (ObjC++ session + plain C++ tests): `CoreMLPeak` class + per-benchmark `.cpp`. Each Core ML compute device (Neural Engine / GPU / CPU) is one device; ML Program models are emitted as protobuf bytes + a weight blob and compiled at run time, and the compute plan proves per operation where they ran |
+| `src/registry/` | `backend_registry.cpp` — the one list of backends in this build (`backendRegistry()`, `include/common/backend_registry.h`), sorted by the `Backend` enum; compiled into both `clpeak` and `clpeak_ffi` by `src/common/cmake/backends.cmake`, which also links the backend libraries and sets `ENABLE_*` for both |
 | `src/cli/` | Desktop CLI: `main.cpp` |
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
@@ -79,7 +83,7 @@ same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`).
 ## Quick Lookups
 
 - **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h` (a `Benchmark` names what is measured, never which backend; reuse one when the measurement exists elsewhere)
-- **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface
+- **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface; then a `Backend` enum value (`include/common/benchmark_enums.h`), a row in the backend table (`src/common/options.cpp`), an `entry<YourPeak>()` in `src/registry/backend_registry.cpp`, and its name in the `foreach` of `src/common/cmake/backends.cmake` -- the CLI, the GUI bridge, the help, the listing and `--device` need nothing else
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)
 - **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`

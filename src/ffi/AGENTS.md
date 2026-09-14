@@ -18,9 +18,11 @@ shared library / Apple framework.
   (`include/common/AGENTS.md`).  The test's arrives once on `test_begin`, with
   the rest of the resolved header (`shape`, `axis`, `direction`, `unit`);
   each reading's rides the reading
-- Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: same order,
-  `RunDocument::append` merge, centralized `-o` save — which also stamps
-  `cancelled` so a partial run does not read as a complete one)
+- Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: both walk
+  the shared `backendRegistry()` so the catalog, the run and the CLI agree on
+  which backends exist and in what order; `RunDocument::append` merge,
+  centralized `-o` save — which also stamps `cancelled` so a partial run does
+  not read as a complete one)
 - Desktop build + `clpeak-gui` target? → `CMakeLists.txt` (gated on
   `CLPEAK_ENABLE_GUI` + detected Flutter SDK; assembles the final bundle at
   `<build>/clpeak-gui/` so Flutter-generated runner projects stay untouched)
@@ -75,5 +77,6 @@ shared library / Apple framework.
 
 - If you change the C ABI or event schema → update `clpeak_ffi.h` docs,
   `app/lib/src/ffi/clpeak_bindings.dart` + `clpeak_events.dart`, and this file.
-- If backend wiring changes in `src/cli/main.cpp` → mirror it in
-  `clpeak_ffi.cpp`.
+- If the run loop changes in `src/cli/main.cpp` → mirror it in
+  `clpeak_ffi.cpp`.  A new backend needs nothing here: the registry and
+  `src/common/cmake/backends.cmake` bring it into both binaries.

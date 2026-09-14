@@ -2,140 +2,17 @@
 #include <common/common.h>
 #include <common/options.h>
 #include <common/inventory.h>
+#include <common/backend_registry.h>
 #include <common/run_document.h>
 #include <common/logger_text.h>
 #include <common/host_info.h>
 #include <version.h>
 #include <chrono>
-#include <functional>
 #include <iostream>
 
-#ifdef ENABLE_OPENCL
-#include <opencl/cl_peak.h>
-#endif
-#ifdef ENABLE_VULKAN
-#include <vulkan/vk_peak.h>
-#endif
-#ifdef ENABLE_CUDA
-#include <cuda/cuda_peak.h>
-#endif
-#ifdef ENABLE_ROCM
-#include <rocm/rocm_peak.h>
-#endif
-#ifdef ENABLE_METAL
-#include <metal/mtl_peak.h>
-#endif
-#ifdef ENABLE_ONEAPI
-#include <oneapi/oneapi_peak.h>
-#endif
-#ifdef ENABLE_CPU
-#include <cpu/cpu_peak.h>
-#endif
 #ifdef ENABLE_ONNX
-#include <onnx/onnx_peak.h>
+#include <onnx/onnx_peak.h>  // onnxSetLibraryOverride, for --onnx-lib
 #endif
-#ifdef ENABLE_COREML
-#include <coreml/coreml_peak.h>
-#endif
-
-// A thin wrapper that captures everything we need per backend so the rest of
-// main() can iterate instead of repeating #ifdef-guarded blocks.  Name and
-// flag come from the backend table in options.cpp.
-struct BackendEntry
-{
-    Backend id;
-    std::function<BackendInventory()> enumerate;
-    std::function<std::unique_ptr<Peak>()> create;
-};
-
-// Build the backend list once.  Each enabled backend registers its static
-// enumerate / factory lambdas here so that main() only has simple loops.
-static std::vector<BackendEntry> buildBackends()
-{
-    std::vector<BackendEntry> out;
-#ifdef ENABLE_CUDA
-    out.push_back({
-        Backend::Cuda,
-        []
-        { return CudaPeak::enumerate(); },
-        []
-        { return std::make_unique<CudaPeak>(); },
-    });
-#endif
-#ifdef ENABLE_ROCM
-    out.push_back({
-        Backend::Rocm,
-        []
-        { return RocmPeak::enumerate(); },
-        []
-        { return std::make_unique<RocmPeak>(); },
-    });
-#endif
-#ifdef ENABLE_METAL
-    out.push_back({
-        Backend::Metal,
-        []
-        { return MetalPeak::enumerate(); },
-        []
-        { return std::make_unique<MetalPeak>(); },
-    });
-#endif
-#ifdef ENABLE_ONEAPI
-    out.push_back({
-        Backend::Oneapi,
-        []
-        { return OneapiPeak::enumerate(); },
-        []
-        { return std::make_unique<OneapiPeak>(); },
-    });
-#endif
-#ifdef ENABLE_VULKAN
-    out.push_back({
-        Backend::Vulkan,
-        []
-        { return vkPeak::enumerate(); },
-        []
-        { return std::make_unique<vkPeak>(); },
-    });
-#endif
-#ifdef ENABLE_OPENCL
-    out.push_back({
-        Backend::OpenCL,
-        []
-        { return clPeak::enumerate(); },
-        []
-        { return std::make_unique<clPeak>(); },
-    });
-#endif
-#ifdef ENABLE_CPU
-    out.push_back({
-        Backend::Cpu,
-        []
-        { return CpuPeak::enumerate(); },
-        []
-        { return std::make_unique<CpuPeak>(); },
-    });
-#endif
-#ifdef ENABLE_ONNX
-    out.push_back({
-        Backend::Onnx,
-        []
-        { return OnnxPeak::enumerate(); },
-        []
-        { return std::make_unique<OnnxPeak>(); },
-    });
-#endif
-#ifdef ENABLE_COREML
-    out.push_back({
-        Backend::Coreml,
-        []
-        { return CoreMLPeak::enumerate(); },
-        []
-        { return std::make_unique<CoreMLPeak>(); },
-    });
-#endif
-    return out;
-}
 
 int main(int argc, char **argv)
 {
@@ -149,7 +26,7 @@ int main(int argc, char **argv)
         onnxSetLibraryOverride(opts.onnxLibPath);
 #endif
 
-    auto backends = buildBackends();
+    const auto &backends = backendRegistry();
 
     // A backend asked for by name that this binary does not carry: say so,
     // or the run reads as "no devices".
@@ -157,16 +34,15 @@ int main(int argc, char **argv)
         std::cout << "clpeak: the " << backendInfo(b).name
                   << " backend is not in this build\n";
 
-    // --list-devices: every enabled backend's inventory, in one format.  The
-    // backends this binary lacks are named too, unless the listing was
-    // narrowed to particular backends.
+    // --list-devices: every enabled backend's inventory, in one format and
+    // in the order a run would visit them.
     if (opts.listDevices)
     {
         std::vector<BackendInventory> invs;
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
                 invs.push_back(be.enumerate());
-        printInventory(invs, std::cout, /*showAbsent=*/opts.requestedBackends.none());
+        printInventory(invs, std::cout);
         return 0;
     }
 

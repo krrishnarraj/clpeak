@@ -97,7 +97,10 @@ public:
   OnnxPeak();
   ~OnnxPeak() override;
 
-  Backend backend() const override { return Backend::Onnx; }
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Onnx;
+  Backend backend() const override { return kBackend; }
   int runAll() override;
 
   static BackendInventory enumerate();

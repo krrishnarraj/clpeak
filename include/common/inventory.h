@@ -59,9 +59,8 @@ std::string inventoryToJson(const std::vector<BackendInventory> &inv);
 
 // --list-devices.  One format for every backend: a header per backend, then
 // one line per device that starts with the exact `backend:index` token
-// --device takes, so what a user reads is what they pass.  `showAbsent`
-// adds a closing line naming the backends this binary was built without.
-void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os,
-                    bool showAbsent);
+// --device takes, so what a user reads is what they pass.  Backends print
+// in the order given, which is the registry's -- the run order.
+void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os);
 
 #endif // CLPEAK_INVENTORY_H

@@ -198,7 +198,7 @@ int OneapiPeak::runAll()
 BackendInventory OneapiPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Oneapi;
+  inv.id = kBackend;
 
   auto devs = enumerateDevices();
   if (devs.empty())

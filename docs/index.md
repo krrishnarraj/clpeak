@@ -51,15 +51,15 @@ both in the app (the info glyph beside each row) and on the CLI
 
 | Backend | Runs on |
 |---|---|
-| OpenCL | Any conformant CPU/GPU/accelerator |
-| Vulkan | Any Vulkan 1.1+ GPU, including cooperative-matrix paths |
 | CUDA | NVIDIA GPUs |
 | ROCm/HIP | AMD GPUs |
 | Metal | Apple silicon and Intel Macs |
 | oneAPI/SYCL | Intel GPUs |
+| Vulkan | Any Vulkan 1.1+ GPU, including cooperative-matrix paths |
+| OpenCL | Any conformant CPU/GPU/accelerator |
 | CPU | x86-64 and AArch64, runtime-dispatched per ISA |
-| ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
 | Core ML | Apple's Neural Engine, GPU and CPU through the system framework, no runtime to install (macOS 14.4+ / iOS 17.4+) |
+| ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
 
 </div>
 

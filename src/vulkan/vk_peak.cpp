@@ -525,7 +525,7 @@ int vkPeak::runAll()
 BackendInventory vkPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Vulkan;
+  inv.id = kBackend;
 
   vkPeak vk;
   if (!vk.initInstance())

@@ -43,7 +43,10 @@ public:
     // and the per-benchmark methods.
     logger::DeviceScope *currentDeviceScope = nullptr;
 
-    Backend backend() const override { return Backend::OpenCL; }
+    // Which backend this is -- the one place that says so; the registry,
+    // the inventory and the device selector all read it from here.
+    static constexpr Backend kBackend = Backend::OpenCL;
+    Backend backend() const override { return kBackend; }
     int runAll() override;
 
     // Inventory.

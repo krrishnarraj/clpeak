@@ -221,7 +221,7 @@ int RocmPeak::runAll()
 BackendInventory RocmPeak::enumerate()
 {
   BackendInventory inv;
-  inv.id = Backend::Rocm;
+  inv.id = kBackend;
 
   int n = 0;
   if (hipGetDeviceCount(&n) != hipSuccess || n == 0)

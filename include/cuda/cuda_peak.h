@@ -196,7 +196,10 @@ public:
   CudaPeak();
   ~CudaPeak();
 
-  Backend backend() const override { return Backend::Cuda; }
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Cuda;
+  Backend backend() const override { return kBackend; }
   int runAll() override;
 
   // Inventory.

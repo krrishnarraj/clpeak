@@ -123,7 +123,10 @@ public:
   MetalPeak();
   ~MetalPeak();
 
-  Backend backend() const override { return Backend::Metal; }
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Metal;
+  Backend backend() const override { return kBackend; }
   static BackendInventory enumerate();
   int runAll() override;
 

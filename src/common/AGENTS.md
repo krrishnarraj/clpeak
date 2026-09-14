@@ -16,7 +16,7 @@ used by the Flutter GUI on every platform).
 - Understanding result output format? → `run_document.cpp` + `include/common/run_document.h`, schema in `docs/format-v3.md`
 - Understanding calibration? → `common.cpp` (`pickIters()`) + `include/common/common.h`
 - Understanding gating? → `peak.cpp` + `include/common/peak.h` (gating lives in Peak)
-- Adding a new backend? → The `Peak` interface is in `include/common/peak.h` (`backend()`, `runAll()`, `isAllowed()`, `isDeviceSelected()`); a `Backend` enum value in `include/common/benchmark_enums.h` and a row in the backend table in `options.cpp` give it its flags
+- Adding a new backend? → The `Peak` interface is in `include/common/peak.h` (`kBackend` + `backend()`, `runAll()`, `isAllowed()`, `isDeviceSelected()`); a `Backend` enum value in `include/common/benchmark_enums.h` (its position is the run order) and a row in the backend table in `options.cpp` give it its flags; `src/registry/backend_registry.cpp` and `cmake/backends.cmake` put it in both binaries
 - Understanding device inventory structs / JSON? → `inventory.cpp` + `include/common/inventory.h`
 
 ## Key Files

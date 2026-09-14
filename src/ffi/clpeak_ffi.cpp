@@ -1,6 +1,7 @@
 #include "clpeak_ffi.h"
 #include "logger_ffi.h"
 
+#include <common/backend_registry.h>
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/options.h>
@@ -9,32 +10,8 @@
 #include <common/run_document.h>
 #include <version.h>
 
-#ifdef ENABLE_OPENCL
-#include <opencl/cl_peak.h>
-#endif
-#ifdef ENABLE_VULKAN
-#include <vulkan/vk_peak.h>
-#endif
-#ifdef ENABLE_CUDA
-#include <cuda/cuda_peak.h>
-#endif
-#ifdef ENABLE_ROCM
-#include <rocm/rocm_peak.h>
-#endif
-#ifdef ENABLE_METAL
-#include <metal/mtl_peak.h>
-#endif
-#ifdef ENABLE_ONEAPI
-#include <oneapi/oneapi_peak.h>
-#endif
-#ifdef ENABLE_CPU
-#include <cpu/cpu_peak.h>
-#endif
 #ifdef ENABLE_ONNX
-#include <onnx/onnx_peak.h>
-#endif
-#ifdef ENABLE_COREML
-#include <coreml/coreml_peak.h>
+#include <onnx/onnx_peak.h>  // onnxSetLibraryOverride / onnxRuntimeStatus
 #endif
 
 #include <atomic>
@@ -55,65 +32,6 @@ char *copyString(const std::string &value)
     if (!out)
         return nullptr;
     std::memcpy(out, value.c_str(), value.size() + 1);
-    return out;
-}
-
-// Same registration order as the CLI (src/cli/main.cpp).
-struct BackendEntry
-{
-    Backend id;
-    std::function<BackendInventory()> enumerate;
-    std::function<std::unique_ptr<Peak>()> create;
-};
-
-std::vector<BackendEntry> buildBackends()
-{
-    std::vector<BackendEntry> out;
-#ifdef ENABLE_CUDA
-    out.push_back({Backend::Cuda,
-                   [] { return CudaPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new CudaPeak()); }});
-#endif
-#ifdef ENABLE_ROCM
-    out.push_back({Backend::Rocm,
-                   [] { return RocmPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new RocmPeak()); }});
-#endif
-#ifdef ENABLE_METAL
-    out.push_back({Backend::Metal,
-                   [] { return MetalPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new MetalPeak()); }});
-#endif
-#ifdef ENABLE_ONEAPI
-    out.push_back({Backend::Oneapi,
-                   [] { return OneapiPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new OneapiPeak()); }});
-#endif
-#ifdef ENABLE_VULKAN
-    out.push_back({Backend::Vulkan,
-                   [] { return vkPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new vkPeak()); }});
-#endif
-#ifdef ENABLE_OPENCL
-    out.push_back({Backend::OpenCL,
-                   [] { return clPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new clPeak()); }});
-#endif
-#ifdef ENABLE_CPU
-    out.push_back({Backend::Cpu,
-                   [] { return CpuPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new CpuPeak()); }});
-#endif
-#ifdef ENABLE_ONNX
-    out.push_back({Backend::Onnx,
-                   [] { return OnnxPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new OnnxPeak()); }});
-#endif
-#ifdef ENABLE_COREML
-    out.push_back({Backend::Coreml,
-                   [] { return CoreMLPeak::enumerate(); },
-                   [] { return std::unique_ptr<Peak>(new CoreMLPeak()); }});
-#endif
     return out;
 }
 
@@ -145,7 +63,7 @@ const char *clpeak_version(void)
 char *clpeak_copy_backend_catalog_json(void)
 {
     std::vector<BackendInventory> inv;
-    for (const auto &be : buildBackends())
+    for (const auto &be : backendRegistry())
         inv.push_back(be.enumerate());
     return copyString(inventoryToJson(inv));
 }
@@ -231,7 +149,7 @@ int clpeak_launch(int argc, const char **argv,
                  std::string("clpeak: the ") + backendInfo(b).name +
                      " backend is not in this build\n");
 
-    for (const auto &be : buildBackends())
+    for (const auto &be : backendRegistry())
     {
         if (!opts.backendEnabled(be.id) || clpeak::cancelRequested())
             continue;
