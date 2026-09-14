@@ -1454,32 +1454,42 @@ and it means the subtraction removes a large number instead of a negligible
 one, so a cheap operation is left resting on the difference of two big
 measurements.
 
-One guard keeps that honest, and it is deliberately the simpler of the two
-that were tried: the operation has to account for at least a fifth of the
-*work*, which is the measurement less the provider's submission charge (a
-one-row reference graph measures it).  Taking the share of wall time instead
-makes a well-resolved operation look marginal wherever dispatch is expensive
--- DirectML charges 156 us against measurements of a few hundred.
+One guard keeps that honest: the operation has to account for at least a
+tenth of the *work*, which is the measurement less the provider's submission
+charge (a one-row reference graph measures it).  Taking the share of wall
+time instead makes a well-resolved operation look marginal wherever dispatch
+is expensive -- DirectML charges 156 us against measurements of a few hundred.
 
-**A bandwidth ceiling was tried for the same job and cannot be calibrated.**
-The idea was sound -- an operation that reads a tensor and writes one back
-cannot beat the rate the provider streams those bytes with no write at all --
-but there is no single size to measure that rate at.  Taken on a small
-working set it is cache-resident and permits anything: CUDA read 2511 GB/s
-from a 3 us net, which is no ceiling.  Taken on a large one it is the DRAM
-rate and refuses rows that legitimately ran out of cache, which is most 8 MB
-rows on a GPU.  Between those two mistakes it produced false refusals on four
-providers -- every activation row on DirectML, CUDA and TensorRT at one point
--- and caught one real case.  The proportional guard is dimensionless and
-needs no second graph to compare against, which is what makes it portable to
-a provider nobody here has run.
+**What that tenth rejects is a remainder of zero or below**, and that is most
+of its value.  TensorRT fuses SiLU into a graph that then costs the same as
+the reference -- 177 us against 176 -- and its softmax comes out *faster*
+than doing nothing at all.  Those are not measurements.
 
-A fifth is where the two populations separate.  Core ML's softmax costs 8-18%
-of its work and gave a refusal, 122 GB/s and 139 GB/s over three runs; it is
-refused every run now.  Its SiLU costs 43% and holds to a few percent
-(33.3 / 34.7 / 38.4).  The CPU EP's 32 MB rung sits at 6-10% and swung between
-11.7 and 28.6 GB/s across runs, so it goes too -- fewer rows, and the ones
-that remain mean something.
+**Two attempts to make the guard do more both cost more than they bought**,
+and neither should be tried again without new evidence:
+
+- *Raising the share to a fifth* threw away every CUDA activation row.  All
+  eight sit between 15.1% and 17.7% -- three operations across three working
+  sets, a band far too tight to be noise -- while the row it was aimed at,
+  Core ML's softmax, lands in the same 8-18% band.  The share does not
+  separate them.
+- *A ceiling against what the provider streams* cannot be calibrated at any
+  one size.  Measured on a small working set it is cache-resident and permits
+  anything (CUDA read 2511 GB/s from a 3 us net); measured on a large one it
+  is the DRAM rate and refuses rows that legitimately ran out of cache, which
+  is most 8 MB rows on a GPU.  Between the two it produced false refusals on
+  four providers -- every activation row on DirectML, CUDA and TensorRT at
+  one point -- and caught one real case.  The reference graph is no better as
+  a yardstick: it is dominated by its reduction, so on CUDA it achieves
+  166 GB/s on a 430 GB/s card.
+
+What actually distinguishes the bad row is that it does not reproduce, and
+one measurement cannot see that.  So the rows near the floor are the least
+trustworthy thing this backend publishes, and the ladder is what protects a
+reader: three sizes and three operations, where one row disagreeing with its
+neighbours is visible.  Core ML's softmax is the known case -- 19 GB/s and
+139 GB/s on a device that streams 89 -- and that is a property of that
+provider's compiler rather than something the row can outvote.
 
 `onnxStreamBps()` survives for a job it *is* well sized for: the decode rows
 read a hundred megabytes of weights from main memory, and a 64 MB probe net

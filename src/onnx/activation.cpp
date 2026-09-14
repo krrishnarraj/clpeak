@@ -91,22 +91,32 @@ namespace
   constexpr unsigned int kSizeBudgetUs = 1000000;
 
   // The share of the work the operation itself has to account for before the
-  // difference is worth reporting.
+  // difference is worth reporting -- the work being the measurement less the
+  // provider's submission charge, since both graphs pay that and it cancels
+  // in the subtraction.
   //
-  // A ceiling was tried instead -- refuse a remainder faster than the
-  // provider streams the same bytes -- and it cannot be calibrated.  Measured
-  // on a small working set it is cache-resident and checks nothing; measured
-  // on a large one it is the DRAM rate and refuses a row that legitimately
-  // ran out of cache, which is most 8 MB rows on a GPU.  Between those two
-  // mistakes it produced false refusals on four providers and caught one real
-  // case.  This is dimensionless and needs no second graph to compare
-  // against, which is what makes it portable.
+  // A tenth, and the number is doing less than it looks.  What it rejects is
+  // a remainder of zero or below: TensorRT fuses SiLU into a graph that then
+  // costs the same as the reference (177 us against 176), and its softmax
+  // comes out *faster* than doing nothing.  Those are not measurements and
+  // never were.
   //
-  // A fifth is where the two populations separate.  Core ML's softmax costs
-  // 8-18% of its work and swung between a refusal, 122 GB/s and 139 GB/s over
-  // three runs; its SiLU costs 43% and holds to 2%.  Below a fifth the row is
-  // the noise of two large measurements rather than the operation.
-  constexpr double kMinOpShare = 0.20;
+  // It cannot do more than that, and two attempts to make it are worth not
+  // repeating.  Raising it to a fifth threw away every CUDA row -- all eight
+  // sit between 15.1% and 17.7%, three operations across three working sets,
+  // a band too tight to be noise.  And a ceiling drawn from what the provider
+  // streams cannot be calibrated at any single size (see below).  The reason
+  // neither works is that the rows this would catch are not distinguishable
+  // by share: Core ML's softmax lands in the same 8-18% band CUDA's good rows
+  // do, and differs only in that it does not reproduce.
+  //
+  // So the rows near this floor are the least trustworthy thing this backend
+  // publishes, and the ladder is what protects a reader: three sizes and
+  // three operations, where one row disagreeing with its neighbours is
+  // visible.  Core ML's softmax is the known case -- it has read 19 and 139
+  // GB/s on a device that streams 89 -- and that instability is a property of
+  // that provider's compiler, which the row cannot outvote.
+  constexpr double kMinOpShare = 0.10;
 
   struct Variant
   {
