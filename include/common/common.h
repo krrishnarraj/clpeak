@@ -471,8 +471,7 @@ void resetCancel();
 // the call site, not inside logf(), so the arguments are never evaluated
 // when it is off: some of them are expensive (an OpenCL build-log query).
 // --verbose is the only tool we have for locating a fault inside someone
-// else's shader compiler, so every line is flushed as it is written, and
-// with -o it is also on disk before the next line runs (run_log.h).
+// else's shader compiler, so every line is flushed as it is written.
 #define CLPEAK_VLOG(...) \
     do { if (::clpeak::verboseEnabled()) \
              ::clpeak::logf(::clpeak::LogLevel::Debug, __VA_ARGS__); } while (0)

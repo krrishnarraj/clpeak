@@ -158,11 +158,6 @@ int clpeak_launch(int argc, const char **argv,
         combined.meta.build.backends.push_back(backendInfo(be.id).name);
     combined.meta.host          = probeHost();
     combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
-    // The sidecar: every entry on disk as it happens, for the native crash
-    // the document never gets written after.  The app adopts one left behind
-    // on its next launch (app/lib/src/services/run_history_store.dart).
-    if (opts.enableOutput)
-        runLog.openSidecar(opts.outputFile);
     int status = 0;
 
     for (Backend b : opts.requestedButNotBuilt())
@@ -202,16 +197,9 @@ int clpeak_launch(int argc, const char **argv,
     // Centralized file dump, exactly like the CLI — also runs after a
     // cancellation so partial results get persisted.  The `cancelled` flag is
     // what tells a reader those results are partial: without it, every test
-    // the run never reached looks like hardware that lacks the feature.  The
-    // sidecar goes once the document is safely written, and stays if it is
-    // not.
-    if (opts.enableOutput)
-    {
-        const bool saved = saveRunJson(combined, opts.outputFile);
-        runLog.closeSidecar(/*remove=*/saved);
-        if (!saved)
-            status |= 1;
-    }
+    // the run never reached looks like hardware that lacks the feature.
+    if (opts.enableOutput && !saveRunJson(combined, opts.outputFile))
+        status |= 1;
 
     int result = cancelled ? CLPEAK_RUN_CANCELLED : status;
 

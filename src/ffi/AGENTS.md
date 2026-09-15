@@ -23,8 +23,7 @@ shared library / Apple framework.
   which backends exist and in what order; `RunDocument::append` merge,
   centralized `-o` save — which also stamps `cancelled` so a partial run does
   not read as a complete one). The `RunLog` is created before argv is parsed,
-  so a rejected argument is a `log` event like any other diagnostic; with `-o`
-  it streams the `<output>.log` sidecar the app adopts after a native crash
+  so a rejected argument is a `log` event like any other diagnostic
 - Diagnostics (`log` events, `--verbose`)? → `clpeak_ffi.h` documents the
   event; the entry is the document's `LogEntry` verbatim. Vendor-relayed
   entries (ONNX Runtime's logger, a Vulkan messenger, a console capture) can
@@ -49,7 +48,7 @@ shared library / Apple framework.
 | File | Purpose |
 |------|---------|
 | `clpeak_ffi.h` | `extern "C"` surface + event schema + `CLPEAK_RUN_*` codes |
-| `clpeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save, the run's `RunLog` + sidecar, the `--verbose` inventory |
+| `clpeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save, the run's `RunLog`, the `--verbose` inventory |
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
 | `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |

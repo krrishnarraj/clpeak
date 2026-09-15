@@ -55,12 +55,6 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   Settings → "Verbose diagnostics" (`settings_screen.dart`) turns debug-level
   recording on for every run and links to the issue tracker, which is how a
   problem on a phone reaches a maintainer
-- A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
-  streams `<id>.clpeak.log` while a run is in flight and removes it once the
-  document is written, so one left behind is a crashed run's only record.
-  History lists it under "Runs that did not finish" (`_CrashLogTile`) with
-  export and delete; the in-flight run's own sidecar is excluded by
-  `BenchmarkService.inFlightRunId`
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
@@ -199,9 +193,8 @@ the platform dirs:
 
 - If the event schema or C ABI changes → update `lib/src/ffi/` and
   `src/ffi/AGENTS.md`.
-- If `LogEntry` or the sidecar header changes natively → mirror it in
-  `lib/src/model/run_document.dart` and `CrashLog.read()` in
-  `lib/src/services/run_history_store.dart`.
+- If `LogEntry` changes natively → mirror it in
+  `lib/src/model/run_document.dart`.
 - If you add a CLI-flag mapping → keep `run_config.dart` in sync with
   `src/common/options.cpp`.
 - versionCode continues the retired native app's sequence (pubspec

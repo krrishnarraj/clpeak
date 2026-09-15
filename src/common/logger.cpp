@@ -143,8 +143,6 @@ void logger::log(clpeak::LogLevel level, std::string message, std::string source
     e.log.deviceIndex = curDeviceIndex;
     e.log.test        = e.testKey();
     e.log.message     = std::move(message);
-    // Recorded before it is shown, so what the sidecar holds when a render
-    // crashes the process is the line that was being rendered.
     if (RunLog *run = RunLog::current()) run->record(e.log);
     onEvent(e);
 }

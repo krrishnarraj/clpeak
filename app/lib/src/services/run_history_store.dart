@@ -10,11 +10,6 @@ import '../model/run_summary.dart';
 /// Persists every run under `<base>/runs/`:
 ///   `<id>.clpeak.json`  the run document, written by the NATIVE side
 ///                       (clpeak_launch -o) — also the export artifact
-///   `<id>.clpeak.log`   the run's diagnostic stream, streamed line by line
-///                       by the native side WHILE the run is in flight and
-///                       removed once the document is written.  One that
-///                       outlives its run is the record of a run the
-///                       process died in — see [listCrashLogs]
 ///   index.json          {"runs":[RunSummary...]} for a fast history list
 ///
 /// Orphan documents (present on disk but missing from the index, e.g. after
@@ -35,12 +30,7 @@ class RunHistoryStore {
   /// (index.json) out of the orphan scan.
   static const fileSuffix = '.clpeak.json';
 
-  /// The sidecar the native side derives from `-o`: `.json` -> `.log`
-  /// (RunLog::sidecarPathFor in include/common/run_log.h).
-  static const logSuffix = '.clpeak.log';
-
   static String fileNameFor(String id) => '$id$fileSuffix';
-  static String logFileNameFor(String id) => '$id$logSuffix';
 
   Future<Directory> runsDirectory() async {
     if (_dir != null) return _dir!;
@@ -191,46 +181,6 @@ class RunHistoryStore {
     await _writeIndex(dir, runs);
   }
 
-  // ── Runs that never finished ─────────────────────────────────────────────
-
-  /// Sidecars left behind by runs whose document was never written — the
-  /// process was killed or crashed natively mid-run — newest first.  A
-  /// sidecar whose document does exist is stale (the run finished, the
-  /// removal did not) and is cleaned up here instead of listed.
-  ///
-  /// [inFlightId] is the run currently executing, whose sidecar is live and
-  /// not a crash.
-  Future<List<CrashLog>> listCrashLogs({String? inFlightId}) async {
-    final dir = await runsDirectory();
-    final out = <CrashLog>[];
-    await for (final f in dir.list()) {
-      if (f is! File || !f.path.endsWith(logSuffix)) continue;
-      final name = p.basename(f.path);
-      final id = name.substring(0, name.length - logSuffix.length);
-      if (id == inFlightId) continue;
-      if (await File(p.join(dir.path, fileNameFor(id))).exists()) {
-        try {
-          await f.delete();
-        } catch (_) {}
-        continue;
-      }
-      final log = await CrashLog.read(f, id: id);
-      if (log != null) out.add(log);
-    }
-    out.sort((a, b) => b.startedAt.compareTo(a.startedAt));
-    return out;
-  }
-
-  Future<File> crashLogFile(CrashLog log) async {
-    final dir = await runsDirectory();
-    return File(p.join(dir.path, log.fileName));
-  }
-
-  Future<void> deleteCrashLog(CrashLog log) async {
-    final file = await crashLogFile(log);
-    if (await file.exists()) await file.delete();
-  }
-
   /// Load a saved run for viewing.
   Future<RunDocument?> load(RunSummary summary) async {
     final dir = await runsDirectory();
@@ -357,92 +307,6 @@ class RunHistoryStore {
     );
     await add(summary);
     return summary;
-  }
-}
-
-/// A run the process died in.  Its document was never written; the run-log
-/// sidecar the native side streamed as it went is the only record, and the
-/// thing to attach to a bug report.  Read from the sidecar's header line
-/// (the run's identity) and the entries after it.
-class CrashLog {
-  const CrashLog({
-    required this.id,
-    required this.fileName,
-    required this.startedAt,
-    required this.clpeakVersion,
-    required this.verbose,
-    required this.entries,
-    required this.backends,
-    required this.lastEntry,
-  });
-
-  final String id;
-  final String fileName;
-  final DateTime startedAt;
-  final String clpeakVersion;
-  final bool verbose;
-
-  /// Lines after the header.
-  final int entries;
-
-  /// Backends the log saw, in order of first appearance.
-  final List<String> backends;
-
-  /// The last line recorded before the process stopped — the one that
-  /// usually says where.
-  final LogEntry? lastEntry;
-
-  /// Parse a sidecar, or null when it is not one (no header line, or a
-  /// header from a format this build does not read).
-  static Future<CrashLog?> read(File file, {required String id}) async {
-    List<String> lines;
-    try {
-      lines = await file.readAsLines();
-    } catch (_) {
-      return null;
-    }
-    if (lines.isEmpty) return null;
-    Map<String, dynamic> header;
-    try {
-      header = jsonDecode(lines.first) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-    if (header['schema'] != 'clpeak/run-log' ||
-        (header['format_version'] as num?)?.toInt() != formatVersion) {
-      return null;
-    }
-    final backends = <String>[];
-    LogEntry? last;
-    var count = 0;
-    for (final line in lines.skip(1)) {
-      if (line.trim().isEmpty) continue;
-      try {
-        final entry =
-            LogEntry.fromJson(jsonDecode(line) as Map<String, dynamic>);
-        count++;
-        last = entry;
-        if (entry.backend.isNotEmpty && !backends.contains(entry.backend)) {
-          backends.add(entry.backend);
-        }
-      } catch (_) {
-        // A line cut short by the crash itself.
-      }
-    }
-    final stat = await file.stat();
-    return CrashLog(
-      id: id,
-      fileName: p.basename(file.path),
-      startedAt: DateTime.tryParse(header['generated_at'] as String? ?? '') ??
-          stat.modified,
-      clpeakVersion: header['clpeak_version'] as String? ?? '',
-      verbose: (header['invocation'] as Map<String, dynamic>?)?['verbose']
-              as bool? ??
-          false,
-      entries: count,
-      backends: backends,
-      lastEntry: last,
-    );
   }
 }
 

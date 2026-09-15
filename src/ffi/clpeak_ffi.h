@@ -140,10 +140,6 @@ typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 // meaningful here and are rejected.  `-o <file>` is honored at the end of the
 // run exactly like the CLI, so partial results of a cancelled run still get
 // saved -- with `"cancelled": true` in the document to say they are partial.
-// While the run is in flight, `<file>` with `.json` swapped for `.log` holds
-// the diagnostic stream so far, one JSON object per line (run_log.h); it is
-// removed once the document is written, so one left behind means the process
-// died mid-run and the sidecar is that run's only record.
 // Never calls exit().
 CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
                                     ClpeakEventCallback on_event,

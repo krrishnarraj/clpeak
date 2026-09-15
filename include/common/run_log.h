@@ -2,7 +2,6 @@
 #define CLPEAK_RUN_LOG_H
 
 #include <chrono>
-#include <cstdio>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -26,19 +25,10 @@ class logger;
 // with none open, the entry is recorded scope-less and rendered by the host's
 // fallback, so a message between two backends is neither lost nor misfiled.
 //
-// Two things make the stream worth more than a terminal's:
-//
-//   The sidecar.  With -o, every entry is also appended to `<output>.log`
-//   (`.json` swapped for `.log`) and flushed before the call returns, one
-//   JSON object per line under a header line naming the run.  The document
-//   is written when the run ends; a native crash inside a driver -- the case
-//   --verbose exists for -- means it never is, and the sidecar is then the
-//   only record.  It is removed once the document has been saved.
-//
-//   The cap.  A runtime that logs per node per session can produce more
-//   text than a phone wants to share.  Past kMaxMessageBytes of message
-//   text, Debug and Info entries are dropped (and counted); warnings and
-//   errors always get through, and finish() records how much was dropped.
+// The cap: a runtime that logs per node per session can produce more text
+// than a phone wants to share.  Past kMaxMessageBytes of message text, Debug
+// and Info entries are dropped (and counted); warnings and errors always get
+// through, and finish() records how much was dropped.
 //
 // Callbacks from vendor runtimes fire on their own threads, so record() is
 // serialised.  Scope is read from the open logger without locking it: the
@@ -47,8 +37,7 @@ class logger;
 class RunLog : public clpeak::LogSink
 {
 public:
-    // Entries go to `doc.log`; `doc.meta` is what the sidecar header names,
-    // so stamp it before openSidecar().
+    // Entries go to `doc.log`.
     explicit RunLog(RunDocument &doc);
     ~RunLog() override;
 
@@ -61,21 +50,6 @@ public:
     // Seconds since this RunLog was created -- the run's t=0, which is also
     // what `generated_at` names.
     double elapsedS() const;
-
-    // ---- Sidecar ---------------------------------------------------------
-
-    // Start mirroring entries to the sidecar of `outputFile`.  Entries
-    // already recorded are written first, so nothing recorded before the
-    // output path was known is missing from it.
-    void openSidecar(const std::string &outputFile);
-
-    // Stop mirroring; remove the file when the document it stood in for has
-    // been saved.
-    void closeSidecar(bool remove);
-
-    // The sidecar path for an output file: `run.clpeak.json` ->
-    // `run.clpeak.log`; a name without `.json` gets `.log` appended.
-    static std::string sidecarPathFor(const std::string &outputFile);
 
     // ---- Recording -------------------------------------------------------
 
@@ -106,16 +80,12 @@ public:
 
 private:
     void appendLocked(LogEntry &entry);
-    void sidecarWriteLocked(const std::string &line);
 
     RunDocument &doc;
     std::chrono::steady_clock::time_point start;
     std::mutex   mutex;
     logger      *active = nullptr;
     std::function<void(const LogEntry &)> fallback;
-
-    FILE        *sidecar = nullptr;
-    std::string  sidecarPath;
 
     std::size_t  messageBytes = 0;
     std::size_t  dropped      = 0;
