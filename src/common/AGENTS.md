@@ -76,6 +76,26 @@ is the first thing to look at when a bandwidth number comes in above what the
 memory can physically do — see `src/cpu/AGENTS.md` for the same rule applied to
 the CPU's own STREAM arrays, which are sized separately.
 
+## Runtimes that compile models leave things on disk; a backend cleans up its own
+
+Every backend that hands work to a vendor runtime has to know what that
+runtime persists, because a benchmark compiles hundreds of one-off models
+per run and nothing about "a cache" assumes that.  What was checked:
+
+| runtime | persists | bounded? | cleaned by |
+|---|---|---|---|
+| Core ML (E5RT), reached by the Core ML backend, the ONNX CoreML provider, and any future LiteRT Core ML delegate | every compiled model **with its weights, twice**, under `~/Library/Caches/<process or bundle id>/com.apple.e5rt.e5bundlecache` (inside the app container on iOS) | **no** — 292 GB / 12k entries accumulated; a 16384-cube session adds 4.5 GB; macOS reports it "available" as purgeable while writes get ENOSPC | `clpeak::purgeCoreMLCompileCache()` (`coreml_cache.mm`): per Core ML session, per ONNX provider, and as a backstop after every backend in the CLI and FFI run loops |
+| ONNX Runtime CoreML EP's own `.mlpackage`, and its profiling JSON | temp directory, per session | removed by ORT on release / `removeProfileArtifacts` | the ONNX backend |
+| ONNX TensorRT / OpenVINO / QNN / NNAPI engine or context caches | only when the provider option enabling them is set | off — clpeak sets none | n/a |
+| CUDA / OpenCL PTX JIT (`~/.nv/ComputeCache`), Mesa shader cache, Metal shader cache, DirectML, driver pipeline caches | small compiled kernels | yes — driver-capped or OS-managed, kilobytes per kernel here | the driver |
+| SYCL persistent JIT cache | only with `SYCL_CACHE_PERSISTENT=1` | off by default | n/a |
+
+The rule for a new backend: find out where its runtime writes, and if the
+answer is "per model, unbounded", clean it in the session teardown and add
+a row here.  Temporary files a backend writes itself carry the process id
+in their name and are swept at the next start (`src/coreml/coreml_session.mm`
+is the pattern), because a process that dies mid-session cleans nothing.
+
 ## When You Change This Directory
 
 - If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.

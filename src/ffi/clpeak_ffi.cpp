@@ -4,6 +4,7 @@
 #include <common/backend_registry.h>
 #include <common/common.h>
 #include <common/inventory.h>
+#include <common/coreml_cache.h>
 #include <common/options.h>
 #include <common/peak.h>
 #include <common/host_info.h>
@@ -159,6 +160,10 @@ int clpeak_launch(int argc, const char **argv,
         peak->applyOptions(opts);
         status |= peak->runAll();
         combined.append(peak->log->doc);
+        // Backstop for Core ML's compile cache, as in the CLI (see
+        // include/common/coreml_cache.h); the app's own cache directory on
+        // iOS and macOS is where it lands.
+        clpeak::purgeCoreMLCompileCache();
     }
 
     bool cancelled = clpeak::cancelRequested();

@@ -1,5 +1,6 @@
 #include <common/peak.h>
 #include <common/common.h>
+#include <common/coreml_cache.h>
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/backend_registry.h>
@@ -70,6 +71,11 @@ int main(int argc, char **argv)
         peak->applyOptions(opts);
         int status = peak->runAll();
         combined.append(peak->log->doc);
+        // Whatever this backend had Core ML compile is finished with; the
+        // backends that use Core ML clean up after themselves as they go,
+        // and this is the backstop for one that does not yet (see
+        // include/common/coreml_cache.h).  A no-op off Apple platforms.
+        clpeak::purgeCoreMLCompileCache();
 
         if (status != 0)
             lastError |= status;
