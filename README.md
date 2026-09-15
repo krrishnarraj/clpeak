@@ -102,6 +102,7 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 ./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
+./clpeak --verbose -o out.clpeak.json # …with every diagnostic and the device inventory: attach this to a bug report
 ./clpeak --compare baseline.clpeak.json   # diff against a saved baseline
 ./clpeak --list-devices               # enumerate devices, no benchmarks
 ```

@@ -7,7 +7,9 @@
 #include <vector>
 
 #include <common/benchmark_enums.h>
+#include <common/common.h>     // clpeak::LogLevel
 #include <common/host_info.h>
+#include <common/inventory.h>
 #include <common/units.h>
 
 // ── The result document ────────────────────────────────────────────────────
@@ -138,6 +140,12 @@ struct TestResult {
 
     std::vector<MetricResult> metrics;
 
+    // Wall-clock seconds the test was open, summed over reopens.  A test that
+    // took forty seconds against a half-second budget is its own diagnosis --
+    // a calibration that overran, a driver that stalled -- and nothing else in
+    // the document says how long anything took.
+    double durationS = 0.0;
+
     // Identity within a device.  `variant` participates: two ISAs of the same
     // CPU test are two tests, and comparing one against the other would be
     // meaningless.
@@ -205,13 +213,29 @@ struct DeviceResult {
 
 // ---- Run ------------------------------------------------------------------
 
-// An ad-hoc message emitted outside any reading (a missing library, a driver
-// warning).  Kept so a reopened run can explain its own gaps instead of
-// looking like the hardware simply lacks the feature.
-struct RunNote {
-    std::string backend;
-    std::string device;
-    std::string message;
+// One line of the run's diagnostic stream: what clpeak (or a library it
+// called) had to say, at what moment, inside which scope.  The whole stream
+// in emission order is the document's `log`; it is what a maintainer reads
+// when a number from a machine they cannot reach looks wrong, so it carries
+// enough to stand alone -- a `jq` over it reproduces the terminal transcript.
+//
+// Scope fields are empty when no such scope was open, and the writer omits
+// them.  `test` is the test's key (`id@variant`), joinable to `tests[]`.
+struct LogEntry {
+    double           elapsedS = 0.0;     // seconds since the run started
+    clpeak::LogLevel level    = clpeak::LogLevel::Info;
+    std::string      source;             // "" = clpeak; else the library relayed
+    std::string      backend;
+    std::string      device;
+    int              deviceIndex = -1;
+    std::string      test;
+    std::string      message;
+};
+
+// What the binary that produced the file is made of.  The first question on
+// any "backend X is missing" report is whether it was ever compiled in.
+struct BuildInfo {
+    std::vector<std::string> backends;   // Backend names, registry order
 };
 
 // How clpeak was asked to run.  Recorded because every number here is
@@ -225,6 +249,10 @@ struct Invocation {
     unsigned iters           = 0;   // 0 = calibrated per test, not forced
     std::vector<std::string> categories;  // enabled category names
     std::vector<std::string> tests;       // empty = every test enabled
+
+    // --verbose: the log carries Debug entries.  Recorded so an empty debug
+    // log reads as "was not asked", not "nothing happened".
+    bool verbose = false;
 };
 
 struct RunMeta {
@@ -237,6 +265,7 @@ struct RunMeta {
     // absent test reads as unsupported hardware.
     bool        cancelled = false;
 
+    BuildInfo  build;
     HostInfo   host;
     Invocation invocation;
 };
@@ -244,15 +273,26 @@ struct RunMeta {
 struct RunDocument {
     RunMeta                   meta;
     std::vector<DeviceResult> devices;
-    std::vector<RunNote>      notes;
+
+    // Every backend's `--list-devices` view, taken before the run: which
+    // backends were available (and why not), and every device each one saw
+    // -- including the ones a --device list left out.  Written under
+    // --verbose only: in the CLI it costs an enumeration pass, and it is the
+    // evidence for "my NPU is not listed", which is a debugging question.
+    std::vector<BackendInventory> inventory;
+
+    // The diagnostic stream, in emission order, for the whole run.  Filled by
+    // RunLog (run_log.h) across every backend's logger, so append() leaves it
+    // alone.
+    std::vector<LogEntry>     log;
 
     bool empty() const { return devices.empty(); }
 
     // Find a device by DeviceResult::key(), or nullptr.
     DeviceResult *findDevice(const std::string &deviceKey);
 
-    // Append another document's devices and notes.  Used to fold the
-    // per-backend loggers into one file; `meta` is the caller's.
+    // Append another document's devices.  Used to fold the per-backend
+    // loggers into one file; `meta`, `inventory` and `log` are the caller's.
     void append(const RunDocument &other);
 };
 
@@ -279,6 +319,16 @@ BaselineMap buildBaselineMap(const RunDocument &doc);
 std::string isoTimestampUtc();
 
 // ---- Serialization --------------------------------------------------------
+
+// One log entry as a single-line JSON object -- the form the document's
+// `log` array holds one per line, the run-log sidecar holds one per line, and
+// the GUI event stream carries.  One serializer for all three.
+std::string logEntryToJson(const LogEntry &entry);
+
+// The first line of the run-log sidecar (run_log.h): the run's identity as a
+// single-line object, so a sidecar left behind by a crash says which run it
+// belonged to without the document that was never written.
+std::string runLogHeaderJson(const RunMeta &meta);
 
 // Write the document as JSON.  Returns false (after a stderr message) when
 // the file cannot be opened or the stream fails while writing.

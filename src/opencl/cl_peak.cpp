@@ -16,6 +16,22 @@ clPeak::clPeak()
 {
 }
 
+namespace
+{
+
+// The context's error callback.  A driver reports a failing command here
+// -- NVIDIA's "CL_OUT_OF_RESOURCES error executing CL_COMMAND_NDRANGE_KERNEL
+// on ..." -- with more than the status code the call returned, and the run
+// log is where that reaches a file.  May arrive on a driver thread; the log
+// route is built for it.
+void CL_CALLBACK contextNotify(const char *errinfo, const void *, size_t, void *)
+{
+  if (errinfo)
+    clpeak::logMessage(clpeak::LogLevel::Error, "opencl", errinfo);
+}
+
+} // namespace
+
 int clPeak::runAll()
 {
   auto backendScope = log->beginBackend("OpenCL");
@@ -47,7 +63,7 @@ int clPeak::runAll()
       std::vector<cl::Device> devices;
       try
       {
-        ctx = cl::Context(CL_DEVICE_TYPE_ALL, cps);
+        ctx = cl::Context(CL_DEVICE_TYPE_ALL, cps, contextNotify);
         devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
       }
       catch (cl::Error &error)
@@ -91,9 +107,13 @@ int clPeak::runAll()
         }
         catch (cl::Error &error)
         {
-          UNUSED(error);
-          CLPEAK_VLOG("  Build Log: %s\n\n",
-                      prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
+          // The device produces nothing after this, and only the compiler
+          // says why -- so the build log is an error on the run log, not a
+          // --verbose extra, and a file from a machine nobody can reach
+          // still explains the missing device.
+          CLPEAK_LOG(Error, "OpenCL: program build failed on %s (%s %d):\n%s",
+                     devInfo.deviceName.c_str(), error.what(), error.err(),
+                     prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
           currentDeviceScope = nullptr;
           continue;
         }

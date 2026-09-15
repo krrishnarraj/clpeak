@@ -5,6 +5,7 @@ import '../../model/catalog.dart';
 import '../../model/result_model.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
+import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';
 import '../common/kit.dart';
 
@@ -123,8 +124,10 @@ class RunConfigScreen extends StatelessWidget {
                         stretch: true,
                         onPressed: canRun
                             ? () {
+                                final verbose =
+                                    context.read<SettingsService>().verbose;
                                 Navigator.of(context).pop();
-                                service.start();
+                                service.start(verbose: verbose);
                               }
                             : null,
                       ),

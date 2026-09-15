@@ -33,7 +33,7 @@ bool RocmPeak::initRuntime()
   if (r != hipSuccess)
   {
     m_initResult = r;
-    fprintf(stderr, "hipGetDeviceCount failed: %s\n", hipErrStr(r));
+    CLPEAK_LOG(Error, "ROCm: hipGetDeviceCount failed: %s", hipErrStr(r));
     return false;
   }
   for (int i = 0; i < n; i++)

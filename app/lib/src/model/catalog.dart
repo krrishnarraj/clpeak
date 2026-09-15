@@ -1,5 +1,6 @@
 /// Parsed device catalog — the inventoryToJson() document from
-/// clpeak_copy_backend_catalog_json (src/common/inventory.cpp).
+/// clpeak_copy_backend_catalog_json (src/common/inventory.cpp).  The same
+/// `backends` array a verbose run document embeds as its `inventory`.
 library;
 
 class CatalogDevice {
@@ -33,9 +34,9 @@ class CatalogDevice {
         type: m['type'] as String? ?? '',
         driver: m['driver'] as String? ?? '',
         api: m['api'] as String? ?? '',
-        computeUnits: (m['computeUnits'] as num?)?.toInt() ?? 0,
-        clockMHz: (m['clockMHz'] as num?)?.toInt() ?? 0,
-        globalMemBytes: (m['globalMemBytes'] as num?)?.toInt() ?? 0,
+        computeUnits: (m['compute_units'] as num?)?.toInt() ?? 0,
+        clockMHz: (m['clock_mhz'] as num?)?.toInt() ?? 0,
+        globalMemBytes: (m['global_mem_bytes'] as num?)?.toInt() ?? 0,
         fp16: m['fp16'] as bool? ?? false,
         fp64: m['fp64'] as bool? ?? false,
       );

@@ -28,7 +28,7 @@ extern "C" {
 CLPEAK_FFI_EXPORT const char *clpeak_version(void);
 
 // Device catalog for every backend compiled into this library, as the
-// inventoryToJson() document:
+// inventoryToJson() document (include/common/inventory.h has the keys):
 //   {"backends":[{"name","flag","available",info?,reason?,notes?,
 //     "platforms":[{"index","name",
 //       "devices":[{"index","name","type",arch?,driver?,api?,...}]}]}]}
@@ -107,10 +107,22 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // reading's note travels with the reading, never up-front, because that is
 // where it is authored (logger::EmitOptions::description).
 //   test_end      {}          device_end {}          backend_end {}
-//   note          {message}
+//   log           {..., test, variant, level, source, elapsed_s, message}
 //   done          {status, cancelled}   // ALWAYS the last event of a launch
 //
-// Callbacks fire on the thread that called clpeak_launch().
+// `log` is one line of the run's diagnostic stream -- the same entry the
+// saved document holds in its `log` array (docs/format-v3.md): `level` is
+// error | warning | info | debug, `source` names the library a message was
+// relayed from ("onnxruntime", "vulkan", "opencl", "console") or is empty
+// for clpeak's own, `elapsed_s` is seconds since the run started, and the
+// scope fields say where it fired.  Debug entries arrive only when argv has
+// --verbose.  The scope fields are empty for a message outside any backend
+// (a rejected argument, a backend not in this build).
+//
+// Callbacks fire on the thread that called clpeak_launch(), except `log`
+// events relayed from a vendor runtime's own logging callback or a console
+// capture, which fire on whatever thread produced them.  The Dart listener
+// (NativeCallable.listener) is built for exactly that.
 typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 
 // ---- Run -----------------------------------------------------------------------
@@ -128,6 +140,10 @@ typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 // meaningful here and are rejected.  `-o <file>` is honored at the end of the
 // run exactly like the CLI, so partial results of a cancelled run still get
 // saved -- with `"cancelled": true` in the document to say they are partial.
+// While the run is in flight, `<file>` with `.json` swapped for `.log` holds
+// the diagnostic stream so far, one JSON object per line (run_log.h); it is
+// removed once the document is written, so one left behind means the process
+// died mid-run and the sidecar is that run's only record.
 // Never calls exit().
 CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
                                     ClpeakEventCallback on_event,

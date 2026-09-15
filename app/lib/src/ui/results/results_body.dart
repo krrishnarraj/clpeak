@@ -171,6 +171,8 @@ class _ResultsBodyState extends State<ResultsBody> {
         ],
       if (selected.unavailable.isNotEmpty)
         _WidgetRow(_UnavailableSection(run: selected), padTop: 22),
+      if (widget.document.log.isNotEmpty)
+        _WidgetRow(_DiagnosticsSection(log: widget.document.log), padTop: 22),
     ];
 
     return ListView.builder(
@@ -1008,6 +1010,169 @@ class _UnavailableSection extends StatelessWidget {
             const SizedBox(height: 4),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The run's diagnostic stream, at the foot of the page.  Warnings and
+/// errors are shown outright: they are the only record of *why* something is
+/// missing ("ONNX: this runtime exposes CPU providers only"), and a run that
+/// silently drops them reads as hardware that lacks the feature.  The full
+/// log — debug lines under the verbose setting, the runtimes' own messages —
+/// sits folded beneath, for reading with the exported file rather than
+/// instead of it.
+///
+/// Run-level, not per device: the stream is one run's, in order, and a line
+/// between two devices belongs to neither.
+class _DiagnosticsSection extends StatelessWidget {
+  const _DiagnosticsSection({required this.log});
+
+  final List<LogEntry> log;
+
+  /// Lines the full-log fold renders before it stops and says so — a verbose
+  /// run can hold thousands, and the file is the place to read those.
+  static const _maxLines = 500;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final problems = log.where((e) => e.level.isProblem).toList();
+    final errors = problems.where((e) => e.level == LogLevel.error).length;
+    final warnings = problems.length - errors;
+
+    final summary = [
+      if (errors > 0) '$errors ${errors == 1 ? 'error' : 'errors'}',
+      if (warnings > 0) '$warnings ${warnings == 1 ? 'warning' : 'warnings'}',
+      '${log.length} ${log.length == 1 ? 'line' : 'lines'}',
+    ].join(', ');
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: t.line)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.notes, size: 13, color: t.faint),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text('DIAGNOSTICS', style: t.micro),
+                ),
+                Text(summary, style: t.micro),
+              ],
+            ),
+          ),
+          for (final e in problems) _LogLine(entry: e, showScope: true),
+          CExpander(
+            header: (context, open) => Container(
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+              decoration: BoxDecoration(
+                border: problems.isEmpty
+                    ? null
+                    : Border(top: BorderSide(color: t.line)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'FULL LOG (${log.length})',
+                      style: t.micro,
+                    ),
+                  ),
+                  Icon(open ? Icons.remove : Icons.add,
+                      size: 13, color: t.faint),
+                ],
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(height: 1, color: t.line),
+                for (final e in log.take(_maxLines))
+                  _LogLine(entry: e, showScope: false),
+                if (log.length > _maxLines)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
+                    child: Text(
+                      'Showing the first $_maxLines of ${log.length} lines — '
+                      'the exported file holds them all.',
+                      style: t.monoSmall.copyWith(color: t.faint),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One diagnostic line: when, how bad, who said it, and where.
+class _LogLine extends StatelessWidget {
+  const _LogLine({required this.entry, required this.showScope});
+
+  final LogEntry entry;
+
+  /// The problems list names each line's scope; the full log, read in
+  /// order, does not need to.
+  final bool showScope;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final isError = entry.level == LogLevel.error;
+    final isProblem = entry.level.isProblem;
+    final color = isError
+        ? t.danger
+        : isProblem
+            ? t.text
+            : t.dim;
+    final tag = entry.source.isEmpty
+        ? entry.level.name
+        : '${entry.level.name} · ${entry.source}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 58,
+            child: Text(
+              '${entry.elapsedSeconds.toStringAsFixed(1)}s',
+              style: t.micro.copyWith(color: t.faint),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (showScope && entry.scope.isNotEmpty)
+                  Text(entry.scope,
+                      style: t.micro.copyWith(color: t.faint)),
+                Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                      text: '$tag  ',
+                      style: t.micro.copyWith(
+                          color: isError ? t.danger : t.faint),
+                    ),
+                    TextSpan(
+                      text: entry.message,
+                      style: t.monoSmall.copyWith(color: color),
+                    ),
+                  ]),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

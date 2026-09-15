@@ -44,14 +44,31 @@ void LoggerText::onEvent(const LogEvent &e)
         break;
     case LogEvent::Kind::DeviceEnd:      renderDeviceEnd();       break;
     case LogEvent::Kind::BackendEnd:     renderBackendEnd();      break;
-    case LogEvent::Kind::Note:
-        // Before the message, or it would appear above rows that were measured
-        // before it.
-        flushMetrics();
-        out << e.message;
-        out.flush();
-        break;
+    case LogEvent::Kind::Log:            renderLog(e.log);        break;
     }
+}
+
+// ── Log ────────────────────────────────────────────────────────────────────
+
+void LoggerText::renderLog(const LogEntry &l)
+{
+    // Library diagnostics and clpeak's own debug/info lines are the --verbose
+    // channel: stderr, flushed per line, so the last one before a driver-side
+    // crash is on screen -- and written past any console capture in progress,
+    // or the line would be captured again.
+    if (!l.source.empty() || l.level == clpeak::LogLevel::Debug ||
+        l.level == clpeak::LogLevel::Info)
+    {
+        if (!verbose) return;
+        clpeak::stderrWrite(l.message + "\n");
+        return;
+    }
+    // clpeak's own warnings and errors print inline with the results, as
+    // notes always have -- before the message, or it would appear above rows
+    // that were measured before it.
+    flushMetrics();
+    out << l.message << "\n";
+    out.flush();
 }
 
 // ── BackendBegin ───────────────────────────────────────────────────────────

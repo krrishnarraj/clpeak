@@ -9,6 +9,7 @@
 #include <common/peak.h>
 #include <common/host_info.h>
 #include <common/run_document.h>
+#include <common/run_log.h>
 #include <version.h>
 
 #ifdef ENABLE_ONNX
@@ -16,7 +17,6 @@
 #endif
 
 #include <atomic>
-#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -36,11 +36,16 @@ char *copyString(const std::string &value)
     return out;
 }
 
-void emitNote(ClpeakEventCallback cb, void *userData, const std::string &msg)
+// A log entry recorded outside any backend's logger (the RunLog's fallback):
+// forwarded as the same `log` event a logger would have sent.
+void emitLogEntry(ClpeakEventCallback cb, void *userData, const LogEntry &entry)
 {
     LogEvent e;
-    e.kind    = LogEvent::Kind::Note;
-    e.message = msg;
+    e.kind        = LogEvent::Kind::Log;
+    e.backend     = entry.backend;
+    e.device      = entry.device;
+    e.deviceIndex = entry.deviceIndex;
+    e.log         = entry;
     ffiEmitJson(cb, userData, ffiEventToJson(e));
 }
 
@@ -121,11 +126,21 @@ int clpeak_launch(int argc, const char **argv,
     for (int i = 0; i < argc; i++)
         mutableArgv.push_back(const_cast<char *>(argv[i]));
 
+    // The run's diagnostic stream, live before the arguments are even parsed
+    // so a rejected argv is on it too.  Entries a backend's logger records
+    // reach the GUI through that logger; the rest through this fallback, as
+    // the same `log` event.
+    RunDocument combined;
+    RunLog      runLog(combined);
+    runLog.setFallbackRenderer([&](const LogEntry &e) {
+        emitLogEntry(on_event, user_data, e);
+    });
+
     CliOptions opts;
     std::string parseError;
     if (!parseCliOptionsNoExit(argc, mutableArgv.data(), opts, parseError))
     {
-        emitNote(on_event, user_data, parseError);
+        clpeak::logMessage(clpeak::LogLevel::Error, "", parseError);
         emitDone(on_event, user_data, CLPEAK_RUN_BAD_ARGS, false);
         g_running.store(false);
         return CLPEAK_RUN_BAD_ARGS;
@@ -137,18 +152,30 @@ int clpeak_launch(int argc, const char **argv,
         onnxSetLibraryOverride(opts.onnxLibPath);
 #endif
 
-    RunDocument combined;
     combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
     combined.meta.generatedAt   = isoTimestampUtc();
+    for (const auto &be : backendRegistry())
+        combined.meta.build.backends.push_back(backendInfo(be.id).name);
     combined.meta.host          = probeHost();
     combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
-    const auto runStart = std::chrono::steady_clock::now();
+    // The sidecar: every entry on disk as it happens, for the native crash
+    // the document never gets written after.  The app adopts one left behind
+    // on its next launch (app/lib/src/services/run_history_store.dart).
+    if (opts.enableOutput)
+        runLog.openSidecar(opts.outputFile);
     int status = 0;
 
     for (Backend b : opts.requestedButNotBuilt())
-        emitNote(on_event, user_data,
-                 std::string("clpeak: the ") + backendInfo(b).name +
-                     " backend is not in this build\n");
+        CLPEAK_LOG(Warning, "clpeak: the %s backend is not in this build",
+                   backendInfo(b).name);
+
+    // --verbose: the catalog as the run saw it, in the file.  Already
+    // enumerated once for the run screen, so the memoised probes make this
+    // cheap here, unlike in the CLI.
+    if (opts.verbose && opts.enableOutput)
+        for (const auto &be : backendRegistry())
+            if (opts.backendEnabled(be.id))
+                combined.inventory.push_back(be.enumerate());
 
     for (const auto &be : backendRegistry())
     {
@@ -169,16 +196,22 @@ int clpeak_launch(int argc, const char **argv,
     bool cancelled = clpeak::cancelRequested();
 
     combined.meta.cancelled = cancelled;
-    combined.meta.durationS = std::chrono::duration<double>(
-                                  std::chrono::steady_clock::now() - runStart)
-                                  .count();
+    combined.meta.durationS = runLog.elapsedS();
+    runLog.finish();
 
     // Centralized file dump, exactly like the CLI — also runs after a
     // cancellation so partial results get persisted.  The `cancelled` flag is
     // what tells a reader those results are partial: without it, every test
-    // the run never reached looks like hardware that lacks the feature.
-    if (opts.enableOutput && !saveRunJson(combined, opts.outputFile))
-        status |= 1;
+    // the run never reached looks like hardware that lacks the feature.  The
+    // sidecar goes once the document is safely written, and stays if it is
+    // not.
+    if (opts.enableOutput)
+    {
+        const bool saved = saveRunJson(combined, opts.outputFile);
+        runLog.closeSidecar(/*remove=*/saved);
+        if (!saved)
+            status |= 1;
+    }
 
     int result = cancelled ? CLPEAK_RUN_CANCELLED : status;
 

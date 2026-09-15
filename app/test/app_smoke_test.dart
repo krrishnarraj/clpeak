@@ -75,6 +75,8 @@ void main() {
     await tester.pump();
     expect(find.text('Theme'), findsOneWidget);
     expect(find.text('ONNX RUNTIME'), findsOneWidget);
+    expect(find.text('DIAGNOSTICS'), findsOneWidget);
+    expect(find.text('Verbose diagnostics'), findsOneWidget);
 
     // About tab: version.
     await tester.tap(find.text('About'));

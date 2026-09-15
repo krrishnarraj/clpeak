@@ -10,6 +10,7 @@ add_library(peak_common STATIC
     host_info.cpp
     json.cpp
     run_document.cpp
+    run_log.cpp
     units.cpp
 )
 # dlopen lives in libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it's in libc.

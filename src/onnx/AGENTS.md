@@ -180,7 +180,16 @@ the XNNPACK EP emits hundreds of `Schema error: ... already registered` lines
 from the bundled ONNX library, direct to the console, below any ORT log
 level. Session creation therefore runs inside `clpeak::ScopedConsoleMute`
 (`common/console_mute.h`, shared with the ROCm backend's hipBLASLt query).
-The mute is a no-op under `--verbose`.
+Under `--verbose` the mute captures into the run log instead of discarding.
+
+ORT's own logger is a different channel and is not muted: the Env is created
+with `CreateEnvWithCustomLogger` (`onnx_session.cpp`, `ortLogMessage`), so a
+provider explaining why it declined a graph, or which nodes fell back to the
+CPU, lands on the run log at ORT's own severity — errors and warnings in
+every dump, INFO as debug under `--verbose` (minus the per-pass
+`GraphTransformer` narration). The Env is opened at INFO once per runtime
+and the callback applies the current run's verbosity, because the GUI can
+toggle `--verbose` between runs of one process.
 
 ## Models are emitted as protobuf bytes, not files
 

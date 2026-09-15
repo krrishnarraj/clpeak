@@ -43,7 +43,24 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `NativeCallable.listener` + `Isolate.run`, `done` event = drain barrier)
 - Argv construction (device/category/time flags)? → `lib/src/model/run_config.dart`
   (never emits per-test flags — the UI is data-driven so test churn in the
-  core needs no app changes)
+  core needs no app changes). `--verbose` is not run configuration: it is the
+  app setting `SettingsService.verbose`, read at the moment of launch and
+  passed as `BenchmarkService.start(verbose:)` by every launch site
+- Diagnostics? → the document's `log` (`LogEntry` in
+  `lib/src/model/run_document.dart`, one stream for the whole run, built from
+  `log` events live and read straight off the file in history).
+  `_DiagnosticsSection` at the foot of `results_body.dart` shows warnings and
+  errors outright — they are the only record of *why* something is absent —
+  and folds the full log beneath; the file a user exports has it all.
+  Settings → "Verbose diagnostics" (`settings_screen.dart`) turns debug-level
+  recording on for every run and links to the issue tracker, which is how a
+  problem on a phone reaches a maintainer
+- A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
+  streams `<id>.clpeak.log` while a run is in flight and removes it once the
+  document is written, so one left behind is a crashed run's only record.
+  History lists it under "Runs that did not finish" (`_CrashLogTile`) with
+  export and delete; the in-flight run's own sidecar is excluded by
+  `BenchmarkService.inFlightRunId`
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
@@ -182,6 +199,9 @@ the platform dirs:
 
 - If the event schema or C ABI changes → update `lib/src/ffi/` and
   `src/ffi/AGENTS.md`.
+- If `LogEntry` or the sidecar header changes natively → mirror it in
+  `lib/src/model/run_document.dart` and `CrashLog.read()` in
+  `lib/src/services/run_history_store.dart`.
 - If you add a CLI-flag mapping → keep `run_config.dart` in sync with
   `src/common/options.cpp`.
 - versionCode continues the retired native app's sequence (pubspec

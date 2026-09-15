@@ -243,7 +243,9 @@ static std::string helpText()
                                    "except CPU (default: 500 ms).  Iters are picked to fit it,\n"
                                    "so set it lower if you hit a GPU watchdog");
   helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
-  helpLine(s, "--verbose",         "print backend debug logs (kernel build logs, API errors)");
+  helpLine(s, "--verbose",         "print backend debug logs (kernel build logs, API errors);\n"
+                                   "with -o, record them in the file's log, with the device\n"
+                                   "inventory, so the file alone can be debugged");
   helpLine(s, "--describe",        "explain what each test and each reading measures");
   helpLine(s, "--list-devices",    "list available devices for every backend and exit");
   helpLine(s, "-o, --output file", "save results to a JSON file");
@@ -668,5 +670,6 @@ Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
       if (opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
         inv.tests.push_back(testFlags[t].name);
 
+  inv.verbose = opts.verbose;
   return inv;
 }

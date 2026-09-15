@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../model/catalog.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
+import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';
 import '../app.dart';
 import '../common/format.dart';
@@ -133,7 +134,9 @@ class _RunLauncher extends StatelessWidget {
                 icon: Icons.play_arrow,
                 kind: CButtonKind.primary,
                 onPressed: ready
-                    ? () => service.start(preset: RunPreset.full)
+                    ? () => service.start(
+                        preset: RunPreset.full,
+                        verbose: context.read<SettingsService>().verbose)
                     : null,
               ),
               CButton(

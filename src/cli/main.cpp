@@ -5,10 +5,10 @@
 #include <common/inventory.h>
 #include <common/backend_registry.h>
 #include <common/run_document.h>
+#include <common/run_log.h>
 #include <common/logger_text.h>
 #include <common/host_info.h>
 #include <version.h>
-#include <chrono>
 #include <iostream>
 
 #ifdef ENABLE_ONNX
@@ -29,16 +29,13 @@ int main(int argc, char **argv)
 
     const auto &backends = backendRegistry();
 
-    // A backend asked for by name that this binary does not carry: say so,
-    // or the run reads as "no devices".
-    for (Backend b : opts.requestedButNotBuilt())
-        std::cout << "clpeak: the " << backendInfo(b).name
-                  << " backend is not in this build\n";
-
     // --list-devices: every enabled backend's inventory, in one format and
     // in the order a run would visit them.
     if (opts.listDevices)
     {
+        for (Backend b : opts.requestedButNotBuilt())
+            std::cout << "clpeak: the " << backendInfo(b).name
+                      << " backend is not in this build\n";
         std::vector<BackendInventory> invs;
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
@@ -50,9 +47,43 @@ int main(int argc, char **argv)
     RunDocument combined;
     combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
     combined.meta.generatedAt   = isoTimestampUtc();
+    for (const auto &be : backends)
+        combined.meta.build.backends.push_back(backendInfo(be.id).name);
     combined.meta.host          = probeHost();
     combined.meta.invocation    = invocationFrom(opts, argc, argv);
-    const auto runStart = std::chrono::steady_clock::now();
+
+    // The run's diagnostic stream: every note, CLPEAK_LOG line and relayed
+    // library message from here on lands on combined.log -- and, with -o,
+    // on the sidecar as it happens, so a crash inside a driver still leaves
+    // a record.  Between backends no logger is open to print for it, so it
+    // prints the way LoggerText would.
+    RunLog runLog(combined);
+    runLog.setFallbackRenderer([&](const LogEntry &e) {
+        if (!e.source.empty() || e.level == clpeak::LogLevel::Debug ||
+            e.level == clpeak::LogLevel::Info)
+        {
+            if (opts.verbose) clpeak::stderrWrite(e.message + "\n");
+            return;
+        }
+        std::cout << e.message << "\n";
+    });
+    if (opts.enableOutput)
+        runLog.openSidecar(opts.outputFile);
+
+    // A backend asked for by name that this binary does not carry: say so,
+    // or the run reads as "no devices".
+    for (Backend b : opts.requestedButNotBuilt())
+        CLPEAK_LOG(Warning, "clpeak: the %s backend is not in this build",
+                   backendInfo(b).name);
+
+    // --verbose: the file also carries what --list-devices would have shown
+    // -- every device each backend saw, and why a backend had none -- since
+    // "my NPU is not listed" is the question a verbose dump exists to answer.
+    // Costs an enumeration pass, which is why it is not on by default.
+    if (opts.verbose && opts.enableOutput)
+        for (const auto &be : backends)
+            if (opts.backendEnabled(be.id))
+                combined.inventory.push_back(be.enumerate());
 
     // Run every enabled backend in order.  No devices is not an error
     // (normal in VM/CI environments).  Only real failures (driver init,
@@ -81,14 +112,19 @@ int main(int argc, char **argv)
             lastError |= status;
     }
 
-    combined.meta.durationS = std::chrono::duration<double>(
-                                  std::chrono::steady_clock::now() - runStart)
-                                  .count();
+    combined.meta.durationS = runLog.elapsedS();
+    runLog.finish();
 
     // Centralized file dump.  A failed dump surfaces in the exit code like any
-    // backend failure.
-    if (opts.enableOutput && !saveRunJson(combined, opts.outputFile))
-        lastError |= 1;
+    // backend failure -- and keeps the sidecar, which is then the only record
+    // of the run.
+    if (opts.enableOutput)
+    {
+        const bool saved = saveRunJson(combined, opts.outputFile);
+        runLog.closeSidecar(/*remove=*/saved);
+        if (!saved)
+            lastError |= 1;
+    }
 
     return lastError;
 }

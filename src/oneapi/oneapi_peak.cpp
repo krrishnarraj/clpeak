@@ -29,7 +29,7 @@ static void collectDevices(sycl::info::device_type type,
   }
   catch (const sycl::exception &e)
   {
-    fprintf(stderr, "sycl::platform::get_platforms failed: %s\n", e.what());
+    CLPEAK_LOG(Error, "oneAPI: sycl::platform::get_platforms failed: %s", e.what());
   }
 }
 

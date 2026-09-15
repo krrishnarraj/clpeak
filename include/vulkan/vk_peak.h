@@ -372,6 +372,11 @@ private:
   std::vector<VkPhysicalDevice> physicalDevices;
   VkResult m_instanceResult = VK_SUCCESS;
 
+  // VK_EXT_debug_utils messenger, when the loader offers the extension: what
+  // the driver (or MoltenVK) has to say goes to the run log rather than only
+  // to a console.  VK_NULL_HANDLE when unavailable.
+  VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+
   bool initInstance();
   void cleanup();
 

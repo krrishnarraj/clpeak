@@ -1,6 +1,7 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 
+#include <chrono>
 #include <cstddef>
 #include <initializer_list>
 #include <string>
@@ -32,6 +33,14 @@
 // (run_document.h) as it goes — backends never touch TAB / NEWLINE or call
 // print() for structured data, and no consumer has to regroup a flat table
 // back into tests.
+//
+// Diagnostics take the same road.  A backend's note() and every CLPEAK_LOG /
+// CLPEAK_VLOG line in the process reaches the open logger (through the run's
+// RunLog, run_log.h), which stamps it with the scope it fired in -- backend,
+// device, test -- records it on the run's `log`, and dispatches it as a Log
+// event for the channel to render.  So the file a user exports holds the
+// terminal transcript, scoped, and the GUI sees the same lines the CLI
+// prints.
 
 // Same shape the document persists (run_document.h), so device metadata
 // reaches the file without a conversion step.
@@ -47,10 +56,10 @@ struct LogEvent {
     TestEnd,
     DeviceEnd,
     BackendEnd,
-    Note,            // + message (may fire at any scope depth)
+    Log,             // + log: one diagnostic (may fire at any scope depth)
   };
 
-  Kind kind = Kind::Note;
+  Kind kind = Kind::Log;
 
   // Scope context — filled from the current scope state for every event
   // (empty strings when the corresponding scope is not open).
@@ -96,8 +105,9 @@ struct LogEvent {
   ResultStatus status = ResultStatus::Ok;
   std::string  reason;
 
-  // Note
-  std::string message;
+  // Log -- the entry as recorded on the run's `log`: level, source, elapsed
+  // time, the scope it fired in, and the message.
+  LogEntry log;
 
   // Identity of the open test within its device -- the same key the document
   // and the --compare baseline use.  Mirrors TestResult::key().
@@ -198,10 +208,19 @@ public:
   /// Begin a backend run.  Returns a handle that auto-closes on destruction.
   BackendScope beginBackend(const std::string &name);
 
-  /// Unstructured ad-hoc message (warnings, notes, errors outside tests).
-  /// Recorded on the document as well as dispatched, so a reopened run can
-  /// explain its own gaps.
+  /// A warning outside any reading -- why something is absent or partial
+  /// ("library not found", "failed to init device 1").  Printed inline with
+  /// the results by the CLI and recorded on the run's log, so a reopened run
+  /// can explain its own gaps instead of reading as hardware that lacks the
+  /// feature.  Sugar for log(Warning, msg).
   void note(const std::string &msg);
+
+  /// One diagnostic at an explicit level, scoped to whatever is open.
+  /// Recorded on the run's log (when a RunLog is live) and dispatched as a
+  /// Log event.  `source` names the library the message was relayed from;
+  /// empty for clpeak's own.  Free functions with no logger in reach use
+  /// CLPEAK_LOG / CLPEAK_VLOG, which arrive here through the RunLog.
+  void log(clpeak::LogLevel level, std::string message, std::string source = "");
 
   // ── Baseline compare ────────────────────────────────────────────────────
 
@@ -217,7 +236,7 @@ public:
   RunDocument doc;
 
   explicit logger(std::string compareFileName = "");
-  virtual ~logger() = default;
+  virtual ~logger();
 
 protected:
   // ── The single output hook ──────────────────────────────────────────────
@@ -245,6 +264,10 @@ protected:
   // closeOpenTest) cannot emit a second TestEnd from its destructor.
   unsigned long long testSeqCounter = 0;
   unsigned long long curTestSeq     = 0;
+
+  // When the open test was opened, for its `duration_s`.  The logger's own
+  // clock, so a test is timed whether or not a RunLog is live.
+  std::chrono::steady_clock::time_point testOpenedAt;
 
   /// Emit TestEnd for the open test (if any) and drop back to device scope.
   void closeOpenTest();

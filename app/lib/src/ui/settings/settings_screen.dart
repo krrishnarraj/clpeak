@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../ffi/clpeak_bindings.dart';
 import '../../model/result_model.dart';
@@ -13,7 +14,8 @@ import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';
 import '../common/kit.dart';
 
-/// Appearance, and which ONNX Runtime the ONNX backend measures.
+/// Appearance, which ONNX Runtime the ONNX backend measures, and whether runs
+/// record verbose diagnostics.
 ///
 /// The runtime picker is the reason this screen exists.  Unlike every other
 /// backend, ONNX has no single driver on a machine: NPU vendors ship their own
@@ -21,6 +23,11 @@ import '../common/kit.dart';
 /// all — a stock build offers CPU and nothing else.  So the library is a
 /// setting, and changing it re-enumerates immediately rather than asking for a
 /// restart.
+///
+/// The verbose switch is how a problem on a phone reaches a maintainer: with
+/// it on, the saved document carries the backends' debug output, the device
+/// inventory and the runtimes' own messages, and the exported file is the
+/// bug report.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -149,6 +156,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     locked: running,
                     onPick: _pickLibrary,
                     onReset: _resetLibrary,
+                  ),
+                  const SizedBox(height: 22),
+                  const CSection(label: 'Diagnostics'),
+                  const SizedBox(height: 10),
+                  _DiagnosticsPanel(
+                    verbose: settings.verbose,
+                    onChanged: settings.setVerbose,
                   ),
                 ],
               ),
@@ -291,6 +305,78 @@ class _OnnxPanel extends StatelessWidget {
                 style: t.micro.copyWith(color: t.dim)),
           ],
         ],
+      ],
+    );
+  }
+}
+
+/// The verbose switch, and the way to the issue tracker it exists for.
+class _DiagnosticsPanel extends StatelessWidget {
+  const _DiagnosticsPanel({required this.verbose, required this.onChanged});
+
+  final bool verbose;
+  final ValueChanged<bool> onChanged;
+
+  static final _issuesUrl =
+      Uri.parse('https://github.com/krrishnarraj/clpeak/issues/new');
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              CRow(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.bug_report_outlined, size: 15, color: t.dim),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Text('Verbose diagnostics', style: t.mono)),
+                    CSwitch(value: verbose, onChanged: onChanged),
+                  ],
+                ),
+              ),
+              CRow(
+                rule: false,
+                onTap: () =>
+                    launchUrl(_issuesUrl, mode: LaunchMode.externalApplication),
+                child: Row(
+                  children: [
+                    Icon(Icons.open_in_new, size: 15, color: t.dim),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Report an issue', style: t.mono),
+                          const SizedBox(height: 3),
+                          Text('github.com/krrishnarraj/clpeak/issues',
+                              style: t.monoSmallDim),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'A debug option, off by default. When it is on, every run records '
+          'enough for the project maintainers to debug and analyse it — the '
+          'backends\' debug output, the device inventory and the runtimes\' '
+          'own messages — into the saved JSON. If a number looks wrong on '
+          'this device, turn it on, run again, export the run and attach the '
+          'file when raising an issue on GitHub.',
+          style: t.micro.copyWith(color: t.dim),
+        ),
       ],
     );
   }

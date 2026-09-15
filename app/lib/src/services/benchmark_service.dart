@@ -78,13 +78,17 @@ class BenchmarkService extends ChangeNotifier {
   int completedTests = 0;
   int exitCode = 0;
   bool cancelled = false;
-  final List<String> notes = [];
 
   DateTime? _startedAt;
   DateTime? get startedAt => _startedAt;
 
   ClpeakRun? _run;
   String? _runId;
+
+  /// Id of the run in flight (its files in history are named by it), or
+  /// null.  History uses it to tell a live run-log sidecar from a crashed
+  /// run's.
+  String? get inFlightRunId => isRunning ? _runId : null;
 
   // ── Live-update throttle ─────────────────────────────────────────────────
   //
@@ -227,7 +231,12 @@ class BenchmarkService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> start({RunPreset? preset}) async {
+  /// Launch a run.  [verbose] passes `--verbose`, so the document written
+  /// for history carries the debug-level diagnostics as well (see
+  /// SettingsService.verbose) — a per-launch argument rather than run
+  /// configuration, because it is an app setting read at the moment of
+  /// launch, not part of what the run measures.
+  Future<void> start({RunPreset? preset, bool verbose = false}) async {
     if (isRunning) return;
     // Never run against a partial catalog: device indices are positions in
     // the enumerated list, so a run started mid-load would address the
@@ -237,7 +246,6 @@ class BenchmarkService extends ChangeNotifier {
     if (!_config.hasSelection || _config.categories.isEmpty) return;
 
     _document = RunDocument();
-    notes.clear();
     currentBackend = '';
     currentTest = '';
     completedTests = 0;
@@ -253,7 +261,12 @@ class BenchmarkService extends ChangeNotifier {
     ScreenWake.acquire();
 
     final resultPath = await _history.filePathFor(_runId!);
-    final args = [..._config.toArgs(_catalog), '-o', resultPath];
+    final args = [
+      ..._config.toArgs(_catalog),
+      if (verbose) '--verbose',
+      '-o',
+      resultPath,
+    ];
 
     final run = ClpeakRunner(_bindings).start(args);
     _run = run;
@@ -325,15 +338,10 @@ class BenchmarkService extends ChangeNotifier {
       case TestEndEvent():
         completedTests++;
         currentTest = '';
-      case NoteEvent(:final message):
-        final trimmed = message.trim();
-        if (trimmed.isNotEmpty) {
-          notes.add(trimmed);
-          _document.notes.add(RunNote(
-              backend: event.backend,
-              device: event.device,
-              message: trimmed));
-        }
+      case LogEntryEvent(:final entry):
+        // The same entry the native side records on the file's `log`, so
+        // the live view and the reopened run show one stream.
+        _document.log.add(entry);
       case DoneEvent():
         break; // handled via onDone/result
       case DeviceEndEvent():

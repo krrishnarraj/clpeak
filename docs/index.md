@@ -190,6 +190,7 @@ whichever API is doing the work.
 ./clpeak --gemm                     # the vendor's tuned matmul, everywhere
 ./clpeak --describe                 # explain what each reading measures
 ./clpeak -o out.clpeak.json         # save results (one JSON document)
+./clpeak --verbose -o out.clpeak.json   # …with every diagnostic and the device inventory: attach this to a bug report
 ./clpeak --compare baseline.json    # diff this run against a saved baseline
 ```
 

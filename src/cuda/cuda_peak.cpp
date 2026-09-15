@@ -39,7 +39,7 @@ bool CudaPeak::initDriver()
   if (r != CUDA_SUCCESS)
   {
     m_initResult = r;
-    fprintf(stderr, "cuInit failed: %s\n", cuErrStr(r));
+    CLPEAK_LOG(Error, "CUDA: cuInit failed: %s", cuErrStr(r));
     return false;
   }
   int n = 0;

@@ -53,9 +53,19 @@ struct BackendInventory
   std::vector<InventoryPlatform> platforms;   // Vulkan/CUDA: a single synthetic platform
 };
 
-// JSON serializer used by the GUI catalog (clpeak_copy_backend_catalog_json).
-// Schema is stable and consumed by app/lib/src/model/catalog.dart.
+// JSON serializer used by the GUI catalog (clpeak_copy_backend_catalog_json):
+//   {"backends":[{"name","flag","available",info?,reason?,notes?,
+//     "platforms":[{"index","name","devices":[{"index","name","type",arch?,
+//       driver?,api?,compute_units?,clock_mhz?,global_mem_bytes?,
+//       max_alloc_bytes?,fp16?,fp64?}]}]}]}
+// Consumed by app/lib/src/model/catalog.dart.
 std::string inventoryToJson(const std::vector<BackendInventory> &inv);
+
+// The `backends` array of the same document, written into an open array of
+// a caller's JsonWriter -- how the run document embeds the inventory under
+// --verbose (run_document.cpp), so the two never drift apart.
+class JsonWriter;
+void writeInventoryBackends(JsonWriter &w, const std::vector<BackendInventory> &inv);
 
 // --list-devices.  One format for every backend: a header per backend, then
 // one line per device that starts with the exact `backend:index` token

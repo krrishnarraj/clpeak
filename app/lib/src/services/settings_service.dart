@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// App settings: the theme mode, and which ONNX Runtime the ONNX backend
-/// loads.
+/// App settings: the theme mode, which ONNX Runtime the ONNX backend loads,
+/// and whether runs record verbose diagnostics.
 ///
 /// Loaded synchronously from an already-read [SharedPreferences] so main()
 /// can apply the ONNX library before the first enumeration — enumeration is
@@ -13,13 +13,15 @@ class SettingsService extends ChangeNotifier {
       : _themeMode = ThemeMode.values.firstWhere(
             (m) => m.name == _prefs.getString(_themeKey),
             orElse: () => ThemeMode.system),
-        _onnxLibraryPath = _prefs.getString(_onnxLibKey) ?? '';
+        _onnxLibraryPath = _prefs.getString(_onnxLibKey) ?? '',
+        _verbose = _prefs.getBool(_verboseKey) ?? false;
 
   static Future<SettingsService> load() async =>
       SettingsService._(await SharedPreferences.getInstance());
 
   static const _themeKey = 'themeMode';
   static const _onnxLibKey = 'onnxLibraryPath';
+  static const _verboseKey = 'verbose';
 
   final SharedPreferences _prefs;
 
@@ -32,10 +34,25 @@ class SettingsService extends ChangeNotifier {
   String _onnxLibraryPath;
   String get onnxLibraryPath => _onnxLibraryPath;
 
+  /// Pass `--verbose` to every run: the saved document (and so the exported
+  /// file) then carries the backends' debug output, the device inventory and
+  /// whatever the runtimes had to say — what a maintainer needs to analyse a
+  /// problem on a device they cannot reach.  Off by default: it makes the
+  /// file larger, and the extra lines are for reading with a bug report.
+  bool _verbose;
+  bool get verbose => _verbose;
+
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     notifyListeners();
     await _prefs.setString(_themeKey, mode.name);
+  }
+
+  Future<void> setVerbose(bool on) async {
+    if (on == _verbose) return;
+    _verbose = on;
+    notifyListeners();
+    await _prefs.setBool(_verboseKey, on);
   }
 
   Future<void> setOnnxLibraryPath(String path) async {

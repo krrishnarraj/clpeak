@@ -548,9 +548,21 @@ void main() {
         'generated_at': '2026-08-29T14:03:11Z',
         'duration_s': 12.5,
         'cancelled': true,
+        'build': {
+          'backends': ['CPU', 'ONNX']
+        },
         'host': {'os': 'Macintosh', 'cpu': 'Apple M1 Pro'},
-        'notes': [
-          {'backend': 'ONNX', 'message': 'QNN EP not found'}
+        'invocation': {
+          'argv': ['clpeak', '--verbose'],
+          'verbose': true,
+        },
+        'log': [
+          {
+            'elapsed_s': 0.4,
+            'level': 'warning',
+            'backend': 'ONNX',
+            'message': 'QNN EP not found'
+          }
         ],
         'devices': [
           {
@@ -602,7 +614,12 @@ void main() {
       final run = doc.runs.single;
       expect(doc.meta!.cancelled, isTrue);
       expect(doc.meta!.host['cpu'], 'Apple M1 Pro');
-      expect(doc.notes.single.message, 'QNN EP not found');
+      expect(doc.log.single.message, 'QNN EP not found');
+      expect(doc.log.single.level, LogLevel.warning);
+      expect(doc.log.single.backend, 'ONNX');
+      expect(doc.problems, hasLength(1));
+      expect(doc.meta!.builtBackends, ['CPU', 'ONNX']);
+      expect(doc.meta!.verbose, isTrue);
       expect(run.props.map((p) => p.key), ['Cores', 'RAM']);
 
       final group = run.categories.single;

@@ -25,7 +25,7 @@ private:
 };
 
 // Serialize one event to its JSON document (exposed for the synthetic
-// `note`/`done` events clpeak_launch emits itself).
+// `log`/`done` events clpeak_launch emits itself).
 std::string ffiEventToJson(const LogEvent &e);
 
 // malloc-copy a string and hand it to the callback (no-op when cb is null).

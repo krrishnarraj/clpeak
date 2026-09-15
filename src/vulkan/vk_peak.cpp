@@ -74,6 +74,56 @@ vkPeak::~vkPeak()
   cleanup();
 }
 
+namespace
+{
+
+// Whether the loader offers an instance extension.
+bool hasInstanceExt(const char *name)
+{
+  uint32_t extCount = 0;
+  if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr) != VK_SUCCESS)
+    return false;
+  std::vector<VkExtensionProperties> props(extCount);
+  if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, props.data()) != VK_SUCCESS)
+    return false;
+  for (const auto &prop : props)
+    if (strcmp(prop.extensionName, name) == 0)
+      return true;
+  return false;
+}
+
+// VK_EXT_debug_utils callback: a driver's or a layer's own diagnostics,
+// relayed to the run log at the severity the driver gave them.  With no
+// validation layer loaded this is what the driver volunteers -- MoltenVK's
+// warnings about a feature it emulates, a device-lost explanation -- which
+// is exactly the line a maintainer wants next to a reading that came out
+// wrong.  VERBOSE is not subscribed; INFO is debug, so it costs nothing
+// unless --verbose asked for it.
+VKAPI_ATTR VkBool32 VKAPI_CALL debugMessage(
+    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+    VkDebugUtilsMessageTypeFlagsEXT,
+    const VkDebugUtilsMessengerCallbackDataEXT *data,
+    void *)
+{
+  if (!data || !data->pMessage)
+    return VK_FALSE;
+  clpeak::LogLevel level = clpeak::LogLevel::Debug;
+  if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+    level = clpeak::LogLevel::Error;
+  else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    level = clpeak::LogLevel::Warning;
+  if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
+    return VK_FALSE;
+  std::string message;
+  if (data->pMessageIdName)
+    message = std::string(data->pMessageIdName) + ": ";
+  message += data->pMessage;
+  clpeak::logMessage(level, "vulkan", message);
+  return VK_FALSE;
+}
+
+} // namespace
+
 bool vkPeak::initInstance()
 {
   VkApplicationInfo appInfo = {};
@@ -98,22 +148,10 @@ bool vkPeak::initInstance()
   instCI.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   instCI.pApplicationInfo = &appInfo;
 
+  std::vector<const char *> extensions;
 #if defined(__APPLE__) || defined(__MACOSX)
   // MoltenVK portability.  Newer Apple SDK loaders require applications to
   // opt in before non-conformant portability drivers are enumerated.
-  std::vector<const char *> extensions;
-  auto hasInstanceExt = [](const char *name) {
-    uint32_t extCount = 0;
-    if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr) != VK_SUCCESS)
-      return false;
-    std::vector<VkExtensionProperties> props(extCount);
-    if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, props.data()) != VK_SUCCESS)
-      return false;
-    for (const auto &prop : props)
-      if (strcmp(prop.extensionName, name) == 0)
-        return true;
-    return false;
-  };
   if (hasInstanceExt(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME))
   {
     instCI.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
@@ -121,13 +159,34 @@ bool vkPeak::initInstance()
   }
   if (hasInstanceExt(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
     extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+#endif
+  // The driver's own diagnostics onto the run log (debugMessage above).
+  const bool wantDebugUtils = hasInstanceExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  if (wantDebugUtils)
+    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   instCI.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
   instCI.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
-#endif
 
   m_instanceResult = vkCreateInstance(&instCI, nullptr, &instance);
   if (m_instanceResult != VK_SUCCESS)
     return false;
+
+  if (wantDebugUtils)
+  {
+    auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+    VkDebugUtilsMessengerCreateInfoEXT msgCI = {};
+    msgCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    msgCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    msgCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    msgCI.pfnUserCallback = debugMessage;
+    if (!create || create(instance, &msgCI, nullptr, &debugMessenger) != VK_SUCCESS)
+      debugMessenger = VK_NULL_HANDLE;
+  }
 
   uint32_t devCount = 0;
   vkEnumeratePhysicalDevices(instance, &devCount, nullptr);
@@ -144,6 +203,14 @@ void vkPeak::cleanup()
 {
   if (instance != VK_NULL_HANDLE)
   {
+    if (debugMessenger != VK_NULL_HANDLE)
+    {
+      auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+          vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+      if (destroy)
+        destroy(instance, debugMessenger, nullptr);
+      debugMessenger = VK_NULL_HANDLE;
+    }
     vkDestroyInstance(instance, nullptr);
     instance = VK_NULL_HANDLE;
   }

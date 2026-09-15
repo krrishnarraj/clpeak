@@ -1,4 +1,5 @@
 #include <common/logger.h>
+#include <common/run_log.h>
 #include <cassert>
 
 namespace {
@@ -50,10 +51,18 @@ std::string trimmed(const std::string &s)
 logger::logger(std::string compareFileName)
     : compareEnabled(!compareFileName.empty())
 {
+    // While this logger lives, it is the scope every diagnostic in the
+    // process is stamped with, and the channel that shows it.
+    if (RunLog *run = RunLog::current()) run->attach(this);
     if (!compareEnabled) return;
     RunDocument base;
     if (loadRunJson(compareFileName, base))
         baseline = buildBaselineMap(base);
+}
+
+logger::~logger()
+{
+    if (RunLog *run = RunLog::current()) run->detach(this);
 }
 
 // ── Event construction ─────────────────────────────────────────────────────
@@ -112,13 +121,31 @@ logger::BackendScope logger::beginBackend(const std::string &name)
 
 void logger::note(const std::string &msg)
 {
-    // Kept on the document as well as dispatched: a note is usually the only
-    // record of *why* something is missing ("library not found"), and without
-    // it a reopened run reads as hardware that simply lacks the feature.
-    doc.notes.push_back({curBackend, curDevice, oneLine(msg)});
+    log(clpeak::LogLevel::Warning, msg);
+}
 
-    LogEvent e = makeEvent(LogEvent::Kind::Note);
-    e.message = msg;
+void logger::log(clpeak::LogLevel level, std::string message, std::string source)
+{
+    // Trailing line endings are the renderer's to add; call sites still
+    // write "...\n" from the days notes were printed raw.  Embedded newlines
+    // stay -- a build log's line structure is the message.
+    while (!message.empty() &&
+           (message.back() == '\n' || message.back() == '\r' ||
+            message.back() == ' '  || message.back() == '\t'))
+        message.pop_back();
+    if (message.empty()) return;
+
+    LogEvent e = makeEvent(LogEvent::Kind::Log);
+    e.log.level       = level;
+    e.log.source      = std::move(source);
+    e.log.backend     = curBackend;
+    e.log.device      = curDevice;
+    e.log.deviceIndex = curDeviceIndex;
+    e.log.test        = e.testKey();
+    e.log.message     = std::move(message);
+    // Recorded before it is shown, so what the sidecar holds when a render
+    // crashes the process is the line that was being rendered.
+    if (RunLog *run = RunLog::current()) run->record(e.log);
     onEvent(e);
 }
 
@@ -245,6 +272,10 @@ void logger::DeviceScope::end()
 void logger::closeOpenTest()
 {
     if (contextDepth != 3) return;
+    if (TestResult *t = openTest())
+        t->durationS += std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - testOpenedAt)
+                            .count();
     onEvent(makeEvent(LogEvent::Kind::TestEnd));
     curTestIdx   = kNoIndex;
     contextDepth = 2;
@@ -318,6 +349,7 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
     }
 
     log->contextDepth = 3;
+    log->testOpenedAt = std::chrono::steady_clock::now();
     seq = ++log->testSeqCounter;
     log->curTestSeq = seq;
 

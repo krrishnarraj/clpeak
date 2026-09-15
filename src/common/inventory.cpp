@@ -1,53 +1,15 @@
 #include <common/inventory.h>
 #include <common/common.h>
+#include <common/json_writer.h>
 #include <common/options.h>
 #include <algorithm>
 #include <cstdio>
-#include <locale>
 #include <ostream>
 #include <sstream>
 #include <string>
 
 namespace
 {
-
-  void appendDeviceJson(std::ostream &os, const InventoryDevice &d)
-  {
-    os << "{\"index\":" << d.index
-       << ",\"name\":\"" << jsonEscape(d.name) << "\""
-       << ",\"type\":\"" << jsonEscape(d.typeStr) << "\"";
-    if (!d.arch.empty())
-      os << ",\"arch\":\"" << jsonEscape(d.arch) << "\"";
-    if (!d.driverVersion.empty())
-      os << ",\"driver\":\"" << jsonEscape(d.driverVersion) << "\"";
-    if (!d.apiVersion.empty())
-      os << ",\"api\":\"" << jsonEscape(d.apiVersion) << "\"";
-    if (d.numComputeUnits)
-      os << ",\"computeUnits\":" << d.numComputeUnits;
-    if (d.maxClockMHz)
-      os << ",\"clockMHz\":" << d.maxClockMHz;
-    if (d.globalMemBytes)
-      os << ",\"globalMemBytes\":" << d.globalMemBytes;
-    if (d.maxAllocBytes)
-      os << ",\"maxAllocBytes\":" << d.maxAllocBytes;
-    if (d.hasFp16)
-      os << ",\"fp16\":true";
-    if (d.hasFp64)
-      os << ",\"fp64\":true";
-    os << "}";
-  }
-
-  void appendStringArrayJson(std::ostream &os, const std::vector<std::string> &v)
-  {
-    os << "[";
-    for (size_t i = 0; i < v.size(); ++i)
-    {
-      if (i)
-        os << ",";
-      os << "\"" << jsonEscape(v[i]) << "\"";
-    }
-    os << "]";
-  }
 
   // The token --device takes for this device.
   std::string deviceToken(const BackendInventory &b, const InventoryDevice &d)
@@ -122,51 +84,66 @@ namespace
 
 } // namespace
 
-std::string inventoryToJson(const std::vector<BackendInventory> &inv)
+void writeInventoryBackends(JsonWriter &w, const std::vector<BackendInventory> &inv)
 {
-  std::ostringstream os;
-  // Machine-readable interchange: JSON is locale-free, and the GUI decodes
-  // this with the host toolkit's locale already installed (see fmtFloat in
-  // src/ffi/logger_ffi.cpp).
-  os.imbue(std::locale::classic());
-  os << "{\"backends\":[";
-  for (size_t i = 0; i < inv.size(); ++i)
+  for (const auto &b : inv)
   {
-    if (i)
-      os << ",";
-    const auto &b = inv[i];
-    os << "{\"name\":\"" << jsonEscape(backendInfo(b.id).name) << "\""
-       << ",\"flag\":\"" << backendInfo(b.id).flag << "\""
-       << ",\"available\":" << (b.available ? "true" : "false");
-    if (!b.info.empty())
-      os << ",\"info\":\"" << jsonEscape(b.info) << "\"";
-    if (!b.unavailableReason.empty())
-      os << ",\"reason\":\"" << jsonEscape(b.unavailableReason) << "\"";
+    w.beginObject();
+    w.str("name", backendInfo(b.id).name);
+    w.str("flag", backendInfo(b.id).flag);
+    w.boolean("available", b.available);
+    w.strIf("info", b.info);
+    w.strIf("reason", b.unavailableReason);
     if (!b.notes.empty())
     {
-      os << ",\"notes\":";
-      appendStringArrayJson(os, b.notes);
+      w.beginArray("notes");
+      for (const auto &n : b.notes) w.rawString(n);
+      w.endArray();
     }
-    os << ",\"platforms\":[";
-    for (size_t p = 0; p < b.platforms.size(); ++p)
+    w.beginArray("platforms");
+    for (const auto &plat : b.platforms)
     {
-      if (p)
-        os << ",";
-      const auto &plat = b.platforms[p];
-      os << "{\"index\":" << plat.index
-         << ",\"name\":\"" << jsonEscape(plat.name) << "\""
-         << ",\"devices\":[";
-      for (size_t d = 0; d < plat.devices.size(); ++d)
+      w.beginObject();
+      w.integer("index", plat.index);
+      w.str("name", plat.name);
+      w.beginArray("devices");
+      for (const auto &d : plat.devices)
       {
-        if (d)
-          os << ",";
-        appendDeviceJson(os, plat.devices[d]);
+        w.beginObject();
+        w.integer("index", d.index);
+        w.str("name", d.name);
+        w.str("type", d.typeStr);
+        w.strIf("arch", d.arch);
+        w.strIf("driver", d.driverVersion);
+        w.strIf("api", d.apiVersion);
+        if (d.numComputeUnits) w.uint("compute_units", d.numComputeUnits);
+        if (d.maxClockMHz)     w.uint("clock_mhz", d.maxClockMHz);
+        if (d.globalMemBytes)  w.uint("global_mem_bytes", d.globalMemBytes);
+        if (d.maxAllocBytes)   w.uint("max_alloc_bytes", d.maxAllocBytes);
+        if (d.hasFp16)         w.boolean("fp16", true);
+        if (d.hasFp64)         w.boolean("fp64", true);
+        w.endObject();
       }
-      os << "]}";
+      w.endArray();
+      w.endObject();
     }
-    os << "]}";
+    w.endArray();
+    w.endObject();
   }
-  os << "]}";
+}
+
+std::string inventoryToJson(const std::vector<BackendInventory> &inv)
+{
+  // Machine-readable interchange: compact, and locale-free by construction
+  // (JsonWriter) -- the GUI decodes this with the host toolkit's locale
+  // already installed.
+  std::ostringstream os;
+  JsonWriter w(os, /*compact=*/true);
+  w.beginObject();
+  w.beginArray("backends");
+  writeInventoryBackends(w, inv);
+  w.endArray();
+  w.endObject();
   return os.str();
 }
 

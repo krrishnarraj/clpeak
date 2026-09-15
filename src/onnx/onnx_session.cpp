@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -65,6 +66,48 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
   return out;
 }
 
+namespace
+{
+
+// OrtLoggingFunction: ORT's severities onto the run log's levels.  INFO is
+// the session-creation narration -- providers registered, transformers
+// applied -- which is debug material and dropped unless --verbose; ERROR
+// includes a provider declining a graph, which is exactly why a reading is
+// Unsupported, so it is kept.  May be called from ORT's own threads.
+void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
+                                const char *category, const char *,
+                                const char *codeLocation, const char *message)
+{
+  clpeak::LogLevel level;
+  switch (severity)
+  {
+  case ORT_LOGGING_LEVEL_FATAL:
+  case ORT_LOGGING_LEVEL_ERROR:   level = clpeak::LogLevel::Error;   break;
+  case ORT_LOGGING_LEVEL_WARNING: level = clpeak::LogLevel::Warning; break;
+  default:                        level = clpeak::LogLevel::Debug;   break;
+  }
+  if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
+    return;
+  // The optimizer narrates every pass over every session -- forty
+  // "GraphTransformer X modified: 0" lines per session, none of them about
+  // the device -- and clpeak creates sessions by the hundred.  Everything
+  // else INFO says (provider registration, partitioning, the session
+  // options) is kept.
+  if (level == clpeak::LogLevel::Debug && message &&
+      (std::strncmp(message, "GraphTransformer ", 17) == 0 ||
+       std::strncmp(message, "Running graph optimizations", 27) == 0))
+    return;
+  std::string text;
+  if (category && *category && std::strcmp(category, "onnxruntime") != 0)
+    text = std::string("[") + category + "] ";
+  text += message ? message : "";
+  if (codeLocation && *codeLocation)
+    text += std::string(" (") + codeLocation + ")";
+  clpeak::logMessage(level, "onnxruntime", text);
+}
+
+} // namespace
+
 OrtEnv *onnxEnv(const OrtRuntime &rt)
 {
   // One OrtEnv per loaded runtime.  The GUI can hot-swap the ONNX Runtime
@@ -96,13 +139,15 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
     envApi = nullptr;
     envBase = nullptr;
   }
-  // A provider declining a graph is an expected outcome here -- it becomes
-  // an Unsupported row -- but ORT reports it at ERROR level and writes it
-  // straight to stderr.  Normal runs stay silent (the skip row carries the
-  // message); --verbose opens the runtime's own log up.
-  OrtLoggingLevel level = clpeak::verboseEnabled() ? ORT_LOGGING_LEVEL_WARNING
-                                                   : ORT_LOGGING_LEVEL_FATAL;
-  OrtStatus *st = rt.api->CreateEnv(level, "clpeak", &env);
+  // The runtime's own log goes to the run log (ortLogMessage) instead of
+  // to stderr: a provider explaining why it declined a graph, or which
+  // nodes fell back to the CPU, is the line that explains an Unsupported
+  // row or a slow one, and on a phone there is no stderr to read it from.
+  // The Env is created once per runtime and its level is fixed, while
+  // --verbose can differ from run to run in the GUI, so it is opened at
+  // INFO and the callback applies the current run's verbosity.
+  OrtStatus *st = rt.api->CreateEnvWithCustomLogger(
+      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &env);
   if (st)
   {
     CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", onnxStatusText(rt, st).c_str());

@@ -1,4 +1,5 @@
 import '../model/result_model.dart';
+import '../model/run_document.dart';
 
 /// Decoded native run events — a 1:1 mirror of the JSON documents emitted by
 /// LoggerFfi / clpeak_launch (see src/ffi/clpeak_ffi.h for the schema).
@@ -67,15 +68,27 @@ sealed class ClpeakEvent {
         return const DeviceEndEvent();
       case 'backend_end':
         return const BackendEndEvent();
-      case 'note':
-        return NoteEvent(s('message'), backend: s('backend'), device: s('device'));
+      case 'log':
+        return LogEntryEvent(LogEntry(
+          elapsedSeconds: (m['elapsed_s'] as num?)?.toDouble() ?? 0,
+          level: LogLevel.fromString(s('level')),
+          source: s('source'),
+          backend: s('backend'),
+          device: s('device'),
+          deviceIndex: deviceIndex(),
+          test: s('variant').isEmpty
+              ? s('test')
+              : '${s('test')}@${s('variant')}',
+          message: s('message'),
+        ));
       case 'done':
         return DoneEvent(
           status: (m['status'] as num?)?.toInt() ?? 0,
           cancelled: m['cancelled'] as bool? ?? false,
         );
       default:
-        return NoteEvent('unknown event: $m');
+        return LogEntryEvent(LogEntry(
+            level: LogLevel.warning, message: 'unknown event: $m'));
     }
   }
 }
@@ -199,11 +212,12 @@ class BackendEndEvent extends ClpeakEvent {
   const BackendEndEvent();
 }
 
-class NoteEvent extends ClpeakEvent {
-  const NoteEvent(this.message, {this.backend = '', this.device = ''});
-  final String message;
-  final String backend;
-  final String device;
+/// One line of the run's diagnostic stream — the same entry the saved
+/// document holds in `log`, so a live run and a reopened file show the same
+/// lines.
+class LogEntryEvent extends ClpeakEvent {
+  const LogEntryEvent(this.entry);
+  final LogEntry entry;
 }
 
 class DoneEvent extends ClpeakEvent {

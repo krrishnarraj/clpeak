@@ -44,7 +44,7 @@ Future<void> main() async {
   if (autorun != null && autorun.isNotEmpty && autorun != '0') {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await service.ready;
-      service.start(preset: RunPreset.full);
+      service.start(preset: RunPreset.full, verbose: settings.verbose);
     });
   }
 

@@ -1,12 +1,116 @@
 #include <common/common.h>
 #include <algorithm>
 #include <atomic>
+#include <cstdarg>
 #include <cstring>
+#include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#define CLPEAK_WRITE _write
+#else
+#include <unistd.h>
+#define CLPEAK_WRITE write
+#endif
 
 namespace clpeak {
 static bool g_verbose = false;
 bool verboseEnabled()   { return g_verbose; }
 void setVerbose(bool on) { g_verbose = on; }
+
+// ── Diagnostics route ──────────────────────────────────────────────────────
+
+const char *logLevelString(LogLevel level)
+{
+    switch (level)
+    {
+    case LogLevel::Error:   return "error";
+    case LogLevel::Warning: return "warning";
+    case LogLevel::Info:    return "info";
+    case LogLevel::Debug:   return "debug";
+    }
+    return "info";
+}
+
+LogLevel logLevelFromString(const std::string &s)
+{
+    if (s == "error")   return LogLevel::Error;
+    if (s == "warning") return LogLevel::Warning;
+    if (s == "debug")   return LogLevel::Debug;
+    return LogLevel::Info;
+}
+
+static LogSink *g_logSink = nullptr;
+void     setLogSink(LogSink *sink) { g_logSink = sink; }
+LogSink *logSink()                 { return g_logSink; }
+
+static std::atomic<int> g_realStderrFd{-1};
+void setRealStderrFd(int fd) { g_realStderrFd.store(fd, std::memory_order_relaxed); }
+
+void stderrWrite(const std::string &text)
+{
+    (void)fflush(stderr);
+    const int fd = g_realStderrFd.load(std::memory_order_relaxed);
+    if (fd >= 0)
+    {
+        // A capture (console_mute.h) owns fd 2 right now; the saved copy is
+        // the terminal.  Unbuffered by construction, like stderr itself.
+        size_t done = 0;
+        while (done < text.size())
+        {
+            const auto n = CLPEAK_WRITE(fd, text.data() + done,
+                                        static_cast<unsigned>(text.size() - done));
+            if (n <= 0) break;
+            done += static_cast<size_t>(n);
+        }
+        return;
+    }
+    (void)fputs(text.c_str(), stderr);
+    (void)fflush(stderr);
+}
+
+void logMessage(LogLevel level, const std::string &source, std::string message)
+{
+    // Trailing newlines and spaces are the terminal's business, not the
+    // message's: every renderer adds its own line ending, and a stored entry
+    // should not carry one.  Leading whitespace stays -- some sites indent
+    // to show nesting.
+    while (!message.empty() &&
+           (message.back() == '\n' || message.back() == '\r' ||
+            message.back() == ' '  || message.back() == '\t'))
+        message.pop_back();
+    if (message.empty()) return;
+
+    if (g_logSink)
+    {
+        g_logSink->onLog(level, source, message);
+        return;
+    }
+    // No run in progress (--list-devices, the GUI enumerating its catalog):
+    // the terminal is all there is.  Debug lines stay gated on --verbose as
+    // they always were.
+    if (level == LogLevel::Debug && !g_verbose) return;
+    stderrWrite(message + "\n");
+}
+
+void logf(LogLevel level, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    va_list copy;
+    va_copy(copy, args);
+    const int n = vsnprintf(nullptr, 0, fmt, copy);
+    va_end(copy);
+    std::string message;
+    if (n > 0)
+    {
+        std::vector<char> buf(static_cast<size_t>(n) + 1);
+        vsnprintf(buf.data(), buf.size(), fmt, args);
+        message.assign(buf.data(), static_cast<size_t>(n));
+    }
+    va_end(args);
+    logMessage(level, "", std::move(message));
+}
 
 static std::atomic<bool> g_cancelRequested{false};
 void requestCancel()   { g_cancelRequested.store(true, std::memory_order_relaxed); }
