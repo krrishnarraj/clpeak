@@ -252,6 +252,12 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       vr.skipReason = plan.whyNot;
       return false;
     }
+    if (const std::string wrong = wrongAnswer(rt, dev, v.f); !wrong.empty())
+    {
+      vr.skipReason = wrong;
+      vr.skipStatus = ResultStatus::Error;
+      return false;
+    }
     if (v.int8Kv && dev.accel != LitertAccel::Npu)
     {
       // XNNPACK dequantizes a constant int8 tensor once, when the model

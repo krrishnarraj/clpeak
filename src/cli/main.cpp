@@ -58,6 +58,9 @@ int main(int argc, char **argv)
     combined.meta.generatedAt   = isoTimestampUtc();
     for (const auto &be : backends)
         combined.meta.build.backends.push_back(backendInfo(be.id).name);
+#ifdef CLPEAK_BUILD_CONFIG
+    combined.meta.build.config = CLPEAK_BUILD_CONFIG;
+#endif
     combined.meta.host          = probeHost();
     combined.meta.invocation    = invocationFrom(opts, argc, argv);
 

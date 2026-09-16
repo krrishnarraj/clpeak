@@ -117,6 +117,9 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
   for (const Format &fmt : kFormats)
   {
     const LitertPlan plan = litertPlanFor(fmt.f, dev.accel);
+    // The format's matmul answer, checked once: a kernel that gets the
+    // format wrong there gets no convolution rate either.
+    const std::string wrong = plan.applies ? wrongAnswer(rt, dev, fmt.f) : std::string();
     for (const Shape &v : kShapes)
     {
       if (clpeak::cancelRequested())
@@ -129,6 +132,11 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       if (!plan.applies)
       {
         test.skip(row, ResultStatus::Unsupported, plan.whyNot, o);
+        continue;
+      }
+      if (!wrong.empty())
+      {
+        test.skip(row, ResultStatus::Error, wrong, o);
         continue;
       }
 
@@ -253,9 +261,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         if (!kernel.empty())
         {
           o.description += "  Ran as `" + kernel + "`.";
-          if (kernel.find("quantize_and_dequantize") != std::string::npos)
-            o.description += "  That is a float kernel between quantize and dequantize passes, not "
-                             "integer arithmetic.";
+          if (plan.integerOps && !litertKernelIsInteger(kernel))
+            o.description += litertFloatKernelNote();
         }
         test.emit(row, (float)best, o);
       }

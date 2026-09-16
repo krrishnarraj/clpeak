@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -132,11 +133,198 @@ void referenceGemm(const std::vector<double> &x, const std::vector<float> &w, in
 
 } // namespace
 
+const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev,
+                                                       LitertFormat f)
+{
+  using clpeak_tflite::TfType;
+  const auto key = std::make_pair((int)dev.accel, (int)f);
+  auto found = answerChecks_.find(key);
+  if (found != answerChecks_.end())
+    return found->second;
+  AnswerCheck &c = answerChecks_[key];
+  const LitertPlan plan = litertPlanFor(f, dev.accel);
+  if (!plan.applies)
+  {
+    c.status = ResultStatus::Unsupported;
+    c.error = plan.whyNot;
+    return c;
+  }
+
+  std::vector<float> weights;   // exactly what the accelerator multiplies
+  std::string err;
+  auto s = LitertSession::create(rt, dev, litertPlainMatMulModel(plan, kDim, kDim, kDim, &weights),
+                                 litertConfigFor(plan), err);
+  if (!s)
+  {
+    c.status = ResultStatus::Unsupported;
+    c.error = err;
+    return c;
+  }
+  if (!s->onDevice())
+  {
+    c.status = ResultStatus::Unsupported;
+    c.error = s->offDevice();
+    return c;
+  }
+
+  // The activations: the same generator as the speed rows, rounded to the
+  // width the model takes them in, which is the width the device sees.
+  const int64_t count = kDim * kDim;
+  std::vector<double> a((size_t)count);
+  std::string raw;
+  const int abits = (int)clpeak_tflite::tfliteElementBits(plan.act);
+  switch (plan.act)
+  {
+  case TfType::F32:
+    raw.resize((size_t)count * 4);
+    for (int64_t i = 0; i < kDim; i++)
+      for (int64_t j = 0; j < kDim; j++)
+      {
+        float v = litertValueAt(i, j, 0x243f6a88u);
+        // The GPU's fp16 policies round every operand to half; done here
+        // first, the conversion is exact and the rounding cancels.
+        if (plan.halfRounded)
+          v = litertHalfToFloat(litertFloatToHalf(v));
+        std::memcpy(&raw[(size_t)(i * kDim + j) * 4], &v, 4);
+        a[(size_t)(i * kDim + j)] = v;
+      }
+    break;
+  case TfType::F16:
+  case TfType::BF16:
+    raw.resize((size_t)count * 2);
+    for (int64_t i = 0; i < kDim; i++)
+      for (int64_t j = 0; j < kDim; j++)
+      {
+        const float v = litertValueAt(i, j, 0x243f6a88u);
+        const uint16_t h = plan.act == TfType::F16 ? litertFloatToHalf(v) : litertFloatToBf16(v);
+        std::memcpy(&raw[(size_t)(i * kDim + j) * 2], &h, 2);
+        a[(size_t)(i * kDim + j)] = plan.act == TfType::F16 ? litertHalfToFloat(h) : litertBf16ToFloat(h);
+      }
+    break;
+  case TfType::I8:
+  case TfType::I16:
+  {
+    const float scale = litertActScale(abits);
+    const long qmax = (1L << (abits - 1)) - 1;
+    raw.resize((size_t)count * (abits / 8));
+    for (int64_t i = 0; i < kDim; i++)
+      for (int64_t j = 0; j < kDim; j++)
+      {
+        const float v = litertValueAt(i, j, 0x243f6a88u);
+        long q = std::lround(v / scale);
+        q = std::max(-qmax, std::min(qmax, q));
+        if (abits == 8)
+        {
+          const int8_t code = (int8_t)q;
+          std::memcpy(&raw[(size_t)(i * kDim + j)], &code, 1);
+        }
+        else
+        {
+          const int16_t code = (int16_t)q;
+          std::memcpy(&raw[(size_t)(i * kDim + j) * 2], &code, 2);
+        }
+        a[(size_t)(i * kDim + j)] = scale * (double)q;
+      }
+    break;
+  }
+  default:
+    c.status = ResultStatus::Error;
+    c.error = "unexpected activation type";
+    return c;
+  }
+
+  std::vector<uint8_t> out;
+  if (!s->writeInput(0, raw.data(), raw.size(), err) || !s->run(err) || !s->outputBytes(0, out, err))
+  {
+    c.status = ResultStatus::Error;
+    c.error = err;
+    return c;
+  }
+  s.reset();
+
+  std::vector<float> got((size_t)count);
+  bool sized = true;
+  switch (plan.act)
+  {
+  case TfType::F32:
+    sized = out.size() == got.size() * 4;
+    if (sized)
+      std::memcpy(got.data(), out.data(), out.size());
+    break;
+  case TfType::F16:
+  case TfType::BF16:
+    sized = out.size() == got.size() * 2;
+    if (sized)
+      for (size_t i = 0; i < got.size(); i++)
+      {
+        uint16_t h;
+        std::memcpy(&h, &out[i * 2], 2);
+        got[i] = plan.act == TfType::F16 ? litertHalfToFloat(h) : litertBf16ToFloat(h);
+      }
+    break;
+  case TfType::I8:
+  {
+    sized = out.size() == got.size();
+    const float scale = litertOutScale(kDim, 8);
+    if (sized)
+      for (size_t i = 0; i < got.size(); i++)
+        got[i] = scale * (float)(int8_t)out[i];
+    break;
+  }
+  case TfType::I16:
+  {
+    sized = out.size() == got.size() * 2;
+    const float scale = litertOutScale(kDim, 16);
+    if (sized)
+      for (size_t i = 0; i < got.size(); i++)
+      {
+        int16_t code;
+        std::memcpy(&code, &out[i * 2], 2);
+        got[i] = scale * (float)code;
+      }
+    break;
+  }
+  default:
+    sized = false;
+  }
+  if (!sized)
+  {
+    c.status = ResultStatus::Error;
+    c.error = "unexpected output size";
+    return c;
+  }
+
+  std::vector<double> ref;
+  referenceGemm(a, weights, kDim, kDim, kDim, ref);
+  const double ppm = relativeRmsPpm(got, ref);
+  if (ppm < 0.0 || !std::isfinite(ppm))
+  {
+    c.status = ResultStatus::Error;
+    c.error = "the result was not finite";
+    return c;
+  }
+  c.ppm = ppm;
+  CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), litertFormatLabel(f), ppm);
+  return c;
+}
+
+std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f)
+{
+  const AnswerCheck &c = answerCheck(rt, dev, f);
+  if (c.ppm < kLitertWrongAnswerPpm)
+    return std::string();
+  char pct[32];
+  std::snprintf(pct, sizeof pct, "%.0f%%", c.ppm / 10000.0);
+  return std::string("this accelerator's answer for ") + litertFormatLabel(f) + " is wrong by " + pct +
+         " (litert_numeric_error: " + std::to_string((long long)c.ppm) +
+         " ppm against the host's reference) -- a kernel that does not compute the format, not one "
+         "that loses precision -- so its rate is not reported";
+}
+
 int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_info_t &dev,
                                 benchmark_config_t &cfg)
 {
   (void)cfg;
-  using clpeak_tflite::TfType;
 
   auto test = currentDeviceScope->beginTest(
       {"litert_numeric_error", "LiteRT matmul numeric error", "ppm", Category::Compute,
@@ -153,167 +341,17 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     if (clpeak::cancelRequested())
       break;
     const char *label = litertFormatLabel(v.f);
-    const LitertPlan plan = litertPlanFor(v.f, dev.accel);
-    if (!plan.applies)
+    const AnswerCheck &c = answerCheck(rt, dev, v.f);
+    if (c.ppm < 0.0)
     {
-      test.skip(label, ResultStatus::Unsupported, plan.whyNot, v.note);
+      test.skip(label, c.status, c.error, v.note);
       continue;
     }
-
-    std::vector<float> weights;   // exactly what the accelerator multiplies
-    std::string err;
-    auto s = LitertSession::create(rt, dev, litertPlainMatMulModel(plan, kDim, kDim, kDim, &weights),
-                                   litertConfigFor(plan), err);
-    if (!s)
-    {
-      test.skip(label, ResultStatus::Unsupported, err, v.note);
-      continue;
-    }
-    if (!s->onDevice())
-    {
-      test.skip(label, ResultStatus::Unsupported, s->offDevice(), v.note);
-      continue;
-    }
-
-    // The activations: the same generator as the speed rows, rounded to the
-    // width the model takes them in, which is the width the device sees.
-    const int64_t count = kDim * kDim;
-    std::vector<double> a((size_t)count);
-    std::string raw;
-    const int abits = (int)clpeak_tflite::tfliteElementBits(plan.act);
-    switch (plan.act)
-    {
-    case TfType::F32:
-      raw.resize((size_t)count * 4);
-      for (int64_t i = 0; i < kDim; i++)
-        for (int64_t j = 0; j < kDim; j++)
-        {
-          float f = litertValueAt(i, j, 0x243f6a88u);
-          // The GPU's fp16 policies round every operand to half; done here
-          // first, the conversion is exact and the rounding cancels.
-          if (plan.halfRounded)
-            f = litertHalfToFloat(litertFloatToHalf(f));
-          std::memcpy(&raw[(size_t)(i * kDim + j) * 4], &f, 4);
-          a[(size_t)(i * kDim + j)] = f;
-        }
-      break;
-    case TfType::F16:
-    case TfType::BF16:
-      raw.resize((size_t)count * 2);
-      for (int64_t i = 0; i < kDim; i++)
-        for (int64_t j = 0; j < kDim; j++)
-        {
-          const float f = litertValueAt(i, j, 0x243f6a88u);
-          const uint16_t h = plan.act == TfType::F16 ? litertFloatToHalf(f) : litertFloatToBf16(f);
-          std::memcpy(&raw[(size_t)(i * kDim + j) * 2], &h, 2);
-          a[(size_t)(i * kDim + j)] = plan.act == TfType::F16 ? litertHalfToFloat(h) : litertBf16ToFloat(h);
-        }
-      break;
-    case TfType::I8:
-    case TfType::I16:
-    {
-      const float scale = litertActScale(abits);
-      const long qmax = (1L << (abits - 1)) - 1;
-      raw.resize((size_t)count * (abits / 8));
-      for (int64_t i = 0; i < kDim; i++)
-        for (int64_t j = 0; j < kDim; j++)
-        {
-          const float f = litertValueAt(i, j, 0x243f6a88u);
-          long q = std::lround(f / scale);
-          q = std::max(-qmax, std::min(qmax, q));
-          if (abits == 8)
-          {
-            const int8_t c = (int8_t)q;
-            std::memcpy(&raw[(size_t)(i * kDim + j)], &c, 1);
-          }
-          else
-          {
-            const int16_t c = (int16_t)q;
-            std::memcpy(&raw[(size_t)(i * kDim + j) * 2], &c, 2);
-          }
-          a[(size_t)(i * kDim + j)] = scale * (double)q;
-        }
-      break;
-    }
-    default:
-      test.skip(label, ResultStatus::Error, "unexpected activation type", v.note);
-      continue;
-    }
-
-    if (!s->writeInput(0, raw.data(), raw.size(), err) || !s->run(err))
-    {
-      test.skip(label, ResultStatus::Error, err, v.note);
-      continue;
-    }
-    std::vector<uint8_t> out;
-    if (!s->outputBytes(0, out, err))
-    {
-      test.skip(label, ResultStatus::Error, err, v.note);
-      continue;
-    }
-    s.reset();
-
-    std::vector<float> got((size_t)count);
-    bool sized = true;
-    switch (plan.act)
-    {
-    case TfType::F32:
-      sized = out.size() == got.size() * 4;
-      if (sized)
-        std::memcpy(got.data(), out.data(), out.size());
-      break;
-    case TfType::F16:
-    case TfType::BF16:
-      sized = out.size() == got.size() * 2;
-      if (sized)
-        for (size_t i = 0; i < got.size(); i++)
-        {
-          uint16_t h;
-          std::memcpy(&h, &out[i * 2], 2);
-          got[i] = plan.act == TfType::F16 ? litertHalfToFloat(h) : litertBf16ToFloat(h);
-        }
-      break;
-    case TfType::I8:
-    {
-      sized = out.size() == got.size();
-      const float scale = litertOutScale(kDim, 8);
-      if (sized)
-        for (size_t i = 0; i < got.size(); i++)
-          got[i] = scale * (float)(int8_t)out[i];
-      break;
-    }
-    case TfType::I16:
-    {
-      sized = out.size() == got.size() * 2;
-      const float scale = litertOutScale(kDim, 16);
-      if (sized)
-        for (size_t i = 0; i < got.size(); i++)
-        {
-          int16_t c;
-          std::memcpy(&c, &out[i * 2], 2);
-          got[i] = scale * (float)c;
-        }
-      break;
-    }
-    default:
-      sized = false;
-    }
-    if (!sized)
-    {
-      test.skip(label, ResultStatus::Error, "unexpected output size", v.note);
-      continue;
-    }
-
-    std::vector<double> ref;
-    referenceGemm(a, weights, kDim, kDim, kDim, ref);
-    const double ppm = relativeRmsPpm(got, ref);
-    if (ppm < 0.0 || !std::isfinite(ppm))
-    {
-      test.skip(label, ResultStatus::Error, "the result was not finite", v.note);
-      continue;
-    }
-    CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), label, ppm);
-    test.emit(label, (float)ppm, v.note);
+    std::string note = v.note;
+    if (c.ppm >= kLitertWrongAnswerPpm)
+      note += "  This is a wrong answer, not a loss of precision: the accelerator's kernel for "
+              "this format does not compute it, and the rate rows for the format are withheld.";
+    test.emit(label, (float)c.ppm, note.c_str());
   }
 
   test.end();

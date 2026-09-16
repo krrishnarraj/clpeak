@@ -231,6 +231,7 @@ void writeBuild(JsonWriter &w, const BuildInfo &b)
     w.beginArray("backends");
     for (const std::string &name : b.backends) w.rawString(name);
     w.endArray();
+    w.strIf("config", b.config);
     w.endObject();
 }
 
@@ -559,10 +560,12 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     out.meta.generatedAt   = root.str("generated_at");
     out.meta.durationS     = root.num("duration_s");
     out.meta.cancelled     = root.flag("cancelled");
-    if (const JsonValue *b = root.find("build"))
+    if (const JsonValue *b = root.find("build")) {
         if (const JsonValue *names = b->find("backends"))
             for (const JsonValue &x : names->items())
                 out.meta.build.backends.push_back(x.asString());
+        out.meta.build.config = b->str("config");
+    }
     if (const JsonValue *h = root.find("host"))       readHost(*h, out.meta.host);
     if (const JsonValue *i = root.find("invocation")) readInvocation(*i, out.meta.invocation);
     if (const JsonValue *ds = root.find("devices"))

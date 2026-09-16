@@ -25,6 +25,8 @@
 #include "litert_model.h"
 #include "litert_session.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <string>
 
@@ -90,6 +92,35 @@ inline bool litertBindScalar(LitertSession &s, const LitertPlan &p, std::string 
   const bool integer = (p.act == clpeak_tflite::TfType::I8 || p.act == clpeak_tflite::TfType::I16);
   const std::string v = litertScalarBytes(p.act, integer ? 1.0f : 1.0009765625f);
   return s.writeInput(0, v.data(), v.size(), error);
+}
+
+// Whether a profiled kernel tag names an integer kernel.  The GPU
+// accelerator answers most quantized graphs with a float kernel between
+// quantize and dequantize passes -- Metal's "convolution1x1(conv_wave_matrix)
+// -> quantize_and_dequantize", Mali's Winograd 3x3 -- but Mali also has a
+// real int8 kernel, "convolution_int8(conv_wave_matrix_mali) ->
+// dequantize_to_float16 -> quantize_and_dequantize", whose tag carries the
+// same dequantize tail.  So the tail says nothing; the kernel's own name
+// (the part before the first arrow) has to say it is integer: XNNPACK's
+// QS8/QD8/QP8/QC8W/QB4W packings, the GPU's "int8"/"int4".
+inline bool litertKernelIsInteger(const std::string &kernel)
+{
+  std::string l = kernel;
+  std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+  const size_t arrow = l.find(" -> ");
+  const std::string head = arrow == std::string::npos ? l : l.substr(0, arrow);
+  for (const char *mark : {"int8", "int4", "int16", "qs8", "qd8", "qp8", "qc8", "qb4", "qu8", "quantized"})
+    if (head.find(mark) != std::string::npos)
+      return true;
+  return false;
+}
+
+// The sentence an integer-format row needs when its kernel was a float one.
+inline const char *litertFloatKernelNote()
+{
+  return "  That is a float kernel between quantize and dequantize passes, not integer "
+         "arithmetic: the accelerator has no integer multiply for this shape and this "
+         "rate is its float one, with the format's traffic savings.";
 }
 
 // The session config a plan asks for on a device.

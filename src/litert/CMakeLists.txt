@@ -29,3 +29,13 @@ target_include_directories(peak_litert PRIVATE
 )
 target_compile_definitions(peak_litert PRIVATE ENABLE_LITERT)
 target_compile_definitions(peak_common PRIVATE ENABLE_LITERT)
+
+# The models are generated on the host (litert_model.cpp's fills) and the
+# accuracy rows are checked against a host GEMM; unoptimised, both run an
+# order of magnitude slower and a `flutter run` (debug) build on a phone
+# spent two minutes of a nine-minute run generating constants.  Optimise
+# the backend in every configuration, as src/cpu does; MSVC's debug flags
+# (/RTC1) conflict with /O2 and are left alone.
+if(NOT MSVC)
+    target_compile_options(peak_litert PRIVATE $<$<CONFIG:Debug>:-O2>)
+endif()

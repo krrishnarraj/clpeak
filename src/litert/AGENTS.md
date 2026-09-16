@@ -173,10 +173,29 @@ kernel name from one profiled run says which kernel it was.
   fp16 storage with fp32 accumulation.  On an M1 Pro: 4.06 / 4.69 / 3.2
   TFLOPS and 0.57 / 4690 / 388 ppm -- the GPU accumulates fp16 in fp16 by
   default.  `fp16_acc32` applies nowhere else.
-- **Its quantized graphs are float kernels between quantize and dequantize
-  passes** (`convolution1x1(conv_wave_matrix) -> quantize_and_dequantize`),
-  so its `int8_qdq` "TOPS" equals its fp16 rate; the row says so when the
-  kernel tag carries `quantize_and_dequantize`.
+- **Its quantized graphs are mostly float kernels between quantize and
+  dequantize passes** (`convolution1x1(conv_wave_matrix) ->
+  quantize_and_dequantize` on Metal, `convolution_winograd_3x3(conv_generic)`
+  for int8 conv3x3 on Mali), so an `int8_qdq` "TOPS" figure there equals the
+  fp16 rate.  But Mali has a real one -- `convolution_int8(
+  conv_wave_matrix_mali) -> dequantize_to_float16 -> quantize_and_dequantize`,
+  3.5x its fp16 rate on a Pixel 7a -- whose tag carries the same dequantize
+  tail, so the tail proves nothing.  `litertKernelIsInteger()` reads the
+  kernel's own name (before the first arrow: `int8`, `int4`, XNNPACK's
+  QS8/QD8/QP8/QC8W/QB4W packings) and the "float kernel" sentence goes on
+  integer rows whose kernel was not one.
+- **A fast kernel can be a wrong one.**  That Mali int8 kernel answered the
+  accuracy test 250% off (2.5 million ppm, where int8 costs ~1%): a wrong
+  answer, not precision.  So the accuracy measurement is memoised per
+  device and format (`LitertPeak::answerCheck`) and every rate test asks
+  `wrongAnswer()` before publishing a format: past `kLitertWrongAnswerPpm`
+  (10% RMS) the gemm, conv and block rows for that format are refused with
+  the figure in the reason, and the accuracy row says it is a wrong answer.
+  The full-integer FULLY_CONNECTED graphs now carry the int32 zero bias a
+  converted model always has (version 5 with keep_num_dims), since a kernel
+  written for the converter's form may be reading a bias that is not there;
+  the next Pixel 7a run says whether that was it, and until then the guard
+  keeps the row honest either way.
 - `int16x8` has no XNNPACK kernel: the CPU row is the runtime's reference
   kernel, three orders of magnitude slower, which is the honest number for
   a format that only an NPU implements.
@@ -324,6 +343,33 @@ compiling), GPU rows ±10%.
 The whole backend, both devices, takes 6:46 here; the time is the timed
 budgets (1 s per activation/tensor size, 2 s per gemm/conv rung, 5 s per
 block point, the ONNX and Core ML backends' figures), not the models.
+
+## Reference readings, Pixel 7a (Tensor G2, Mali-G710, Android 16)
+
+The user's phone through the Flutter app, GPU device only, LiteRT 2.2.0's
+OpenCL accelerator; the CPU device (XNNPACK) was not run.  A debug (`flutter
+run`) build, so its host-side times are not the device's -- the numbers are.
+
+| row | GPU (OpenCL, Mali-G710) |
+|---|---|
+| gemm fp32 / fp16 / fp16_acc32 | 180 / 287 / 260 GFLOPS |
+| gemm int8_qdq / int8_weight | 1.01 TOPS (wrong answer, see above) / 294 GFLOPS |
+| error fp32 / fp16 / fp16_acc32 / int8_weight | 0.57 / 4690 / 388 / 4692 ppm (the M1 Pro's figures exactly) |
+| conv3x3 fp32 / fp16 / int8 | 495 G / 982 G (Winograd) / 976 G (float Winograd) |
+| conv1x1 fp32 / fp16 / int8 | 125 / 280 / 369 G |
+| block prefill fp16 s2048 / decode fp16 kv2048 | 280 GFLOPS / 10.5 GB/s |
+| block latency fp16 prefill s512 / decode kv2048 / kv8192 | 178 ms / 11.2 ms / 34 ms |
+| activation softmax / layernorm (32 MB) | 10.1 / 7.8 GB/s (silu fused, unresolvable) |
+| tensor_bw 8mb / 128mb | 17.5 / 14.9 GB/s |
+| transfer h2d / roundtrip / d2h | 2.5 / 2.2 / 3.8 GB/s |
+| dispatch trivial / matmul_256 / create | 0.67 ms / 2.5 ms / 6.1 ms |
+
+Nine and a half minutes for the device: 129 s of model generation (the
+debug build's unoptimised fills -- `peak_litert` is now compiled with `-O2`
+in every configuration, and the run document's `build.config` says which
+it was), 98 s of the accelerator's own load-and-compile (an int8 model of
+128 MB takes it 10 s), 13 s of first inferences, and the rest the timed
+budgets.
 
 ## Packaging
 

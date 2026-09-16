@@ -149,9 +149,11 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
   return p;
 }
 
-// tflite/converter/tools/versioning/op_version.cc, FULLY_CONNECTED, for a
-// graph with no bias input (two inputs), in the rules' order.
-int litertFcVersion(const LitertPlan &p)
+// tflite/converter/tools/versioning/op_version.cc, FULLY_CONNECTED, in the
+// rules' order: the float and dynamically quantized graphs carry no bias
+// (two inputs, version 6); the full-integer ones carry the int32 bias a
+// converted model always has, with keep_num_dims, which is version 5.
+int litertFcVersion(const LitertPlan &p, bool hasBias)
 {
   if (p.weight == TfType::I2)
     return 14;
@@ -161,7 +163,9 @@ int litertFcVersion(const LitertPlan &p)
     return 12;
   if (p.act == TfType::I16 && p.weight == TfType::I16)
     return 7;
-  return 6;   // two inputs (an fp16 weight dequantized into an fp32 graph included)
+  if (!hasBias)
+    return 6;   // two inputs (an fp16 weight dequantized into an fp32 graph included)
+  return 5;   // keep_num_dims
 }
 
 // ---------------------------------------------------------------------------
@@ -785,6 +789,25 @@ int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t see
   return tensor;
 }
 
+// Whether a plan's FULLY_CONNECTED carries a bias: the full-integer int8
+// graphs do, because a converted model always has one and an accelerator's
+// int8 kernel is written for that form (Mali's int8 path returned a wrong
+// answer for the bias-less form on a Pixel 7a; whether the bias is what it
+// wanted is what the next run there says).  The int16 plan stays bias-less:
+// its reference kernel wants an int64 bias and nothing else runs it.
+bool fcHasBias(const LitertPlan &p) { return p.act == TfType::I8 && p.weight == TfType::I8; }
+
+// The int32 zero bias of an integer FULLY_CONNECTED: one per output row,
+// at the product of the input and weight scales.
+int addFcBias(Recipe &r, int64_t N, float aScale, float wScale)
+{
+  TfQuant bq;
+  bq.scale.assign((size_t)N, aScale * wScale);
+  bq.zeroPoint.assign((size_t)N, 0);
+  bq.quantizedDim = 0;
+  return r.m.addTensor(0, {(int32_t)N}, TfType::I32, "bias", r.ints(std::vector<int32_t>((size_t)N, 0)), bq);
+}
+
 // The scalar input that keeps a graph live, in the activation type.
 int addScalar(Recipe &r, const LitertPlan &p)
 {
@@ -870,13 +893,15 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
   const int s = addScalar(r, p);
   const int as = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "As", 0, aq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
+  const bool bias = fcHasBias(p);
+  const int b = bias ? addFcBias(r, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant cq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int c = r.m.addTensor(0, {1, (int32_t)M, (int32_t)N}, p.act, "C", 0, cq);
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
   const int out = r.m.addTensor(0, {1, 1, (int32_t)N}, p.act, "out", 0, cq);
 
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {a, s}, {as}, mulOptions());
-  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p), {as, w, -1}, {c}, fcOptions(p));
+  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {as, w, b}, {c}, fcOptions(p));
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {c, ax}, {out}, reduceOptions());
   r.m.setInputs(0, {s});
   r.m.setOutputs(0, {out});
@@ -890,13 +915,16 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
   r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
-  const TfQuant aq = actQuant(p, isInteger(p.act) ? litertActScale(abits) : 1.0f);
+  const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
+  const TfQuant aq = actQuant(p, aScale);
   const int x = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "x", 0, aq);
   const Fill *wf = nullptr;
   const int w = addWeight(r, p, N, K, seedW, &wf);
+  const bool bias = fcHasBias(p);
+  const int b = bias ? addFcBias(r, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int y = r.m.addTensor(0, {1, (int32_t)M, (int32_t)N}, p.act, "y", 0, yq);
-  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p), {x, w, -1}, {y}, fcOptions(p));
+  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
   r.m.setInputs(0, {x});
   r.m.setOutputs(0, {y});
   if (weights && wf)
@@ -915,12 +943,15 @@ TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t 
   r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
-  const TfQuant xq = actQuant(p, isInteger(p.act) ? litertActScale(abits) : 1.0f);
+  const float xScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
+  const TfQuant xq = actQuant(p, xScale);
   const int x = r.m.addTensor(0, {1, 1, (int32_t)K}, p.act, "x", 0, xq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
+  const bool bias = fcHasBias(p);
+  const int b = bias ? addFcBias(r, N, xScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int y = r.m.addTensor(0, {1, 1, (int32_t)N}, p.act, "y", 0, yq);
-  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p), {x, w, -1}, {y}, fcOptions(p));
+  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
   r.m.setInputs(0, {x});
   r.m.setOutputs(0, {y});
   return r.m.build(describe(p, "gemv"));
@@ -1263,7 +1294,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     if (!qdq)
     {
       const int out = tensor(outShape, name);
-      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p), {in, w, -1}, {out}, fcOptions(p));
+      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, false), {in, w, -1}, {out}, fcOptions(p));
       return out;
     }
     // W8A8: quantize in, integer multiply, dequantize out.
@@ -1276,7 +1307,8 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     r.m.addOp(0, TfOp::Quantize, 1, {in}, {inQ});
     LitertPlan ip = p;
     ip.act = TfType::I8;
-    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(ip), {inQ, w, -1}, {outQ}, fcOptions(ip));
+    const int b = addFcBias(r, N, qa, litertWeightScale(bitsOf(p.weight)) * mag);
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(ip, true), {inQ, w, b}, {outQ}, fcOptions(ip));
     r.m.addOp(0, TfOp::Dequantize, 2, {outQ}, {out});
     return out;
   };

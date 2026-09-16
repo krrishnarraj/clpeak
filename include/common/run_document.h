@@ -236,6 +236,7 @@ struct LogEntry {
 // any "backend X is missing" report is whether it was ever compiled in.
 struct BuildInfo {
     std::vector<std::string> backends;   // Backend names, registry order
+    std::string config;                  // CMake configuration ("Release", "Debug"), when the build stamped it
 };
 
 // How clpeak was asked to run.  Recorded because every number here is

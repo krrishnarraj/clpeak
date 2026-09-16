@@ -200,6 +200,9 @@ int clpeak_launch(int argc, const char **argv,
     combined.meta.generatedAt   = isoTimestampUtc();
     for (const auto &be : backendRegistry())
         combined.meta.build.backends.push_back(backendInfo(be.id).name);
+#ifdef CLPEAK_BUILD_CONFIG
+    combined.meta.build.config = CLPEAK_BUILD_CONFIG;
+#endif
     combined.meta.host          = probeHost();
     combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
     // The sidecar: every entry on disk as it happens, for the native crash

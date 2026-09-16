@@ -13,3 +13,7 @@ clpeak_link_backends(clpeak)
 target_include_directories(clpeak PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
 include(${CMAKE_CURRENT_LIST_DIR}/../common/cmake/version.cmake)
 clpeak_setup_version(clpeak)
+# The configuration goes into every run document's `build` block: a debug
+# build's host-side work (model generation, reference arithmetic) runs
+# unoptimised, and a report from one should say so.
+target_compile_definitions(clpeak PRIVATE CLPEAK_BUILD_CONFIG="$<CONFIG>")

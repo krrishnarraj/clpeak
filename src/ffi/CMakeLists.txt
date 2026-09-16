@@ -22,6 +22,8 @@ set_target_properties(clpeak_ffi PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
+# See src/cli/CMakeLists.txt: the run document records the configuration.
+target_compile_definitions(clpeak_ffi PRIVATE CLPEAK_BUILD_CONFIG="$<CONFIG>")
 if(NOT ANDROID)
     # Place the library at the build root for easy discovery (clpeak-gui,
     # CLPEAK_FFI_PATH dev override).  Android keeps CMake defaults so the

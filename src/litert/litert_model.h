@@ -85,8 +85,9 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
 clpeak_tflite::TfType litertConstantType(const LitertPlan &p);
 
 // The version number a converted model would carry for FULLY_CONNECTED in
-// this plan (tflite/converter/tools/versioning/op_version.cc).
-int litertFcVersion(const LitertPlan &p);
+// this plan (tflite/converter/tools/versioning/op_version.cc), with or
+// without the bias input.
+int litertFcVersion(const LitertPlan &p, bool hasBias);
 
 // ---- scalar conversions ---------------------------------------------------
 uint16_t litertFloatToHalf(float f);

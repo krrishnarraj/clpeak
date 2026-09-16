@@ -8,7 +8,9 @@
 #include <common/logger.h>
 #include <common/peak.h>
 
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct CliOptions;
@@ -33,6 +35,8 @@ constexpr double kLitertCreateGrowthFloor = 2.0e6;
 // accelerator over OpenCL, Metal or WebGPU) and NPU (a vendor dispatch
 // library) -- and, as in the Core ML backend, each is presented as one
 // device so the same micro-graphs run side by side on all of them.
+enum class LitertFormat;   // src/litert/litert_model.h
+
 enum class LitertAccel { Cpu, Gpu, Npu };
 const char *litertAccelName(LitertAccel a);   // "CPU" / "GPU" / "NPU"
 
@@ -69,7 +73,33 @@ public:
   int runDispatchLatency(const LitertRuntime &rt, const litert_device_info_t &dev, benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
+
+  // litert_numeric_error's measurement for one format on one device,
+  // memoised: the relative RMS error of the accelerator's 1024-cubed matmul
+  // against the host's double-precision reference, in ppm, or the status
+  // and reason when it could not be measured.  The rate tests ask before
+  // publishing a format's rate -- a kernel that returns a wrong answer
+  // (Mali's int8 path on a Pixel 7a was 250% off) is not a capability, and
+  // its speed is not a number anyone should divide by.
+  struct AnswerCheck
+  {
+    double ppm = -1.0;
+    ResultStatus status = ResultStatus::Ok;
+    std::string error;
+  };
+  const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f);
+  // Empty when the format's answer is right or could not be checked;
+  // otherwise the reason a rate row is refused with.
+  std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f);
+
+private:
+  std::map<std::pair<int, int>, AnswerCheck> answerChecks_;   // (accelerator, format)
 };
+
+// A relative RMS error past this is a wrong answer, not a loss of precision:
+// int8 with the result itself quantized costs ~1%, nothing legitimate here
+// reaches 10%.
+constexpr double kLitertWrongAnswerPpm = 100000.0;
 
 // The accelerators this machine can actually run, accelerators first and the
 // CPU last: each has compiled and run one tiny model with nothing handed

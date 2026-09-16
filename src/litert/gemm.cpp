@@ -187,6 +187,12 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       test.skip(label, ResultStatus::Unsupported, plan.whyNot, o);
       continue;
     }
+    // A kernel whose answer is wrong has no rate worth publishing.
+    if (const std::string wrong = wrongAnswer(rt, dev, v.f); !wrong.empty())
+    {
+      test.skip(label, ResultStatus::Error, wrong, o);
+      continue;
+    }
 
     double best = 0.0;
     int64_t bestDim = 0;
@@ -397,13 +403,10 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       if (!kernel.empty())
       {
         o.description += "  Ran as `" + kernel + "`.";
-        // The GPU accelerator's answer to a quantized graph is to wrap a
-        // float kernel in quantize/dequantize passes; the tag says so, and
-        // a row that says "ops" for float arithmetic needs the sentence.
-        if (kernel.find("quantize_and_dequantize") != std::string::npos)
-          o.description += "  That is a float kernel between quantize and dequantize passes, not "
-                           "integer arithmetic: the accelerator has no int8 multiply and this rate "
-                           "is its float one, with the format's traffic savings.";
+        // A row that says "ops" for float arithmetic needs the sentence;
+        // the kernel's name, not the passes around it, says which it was.
+        if (plan.integerOps && !litertKernelIsInteger(kernel))
+          o.description += litertFloatKernelNote();
       }
       test.emit(label, (float)best, o);
     }
