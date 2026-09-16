@@ -61,14 +61,15 @@ constexpr double kFoldWorkFloor = 0.15;
 
 // Everything a rung holds at once, capped at a quarter of physical memory
 // (a fixed ceiling would be a crash on a phone and a needless limit on a
-// workstation): the model's own copy of A and W, the scaled activations,
-// the result, and the accelerator's packed copy of the weights.
+// workstation): the model's own copy of A and W in their stored types, the
+// scaled activations, the result, and the accelerator's packed copy of the
+// weights.
 uint64_t maxRungBytes() { return clpeak::memoryBudget(3ull << 30); }
 
 uint64_t rungBytes(const LitertPlan &p, int64_t D)
 {
-  const uint64_t a = litertElemBytes(p.act, D * D);
-  const uint64_t w = litertElemBytes(p.weight, D * D);
+  const uint64_t a = litertElemBytes(litertConstantType(p), D * D);
+  const uint64_t w = litertWeightBytes(p, D, D);
   return 2 * a + 2 * w + a;
 }
 
@@ -86,8 +87,8 @@ const Variant kVariants[] = {
     {LitertFormat::Fp16,
      "16-bit storage and arithmetic.  On the CPU the tensors are half-typed and "
      "XNNPACK runs its fp16 GEMM; on the GPU it is the accelerator's fp16 "
-     "policy over the same fp32 graph, weights converted to half at load -- "
-     "what a converted model gets by default on a phone."},
+     "policy over an fp32 graph whose weights are stored as half -- what a "
+     "float16-quantized model gets by default on a phone."},
     {LitertFormat::Fp16Acc32,
      "The GPU's third precision policy: fp16 storage and arithmetic with the "
      "matmul accumulated in fp32.  Whether it costs anything against plain "

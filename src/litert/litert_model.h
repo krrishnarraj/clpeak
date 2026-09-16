@@ -35,7 +35,7 @@
 enum class LitertFormat
 {
   Fp32,        // fp32 storage and arithmetic
-  Fp16,        // fp16 storage and arithmetic (the GPU: an fp32 graph under its fp16 policy)
+  Fp16,        // fp16 storage and arithmetic (the GPU: fp16 constants in an fp32 graph under its fp16 policy)
   Fp16Acc32,   // GPU only: fp16 storage, fp32 accumulation in the matmul-class operators
   Bf16,        // bfloat16 tensors: in the schema; whether any kernel takes them is the row
   Int8Qdq,     // full-integer: int8 activations, int8 per-channel weights, int8 result
@@ -69,8 +69,20 @@ struct LitertPlan
   // as the accelerator's error.  With the rounding done on the host first
   // the conversion is exact and cancels, as it does for a half-typed graph.
   bool halfRounded = false;
+  // The graph's large float constants are stored as fp16 and dequantized
+  // into the fp32 graph (DEQUANTIZE, the form the converter's own float16
+  // quantization writes): the GPU's fp16 policies hold them as half anyway,
+  // so an fp32 copy in the model is twice the host memory for nothing, and
+  // on a phone that memory is the difference between a rung that runs and
+  // one the budget refuses.  The accelerator folds the dequantize at load.
+  bool halfConstants = false;
 };
 LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
+
+// The type a plan's activation-shaped constants are stored in: fp16 under
+// `halfConstants`, otherwise the activation type.  What a resident tensor
+// costs in host memory and, on the GPU, the bytes it streams.
+clpeak_tflite::TfType litertConstantType(const LitertPlan &p);
 
 // The version number a converted model would carry for FULLY_CONNECTED in
 // this plan (tflite/converter/tools/versioning/op_version.cc).
@@ -83,6 +95,12 @@ uint16_t litertFloatToBf16(float f);
 float litertBf16ToFloat(uint16_t b);
 uint8_t litertFloatToFp8E4M3(float f);
 float litertFp8E4M3ToFloat(uint8_t v);
+
+// On AArch64 the half conversions are the hardware's (one instruction each;
+// the fills depend on it); this checks them against the bit-level routine
+// they replace, across every half code and every rounding case.  True on
+// other platforms, which only have the routine.
+bool litertHalfConversionsAgree();
 
 // ---- operand values -------------------------------------------------------
 // Deterministic uniform values in [-0.5, 0.5) * magnitude: the same

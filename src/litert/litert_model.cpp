@@ -3,11 +3,25 @@
 #include "litert_model.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <thread>
 
 using namespace clpeak_tflite;
+
+// AArch64 converts fp32 <-> fp16 in one instruction (fcvt: round to nearest
+// even, subnormals kept), which the fills lean on: a phone rounds a
+// 64M-element constant to half in the time the bit-level routine below
+// takes for a fraction of it.  The two agree to the bit -- the routine is
+// the same rounding spelt out -- and the bit-level one stays as the other
+// platforms' path and the definition.
+#if defined(__aarch64__) && defined(__ARM_FP16_FORMAT_IEEE)
+#define CLPEAK_LITERT_HW_HALF 1
+#else
+#define CLPEAK_LITERT_HW_HALF 0
+#endif
 
 // ---------------------------------------------------------------------------
 // Formats and plans
@@ -59,6 +73,8 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     {
       p.gpuPrecision = kLiteRtDelegatePrecisionFp16;
       p.halfRounded = true;
+      p.halfConstants = true;
+      p.weight = TfType::F16;
     }
     else
       p.act = p.weight = TfType::F16;
@@ -72,6 +88,8 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     }
     p.gpuPrecision = kLiteRtDelegatePrecisionFp16WithFp32Accum;
     p.halfRounded = true;
+    p.halfConstants = true;
+    p.weight = TfType::F16;
     break;
   case LitertFormat::Bf16:
     if (accel == LitertAccel::Gpu)
@@ -143,14 +161,17 @@ int litertFcVersion(const LitertPlan &p)
     return 12;
   if (p.act == TfType::I16 && p.weight == TfType::I16)
     return 7;
-  return 6;   // two inputs
+  return 6;   // two inputs (an fp16 weight dequantized into an fp32 graph included)
 }
 
 // ---------------------------------------------------------------------------
 // Scalar conversions
 // ---------------------------------------------------------------------------
 
-uint16_t litertFloatToHalf(float f)
+namespace
+{
+
+uint16_t softFloatToHalf(float f)
 {
   uint32_t x;
   std::memcpy(&x, &f, 4);
@@ -181,7 +202,7 @@ uint16_t litertFloatToHalf(float f)
   return (uint16_t)half;
 }
 
-float litertHalfToFloat(uint16_t h)
+float softHalfToFloat(uint16_t h)
 {
   const uint32_t sign = ((uint32_t)h & 0x8000u) << 16;
   uint32_t exp = (h >> 10) & 0x1fu;
@@ -211,6 +232,61 @@ float litertHalfToFloat(uint16_t h)
   float f;
   std::memcpy(&f, &out, 4);
   return f;
+}
+
+} // namespace
+
+uint16_t litertFloatToHalf(float f)
+{
+#if CLPEAK_LITERT_HW_HALF
+  const __fp16 h = (__fp16)f;
+  uint16_t u;
+  std::memcpy(&u, &h, 2);
+  return u;
+#else
+  return softFloatToHalf(f);
+#endif
+}
+
+float litertHalfToFloat(uint16_t h)
+{
+#if CLPEAK_LITERT_HW_HALF
+  __fp16 v;
+  std::memcpy(&v, &h, 2);
+  return (float)v;
+#else
+  return softHalfToFloat(h);
+#endif
+}
+
+bool litertHalfConversionsAgree()
+{
+#if CLPEAK_LITERT_HW_HALF
+  // Every half-precision code back through both paths, and every float
+  // with a half-precision rounding case: the subnormal band, the halfway
+  // points, the overflow edge.
+  for (uint32_t h = 0; h < 0x10000u; h++)
+  {
+    const float a = litertHalfToFloat((uint16_t)h), b = softHalfToFloat((uint16_t)h);
+    if (std::memcmp(&a, &b, 4) != 0 && !(std::isnan(a) && std::isnan(b)))
+      return false;
+  }
+  for (uint32_t i = 0; i < (1u << 22); i++)
+  {
+    // A float per 2^10 codes across the whole range, plus the halfway points.
+    const uint32_t x = i << 10;
+    for (uint32_t y : {x, x + 0x1000u, x + 0x1fffu, x + 0x2000u})
+    {
+      float f;
+      std::memcpy(&f, &y, 4);
+      if (std::isnan(f))
+        continue;
+      if (litertFloatToHalf(f) != softFloatToHalf(f))
+        return false;
+    }
+  }
+#endif
+  return true;
 }
 
 uint16_t litertFloatToBf16(float f)
@@ -298,13 +374,21 @@ uint32_t hash32(uint32_t h)
   return h;
 }
 
+// Row i's key, then one mix per element.  The inner loop over j is integer
+// multiply/shift/xor and a float convert with nothing carried between
+// elements, so it vectorises, and rows are independent, so a fill runs on
+// every core (fillTensor below).
+uint32_t rowKey(int64_t i, uint32_t seed) { return hash32((uint32_t)i * 2654435761u ^ seed); }
+
+float valueIn(uint32_t key, int64_t j)
+{
+  const uint32_t h = hash32(key ^ ((uint32_t)j * 2246822519u));
+  return (float)(h & 0xffffffu) * (1.0f / 16777216.0f) - 0.5f;
+}
+
 } // namespace
 
-float litertValueAt(int64_t i, int64_t j, uint32_t seed)
-{
-  const uint32_t h = hash32((uint32_t)i * 2654435761u ^ hash32((uint32_t)j * 2246822519u ^ seed));
-  return (float)(h & 0xffffffu) / 16777216.0f - 0.5f;
-}
+float litertValueAt(int64_t i, int64_t j, uint32_t seed) { return valueIn(rowKey(i, seed), j); }
 
 float litertActScale(int bits)
 {
@@ -322,6 +406,11 @@ float litertOutScale(int64_t K, int bits)
   // Four sigma of a K-deep dot product of two such operands (variance 1/12
   // each) onto the widest code.
   return (float)(std::sqrt((double)K) / 3.0 / (double)((1 << (bits - 1)) - 1));
+}
+
+TfType litertConstantType(const LitertPlan &p)
+{
+  return (p.halfConstants && p.act == TfType::F32) ? TfType::F16 : p.act;
 }
 
 size_t litertElemBytes(TfType t, int64_t count)
@@ -391,17 +480,54 @@ struct Fill
   bool halfRounded;     // fp32 values pre-rounded to fp16 (LitertPlan::halfRounded)
 };
 
+#if CLPEAK_LITERT_HW_HALF
+float roundHalf(float v) { return (float)(__fp16)v; }
+#else
 float roundHalf(float v) { return litertHalfToFloat(litertFloatToHalf(v)); }
+#endif
+
+// Run `rowFn(i)` for every row on every hardware thread, rows handed out
+// in small chunks so a phone's little cores do not decide when the big
+// ones finish.  Small fills stay on the calling thread.
+template <typename RowFn> void forEachRow(int64_t rows, int64_t cols, RowFn &&rowFn)
+{
+  unsigned threads = std::thread::hardware_concurrency();
+  if (threads == 0 || rows * cols < (1 << 18) || rows < 2)
+    threads = 1;
+  threads = std::min<unsigned>(threads, (unsigned)rows);
+  if (threads == 1)
+  {
+    for (int64_t i = 0; i < rows; i++)
+      rowFn(i);
+    return;
+  }
+  const int64_t chunk = std::max<int64_t>(1, rows / ((int64_t)threads * 16));
+  std::atomic<int64_t> next(0);
+  std::vector<std::thread> pool;
+  pool.reserve(threads);
+  for (unsigned t = 0; t < threads; t++)
+    pool.emplace_back([&]() {
+      for (;;)
+      {
+        const int64_t begin = next.fetch_add(chunk);
+        if (begin >= rows)
+          return;
+        const int64_t end = std::min(rows, begin + chunk);
+        for (int64_t i = begin; i < end; i++)
+          rowFn(i);
+      }
+    });
+  for (auto &th : pool)
+    th.join();
+}
 
 void fillTensor(uint8_t *dst, size_t bytes, void *ctx)
 {
   const Fill &f = *static_cast<const Fill *>(ctx);
-  auto at = [&](int64_t i, int64_t j) {
-    const float v = litertValueAt(i, j, f.seed) * f.magnitude;
-    return f.halfRounded ? roundHalf(v) : v;
-  };
-  auto code = [&](int64_t i, int64_t j) -> long {
-    const long q = std::lround(at(i, j) / f.scale);
+  const int64_t cols = f.cols;
+  // The integer types: the stored code for a value, rounded and clamped.
+  auto code = [&](float v) -> long {
+    const long q = std::lround(v / f.scale);
     return std::max(-(long)f.qmax, std::min((long)f.qmax, q));
   };
   switch (f.type)
@@ -409,57 +535,95 @@ void fillTensor(uint8_t *dst, size_t bytes, void *ctx)
   case TfType::F32:
   {
     float *p = reinterpret_cast<float *>(dst);
-    for (int64_t i = 0; i < f.rows; i++)
-      for (int64_t j = 0; j < f.cols; j++)
-        p[i * f.cols + j] = at(i, j);
+    forEachRow(f.rows, cols, [&](int64_t i) {
+      const uint32_t key = rowKey(i, f.seed);
+      float *row = p + i * cols;
+      if (f.halfRounded)
+        for (int64_t j = 0; j < cols; j++)
+          row[j] = roundHalf(valueIn(key, j) * f.magnitude);
+      else
+        for (int64_t j = 0; j < cols; j++)
+          row[j] = valueIn(key, j) * f.magnitude;
+    });
     break;
   }
   case TfType::F16:
   {
     uint16_t *p = reinterpret_cast<uint16_t *>(dst);
-    for (int64_t i = 0; i < f.rows; i++)
-      for (int64_t j = 0; j < f.cols; j++)
-        p[i * f.cols + j] = litertFloatToHalf(at(i, j));
+    forEachRow(f.rows, cols, [&](int64_t i) {
+      const uint32_t key = rowKey(i, f.seed);
+      uint16_t *row = p + i * cols;
+      for (int64_t j = 0; j < cols; j++)
+        row[j] = litertFloatToHalf(valueIn(key, j) * f.magnitude);
+    });
     break;
   }
   case TfType::BF16:
   {
     uint16_t *p = reinterpret_cast<uint16_t *>(dst);
-    for (int64_t i = 0; i < f.rows; i++)
-      for (int64_t j = 0; j < f.cols; j++)
-        p[i * f.cols + j] = litertFloatToBf16(at(i, j));
+    forEachRow(f.rows, cols, [&](int64_t i) {
+      const uint32_t key = rowKey(i, f.seed);
+      uint16_t *row = p + i * cols;
+      for (int64_t j = 0; j < cols; j++)
+        row[j] = litertFloatToBf16(valueIn(key, j) * f.magnitude);
+    });
     break;
   }
   case TfType::F8E4M3:
-    for (int64_t i = 0; i < f.rows; i++)
-      for (int64_t j = 0; j < f.cols; j++)
-        dst[i * f.cols + j] = litertFloatToFp8E4M3(at(i, j) / f.scale);
+    forEachRow(f.rows, cols, [&](int64_t i) {
+      const uint32_t key = rowKey(i, f.seed);
+      uint8_t *row = dst + i * cols;
+      for (int64_t j = 0; j < cols; j++)
+        row[j] = litertFloatToFp8E4M3(valueIn(key, j) * f.magnitude / f.scale);
+    });
     break;
   case TfType::I8:
   {
     int8_t *p = reinterpret_cast<int8_t *>(dst);
-    for (int64_t i = 0; i < f.rows; i++)
-      for (int64_t j = 0; j < f.cols; j++)
-        p[i * f.cols + j] = (int8_t)code(i, j);
+    forEachRow(f.rows, cols, [&](int64_t i) {
+      const uint32_t key = rowKey(i, f.seed);
+      int8_t *row = p + i * cols;
+      for (int64_t j = 0; j < cols; j++)
+        row[j] = (int8_t)code(valueIn(key, j) * f.magnitude);
+    });
     break;
   }
   case TfType::I16:
   {
     int16_t *p = reinterpret_cast<int16_t *>(dst);
-    for (int64_t i = 0; i < f.rows; i++)
-      for (int64_t j = 0; j < f.cols; j++)
-        p[i * f.cols + j] = (int16_t)code(i, j);
+    forEachRow(f.rows, cols, [&](int64_t i) {
+      const uint32_t key = rowKey(i, f.seed);
+      int16_t *row = p + i * cols;
+      for (int64_t j = 0; j < cols; j++)
+        row[j] = (int16_t)code(valueIn(key, j) * f.magnitude);
+    });
     break;
   }
   case TfType::I4:
   {
-    // Two per byte, the first in the low nibble, two's complement.
+    // Two per byte, the first in the low nibble, two's complement.  A row
+    // of an even width owns whole bytes, so rows fill independently; an
+    // odd width (no recipe has one) goes element by element.
     std::memset(dst, 0, bytes);
-    const int64_t n = f.rows * f.cols;
-    for (int64_t e = 0; e < n; e++)
+    if (cols % 2 == 0)
+      forEachRow(f.rows, cols, [&](int64_t i) {
+        const uint32_t key = rowKey(i, f.seed);
+        uint8_t *row = dst + i * (cols / 2);
+        for (int64_t j = 0; j < cols; j += 2)
+        {
+          const uint8_t lo = (uint8_t)(code(valueIn(key, j) * f.magnitude) & 0xf);
+          const uint8_t hi = (uint8_t)(code(valueIn(key, j + 1) * f.magnitude) & 0xf);
+          row[j / 2] = (uint8_t)(lo | (hi << 4));
+        }
+      });
+    else
     {
-      const uint8_t nib = (uint8_t)(code(e / f.cols, e % f.cols) & 0xf);
-      dst[e / 2] |= (uint8_t)((e & 1) ? (nib << 4) : nib);
+      const int64_t n = f.rows * cols;
+      for (int64_t e = 0; e < n; e++)
+      {
+        const uint8_t nib = (uint8_t)(code(litertValueAt(e / cols, e % cols, f.seed) * f.magnitude) & 0xf);
+        dst[e / 2] |= (uint8_t)((e & 1) ? (nib << 4) : nib);
+      }
     }
     break;
   }
@@ -522,6 +686,42 @@ struct Recipe
     halfBuffers.push_back(std::move(v));
     return m.addBuffer(halfBuffers.back().data(), halfBuffers.back().size() * 2);
   }
+
+  // An fp16 constant dequantized into an fp32 graph (DEQUANTIZE version 3,
+  // the converter's own float16-quantization form): the tensor the graph
+  // consumes is fp32, the bytes in the model are half.
+  int dequantized(const std::vector<int32_t> &shape, const std::string &name, int buf, const TfQuant &q)
+  {
+    const int packed = m.addTensor(0, shape, TfType::F16, name + "_h", buf);
+    const int t = m.addTensor(0, shape, TfType::F32, name, 0, q);
+    m.addOp(0, TfOp::Dequantize, 3, {packed}, {t});
+    return t;
+  }
+
+  // An activation-shaped constant as a tensor of the activation type, stored
+  // as the plan says (litertConstantType).  `scale`/`qmax` are the integer
+  // types' code mapping.
+  int actConstant(const LitertPlan &p, const std::vector<int32_t> &shape, const std::string &name,
+                  int64_t rows, int64_t cols, uint32_t seed, float magnitude, float scale = 1.0f,
+                  int qmax = 0, const TfQuant &q = TfQuant())
+  {
+    const TfType stored = litertConstantType(p);
+    const int buf = constant(rows, cols, stored, seed, magnitude, scale, qmax);
+    if (stored == p.act)
+      return m.addTensor(0, shape, p.act, name, buf, q);
+    return dequantized(shape, name, buf, q);
+  }
+
+  // A float weight in the plan's weight type; an fp16 weight in an fp32
+  // graph is dequantized into it.
+  int floatWeight(const LitertPlan &p, const std::vector<int32_t> &shape, const std::string &name,
+                  int64_t rows, int64_t cols, uint32_t seed, float magnitude)
+  {
+    const int buf = constant(rows, cols, p.weight, seed, magnitude);
+    if (p.weight == TfType::F16 && p.act == TfType::F32)
+      return dequantized(shape, name, buf, TfQuant());
+    return m.addTensor(0, shape, p.weight, name, buf);
+  }
 };
 
 // The quantization a plan's activations carry, at a given scale.
@@ -543,10 +743,7 @@ int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t see
   const TfType wt = p.weight;
   int tensor;
   if (wt == TfType::F32 || wt == TfType::F16 || wt == TfType::BF16)
-  {
-    const int buf = r.constant(N, K, wt, seed, 1.0f);
-    tensor = r.m.addTensor(0, {(int32_t)N, (int32_t)K}, wt, "W", buf);
-  }
+    tensor = r.floatWeight(p, {(int32_t)N, (int32_t)K}, "W", N, K, seed, 1.0f);
   else if (wt == TfType::F8E4M3)
   {
     // One scale per row; codes span a comfortable part of the format's range
@@ -663,14 +860,13 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.act, M * K) + litertElemBytes(p.weight, N * K));
+  r.m.reserveBytes(litertElemBytes(litertConstantType(p), M * K) + litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
 
-  const int aBuf = isInteger(p.act) ? r.constant(M, K, p.act, seedA, 1.0f, aScale, qmaxOf(p.act))
-                                    : r.constant(M, K, p.act, seedA, 1.0f);
-  const int a = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "A", aBuf, aq);
+  const int a = r.actConstant(p, {1, (int32_t)M, (int32_t)K}, "A", M, K, seedA, 1.0f,
+                              isInteger(p.act) ? aScale : 1.0f, isInteger(p.act) ? qmaxOf(p.act) : 0, aq);
   const int s = addScalar(r, p);
   const int as = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "As", 0, aq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
@@ -735,11 +931,10 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.act, rows * cols));
+  r.m.reserveBytes(litertElemBytes(litertConstantType(p), rows * cols));
   const std::vector<int32_t> shape = {1, (int32_t)rows, (int32_t)cols};
   // Magnitude 4: softmax and the normalisation need a spread to work on.
-  const int x0Buf = r.constant(rows, cols, p.act, 0x6a09e667u, 4.0f);
-  const int x0 = r.m.addTensor(0, shape, p.act, "X0", x0Buf);
+  const int x0 = r.actConstant(p, shape, "X0", rows, cols, 0x6a09e667u, 4.0f);
   const int s = addScalar(r, p);
   const int x = r.m.addTensor(0, shape, p.act, "X", 0);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
@@ -879,10 +1074,7 @@ int addFilter(Recipe &r, const LitertPlan &p, int64_t channels, int64_t kernel, 
   const int64_t cols = depthwise ? kernel * kernel * channels : fanIn;
   const TfType wt = p.weight;
   if (wt == TfType::F32 || wt == TfType::F16 || wt == TfType::BF16)
-  {
-    const int buf = r.constant(rows, cols, wt, 0x7f4a7c15u, mag);
-    return r.m.addTensor(0, shape, wt, "W", buf);
-  }
+    return r.floatWeight(p, shape, "W", rows, cols, 0x7f4a7c15u, mag);
   const float scale = litertWeightScale(bitsOf(wt)) * mag;
   const int buf = r.constant(rows, cols, wt, 0x7f4a7c15u, mag, scale, qmaxOf(wt));
   TfQuant q;
@@ -913,16 +1105,14 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.act, channels * spatial * spatial));
+  r.m.reserveBytes(litertElemBytes(litertConstantType(p), channels * spatial * spatial));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
   const std::vector<int32_t> shape = {1, (int32_t)spatial, (int32_t)spatial, (int32_t)channels};
 
-  const int x0Buf = isInteger(p.act)
-      ? r.constant(spatial * spatial, channels, p.act, 0x9e3779b9u, 1.0f, aScale, qmaxOf(p.act))
-      : r.constant(spatial * spatial, channels, p.act, 0x9e3779b9u, 1.0f);
-  const int x0 = r.m.addTensor(0, shape, p.act, "X0", x0Buf, aq);
+  const int x0 = r.actConstant(p, shape, "X0", spatial * spatial, channels, 0x9e3779b9u, 1.0f,
+                               isInteger(p.act) ? aScale : 1.0f, isInteger(p.act) ? qmaxOf(p.act) : 0, aq);
   const int s = addScalar(r, p);
   const int x = r.m.addTensor(0, shape, p.act, "X", 0, aq);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
@@ -1010,17 +1200,18 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   fp.weightBlock = 0;
   fp.dynamicQuant = false;
 
+  const TfType stored = litertConstantType(fp);   // the float constants' stored type
   r.m.reserveBytes(4 * litertWeightBytes(p, d, d) + 2 * litertWeightBytes(p, ffn, d) +
                    litertWeightBytes(p, d, ffn) +
-                   (decode ? 2 * litertElemBytes(sh.int8Kv ? TfType::I8 : act, H * ctx * Dh) : 0) +
-                   litertElemBytes(act, S * d));
+                   (decode ? 2 * litertElemBytes(sh.int8Kv ? TfType::I8 : stored, H * ctx * Dh) : 0) +
+                   litertElemBytes(stored, S * d));
 
   auto tensor = [&](const std::vector<int32_t> &shape, const std::string &name) {
     return r.m.addTensor(0, shape, act, name, 0);
   };
   const std::vector<int32_t> xShape = {1, (int32_t)S, (int32_t)d};
 
-  const int x0 = r.m.addTensor(0, xShape, act, "X0", r.constant(S, d, act, 0xa5a5a5a5u, mag));
+  const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
   const int s = addScalar(r, fp);
   const int x = tensor(xShape, "X");
   r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
@@ -1036,7 +1227,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     {
       const TfType wt = p.weight;
       if (wt == TfType::F32 || wt == TfType::F16 || wt == TfType::BF16)
-        w = r.m.addTensor(0, {(int32_t)N, (int32_t)K}, wt, "W_" + name, r.constant(N, K, wt, seed, mag));
+        w = r.floatWeight(p, {(int32_t)N, (int32_t)K}, "W_" + name, N, K, seed, mag);
       else if (wt == TfType::F8E4M3)
       {
         const float scale = 1.0f / 16.0f;
@@ -1117,7 +1308,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   {
     auto cache = [&](const std::string &name, uint32_t seed) -> int {
       if (!sh.int8Kv)
-        return r.m.addTensor(0, cacheShape, act, name, r.constant(H * ctx, Dh, act, seed, mag));
+        return r.actConstant(fp, cacheShape, name, H * ctx, Dh, seed, mag);
       // Quantized per tensor: the cache spends the whole int8 range and one
       // scale quarters it back to the [-0.25, 0.25) the float cache holds.
       const float scale = 0.25f / 127.0f;

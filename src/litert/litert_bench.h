@@ -13,6 +13,13 @@
 //   3. timed    pickIters(probe, budget, forced, kLitertMaxIters) inferences;
 //               when the budget affords only one, the probe already is the
 //               measurement.
+//
+// Every batch, the probe included, ends with a wait for the accelerator: the
+// GPU accelerator's OpenCL path returns from a run as soon as the work is
+// submitted, and a probe that timed a submission would size the batch for
+// a run a hundred times shorter than the real one -- on a phone that turned
+// a one-second budget into ten.  `syncEach` waits after every run instead,
+// for the latency rows, where a result read back is the unit of work.
 
 #include <litert/litert_peak.h>
 #include "litert_model.h"
@@ -45,17 +52,17 @@ struct LitertMeasurement
 
 inline LitertMeasurement litertMeasure(LitertSession &s, unsigned warmupCount, unsigned budgetUs,
                                        bool forceIters, unsigned forced,
-                                       unsigned maxIters = kLitertMaxIters)
+                                       unsigned maxIters = kLitertMaxIters, bool syncEach = false)
 {
   LitertMeasurement m;
-  if (s.timeRuns(1 + warmupCount, m.error) < 0.0)
+  if (s.timeRuns(1 + warmupCount, m.error, syncEach) < 0.0)
   {
     if (m.error.empty())
       m.error = "inference failed";
     m.status = litertFailureStatus(m.error);
     return m;
   }
-  m.probeUs = s.timeRuns(1, m.error);
+  m.probeUs = s.timeRuns(1, m.error, syncEach);
   if (m.probeUs <= 0.0)
   {
     m.status = ResultStatus::Error;
@@ -64,7 +71,7 @@ inline LitertMeasurement litertMeasure(LitertSession &s, unsigned warmupCount, u
     return m;
   }
   m.iters = pickIters(m.probeUs, budgetUs, forceIters ? forced : 0, maxIters);
-  m.meanUs = (m.iters > 1) ? s.timeRuns(m.iters, m.error) : m.probeUs;
+  m.meanUs = (m.iters > 1) ? s.timeRuns(m.iters, m.error, syncEach) : m.probeUs;
   if (m.meanUs <= 0.0)
   {
     m.status = ResultStatus::Error;

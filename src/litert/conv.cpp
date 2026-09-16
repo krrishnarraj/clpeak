@@ -56,7 +56,7 @@ const Format kFormats[] = {
      "FP32 in and out; on the GPU under its fp32 policy."},
     {LitertFormat::Fp16, "fp16",
      "16-bit floats: half-typed tensors on the CPU, the GPU's fp16 policy over "
-     "an fp32 graph."},
+     "an fp32 graph with half-stored weights."},
     {LitertFormat::Int8Qdq, "int8",
      "8-bit activations and per-channel 8-bit weights with an 8-bit result -- "
      "TFLite's full-integer convolution, the operation every mobile NPU is "
@@ -132,7 +132,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         continue;
       }
 
-      const uint64_t elemBytes = litertElemBytes(plan.act, 1);
+      const uint64_t elemBytes = litertElemBytes(litertConstantType(plan), 1);
       double best = 0.0;
       int64_t bestSp = 0;
       std::string firstErr, kernel;
@@ -145,8 +145,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       {
         if (clpeak::cancelRequested())
           break;
-        // The feature map, held three times (the constant, the scaled copy,
-        // the result).
+        // The feature map, held three times (the constant as stored, the
+        // scaled copy, the result).
         const uint64_t bytes = 3ull * (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
         if (bytes > maxTensorBytes())
         {

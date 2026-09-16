@@ -69,7 +69,9 @@ Run measure(const LitertRuntime &rt, const litert_device_info_t &dev, const Lite
     r.status = ResultStatus::Error;
     return r;
   }
-  auto m = litertMeasure(*s, warmup, kBudgetUs, forceIters, forced, kMaxIters);
+  // Waited for one at a time: the toll is per piece of work handed over
+  // and taken back, not per submission into a queue.
+  auto m = litertMeasure(*s, warmup, kBudgetUs, forceIters, forced, kMaxIters, true);
   if (m.meanUs <= 0.0)
   {
     r.error = m.error;

@@ -50,6 +50,9 @@ public:
   // Creation cost in microseconds: model load plus compilation (on an NPU,
   // the vendor compiler; on the GPU, shader compilation and weight upload).
   double createUs = 0.0;
+  // The first inference, which finishes what creation deferred (XNNPACK
+  // packs its weights then, the GPU accelerator uploads); zero until run.
+  double firstRunUs = 0.0;
 
   // Did every operation land on the device this session was created for?
   // Always true on the CPU.  For the GPU and NPU this is LiteRT's own
@@ -68,12 +71,22 @@ public:
   // buffer LiteRT allocated.
   bool writeInput(size_t i, const void *data, size_t bytes, std::string &error);
 
-  // One inference.
+  // One inference.  The GPU accelerator may return before the GPU has
+  // finished (its OpenCL path submits and does not wait by default), so a
+  // run is complete only once sync() has returned.
   bool run(std::string &error);
 
-  // Mean microseconds per inference over `n` of them; negative with `error`
-  // set on failure.
-  double timeRuns(unsigned n, std::string &error);
+  // Wait for every run so far to finish: a read lock on the first output
+  // waits on whatever the accelerator left pending.  Free where the run
+  // already waited.
+  bool sync(std::string &error);
+
+  // Mean microseconds per inference over `n` of them, the batch ended with
+  // a sync() so the time covers the accelerator's completion and not just
+  // its submissions; with `syncEach` every run is waited for on its own,
+  // which is what a caller that reads each result pays.  Negative with
+  // `error` set on failure.
+  double timeRuns(unsigned n, std::string &error, bool syncEach = false);
 
   // Bytes of output `i` after the last run().
   bool outputBytes(size_t i, std::vector<uint8_t> &out, std::string &error);

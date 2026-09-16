@@ -500,6 +500,12 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   s->creationLog = console + litertDrainLog(rt);
   if (!console.empty() && clpeak::verboseEnabled())
     CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
+  // Where a session's time went, for the run log: the host generating the
+  // model against the runtime loading and compiling it.  On a phone both
+  // can dwarf the measurement that follows.
+  CLPEAK_VLOG("litert: %s: %.1f MB built in %.0f ms, loaded and compiled for the %s in %.0f ms\n",
+              s->bytes_.description.c_str(), (double)s->bytes_.size() / 1048576.0, s->bytes_.buildUs / 1000.0,
+              s->accelName_.c_str(), s->createUs / 1000.0);
 
   if (dev.accel != LitertAccel::Cpu)
   {
@@ -632,13 +638,21 @@ bool LitertSession::run(std::string &error)
   if (!ran_)
   {
     ran_ = true;
+    const auto t0 = Clock::now();
     clpeak::ScopedConsoleMute mute(clpeak::ScopedConsoleMute::Capture::Always);
     st = rt_->api.LiteRtRunCompiledModel(compiled_, 0, inputs_.size(), inputs_.data(),
                                          outputs_.size(), outputs_.data());
     mute.finish();
     console = mute.text();
+    if (st == kLiteRtStatusOk)
+    {
+      std::string ignored;
+      sync(ignored);   // the first run's time is to completion, like the rest
+    }
+    firstRunUs = elapsedUs(t0);
     if (!console.empty() && clpeak::verboseEnabled())
       CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
+    CLPEAK_VLOG("litert: %s: first inference %.0f ms\n", bytes_.description.c_str(), firstRunUs / 1000.0);
   }
   else
     st = rt_->api.LiteRtRunCompiledModel(compiled_, 0, inputs_.size(), inputs_.data(),
@@ -655,14 +669,40 @@ bool LitertSession::run(std::string &error)
   return true;
 }
 
-double LitertSession::timeRuns(unsigned n, std::string &error)
+bool LitertSession::sync(std::string &error)
+{
+  if (outputs_.empty())
+    return true;
+  void *p = nullptr;
+  LiteRtStatus st = rt_->api.LiteRtLockTensorBuffer(outputs_[0], &p, kLiteRtTensorBufferLockModeRead);
+  if (st != kLiteRtStatusOk)
+  {
+    error = "LiteRT could not wait for an inference: " + litertStatusText(*rt_, st);
+    return false;
+  }
+  st = rt_->api.LiteRtUnlockTensorBuffer(outputs_[0]);
+  if (st != kLiteRtStatusOk)
+  {
+    error = "LiteRT could not unmap an output buffer: " + litertStatusText(*rt_, st);
+    return false;
+  }
+  return true;
+}
+
+double LitertSession::timeRuns(unsigned n, std::string &error, bool syncEach)
 {
   if (n == 0)
     return 0.0;
   const auto t0 = Clock::now();
   for (unsigned i = 0; i < n; i++)
+  {
     if (!run(error))
       return -1.0;
+    if (syncEach && !sync(error))
+      return -1.0;
+  }
+  if (!syncEach && !sync(error))
+    return -1.0;
   return elapsedUs(t0) / n;
 }
 

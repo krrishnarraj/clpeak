@@ -12,8 +12,16 @@
 // by the three operations.  Every rung is reported at the three working-set
 // sizes litert-tensor-bw always measures, so the two ladders divide row for
 // row; see src/onnx/activation.cpp for why a single number per operation
-// cannot be made honest, and src/coreml/activation.cpp for the two-session
-// minimum and noise floor used here.
+// cannot be made honest.
+//
+// The noise floor is the Core ML test's (src/coreml/activation.cpp): a
+// difference is reported only when it clears the graphs' own spread by a
+// margin.  Core ML takes that spread between two sessions, because its
+// compiler can place a graph differently each time it is asked; LiteRT
+// compiles the same graph the same way, so the spread here is between two
+// timed batches of one session -- what run-to-run noise there is, without
+// building and uploading every constant twice, which on a phone GPU was
+// most of the test.
 
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
@@ -47,7 +55,7 @@ constexpr unsigned int kSizeBudgetUs = 1000000;
 
 // The share of the work the operation itself has to account for before the
 // difference is worth reporting, and the factor by which it has to clear
-// the graphs' own session-to-session spread.
+// the graphs' own run-to-run spread.
 constexpr double kMinOpShare = 0.10;
 constexpr double kNoiseFactor = 3.0;
 
@@ -73,14 +81,14 @@ const Variant kVariants[] = {
 
 struct Run
 {
-  double us = -1.0;         // the faster of the two sessions
+  double us = -1.0;         // the faster of the two batches
   double spreadUs = 0.0;    // how far apart they were
   std::string error;
   ResultStatus status = ResultStatus::Ok;
 };
 
-Run measureOnce(const LitertRuntime &rt, const litert_device_info_t &dev, const LitertPlan &plan,
-                int64_t rows, LitertActivation act, unsigned warmup, bool forceIters, unsigned forced)
+Run measure(const LitertRuntime &rt, const litert_device_info_t &dev, const LitertPlan &plan,
+            int64_t rows, LitertActivation act, unsigned warmup, bool forceIters, unsigned forced)
 {
   Run r;
   std::string err;
@@ -111,22 +119,17 @@ Run measureOnce(const LitertRuntime &rt, const litert_device_info_t &dev, const 
     r.status = m.status;
     return r;
   }
-  r.us = m.meanUs;
-  return r;
-}
-
-Run measure(const LitertRuntime &rt, const litert_device_info_t &dev, const LitertPlan &plan,
-            int64_t rows, LitertActivation act, unsigned warmup, bool forceIters, unsigned forced)
-{
-  Run a = measureOnce(rt, dev, plan, rows, act, warmup, forceIters, forced);
-  if (a.us <= 0.0)
-    return a;
-  Run b = measureOnce(rt, dev, plan, rows, act, warmup, forceIters, forced);
-  if (b.us <= 0.0)
-    return b;
-  Run r;
-  r.us = std::min(a.us, b.us);
-  r.spreadUs = std::fabs(a.us - b.us);
+  // A second batch of the same count: the spread between the two is the
+  // graph's own noise, and the faster one is the reading.
+  const double again = s->timeRuns(std::max(1u, m.iters), err);
+  if (again <= 0.0)
+  {
+    r.error = err.empty() ? "inference failed" : err;
+    r.status = ResultStatus::Error;
+    return r;
+  }
+  r.us = std::min(m.meanUs, again);
+  r.spreadUs = std::fabs(m.meanUs - again);
   return r;
 }
 
@@ -137,7 +140,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
 {
   (void)cfg;
   const LitertPlan plan = litertPlanFor(LitertFormat::Fp16, dev.accel);
-  const uint64_t elem = litertElemBytes(plan.act, 1);
+  const uint64_t elem = litertElemBytes(litertConstantType(plan), 1);   // the constant as stored
 
   auto test = currentDeviceScope->beginTest(
       {"litert_activation", "LiteRT activation throughput", "bps", Category::Bandwidth,
@@ -166,8 +169,10 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       const std::string metric = std::string(v.label) + "_" + sz.label;
       const std::string note = std::string(sz.label) + " of activations -- " + v.note +
                                "  Net of the read, scale and reduction around it.";
-      // The working set is sized in the bytes the accelerator streams; the
-      // GPU's fp16 policy keeps an fp32 graph's activations in half.
+      // The working set is sized in the bytes the accelerator streams, half
+      // on every accelerator under this plan; `graphBytes` is what the model
+      // holds, which is the same now that the GPU's constants are stored as
+      // half too.
       const int64_t rows = (int64_t)(sz.bytes / (2ull * (uint64_t)kCols));
       const uint64_t graphBytes = (uint64_t)rows * (uint64_t)kCols * elem;
 
@@ -211,7 +216,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
                       ? "the operation costs less than a tenth of the reference graph around it, "
                         "too close to the noise to report"
                       : "the operation's cost (" + std::to_string((long long)opUs) +
-                            " us) is within the graphs' own session-to-session spread (" +
+                            " us) is within the graphs' own run-to-run spread (" +
                             std::to_string((long long)noiseUs) +
                             " us), so it cannot be resolved -- on an accelerator that fuses it "
                             "into the passes around it, it costs nothing",

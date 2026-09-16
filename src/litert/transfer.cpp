@@ -81,7 +81,9 @@ Run measure(const LitertRuntime &rt, const litert_device_info_t &dev, const Lite
     {
       if (!s->writeInput(0, in.data(), in.size(), err) || !s->run(err))
         return -1.0;
-      if (roundTrip && !s->outputBytes(0, out, err))
+      // The result back in full, or the one element that proves the run
+      // finished: either way the trip is timed to completion.
+      if (roundTrip ? !s->outputBytes(0, out, err) : !s->sync(err))
         return -1.0;
     }
     return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / n;

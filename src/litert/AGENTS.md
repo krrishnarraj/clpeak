@@ -116,6 +116,32 @@ difference between a 1 GB rung and a killed process.  Models are loaded
 from that buffer in place (`LiteRtCreateModelFromBuffer`), and the session
 owns the bytes for its lifetime.
 
+**The fills run on every core and vectorise, and their cost is logged.**
+`fillTensor` hands rows out to every hardware thread in small chunks (so a
+phone's little cores do not decide when its big ones finish) and each row
+is one integer hash per element with nothing carried between elements, so
+the inner loop vectorises; on AArch64 the fp16 rounding is the `fcvt`
+instruction (`litertHalfConversionsAgree()` proves it matches the bit-level
+routine, checked once per `--verbose` run).  An M1 Pro fills a 256 MB
+constant in 40 ms.  The element-by-element original took a Pixel-class
+phone 11 s per 256 MB, which was most of every test there.  Under
+`--verbose` every session logs how long the model took to build, to load
+and compile, and its first inference, so the next phone run says where the
+time went.
+
+**Under the GPU's fp16 policies the large float constants are stored as
+fp16 and dequantized into the fp32 graph** (`LitertPlan::halfConstants`;
+`DEQUANTIZE` version 3, the form the converter's own float16 quantization
+writes).  Both the Metal and XNNPACK accelerators fold the dequantize at
+load -- the profile shows no kernel for it, the rate and the output are
+identical to an fp32 constant's, and creation is faster because the
+accelerator skips its own conversion.  What it buys is half the host
+memory per rung on the GPU (a 2048-wide block's weights are 101 MB in the
+model rather than 202), which on a 4 GB phone is the difference between the
+block running and the memory gate refusing it, and correct byte accounting:
+the decode row counted the fp32 model bytes for weights the GPU streamed as
+half and read twice the truth (203 GB/s on an M1 Pro whose bus does 200).
+
 **Every activation tensor carries a leading batch dimension of one.**  The
 GPU accelerator maps a 2-D tensor's first dimension onto its batch axis and
 reduces over it wrongly: `REDUCE_MAX` over axis 0 of a `[D, D]` matmul
@@ -136,16 +162,17 @@ kernel name from one profiled run says which kernel it was.
   F32, QB4W)`.  The last two are the finding: the weight-only formats
   (`int8_weight`, `int4_weight`) run as *int8 arithmetic on dynamically
   quantized activations*, not as float multiplies of unpacked weights.  On
-  an M1 Pro that is why `int8_weight` reads 2.57 TFLOPS against fp32's 468
-  GFLOPS, and why its accuracy row reads 3915 ppm where the GPU's -- which
-  unpacks the same weights to half and multiplies in float -- reads 4696
+  an M1 Pro that is why `int8_weight` reads 2.4 TFLOPS against fp32's 489
+  GFLOPS, and why its accuracy row reads 3918 ppm where the GPU's -- which
+  unpacks the same weights to half and multiplies in float -- reads 4692
   because it accumulates in fp16.
 - **The GPU accelerator computes an fp32 graph in fp16 unless told
   otherwise**, so `fp32` asks for its fp32 policy, `fp16` is its fp16 policy
-  over the same fp32 graph (it refuses half-typed tensors outright), and
-  `fp16_acc32` is its third policy, fp16 storage with fp32 accumulation.  On
-  an M1 Pro: 4.10 / 4.71 / 3.44 TFLOPS and 0.57 / 4690 / 388 ppm -- the GPU
-  accumulates fp16 in fp16 by default.  `fp16_acc32` applies nowhere else.
+  over an fp32 graph whose constants are stored as fp16 (it refuses
+  half-typed *activations* outright), and `fp16_acc32` is its third policy,
+  fp16 storage with fp32 accumulation.  On an M1 Pro: 4.06 / 4.69 / 3.2
+  TFLOPS and 0.57 / 4690 / 388 ppm -- the GPU accumulates fp16 in fp16 by
+  default.  `fp16_acc32` applies nowhere else.
 - **Its quantized graphs are float kernels between quantize and dequantize
   passes** (`convolution1x1(conv_wave_matrix) -> quantize_and_dequantize`),
   so its `int8_qdq` "TOPS" equals its fp16 rate; the row says so when the
@@ -176,6 +203,21 @@ is the second witness: one profiled run per variant at the smallest size
 names the kernel that did the multiply, and that name goes into the row.
 **Profiling never touches a timed session** -- on the Metal GPU it waits on
 every kernel and cut a 4 TFLOPS matmul to 0.4.
+
+**Every timed batch ends with a wait for the accelerator**
+(`LitertSession::sync()`, a read lock on the first output).  The GPU
+accelerator's OpenCL path returns from `LiteRtRunCompiledModel` once the
+work is *submitted* (`hint_waiting_for_completion: false` in its log), so
+on a phone the one-inference probe timed a submission, `pickIters` sized the
+batch for a run a hundred times shorter than the real one, and a 1 s budget
+ran for 10 s at every 128 MB rung -- the activation test alone took six
+minutes.  The batch mean was right (the queue back-pressures) but the
+budget was not.  Metal waited already, so the desktop numbers did not
+move.  The latency rows sync after *every* run (`syncEach`): the toll is
+per piece of work handed over and taken back, not per submission.  The
+activation test's noise floor is two timed batches of one session, not
+two sessions: LiteRT compiles a graph the same way each time, and building
+and uploading every constant twice was the other half of that six minutes.
 
 ## What the accelerator libraries do wrong, and how the backend stays up
 
@@ -263,17 +305,25 @@ clpeak flags rather than trusts it.
 
 ## Reference readings, M1 Pro (LiteRT 2.2.0, macOS 26)
 
+One run, 2026-09-16, after the fill/sync/fp16-constant changes; CPU rows
+move ±15% between runs on a laptop (and more if anything else is
+compiling), GPU rows ±10%.
+
 | row | GPU (Metal) | CPU (XNNPACK, 10 threads) |
 |---|---|---|
-| gemm fp32 / fp16 / fp16_acc32 | 4.10 / 4.71 / 3.44 TFLOPS | 468 GFLOPS / 1.00 TFLOPS / — |
-| gemm int8_qdq / int16x8 | 4.73 "TOPS" (float kernel) / aborts | 2.51 TOPS / 1.23 GOPS |
-| gemm int8_weight / int4_weight | 4.65 TFLOPS / heap overrun | 2.57 / 1.67 TFLOPS |
+| gemm fp32 / fp16 / fp16_acc32 | 3.64 / 4.70 / 3.37 TFLOPS | 489 GFLOPS / 903 GFLOPS / — |
+| gemm int8_qdq / int16x8 | 4.70 "TOPS" (float kernel) / aborts | 2.21 TOPS / 1.25 GOPS |
+| gemm int8_weight / int4_weight | 4.67 TFLOPS / heap overrun | 2.40 / 1.53 TFLOPS |
 | error fp32 / fp16 / fp16_acc32 | 0.57 / 4690 / 388 ppm | 0.57 / 4690 / — |
-| error int8_qdq / int8_weight / int4_weight | 10486 / 4696 / — | 9383 / 3915 / 4370 |
-| conv3x3 fp32 / fp16 / int8 | 8.88 / 12.7 T (Winograd-counted) / 12.7 TOPS | 594 G / 1.07 T / 2.64 TOPS |
-| block prefill fp16 s2048 / decode fp16 kv2048 | 4.37 TFLOPS / 203 GB/s | ~0.95 TFLOPS / 102 GB/s |
-| tensor_bw 8mb / 128mb | 183 / 140 GB/s | 214 / 117 GB/s |
-| dispatch trivial / matmul_256 / create | 252 µs / 331 µs / 1.23 ms | 551 ns / 142 µs / 173 µs |
+| error int8_qdq / int8_weight / int4_weight | 10430 / 4692 / — | 9317 / 3918 / 4377 |
+| conv3x3 fp32 / fp16 / int8 | 8.60 / 12.7 T (Winograd-counted) / 12.6 TOPS | 484 G / 984 G / 2.31 TOPS |
+| block prefill fp16 s2048 / decode fp16 kv2048 | 4.34 TFLOPS / 102 GB/s | 0.85 TFLOPS / 101 GB/s |
+| tensor_bw 8mb / 128mb | 484 / 142 GB/s | 261 / 115 GB/s |
+| dispatch trivial / matmul_256 / create | 268 µs / 390 µs / 1.36 ms | 602 ns / 144 µs / 277 µs |
+
+The whole backend, both devices, takes 6:46 here; the time is the timed
+budgets (1 s per activation/tensor size, 2 s per gemm/conv rung, 5 s per
+block point, the ONNX and Core ML backends' figures), not the models.
 
 ## Packaging
 

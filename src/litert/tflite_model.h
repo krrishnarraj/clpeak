@@ -162,6 +162,8 @@ struct TfliteBytes
 {
   std::vector<uint8_t> storage;
   size_t head = 0;
+  std::string description;   // the model's own description string
+  double buildUs = 0.0;      // what build() took: the fills are most of it
   const uint8_t *data() const { return storage.data() + head; }
   size_t size() const { return storage.size() - head; }
 };

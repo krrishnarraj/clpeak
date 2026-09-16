@@ -105,10 +105,15 @@ uint64_t weightBytes(const LitertPlan &p)
          litertWeightBytes(p, kDModel, kFfnHidden);
 }
 
+// The cache as the model stores it: int8 when asked, else the float
+// constant type of the block's float parts (the quantized block keeps
+// attention in float).
 uint64_t kvBytes(const LitertPlan &p, bool int8Kv, int64_t kv)
 {
-  const uint64_t elem = int8Kv ? 1 : litertElemBytes(p.act == clpeak_tflite::TfType::I8
-                                                          ? clpeak_tflite::TfType::F32 : p.act, 1);
+  LitertPlan fp = p;
+  if (fp.act == clpeak_tflite::TfType::I8)
+    fp.act = clpeak_tflite::TfType::F32;
+  const uint64_t elem = int8Kv ? 1 : litertElemBytes(litertConstantType(fp), 1);
   return 2ull * (uint64_t)kHeads * (uint64_t)kv * (uint64_t)kHeadDim * elem;
 }
 

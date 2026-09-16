@@ -2,6 +2,7 @@
 
 #include "tflite_model.h"
 
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 
@@ -540,6 +541,7 @@ int TfliteModel::addSubgraph(const std::string &name)
 
 TfliteBytes TfliteModel::build(const std::string &description) const
 {
+  const auto t0 = std::chrono::steady_clock::now();
   size_t weightBytes = reserve_;
   for (const auto &bf : buffers_)
     weightBytes += bf.bytes + 32;
@@ -740,7 +742,10 @@ TfliteBytes TfliteModel::build(const std::string &description) const
   b.addOffset(7, signaturesVec);
   const uint32_t root = b.endTable();
 
-  return b.finish(root, "TFL3");
+  TfliteBytes out = b.finish(root, "TFL3");
+  out.description = description;
+  out.buildUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+  return out;
 }
 
 } // namespace clpeak_tflite

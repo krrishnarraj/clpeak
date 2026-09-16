@@ -287,6 +287,12 @@ int LitertPeak::runAll()
 
   auto backendScope = log->beginBackend("LiteRT");
 
+  // The fills round to half in hardware where there is hardware for it;
+  // once per run, under --verbose, say so if it ever disagrees with the
+  // routine it stands in for (it should not: both are IEEE round-to-nearest).
+  if (clpeak::verboseEnabled() && !litertHalfConversionsAgree())
+    CLPEAK_VLOG("LiteRT: the hardware fp16 conversion disagrees with the reference routine\n");
+
   for (int idx = 0; idx < (int)devs.size(); idx++)
   {
     if (clpeak::cancelRequested())

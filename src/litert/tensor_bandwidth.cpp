@@ -144,13 +144,12 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
     const size_t rung = index++;
     if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
       break;
-    // The weights as the GPU stores them are half whatever the graph's
-    // weight type is; the GPU's fp16 policy converts an fp32 weight to half
-    // at load, and the bytes it streams per token are the half ones.
+    // The bytes streamed per pass: the fp16 plan's weights are half on
+    // every accelerator (the GPU's stores them as half under its fp16
+    // policy, and the model now carries them as half too).
     const uint64_t bytes = (uint64_t)s.dim * (uint64_t)s.dim * 2;
-    // The weights exist in the model and again in the accelerator's copy;
-    // on the GPU the fp32 graph's copy is twice the size.
-    const uint64_t peak = litertElemBytes(plan.weight, s.dim * s.dim) + bytes;
+    // The weights exist in the model and again in the accelerator's copy.
+    const uint64_t peak = litertWeightBytes(plan, s.dim, s.dim) + bytes;
     if (peak > clpeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)
