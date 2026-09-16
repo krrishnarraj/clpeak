@@ -1,6 +1,7 @@
 #include <common/run_log.h>
 #include <common/logger.h>
 
+#include <cstdio>
 #include <utility>
 
 namespace {
@@ -18,6 +19,9 @@ RunLog::~RunLog()
 {
     if (clpeak::logSink() == this) clpeak::setLogSink(nullptr);
     if (g_current == this) g_current = nullptr;
+    // Not removed: a RunLog that goes away without closeSidecar(true) is a
+    // run whose document was never saved, and the sidecar is its record.
+    closeSidecar(false);
 }
 
 RunLog *RunLog::current()
@@ -29,6 +33,67 @@ double RunLog::elapsedS() const
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
         .count();
+}
+
+// ── Sidecar ────────────────────────────────────────────────────────────────
+
+std::string RunLog::sidecarPathFor(const std::string &outputFile)
+{
+    const std::string ext = ".json";
+    if (outputFile.size() > ext.size() &&
+        outputFile.compare(outputFile.size() - ext.size(), ext.size(), ext) == 0)
+        return outputFile.substr(0, outputFile.size() - ext.size()) + ".log";
+    return outputFile + ".log";
+}
+
+void RunLog::openSidecar(const std::string &outputFile)
+{
+    std::string failed;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (sidecar) return;
+        sidecarPath = sidecarPathFor(outputFile);
+#ifdef _MSC_VER
+        (void)fopen_s(&sidecar, sidecarPath.c_str(), "wb");
+#else
+        sidecar = std::fopen(sidecarPath.c_str(), "wb");
+#endif
+        if (!sidecar)
+        {
+            failed = sidecarPath;
+            sidecarPath.clear();
+        }
+        else
+        {
+            sidecarWriteLocked(runLogHeaderJson(doc.meta));
+            for (const LogEntry &e : doc.log) sidecarWriteLocked(logEntryToJson(e));
+        }
+    }
+    if (!failed.empty())
+        clpeak::logMessage(clpeak::LogLevel::Warning, "",
+                           "cannot open the run log sidecar " + failed +
+                               "; diagnostics will only reach the document");
+}
+
+void RunLog::closeSidecar(bool remove)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!sidecar) return;
+    (void)std::fclose(sidecar);
+    sidecar = nullptr;
+    if (remove) (void)std::remove(sidecarPath.c_str());
+    sidecarPath.clear();
+}
+
+void RunLog::sidecarWriteLocked(const std::string &line)
+{
+    if (!sidecar) return;
+    (void)std::fputs(line.c_str(), sidecar);
+    (void)std::fputc('\n', sidecar);
+    // Flushed per line: what the sidecar is for is the crash that never
+    // returns from the next call.  stdio's buffer would be the one that
+    // held the line that mattered.
+    (void)std::fflush(sidecar);
 }
 
 // ── Recording ──────────────────────────────────────────────────────────────
@@ -51,6 +116,7 @@ void RunLog::appendLocked(LogEntry &entry)
     }
     messageBytes += entry.message.size();
     doc.log.push_back(entry);
+    sidecarWriteLocked(logEntryToJson(entry));
 }
 
 void RunLog::onLog(clpeak::LogLevel level, const std::string &source,

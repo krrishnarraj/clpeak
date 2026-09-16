@@ -12,8 +12,9 @@
 
 // ── Streaming JSON emitter ─────────────────────────────────────────────────
 //
-// Indent-tracking writer shared by the result document (run_document.cpp)
-// and the device inventory (inventory.cpp), so one shape has one serializer.  Nothing is built in memory: the caller
+// Indent-tracking writer shared by the result document (run_document.cpp),
+// the device inventory (inventory.cpp) and the run-log sidecar (run_log.cpp),
+// so one shape has one serializer.  Nothing is built in memory: the caller
 // walks its own structures and the writer punctuates.
 //
 // Three layouts, all valid JSON:

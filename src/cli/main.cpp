@@ -62,9 +62,10 @@ int main(int argc, char **argv)
     combined.meta.invocation    = invocationFrom(opts, argc, argv);
 
     // The run's diagnostic stream: every note, CLPEAK_LOG line and relayed
-    // library message from here on lands on combined.log.  Between backends
-    // no logger is open to print for it, so it prints the way LoggerText
-    // would.
+    // library message from here on lands on combined.log -- and, with -o,
+    // on the sidecar as it happens, so a crash inside a driver still leaves
+    // a record.  Between backends no logger is open to print for it, so it
+    // prints the way LoggerText would.
     RunLog runLog(combined);
     runLog.setFallbackRenderer([&](const LogEntry &e) {
         if (!e.source.empty() || e.level == clpeak::LogLevel::Debug ||
@@ -75,6 +76,8 @@ int main(int argc, char **argv)
         }
         std::cout << e.message << "\n";
     });
+    if (opts.enableOutput)
+        runLog.openSidecar(opts.outputFile);
 
     // A backend asked for by name that this binary does not carry: say so,
     // or the run reads as "no devices".
@@ -122,9 +125,15 @@ int main(int argc, char **argv)
     runLog.finish();
 
     // Centralized file dump.  A failed dump surfaces in the exit code like any
-    // backend failure.
-    if (opts.enableOutput && !saveRunJson(combined, opts.outputFile))
-        lastError |= 1;
+    // backend failure -- and keeps the sidecar, which is then the only record
+    // of the run.
+    if (opts.enableOutput)
+    {
+        const bool saved = saveRunJson(combined, opts.outputFile);
+        runLog.closeSidecar(/*remove=*/saved);
+        if (!saved)
+            lastError |= 1;
+    }
 
     return lastError;
 }

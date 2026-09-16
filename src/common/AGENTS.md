@@ -13,7 +13,8 @@ Diagnostics ride the same stream. `RunLog` (`run_log.cpp`) is the host-owned
 sink for one whole run: every `CLPEAK_LOG` / `CLPEAK_VLOG` line, every
 `logger::note()`, and every message relayed from a vendor runtime lands on the
 document's `log` — scoped by whichever backend logger is open, timed from the
-run's start — and is dispatched as a `Log` event for the channel to render.
+run's start, mirrored line by line to the `-o` sidecar — and is dispatched
+as a `Log` event for the channel to render.
 
 ## Quick Lookups
 
@@ -32,8 +33,8 @@ run's start — and is dispatched as a `Log` event for the channel to render.
 |------|---------|
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, and the `--device` items that name `backend()`) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
-| `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): devices, the `--verbose` inventory, and the `log` stream one entry per line. Also `RunDocument::append`, which folds each backend's logger into the document a host saves |
-| `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, caps the log at 4 MiB of Debug/Info, and renders through the attached logger or the host's fallback |
+| `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): devices, the `--verbose` inventory, and the `log` stream one entry per line. Also `RunDocument::append`, which folds each backend's logger into the document a host saves, and `runLogHeaderJson()` for the sidecar's first line |
+| `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps the log at 4 MiB of Debug/Info, and renders through the attached logger or the host's fallback |
 | `units.cpp` | The unit table: token → symbol, quantity, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
 | `json.cpp` | Recursive-descent JSON parser, classic-locale numbers. Hand-rolled: it is the only parser clpeak needs, and it is smaller than the XML/CSV line scanners it replaced |
 | `host_info.cpp` | `probeHost()`. Deliberately records no hostname, username or serial — result files get shared |
@@ -115,5 +116,5 @@ is the pattern), because a process that dies mid-session cleans nothing.
   round-trips without a bump — and a bump makes every file a user has already
   saved unreadable, the GUI's whole run history included.
 - If you change `LogEvent` or the event kinds → update `src/ffi/logger_ffi.cpp` (JSON mirror) and the Dart decoder `app/lib/src/ffi/clpeak_events.dart`.
-- If you change `LogEntry` → it is serialized in one place (`logEntryToJson`) for the document and read back by the loader, but the FFI event (`logger_ffi.cpp`) and the Dart `LogEntry` (`app/lib/src/model/run_document.dart`) mirror it by hand.
+- If you change `LogEntry` → it is serialized in one place (`logEntryToJson`) for the document, the sidecar and the loader, but the FFI event (`logger_ffi.cpp`) and the Dart `LogEntry` (`app/lib/src/model/run_document.dart`) mirror it by hand.
 - If you add/remove a file → update `src/common/CMakeLists.txt` and this file.

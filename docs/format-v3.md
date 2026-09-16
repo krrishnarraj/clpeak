@@ -265,6 +265,26 @@ The log is capped at 4 MiB of message text; past that, `debug` and `info`
 entries are dropped and a final `warning` says how many. Console captures
 record the first 200 lines of a call and count the rest.
 
+### The run-log sidecar
+
+With `-o`, every entry is also appended — and flushed — to a sidecar as it
+happens: the output path with `.json` swapped for `.log` (`run.clpeak.json` →
+`run.clpeak.log`), one JSON object per line under a header line naming the
+run:
+
+```jsonc
+{"schema": "clpeak/run-log", "format_version": 3, "clpeak_version": "…", "generated_at": "…", "build": {…}, "host": {…}, "invocation": {…}}
+{"elapsed_s": 0.31, "level": "warning", "backend": "ONNX", "message": "…"}
+…
+```
+
+The document is written when the run ends. A native crash inside a driver —
+the case `--verbose` exists for — means it never is, and the sidecar is then
+the only record of the run; its last line is usually where. It is removed once
+the document has been saved, so one that outlives its run is the record of a
+run the process died in. The GUI adopts one it finds on its next launch and
+offers it for export.
+
 ## Inventory
 
 `--verbose` only. The `backends` array of the device catalog, exactly as the
@@ -311,6 +331,6 @@ with a message naming its version. Regenerate it.
 | direction inferred from the unit, in the GUI only | `direction`, per test, resolved natively |
 | — | `shape`, `axis`, `variant` |
 | — | `generated_at`, `duration_s`, `cancelled`, `build`, `host`, `invocation` |
-| `--verbose` to a terminal, or nowhere at all on a phone | `log` (every level, scoped and timed), `inventory`, per-test `duration_s` |
+| `--verbose` to a terminal, or nowhere at all on a phone | `log` (every level, scoped and timed), `inventory`, per-test `duration_s`, the run-log sidecar |
 | ISA slugged into the test tag | `id` + `variant` |
 | `category: ""` for unknown | `category: "unknown"` |

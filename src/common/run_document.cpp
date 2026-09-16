@@ -375,6 +375,24 @@ std::string logEntryToJson(const LogEntry &entry)
     return ss.str();
 }
 
+std::string runLogHeaderJson(const RunMeta &meta)
+{
+    std::ostringstream ss;
+    JsonWriter w(ss);
+    w.beginObjectInline();
+    w.str("schema", "clpeak/run-log");
+    w.integer("format_version", RESULT_FORMAT_VERSION);
+    w.str("clpeak_version", meta.clpeakVersion.empty()
+                                ? std::string(CLPEAK_VERSION_STR)
+                                : meta.clpeakVersion);
+    w.strIf("generated_at", meta.generatedAt);
+    writeBuild(w, meta.build);
+    writeHost(w, meta.host);
+    writeInvocation(w, meta.invocation);
+    w.endObject();
+    return ss.str();
+}
+
 bool saveRunJson(const RunDocument &doc, const std::string &filename)
 {
     std::ofstream f(filename);

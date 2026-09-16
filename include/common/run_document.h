@@ -321,8 +321,14 @@ std::string isoTimestampUtc();
 // ---- Serialization --------------------------------------------------------
 
 // One log entry as a single-line JSON object -- the form the document's
-// `log` array holds one per line.
+// `log` array holds one per line, the run-log sidecar holds one per line, and
+// the GUI event stream carries.  One serializer for all three.
 std::string logEntryToJson(const LogEntry &entry);
+
+// The first line of the run-log sidecar (run_log.h): the run's identity as a
+// single-line object, so a sidecar left behind by a crash says which run it
+// belonged to without the document that was never written.
+std::string runLogHeaderJson(const RunMeta &meta);
 
 // Write the document as JSON.  Returns false (after a stderr message) when
 // the file cannot be opened or the stream fails while writing.

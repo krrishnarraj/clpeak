@@ -92,7 +92,7 @@ run and the result document all share.
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)
 - **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`
-- **Emitting a diagnostic, or reading one back?** → `CLPEAK_LOG` / `CLPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`) — `--verbose` is what makes a dump debuggable without the machine
+- **Emitting a diagnostic, or reading one back?** → `CLPEAK_LOG` / `CLPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
 

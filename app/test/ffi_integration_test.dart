@@ -11,6 +11,7 @@ import 'package:clpeak/src/ffi/clpeak_events.dart';
 import 'package:clpeak/src/ffi/clpeak_runner.dart';
 import 'package:clpeak/src/model/result_model.dart';
 import 'package:clpeak/src/model/run_document.dart';
+import 'package:clpeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -107,6 +108,12 @@ void main() {
           (raw['devices'][0]['tests'] as List)
               .any((t) => (t['duration_s'] as num? ?? 0) > 0),
           isTrue);
+      // The run-log sidecar lived while the run did and went with the save.
+      expect(
+          File(RunHistoryStore.logFileNameFor(out.path.substring(
+                  0, out.path.length - RunHistoryStore.fileSuffix.length)))
+              .existsSync(),
+          isFalse);
       out.deleteSync();
     });
 

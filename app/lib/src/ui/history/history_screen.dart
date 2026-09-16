@@ -21,7 +21,7 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  late Future<List<RunSummary>> _runs;
+  late Future<_HistoryContents> _contents;
 
   /// Id of the finished run the current list was built for; the tab lives in
   /// an IndexedStack, so initState alone would leave it stale forever.
@@ -30,12 +30,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
-    _runs = context.read<RunHistoryStore>().list();
+    _contents = _load();
+  }
+
+  Future<_HistoryContents> _load() async {
+    final history = context.read<RunHistoryStore>();
+    final service = context.read<BenchmarkService>();
+    return _HistoryContents(
+      runs: await history.list(),
+      crashLogs:
+          await history.listCrashLogs(inFlightId: service.inFlightRunId),
+    );
   }
 
   void _refresh() {
     setState(() {
-      _runs = context.read<RunHistoryStore>().list();
+      _contents = _load();
     });
   }
 
@@ -133,7 +143,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         context.select<BenchmarkService, String?>((s) => s.lastSummary?.id);
     if (lastRunId != _seenRunId) {
       _seenRunId = lastRunId;
-      _runs = context.read<RunHistoryStore>().list();
+      _contents = _load();
     }
 
     return Scaffold(
@@ -152,16 +162,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
             Expanded(
-              child: FutureBuilder<List<RunSummary>>(
+              child: FutureBuilder<_HistoryContents>(
                 // Recreate the future on every finished run / manual refresh.
-                future: _runs,
+                future: _contents,
                 builder: (context, snapshot) {
-                  final runs = snapshot.data;
-                  if (runs == null) {
+                  final contents = snapshot.data;
+                  if (contents == null) {
                     // Static text, not a spinner — nothing in this app spins.
                     return const CEmpty(title: 'Reading index…');
                   }
-                  if (runs.isEmpty) {
+                  final runs = contents.runs;
+                  final crashLogs = contents.crashLogs;
+                  if (runs.isEmpty && crashLogs.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -182,18 +194,36 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ),
                     );
                   }
+                  // Crashed runs first: a run the app died in is the one the
+                  // user came here about, and its log is what a maintainer
+                  // needs.
+                  final tiles = <Widget>[
+                    if (crashLogs.isNotEmpty) ...[
+                      const CSection(label: 'Runs that did not finish'),
+                      const SizedBox(height: 10),
+                      for (final log in crashLogs)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _CrashLogTile(log: log, onChanged: _refresh),
+                        ),
+                      if (runs.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const CSection(label: 'Saved runs'),
+                        const SizedBox(height: 10),
+                      ],
+                    ],
+                    for (final run in runs)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _RunTile(summary: run, onChanged: _refresh),
+                      ),
+                  ];
                   return RefreshIndicator(
                     onRefresh: () async => _refresh(),
                     child: ListView.builder(
                       padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-                      itemCount: runs.length,
-                      itemBuilder: (context, i) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _RunTile(
-                          summary: runs[i],
-                          onChanged: _refresh,
-                        ),
-                      ),
+                      itemCount: tiles.length,
+                      itemBuilder: (context, i) => tiles[i],
                     ),
                   );
                 },
@@ -207,6 +237,162 @@ class _HistoryScreenState extends State<HistoryScreen> {
 }
 
 enum _ImportConflictChoice { overwrite, rename, cancel }
+
+class _HistoryContents {
+  const _HistoryContents({required this.runs, required this.crashLogs});
+  final List<RunSummary> runs;
+  final List<CrashLog> crashLogs;
+}
+
+/// A run the process died in: no results, only the run log the native side
+/// streamed while it ran.  Exportable, so it can go on a bug report, and
+/// deletable; nothing to open.
+class _CrashLogTile extends StatelessWidget {
+  const _CrashLogTile({required this.log, required this.onChanged});
+
+  final CrashLog log;
+  final VoidCallback onChanged;
+
+  Future<void> _export(BuildContext context) async {
+    final history = context.read<RunHistoryStore>();
+    final export = context.read<ExportService>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final file = await history.crashLogFile(log);
+      await export.exportRunLog(file, suggestedName: log.fileName);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final t = CP.of(context);
+    final history = context.read<RunHistoryStore>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => CDialog(
+        title: 'Delete run log?',
+        actions: [
+          CButton(
+              label: 'Cancel',
+              kind: CButtonKind.quiet,
+              onPressed: () => Navigator.pop(context, false)),
+          CButton(
+              label: 'Delete',
+              danger: true,
+              onPressed: () => Navigator.pop(context, true)),
+        ],
+        child: Text(
+          'This permanently removes the only record of the run from '
+          '${formatDate(log.startedAt)}.',
+          style: t.body,
+        ),
+      ),
+    );
+    if (confirmed == true) {
+      await history.deleteCrashLog(log);
+      onChanged();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final last = log.lastEntry;
+    return CPanel(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: t.danger, width: 2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    log.id,
+                    style: t.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                CTag(text: 'did not finish', color: t.danger),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  tooltip: 'Run log actions',
+                  icon: Icon(Icons.more_horiz, size: 17, color: t.dim),
+                  iconSize: 17,
+                  splashRadius: 1,
+                  position: PopupMenuPosition.under,
+                  onSelected: (action) => switch (action) {
+                    'export' => _export(context),
+                    'delete' => _delete(context),
+                    _ => null,
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                        value: 'export',
+                        height: 38,
+                        child: Text('Export log', style: t.monoSmall)),
+                    PopupMenuItem(
+                        value: 'delete',
+                        height: 38,
+                        child: Text('Delete',
+                            style: t.monoSmall.copyWith(color: t.danger))),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              'The app stopped before this run finished. Its results were '
+              'never written; the run log recorded up to that point is '
+              'what to attach to a bug report.',
+              style: t.monoSmallDim,
+            ),
+            if (last != null) ...[
+              const SizedBox(height: 7),
+              Text(
+                'last line: ${last.message}',
+                style: t.monoSmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            const SizedBox(height: 9),
+            Row(
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 5,
+                    runSpacing: 5,
+                    children: [
+                      for (final backend in log.backends)
+                        CTag(text: backend, upper: false),
+                      if (log.verbose) const CTag(text: 'verbose'),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  [
+                    formatDate(log.startedAt),
+                    '${log.entries} log lines',
+                    if (log.clpeakVersion.isNotEmpty) 'v${log.clpeakVersion}',
+                  ].join('  ·  '),
+                  style: t.micro,
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _RunTile extends StatelessWidget {
   const _RunTile({required this.summary, required this.onChanged});

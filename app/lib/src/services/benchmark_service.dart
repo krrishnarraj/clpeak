@@ -85,6 +85,11 @@ class BenchmarkService extends ChangeNotifier {
   ClpeakRun? _run;
   String? _runId;
 
+  /// Id of the run in flight (its files in history are named by it), or
+  /// null.  History uses it to tell a live run-log sidecar from a crashed
+  /// run's.
+  String? get inFlightRunId => isRunning ? _runId : null;
+
   // ── Live-update throttle ─────────────────────────────────────────────────
   //
   // Every rebuild this notifier triggers ends in a presented frame, which is

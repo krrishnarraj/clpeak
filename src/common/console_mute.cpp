@@ -154,8 +154,9 @@ void ScopedConsoleMute::drain()
     if (n <= 0)
       break;
     pending.append(buf, static_cast<size_t>(n));
-    // Emit whole lines as they complete, each as it happened, so the run log
-    // holds them in the order the library printed them.
+    // Emit whole lines as they complete, each as it happened: recorded (and
+    // on the sidecar) before the library's next line, which is the point
+    // when the next line is the one that crashes it.
     size_t start = 0;
     for (;;)
     {

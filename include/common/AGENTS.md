@@ -11,7 +11,7 @@ No backend-specific includes live here.
 - Looking for CLI options struct? → `options.h`
 - Looking for result output format? → `run_document.h` (model) / `docs/format-v3.md` (schema)
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
-- Emitting a diagnostic? → `CLPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `CLPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store is `run_log.h`
+- Emitting a diagnostic? → `CLPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `CLPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
 - Looking for device inventory structs? → `inventory.h`
 - Looking for gating? → `peak.h` (gating is part of Peak)
 - Classifying or documenting a test? → see *What a backend authors at beginTest()* below
@@ -172,8 +172,8 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
-| `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the size cap |
-| `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document and the inventory |
+| `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |
+| `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
 | `dynlib.h` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver |
