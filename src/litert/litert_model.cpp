@@ -56,7 +56,10 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     // half arithmetic throughout.  That is fp16 storage and arithmetic as
     // surely as a half-typed graph is, so it is what the row runs there.
     if (accel == LitertAccel::Gpu)
+    {
       p.gpuPrecision = kLiteRtDelegatePrecisionFp16;
+      p.halfRounded = true;
+    }
     else
       p.act = p.weight = TfType::F16;
     break;
@@ -68,6 +71,7 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
                  std::string(litertAccelName(accel)) + " has no such setting";
     }
     p.gpuPrecision = kLiteRtDelegatePrecisionFp16WithFp32Accum;
+    p.halfRounded = true;
     break;
   case LitertFormat::Bf16:
     if (accel == LitertAccel::Gpu)
@@ -384,12 +388,18 @@ struct Fill
   float magnitude;
   float scale;          // integer / fp8 types: value / scale, rounded and clamped
   int qmax;
+  bool halfRounded;     // fp32 values pre-rounded to fp16 (LitertPlan::halfRounded)
 };
+
+float roundHalf(float v) { return litertHalfToFloat(litertFloatToHalf(v)); }
 
 void fillTensor(uint8_t *dst, size_t bytes, void *ctx)
 {
   const Fill &f = *static_cast<const Fill *>(ctx);
-  auto at = [&](int64_t i, int64_t j) { return litertValueAt(i, j, f.seed) * f.magnitude; };
+  auto at = [&](int64_t i, int64_t j) {
+    const float v = litertValueAt(i, j, f.seed) * f.magnitude;
+    return f.halfRounded ? roundHalf(v) : v;
+  };
   auto code = [&](int64_t i, int64_t j) -> long {
     const long q = std::lround(at(i, j) / f.scale);
     return std::max(-(long)f.qmax, std::min((long)f.qmax, q));
@@ -466,7 +476,7 @@ float storedValue(const Fill &f, int64_t i, int64_t j)
   const float v = litertValueAt(i, j, f.seed) * f.magnitude;
   switch (f.type)
   {
-  case TfType::F32: return v;
+  case TfType::F32: return f.halfRounded ? roundHalf(v) : v;
   case TfType::F16: return litertHalfToFloat(litertFloatToHalf(v));
   case TfType::BF16: return litertBf16ToFloat(litertFloatToBf16(v));
   case TfType::F8E4M3: return litertFp8E4M3ToFloat(litertFloatToFp8E4M3(v / f.scale)) * f.scale;
@@ -493,11 +503,13 @@ struct Recipe
   std::vector<std::unique_ptr<Fill>> fills;
   std::vector<std::vector<uint16_t>> halfBuffers;   // for addBuffer, which does not copy
   std::vector<std::vector<int32_t>> intBuffers;
+  bool halfRounded = false;   // from the plan; applies to every fp32 fill
 
   int constant(int64_t rows, int64_t cols, TfType type, uint32_t seed, float magnitude,
                float scale = 1.0f, int qmax = 0)
   {
-    fills.push_back(std::unique_ptr<Fill>(new Fill{type, rows, cols, seed, magnitude, scale, qmax}));
+    fills.push_back(std::unique_ptr<Fill>(
+        new Fill{type, rows, cols, seed, magnitude, scale, qmax, halfRounded && type == TfType::F32}));
     return m.addBufferFill(litertElemBytes(type, rows * cols), fillTensor, fills.back().get());
   }
   int ints(std::vector<int32_t> v)
@@ -650,6 +662,7 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
                               uint32_t seedA, uint32_t seedW)
 {
   Recipe r;
+  r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.act, M * K) + litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
@@ -678,6 +691,7 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
                                    std::vector<float> *weights, uint32_t seedW)
 {
   Recipe r;
+  r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const TfQuant aq = actQuant(p, isInteger(p.act) ? litertActScale(abits) : 1.0f);
@@ -702,6 +716,7 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
 TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t seedW)
 {
   Recipe r;
+  r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const TfQuant xq = actQuant(p, isInteger(p.act) ? litertActScale(abits) : 1.0f);
@@ -719,6 +734,7 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
                                   LitertActivation act)
 {
   Recipe r;
+  r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.act, rows * cols));
   const std::vector<int32_t> shape = {1, (int32_t)rows, (int32_t)cols};
   // Magnitude 4: softmax and the normalisation need a spread to work on.
@@ -896,6 +912,7 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
                             bool depthwise)
 {
   Recipe r;
+  r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.act, channels * spatial * spatial));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
@@ -973,6 +990,7 @@ float blockActScale(int64_t d)
 TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
 {
   Recipe r;
+  r.halfRounded = p.halfRounded;
   const int64_t d = sh.dModel, H = sh.heads, Dh = sh.headDim, ffn = sh.ffnHidden, S = sh.seq;
   const bool decode = sh.kvLen > 0;
   const int64_t ctx = decode ? sh.kvLen : S;

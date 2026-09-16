@@ -63,6 +63,12 @@ struct LitertPlan
   bool integerOps = false;        // counts in ops rather than flops
   LiteRtDelegatePrecision gpuPrecision = kLiteRtDelegatePrecisionDefault;
   bool gpuAllowQuantized = false;
+  // The fp32 tensors hold values already rounded to fp16: the GPU's fp16
+  // policies convert every fp32 operand to half at load, and an accuracy
+  // reference built from the unrounded values would count that conversion
+  // as the accelerator's error.  With the rounding done on the host first
+  // the conversion is exact and cancels, as it does for a half-typed graph.
+  bool halfRounded = false;
 };
 LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
 

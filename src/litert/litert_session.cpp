@@ -334,6 +334,15 @@ bool addOpaque(const LitertRuntime &rt, LiteRtOptions options, const char *ident
 
 } // namespace
 
+bool litertPrepareEnvironment(const LitertRuntime &rt, LitertAccel accel, std::string &error)
+{
+  installSink(rt);
+  LiteRtEnvironment env = environmentFor(rt, accel, error);
+  if (env)
+    releaseEnvironment(accel);   // environmentFor counted a session that is not coming
+  return env != nullptr;
+}
+
 void litertResetEnvironment(const LitertRuntime &rt, LitertAccel accel)
 {
   std::lock_guard<std::mutex> lock(g_envMutex);

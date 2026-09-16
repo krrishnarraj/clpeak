@@ -70,6 +70,8 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // R8 rules for the runtime AARs whose Java surface is unused.
+            proguardFile("proguard-rules.pro")
         }
     }
 }
@@ -86,7 +88,12 @@ dependencies {
     // Tensor and MediaTek NPU system libraries) and the merger brings them
     // into ours.  NPU dispatch libraries are not on Maven: see
     // tool/fetch_litert_npu.sh, which stages them under src/main/jniLibs.
-    implementation("com.google.ai.edge.litert:litert:2.2.0")
+    // The AAR's Kotlin/Java surface (and the `litert-api` it depends on,
+    // which declares the same namespace and trips AGP 9's uniqueness
+    // check) is unused: only the .so files are wanted.
+    implementation("com.google.ai.edge.litert:litert:2.2.0") {
+        exclude(group = "com.google.ai.edge.litert", module = "litert-api")
+    }
 }
 
 kotlin {

@@ -120,7 +120,7 @@ kernel name from one profiled run says which kernel it was.
   otherwise**, so `fp32` asks for its fp32 policy, `fp16` is its fp16 policy
   over the same fp32 graph (it refuses half-typed tensors outright), and
   `fp16_acc32` is its third policy, fp16 storage with fp32 accumulation.  On
-  an M1 Pro: 4.10 / 4.71 / 3.44 TFLOPS and 0.57 / 4698 / 467 ppm -- the GPU
+  an M1 Pro: 4.10 / 4.71 / 3.44 TFLOPS and 0.57 / 4690 / 388 ppm -- the GPU
   accumulates fp16 in fp16 by default.  `fp16_acc32` applies nowhere else.
 - **Its quantized graphs are float kernels between quantize and dequantize
   passes** (`convolution1x1(conv_wave_matrix) -> quantize_and_dequantize`),
@@ -155,7 +155,7 @@ every kernel and cut a 4 TFLOPS matmul to 0.4.
 
 ## What the accelerator libraries do wrong, and how the backend stays up
 
-Three faults in LiteRT 2.2.0's GPU accelerator would take the whole run
+Four faults in LiteRT 2.2.0's GPU accelerator would take the whole run
 down, and a benchmark that dies to prove a point has proved the wrong one.
 Each is fenced in `litertPlanFor()` or `litert_session.cpp` with the fault
 recorded in the row's reason, so lifting the fence when a release fixes it
@@ -172,6 +172,13 @@ is a one-line change:
   rungs later.  Per-row int4 goes through a different path and is safe, but
   it is not the format language models ship in, so the blocked format is not
   sent to the GPU rather than measured as something else.
+- **The OpenCL accelerator crashes without an OpenCL library.**  On a
+  machine with no `libOpenCL` at all (an emulator, a box without a driver)
+  `libLiteRtClGlAccelerator` dereferences a null inside `strlen` when it
+  compiles its first model instead of declining.  `litertUsableDevices()`
+  brings the GPU environment up on its own first, reads which accelerator
+  library registered, and when it is the OpenCL one requires an OpenCL
+  library to be loadable before any model is sent.
 - **The Metal accelerator leaks a residency set per compiled model** and
   `IOGPUMetalCommandQueue` asserts on the 33rd ("command queue residency
   set limit of 32 exceeded").  The `enable_metal_residency_set` option does
@@ -206,7 +213,7 @@ no kernel for the format.
 | gemm fp32 / fp16 / fp16_acc32 | 4.10 / 4.71 / 3.44 TFLOPS | 468 GFLOPS / 1.00 TFLOPS / — |
 | gemm int8_qdq / int16x8 | 4.73 "TOPS" (float kernel) / aborts | 2.51 TOPS / 1.23 GOPS |
 | gemm int8_weight / int4_weight | 4.65 TFLOPS / heap overrun | 2.57 / 1.67 TFLOPS |
-| error fp32 / fp16 / fp16_acc32 | 0.57 / 4698 / 467 ppm | 0.57 / 4690 / — |
+| error fp32 / fp16 / fp16_acc32 | 0.57 / 4690 / 388 ppm | 0.57 / 4690 / — |
 | error int8_qdq / int8_weight / int4_weight | 10486 / 4696 / — | 9383 / 3915 / 4370 |
 | conv3x3 fp32 / fp16 / int8 | 8.88 / 12.7 T (Winograd-counted) / 12.7 TOPS | 594 G / 1.07 T / 2.64 TOPS |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 4.37 TFLOPS / 203 GB/s | ~0.95 TFLOPS / 102 GB/s |
@@ -227,6 +234,14 @@ no kernel for the format.
   feature modules the zip is laid out as.  NPU needs API 31+ and arm64.
 - **Desktop**: `--litert-lib` at a pip wheel's `libLiteRt.{so,dylib,dll}`;
   the GPU accelerator and the Intel OpenVINO NPU dispatch sit beside it.
+- **Verified on Android** with the CLI built against the NDK (root
+  CMakeLists with `android.toolchain.cmake`, every other backend off) and
+  pushed to an arm64 emulator beside the AAR's two `.so` files: every test
+  runs on XNNPACK, the numeric-error rows match macOS bit for bit, the GPU
+  is declined for lack of OpenCL, and the fp32 block is skipped by the
+  memory gate on 4 GB.  The release APK builds with the AAR's `litert-api`
+  excluded (it repeats the AAR's namespace, which AGP 9 rejects) and R8
+  told not to chase the AAR's unused Java classes.
 - **iOS**: not yet wired; LiteRT's dylibs can be dlopen'd from an embedded
   framework there (MLPerf Mobile does), unlike ONNX Runtime.
 

@@ -111,6 +111,12 @@ private:
 // creation and failure so a refusal carries the runtime's own words.
 std::string litertDrainLog(const LitertRuntime &rt);
 
+// Bring up an accelerator's environment without compiling anything (a
+// session would do the same on demand); false with `error` set when LiteRT
+// refuses.  Lets a probe read the environment log before it risks a
+// compile.
+bool litertPrepareEnvironment(const LitertRuntime &rt, LitertAccel accel, std::string &error);
+
 // What LiteRT logged while creating an accelerator's environment -- which
 // GPU accelerator library it loaded, what an NPU dispatch library said.
 std::string litertEnvironmentLog(LitertAccel accel);

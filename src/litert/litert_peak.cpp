@@ -6,6 +6,7 @@
 #include "litert_runtime.h"
 #include "litert_session.h"
 
+#include <common/dynlib.h>
 #include <common/options.h>
 
 #include <algorithm>
@@ -156,7 +157,13 @@ std::vector<litert_device_info_t> litertUsableDevices(
     }
 
     // GPU: the accelerator library beside the runtime, whichever API it is
-    // built on.
+    // built on.  The environment comes up first, on its own: which library
+    // registered is in its log, and the OpenCL one dereferences a null
+    // (strlen inside libLiteRtClGlAccelerator, LiteRT 2.2.0) when it
+    // compiles a model on a machine with no OpenCL library at all -- an
+    // emulator, a box without a driver -- rather than declining.  So when
+    // that is the accelerator, an OpenCL library has to be loadable before
+    // a model is sent to it.
     {
       litert_device_info_t dev;
       dev.accel = LitertAccel::Gpu;
@@ -164,9 +171,35 @@ std::vector<litert_device_info_t> litertUsableDevices(
       dev.deviceType = DeviceType::Gpu;
       dev.displayName = "GPU via LiteRT";
       std::string reason, log;
-      if (probeAccel(rt, dev, reason, log))
+      bool ok = litertPrepareEnvironment(rt, dev.accel, reason);
+      if (ok)
       {
-        dev.vendor = gpuBackendFrom(log);
+        dev.vendor = gpuBackendFrom(litertEnvironmentLog(dev.accel));
+        if (dev.vendor == "OpenCL")
+        {
+          void *cl = clpeak::dynOpen({
+#if defined(__ANDROID__)
+              "libOpenCL.so", "libOpenCL-pixel.so", "libOpenCL-car.so",
+#elif defined(_WIN32)
+              "OpenCL.dll",
+#else
+              "libOpenCL.so.1", "libOpenCL.so",
+#endif
+          });
+          if (!cl)
+          {
+            ok = false;
+            reason = "LiteRT's GPU accelerator here is the OpenCL one and no OpenCL library can be "
+                     "loaded; the accelerator crashes rather than declining in that case (LiteRT "
+                     "2.2.0), so no model is sent to it";
+          }
+          // The handle is kept: the accelerator dlopens the same library.
+        }
+      }
+      if (ok && probeAccel(rt, dev, reason, log))
+      {
+        if (dev.vendor.empty())
+          dev.vendor = gpuBackendFrom(log);
         if (!dev.vendor.empty())
           dev.displayName += " (" + dev.vendor + ")";
         g_devs.push_back(dev);

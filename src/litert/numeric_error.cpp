@@ -188,7 +188,11 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
       for (int64_t i = 0; i < kDim; i++)
         for (int64_t j = 0; j < kDim; j++)
         {
-          const float f = litertValueAt(i, j, 0x243f6a88u);
+          float f = litertValueAt(i, j, 0x243f6a88u);
+          // The GPU's fp16 policies round every operand to half; done here
+          // first, the conversion is exact and the rounding cancels.
+          if (plan.halfRounded)
+            f = litertHalfToFloat(litertFloatToHalf(f));
           std::memcpy(&raw[(size_t)(i * kDim + j) * 4], &f, 4);
           a[(size_t)(i * kDim + j)] = f;
         }
