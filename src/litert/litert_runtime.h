@@ -50,7 +50,6 @@
 // opaque payload -- a TOML string under an identifier such as "gpu_options"
 // or "xnnpack" -- and litert_session.cpp writes those strings directly.
 #define CLPEAK_LITERT_REQUIRED(X)                                     \
-  X(LiteRtGetStatusString)                                            \
   X(LiteRtCreateEnvironment)                                          \
   X(LiteRtDestroyEnvironment)                                         \
   X(LiteRtCreateOptions)                                              \
@@ -83,7 +82,11 @@
   X(LiteRtGetNumTensorBufferRequirementsSupportedBufferTypes)         \
   X(LiteRtGetTensorBufferRequirementsSupportedTensorBufferType)
 
+// LiteRtGetStatusString is optional because the Linux x86_64 wheel of
+// ai-edge-litert 2.2.0 does not export it (the macOS and Android libraries
+// do); litertStatusText() falls back to the numeric code.
 #define CLPEAK_LITERT_OPTIONAL(X)                                     \
+  X(LiteRtGetStatusString)                                            \
   X(LiteRtCreateSinkLogger)                                           \
   X(LiteRtDestroyLogger)                                              \
   X(LiteRtSetDefaultLogger)                                           \

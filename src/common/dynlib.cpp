@@ -40,15 +40,4 @@ void *dynSym(void *lib, const char *name)
 #endif
 }
 
-void dynClose(void *lib)
-{
-  if (!lib)
-    return;
-#if defined(_WIN32)
-  FreeLibrary(reinterpret_cast<HMODULE>(lib));
-#else
-  dlclose(lib);
-#endif
-}
-
 } // namespace clpeak

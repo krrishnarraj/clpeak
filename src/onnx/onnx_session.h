@@ -14,7 +14,10 @@
 #include <onnx/onnx_peak.h>
 
 // Process-wide OrtEnv (created on first use; log level follows --verbose).
+// Null when the runtime refuses to create one, with the reason in
+// onnxEnvError(); a refusal is remembered per runtime rather than retried.
 OrtEnv *onnxEnv(const OrtRuntime &rt);
+std::string onnxEnvError();
 
 struct OnnxSessionResult
 {

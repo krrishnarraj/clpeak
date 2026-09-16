@@ -79,9 +79,18 @@ std::string gpuBackendFrom(const std::string &log)
   return std::string();
 }
 
+// The usable-device list, probed once per runtime and NPU directory.  The
+// runtime is identified by its library handle, not by the address of the
+// record litertRuntime() returns: that record is the loader's one static,
+// so its address is the same whichever library is loaded into it, while a
+// handle is unique per mapped file and never unmapped (common/dynlib.h).
+// Both can change between GUI runs (Settings: library, NPU directory), and
+// each change means a fresh probe -- the accelerators a runtime brings are
+// that runtime's.
 std::mutex g_devMutex;
 bool g_devProbed = false;
-const LitertRuntime *g_devRuntime = nullptr;
+const void *g_devRuntime = nullptr;   // LitertRuntime::lib
+std::string g_devNpuDir;
 std::vector<litert_device_info_t> g_devs;
 std::vector<std::pair<litert_device_info_t, std::string>> g_skipped;
 
@@ -120,10 +129,11 @@ std::vector<litert_device_info_t> litertUsableDevices(
     const LitertRuntime &rt, std::vector<std::pair<litert_device_info_t, std::string>> *skipped)
 {
   std::lock_guard<std::mutex> lock(g_devMutex);
-  if (!g_devProbed || g_devRuntime != &rt)
+  if (!g_devProbed || g_devRuntime != rt.lib || g_devNpuDir != litertNpuDir())
   {
     g_devProbed = true;
-    g_devRuntime = &rt;
+    g_devRuntime = rt.lib;
+    g_devNpuDir = litertNpuDir();
     g_devs.clear();
     g_skipped.clear();
 

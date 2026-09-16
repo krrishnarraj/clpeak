@@ -65,8 +65,32 @@ its name, an OPTIONAL one (the profiler, the sink logger, error messages)
 leaves a null the callers check.  The directory the library loaded from is
 remembered because LiteRT looks for its GPU accelerator library and the NPU
 dispatch libraries there unless told otherwise; `--litert-npu-dir` is that
-telling.  **Never `dlclose` the runtime**: it keeps accelerator contexts and
-worker threads alive.
+telling.  **Never `dlclose` the runtime -- nor a file that failed to be one.**
+The runtime keeps accelerator contexts and worker threads alive, and the
+Linux x86_64 wheel of ai-edge-litert 2.2.0 showed the second half: its
+`libLiteRt.so` registers a hundred-odd static destructors through
+`__cxa_atexit` but ships without `.fini_array` / `__cxa_finalize`, so a
+dlclose leaves them dangling in glibc's exit list and the process
+segfaults at `exit()` inside whatever library was later mapped over the
+hole (`--litert-lib <wheel>/libLiteRt.so --list-devices` died in
+libonnxruntime.so's exit handler).  That wheel also lacks
+`LiteRtGetStatusString` -- the Android AAR and macOS wheel of the same
+version export it -- which is why that symbol is OPTIONAL.
+
+**Switching runtimes in one process** (the GUI's Settings, between runs)
+is keyed by the library handle, `LitertRuntime::lib` -- never by the address
+of the record `litertRuntime()` returns, which is the loader's one static and
+so the same whichever library sits in it (the device-list memo in
+`litert_peak.cpp` once compared exactly that and never re-probed).  A handle
+is unique per mapped file and never unmapped.  The environments in
+`litert_session.cpp` record the runtime that created them and are destroyed,
+with that runtime's own `LiteRtDestroyEnvironment`, the first time another
+runtime asks for that accelerator; a remembered creation failure goes with
+them (the library with no GPU accelerator beside it was the old one).
+Verified with the C ABI: wheel → a copy in another directory → wheel, on
+macOS (Metal) and Linux (WebGPU), each run on the library it named and the
+copy loading its own accelerator.  The runtime left behind costs its mapping
+(~8 MB resident on macOS, ~30 MB with the WebGPU accelerator on Linux).
 
 **Accelerator and vendor options are TOML strings, not linked helpers.**
 The `Lrt*Options` builders in `litert/c/options/*.h` are client-side

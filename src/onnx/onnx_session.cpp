@@ -108,6 +108,11 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
 
 } // namespace
 
+// Why the last onnxEnv() refused, for the rows that report it.  Written
+// and read under onnxEnv()'s lock or on the same thread after it returned
+// null, so a plain string will do.
+static std::string g_envError;
+
 OrtEnv *onnxEnv(const OrtRuntime &rt)
 {
   // One OrtEnv per loaded runtime.  The GUI can hot-swap the ONNX Runtime
@@ -124,9 +129,16 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   static OrtEnv *env = nullptr;
   static const OrtApi *envApi = nullptr;
   static const OrtApiBase *envBase = nullptr;
+  // A runtime that refused once refuses again: remembered per runtime, so
+  // enumeration does not pay for the same failed attempt at every probe,
+  // and a different library gets its own try.
+  static const OrtApi *failedApi = nullptr;
+  static const OrtApiBase *failedBase = nullptr;
   std::lock_guard<std::mutex> lock(mutex);
   if (env && envApi == rt.api && envBase == rt.base)
     return env;
+  if (!env && failedApi == rt.api && failedBase == rt.base)
+    return nullptr;
   if (env)
   {
     // Release with the API that created it; the old shared object is still
@@ -148,18 +160,29 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   // INFO and the callback applies the current run's verbosity.
   OrtStatus *st = rt.api->CreateEnvWithCustomLogger(
       ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &env);
-  if (st)
+  if (st || !env)
   {
-    CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", onnxStatusText(rt, st).c_str());
+    // Two package-built runtimes (Debian's, Homebrew's) share one system
+    // libonnx, whose schema registry is process-wide: the second to create
+    // an environment finds every schema "already registered" and refuses.
+    // The reason is the runtime's own words, kept for the skip rows.
+    g_envError = st ? onnxStatusText(rt, st)
+                    : "the runtime returned no environment and no error";
+    CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", g_envError.c_str());
     env = nullptr;
+    failedApi = rt.api;
+    failedBase = rt.base;
     return nullptr;
   }
-  if (env)
-  {
-    envApi = rt.api;
-    envBase = rt.base;
-  }
+  envApi = rt.api;
+  envBase = rt.base;
+  g_envError.clear();
   return env;
+}
+
+std::string onnxEnvError()
+{
+  return g_envError;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +425,7 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   // registration (TensorRT, CUDA) fail with "Attempt to use DefaultLogger
   // but none has been registered" instead of attaching.
   if (!onnxEnv(rt))
-    return "onnxruntime environment creation failed";
+    return "onnxruntime environment creation failed: " + onnxEnvError();
 
   OrtSessionOptions *so = nullptr;
   if (OrtStatus *st = rt.api->CreateSessionOptions(&so))
@@ -677,7 +700,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   OrtEnv *env = onnxEnv(rt);
   if (!env)
   {
-    res.error = "onnxruntime environment creation failed";
+    res.error = "onnxruntime environment creation failed: " + onnxEnvError();
     return res;
   }
 

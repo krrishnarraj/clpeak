@@ -182,11 +182,12 @@ static void loadRuntime()
         // succeeded: that is an already-mapped custom DLL shining through
         // (see resolveWindowsDefaultAbsolute), not a default.  Adopting it
         // would report the previous pick's version under the default's name.
+        // This call's extra reference on it is simply kept: the module is
+        // leaked for the life of the process anyway.
         for (const auto &kv : g_cache)
         {
           if (kv.second.lib == lib)
           {
-            clpeak::dynClose(lib);  // drop this call's ref; the leaked one stays
             g_loadError = "onnxruntime library not found";
             lib = nullptr;
             break;
@@ -212,22 +213,21 @@ static void loadRuntime()
   if (!lib)
     return;
 
+  // A file that turns out not to be a usable ONNX Runtime stays mapped like
+  // any other handle: unloading a library whose constructors have run is
+  // what common/dynlib.h explains is never safe.
   auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(
       clpeak::dynSym(lib, "OrtGetApiBase"));
   if (!getBase)
   {
     g_loadError = std::string(named ? named : "onnxruntime") +
                   " exports no OrtGetApiBase -- not an ONNX Runtime library";
-    clpeak::dynClose(lib);
     return;
   }
 
   OrtRuntime cur;
   if (!adoptApiBase(getBase(), cur))
-  {
-    clpeak::dynClose(lib);
     return;
-  }
 
   // Deliberately not dlclosed for the rest of the process: see the note on
   // onnxSetLibraryOverride() in the header.

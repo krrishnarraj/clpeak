@@ -304,8 +304,14 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
   static std::mutex mtx;
   // OpenVINO shares one providerKey across its NPU/GPU/CPU targets, which
   // compile and fuse independently -- key by target too, or the GPU row
-  // would reuse the NPU probe.
+  // would reuse the NPU probe.  And by runtime, like the other memos here:
+  // the GUI can point the backend at a different ONNX Runtime between runs,
+  // and what a provider fuses or which widths it casts is that runtime's
+  // answer, not the provider name's.  Handles are never unmapped, so the
+  // base pointer is a stable identity, and the same path picked again
+  // reuses its handle and so its probe.
   const std::string memoKey =
+      std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
       ep.providerKey + '\x1f' + ep.epDevice;
   std::lock_guard<std::mutex> lk(mtx);
   auto it = memo.find(memoKey);

@@ -44,7 +44,7 @@ as a `Log` event for the channel to render.
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`); the backend table (`backendInfo()`: name, flag, built-in), the category and test flag tables, and `--help` generated from them |
 | `console_mute.cpp` | `clpeak::ScopedConsoleMute` — silences stdout+stderr at the fd level for a scope, so vendor runtimes that print below any log level (hipBLASLt's Tensile internals, the ONNX schema registry) cannot wreck the results table. Under `--verbose` it captures instead: a pipe drained by a thread, each line recorded as a `source: "console"` debug entry (first 200 per scope) and echoed to the real stderr |
 | `coreml_cache.mm` / `coreml_cache_stub.cpp` | `clpeak::purgeCoreMLCompileCache()` — removes this process's Core ML runtime cache (`~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`), which keeps every compiled model with its weights and never evicts; called by the Core ML backend per session and by the ONNX backend per provider. Apple-only, a stub elsewhere |
-| `dynlib.cpp` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS) so the shipped binary needs only the driver |
+| `dynlib.cpp` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS, ONNX Runtime, LiteRT) so the shipped binary needs only the driver. Deliberately no close: see `include/common/dynlib.h` |
 
 ## Scope invariant: one open test at a time
 

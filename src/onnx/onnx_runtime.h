@@ -35,8 +35,9 @@ struct OrtRuntime
 // Naming a different library after one is already loaded takes effect: the
 // next ortRuntime() call loads the new one.  The old handle is deliberately
 // leaked rather than dlclosed -- ONNX Runtime keeps worker threads alive past
-// the last session, so unloading it is not safe.  No-op when statically
-// linked.
+// the last session, so unloading it is not safe (nor is unloading a file
+// that turned out not to be an ONNX Runtime at all; common/dynlib.h has the
+// crash that proved it).  No-op when statically linked.
 //
 // Call it between runs only: ortRuntime() hands out a pointer to the loader's
 // own record, and changing the library repoints that record.

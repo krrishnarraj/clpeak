@@ -128,12 +128,14 @@ static void loadRuntime()
   if (!lib)
     return;
 
+  // A file that lacks the required entry points stays mapped like any
+  // other handle.  This is the path that found the rule in common/dynlib.h:
+  // the ai-edge-litert 2.2.0 wheel's libLiteRt.so was refused here, dlclosed,
+  // and took the process down at exit through the static destructors it had
+  // registered and could not retire.
   LitertRuntime cur;
   if (!resolveApi(lib, cur.api, named ? named : "libLiteRt"))
-  {
-    clpeak::dynClose(lib);
     return;
-  }
 
   cur.lib = lib;
   cur.path = named ? named : resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));

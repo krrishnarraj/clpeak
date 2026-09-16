@@ -179,12 +179,32 @@ std::string lastLines(const std::string &log, int keep = 3)
 // share.  Each is created with only its own accelerator registered, so the
 // CPU device's runs never touch the GPU library and the GPU device's
 // fallback path is the CPU built into the runtime rather than a delegate.
+//
+// Each belongs to the runtime that created it.  The GUI can point the
+// backend at a different libLiteRt between runs (Settings), and an
+// environment is an object of the library that made it -- handing it to
+// another library's LiteRtCreateCompiledModel would run one build's code
+// over another build's object, and would measure the old library's
+// accelerator under the new one's name even when the builds happen to
+// match.  So a record whose owner is not the current runtime is torn down
+// with its owner's own entry points and rebuilt, and a remembered creation
+// failure goes with it: the library that had no GPU accelerator beside it
+// was the old one.  The owner is the library handle, unique per mapped file
+// and never unmapped (common/dynlib.h), so the same path picked again keeps
+// its environment.  Sessions are never alive across a switch -- the FFI
+// refuses a library change during a run -- but the record checks anyway.
+struct EnvRecord
+{
+  const void *owner = nullptr;   // LitertRuntime::lib of the runtime that created it
+  LitertApi api;                 // that runtime's entry points, for the matching destroy
+  LiteRtEnvironment env = nullptr;
+  std::string error;             // why creation failed, when env is null
+  std::string log;               // what LiteRT said while bringing it up
+  int models = 0;                // compiled models created on it, ever
+  int live = 0;                  // sessions currently alive on it
+};
 std::mutex g_envMutex;
-std::map<int, LiteRtEnvironment> g_envs;
-std::map<int, std::string> g_envErrors;
-std::map<int, std::string> g_envLogs;   // what LiteRT said while bringing each one up
-std::map<int, int> g_envModels;         // compiled models created on each, ever
-std::map<int, int> g_envLive;           // sessions currently alive on each
+std::map<int, EnvRecord> g_envs;   // by accelerator
 
 // The Metal accelerator adds a residency set to its command queue for every
 // compiled model and never removes one, and IOGPUMetalCommandQueue asserts
@@ -221,26 +241,42 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
   std::lock_guard<std::mutex> lock(g_envMutex);
   const int key = (int)accel;
   auto it = g_envs.find(key);
-  if (it != g_envs.end() && accel == LitertAccel::Gpu && kGpuModelsPerEnvironment > 0 &&
-      g_envModels[key] >= kGpuModelsPerEnvironment && g_envLive[key] == 0)
+  if (it != g_envs.end() && it->second.owner != rt.lib)
   {
-    CLPEAK_VLOG("litert: recreating the GPU environment after %d compiled models\n", g_envModels[key]);
-    rt.api.LiteRtDestroyEnvironment(it->second);
+    // Another runtime's environment, or its refusal: see the note above.
+    if (it->second.live > 0)
+    {
+      error = "the " + std::string(litertAccelName(accel)) +
+              " environment of the previously loaded LiteRT still has sessions alive";
+      return nullptr;
+    }
+    CLPEAK_VLOG("litert: dropping the %s environment of the previously loaded runtime\n",
+                litertAccelName(accel));
+    if (it->second.env)
+      it->second.api.LiteRtDestroyEnvironment(it->second.env);
     g_envs.erase(it);
-    g_envModels[key] = 0;
+    it = g_envs.end();
+  }
+  if (it != g_envs.end() && it->second.env && accel == LitertAccel::Gpu &&
+      kGpuModelsPerEnvironment > 0 && it->second.models >= kGpuModelsPerEnvironment &&
+      it->second.live == 0)
+  {
+    CLPEAK_VLOG("litert: recreating the GPU environment after %d compiled models\n",
+                it->second.models);
+    it->second.api.LiteRtDestroyEnvironment(it->second.env);
+    g_envs.erase(it);
     it = g_envs.end();
   }
   if (it != g_envs.end())
   {
-    g_envModels[key]++;
-    g_envLive[key]++;
-    return it->second;
-  }
-  auto err = g_envErrors.find(key);
-  if (err != g_envErrors.end())
-  {
-    error = err->second;
-    return nullptr;
+    if (!it->second.env)
+    {
+      error = it->second.error;
+      return nullptr;
+    }
+    it->second.models++;
+    it->second.live++;
+    return it->second.env;
   }
 
   // Strings must outlive the call only; LiteRT copies option values.
@@ -275,7 +311,10 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
     logged = mute.text();
   }
   logged += litertDrainLog(rt);
-  g_envLogs[key] = logged;
+  EnvRecord rec;
+  rec.owner = rt.lib;
+  rec.api = rt.api;
+  rec.log = logged;
   if (st != kLiteRtStatusOk || !env)
   {
     error = "LiteRT could not create an environment for the " + std::string(litertAccelName(accel)) +
@@ -283,21 +322,23 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
     const std::string why = lastLines(logged);
     if (!why.empty())
       error += " (" + why + ")";
-    g_envErrors[key] = error;
+    rec.error = error;
+    g_envs[key] = rec;
     return nullptr;
   }
-  g_envs[key] = env;
-  g_envModels[key] = 1;
-  g_envLive[key] = 1;
+  rec.env = env;
+  rec.models = 1;
+  rec.live = 1;
+  g_envs[key] = rec;
   return env;
 }
 
 void releaseEnvironment(LitertAccel accel)
 {
   std::lock_guard<std::mutex> lock(g_envMutex);
-  auto it = g_envLive.find((int)accel);
-  if (it != g_envLive.end() && it->second > 0)
-    it->second--;
+  auto it = g_envs.find((int)accel);
+  if (it != g_envs.end() && it->second.live > 0)
+    it->second.live--;
 }
 
 // An opaque option: a TOML string under the identifier the accelerator
@@ -349,19 +390,17 @@ void litertResetEnvironment(const LitertRuntime &rt, LitertAccel accel)
   auto it = g_envs.find((int)accel);
   if (it == g_envs.end())
     return;
-  rt.api.LiteRtDestroyEnvironment(it->second);
+  if (it->second.env)
+    it->second.api.LiteRtDestroyEnvironment(it->second.env);
   g_envs.erase(it);
-  g_envErrors.erase((int)accel);
-  g_envModels.erase((int)accel);
-  g_envLive.erase((int)accel);
   litertDrainLog(rt);
 }
 
 std::string litertEnvironmentLog(LitertAccel accel)
 {
   std::lock_guard<std::mutex> lock(g_envMutex);
-  auto it = g_envLogs.find((int)accel);
-  return it == g_envLogs.end() ? std::string() : it->second;
+  auto it = g_envs.find((int)accel);
+  return it == g_envs.end() ? std::string() : it->second.log;
 }
 
 // ---------------------------------------------------------------------------

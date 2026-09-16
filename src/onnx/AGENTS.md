@@ -63,6 +63,32 @@ carries the reason, and `onnxRuntimeStatus()` packages it for a UI.
 Naming a different library after one is loaded takes effect on the next
 `ortRuntime()` call, so the settings screen needs no restart.
 
+**Switching runtimes in one process** (the GUI, between runs) works because
+every piece of per-runtime state is keyed by the runtime, not by a name: the
+`OrtEnv` is tracked by the `OrtApi`/`OrtApiBase` it came from and recreated
+when they change (the old one released with its own API), and the three probe
+memos in `onnx_probe.cpp` (viability, gemm variants, streaming width) all key
+on `rt.base` beside the provider — what a provider fuses or casts is the
+runtime's answer, and the CPU provider of a 1.17 is not that of a 1.30.  A
+handle is never unmapped (`include/common/dynlib.h`), so the pointer is a
+stable identity and the same path picked again reuses its handle and its
+memos.  Verified with the C ABI on a Threadripper: Debian's 1.23.2 → a 1.30.0
+build with CUDA and TensorRT providers → 1.23.2 → the default search, each run
+on the runtime it named.  The cost of the runtime left behind is its mapping
+(~13–20 MB resident) plus whatever it dragged in: nothing to speak of for a
+CPU-only build, but the CUDA/TensorRT build left ~2 GB in the process
+(libnvinfer/cuBLASLt/cuDNN code, the CUDA context, TensorRT's host state) that
+no `dlclose` of libonnxruntime would have returned either.
+
+One limitation is ORT's, not ours: a runtime that links a *shared* libonnx
+(Debian's and Homebrew's both do) registers its schemas into that library's
+process-wide registry, so a second such runtime cannot create an
+environment — `Trying to add a domain to DomainToVersion map, but the domain
+is already exist` — and every provider row says so.  `onnxEnv()` keeps the
+refusal per runtime (no retry per probe) and `onnxEnvError()` carries the
+runtime's words into the skip reason; switching back to the first works.
+Upstream builds carry their own ONNX and coexist.
+
 **iOS is the exception** (`CLPEAK_ONNX_STATIC`): Apple's official pod ships
 `onnxruntime.xcframework` as a *static* framework, and iOS will not dlopen a
 library that was not built into the app.  There the runtime is linked in,
@@ -76,7 +102,9 @@ installation is required to compile the backend.  `onnx_runtime.cpp` requests
 against a new header still runs on an older installed runtime.
 
 **Never `dlclose` the runtime.** ONNX Runtime keeps worker threads alive; the
-handle is deliberately leaked at exit.
+handle is deliberately leaked at exit.  Nor is a file that turned out not to
+be an ONNX Runtime closed: `include/common/dynlib.h` has the exit crash a
+dlclose of the wrong library produced.
 
 **Ask for the right API version in one call.** ORT numbers its API after its
 own minor version (1.23.x serves API 23), so `onnx_runtime.cpp` parses
