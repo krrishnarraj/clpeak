@@ -6,6 +6,7 @@
 #include "litert_runtime.h"
 #include "litert_session.h"
 
+#include <common/console_mute.h>
 #include <common/dynlib.h>
 #include <common/options.h>
 
@@ -318,31 +319,71 @@ int LitertPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // ---- Compute (FLOPS + OPS) ---------------------------------------------
-    if (isAllowed(Benchmark::Gemm))
-      runGemm(*rt, dev, cfg);
-    if (isAllowed(Benchmark::Conv))
-      runConv(*rt, dev, cfg);
+    // LiteRT's accelerator delegates narrate on stderr from their own worker
+    // threads, asynchronously -- weight-upload and kernel-compile threads
+    // print between and after the calls that spawned them, so no per-call mute
+    // can bracket it, and the desktop wheels export no sink logger to divert
+    // it either.  One stderr-only scope over the device's whole benchmark
+    // silences that noise (the result table is on stdout and stays visible)
+    // and watches for the phrases a lost accelerator prints.  A WebGPU device
+    // that exhausts Vulkan's file descriptors is the reason this matters: it
+    // is lost, keeps returning success from invokes that compute nothing, and
+    // would otherwise publish an impossible rate under a clean-looking table.
+    static const std::vector<std::string> kLossMarkers = {
+        "is lost", "Failed to invoke", "failed to invoke",
+        "OUT_OF_HOST_MEMORY", "Ran out of file descriptors",
+    };
+    bool deviceLost = false;
+    {
+      // Mute every device's scope, not just the accelerators': a lost GPU's
+      // Dawn worker threads keep logging asynchronously after its own tests
+      // end, into the next device's (the CPU's) scope, so leaving the CPU
+      // unmuted lets that spill through.  Only an accelerator's own scope
+      // watches for the loss markers, though -- a marker that leaks into the
+      // CPU's scope is the GPU's dying breath, not a CPU fault.
+      clpeak::ScopedConsoleMute devMute(
+          clpeak::ScopedConsoleMute::Capture::Verbose,
+          dev.accel == LitertAccel::Cpu ? std::vector<std::string>{} : kLossMarkers,
+          /*stderrOnly=*/true);
 
-    // ---- What the speed rows cost in accuracy ------------------------------
-    if (isAllowed(Benchmark::NumericError))
-      runNumericError(*rt, dev, cfg);
+      // Run one benchmark, then let a device that has just announced its loss
+      // stop the rest: every later test on it would only compile models it
+      // cannot run and reprint the same failure.
+      auto phase = [&](Benchmark b, int (LitertPeak::*fn)(const LitertRuntime &,
+                                                          const litert_device_info_t &,
+                                                          benchmark_config_t &)) {
+        if (deviceLost || clpeak::cancelRequested() || !isAllowed(b))
+          return;
+        (this->*fn)(*rt, dev, cfg);
+        if (devMute.sawWatched())
+          deviceLost = true;
+      };
 
-    // ---- AI composite (whole transformer block) ----------------------------
-    if (isAllowed(Benchmark::TransformerBlock))
-      runBlock(*rt, dev, cfg);
+      // ---- Compute (FLOPS + OPS) -------------------------------------------
+      phase(Benchmark::Gemm, &LitertPeak::runGemm);
+      phase(Benchmark::Conv, &LitertPeak::runConv);
+      // ---- What the speed rows cost in accuracy ----------------------------
+      phase(Benchmark::NumericError, &LitertPeak::runNumericError);
+      // ---- AI composite (whole transformer block) --------------------------
+      phase(Benchmark::TransformerBlock, &LitertPeak::runBlock);
+      // ---- Bandwidth -------------------------------------------------------
+      phase(Benchmark::Activation, &LitertPeak::runActivation);
+      phase(Benchmark::TensorBW, &LitertPeak::runTensorBandwidth);
+      phase(Benchmark::TransferBW, &LitertPeak::runTransferBandwidth);
+      // ---- Latency ---------------------------------------------------------
+      phase(Benchmark::KernelLatency, &LitertPeak::runDispatchLatency);
+    }
 
-    // ---- Bandwidth ---------------------------------------------------------
-    if (isAllowed(Benchmark::Activation))
-      runActivation(*rt, dev, cfg);
-    if (isAllowed(Benchmark::TensorBW))
-      runTensorBandwidth(*rt, dev, cfg);
-    if (isAllowed(Benchmark::TransferBW))
-      runTransferBandwidth(*rt, dev, cfg);
-
-    // ---- Latency -----------------------------------------------------------
-    if (isAllowed(Benchmark::KernelLatency))
-      runDispatchLatency(*rt, dev, cfg);
+    // Emitted after the mute closes, so it reaches the console: a device lost
+    // mid-run leaves any rates already printed for it untrustworthy, and this
+    // says so rather than letting a clean table imply they are sound.
+    if (deviceLost)
+      CLPEAK_LOG(Warning,
+                 "LiteRT %s: the accelerator reported it was lost during the run "
+                 "(a Vulkan/WebGPU file-descriptor or host-memory exhaustion on "
+                 "this platform); any rates shown for it are unreliable and its "
+                 "remaining tests were skipped",
+                 dev.displayName.c_str());
 
     currentDeviceScope = nullptr;
   }

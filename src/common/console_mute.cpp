@@ -41,6 +41,13 @@ bool makePipe(int fds[2])
 } // namespace
 
 ScopedConsoleMute::ScopedConsoleMute(Capture mode)
+    : ScopedConsoleMute(mode, {}, false)
+{
+}
+
+ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watchFor,
+                                     bool stderrOnlyMode)
+    : stderrOnly(stderrOnlyMode), watch(std::move(watchFor))
 {
   (void)fflush(stdout);
   (void)fflush(stderr);
@@ -48,7 +55,10 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode)
   savedErr = CLPEAK_DUP(CLPEAK_FILENO(stderr));
   keepText = (mode == Capture::Always);
 
-  if (verboseEnabled() || keepText)
+  // Watching needs the stream in hand line by line, which only the capture
+  // path gives; a non-verbose scope that merely wants to know whether a
+  // phrase appeared still takes it.
+  if (verboseEnabled() || keepText || !watch.empty())
   {
     // Capture.  The reader drains the pipe for as long as anything holds
     // its write end -- which is fds 1 and 2 until the destructor puts the
@@ -58,7 +68,8 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode)
     if (savedOut >= 0 && savedErr >= 0 && makePipe(fds))
     {
       readFd = fds[0];
-      (void)CLPEAK_DUP2(fds[1], CLPEAK_FILENO(stdout));
+      if (!stderrOnly)
+        (void)CLPEAK_DUP2(fds[1], CLPEAK_FILENO(stdout));
       (void)CLPEAK_DUP2(fds[1], CLPEAK_FILENO(stderr));
       (void)CLPEAK_CLOSE(fds[1]);
       // Whatever renders a captured line must not write it into the capture.
@@ -72,7 +83,8 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode)
         // No thread: put the console back and run unmuted, as --verbose
         // always did.
         setRealStderrFd(-1);
-        (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
+        if (!stderrOnly)
+          (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
         (void)CLPEAK_DUP2(savedErr, CLPEAK_FILENO(stderr));
         (void)CLPEAK_CLOSE(readFd);
         readFd = -1;
@@ -89,9 +101,15 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode)
 #endif
   if (nul)
   {
-    if (savedOut >= 0) (void)CLPEAK_DUP2(CLPEAK_FILENO(nul), CLPEAK_FILENO(stdout));
+    if (savedOut >= 0 && !stderrOnly) (void)CLPEAK_DUP2(CLPEAK_FILENO(nul), CLPEAK_FILENO(stdout));
     if (savedErr >= 0) (void)CLPEAK_DUP2(CLPEAK_FILENO(nul), CLPEAK_FILENO(stderr));
     (void)fclose(nul);
+    // Even while discarding the library's console, clpeak's own diagnostics
+    // must still reach the real stderr rather than the bit bucket -- the same
+    // bypass the capture path installs, so a warning emitted inside a muted
+    // scope is not lost with the noise.
+    if (savedErr >= 0)
+      setRealStderrFd(savedErr);
   }
 }
 
@@ -104,7 +122,7 @@ void ScopedConsoleMute::finish()
   finished = true;
   (void)fflush(stdout);
   (void)fflush(stderr);
-  if (savedOut >= 0) (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
+  if (savedOut >= 0 && !stderrOnly) (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
   if (savedErr >= 0) (void)CLPEAK_DUP2(savedErr, CLPEAK_FILENO(stderr));
   // fd 2 is the console again, so the bypass goes before its saved copy is
   // closed -- a line the reader is still rendering must not land on a
@@ -136,6 +154,15 @@ void ScopedConsoleMute::finish()
 // of a scope), and into text() when the scope keeps it.
 void ScopedConsoleMute::record(const std::string &line)
 {
+  if (!watch.empty() && !watchHit.load(std::memory_order_relaxed))
+  {
+    for (const std::string &needle : watch)
+      if (!needle.empty() && line.find(needle) != std::string::npos)
+      {
+        watchHit.store(true, std::memory_order_relaxed);
+        break;
+      }
+  }
   if (keepText)
   {
     captured += line;

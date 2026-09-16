@@ -230,6 +230,37 @@ timed loop must not pay.  A refusal that arrives as "failed to prepare" is
 reported as unsupported, not as an error: it is the runtime saying it has
 no kernel for the format.
 
+**Two things defeat the per-call mutes, both real on the desktop
+`ai-edge-litert` wheels.** First, those wheels export *no* sink logger
+(`LiteRtCreateSinkLogger` and friends are absent, like `LiteRtGetStatusString`
+on Linux), so `installSink` no-ops and LiteRT's own logger writes straight to
+stderr.  Second, the GPU delegates (WebGPU/Dawn especially) log from their own
+worker threads -- weight upload, kernel compile -- *asynchronously*, between
+and after the calls that spawned them, so no per-call scope can bracket it.
+The result on an NVIDIA box was hundreds of lines a non-verbose run never
+asked for.  The fix is one `ScopedConsoleMute` per **device** spanning its
+whole benchmark (`litert_peak.cpp`), `stderrOnly` so the result table on
+stdout stays visible while the vendor's stderr noise is discarded (or, under
+`--verbose`, captured to the run log).  Every device's scope is muted, not
+just the accelerators': a lost GPU's Dawn threads keep logging into the *next*
+device's (the CPU's) scope.
+
+**A lost accelerator returns success from invokes that do nothing.** A WebGPU
+device that exhausts Vulkan's file descriptors (`VK_ERROR_OUT_OF_HOST_MEMORY`,
+"Ran out of file descriptors") is lost, yet `LiteRtRunCompiledModel` keeps
+returning `kLiteRtStatusOk`; the failure is reported only asynchronously on
+the console ("[Device] is lost", "failed to invoke").  So the timed loop
+divides real work by a no-op's time and would publish an impossible rate
+(16 PFLOPS of fp32 conv on a mid-range GPU).  The device-scope mute therefore
+*watches* for those phrases (`ScopedConsoleMute`'s `watch` list, `sawWatched()`);
+the first test that trips it latches `deviceLost`, the rest of that device's
+tests are skipped, and a `Warning` after the scope says the numbers already
+shown for it are unreliable.  This is the only backend that needs it because
+it is the only one whose device can die mid-run while still reporting OK.
+Raising `RLIMIT_NOFILE` delays the loss but the desktop WebGPU delegate stays
+unreliable (it also silently no-ops some rungs without losing the device), so
+clpeak flags rather than trusts it.
+
 ## Reference readings, M1 Pro (LiteRT 2.2.0, macOS 26)
 
 | row | GPU (Metal) | CPU (XNNPACK, 10 threads) |
