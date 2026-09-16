@@ -19,6 +19,7 @@
 #include "litert_session.h"
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
