@@ -3,6 +3,7 @@
 #include <onnx/onnx_peak.h>
 #include "onnx_runtime.h"
 #include "onnx_probe.h"
+#include "onnx_session.h"
 
 #include <common/coreml_cache.h>
 #include <common/options.h>
@@ -257,6 +258,9 @@ int OnnxPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
+    // A device lost under a previous provider is not this one's problem.
+    onnxClearDeviceLost();
+
     // Global tiny probe once per EP: learn which dtypes this EP can
     // actually run at 64^3 before paying 1024^3 (QNN HTP: 0.5s vs 33s).
     // Subsequent runGemm/runConv etc consult the cache instead of
@@ -273,32 +277,48 @@ int OnnxPeak::runAll()
     if (isAllowed(Benchmark::Gemm) || isAllowed(Benchmark::NumericError))
       onnxClearGemmFolded(ep);
 
+    // Only a provider with a device of its own can lose one, and the latch is
+    // process-wide: ORT's device-lost callback can still fire for the GPU that
+    // just died while the CPU provider is running, and that is the GPU's news,
+    // not the CPU's.
+    const bool canLoseDevice = (ep.deviceType != DeviceType::Cpu);
+    auto deviceLost = [&] { return canLoseDevice && onnxDeviceLost(); };
+
+    // Run one benchmark, unless the device has already been lost -- see
+    // onnxDeviceLost().  The probe above can lose it before the first test:
+    // on a Pixel 7a the 32^3 gemm probe hangs the GPU and the driver resets
+    // it, so the whole provider is gone before a single row is measured.
+    auto phase = [&](Benchmark b, int (OnnxPeak::*fn)(const OrtRuntime &,
+                                                      const onnx_ep_info_t &,
+                                                      benchmark_config_t &)) {
+      if (!isAllowed(b) || clpeak::cancelRequested() || deviceLost())
+        return;
+      (this->*fn)(*rt, ep, cfg);
+    };
+
     // ---- Compute (FLOPS + OPS) ---------------------------
-    if (isAllowed(Benchmark::Gemm))
-      runGemm(*rt, ep, cfg);
-
-    if (isAllowed(Benchmark::Conv))
-      runConv(*rt, ep, cfg);
-
+    phase(Benchmark::Gemm, &OnnxPeak::runGemm);
+    phase(Benchmark::Conv, &OnnxPeak::runConv);
     // ---- Phase 3: what the speed rows above cost in accuracy -------------
-    if (isAllowed(Benchmark::NumericError))
-      runNumericError(*rt, ep, cfg);
-
+    phase(Benchmark::NumericError, &OnnxPeak::runNumericError);
     // ---- Phase 4: AI composite (whole transformer block) -----------------
-    if (isAllowed(Benchmark::TransformerBlock))
-      runBlock(*rt, ep, cfg);
-
+    phase(Benchmark::TransformerBlock, &OnnxPeak::runBlock);
     // ---- Phase 5: bandwidth ----------------------------------------------
-    if (isAllowed(Benchmark::Activation))
-      runActivation(*rt, ep, cfg);
-    if (isAllowed(Benchmark::TensorBW))
-      runTensorBandwidth(*rt, ep, cfg);
-    if (isAllowed(Benchmark::TransferBW))
-      runTransferBandwidth(*rt, ep, cfg);
-
+    phase(Benchmark::Activation, &OnnxPeak::runActivation);
+    phase(Benchmark::TensorBW, &OnnxPeak::runTensorBandwidth);
+    phase(Benchmark::TransferBW, &OnnxPeak::runTransferBandwidth);
     // ---- Phase 6: latency ------------------------------------------------
-    if (isAllowed(Benchmark::KernelLatency))
-      runDispatchLatency(*rt, ep, cfg);
+    phase(Benchmark::KernelLatency, &OnnxPeak::runDispatchLatency);
+
+    // One line that says what happened, in place of the dozens of rows each
+    // remaining test would otherwise have filed against a device that cannot
+    // answer.  An error, not a warning: nothing was measured here.
+    if (deviceLost())
+      CLPEAK_LOG(Error,
+                 "ONNX %s: the device was lost during the run (the driver reset "
+                 "it, and the provider cannot recover); no further tests were "
+                 "attempted on it and any rows already filed are not measurements",
+                 ep.displayName.c_str());
 
     currentDeviceScope = nullptr;
 

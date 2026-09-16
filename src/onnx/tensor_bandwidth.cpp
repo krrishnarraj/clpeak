@@ -171,7 +171,7 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
     if (!ses.session)
     {
       r.error  = ses.error;
-      r.status = ResultStatus::Unsupported;
+      r.status = onnxFailureStatus(ses.error);
       return r;
     }
     if (createUs > kOnnxMaxCreateUs)

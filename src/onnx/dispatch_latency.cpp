@@ -87,7 +87,7 @@ Timed timeGraph(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   if (!ses.session)
   {
     t.error  = ses.error;
-    t.status = ResultStatus::Unsupported;
+    t.status = onnxFailureStatus(ses.error);
     t.createUs = -1.0;
     return t;
   }

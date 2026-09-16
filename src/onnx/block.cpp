@@ -468,7 +468,7 @@ namespace
     if (!r.session)
     {
       error = r.error;
-      status = ResultStatus::Unsupported;
+      status = onnxFailureStatus(r.error);
       return -1.0;
     }
 

@@ -317,7 +317,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       auto it = probe.find(v.label);
       if (it != probe.end() && !it->second.ok)
       {
-        test.skip(v.label, ResultStatus::Unsupported, it->second.reason, o.description);
+        test.skip(v.label, onnxFailureStatus(it->second.reason), it->second.reason,
+                  o.description);
         continue;
       }
     }
@@ -483,7 +484,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     if (raw.empty())
     {
-      test.skip(v.label, ResultStatus::Unsupported,
+      test.skip(v.label, onnxFailureStatus(err),
                 err.empty() ? "run failed" : err, o.description);
       continue;
     }

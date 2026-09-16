@@ -186,7 +186,7 @@ namespace
       if (!ses.session)
       {
         r.error = ses.error;
-        r.status = ResultStatus::Unsupported;
+        r.status = onnxFailureStatus(ses.error);
         return r;
       }
       if (createUs > kOnnxMaxCreateUs)

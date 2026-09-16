@@ -196,7 +196,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const OnnxProbeResult &pr = it->second;
     if (!pr.ok)
     {
-      test.skip(v.label, ResultStatus::Unsupported, pr.reason, o);
+      test.skip(v.label, onnxFailureStatus(pr.reason), pr.reason, o);
       return;
     }
     // The probe left one or more viable shapes, result-scaled first.  Try
@@ -562,7 +562,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       if (folded)
         onnxNoteGemmFolded(ep, v.label);
-      test.skip(v.label, errStatus,
+      test.skip(v.label, onnxFailureStatus(firstErr, errStatus),
                 firstErr.empty() ? "no supported datatype" : firstErr, o);
     }
     break; // settled: this shape produced the row (measurement or error)

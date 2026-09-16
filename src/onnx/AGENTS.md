@@ -32,7 +32,7 @@ backend.
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
-| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
+| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`) |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
 | `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
@@ -329,6 +329,44 @@ to clpeak. Two cross-checks close most of that gap: the CPU EP row — always
 enumerated, always last — should be far below any accelerator row, and the
 `onnx-numeric-error` fp32 row exposes an EP that took an fp32 graph and
 computed it at lower precision (see below).
+
+## `Unsupported` is a claim about the format, not about the device
+
+Every refusal in this backend defaults to `Unsupported`, and that is right
+for almost all of them: a provider declining nodes under the fallback guard,
+a missing bf16 kernel, the empty `OrtStatus` ORT returns for a float4 graph.
+They are capability facts, and they stay true on a healthy machine.
+
+A **device loss** is not one of those, and must never be reported as one.  A
+GPU reset out from under the provider -- a Mali driver timing out a hung
+shader and answering `vkWaitForFences` with `VK_ERROR_DEVICE_LOST`, which is
+what a Pixel 7a does to the WebGPU EP on the first non-trivial graph -- makes
+every later session fail for a reason that has nothing to do with the format
+being asked for.  Labelling that `Unsupported` tells a reader the provider
+cannot do fp32 matmul, and a reader has no way to tell it from a real
+refusal.  `onnxFailureStatus()` (`onnx_session.h`) therefore promotes exactly
+those to `Error` and leaves everything else alone; use it wherever a
+runtime-produced reason becomes a row's status.
+
+**And a lost device does not come back.**  Every later session still builds
+and every later inference still fails, so a run that keeps asking spends its
+whole budget proving it: the report that prompted this guard had 52 of 83
+rows and 53 of its 58 seconds against a GPU that had been dead since t=4.1 s,
+and was still dispatching `MatMul` programs to it at t=57.7 s.  So the loss is
+latched the moment the runtime mentions it -- `onnxDeviceLost()`, set from
+`onnxStatusText()` and from the ORT logger *above its verbosity filter*,
+since the WebGPU EP announces the loss at INFO and a non-verbose run would
+otherwise never see the earliest signal.  `runAll()` clears the latch per
+provider, and the first test that trips it skips the rest of that provider's
+tests and files one `Error` line instead.
+
+Only a provider with a device of its own is subject to it (`deviceType !=
+Cpu`): the latch is process-wide, and ORT's device-lost callback can still
+fire for the GPU that just died while the CPU provider is running.
+
+Note what this guard does *not* do.  It does not rescue the run -- there is
+nothing to rescue, the device is gone -- it makes the report say so once,
+honestly, instead of 52 times in the wrong vocabulary.
 
 ## What the numeric-error rows are for
 

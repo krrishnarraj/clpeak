@@ -133,4 +133,40 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
 
+// Has the runtime reported its accelerator device lost since the flag was
+// last cleared?
+//
+// A GPU that is reset out from under the provider -- a Mali driver timing out
+// a hung shader and answering vkWaitForFences with VK_ERROR_DEVICE_LOST, which
+// is what a Pixel 7a does to the WebGPU EP on the first non-trivial graph --
+// does not come back.  Every later session still builds, every later inference
+// still fails, and the run spends its whole budget proving it: 52 of 83 rows
+// and 53 of 58 seconds in the report that prompted this.  So the loss is
+// latched the moment the runtime mentions it, whether that is in a status
+// message handed back to us or a line it only logged, and runAll() abandons
+// the provider rather than asking it 52 more questions.
+//
+// Set from the ORT logger (above any verbosity filter -- the WebGPU EP reports
+// the loss at INFO, so a non-verbose run would otherwise never see it) and
+// from onnxStatusText().  Cleared per provider in runAll().
+bool onnxDeviceLost();
+void onnxClearDeviceLost();
+
+// True when `reason` is a runtime or device failure rather than the provider
+// saying it has no kernel for this format.
+bool onnxReasonIsDeviceLoss(const std::string &reason);
+
+// The status a refusal deserves.  ONNX's ordinary refusals *are* capability
+// facts -- a provider declining nodes under the CPU-fallback guard, a missing
+// bf16 kernel, the empty status ORT returns for a float4 graph -- so
+// Unsupported stays the default and only a device failure is promoted to
+// Error.  Reporting a dead GPU as "unsupported" would be a claim about the
+// format, and a reader has no way to tell it from a real one: this run said
+// "unsupported" against fp32 matmul on a GPU that does fp32 matmul perfectly
+// well when it is alive.
+// `current` is never downgraded: a caller that has already concluded the
+// ladder failed for a reason of its own keeps its Error.
+ResultStatus onnxFailureStatus(const std::string &reason,
+                               ResultStatus current = ResultStatus::Unsupported);
+
 #endif // CLPEAK_ONNX_SESSION_H

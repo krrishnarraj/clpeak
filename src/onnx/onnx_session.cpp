@@ -46,6 +46,47 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
   return std::string();
 }
 
+// Device loss, latched.  Written from ORT's logger thread and from whatever
+// thread a status came back on, read by runAll between tests.
+static std::atomic<bool> g_deviceLost{false};
+
+bool onnxReasonIsDeviceLoss(const std::string &reason)
+{
+  // What the WebGPU/Dawn EP says on a driver reset, in the three places it
+  // surfaces: the device-lost callback, the failed readback that follows, and
+  // the Vulkan error underneath.  "device lost" also covers D3D12's
+  // DXGI_ERROR_DEVICE_REMOVED path, which ORT reports with the same words.
+  static const char *kMarkers[] = {
+      "Device] is lost",
+      "device lost",
+      "Device lost",
+      "DEVICE_LOST",
+      "DEVICE_REMOVED",
+      "Failed to download data from buffer",
+  };
+  for (const char *m : kMarkers)
+    if (reason.find(m) != std::string::npos)
+      return true;
+  return false;
+}
+
+// Latch when `text` carries the loss; harmless for anything else.
+static void noteDeviceLost(const std::string &text)
+{
+  if (!g_deviceLost.load(std::memory_order_relaxed) && onnxReasonIsDeviceLoss(text))
+    g_deviceLost.store(true, std::memory_order_relaxed);
+}
+
+bool onnxDeviceLost() { return g_deviceLost.load(std::memory_order_relaxed); }
+void onnxClearDeviceLost() { g_deviceLost.store(false, std::memory_order_relaxed); }
+
+ResultStatus onnxFailureStatus(const std::string &reason, ResultStatus current)
+{
+  if (current == ResultStatus::Error)
+    return current;
+  return onnxReasonIsDeviceLoss(reason) ? ResultStatus::Error : ResultStatus::Unsupported;
+}
+
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 {
   if (!st)
@@ -53,6 +94,8 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
   const char *msg = rt.api->GetErrorMessage(st);
   std::string out = msg ? msg : "";
   rt.api->ReleaseStatus(st);
+  // Before the first line is kept below: the loss is often named further down.
+  noteDeviceLost(out);
   // A status with an empty message is as useless as no status: the row would
   // report a refusal with nothing in it, which is what a stock ONNX Runtime
   // 1.23 does for the float4 graphs.  Never hand back an empty reason.
@@ -78,6 +121,14 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
                                 const char *category, const char *,
                                 const char *codeLocation, const char *message)
 {
+  // Before any filtering: the WebGPU EP announces the loss at INFO
+  // ("WebGPU device lost (1): vkWaitForFences failed with VK_ERROR_DEVICE_LOST"),
+  // which is debug material here and dropped without --verbose -- so latching
+  // after the filter would see it only in verbose runs, the ones least in need
+  // of the guard.
+  if (message)
+    noteDeviceLost(message);
+
   clpeak::LogLevel level;
   switch (severity)
   {

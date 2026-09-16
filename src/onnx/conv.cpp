@@ -287,7 +287,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {
           logger::EmitOptions o;
           o.description = std::string("Peak over a doubling sweep of feature-map sizes.  ") + dt.note + "  " + v.note;
-          test.skip(row, ResultStatus::Unsupported, it->second.reason, o.description);
+          test.skip(row, onnxFailureStatus(it->second.reason), it->second.reason,
+                    o.description);
           continue;
         }
       }
@@ -472,7 +473,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                     "feature-map sizes.  ") +
                         dt.note + "  " +
                         v.note;
-        test.skip(row, errStatus,
+        test.skip(row, onnxFailureStatus(firstErr, errStatus),
                   firstErr.empty() ? "convolution unsupported" : firstErr,
                   o.description);
       }
