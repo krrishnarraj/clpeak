@@ -28,10 +28,16 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
   per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
   107 MB for every slice).  LiteRT's NPU dispatch shims are not on Maven:
-  `tool/fetch_litert_npu.sh` stages them under `android/app/src/main/jniLibs/`
-  (git-ignored) before a build that should reach an NPU; the Qualcomm
-  runtime itself is a further, per-Hexagon-generation bundle (see
-  `src/litert/AGENTS.md`, Packaging).
+  `tool/fetch_litert_npu.sh qualcomm|google_tensor` stages one vendor's under
+  `android/app/src/main/jniLibs/` (git-ignored) before a build that should
+  reach that NPU -- one vendor, because LiteRT loads the first shim it lists.
+  Staging any switches the build to extracting native libraries at install
+  (LiteRT finds the shim by listing a directory, which an APK's internal
+  `lib/` is not).  Qualcomm's own runtime is a further 67 MB opt-in,
+  `clpeakQnn=true` in `android/gradle.properties` (Maven Central's
+  `com.qualcomm.qti:qnn-runtime`, every Hexagon generation); MediaTek's and
+  Google Tensor's are system libraries on the device.  See
+  `src/litert/AGENTS.md`, Packaging.
 - iOS: `tool/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX

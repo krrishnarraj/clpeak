@@ -101,7 +101,7 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 ./clpeak --device coreml:0            # one device, as --list-devices names it (here: the Neural Engine)
 ./clpeak --device cuda:0,vulkan:1     # a few devices across backends; nothing else runs
 ./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
-./clpeak --litert --litert-lib PATH   # pick the LiteRT library (a pip ai-edge-litert wheel has one); --litert-npu-dir for the vendor NPU runtime
+./clpeak --litert --litert-lib PATH   # pick the LiteRT library (a pip ai-edge-litert wheel has one); --litert-npu-dir for the vendor NPU runtime (Android app: tool/fetch_litert_npu.sh, app/AGENTS.md)
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
 ./clpeak --verbose -o out.clpeak.json # …with every diagnostic and the device inventory: attach this to a bug report

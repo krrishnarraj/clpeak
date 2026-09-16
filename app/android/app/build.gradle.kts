@@ -4,6 +4,27 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Qualcomm's QNN (QAIRT) runtime for LiteRT's Hexagon NPU path, opt-in:
+// `clpeakQnn=true` in android/gradle.properties (which `flutter build` and
+// `flutter run` read), or `-PclpeakQnn=true` on a direct gradlew call.
+//
+// It is 67 MB compressed / 200 MB installed (libQnnHtpPrepare.so alone is
+// 86 MB; one Skel per Hexagon generation v68..v81), only a Snapdragon can
+// use it, and Qualcomm publishes it on Maven Central under its AI Hub Model
+// License (com.qualcomm.qti:qnn-runtime), so it is not in the default APK.
+// LiteRT's own Qualcomm shims (libLiteRtDispatch_Qualcomm.so and the
+// compiler plugin, from tool/fetch_litert_npu.sh) must sit beside it, and
+// the QNN version has to be the one those shims were built against (2.47
+// for LiteRT 2.2.0: the release's fetch_qualcomm_library.sh names it).
+val clpeakQnn = (project.findProperty("clpeakQnn")?.toString() ?: "false") == "true"
+
+// NPU shims staged by tool/fetch_litert_npu.sh.  LiteRT finds a dispatch
+// library by listing the directory it is told (litert_dispatch.cc), and an
+// APK's internal lib/ path is not a directory anyone can list, so an app
+// carrying shims has its native libraries extracted at install; the
+// Qualcomm runtime needs that anyway (see below).
+val clpeakNpuStaged = file("src/main/jniLibs/arm64-v8a").isDirectory
+
 android {
     namespace = "kr.clpeak"
     compileSdk = flutter.compileSdkVersion
@@ -58,10 +79,14 @@ android {
                 "lib/armeabi-v7a/libLiteRt.so",
                 "lib/armeabi-v7a/libLiteRtClGlAccelerator.so",
             )
-            // A LiteRT NPU dispatch library staged by tool/fetch_litert_npu.sh
-            // and the runtime's own .so must both stay uncompressed and
-            // page-aligned to be dlopen'd out of the APK.
-            useLegacyPackaging = false
+            // Without NPU libraries the .so files stay uncompressed and
+            // page-aligned in the APK and are dlopen'd from there.  With
+            // them, they are extracted at install: LiteRT lists a directory
+            // to find its dispatch shim, and the Qualcomm runtime's
+            // Hexagon-side libraries (libQnnHtpV*Skel.so) are opened by the
+            // DSP's loader from ADSP_LIBRARY_PATH, which LiteRT points at
+            // that same directory -- both need real files.
+            useLegacyPackaging = clpeakQnn || clpeakNpuStaged
         }
     }
 
@@ -93,6 +118,11 @@ dependencies {
     // check) is unused: only the .so files are wanted.
     implementation("com.google.ai.edge.litert:litert:2.2.0") {
         exclude(group = "com.google.ai.edge.litert", module = "litert-api")
+    }
+
+    // See `clpeakQnn` at the top of this file.
+    if (clpeakQnn) {
+        implementation("com.qualcomm.qti:qnn-runtime:2.47.0")
     }
 }
 

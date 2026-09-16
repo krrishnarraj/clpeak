@@ -378,11 +378,26 @@ budgets.
   `libLiteRtClGlAccelerator.so` 3.1 MB); its manifest's `uses-native-library`
   entries merge into ours.  NPU dispatch and compiler-plugin shims come from
   the release's `litert_npu_runtime_libraries_jit.zip` via
-  `tool/fetch_litert_npu.sh` into `src/main/jniLibs/` (git-ignored).  MediaTek
-  and Google Tensor runtimes are system libraries; Qualcomm's QAIRT
-  libraries must be bundled per Hexagon generation (the zip's own
-  `fetch_qualcomm_library.sh`), which for a Play release means the dynamic
-  feature modules the zip is laid out as.  NPU needs API 31+ and arm64.
+  `tool/fetch_litert_npu.sh qualcomm|google_tensor` into `src/main/jniLibs/`
+  (git-ignored) -- one vendor at a time, because LiteRT lists the dispatch
+  directory and loads the first `libLiteRtDispatch_*` it finds
+  (`litert_dispatch.cc`), so `litertUsableDevices()` labels the device from
+  the path in LiteRT's log rather than from what is staged.  That listing
+  is also why an app carrying shims extracts its native libraries at
+  install (`useLegacyPackaging`): an APK's internal `lib/` path can be
+  dlopen'd but not listed.  MediaTek and Google Tensor runtimes are system
+  libraries on the device.  Qualcomm's is bundled: `clpeakQnn=true` pulls
+  `com.qualcomm.qti:qnn-runtime:2.47.0` from Maven Central (every Hexagon
+  generation's Skel/Stub plus `libQnnHtp`, `libQnnSystem` and the 86 MB
+  `libQnnHtpPrepare` the JIT needs; 67 MB compressed, arm64 only; the
+  version is the one LiteRT 2.2.0's shims were built against, named in the
+  zip's `fetch_qualcomm_library.sh`), and LiteRT's `QnnManager` points
+  `ADSP_LIBRARY_PATH` at the dispatch directory so the DSP's loader finds
+  the Skel -- another reason the files must be real.  A Play release would
+  carry the zip's per-generation dynamic feature modules instead, delivered
+  by device group.  NPU needs API 31+ and arm64.  Unverified on Snapdragon
+  and Tensor silicon: the APK builds and packages (114 MB arm64 with QNN);
+  the testers' runs are the proof.
 - **Desktop**: `--litert-lib` at a pip wheel's `libLiteRt.{so,dylib,dll}`;
   the GPU accelerator and the Intel OpenVINO NPU dispatch sit beside it.
 - **Verified on Android** with the CLI built against the NDK (root

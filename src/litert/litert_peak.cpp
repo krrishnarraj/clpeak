@@ -46,22 +46,43 @@ const NpuVendor kNpuVendors[] = {
     {"IntelOpenvino", "Intel", "Intel NPU via LiteRT (OpenVINO)"},
 };
 
-const NpuVendor *findNpuVendor(const std::string &dir)
+// Which vendors' dispatch libraries sit in `dir`, in the table's order.  A
+// directory listing first; where there is no directory to list -- an
+// Android app's libraries stay inside the APK ("base.apk!/lib/arm64-v8a",
+// which the linker opens but no directory iterator can) -- each vendor's
+// library is tried by name, the way LiteRT itself will open it.  More than
+// one is normal: tool/fetch_litert_npu.sh stages every vendor's shim, and
+// only the one for the silicon underneath will bring up a device.
+std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
 {
+  std::vector<const NpuVendor *> found;
   if (dir.empty())
-    return nullptr;
+    return found;
   std::error_code ec;
   std::filesystem::directory_iterator it(dir, ec), end;
-  for (; !ec && it != end; it.increment(ec))
+  if (!ec)
   {
-    const std::string name = it->path().filename().string();
-    if (name.rfind("libLiteRtDispatch_", 0) != 0 && name.rfind("LiteRtDispatch", 0) != 0)
-      continue;
+    std::vector<std::string> names;
+    for (; !ec && it != end; it.increment(ec))
+      names.push_back(it->path().filename().string());
     for (const auto &v : kNpuVendors)
-      if (name.find(v.fileTag) != std::string::npos)
-        return &v;
+      for (const std::string &name : names)
+        if ((name.rfind("libLiteRtDispatch_", 0) == 0 || name.rfind("LiteRtDispatch", 0) == 0) &&
+            name.find(v.fileTag) != std::string::npos)
+        {
+          found.push_back(&v);
+          break;
+        }
+    return found;
   }
-  return nullptr;
+  for (const auto &v : kNpuVendors)
+  {
+    const std::string name = std::string("libLiteRtDispatch_") + v.fileTag + ".so";
+    const std::string full = dir + "/" + name;
+    if (clpeak::dynOpen({full.c_str(), name.c_str()}))
+      found.push_back(&v);
+  }
+  return found;
 }
 
 // The GPU accelerator library that registered, from what LiteRT logged
@@ -141,13 +162,18 @@ std::vector<litert_device_info_t> litertUsableDevices(
     // NPU: only when a vendor dispatch library is there to be loaded; LiteRT
     // otherwise logs a request for DispatchLibraryDir and takes the graph
     // on the CPU, which the fallback guard would catch one step later.
+    // LiteRT itself picks the library: it lists the directory and loads the
+    // first libLiteRtDispatch_* it finds (litert_dispatch.cc, with a warning
+    // when there are several), once per process.  So the device is whatever
+    // it loaded -- its log names the path -- and staging one vendor's shim
+    // is the way to choose.
     {
       litert_device_info_t dev;
       dev.accel = LitertAccel::Npu;
       dev.typeStr = "NPU";
       dev.deviceType = DeviceType::Accelerator;
-      const NpuVendor *v = findNpuVendor(litertNpuDir());
-      if (!v)
+      const std::vector<const NpuVendor *> vendors = findNpuVendors(litertNpuDir());
+      if (vendors.empty())
       {
         dev.displayName = "NPU via LiteRT";
         g_skipped.emplace_back(dev, "no libLiteRtDispatch_<vendor> library in " +
@@ -157,13 +183,29 @@ std::vector<litert_device_info_t> litertUsableDevices(
       }
       else
       {
-        dev.vendor = v->vendor;
-        dev.displayName = v->display;
+        dev.vendor = vendors.front()->vendor;
+        dev.displayName = vendors.front()->display;
         std::string reason, log;
-        if (probeAccel(rt, dev, reason, log))
+        const bool ok = probeAccel(rt, dev, reason, log);
+        // Which shim LiteRT actually loaded, from its own log line.
+        const std::string envLog = litertEnvironmentLog(LitertAccel::Npu);
+        for (const auto &v : kNpuVendors)
+          if (envLog.find(std::string("libLiteRtDispatch_") + v.fileTag) != std::string::npos ||
+              envLog.find(std::string("LiteRtDispatch_") + v.fileTag) != std::string::npos)
+          {
+            dev.vendor = v.vendor;
+            dev.displayName = v.display;
+            break;
+          }
+        if (ok)
           g_devs.push_back(dev);
         else
+        {
+          if (vendors.size() > 1)
+            reason += " (several vendors' dispatch libraries are staged in " + litertNpuDir() +
+                      " and LiteRT loads the first it lists; stage only the one for this device)";
           g_skipped.emplace_back(dev, reason);
+        }
       }
     }
 
