@@ -62,6 +62,21 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 // {"available":false,"error":"ONNX backend not built in"} without one.
 CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 
+// The same two entry points for LiteRT: which libLiteRt to load (absolute
+// path, or NULL/"" to search the conventional names) and, separately, the
+// directory holding the NPU dispatch / compiler-plugin libraries and the
+// vendor runtime (NULL/"" = beside the LiteRT library).  Between runs only;
+// no-ops on a build without the backend.
+CLPEAK_FFI_EXPORT void clpeak_set_litert_library(const char *path);
+CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
+
+// State of the LiteRT runtime, for a settings screen:
+//   {"available":bool,"version":str,"path":str,"error":str}
+// `version` is the ABI version this build was compiled against -- LiteRT
+// exposes no runtime version string.  {"available":false,"error":"LiteRT
+// backend not built in"} without the backend.
+CLPEAK_FFI_EXPORT char *clpeak_copy_litert_status_json(void);
+
 // ---- Event stream -------------------------------------------------------------
 
 // Every run event arrives as one malloc'd UTF-8 JSON document.  OWNERSHIP

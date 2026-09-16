@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// App settings: the theme mode, which ONNX Runtime the ONNX backend loads,
-/// and whether runs record verbose diagnostics.
+/// App settings: the theme mode, which ONNX Runtime and LiteRT libraries the
+/// two backends load, and whether runs record verbose diagnostics.
 ///
 /// Loaded synchronously from an already-read [SharedPreferences] so main()
 /// can apply the ONNX library before the first enumeration — enumeration is
@@ -14,6 +14,7 @@ class SettingsService extends ChangeNotifier {
             (m) => m.name == _prefs.getString(_themeKey),
             orElse: () => ThemeMode.system),
         _onnxLibraryPath = _prefs.getString(_onnxLibKey) ?? '',
+        _litertLibraryPath = _prefs.getString(_litertLibKey) ?? '',
         _verbose = _prefs.getBool(_verboseKey) ?? false;
 
   static Future<SettingsService> load() async =>
@@ -21,6 +22,7 @@ class SettingsService extends ChangeNotifier {
 
   static const _themeKey = 'themeMode';
   static const _onnxLibKey = 'onnxLibraryPath';
+  static const _litertLibKey = 'litertLibraryPath';
   static const _verboseKey = 'verbose';
 
   final SharedPreferences _prefs;
@@ -33,6 +35,11 @@ class SettingsService extends ChangeNotifier {
   /// linked into the app (iOS).
   String _onnxLibraryPath;
   String get onnxLibraryPath => _onnxLibraryPath;
+
+  /// The same for LiteRT: a libLiteRt to load ahead of the packaged /
+  /// conventional one, or empty.
+  String _litertLibraryPath;
+  String get litertLibraryPath => _litertLibraryPath;
 
   /// Pass `--verbose` to every run: the saved document (and so the exported
   /// file) then carries the backends' debug output, the device inventory and
@@ -63,6 +70,17 @@ class SettingsService extends ChangeNotifier {
       await _prefs.remove(_onnxLibKey);
     } else {
       await _prefs.setString(_onnxLibKey, path);
+    }
+  }
+
+  Future<void> setLitertLibraryPath(String path) async {
+    if (path == _litertLibraryPath) return;
+    _litertLibraryPath = path;
+    notifyListeners();
+    if (path.isEmpty) {
+      await _prefs.remove(_litertLibKey);
+    } else {
+      await _prefs.setString(_litertLibKey, path);
     }
   }
 }

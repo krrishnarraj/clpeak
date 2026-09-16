@@ -139,6 +139,19 @@ class BenchmarkService extends ChangeNotifier {
   /// Which ONNX Runtime the backend has loaded, or why none is.
   OnnxStatus onnxStatus() => _bindings.onnxStatus();
 
+  /// Which LiteRT the backend has loaded, or why none is.
+  LitertStatus litertStatus() => _bindings.litertStatus();
+
+  /// Point the LiteRT backend at a library and re-enumerate; see
+  /// [setOnnxLibrary] for the single-flight reasoning.
+  Future<void> setLitertLibrary(String path) async {
+    if (isRunning) return;
+    await _catalogFlight;
+    if (isRunning) return;
+    _bindings.setLitertLibrary(path);
+    await reloadCatalog();
+  }
+
   /// Point the ONNX backend at a library and re-enumerate, so the device
   /// list reflects the providers the new runtime brings.  Empty path = back
   /// to searching the conventional names.
@@ -154,7 +167,7 @@ class BenchmarkService extends ChangeNotifier {
   }
 
   /// Re-enumerate after something changed what the native side can see —
-  /// today only the ONNX Runtime the settings screen chose.
+  /// the ONNX Runtime or LiteRT library the settings screen chose.
   ///
   /// Selections survive where they still mean something: a device the user
   /// had turned off stays off, one that has gone away is dropped, and a

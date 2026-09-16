@@ -21,12 +21,17 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   clpeak-gui target owns final assembly).
 - Android: `flutter build apk --release` / `flutter build appbundle --release`
   (Gradle drives `src/ffi/android/CMakeLists.txt`; needs
-  `git submodule update --init`). The bundle includes ONNX Runtime for
+  `git submodule update --init`). The bundle includes ONNX Runtime and
+  LiteRT (`libLiteRt.so` + its OpenCL GPU accelerator, 8.6 MB) for
   **arm64-v8a** (devices) and **x86_64** (emulator / Chromebooks) —
   `armeabi-v7a`/`x86` are excluded as legacy 32-bit ABIs; see the packaging
   block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
   per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
-  107 MB for every slice).
+  107 MB for every slice).  LiteRT's NPU dispatch shims are not on Maven:
+  `tool/fetch_litert_npu.sh` stages them under `android/app/src/main/jniLibs/`
+  (git-ignored) before a build that should reach an NPU; the Qualcomm
+  runtime itself is a further, per-Hexagon-generation bundle (see
+  `src/litert/AGENTS.md`, Packaging).
 - iOS: `tool/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX

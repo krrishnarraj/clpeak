@@ -18,7 +18,7 @@ set(CLPEAK_BACKEND_REGISTRY_SOURCE
 function(clpeak_link_backends target)
     target_sources(${target} PRIVATE "${CLPEAK_BACKEND_REGISTRY_SOURCE}")
 
-    foreach(_backend OPENCL VULKAN CUDA ROCM METAL ONEAPI CPU ONNX COREML)
+    foreach(_backend OPENCL VULKAN CUDA ROCM METAL ONEAPI CPU ONNX COREML LITERT)
         string(TOLOWER "${_backend}" _lower)
         if(TARGET peak_${_lower})
             target_link_libraries(${target} PRIVATE peak_${_lower})

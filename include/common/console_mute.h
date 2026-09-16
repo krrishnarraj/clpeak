@@ -28,8 +28,22 @@ namespace clpeak {
 class ScopedConsoleMute
 {
 public:
-  ScopedConsoleMute();
+  // Verbose: capture under --verbose, discard otherwise (the default).
+  // Always: capture regardless, and keep the text for text() -- for a
+  // library whose refusal reason only ever reaches the console.  TFLite's
+  // kernel errors ("input->type != kTfLiteFloat32") go to its error reporter,
+  // which is stderr, and a LiteRT compile that fails hands back a status
+  // code and nothing else; the sentence that explains the row is here.
+  enum class Capture { Verbose, Always };
+  explicit ScopedConsoleMute(Capture mode = Capture::Verbose);
   ~ScopedConsoleMute();
+
+  // Restore the console now (the destructor would otherwise), so text() can
+  // be read while the scope is still in reach.  Idempotent.
+  void finish();
+
+  // Everything the library printed within this scope, Capture::Always only.
+  const std::string &text() const { return captured; }
 
   ScopedConsoleMute(const ScopedConsoleMute &) = delete;
   ScopedConsoleMute &operator=(const ScopedConsoleMute &) = delete;
@@ -40,6 +54,7 @@ public:
 
 private:
   void drain();
+  void record(const std::string &line);
 
   int savedOut = -1;
   int savedErr = -1;
@@ -48,6 +63,9 @@ private:
   int         readFd = -1;
   std::thread reader;
   std::string pending;    // an unterminated last line, flushed at scope end
+  std::string captured;   // Capture::Always: every line, for text()
+  bool        keepText = false;
+  bool        finished = false;
   unsigned    lines = 0;
 };
 

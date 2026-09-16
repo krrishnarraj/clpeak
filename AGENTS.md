@@ -2,8 +2,10 @@
 
 Cross-API compute benchmark tool. Measures compute, bandwidth, and latency
 across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL GPU backends —
-plus a native CPU backend, an ONNX Runtime backend that reaches NPUs, and a
-Core ML backend for Apple's Neural Engine — from a single binary.
+plus a native CPU backend, an ONNX Runtime backend that reaches NPUs, a
+Core ML backend for Apple's Neural Engine, and a LiteRT backend for Android's
+NPUs (Qualcomm, MediaTek, Google Tensor, Samsung) and its GPU/CPU runtime —
+from a single binary.
 
 ## Architecture
 
@@ -17,7 +19,8 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 ├── MetalPeak  → src/metal/                          ← Metal backend
 ├── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
 ├── OnnxPeak   → src/onnx/                           ← ONNX Runtime backend (NPUs via execution providers)
-└── CoreMLPeak → src/coreml/                         ← Core ML backend (Apple Neural Engine / GPU / CPU; Apple only)
+├── CoreMLPeak → src/coreml/                         ← Core ML backend (Apple Neural Engine / GPU / CPU; Apple only)
+└── LitertPeak → src/litert/                         ← LiteRT backend (NPU / GPU / CPU accelerators; Android's native AI runtime)
 ```
 
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
@@ -42,6 +45,7 @@ run and the result document all share.
 | `include/cpu/` | Native CPU backend header — `cpu_peak.h` |
 | `include/onnx/` | ONNX Runtime backend header — `onnx_peak.h` |
 | `include/coreml/` | Core ML backend header — `coreml_peak.h` |
+| `include/litert/` | LiteRT backend header — `litert_peak.h` |
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
@@ -52,12 +56,13 @@ run and the result document all share.
 | `src/cpu/` | Native CPU backend: `CpuPeak` class + `std::thread` pool + per-ISA SIMD kernels (one feature TU per ISA, runtime-dispatched); cache/DRAM bandwidth + memory latency |
 | `src/onnx/` | ONNX Runtime backend: `OnnxPeak` class + per-benchmark `.cpp`. Each execution provider (QNN / OpenVINO / VitisAI / CoreML / NNAPI / GPU / CPU) is one device; the runtime is dlopen'd and models are emitted as protobuf bytes in memory |
 | `src/coreml/` | Core ML backend (ObjC++ session + plain C++ tests): `CoreMLPeak` class + per-benchmark `.cpp`. Each Core ML compute device (Neural Engine / GPU / CPU) is one device; ML Program models are emitted as protobuf bytes + a weight blob and compiled at run time, and the compute plan proves per operation where they ran |
+| `src/litert/` | LiteRT backend: `LitertPeak` class + per-benchmark `.cpp`. Each accelerator (NPU via a vendor dispatch library / GPU / CPU) is one device; `.tflite` models are emitted as FlatBuffer bytes in memory, the runtime is dlopen'd, and `IsFullyAccelerated` plus the profiler prove what ran where |
 | `src/registry/` | `backend_registry.cpp` — the one list of backends in this build (`backendRegistry()`, `include/common/backend_registry.h`), sorted by the `Backend` enum; compiled into both `clpeak` and `clpeak_ffi` by `src/common/cmake/backends.cmake`, which also links the backend libraries and sets `ENABLE_*` for both |
 | `src/cli/` | Desktop CLI: `main.cpp` |
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
-| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` (C API — no library needed to build) |
-| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` — refresh the vendored ONNX Runtime headers) |
+| `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` and `litert/` (C APIs — no library needed to build) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_litert_npu.sh` — stage LiteRT's NPU dispatch shims for the Android app) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |

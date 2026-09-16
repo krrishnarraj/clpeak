@@ -14,6 +14,9 @@
 #ifdef ENABLE_ONNX
 #include <onnx/onnx_peak.h>  // onnxSetLibraryOverride, for --onnx-lib
 #endif
+#ifdef ENABLE_LITERT
+#include <litert/litert_peak.h>  // litertSetLibraryOverride, for --litert-lib
+#endif
 
 int main(int argc, char **argv)
 {
@@ -25,6 +28,12 @@ int main(int argc, char **argv)
     // and enumerate() is what loads it.
     if (!opts.onnxLibPath.empty())
         onnxSetLibraryOverride(opts.onnxLibPath);
+#endif
+#ifdef ENABLE_LITERT
+    if (!opts.litertLibPath.empty())
+        litertSetLibraryOverride(opts.litertLibPath);
+    if (!opts.litertNpuDir.empty())
+        litertSetNpuDirOverride(opts.litertNpuDir);
 #endif
 
     const auto &backends = backendRegistry();

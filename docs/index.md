@@ -10,9 +10,9 @@ actually reach — not what the spec sheet claims.
 {: .lede }
 
 Originally an OpenCL benchmark, clpeak now drives OpenCL, Vulkan, CUDA,
-ROCm/HIP, Metal, oneAPI/SYCL, a native CPU backend and an ONNX Runtime backend
-(NPUs via execution providers) from one codebase, so the
-same tests can be compared across APIs on the same machine.
+ROCm/HIP, Metal, oneAPI/SYCL, a native CPU backend, and the ONNX Runtime,
+Core ML and LiteRT backends that reach NPUs, from one codebase, so the same
+tests can be compared across APIs on the same machine.
 
 <figure>
   <img src="{{ '/assets/img/results-dark.png' | relative_url }}"
@@ -37,7 +37,7 @@ same tests can be compared across APIs on the same machine.
   DRAM levels; NPU resident-tensor and transfer bandwidth.
 - **Latency** — kernel launch round-trip, memory latency, atomics and
   branch-mispredict cost; NPU dispatch overhead.
-- **AI composites** — ONNX and Core ML transformer-block prefill/decode, convolution and
+- **AI composites** — ONNX, Core ML and LiteRT transformer-block prefill/decode, convolution and
   activation throughput, plus per-dtype numeric error, so a rate always ships
   with its accuracy cost.
 
@@ -60,6 +60,7 @@ both in the app (the info glyph beside each row) and on the CLI
 | CPU | x86-64 and AArch64, runtime-dispatched per ISA |
 | Core ML | Apple's Neural Engine, GPU and CPU through the system framework, no runtime to install (macOS 14.4+ / iOS 17.4+) |
 | ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
+| LiteRT | Android's native AI runtime: NPUs through vendor dispatch libraries (Qualcomm, MediaTek, Google Tensor, Samsung; Intel on desktops), its GPU accelerator (OpenCL / Metal / WebGPU) and XNNPACK on the CPU, each as a device |
 
 </div>
 

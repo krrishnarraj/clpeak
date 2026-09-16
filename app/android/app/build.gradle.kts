@@ -55,7 +55,13 @@ android {
                 "lib/armeabi-v7a/libonnxruntime.so",
                 "lib/x86/libonnxruntime.so",
                 "**/libonnxruntime4j_jni.so",
+                "lib/armeabi-v7a/libLiteRt.so",
+                "lib/armeabi-v7a/libLiteRtClGlAccelerator.so",
             )
+            // A LiteRT NPU dispatch library staged by tool/fetch_litert_npu.sh
+            // and the runtime's own .so must both stay uncompressed and
+            // page-aligned to be dlopen'd out of the APK.
+            useLegacyPackaging = false
         }
     }
 
@@ -72,6 +78,15 @@ dependencies {
     // Packaged for its jni/<abi>/libonnxruntime.so; the Java API that comes
     // with it is unused (clpeak talks to the C API through the FFI library).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+
+    // LiteRT: jni/<abi>/libLiteRt.so plus its OpenCL GPU accelerator
+    // (libLiteRtClGlAccelerator.so), 8.6 MB for arm64-v8a.  The AAR's own
+    // manifest carries the `uses-native-library` declarations the runtime
+    // needs on Android 12+ (libOpenCL, Qualcomm's libcdsprpc, the Google
+    // Tensor and MediaTek NPU system libraries) and the merger brings them
+    // into ours.  NPU dispatch libraries are not on Maven: see
+    // tool/fetch_litert_npu.sh, which stages them under src/main/jniLibs.
+    implementation("com.google.ai.edge.litert:litert:2.2.0")
 }
 
 kotlin {

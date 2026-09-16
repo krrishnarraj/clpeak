@@ -7,7 +7,7 @@
 
 **clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs, GPUs and NPUs. It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.
 
-Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX, Core ML and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
+Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX, Core ML, LiteRT and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
 
 [![clpeak desktop app showing Metal results on an Apple M1 Pro](docs/assets/img/results-dark.png)](https://krrishnarraj.github.io/clpeak/)
 
@@ -83,6 +83,7 @@ Backends auto-enable when their SDK is found; opt out with `-DCLPEAK_ENABLE_<X>=
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (otherwise always available) |
 | `CLPEAK_ENABLE_ONNX` | `ON` | Skip ONNX Runtime backend (otherwise always built; runtime loaded at run time) |
 | `CLPEAK_ENABLE_COREML` | `ON` | Skip Core ML backend (Apple only; Neural Engine / GPU / CPU through the system framework) |
+| `CLPEAK_ENABLE_LITERT` | `ON` | Skip LiteRT backend (otherwise always built; libLiteRt loaded at run time — NPU / GPU / CPU accelerators) |
 | `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped when no Flutter SDK is found) |
 
 The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmake --build build --target clpeak-gui`).
@@ -100,6 +101,7 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 ./clpeak --device coreml:0            # one device, as --list-devices names it (here: the Neural Engine)
 ./clpeak --device cuda:0,vulkan:1     # a few devices across backends; nothing else runs
 ./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
+./clpeak --litert --litert-lib PATH   # pick the LiteRT library (a pip ai-edge-litert wheel has one); --litert-npu-dir for the vendor NPU runtime
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
 ./clpeak --verbose -o out.clpeak.json # …with every diagnostic and the device inventory: attach this to a bug report

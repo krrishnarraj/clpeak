@@ -53,6 +53,13 @@ struct CliOptions {
   // links ONNX Runtime statically, where there is nothing to load.
   std::string onnxLibPath;
 
+  // --litert-lib: the LiteRT shared library (libLiteRt) to load, ahead of
+  // the platform's conventional names; --litert-npu-dir: where the NPU
+  // dispatch and compiler-plugin libraries and the vendor runtime live,
+  // when not beside the runtime library (see src/litert/litert_runtime.cpp).
+  std::string litertLibPath;
+  std::string litertNpuDir;
+
   // Iters / warmup.  When forceIters is false, each backend's runKernel
   // calibrates iters from a one-shot timed warmup so the timed phase lands
   // at ~targetTimeUs regardless of device speed.

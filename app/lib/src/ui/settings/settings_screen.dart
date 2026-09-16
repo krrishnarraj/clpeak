@@ -14,8 +14,8 @@ import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';
 import '../common/kit.dart';
 
-/// Appearance, which ONNX Runtime the ONNX backend measures, and whether runs
-/// record verbose diagnostics.
+/// Appearance, which ONNX Runtime and LiteRT libraries the two backends
+/// measure, and whether runs record verbose diagnostics.
 ///
 /// The runtime picker is the reason this screen exists.  Unlike every other
 /// backend, ONNX has no single driver on a machine: NPU vendors ship their own
@@ -37,6 +37,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   OnnxStatus? _onnx;
+  LitertStatus? _litert;
 
   @override
   void initState() {
@@ -45,25 +46,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _refreshOnnx() {
-    setState(() => _onnx = context.read<BenchmarkService>().onnxStatus());
+    final service = context.read<BenchmarkService>();
+    setState(() {
+      _onnx = service.onnxStatus();
+      _litert = service.litertStatus();
+    });
   }
 
   /// Apply a library choice: persist it, hand it to the native loader, then
   /// re-enumerate so the provider list on the run screen matches what was
   /// just chosen.
-  Future<void> _applyLibrary(String path) async {
+  Future<void> _applyLibrary(_Runtime which, String path) async {
     final settings = context.read<SettingsService>();
     final service = context.read<BenchmarkService>();
-    await settings.setOnnxLibraryPath(path);
+    if (which == _Runtime.onnx) {
+      await settings.setOnnxLibraryPath(path);
+    } else {
+      await settings.setLitertLibraryPath(path);
+    }
     if (!mounted) return;
     // Async since catalog loads off-thread; refresh the status after the
     // re-enumeration lands.
-    await service.setOnnxLibrary(path);
+    if (which == _Runtime.onnx) {
+      await service.setOnnxLibrary(path);
+    } else {
+      await service.setLitertLibrary(path);
+    }
     if (!mounted) return;
     _refreshOnnx();
   }
 
-  Future<void> _pickLibrary() async {
+  Future<void> _pickLibrary(_Runtime which) async {
     // No extension filter: a runtime is .so / .dylib / .dll depending on the
     // platform, and plenty of real ones are versioned
     // (libonnxruntime.so.1.27.0) where an extension filter matches nothing.
@@ -71,7 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       acceptedTypeGroups: const [XTypeGroup(label: 'Shared library')],
     );
     if (file == null) return;
-    await _applyLibrary(await _durablePath(file.path));
+    await _applyLibrary(which, await _durablePath(which, file.path));
   }
 
   /// Where the chosen library should live so it is still there next launch.
@@ -90,10 +103,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// by path and never unmaps -- would see the same key and keep measuring
   /// the first file.  Desktop pickers return the real file, already stable
   /// and not ours to duplicate.
-  Future<String> _durablePath(String picked) async {
+  Future<String> _durablePath(_Runtime which, String picked) async {
     if (!Platform.isAndroid) return picked;
     final dir = Directory(
-        p.join((await getApplicationSupportDirectory()).path, 'onnxruntime'));
+        p.join((await getApplicationSupportDirectory()).path, which.dirName));
     if (dir.existsSync()) dir.deleteSync(recursive: true);
     dir.createSync(recursive: true);
     final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -104,11 +117,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Back to the bundled/system runtime, and drop the imported copy with it —
   /// leaving 27 MB stranded in the sandbox would be its own small bug.
-  Future<void> _resetLibrary() async {
-    await _applyLibrary('');
+  Future<void> _resetLibrary(_Runtime which) async {
+    await _applyLibrary(which, '');
     if (!Platform.isAndroid) return;
     final dir = Directory(
-        p.join((await getApplicationSupportDirectory()).path, 'onnxruntime'));
+        p.join((await getApplicationSupportDirectory()).path, which.dirName));
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   }
 
@@ -150,12 +163,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 22),
                   const CSection(label: 'ONNX Runtime'),
                   const SizedBox(height: 10),
-                  _OnnxPanel(
-                    status: _onnx,
+                  _RuntimePanel(
+                    view: _RuntimeView.onnx(_onnx),
                     savedPath: settings.onnxLibraryPath,
                     locked: running,
-                    onPick: _pickLibrary,
-                    onReset: _resetLibrary,
+                    onPick: () => _pickLibrary(_Runtime.onnx),
+                    onReset: () => _resetLibrary(_Runtime.onnx),
+                  ),
+                  const SizedBox(height: 22),
+                  const CSection(label: 'LiteRT'),
+                  const SizedBox(height: 10),
+                  _RuntimePanel(
+                    view: _RuntimeView.litert(_litert),
+                    savedPath: settings.litertLibraryPath,
+                    locked: running,
+                    onPick: () => _pickLibrary(_Runtime.litert),
+                    onReset: () => _resetLibrary(_Runtime.litert),
                   ),
                   const SizedBox(height: 22),
                   const CSection(label: 'Diagnostics'),
@@ -174,16 +197,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _OnnxPanel extends StatelessWidget {
-  const _OnnxPanel({
-    required this.status,
+/// Which loadable runtime a picker row is about.
+enum _Runtime {
+  onnx('onnxruntime'),
+  litert('litert');
+
+  const _Runtime(this.dirName);
+
+  /// Where an imported copy lives inside the Android sandbox.
+  final String dirName;
+}
+
+/// What the panel shows for one runtime, whichever backend reported it.
+class _RuntimeView {
+  const _RuntimeView({
+    required this.known,
+    required this.available,
+    required this.fixed,
+    required this.title,
+    required this.path,
+    required this.error,
+    required this.hint,
+    required this.fixedHint,
+  });
+
+  /// A status has been read at all (false while "Checking…").
+  final bool known;
+  final bool available;
+
+  /// Built into the app or otherwise not choosable.
+  final bool fixed;
+  final String title;
+  final String path;
+  final String error;
+  final String hint;
+  final String fixedHint;
+
+  factory _RuntimeView.onnx(OnnxStatus? s) => _RuntimeView(
+        known: s != null,
+        available: s?.available ?? false,
+        // iOS links ONNX Runtime into the app — Apple's pod is a static
+        // framework and iOS will not dlopen another one — so there is
+        // nothing to choose.
+        fixed: s?.linkedIn ?? Platform.isIOS,
+        title: s == null
+            ? 'Checking…'
+            : s.available
+                ? 'ONNX Runtime ${s.version}'
+                : 'No runtime loaded',
+        path: s?.path ?? '',
+        error: s?.error ?? '',
+        hint: 'Which runtime is loaded decides which execution providers '
+            'exist: a stock build offers CPU only, while a vendor build '
+            'brings its NPU. Changing it re-enumerates straight away.',
+        fixedHint: 'ONNX Runtime is linked into this build, so there is no '
+            'other library to point at.',
+      );
+
+  factory _RuntimeView.litert(LitertStatus? s) => _RuntimeView(
+        known: s != null,
+        available: s?.available ?? false,
+        fixed: false,
+        title: s == null
+            ? 'Checking…'
+            : s.available
+                ? 'LiteRT (${s.version})'
+                : 'No runtime loaded',
+        path: s?.path ?? '',
+        error: s?.error ?? '',
+        hint: 'The app carries LiteRT on Android; elsewhere a pip '
+            'ai-edge-litert wheel has a libLiteRt to point at. The GPU '
+            'accelerator and any NPU dispatch library are found beside it.',
+        fixedHint: '',
+      );
+}
+
+class _RuntimePanel extends StatelessWidget {
+  const _RuntimePanel({
+    required this.view,
     required this.savedPath,
     required this.locked,
     required this.onPick,
     required this.onReset,
   });
 
-  final OnnxStatus? status;
+  final _RuntimeView view;
   final String savedPath;
 
   /// A run is in flight; the loader hands out a pointer to the runtime it
@@ -196,13 +294,10 @@ class _OnnxPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final s = status;
+    final s = view;
     final tint = ClpeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
-
-    // iOS links ONNX Runtime into the app — Apple's pod is a static framework
-    // and iOS will not dlopen another one — so there is nothing to choose.
-    final fixed = s?.linkedIn ?? Platform.isIOS;
+    final fixed = s.fixed;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -212,20 +307,11 @@ class _OnnxPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               CRow(
-                accent: s?.available == true ? tint : null,
+                accent: s.available ? tint : null,
                 child: Row(
                   children: [
-                    Expanded(
-                      child: Text(
-                        s == null
-                            ? 'Checking…'
-                            : s.available
-                                ? 'ONNX Runtime ${s.version}'
-                                : 'No runtime loaded',
-                        style: t.mono,
-                      ),
-                    ),
-                    if (s != null)
+                    Expanded(child: Text(s.title, style: t.mono)),
+                    if (s.known)
                       CTag(
                         text: s.available ? 'loaded' : 'absent',
                         color: s.available ? tint : t.dim,
@@ -234,7 +320,7 @@ class _OnnxPanel extends StatelessWidget {
                 ),
               ),
               CRow(
-                rule: s?.error.isNotEmpty ?? false,
+                rule: s.error.isNotEmpty,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -244,8 +330,8 @@ class _OnnxPanel extends StatelessWidget {
                       child: Text(
                         fixed
                             ? 'Built into the app'
-                            : (s?.path.isNotEmpty ?? false)
-                                ? s!.path
+                            : s.path.isNotEmpty
+                                ? s.path
                                 : savedPath.isNotEmpty
                                     ? savedPath
                                     : 'Found by name on the system paths',
@@ -255,7 +341,7 @@ class _OnnxPanel extends StatelessWidget {
                   ],
                 ),
               ),
-              if (s != null && s.error.isNotEmpty)
+              if (s.error.isNotEmpty)
                 CRow(
                   rule: false,
                   child: Row(
@@ -275,12 +361,7 @@ class _OnnxPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          fixed
-              ? 'ONNX Runtime is linked into this build, so there is no other '
-                  'library to point at.'
-              : 'Which runtime is loaded decides which execution providers '
-                  'exist: a stock build offers CPU only, while a vendor build '
-                  'brings its NPU. Changing it re-enumerates straight away.',
+          fixed ? s.fixedHint : s.hint,
           style: t.micro.copyWith(color: t.dim),
         ),
         if (!fixed) ...[

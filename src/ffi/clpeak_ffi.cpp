@@ -15,6 +15,9 @@
 #ifdef ENABLE_ONNX
 #include <onnx/onnx_peak.h>  // onnxSetLibraryOverride / onnxRuntimeStatus
 #endif
+#ifdef ENABLE_LITERT
+#include <litert/litert_peak.h>  // litertSetLibraryOverride / litertRuntimeStatus
+#endif
 
 #include <atomic>
 #include <cstdlib>
@@ -107,6 +110,41 @@ void clpeak_set_onnx_library(const char *path)
 #endif
 }
 
+char *clpeak_copy_litert_status_json(void)
+{
+#ifdef ENABLE_LITERT
+    const LitertRuntimeStatus st = litertRuntimeStatus();
+    std::string json = "{\"available\":";
+    json += st.available ? "true" : "false";
+    json += ",\"version\":\"" + jsonEscape(st.version) + "\"";
+    json += ",\"path\":\"" + jsonEscape(st.path) + "\"";
+    json += ",\"error\":\"" + jsonEscape(st.error) + "\"}";
+    return copyString(json);
+#else
+    return copyString(
+        "{\"available\":false,\"version\":\"\",\"path\":\"\","
+        "\"error\":\"LiteRT backend not built in\"}");
+#endif
+}
+
+void clpeak_set_litert_library(const char *path)
+{
+#ifdef ENABLE_LITERT
+    litertSetLibraryOverride(path ? path : "");
+#else
+    (void)path;
+#endif
+}
+
+void clpeak_set_litert_npu_dir(const char *dir)
+{
+#ifdef ENABLE_LITERT
+    litertSetNpuDirOverride(dir ? dir : "");
+#else
+    (void)dir;
+#endif
+}
+
 void clpeak_request_cancel(void)
 {
     clpeak::requestCancel();
@@ -150,6 +188,12 @@ int clpeak_launch(int argc, const char **argv,
 #ifdef ENABLE_ONNX
     if (!opts.onnxLibPath.empty())
         onnxSetLibraryOverride(opts.onnxLibPath);
+#endif
+#ifdef ENABLE_LITERT
+    if (!opts.litertLibPath.empty())
+        litertSetLibraryOverride(opts.litertLibPath);
+    if (!opts.litertNpuDir.empty())
+        litertSetNpuDirOverride(opts.litertNpuDir);
 #endif
 
     combined.meta.clpeakVersion = CLPEAK_VERSION_STR;

@@ -1,0 +1,345 @@
+#ifdef ENABLE_LITERT
+
+#include <litert/litert_peak.h>
+#include "litert_bench.h"
+#include "litert_model.h"
+#include "litert_runtime.h"
+#include "litert_session.h"
+
+#include <common/options.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <mutex>
+#include <ostream>
+
+// ---------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------
+// LiteRT does not enumerate hardware.  It has three accelerator slots -- CPU,
+// GPU, NPU -- and each is present when its library loads and its first model
+// compiles with nothing handed back to the CPU.  So a device here is an
+// accelerator that has proved itself on one tiny graph, named as precisely
+// as the runtime lets us: the GPU by the accelerator library that answered
+// (Metal, OpenCL, WebGPU), the NPU by the vendor dispatch library beside the
+// runtime.  Accelerators first, CPU last, like every other backend.
+
+namespace
+{
+
+// Which vendor dispatch libraries sit in the NPU directory.  LiteRT loads
+// libLiteRtDispatch_<Vendor>; the file name is the only place the vendor's
+// identity is written down before a model compiles.
+struct NpuVendor
+{
+  const char *fileTag;   // in libLiteRtDispatch_<fileTag>
+  const char *vendor;
+  const char *display;
+};
+const NpuVendor kNpuVendors[] = {
+    {"Qualcomm", "Qualcomm", "Qualcomm Hexagon NPU via LiteRT"},
+    {"MediaTek", "MediaTek", "MediaTek NeuroPilot APU via LiteRT"},
+    {"GoogleTensor", "Google", "Google Tensor TPU via LiteRT"},
+    {"Samsung", "Samsung", "Samsung Exynos AI LiteCore NPU via LiteRT"},
+    {"IntelOpenvino", "Intel", "Intel NPU via LiteRT (OpenVINO)"},
+};
+
+const NpuVendor *findNpuVendor(const std::string &dir)
+{
+  if (dir.empty())
+    return nullptr;
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dir, ec), end;
+  for (; !ec && it != end; it.increment(ec))
+  {
+    const std::string name = it->path().filename().string();
+    if (name.rfind("libLiteRtDispatch_", 0) != 0 && name.rfind("LiteRtDispatch", 0) != 0)
+      continue;
+    for (const auto &v : kNpuVendors)
+      if (name.find(v.fileTag) != std::string::npos)
+        return &v;
+  }
+  return nullptr;
+}
+
+// The GPU accelerator library that registered, from what LiteRT logged
+// while the environment came up ("Dynamically loaded GPU accelerator
+// (libLiteRtMetalAccelerator.dylib) registered.").
+std::string gpuBackendFrom(const std::string &log)
+{
+  if (log.find("MetalAccelerator") != std::string::npos)
+    return "Metal";
+  if (log.find("OpenClAccelerator") != std::string::npos || log.find("ClGlAccelerator") != std::string::npos)
+    return "OpenCL";
+  if (log.find("WebGpuAccelerator") != std::string::npos)
+    return "WebGPU";
+  if (log.find("VulkanAccelerator") != std::string::npos)
+    return "Vulkan";
+  return std::string();
+}
+
+std::mutex g_devMutex;
+bool g_devProbed = false;
+const LitertRuntime *g_devRuntime = nullptr;
+std::vector<litert_device_info_t> g_devs;
+std::vector<std::pair<litert_device_info_t, std::string>> g_skipped;
+
+// One tiny fp32 graph on the accelerator.  Its creation log is what names
+// the GPU backend, so it is returned too.
+bool probeAccel(const LitertRuntime &rt, litert_device_info_t &dev, std::string &reason,
+                std::string &log)
+{
+  const LitertPlan plan = litertPlanFor(LitertFormat::Fp32, dev.accel);
+  std::string err;
+  auto s = LitertSession::create(rt, dev, litertTrivialModel(plan, 64), litertConfigFor(plan), err);
+  if (!s)
+  {
+    reason = err;
+    return false;
+  }
+  log = litertEnvironmentLog(dev.accel) + s->creationLog;
+  if (!s->onDevice())
+  {
+    reason = "the accelerator loaded but took no operation of a one-node graph (" +
+             s->offDevice() + ")";
+    return false;
+  }
+  std::vector<float> x(64, 0.5f);
+  if (!s->writeInput(0, x.data(), x.size() * 4, err) || !s->run(err))
+  {
+    reason = "a one-node graph did not run: " + err;
+    return false;
+  }
+  return true;
+}
+
+} // namespace
+
+std::vector<litert_device_info_t> litertUsableDevices(
+    const LitertRuntime &rt, std::vector<std::pair<litert_device_info_t, std::string>> *skipped)
+{
+  std::lock_guard<std::mutex> lock(g_devMutex);
+  if (!g_devProbed || g_devRuntime != &rt)
+  {
+    g_devProbed = true;
+    g_devRuntime = &rt;
+    g_devs.clear();
+    g_skipped.clear();
+
+    // NPU: only when a vendor dispatch library is there to be loaded; LiteRT
+    // otherwise logs a request for DispatchLibraryDir and takes the graph
+    // on the CPU, which the fallback guard would catch one step later.
+    {
+      litert_device_info_t dev;
+      dev.accel = LitertAccel::Npu;
+      dev.typeStr = "NPU";
+      dev.deviceType = DeviceType::Accelerator;
+      const NpuVendor *v = findNpuVendor(litertNpuDir());
+      if (!v)
+      {
+        dev.displayName = "NPU via LiteRT";
+        g_skipped.emplace_back(dev, "no libLiteRtDispatch_<vendor> library in " +
+                                        (litertNpuDir().empty() ? std::string("the runtime's directory")
+                                                                : litertNpuDir()) +
+                                        "; --litert-npu-dir names where the vendor runtime is");
+      }
+      else
+      {
+        dev.vendor = v->vendor;
+        dev.displayName = v->display;
+        std::string reason, log;
+        if (probeAccel(rt, dev, reason, log))
+          g_devs.push_back(dev);
+        else
+          g_skipped.emplace_back(dev, reason);
+      }
+    }
+
+    // GPU: the accelerator library beside the runtime, whichever API it is
+    // built on.
+    {
+      litert_device_info_t dev;
+      dev.accel = LitertAccel::Gpu;
+      dev.typeStr = "GPU";
+      dev.deviceType = DeviceType::Gpu;
+      dev.displayName = "GPU via LiteRT";
+      std::string reason, log;
+      if (probeAccel(rt, dev, reason, log))
+      {
+        dev.vendor = gpuBackendFrom(log);
+        if (!dev.vendor.empty())
+          dev.displayName += " (" + dev.vendor + ")";
+        g_devs.push_back(dev);
+      }
+      else
+        g_skipped.emplace_back(dev, reason);
+    }
+
+    // CPU: XNNPACK, built into the runtime.
+    {
+      litert_device_info_t dev;
+      dev.accel = LitertAccel::Cpu;
+      dev.typeStr = "CPU";
+      dev.deviceType = DeviceType::Cpu;
+      dev.displayName = "CPU via LiteRT (XNNPACK)";
+      std::string reason, log;
+      if (probeAccel(rt, dev, reason, log))
+        g_devs.push_back(dev);
+      else
+        g_skipped.emplace_back(dev, reason);
+    }
+  }
+  if (skipped)
+    *skipped = g_skipped;
+  return g_devs;
+}
+
+LitertRuntimeStatus litertRuntimeStatus()
+{
+  LitertRuntimeStatus st;
+  if (const LitertRuntime *rt = litertRuntime())
+  {
+    st.available = true;
+    st.version = "ABI " + rt->abiVersion;
+    st.path = rt->path;
+  }
+  else
+  {
+    st.error = litertLoadDiagnostic();
+    if (st.error.empty())
+      st.error = "LiteRT library not found";
+  }
+  return st;
+}
+
+// ---------------------------------------------------------------------------
+// LitertPeak
+// ---------------------------------------------------------------------------
+
+LitertPeak::LitertPeak() = default;
+LitertPeak::~LitertPeak() = default;
+
+int LitertPeak::runAll()
+{
+  const LitertRuntime *rt = litertRuntime();
+  if (!rt)
+  {
+    const std::string why = litertLoadDiagnostic();
+    log->note("LiteRT: " + (why.empty() ? std::string("LiteRT library (libLiteRt) not found") : why) + "\n");
+    return 0;   // absent runtime is not an error, like a missing GPU driver
+  }
+
+  std::vector<std::pair<litert_device_info_t, std::string>> skipped;
+  auto devs = litertUsableDevices(*rt, &skipped);
+  // Verbose only: an accelerator this machine has no library or silicon for
+  // is the normal case, not a warning.
+  for (const auto &sk : skipped)
+    CLPEAK_VLOG("LiteRT: skipping %s (%s)\n", sk.first.displayName.c_str(), sk.second.c_str());
+  if (devs.empty())
+  {
+    log->note("LiteRT: no accelerator could run a model\n");
+    return 0;
+  }
+
+  auto backendScope = log->beginBackend("LiteRT");
+
+  for (int idx = 0; idx < (int)devs.size(); idx++)
+  {
+    if (clpeak::cancelRequested())
+      break;
+    if (!isDeviceSelected(idx))
+      continue;
+
+    const litert_device_info_t &dev = devs[idx];
+
+    benchmark_config_t cfg = benchmark_config_t::forDevice(dev.deviceType);
+    cfg.targetTimeUs = targetTimeUs;
+
+    std::vector<DeviceProp> details = {
+        {"Accelerator", litertAccelName(dev.accel)},
+        {"Type", dev.typeStr},
+        {"LiteRT", "ABI " + rt->abiVersion + (rt->path.empty() ? "" : " (" + rt->path + ")")},
+    };
+    if (!dev.vendor.empty())
+      details.push_back({dev.accel == LitertAccel::Gpu ? "GPU backend" : "NPU vendor", dev.vendor});
+    if (!dev.detail.empty())
+      details.push_back({"Device", dev.detail});
+
+    auto deviceScope = backendScope.beginDevice({
+        dev.displayName,
+        "",   // platform defaults to the backend name
+        rt->abiVersion,
+        details,
+        -1,
+        idx,
+    });
+    currentDeviceScope = &deviceScope;
+
+    // ---- Compute (FLOPS + OPS) ---------------------------------------------
+    if (isAllowed(Benchmark::Gemm))
+      runGemm(*rt, dev, cfg);
+    if (isAllowed(Benchmark::Conv))
+      runConv(*rt, dev, cfg);
+
+    // ---- What the speed rows cost in accuracy ------------------------------
+    if (isAllowed(Benchmark::NumericError))
+      runNumericError(*rt, dev, cfg);
+
+    // ---- AI composite (whole transformer block) ----------------------------
+    if (isAllowed(Benchmark::TransformerBlock))
+      runBlock(*rt, dev, cfg);
+
+    // ---- Bandwidth ---------------------------------------------------------
+    if (isAllowed(Benchmark::Activation))
+      runActivation(*rt, dev, cfg);
+    if (isAllowed(Benchmark::TensorBW))
+      runTensorBandwidth(*rt, dev, cfg);
+    if (isAllowed(Benchmark::TransferBW))
+      runTransferBandwidth(*rt, dev, cfg);
+
+    // ---- Latency -----------------------------------------------------------
+    if (isAllowed(Benchmark::KernelLatency))
+      runDispatchLatency(*rt, dev, cfg);
+
+    currentDeviceScope = nullptr;
+  }
+
+  return 0;
+}
+
+BackendInventory LitertPeak::enumerate()
+{
+  BackendInventory inv;
+  inv.id = kBackend;
+
+  const LitertRuntime *rt = litertRuntime();
+  if (!rt)
+  {
+    const std::string why = litertLoadDiagnostic();
+    inv.unavailableReason = why.empty() ? "LiteRT library (libLiteRt) not found" : why;
+    return inv;
+  }
+  inv.info = "LiteRT ABI " + rt->abiVersion + (rt->path.empty() ? "" : ", " + rt->path);
+  inv.available = true;
+
+  std::vector<std::pair<litert_device_info_t, std::string>> skipped;
+  auto devs = litertUsableDevices(*rt, &skipped);
+  for (const auto &sk : skipped)
+    inv.notes.push_back(sk.first.displayName + ": " + sk.second);
+
+  InventoryPlatform plat;
+  plat.index = 0;
+  plat.name = "LiteRT";
+  for (int i = 0; i < (int)devs.size(); i++)
+  {
+    InventoryDevice d;
+    d.index = i;
+    d.name = devs[i].displayName;
+    d.typeStr = devs[i].typeStr;
+    plat.devices.push_back(std::move(d));
+  }
+  inv.platforms.push_back(std::move(plat));
+  return inv;
+}
+
+#endif // ENABLE_LITERT

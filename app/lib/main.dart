@@ -22,6 +22,7 @@ Future<void> main() async {
   // until the next launch.
   final settings = await SettingsService.load();
   bindings.setOnnxLibrary(settings.onnxLibraryPath);
+  bindings.setLitertLibrary(settings.litertLibraryPath);
 
   final history = RunHistoryStore();
   final service = BenchmarkService(bindings, history);

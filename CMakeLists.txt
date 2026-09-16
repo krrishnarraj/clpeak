@@ -94,6 +94,7 @@ option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or cla
 option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
 option(CLPEAK_ENABLE_ONNX   "Build ONNX Runtime backend (NPUs via execution providers; library dlopen'd at run time)" ON)
 option(CLPEAK_ENABLE_COREML "Build Core ML backend (Apple Neural Engine / GPU / CPU through Core ML; Apple only)" ON)
+option(CLPEAK_ENABLE_LITERT "Build LiteRT backend (NPU / GPU / CPU accelerators; library dlopen'd at run time)" ON)
 option(CLPEAK_ENABLE_GUI    "Build the Flutter GUI app (clpeak-gui target) and its native bridge" ON)
 
 # The native CPU backend needs a threading library (always available).
@@ -219,6 +220,7 @@ add_subdirectory(src/oneapi)
 add_subdirectory(src/cpu)
 add_subdirectory(src/onnx)
 add_subdirectory(src/coreml)
+add_subdirectory(src/litert)
 
 # CLI executable
 add_subdirectory(src/cli)
@@ -310,6 +312,11 @@ if(CLPEAK_ENABLE_ONNX)
     string(APPEND _clpeak_summary "  ONNX   : ENABLED  (onnxruntime dlopen'd at run time)\n")
 else()
     string(APPEND _clpeak_summary "  ONNX   : disabled (CLPEAK_ENABLE_ONNX=OFF)\n")
+endif()
+if(CLPEAK_ENABLE_LITERT)
+    string(APPEND _clpeak_summary "  LiteRT : ENABLED  (libLiteRt dlopen'd at run time)\n")
+else()
+    string(APPEND _clpeak_summary "  LiteRT : disabled (CLPEAK_ENABLE_LITERT=OFF)\n")
 endif()
 if(CLPEAK_ENABLE_COREML AND TARGET peak_coreml)
     string(APPEND _clpeak_summary "  CoreML : ENABLED  (Neural Engine / GPU / CPU compute devices)\n")

@@ -40,14 +40,15 @@ bool makePipe(int fds[2])
 
 } // namespace
 
-ScopedConsoleMute::ScopedConsoleMute()
+ScopedConsoleMute::ScopedConsoleMute(Capture mode)
 {
   (void)fflush(stdout);
   (void)fflush(stderr);
   savedOut = CLPEAK_DUP(CLPEAK_FILENO(stdout));
   savedErr = CLPEAK_DUP(CLPEAK_FILENO(stderr));
+  keepText = (mode == Capture::Always);
 
-  if (verboseEnabled())
+  if (verboseEnabled() || keepText)
   {
     // Capture.  The reader drains the pipe for as long as anything holds
     // its write end -- which is fds 1 and 2 until the destructor puts the
@@ -94,8 +95,13 @@ ScopedConsoleMute::ScopedConsoleMute()
   }
 }
 
-ScopedConsoleMute::~ScopedConsoleMute()
+ScopedConsoleMute::~ScopedConsoleMute() { finish(); }
+
+void ScopedConsoleMute::finish()
 {
+  if (finished)
+    return;
+  finished = true;
   (void)fflush(stdout);
   (void)fflush(stderr);
   if (savedOut >= 0) (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
@@ -117,14 +123,26 @@ ScopedConsoleMute::~ScopedConsoleMute()
 
   if (!pending.empty())
   {
-    if (lines++ < kMaxLines)
-      logMessage(LogLevel::Debug, "console", pending);
+    record(pending);
     pending.clear();
   }
-  if (lines > kMaxLines)
+  if (lines > kMaxLines && verboseEnabled())
     logMessage(LogLevel::Debug, "console",
                std::to_string(lines - kMaxLines) +
                    " more lines from the library not recorded");
+}
+
+// One captured line: onto the run log under --verbose (the first kMaxLines
+// of a scope), and into text() when the scope keeps it.
+void ScopedConsoleMute::record(const std::string &line)
+{
+  if (keepText)
+  {
+    captured += line;
+    captured += '\n';
+  }
+  if (lines++ < kMaxLines && verboseEnabled())
+    logMessage(LogLevel::Debug, "console", line);
 }
 
 void ScopedConsoleMute::drain()
@@ -148,8 +166,7 @@ void ScopedConsoleMute::drain()
       start = nl + 1;
       if (line.empty())
         continue;
-      if (lines++ < kMaxLines)
-        logMessage(LogLevel::Debug, "console", line);
+      record(line);
     }
     pending.erase(0, start);
   }

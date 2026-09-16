@@ -68,6 +68,11 @@
 #else
 #define CLPEAK_BUILT_COREML false
 #endif
+#ifdef ENABLE_LITERT
+#define CLPEAK_BUILT_LITERT true
+#else
+#define CLPEAK_BUILT_LITERT false
+#endif
 
 struct BackendRow {
   BackendInfo info;
@@ -86,6 +91,7 @@ static constexpr BackendRow backendTable[] = {
   {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
   {{Backend::Cpu,    "CPU",    "cpu",    CLPEAK_BUILT_CPU},    "native CPU"},
   {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
+  {{Backend::Litert, "LiteRT", "litert", CLPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
   {{Backend::Onnx,   "ONNX",   "onnx",   CLPEAK_BUILT_ONNX},   "ONNX Runtime (NPUs via execution providers)"},
 };
 static constexpr int numBackends = sizeof(backendTable) / sizeof(backendTable[0]);
@@ -252,6 +258,11 @@ static std::string helpText()
   helpLine(s, "--compare file",    "compare results against a saved run");
   helpLine(s, "--onnx-lib path",   "onnxruntime shared library to load\n"
                                    "(default: the platform's conventional names)");
+  helpLine(s, "--litert-lib path", "LiteRT shared library (libLiteRt) to load\n"
+                                   "(default: the platform's conventional names)");
+  helpLine(s, "--litert-npu-dir dir", "where LiteRT's NPU dispatch / compiler-plugin\n"
+                                   "libraries and the vendor runtime are (default: beside\n"
+                                   "the LiteRT library)");
   s += "\n";
   s += " BACKENDS (--<backend> / --no-<backend>; default: every one in this build):\n";
   for (int i = 0; i < numBackends; i++)
@@ -543,6 +554,22 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!v)
         return missingArg(err, a);
       out.onnxLibPath = v;
+      continue;
+    }
+    if (!strcmp(a, "--litert-lib"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.litertLibPath = v;
+      continue;
+    }
+    if (!strcmp(a, "--litert-npu-dir"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.litertNpuDir = v;
       continue;
     }
 

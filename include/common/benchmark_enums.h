@@ -19,8 +19,9 @@ enum class DeviceType : unsigned int {
 // Nothing else holds an order -- the registry (src/registry) sorts by this
 // enum, and the table in options.cpp is checked against it at compile time.
 // Vendor-native APIs first, then the portable layers over the same silicon,
-// then the CPU, then the NPU runtimes (again native before portable): the
-// most representative numbers come out first, and a run cut short still has
+// then the CPU, then the NPU runtimes (again native before portable -- Core
+// ML on Apple, LiteRT on Android, ONNX Runtime everywhere): the most
+// representative numbers come out first, and a run cut short still has
 // them.
 //
 // A backend's flag is its name in lower case (--opencl, --coreml); the
@@ -36,6 +37,7 @@ enum class Backend : unsigned int {
     OpenCL,
     Cpu,
     Coreml,
+    Litert,
     Onnx,
     COUNT
 };

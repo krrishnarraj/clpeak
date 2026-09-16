@@ -31,6 +31,9 @@ typedef ClpeakRequestCancel = void Function();
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
 typedef _OnnxStatusNative = Pointer<Utf8> Function();
+typedef _SetLitertLibNative = Void Function(Pointer<Utf8> path);
+typedef _SetLitertLib = void Function(Pointer<Utf8> path);
+typedef _LitertStatusNative = Pointer<Utf8> Function();
 
 /// Thin, manual dart:ffi bindings over the 9 clpeak_* symbols.
 class ClpeakBindings {
@@ -49,7 +52,13 @@ class ClpeakBindings {
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'clpeak_set_onnx_library'),
         _onnxStatus = lib.lookupFunction<_OnnxStatusNative, _OnnxStatusNative>(
-            'clpeak_copy_onnx_status_json');
+            'clpeak_copy_onnx_status_json'),
+        _setLitertLibrary =
+            lib.lookupFunction<_SetLitertLibNative, _SetLitertLib>(
+                'clpeak_set_litert_library'),
+        _litertStatus =
+            lib.lookupFunction<_LitertStatusNative, _LitertStatusNative>(
+                'clpeak_copy_litert_status_json');
 
   factory ClpeakBindings.open() => ClpeakBindings._(openClpeakLibrary());
 
@@ -60,6 +69,8 @@ class ClpeakBindings {
   final ClpeakRequestCancel requestCancel;
   final _SetOnnxLib _setOnnxLibrary;
   final _OnnxStatusNative _onnxStatus;
+  final _SetLitertLib _setLitertLibrary;
+  final _LitertStatusNative _litertStatus;
 
   /// clpeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();
@@ -103,6 +114,25 @@ class ClpeakBindings {
     return OnnxStatus.fromJson(jsonDecode(json) as Map<String, dynamic>);
   }
 
+  /// The same for LiteRT: which libLiteRt the backend loads, ahead of the
+  /// platform's conventional names (on Android the one packaged in the app).
+  /// Same contract as [setOnnxLibrary]: before enumeration, between runs.
+  void setLitertLibrary(String path) {
+    final ptr = path.toNativeUtf8();
+    try {
+      _setLitertLibrary(ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
+  /// Which LiteRT is loaded, or why none is — see [LitertStatus].
+  LitertStatus litertStatus() {
+    final json = takeString(_litertStatus());
+    if (json == null) return const LitertStatus.unavailable('no response');
+    return LitertStatus.fromJson(jsonDecode(json) as Map<String, dynamic>);
+  }
+
 }
 
 /// State of the ONNX Runtime, as clpeak_copy_onnx_status_json() reports it.
@@ -135,6 +165,35 @@ class OnnxStatus {
   factory OnnxStatus.fromJson(Map<String, dynamic> m) => OnnxStatus(
         available: m['available'] as bool? ?? false,
         linkedIn: m['linkedIn'] as bool? ?? false,
+        version: m['version'] as String? ?? '',
+        path: m['path'] as String? ?? '',
+        error: m['error'] as String? ?? '',
+      );
+}
+
+/// State of the LiteRT runtime, as clpeak_copy_litert_status_json() reports
+/// it.  LiteRT has no runtime version string; `version` is the ABI version
+/// the app was built against.
+class LitertStatus {
+  const LitertStatus({
+    required this.available,
+    required this.version,
+    required this.path,
+    required this.error,
+  });
+
+  const LitertStatus.unavailable(this.error)
+      : available = false,
+        version = '',
+        path = '';
+
+  final bool available;
+  final String version; // "ABI 1.0.0"
+  final String path; // what was loaded
+  final String error; // populated only when !available
+
+  factory LitertStatus.fromJson(Map<String, dynamic> m) => LitertStatus(
+        available: m['available'] as bool? ?? false,
         version: m['version'] as String? ?? '',
         path: m['path'] as String? ?? '',
         error: m['error'] as String? ?? '',
