@@ -1,4 +1,28 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- The ONNX Runtime and LiteRT AARs are packaged for their .so files
+         alone (see build.gradle.kts), but the manifest merger brings their
+         Java-side declarations along too.  The permissions below are dropped
+         again; the AARs' uses-native-library entries are kept, since those
+         are what let the runtimes reach vendor libraries on Android 12+.
+         Nothing in clpeak talks to the network: url_launcher opens links in
+         the external browser and share_plus hands a local file to the system
+         share sheet.  src/debug and src/profile put INTERNET back for the
+         Flutter tool's connection to the running app. -->
+    <!-- ONNX Runtime's Java telemetry client (see the provider below). -->
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_NETWORK_STATE"
+        tools:node="remove" />
+    <!-- LiteRT's AiPack model downloader, which clpeak never uses. -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+        tools:node="remove" />
     <application
         android:label="clpeak"
         android:name="${applicationName}"
@@ -35,6 +59,15 @@
         <uses-native-library
             android:name="libOpenCL.so"
             android:required="false" />
+        <!-- ONNX Runtime's AAR registers a ContentProvider that Android runs
+             at process start: it System.loadLibrary()s the 32 MB runtime
+             before Flutter is up and starts ORT's telemetry client (a
+             network-state callback and a battery receiver).  The ONNX backend
+             dlopens the runtime itself when it is first used, and clpeak
+             never touches the Java API, so the provider goes. -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            tools:node="remove" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
