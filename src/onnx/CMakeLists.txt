@@ -8,6 +8,8 @@ add_library(peak_onnx STATIC
     onnx_peak.cpp
     onnx_runtime.cpp
     onnx_session.cpp
+    onnx_plugin.cpp
+    onnx_winml.cpp
     onnx_model.cpp
     onnx_probe.cpp
     gemm_setup.cpp

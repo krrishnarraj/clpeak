@@ -53,12 +53,43 @@ CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 // that link ONNX Runtime statically (iOS) or omit the backend entirely.
 CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 
+// Plugin execution-provider libraries to register on the ONNX Runtime
+// environment (ONNX Runtime 1.22+; src/onnx/onnx_plugin.h): `spec` is one
+// `NAME=PATH` per line ('\n'-separated), NAME being the registration name
+// the provider expects ("QNNExecutionProvider" for Qualcomm's plugin) and
+// PATH the library -- absolute, or on Android a bare soname the APK's lib
+// dir resolves.  Lines starting with '!' name an implicit library: one the
+// app bundles on the off-chance the hardware is there, whose failure to
+// register goes to the verbose log rather than the run's notes.  NULL/""
+// clears the set.  Between runs only, like clpeak_set_onnx_library(): the
+// environment is rebuilt on the next enumeration or run.
+CLPEAK_FFI_EXPORT void clpeak_set_onnx_ep_libraries(const char *spec);
+
+// Windows ML's execution-provider catalog (Windows 11 24H2+): when
+// `enabled`, the vendor providers the catalog installs from the Microsoft
+// Store are registered as plugin libraries on the next enumeration or run.
+// `path` names Microsoft.Windows.AI.MachineLearning.dll or its directory,
+// or is NULL/"" to search beside the loaded runtime and the executable; with
+// a path and no library chosen through clpeak_set_onnx_library(), the
+// onnxruntime.dll beside the catalog becomes the runtime.  Installing a
+// provider is a download, which is why this is a switch and not a default.
+// Accepted everywhere; off Windows the status reports the catalog as
+// unavailable.
+CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
+
 // State of the ONNX Runtime, for a settings screen to report back with:
-//   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str}
+//   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str,
+//    "epLibraries":[{"name":str,"path":str,"named":bool,"registered":bool,
+//                    "error":str}],
+//    "winml":{"enabled":bool,"path":str,"error":str}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
 // clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
 // empty when it was found by name.  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
+// `epLibraries` is what the last environment registered, so a library set
+// since the last enumeration is absent until the next one; `winml.path` is
+// the catalog DLL that answered and `winml.error` why it did not, or that
+// nothing has resolved it yet.
 // {"available":false,"error":"ONNX backend not built in"} without one.
 CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 
@@ -72,6 +103,14 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // and the settings screen does not offer one.
 CLPEAK_FFI_EXPORT void clpeak_set_litert_library(const char *path);
 CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
+
+// Android: a writable directory (the app's support directory) where the
+// backend stages one vendor's NPU shims when the APK carries several.
+// LiteRT loads the first libLiteRtDispatch_* it lists in a directory, so
+// the shims for this SoC (ro.soc.manufacturer) get `<dir>/<vendor>/` of
+// links to the packaged files, remade at every launch.  Before enumeration;
+// a no-op elsewhere and with one vendor or none packaged.
+CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_stage_dir(const char *dir);
 
 // State of the LiteRT runtime, for a settings screen:
 //   {"available":bool,"version":str,"path":str,"error":str}

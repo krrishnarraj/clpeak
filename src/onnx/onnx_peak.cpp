@@ -2,8 +2,10 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_runtime.h"
+#include "onnx_plugin.h"
 #include "onnx_probe.h"
 #include "onnx_session.h"
+#include "onnx_winml.h"
 
 #include <common/coreml_cache.h>
 #include <common/options.h>
@@ -60,9 +62,78 @@ static const EpTableEntry *epLookup(const std::string &key)
   return nullptr;
 }
 
+bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
+                      std::string &typeStr, DeviceType &deviceType)
+{
+  const EpTableEntry *t = epLookup(providerKey);
+  if (!t)
+    return false;
+  display    = t->display;
+  typeStr    = t->type;
+  deviceType = t->deviceType;
+  return true;
+}
+
+// The notes a run and a listing both make about the plugin libraries: a
+// library someone named that would not register is said in normal output,
+// like a named runtime that would not load; one the app bundled on the
+// off-chance (`named == false`) only under --verbose, where a registered
+// library is also confirmed with its path.  The Windows ML catalog reports
+// the same way: its failures out loud, since --onnx-winml asked for it.
+static void pluginNotes(const OrtRuntime &rt,
+                        std::vector<std::string> &loud,
+                        std::vector<std::string> &quiet)
+{
+  const std::vector<onnx_ep_info_t> devices = onnxPluginDevices(rt);
+  for (const auto &st : onnxEpLibraryStatus())
+  {
+    if (!st.registered)
+    {
+      (st.lib.named ? loud : quiet)
+          .push_back("the " + st.lib.name + " plugin library (" + st.lib.path +
+                     ") did not register: " + st.error);
+      continue;
+    }
+    // A plugin enumerates the hardware it can serve, and on a machine
+    // without that hardware a registered library offers nothing -- which
+    // is the answer, not a fault, but one worth a line for the person who
+    // named the library.
+    bool any = false;
+    for (const auto &d : devices)
+      any = any || d.library == st.lib.name;
+    if (any)
+      quiet.push_back("registered the " + st.lib.name + " plugin library from " +
+                      st.lib.path);
+    else
+      (st.lib.named ? loud : quiet)
+          .push_back("the " + st.lib.name + " plugin library (" + st.lib.path +
+                     ") registered but offers no device on this machine");
+  }
+  if (onnxWinmlEnabled())
+  {
+    const OnnxWinmlResolution &res = onnxWinmlResolve(&rt, onnxWinmlPathHint());
+    if (!res.error.empty())
+      loud.push_back("Windows ML: " + res.error);
+    for (const auto &p : res.providers)
+      if (!p.ready)
+        loud.push_back("Windows ML: the " + p.name +
+                       (p.version.empty() ? "" : " " + p.version) +
+                       " execution provider is not usable: " + p.error);
+    if (res.error.empty() && res.providers.empty())
+      loud.push_back("Windows ML: the catalog lists no execution provider for "
+                     "this machine");
+  }
+}
+
 std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
 {
-  std::vector<onnx_ep_info_t> out;
+  // Plugin providers first: each is here because someone asked for it, and
+  // its NPU or GPU belongs ahead of the built-in CPU providers.  A plugin's
+  // own CPU-class device (QNN's reference backend, when it is enabled) goes
+  // after every built-in accelerator, where a CPU belongs.
+  std::vector<onnx_ep_info_t> out, pluginCpus;
+  for (auto &ep : onnxPluginDevices(rt))
+    (ep.deviceType == DeviceType::Cpu ? pluginCpus : out).push_back(std::move(ep));
 
   char **providers = nullptr;
   int    count     = 0;
@@ -70,6 +141,7 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
   if (st)
   {
     rt.api->ReleaseStatus(st);
+    out.insert(out.end(), pluginCpus.begin(), pluginCpus.end());
     return out;
   }
 
@@ -125,7 +197,13 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
     rt.api->ReleaseStatus(rel);
 
   // GetAvailableProviders returns default-priority order (accelerators
-  // before CPU), which is also the order we want to benchmark in.  Keep it.
+  // before CPU), which is also the order we want to benchmark in.  Keep it,
+  // with a plugin's CPU-class devices after the built-in accelerators and
+  // before the built-in CPU providers.
+  auto firstCpu = std::find_if(out.begin(), out.end(), [](const onnx_ep_info_t &e) {
+    return !e.epDevicePtr && e.deviceType == DeviceType::Cpu;
+  });
+  out.insert(firstCpu, pluginCpus.begin(), pluginCpus.end());
   return out;
 }
 
@@ -174,6 +252,25 @@ OnnxRuntimeStatus onnxRuntimeStatus()
     if (st.error.empty())
       st.error = "onnxruntime library not found";
   }
+  // What the last environment registered; a library configured since is
+  // not in it until the next enumeration or run creates the environment
+  // it registers on (settings screens refresh after enumerating).
+  st.epLibraries  = onnxEpLibraryStatus();
+  st.winmlEnabled = onnxWinmlEnabled();
+  if (st.winmlEnabled && st.available)
+  {
+    // Only what the last enumeration or run found: resolving the catalog
+    // here could install a provider, and a status query must not.
+    if (const OnnxWinmlResolution *res = onnxWinmlResolved(ortRuntime()))
+    {
+      st.winmlPath  = res->dllPath;
+      st.winmlError = res->error;
+    }
+    else
+    {
+      st.winmlError = "not resolved yet; enumerate or run first";
+    }
+  }
   return st;
 }
 
@@ -204,6 +301,16 @@ int OnnxPeak::runAll()
   for (const auto &sk : skipped)
     CLPEAK_VLOG("ONNX: skipping %s (%s)\n", sk.first.displayName.c_str(),
                 sk.second.c_str());
+  // The plugin libraries and the Windows ML catalog: what someone asked for
+  // and did not get is said in normal output (pluginNotes explains which).
+  {
+    std::vector<std::string> loud, quiet;
+    pluginNotes(*rt, loud, quiet);
+    for (const auto &n : loud)
+      log->note("ONNX: " + n + "\n");
+    for (const auto &n : quiet)
+      CLPEAK_VLOG("ONNX: %s\n", n.c_str());
+  }
   if (eps.empty())
   {
     log->note("ONNX: no execution providers available\n");
@@ -242,10 +349,24 @@ int OnnxPeak::runAll()
         {"Type", ep.typeStr.empty() ? "Unknown" : ep.typeStr},
         {"ONNX Runtime", rt->versionString},
     };
+    if (ep.epDevicePtr)
+    {
+      // A plugin provider: which library it came from and what the
+      // runtime says about the silicon behind this device -- the vendor,
+      // and whatever metadata the provider attached (a SoC model, a
+      // driver version), which is the only inventory an NPU offers.
+      details.push_back({"Plugin library", onnxEpLibraryPath(ep.library)});
+      if (!ep.vendor.empty())
+        details.push_back({"Vendor", ep.vendor});
+      if (!ep.epDevice.empty())
+        details.push_back({"Device", ep.epDevice});
+      for (const auto &kv : ep.hardware)
+        details.push_back({kv.first, kv.second});
+    }
     // The OpenVINO target is part of what was measured (NPU vs GPU vs
     // CPU are different silicon behind one provider name), so record it
     // alongside the provider rather than leaving rows to guess.
-    if (!ep.epDevice.empty())
+    else if (!ep.epDevice.empty())
       details.push_back({"OpenVINO device", ep.epDevice});
 
     auto deviceScope = backendScope.beginDevice({
@@ -361,6 +482,17 @@ BackendInventory OnnxPeak::enumerate()
   auto eps = onnxUsableEps(*rt, &skipped);
   for (const auto &sk : skipped)
     inv.notes.push_back("skipping " + sk.first.displayName + ": " + sk.second);
+  // A plugin library someone named that did not register, or a Windows ML
+  // failure, is a fact about this listing and not a verbose-only note:
+  // it rides the info line, where a missing runtime's reason would be.
+  {
+    std::vector<std::string> loud, quiet;
+    pluginNotes(*rt, loud, quiet);
+    for (const auto &n : loud)
+      inv.info += "; " + n;
+    for (const auto &n : quiet)
+      inv.notes.push_back(n);
+  }
 
   InventoryPlatform plat;
   plat.index = 0;

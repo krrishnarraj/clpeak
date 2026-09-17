@@ -137,6 +137,15 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   replaced by "Built into the app": ONNX Runtime is statically linked there
   (Apple's pod is a static framework and iOS will not dlopen another), which
   `OnnxStatus.linkedIn` reports.
+- Plugin execution providers and Windows ML? → the same screen, desktop
+  only: `SettingsService.onnxEpLibraries` (name + path per library, the
+  registration name guessed from the file name and confirmed in a dialog)
+  and `onnxWinml` / `onnxWinmlPath` (Windows), applied in `main()` beside
+  the library path and, on change, through `BenchmarkService.setOnnxEpLibraries`
+  / `setOnnxWinml` + a re-enumeration.  `OnnxStatus.epLibraries` says how
+  each registered on the last enumeration (empty = pending), and the panel
+  shows it per row.  Enabling Windows ML makes the next enumeration install
+  the Store providers, so it can take minutes the first time.
 - Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
   (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
   Android/iOS only — a sleeping display stops the frames the run was budgeted

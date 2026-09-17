@@ -171,6 +171,28 @@ class BenchmarkService extends ChangeNotifier {
     await reloadCatalog();
   }
 
+  /// Replace the ONNX backend's plugin execution-provider libraries and
+  /// re-enumerate; same single-flight contract as [setOnnxLibrary].
+  Future<void> setOnnxEpLibraries(List<OnnxEpLibrary> libs) async {
+    if (isRunning) return;
+    await _catalogFlight;
+    if (isRunning) return;
+    _bindings.setOnnxEpLibraries(libs);
+    await reloadCatalog();
+  }
+
+  /// Switch the Windows ML execution-provider catalog and re-enumerate.
+  /// Enumeration is what installs and registers the catalog's providers,
+  /// so the first enumeration after enabling can take as long as the
+  /// download does.
+  Future<void> setOnnxWinml({required bool enabled, required String path}) async {
+    if (isRunning) return;
+    await _catalogFlight;
+    if (isRunning) return;
+    _bindings.setOnnxWinml(enabled: enabled, path: path);
+    await reloadCatalog();
+  }
+
   /// Re-enumerate after something changed what the native side can see —
   /// the ONNX Runtime or LiteRT library the settings screen chose.
   ///

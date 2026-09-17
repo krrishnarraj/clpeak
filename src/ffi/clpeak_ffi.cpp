@@ -92,12 +92,32 @@ char *clpeak_copy_onnx_status_json(void)
     json += st.linkedIn ? "true" : "false";
     json += ",\"version\":\"" + jsonEscape(st.version) + "\"";
     json += ",\"path\":\"" + jsonEscape(st.path) + "\"";
-    json += ",\"error\":\"" + jsonEscape(st.error) + "\"}";
+    json += ",\"error\":\"" + jsonEscape(st.error) + "\"";
+    json += ",\"epLibraries\":[";
+    for (size_t i = 0; i < st.epLibraries.size(); i++)
+    {
+        const OnnxEpLibraryStatus &e = st.epLibraries[i];
+        if (i) json += ",";
+        json += "{\"name\":\"" + jsonEscape(e.lib.name) + "\"";
+        json += ",\"path\":\"" + jsonEscape(e.lib.path) + "\"";
+        json += ",\"named\":";
+        json += e.lib.named ? "true" : "false";
+        json += ",\"registered\":";
+        json += e.registered ? "true" : "false";
+        json += ",\"error\":\"" + jsonEscape(e.error) + "\"}";
+    }
+    json += "]";
+    json += ",\"winml\":{\"enabled\":";
+    json += st.winmlEnabled ? "true" : "false";
+    json += ",\"path\":\"" + jsonEscape(st.winmlPath) + "\"";
+    json += ",\"error\":\"" + jsonEscape(st.winmlError) + "\"}}";
     return copyString(json);
 #else
     return copyString(
         "{\"available\":false,\"linkedIn\":false,\"version\":\"\","
-        "\"path\":\"\",\"error\":\"ONNX backend not built in\"}");
+        "\"path\":\"\",\"error\":\"ONNX backend not built in\","
+        "\"epLibraries\":[],\"winml\":{\"enabled\":false,\"path\":\"\","
+        "\"error\":\"\"}}");
 #endif
 }
 
@@ -106,6 +126,51 @@ void clpeak_set_onnx_library(const char *path)
 #ifdef ENABLE_ONNX
     onnxSetLibraryOverride(path ? path : "");
 #else
+    (void)path;
+#endif
+}
+
+void clpeak_set_onnx_ep_libraries(const char *spec)
+{
+#ifdef ENABLE_ONNX
+    std::vector<OnnxEpLibrary> libs;
+    std::string text = spec ? spec : "";
+    size_t pos = 0;
+    while (pos <= text.size())
+    {
+        size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) nl = text.size();
+        std::string line = text.substr(pos, nl - pos);
+        pos = nl + 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        OnnxEpLibrary lib;
+        if (line[0] == '!')
+        {
+            lib.named = false;
+            line.erase(0, 1);
+        }
+        const size_t eq = line.find('=');
+        // A malformed line is dropped rather than registered under a wrong
+        // name; the GUI validates before it gets here.
+        if (eq == std::string::npos || eq == 0 || eq + 1 == line.size())
+            continue;
+        lib.name = line.substr(0, eq);
+        lib.path = line.substr(eq + 1);
+        libs.push_back(std::move(lib));
+    }
+    onnxSetEpLibraries(std::move(libs));
+#else
+    (void)spec;
+#endif
+}
+
+void clpeak_set_onnx_winml(int enabled, const char *path)
+{
+#ifdef ENABLE_ONNX
+    onnxSetWinml(enabled != 0, path ? path : "");
+#else
+    (void)enabled;
     (void)path;
 #endif
 }
@@ -140,6 +205,15 @@ void clpeak_set_litert_npu_dir(const char *dir)
 {
 #ifdef ENABLE_LITERT
     litertSetNpuDirOverride(dir ? dir : "");
+#else
+    (void)dir;
+#endif
+}
+
+void clpeak_set_litert_npu_stage_dir(const char *dir)
+{
+#ifdef ENABLE_LITERT
+    litertSetNpuStageDir(dir ? dir : "");
 #else
     (void)dir;
 #endif
@@ -188,6 +262,17 @@ int clpeak_launch(int argc, const char **argv,
 #ifdef ENABLE_ONNX
     if (!opts.onnxLibPath.empty())
         onnxSetLibraryOverride(opts.onnxLibPath);
+    // Plugin providers register on the runtime's environment, which the
+    // first enumeration creates: the set has to be in place before it.
+    if (!opts.onnxEpLibraries.empty())
+    {
+        std::vector<OnnxEpLibrary> libs;
+        for (const auto &e : opts.onnxEpLibraries)
+            libs.push_back({e.first, e.second, true});
+        onnxSetEpLibraries(std::move(libs));
+    }
+    if (opts.onnxWinml)
+        onnxSetWinml(true, opts.onnxWinmlPath);
 #endif
 #ifdef ENABLE_LITERT
     if (!opts.litertLibPath.empty())

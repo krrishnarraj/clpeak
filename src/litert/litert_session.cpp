@@ -475,6 +475,42 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     if (!toml.empty() && !addOpaque(rt, s->options_, "gpu_options", toml, optErr))
       return fail(optErr, kLiteRtStatusErrorInvalidArgument);
   }
+  if (dev.accel == LitertAccel::Npu)
+  {
+    // Peak clocks, the way the ONNX backend asks QNN for "burst": every
+    // vendor's default performance mode is a power policy for an app, and
+    // the difference on sustained work is a large multiple.  The payload is
+    // the vendor's own TOML (the identifiers and keys of the
+    // litert/c/options/*.cc parsers; the values are the enums in the
+    // vendored headers), and only the vendor whose dispatch library came up
+    // gets one -- an identifier no plugin consumes would be ignored, but
+    // there is no reason to send it.
+    const char *identifier = nullptr;
+    std::string toml;
+    if (dev.vendor == "Qualcomm")
+    {
+      identifier = "qualcomm";
+      toml = "htp_performance_mode = " +
+             std::to_string((int)kLiteRtQualcommHtpPerformanceModeBurst) + "\n" +
+             "dsp_performance_mode = " +
+             std::to_string((int)kLiteRtQualcommDspPerformanceModeBurst) + "\n";
+    }
+    else if (dev.vendor == "Google")
+    {
+      identifier = "google_tensor";
+      toml = "performance_mode = " +
+             std::to_string((int)kLiteRtGoogleTensorOptionsPerformanceModeBurst) + "\n";
+    }
+    else if (dev.vendor == "MediaTek")
+    {
+      identifier = "mediatek";
+      toml = "performance_mode = " +
+             std::to_string((int)kLiteRtMediatekNeuronAdapterPerformanceModeNeuronPreferTurboBoost) +
+             "\n";
+    }
+    if (identifier && !addOpaque(rt, s->options_, identifier, toml, optErr))
+      return fail(optErr, kLiteRtStatusErrorInvalidArgument);
+  }
   if (cfg.profile &&
       !addOpaque(rt, s->options_, "runtime_options_string", "enable_profiling = true\n", optErr))
     return fail(optErr, kLiteRtStatusErrorInvalidArgument);

@@ -258,6 +258,13 @@ static std::string helpText()
   helpLine(s, "--compare file",    "compare results against a saved run");
   helpLine(s, "--onnx-lib path",   "onnxruntime shared library to load\n"
                                    "(default: the platform's conventional names)");
+  helpLine(s, "--onnx-ep NAME=path", "register a plugin execution-provider library\n"
+                                   "under NAME (ONNX Runtime 1.22+; repeatable), e.g.\n"
+                                   "QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll");
+  helpLine(s, "--onnx-winml [path]", "register the execution providers Windows ML installs\n"
+                                   "from the Microsoft Store (Windows 11 24H2+); path names\n"
+                                   "Microsoft.Windows.AI.MachineLearning.dll or its directory\n"
+                                   "(default: beside the loaded runtime, then the executable)");
   helpLine(s, "--litert-lib path", "LiteRT shared library (libLiteRt) to load\n"
                                    "(default: the platform's conventional names)");
   helpLine(s, "--litert-npu-dir dir", "where LiteRT's NPU dispatch / compiler-plugin\n"
@@ -554,6 +561,34 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!v)
         return missingArg(err, a);
       out.onnxLibPath = v;
+      continue;
+    }
+    if (!strcmp(a, "--onnx-ep"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      // NAME=PATH; the '=' after the name is the first one, since a path
+      // may carry its own (a Windows drive letter never does, a URL-ish
+      // directory might).
+      const char *eq = strchr(v, '=');
+      if (!eq || eq == v || !eq[1])
+      {
+        err = std::string("clpeak: --onnx-ep expects NAME=PATH, the "
+                          "registration name the provider wants (Qualcomm's "
+                          "QNN: QNNExecutionProvider) and the library to load; got '") +
+              v + "'\n";
+        return ParseResult::Error;
+      }
+      out.onnxEpLibraries.emplace_back(std::string(v, eq - v), std::string(eq + 1));
+      continue;
+    }
+    if (!strcmp(a, "--onnx-winml"))
+    {
+      out.onnxWinml = true;
+      // The path is optional: the next word is one unless it is a flag.
+      if (i + 1 < argc && argv[i + 1][0] != '-')
+        out.onnxWinmlPath = argv[++i];
       continue;
     }
     if (!strcmp(a, "--litert-lib"))

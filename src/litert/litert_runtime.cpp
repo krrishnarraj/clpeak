@@ -27,6 +27,8 @@ static bool g_attempted = false;
 static std::string g_loadError;
 static std::string g_override;   // --litert-lib / clpeak_set_litert_library
 static std::string g_npuDir;     // --litert-npu-dir
+static std::string g_npuStage;   // clpeak_set_litert_npu_stage_dir (Android)
+static std::string g_npuResolved; // the vendor directory staged there, if any
 
 // Every loaded runtime stays mapped for the life of the process and is
 // remembered under its override key ("" for the default search), so a
@@ -179,11 +181,37 @@ void litertSetNpuDirOverride(const std::string &dir)
   g_npuDir = dir;
 }
 
+std::string litertNpuDirOverride()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_npuDir;
+}
+
+void litertSetNpuStageDir(const std::string &dir)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_npuStage = dir;
+}
+
+std::string litertNpuStageDir()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_npuStage;
+}
+
+void litertSetNpuResolvedDir(const std::string &dir)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_npuResolved = dir;
+}
+
 std::string litertNpuDir()
 {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (!g_npuDir.empty())
     return g_npuDir;
+  if (!g_npuResolved.empty())
+    return g_npuResolved;
   return g_loaded ? g_rt.libraryDir : std::string();
 }
 

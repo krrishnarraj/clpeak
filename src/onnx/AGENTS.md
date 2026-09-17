@@ -15,6 +15,8 @@ backend.
 
 - Looking for the main class (`OnnxPeak` ctor, `runAll`, inventory, EP table)? → `onnx_peak.cpp`
 - Looking for how the runtime library is found/loaded, or how `--onnx-lib` picks one? → `onnx_runtime.cpp` + `onnx_runtime.h`
+- Looking for plugin providers (`--onnx-ep`), their registration on the environment and the OrtEpDevice enumeration? → `onnx_plugin.cpp` + `onnx_plugin.h`
+- Looking for the Windows ML catalog (`--onnx-winml`), which installs vendor providers from the Store? → `onnx_winml.cpp` + `onnx_winml.h`
 - Looking for session creation / per-EP options / the CPU-fallback guard? → `onnx_session.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
@@ -33,6 +35,8 @@ backend.
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`) |
+| `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`, `onnxSetWinml`), `onnxRegisterEpLibraries()` (called by `onnxEnv()` on every fresh environment), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
+| `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
 | `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
@@ -112,6 +116,114 @@ own minor version (1.23.x serves API 23), so `onnx_runtime.cpp` parses
 `ORT_API_VERSION` instead makes ORT print `The requested API version [N] is
 not available` once per failed attempt, straight to the console and below any
 log level — six lines of it against a 1.23 runtime, before any test runs.
+
+## Plugin providers: a library registered on the environment
+
+A provider no longer has to be compiled into the runtime.  Since ONNX
+Runtime 1.22 a separately shipped shared library exporting
+`CreateEpFactories` can be registered on the environment by path
+(`RegisterExecutionProviderLibrary`), after which the runtime enumerates
+every hardware device the plugin can serve (`GetEpDevices`, one
+`OrtEpDevice` per provider × device) and a session is attached to one of
+them with `SessionOptionsAppendExecutionProvider_V2`.  This is not a
+convenience: **Qualcomm's QNN provider only exists in this shape now**
+(`onnxruntime-qnn` 2.x, a 60 MB zip with `onnxruntime_providers_qnn.dll`
+and the whole QAIRT set beside it; Microsoft's built-in QNN packages end
+at ORT 1.24.4), and it is how Windows ML hands out the vendor providers it
+installs from the Store.  A stock runtime on a Snapdragon laptop reaches
+the CPU and DirectML, and without this nothing else.
+
+`--onnx-ep NAME=PATH` (repeatable; the FFI's
+`clpeak_set_onnx_ep_libraries`) names the libraries; `--onnx-winml
+[PATH]` adds whatever the catalog resolves (below).  Three things differ
+from a built-in provider, and `onnx_plugin.cpp` keeps all three in one
+place:
+
+- **Registration is per environment.**  `onnxEnv()` registers the
+  configured set right after creating an environment, and the set is part
+  of the environment's identity: a change between runs (the GUI's
+  Settings) bumps `onnxEpConfigGeneration()`, the next `onnxEnv()` releases
+  the old environment (taking its plugin libraries with it) and builds a
+  fresh one.  Every session must be gone by then -- the same
+  between-runs-only contract the runtime override has.  The status a
+  settings screen reads (`onnxEpLibraryStatus()`) is what the *current*
+  environment registered and is empty after a change until the next
+  enumeration; and a set that became empty rebuilds the environment on the
+  next enumeration even though nothing else would ask for one, or the old
+  registrations would stand behind a status that no longer names them.
+- **The devices come from the runtime, not from a table.**  A plugin's
+  devices are the `OrtEpDevice`s whose provider name was not there before
+  registering (names, not pointers: the runtime may rebuild its list).
+  Each becomes one `onnx_ep_info_t` with `epDevicePtr` set, the hardware
+  type from `HardwareDevice_Type` (NPU → Accelerator, GPU, CPU), the vendor
+  and metadata the runtime reports, and `epDevice` a label ("NPU", "GPU#2")
+  that keys the probe memos exactly as OpenVINO's target does.  The
+  display name is `kEpTable`'s when the provider is known *and* the device
+  is the one the table means -- QNN's HTP row is "Hexagon NPU", its GPU
+  backend is not -- else built from what the runtime said ("QNN (Qualcomm
+  GPU)").  A registered library that offers no device on this machine is
+  reported as such: a plugin enumerates the hardware it can serve, and on
+  the wrong machine that is nothing, which is the answer rather than a
+  fault.  Plugin devices list first (accelerators, then GPUs), their
+  CPU-class devices after the built-in accelerators.
+- **The append is the V2 one.**  `appendProvider()` sends a device with
+  `epDevicePtr` through `onnxAppendPluginDevice()`; the string-keyed append
+  knows the built-in names only and answers "QNN execution provider is not
+  supported in this build" for a plugin, whatever was registered.  The
+  options are the same table (`genericEpOptions`): a plugin QNN takes the
+  HTP options a built-in one does, with the backend chosen by the device's
+  type (`backend_type` htp/gpu/cpu) -- or `backend_path` naming the
+  `QnnHtp.dll` beside the plugin outright when it is there, so nothing is
+  left to a loader search.  A plugin clpeak has no wiring for runs with
+  the provider's own defaults: the person naming the library asked for
+  exactly that, and the fallback guard still fails any session the
+  provider does not take whole.
+
+The API is gated on `rt.apiVersion >= 22`: an older runtime hands out a
+shorter `OrtApi` table, so the slots must not even be read.  Registration
+paths are UTF-8 at the C ABI and `ORTCHAR_T` (wide) on Windows; the
+conversion happens once, at registration.  Verified on macOS against
+Homebrew's 1.29 for the refusal paths (a runtime named as a plugin exports
+no `CreateEpFactories`; a missing file; the built-in device set staying
+untouched); a real plugin is a Windows or Android matter.
+
+### The Windows ML catalog
+
+On Windows 11 24H2 the vendor providers -- Qualcomm QNN, Intel OpenVINO,
+AMD Vitis AI, NVIDIA TensorRT for RTX -- are Store packages that Windows
+ML installs and updates, and the flat C API of
+`Microsoft.Windows.AI.MachineLearning.dll` (`WinMLEpCatalog.h`:
+`WinMLEpCatalogCreate` → `WinMLEpCatalogEnumProviders` →
+`WinMLEpEnsureReady` → `WinMLEpGetLibraryPath`) says which fit this
+machine, installs them, and returns each one's plugin library path.
+`onnx_winml.cpp` dlopens that DLL -- named by `--onnx-winml PATH` (the
+file or its directory), else found beside the loaded runtime or the
+executable -- and every certified provider it makes ready joins the
+plugin set under the catalog's own name (which is the registration name
+Qualcomm's plugin requires, "QNNExecutionProvider").  Uncertified
+providers are listed in the status and not registered, as Windows ML
+itself does.  The DLL is not shipped with clpeak: `tool/fetch_winml.ps1`
+downloads Microsoft's NuGet package and stages its `runtimes/win-<arch>/
+native/` DLLs under `build/winml/<arch>/`, and with a directory given to
+`--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll` beside the
+catalog becomes the runtime (`winmlDefaultRuntime()` in
+`onnx_runtime.cpp`, cached under its own key so switching the catalog off
+does not keep it).  `DirectML.dll` is staged too: that runtime delay-loads
+it the moment its DirectML provider is attached, which the viability probe
+does, and a delay-load with nothing to find is a structured exception,
+not a refusal -- which is also why a runtime loaded by path gets its
+directory put on the DLL search (`SetDllDirectory`, `searchBesideRuntime`).
+
+Installing is a download of tens to hundreds of megabytes, so the catalog
+is opt-in, the run says out loud when it is installing, and a status query
+(`onnxRuntimeStatus`) never resolves the catalog -- it reads the memo the
+last enumeration left (`onnxWinmlResolved`) or says nothing has.  The
+resolution is memoized per configuration generation and per runtime
+(the DLL search starts beside the runtime).  The whole thing is a no-op off
+Windows, where `--onnx-winml` still parses and the status says why it did
+nothing.  Unverified on Windows at the time of writing: the flat C API was
+transcribed from the 2.3.42 package's header and the DLL's export table,
+and the first Windows 11 run is the proof.
 
 ## Verifying a row measured what its name says
 
@@ -1742,7 +1854,10 @@ and dedicated append calls. A provider matching neither is reported as
 unsupported rather than run with defaults — silently measuring something
 unintended is the thing this backend must not do. The CPU EP is implicit in
 every session and is the one provider that registers nothing and keeps its
-fallback.
+fallback.  A plugin provider (`epDevicePtr` set) takes the same key/value
+table through the OrtEpDevice append, `onnxAppendPluginDevice()`; there
+the one exception to "no defaults" applies, since a person named that
+library (see "Plugin providers").
 
 ## A datatype needs a runtime, not just an opset
 
@@ -1830,7 +1945,9 @@ install enumerates something like Dnnl / XNNPACK / CPU and nothing else, even
 on a machine with an obvious GPU in it — which makes the backend look broken
 when it is the runtime that cannot reach the hardware. `runAll()` emits a
 one-line note when no accelerator provider is present; `--onnx-lib` (or the
-GUI's settings screen) selects a different runtime library.
+GUI's settings screen) selects a different runtime library, and `--onnx-ep`
+/ `--onnx-winml` add plugin providers to a stock one (see "Plugin providers"
+above) — on Windows that is now the only route to a Qualcomm NPU.
 
 The mobile packages are the counter-example, and it is why they are bundled:
 `com.microsoft.onnxruntime:onnxruntime-android` carries NNAPI, and the iOS
@@ -1850,6 +1967,9 @@ agree; skipped entries surface once as a verbose-only note with the refusal
 reason.
 OpenVINO enumerates as three targets (NPU/GPU/CPU, see `onnx_peak.cpp`) and
 each is filtered independently. Answers are memoized per runtime and target.
+Plugin providers are the one part of the list that *is* hardware-derived:
+`GetEpDevices` reports the devices a plugin can serve, so they enter the
+raw list per device already and the probe only confirms them.
 The probe tries cheapest first -- provider attach with no model, then the
 dispatch-latency trivial Mul, then the matmul legs -- so a live EP never
 pays for a matmul session it was only ever going to pass.

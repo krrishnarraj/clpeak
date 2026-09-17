@@ -7,7 +7,9 @@ shared library / Apple framework.
 ## Quick Lookups
 
 - The C ABI? → `clpeak_ffi.h` (catalog JSON, blocking `clpeak_launch` with a
-  streaming event callback, `clpeak_request_cancel`). There is no saved-result
+  streaming event callback, `clpeak_request_cancel`, the runtime setters:
+  `clpeak_set_onnx_library` / `_ep_libraries` / `_winml`, `clpeak_set_litert_*`,
+  each with a `clpeak_copy_*_status_json`). There is no saved-result
   loader: result files are JSON in the shape the GUI renders, so it reads them
   with `dart:convert` and history survives a native library that won't load
 - Event JSON schema? → documented in `clpeak_ffi.h`; produced in

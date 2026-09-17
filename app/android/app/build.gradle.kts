@@ -4,7 +4,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Qualcomm's QNN (QAIRT) runtime for LiteRT's Hexagon NPU path, opt-in:
+// Qualcomm's QNN (QAIRT) runtime for the Hexagon NPU, opt-in:
 // `clpeakQnn=true` in android/gradle.properties (which `flutter build` and
 // `flutter run` read), or `-PclpeakQnn=true` on a direct gradlew call.
 //
@@ -12,16 +12,30 @@ plugins {
 // 86 MB; one Skel per Hexagon generation v68..v81), only a Snapdragon can
 // use it, and Qualcomm publishes it on Maven Central under its AI Hub Model
 // License (com.qualcomm.qti:qnn-runtime), so it is not in the default APK.
-// LiteRT's own Qualcomm shims (libLiteRtDispatch_Qualcomm.so and the
-// compiler plugin, from tool/fetch_litert_npu.sh) must sit beside it, and
-// the QNN version has to be the one those shims were built against (2.47
-// for LiteRT 2.2.0: the release's fetch_qualcomm_library.sh names it).
+// Two stacks reach the NPU through it, and the flag brings both:
+//  - LiteRT, through its Qualcomm shims (libLiteRtDispatch_Qualcomm.so and
+//    the compiler plugin, from tool/fetch_litert_npu.sh) which must sit
+//    beside it -- built against QAIRT 2.47 for LiteRT 2.2.0 (the release's
+//    fetch_qualcomm_library.sh names it);
+//  - ONNX Runtime, through Qualcomm's plugin execution provider
+//    (com.qualcomm.qti:onnxruntime-android-qnn, 4 MB: one
+//    libonnxruntime_providers_qnn.so that a stock onnxruntime-android 1.24.1+
+//    registers at run time; the app does so by its bare soname, see
+//    SettingsService.effectiveOnnxEpLibraries) -- validated by Qualcomm
+//    against QAIRT 2.50.
+// One QNN runtime serves both: 2.50, the newer of the two.  LiteRT's
+// QnnManager accepts a runtime whose API minor version is newer than the
+// one its shims were built against, with a warning (a major mismatch is
+// refused); the ONNX plugin gets exactly what it was tested with.
+// Unverified on a Snapdragon: the first tester's run is the proof.
 val clpeakQnn = (project.findProperty("clpeakQnn")?.toString() ?: "false") == "true"
 
-// NPU shims staged by tool/fetch_litert_npu.sh.  LiteRT finds a dispatch
-// library by listing the directory it is told (litert_dispatch.cc), and an
-// APK's internal lib/ path is not a directory anyone can list, so an app
-// carrying shims has its native libraries extracted at install; the
+// NPU shims staged by tool/fetch_litert_npu.sh (any vendor, or all: the
+// backend picks the SoC's vendor at launch and stages its shims in a
+// directory of their own).  LiteRT finds a dispatch library by listing the
+// directory it is told (litert_dispatch.cc), as the backend does to pick,
+// and an APK's internal lib/ path is not a directory anyone can list, so an
+// app carrying shims has its native libraries extracted at install; the
 // Qualcomm runtime needs that anyway (see below).
 val clpeakNpuStaged = file("src/main/jniLibs/arm64-v8a").isDirectory
 
@@ -122,7 +136,8 @@ dependencies {
 
     // See `clpeakQnn` at the top of this file.
     if (clpeakQnn) {
-        implementation("com.qualcomm.qti:qnn-runtime:2.47.0")
+        implementation("com.qualcomm.qti:qnn-runtime:2.50.0")
+        implementation("com.qualcomm.qti:onnxruntime-android-qnn:2.6.0")
     }
 }
 

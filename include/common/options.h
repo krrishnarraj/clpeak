@@ -3,6 +3,7 @@
 
 #include <bitset>
 #include <string>
+#include <utility>
 #include <vector>
 #include <common/benchmark_enums.h>  // Backend, Benchmark, Category
 #include <common/common.h>           // DEFAULT_TARGET_TIME_US
@@ -52,6 +53,21 @@ struct CliOptions {
   // default names (see src/onnx/onnx_runtime.cpp).  Ignored on a build that
   // links ONNX Runtime statically, where there is nothing to load.
   std::string onnxLibPath;
+
+  // --onnx-ep NAME=PATH (repeatable): plugin execution-provider libraries
+  // to register on the runtime (ONNX Runtime 1.22+), each under the
+  // registration name the provider expects -- Qualcomm's QNN plugin is
+  // `QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll`.  See
+  // src/onnx/onnx_plugin.h.
+  std::vector<std::pair<std::string, std::string>> onnxEpLibraries;
+
+  // --onnx-winml [PATH]: register the execution providers Windows ML's
+  // catalog installs from the Microsoft Store (Windows 11 24H2+), through
+  // Microsoft.Windows.AI.MachineLearning.dll -- the file, or its directory,
+  // named by PATH, else searched beside the loaded runtime and the
+  // executable.  Opt-in because a missing provider is downloaded.
+  bool        onnxWinml = false;
+  std::string onnxWinmlPath;
 
   // --litert-lib: the LiteRT shared library (libLiteRt) to load, ahead of
   // the platform's conventional names; --litert-npu-dir: where the NPU

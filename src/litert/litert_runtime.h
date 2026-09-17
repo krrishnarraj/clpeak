@@ -137,7 +137,16 @@ void litertSetLibraryOverride(const std::string &path);
 // the vendor runtime beside them).  Empty means the runtime library's own
 // directory.  Backs `--litert-npu-dir`.
 void litertSetNpuDirOverride(const std::string &dir);
+std::string litertNpuDirOverride();
 std::string litertNpuDir();
+
+// The stage directory (include/litert/litert_peak.h) and what the vendor
+// selection resolved inside it (litert_peak.cpp, litertStageNpuVendor).  A
+// resolved directory answers litertNpuDir() when no override is set; empty
+// means the runtime's own directory, as before.
+void litertSetNpuStageDir(const std::string &dir);
+std::string litertNpuStageDir();
+void litertSetNpuResolvedDir(const std::string &dir);
 
 // Load on first use; nullptr when no runtime is found or it lacks a required
 // entry point.  A failed search is remembered, so a missing runtime costs one

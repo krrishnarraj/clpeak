@@ -101,6 +101,8 @@ The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmak
 ./clpeak --devices coreml:0           # one device, as --list-devices names it (here: the Neural Engine)
 ./clpeak --devices cuda:0,vulkan:1    # a few devices across backends; nothing else runs
 ./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
+./clpeak --onnx --onnx-ep QNNExecutionProvider=DIR/onnxruntime_providers_qnn.dll   # register a plugin provider (ORT 1.22+; Qualcomm's QNN ships as one)
+./clpeak --onnx --onnx-winml DIR      # Windows 11: the vendor providers Windows ML installs from the Store (tool/fetch_winml.ps1 stages Microsoft's runtime in DIR)
 ./clpeak --litert --litert-lib PATH   # pick the LiteRT library (a pip ai-edge-litert wheel has one); --litert-npu-dir for the vendor NPU runtime (Android app: tool/fetch_litert_npu.sh, app/AGENTS.md)
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)

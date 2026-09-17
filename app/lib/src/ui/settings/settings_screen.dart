@@ -125,6 +125,153 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   }
 
+  /// Plugin execution providers are a desktop matter: a phone's plugin, if
+  /// any, is bundled with the app and registered without asking.
+  static bool get _desktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  /// Persist the plugin library set, hand it to the native side and
+  /// re-enumerate, then read back how each registered.
+  Future<void> _applyEpLibraries(List<OnnxEpLibrary> libs) async {
+    final settings = context.read<SettingsService>();
+    final service = context.read<BenchmarkService>();
+    await settings.setOnnxEpLibraries(libs);
+    if (!mounted) return;
+    await service.setOnnxEpLibraries(settings.effectiveOnnxEpLibraries);
+    if (!mounted) return;
+    _refreshOnnx();
+  }
+
+  /// Pick a plugin library, then ask for the registration name the provider
+  /// expects -- guessed from the file name, which for every plugin shipped so
+  /// far is `onnxruntime_providers_<short>`; Qualcomm's QNN insists on
+  /// "QNNExecutionProvider", and the rest follow the same pattern.
+  Future<void> _addEpLibrary() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [XTypeGroup(label: 'Shared library')],
+    );
+    if (file == null || !mounted) return;
+    final name = await _askRegistrationName(file.path);
+    if (name == null || name.isEmpty || !mounted) return;
+    final settings = context.read<SettingsService>();
+    final libs = [
+      for (final l in settings.onnxEpLibraries)
+        if (l.name != name) l,
+      OnnxEpLibrary(name: name, path: file.path),
+    ];
+    await _applyEpLibraries(libs);
+  }
+
+  Future<void> _removeEpLibrary(OnnxEpLibrary lib) async {
+    final settings = context.read<SettingsService>();
+    await _applyEpLibraries([
+      for (final l in settings.onnxEpLibraries)
+        if (l.name != lib.name || l.path != lib.path) l,
+    ]);
+  }
+
+  static String _guessRegistrationName(String path) {
+    var stem = p.basenameWithoutExtension(path);
+    // Versioned Unix names keep their extension in the stem (libfoo.so.1).
+    stem = stem.replaceFirst(RegExp(r'\.so(\.\d+)*$'), '');
+    if (stem.startsWith('lib')) stem = stem.substring(3);
+    const prefix = 'onnxruntime_providers_';
+    if (stem.startsWith(prefix)) stem = stem.substring(prefix.length);
+    const known = {
+      'qnn': 'QNN',
+      'openvino': 'OpenVINO',
+      'vitisai': 'VitisAI',
+      'nv_tensorrt_rtx': 'NvTensorRTRTX',
+      'tensorrt': 'Tensorrt',
+      'cuda': 'CUDA',
+      'migraphx': 'MIGraphX',
+      'webgpu': 'WebGpu',
+      'dml': 'Dml',
+    };
+    final short = known[stem.toLowerCase()] ??
+        (stem.isEmpty ? '' : stem[0].toUpperCase() + stem.substring(1));
+    return short.isEmpty ? '' : '${short}ExecutionProvider';
+  }
+
+  Future<String?> _askRegistrationName(String path) async {
+    final t = CP.of(context);
+    final controller =
+        TextEditingController(text: _guessRegistrationName(path));
+    return showDialog<String>(
+      context: context,
+      builder: (context) => CDialog(
+        title: 'Registration name',
+        actions: [
+          CButton(
+              label: 'Cancel',
+              kind: CButtonKind.quiet,
+              onPressed: () => Navigator.pop(context)),
+          CButton(
+              label: 'Register',
+              kind: CButtonKind.primary,
+              onPressed: () => Navigator.pop(context, controller.text.trim())),
+        ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(p.basename(path), style: t.monoSmallDim),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              style: t.mono,
+              cursorWidth: 1.5,
+              cursorRadius: Radius.zero,
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(CP.rControl),
+                  borderSide: BorderSide(color: t.line),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(CP.rControl),
+                  borderSide: BorderSide(color: t.line),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(CP.rControl),
+                  borderSide: BorderSide(color: t.text, width: 1.5),
+                ),
+              ),
+              onSubmitted: (v) => Navigator.pop(context, v.trim()),
+            ),
+            const SizedBox(height: 10),
+            Text(
+                'The name the provider expects to be registered under; '
+                'Qualcomm\'s QNN plugin requires QNNExecutionProvider.',
+                style: t.micro),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Switch the Windows ML catalog; enabling it re-enumerates, which installs
+  /// whatever certified providers fit the machine.
+  Future<void> _applyWinml({required bool enabled, required String path}) async {
+    final settings = context.read<SettingsService>();
+    final service = context.read<BenchmarkService>();
+    await settings.setOnnxWinml(enabled: enabled, path: path);
+    if (!mounted) return;
+    await service.setOnnxWinml(enabled: enabled, path: path);
+    if (!mounted) return;
+    _refreshOnnx();
+  }
+
+  Future<void> _pickWinmlDir() async {
+    final dir = await getDirectoryPath();
+    if (dir == null || !mounted) return;
+    final settings = context.read<SettingsService>();
+    await _applyWinml(enabled: settings.onnxWinml, path: dir);
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
@@ -170,6 +317,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPick: () => _pickLibrary(_Runtime.onnx),
                     onReset: () => _resetLibrary(_Runtime.onnx),
                   ),
+                  if (_desktop) ...[
+                    const SizedBox(height: 22),
+                    const CSection(label: 'Plugin execution providers'),
+                    const SizedBox(height: 10),
+                    _EpLibrariesPanel(
+                      libraries: settings.onnxEpLibraries,
+                      status: _onnx?.epLibraries ?? const [],
+                      locked: running,
+                      onAdd: _addEpLibrary,
+                      onRemove: _removeEpLibrary,
+                    ),
+                  ],
+                  if (Platform.isWindows) ...[
+                    const SizedBox(height: 22),
+                    const CSection(label: 'Windows ML'),
+                    const SizedBox(height: 10),
+                    _WinmlPanel(
+                      enabled: settings.onnxWinml,
+                      path: settings.onnxWinmlPath,
+                      status: _onnx,
+                      locked: running,
+                      onToggle: (on) =>
+                          _applyWinml(enabled: on, path: settings.onnxWinmlPath),
+                      onPickDir: _pickWinmlDir,
+                      onClearDir: () =>
+                          _applyWinml(enabled: settings.onnxWinml, path: ''),
+                    ),
+                  ],
                   const SizedBox(height: 22),
                   const CSection(label: 'LiteRT'),
                   const SizedBox(height: 10),
@@ -386,6 +561,240 @@ class _RuntimePanel extends StatelessWidget {
                 style: t.micro.copyWith(color: t.dim)),
           ],
         ],
+      ],
+    );
+  }
+}
+
+/// The plugin execution-provider libraries registered on the ONNX Runtime
+/// (1.22+), each with how the last enumeration found it.
+class _EpLibrariesPanel extends StatelessWidget {
+  const _EpLibrariesPanel({
+    required this.libraries,
+    required this.status,
+    required this.locked,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  final List<OnnxEpLibrary> libraries;
+  final List<OnnxEpLibraryStatus> status;
+  final bool locked;
+  final VoidCallback onAdd;
+  final ValueChanged<OnnxEpLibrary> onRemove;
+
+  OnnxEpLibraryStatus? _statusOf(OnnxEpLibrary lib) {
+    for (final s in status) {
+      if (s.name == lib.name && s.path == lib.path) return s;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final tint = ClpeakTheme.categoryColor(BenchCategory.ai,
+        brightness: Theme.of(context).brightness);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (libraries.isEmpty)
+                CRow(
+                  rule: false,
+                  child: Text('None registered', style: t.monoSmallDim),
+                ),
+              for (var i = 0; i < libraries.length; i++)
+                Builder(builder: (context) {
+                  final lib = libraries[i];
+                  final st = _statusOf(lib);
+                  final registered = st?.registered ?? false;
+                  return CRow(
+                    rule: i < libraries.length - 1,
+                    accent: registered ? tint : null,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.extension_outlined, size: 15, color: t.dim),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(lib.name, style: t.mono),
+                              const SizedBox(height: 3),
+                              Text(p.basename(lib.path), style: t.monoSmallDim),
+                              if (st != null && !registered) ...[
+                                const SizedBox(height: 3),
+                                Text(st.error,
+                                    style: t.monoSmallDim
+                                        .copyWith(color: t.danger)),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        CTag(
+                          text: st == null
+                              ? 'pending'
+                              : registered
+                                  ? 'registered'
+                                  : 'failed',
+                          color: st == null
+                              ? t.dim
+                              : registered
+                                  ? tint
+                                  : t.danger,
+                        ),
+                        const SizedBox(width: 4),
+                        CIconButton(
+                          icon: Icons.close,
+                          tooltip: 'Remove',
+                          onPressed: locked ? null : () => onRemove(lib),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'A provider shipped apart from the runtime — Qualcomm\'s QNN plugin '
+          '(onnxruntime_providers_qnn) reaches the Hexagon NPU on a stock '
+          'ONNX Runtime 1.24 or newer.',
+          style: t.micro.copyWith(color: t.dim),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            CButton(
+              label: 'Add library…',
+              icon: Icons.add,
+              onPressed: locked ? null : onAdd,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Windows ML's execution-provider catalog: the switch, where its DLL is,
+/// and what the last enumeration made of it.
+class _WinmlPanel extends StatelessWidget {
+  const _WinmlPanel({
+    required this.enabled,
+    required this.path,
+    required this.status,
+    required this.locked,
+    required this.onToggle,
+    required this.onPickDir,
+    required this.onClearDir,
+  });
+
+  final bool enabled;
+  final String path;
+  final OnnxStatus? status;
+  final bool locked;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback onPickDir;
+  final VoidCallback onClearDir;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final s = status;
+    final resolved = s != null && s.winmlEnabled && s.winmlPath.isNotEmpty;
+    final error = s != null && s.winmlEnabled ? s.winmlError : '';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              CRow(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.storefront_outlined, size: 15, color: t.dim),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Text('Store execution providers',
+                            style: t.mono)),
+                    CSwitch(
+                        value: enabled,
+                        onChanged: locked ? (_) {} : onToggle),
+                  ],
+                ),
+              ),
+              CRow(
+                rule: enabled && error.isNotEmpty,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.folder_outlined, size: 15, color: t.dim),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        resolved
+                            ? s.winmlPath
+                            : path.isNotEmpty
+                                ? path
+                                : 'Microsoft.Windows.AI.MachineLearning.dll '
+                                    'beside the runtime or the app',
+                        style: t.monoSmallDim,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (enabled && error.isNotEmpty)
+                CRow(
+                  rule: false,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.error_outline, size: 15, color: t.danger),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(error,
+                            style: t.monoSmallDim.copyWith(color: t.danger)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Windows 11 24H2 installs the vendor providers (Qualcomm QNN, Intel '
+          'OpenVINO, AMD Vitis AI, NVIDIA TensorRT for RTX) from the Microsoft '
+          'Store on first use — a download. The catalog DLL comes with the '
+          'Microsoft.Windows.AI.MachineLearning package, not with clpeak.',
+          style: t.micro.copyWith(color: t.dim),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            CButton(
+              label: 'Choose folder…',
+              icon: Icons.folder_open,
+              onPressed: locked ? null : onPickDir,
+            ),
+            const SizedBox(width: 8),
+            CButton(
+              label: 'Search',
+              onPressed: locked || path.isEmpty ? null : onClearDir,
+            ),
+          ],
+        ),
       ],
     );
   }

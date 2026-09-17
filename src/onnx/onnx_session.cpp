@@ -2,6 +2,7 @@
 
 #include "onnx_session.h"
 #include "onnx_model.h"
+#include "onnx_plugin.h"
 
 #include <common/common.h>
 #include <common/console_mute.h>
@@ -180,13 +181,19 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   static OrtEnv *env = nullptr;
   static const OrtApi *envApi = nullptr;
   static const OrtApiBase *envBase = nullptr;
+  // The plugin libraries an Env registers are part of its identity too
+  // (onnx_plugin.h): a different set between runs means a fresh Env, on
+  // which the new set is registered and the old one is unloaded with it.
+  static uint64_t envGeneration = 0;
   // A runtime that refused once refuses again: remembered per runtime, so
   // enumeration does not pay for the same failed attempt at every probe,
   // and a different library gets its own try.
   static const OrtApi *failedApi = nullptr;
   static const OrtApiBase *failedBase = nullptr;
   std::lock_guard<std::mutex> lock(mutex);
-  if (env && envApi == rt.api && envBase == rt.base)
+  const uint64_t generation = onnxEpConfigGeneration();
+  if (env && envApi == rt.api && envBase == rt.base &&
+      envGeneration == generation)
     return env;
   if (!env && failedApi == rt.api && failedBase == rt.base)
     return nullptr;
@@ -227,7 +234,11 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   }
   envApi = rt.api;
   envBase = rt.base;
+  envGeneration = generation;
   g_envError.clear();
+  // Plugin providers live on the Env, so this is where they are registered
+  // -- once per Env, before anything enumerates or attaches them.
+  onnxRegisterEpLibraries(rt, env);
   return env;
 }
 
@@ -252,11 +263,43 @@ namespace
 struct EpOptions
 {
   const char *registrationName;     // name the generic append API expects
-  std::vector<std::pair<const char *, const char *>> kv;
+  std::vector<std::pair<std::string, std::string>> kv;
 };
 
-// Providers registered through the generic string-keyed API.  Returns false
-// for anything not handled here; the caller then tries the typed paths.
+// The QNN backend library for a device: `backend_path` naming the file
+// beside the plugin library when it is there to be named, else
+// `backend_type` and the provider's own search.  A built-in QNN provider
+// resolves a bare file name against its runtime's directory (and the
+// plugin against its own), but naming the file outright when it is in
+// sight leaves nothing to a loader search that depends on which
+// directory the process started in.
+void qnnBackend(const onnx_ep_info_t &ep, const char *type, const char *file,
+                EpOptions &out)
+{
+  if (ep.epDevicePtr)
+  {
+    const std::string lib = onnxEpLibraryPath(ep.library);
+    const size_t slash = lib.find_last_of("/\\");
+    if (slash != std::string::npos)
+    {
+      const std::string beside = lib.substr(0, slash + 1) + file;
+      std::error_code ec;
+      if (std::filesystem::exists(beside, ec))
+      {
+        out.kv.emplace_back("backend_path", beside);
+        return;
+      }
+    }
+    out.kv.emplace_back("backend_type", type);
+    return;
+  }
+  out.kv.emplace_back("backend_path", file);
+}
+
+// Providers registered through the generic string-keyed API -- and the
+// plugin providers, which take the same key/value options through the
+// OrtEpDevice append (onnx_plugin.h).  Returns false for anything not
+// handled here; the caller then tries the typed paths.
 bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
 {
   const std::string &providerKey = ep.providerKey;
@@ -271,40 +314,63 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
   }
   if (providerKey == "QNNExecutionProvider")
   {
-    // HTP is the NPU proper; without this the EP would settle for the DSP or
-    // the CPU reference backend and the row would not mean what it says.
 #if defined(_WIN32)
-    const char *htp = "QnnHtp.dll";
+    const char *htpFile = "QnnHtp.dll";
+    const char *gpuFile = "QnnGpu.dll";
+    const char *cpuFile = "QnnCpu.dll";
 #else
-    const char *htp = "libQnnHtp.so";
+    const char *htpFile = "libQnnHtp.so";
+    const char *gpuFile = "libQnnGpu.so";
+    const char *cpuFile = "libQnnCpu.so";
 #endif
-    out = {"QNN",
-           {{"backend_path", htp},
-            // Peak clocks.  The HTP's default performance mode is a power
-            // saver; "burst" is what a benchmark -- and Qualcomm's own
-            // profiling tools -- ask for, and the difference is a large
-            // multiple on sustained work.
-            {"htp_performance_mode", "burst"},
-            {"qnn_context_priority", "high"},
-            // The most optimised graph the finalizer will produce.  Costs
-            // preparation time, which the session-creation budgets bound.
-            {"htp_graph_finalization_optimization_mode", "3"},
-            // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
-            // HTP.  The default hands them to the CPU EP, which the fallback
-            // guard then refuses -- and a quantized input arriving through
-            // a dequantize is exactly what the numeric-error and live QDQ
-            // graphs have at their boundary.
-            {"offload_graph_io_quantization", "0"}}};
+    out = {"QNN", {}};
+    // The plugin enumerates each backend's device on its own (the HTP as
+    // an NPU, the Adreno as a GPU, the reference backend as a CPU), and
+    // the row is the device it says.  The built-in provider enumerates
+    // once, and there HTP is the NPU proper: without naming it the EP
+    // would settle for the DSP or the CPU reference backend and the row
+    // would not mean what it says.
+    if (ep.epDevicePtr && ep.deviceType == DeviceType::Gpu)
+    {
+      qnnBackend(ep, "gpu", gpuFile, out);
+      return true;
+    }
+    if (ep.epDevicePtr && ep.deviceType == DeviceType::Cpu)
+    {
+      qnnBackend(ep, "cpu", cpuFile, out);
+      return true;
+    }
+    qnnBackend(ep, "htp", htpFile, out);
+    // Peak clocks.  The HTP's default performance mode is a power
+    // saver; "burst" is what a benchmark -- and Qualcomm's own
+    // profiling tools -- ask for, and the difference is a large
+    // multiple on sustained work.
+    out.kv.emplace_back("htp_performance_mode", "burst");
+    out.kv.emplace_back("qnn_context_priority", "high");
+    // The most optimised graph the finalizer will produce.  Costs
+    // preparation time, which the session-creation budgets bound.
+    out.kv.emplace_back("htp_graph_finalization_optimization_mode", "3");
+    // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
+    // HTP.  The default hands them to the CPU EP, which the fallback
+    // guard then refuses -- and a quantized input arriving through
+    // a dequantize is exactly what the numeric-error and live QDQ
+    // graphs have at their boundary.
+    out.kv.emplace_back("offload_graph_io_quantization", "0");
     return true;
   }
   if (providerKey == "OpenVINOExecutionProvider")
   {
     // One registration per enumerated target (see onnxAvailableEps):
     // NPU, GPU and CPU are different silicon behind one provider name,
-    // and the target is part of what the row measures.  The pointer
-    // borrows ep.epDevice, which outlives the append call below.
-    const char *dev = ep.epDevice.empty() ? "NPU" : ep.epDevice.c_str();
-    out = {"OpenVINO", {{"device_type", dev}}};
+    // and the target is part of what the row measures.  A plugin OpenVINO
+    // is appended for its OrtEpDevice, which already names the silicon.
+    if (ep.epDevicePtr)
+    {
+      out = {"OpenVINO", {}};
+      return true;
+    }
+    out = {"OpenVINO",
+           {{"device_type", ep.epDevice.empty() ? "NPU" : ep.epDevice}}};
     return true;
   }
   if (providerKey == "VitisAIExecutionProvider")
@@ -344,14 +410,30 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   const OrtApi *api = rt.api;
   const std::string &providerKey = ep.providerKey;
 
+  // ---- Plugin providers: appended for their OrtEpDevice -----------------
+  // The string-keyed append below knows the built-in names only and
+  // answers "not supported in this build" for a plugin, however it was
+  // registered.  The options are the same table: a plugin QNN takes the
+  // HTP options a built-in one does.  A plugin clpeak has no wiring for
+  // runs with the provider's own defaults -- the person naming the library
+  // asked for exactly that, and the fallback guard still fails a session
+  // the provider does not take whole.
+  if (ep.epDevicePtr)
+  {
+    EpOptions opts;
+    if (!genericEpOptions(ep, opts))
+      opts = {"", {}};
+    return onnxAppendPluginDevice(rt, so, ep, opts.kv);
+  }
+
   EpOptions opts;
   if (genericEpOptions(ep, opts))
   {
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
     {
-      keys.push_back(kvp.first);
-      vals.push_back(kvp.second);
+      keys.push_back(kvp.first.c_str());
+      vals.push_back(kvp.second.c_str());
     }
     return onnxStatusText(rt, api->SessionOptionsAppendExecutionProvider(
         so, opts.registrationName, keys.data(), vals.data(), keys.size()));

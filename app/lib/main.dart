@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import 'src/ffi/clpeak_bindings.dart';
@@ -22,7 +24,16 @@ Future<void> main() async {
   // until the next launch.
   final settings = await SettingsService.load();
   bindings.setOnnxLibrary(settings.onnxLibraryPath);
+  bindings.setOnnxEpLibraries(settings.effectiveOnnxEpLibraries);
+  bindings.setOnnxWinml(
+      enabled: settings.onnxWinml, path: settings.onnxWinmlPath);
   bindings.setLitertLibrary(settings.litertLibraryPath);
+  if (Platform.isAndroid) {
+    // An APK carrying more than one vendor's NPU shims needs a directory
+    // per vendor for LiteRT to choose by; the backend stages links there.
+    bindings.setLitertNpuStageDir(
+        p.join((await getApplicationSupportDirectory()).path, 'litert-npu'));
+  }
 
   final history = RunHistoryStore();
   final service = BenchmarkService(bindings, history);

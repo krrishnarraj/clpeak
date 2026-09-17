@@ -48,6 +48,12 @@ void onnxSetLibraryOverride(const std::string &path);
 // missing runtime costs one search rather than one per call.
 const OrtRuntime *ortRuntime();
 
+// Ask the loader to run its default search again on the next ortRuntime():
+// the plugin configuration steers that search (an --onnx-winml directory's
+// own runtime comes first), so a change to it is a reason to look again.
+// A named library is unaffected.  Between runs only, like the override.
+void onnxRuntimeRecheck();
+
 // Why the last load attempt failed, ready to show a user; empty when the
 // runtime loaded or has not been asked for yet.  A refusal is only as useful
 // as the sentence it comes with, and "not found" is the wrong sentence when

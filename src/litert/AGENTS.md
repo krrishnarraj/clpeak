@@ -19,6 +19,8 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 
 - Looking for the main class (`LitertPeak`, `runAll`, device probing)? → `litert_peak.cpp`
 - Looking for how the runtime library is found/loaded, or how `--litert-lib` / `--litert-npu-dir` pick one? → `litert_runtime.cpp` + `litert_runtime.h`
+- Looking for how an APK carrying every vendor's NPU shims picks the one for this SoC? → `litertStageNpuVendor()` in `litert_peak.cpp`
+- Looking for the NPU performance modes (Qualcomm burst, Tensor burst, MediaTek turbo)? → the `"qualcomm"` / `"google_tensor"` / `"mediatek"` payloads in `litert_session.cpp`
 - Looking for environments, options payloads, compilation, buffers, the fallback guard, the profiler, the log capture? → `litert_session.cpp`
 - Looking for how `.tflite` models are written without flatc? → `tflite_model.cpp` + `tflite_model.h`
 - Looking for the formats, per-accelerator plans and model recipes? → `litert_model.cpp` + `litert_model.h`
@@ -103,6 +105,14 @@ What the runtime receives is an opaque payload under an identifier --
 `"qualcomm"` with `htp_performance_mode = 2`, `"runtime_options_string"`
 with `enable_profiling = true` -- and `litert_session.cpp` writes those
 strings directly.  The vendored option headers are kept for their enums.
+An NPU session sends the vendor of its dispatch library a performance
+mode, the way the ONNX backend asks QNN for "burst": `"qualcomm"`
+`htp_performance_mode` / `dsp_performance_mode` = Burst, `"google_tensor"`
+`performance_mode` = Burst, `"mediatek"` `performance_mode` =
+TurboBoost (the keys are those of the `litert/c/options/*.cc` TOML
+parsers, the values the vendored enums).  Every vendor's default is a
+power policy for an app, and on sustained work the difference is a large
+multiple.  Unverified on NPU silicon, like the rows themselves.
 
 ## Models are emitted as FlatBuffer bytes, not built with a converter
 
@@ -402,26 +412,45 @@ budgets.
   `libLiteRtClGlAccelerator.so` 3.1 MB); its manifest's `uses-native-library`
   entries merge into ours.  NPU dispatch and compiler-plugin shims come from
   the release's `litert_npu_runtime_libraries_jit.zip` via
-  `tool/fetch_litert_npu.sh qualcomm|google_tensor` into `src/main/jniLibs/`
-  (git-ignored) -- one vendor at a time, because LiteRT lists the dispatch
-  directory and loads the first `libLiteRtDispatch_*` it finds
-  (`litert_dispatch.cc`), so `litertUsableDevices()` labels the device from
-  the path in LiteRT's log rather than from what is staged.  That listing
-  is also why an app carrying shims extracts its native libraries at
-  install (`useLegacyPackaging`): an APK's internal `lib/` path can be
-  dlopen'd but not listed.  MediaTek and Google Tensor runtimes are system
-  libraries on the device.  Qualcomm's is bundled: `clpeakQnn=true` pulls
-  `com.qualcomm.qti:qnn-runtime:2.47.0` from Maven Central (every Hexagon
-  generation's Skel/Stub plus `libQnnHtp`, `libQnnSystem` and the 86 MB
-  `libQnnHtpPrepare` the JIT needs; 67 MB compressed, arm64 only; the
-  version is the one LiteRT 2.2.0's shims were built against, named in the
-  zip's `fetch_qualcomm_library.sh`), and LiteRT's `QnnManager` points
-  `ADSP_LIBRARY_PATH` at the dispatch directory so the DSP's loader finds
-  the Skel -- another reason the files must be real.  A Play release would
-  carry the zip's per-generation dynamic feature modules instead, delivered
-  by device group.  NPU needs API 31+ and arm64.  Unverified on Snapdragon
-  and Tensor silicon: the APK builds and packages (114 MB arm64 with QNN);
-  the testers' runs are the proof.
+  `tool/fetch_litert_npu.sh qualcomm|google_tensor|all` into
+  `src/main/jniLibs/` (git-ignored).  LiteRT lists the dispatch directory
+  and loads the first `libLiteRtDispatch_*` it finds (`litert_dispatch.cc`,
+  still so on main), so with `all` staged the lib dir is not what it is
+  handed: `litertStageNpuVendor()` (`litert_peak.cpp`) reads
+  `ro.soc.manufacturer` ("Google", "QTI", "Mediatek", "Samsung"), links the
+  matching vendor's shims into `<support dir>/litert-npu/<Vendor>/` (the
+  app passes the directory through `clpeak_set_litert_npu_stage_dir`; links,
+  remade at every launch, because the lib dir moves with every install) and
+  that directory answers `litertNpuDir()`.  The shim names are not
+  consistent (`libLiteRtDispatch_GoogleTensor.so` beside
+  `libLiteRtCompilerPlugin_google_tensor.so`), so the match drops case and
+  underscores.  An unknown SoC, one vendor, or no stage directory leaves
+  the lib dir as before.  `litertUsableDevices()` still labels the device
+  from the path in LiteRT's log rather than from what is staged, and
+  records `ro.soc.model` as the device detail.  That listing is also why an
+  app carrying shims extracts its native libraries at install
+  (`useLegacyPackaging`): an APK's internal `lib/` path can be dlopen'd but
+  not listed.  Google's zip gates the Tensor module to G3–G6 (Pixel 8 and
+  later); a Tensor G2 (Pixel 7a) is not served.  MediaTek and Google
+  Tensor runtimes are system libraries on the device.  Qualcomm's is
+  bundled: `clpeakQnn=true` pulls `com.qualcomm.qti:qnn-runtime:2.50.0`
+  from Maven Central (every Hexagon generation's Skel/Stub plus
+  `libQnnHtp`, `libQnnSystem` and the 86 MB `libQnnHtpPrepare` the JIT
+  needs; 67 MB compressed, arm64 only) together with Qualcomm's ONNX Runtime
+  QNN plugin (`onnxruntime-android-qnn:2.6.0`, 4 MB, which the app registers
+  by soname).  2.50 is newer than the 2.47 LiteRT 2.2.0's shims were built
+  against (the zip's `fetch_qualcomm_library.sh` names it): `QnnManager`
+  accepts a newer API minor with a warning and refuses only a major
+  mismatch, and the ONNX plugin was validated against 2.50 -- one runtime
+  for both stacks, to be confirmed on a Snapdragon.  The DSP's loader
+  finds the Skel through `ADSP_LIBRARY_PATH`, which LiteRT points at the
+  dispatch directory (prepending when the variable is already set); with
+  the shims in a directory of their own, `litertStageNpuVendor()` sets it
+  to the lib dir first.  A Play release would carry the zip's
+  per-generation dynamic feature modules instead, delivered by device
+  group.  NPU needs API 31+ and arm64.  Unverified on Snapdragon and
+  Tensor silicon: the APK builds and packages (136 MB with QNN and both
+  vendors' shims); the testers' runs are the proof.
 - **Desktop**: `--litert-lib` at a pip wheel's `libLiteRt.{so,dylib,dll}`;
   the GPU accelerator and the Intel OpenVINO NPU dispatch sit beside it.
 - **Verified on Android** with the CLI built against the NDK (root

@@ -11,9 +11,15 @@
 #include <common/options.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <ostream>
+
+#if defined(__ANDROID__)
+#include <sys/system_properties.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Devices
@@ -83,6 +89,135 @@ std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
       found.push_back(&v);
   }
   return found;
+}
+
+// Does a file name carry a vendor's tag, however the vendor spelled it?
+// The shims are not consistent among themselves: Google's dispatch library
+// is libLiteRtDispatch_GoogleTensor.so and its compiler plugin
+// libLiteRtCompilerPlugin_google_tensor.so.  Case and underscores are
+// dropped from both sides before comparing.
+bool nameCarriesTag(const std::string &name, const std::string &tag)
+{
+  auto squash = [](const std::string &in) {
+    std::string out;
+    for (char c : in)
+      if (c != '_')
+        out += (char)std::tolower((unsigned char)c);
+    return out;
+  };
+  return squash(name).find(squash(tag)) != std::string::npos;
+}
+
+// Which vendor's NPU this device carries, from the system's own answer.
+// `ro.soc.manufacturer` (Android 12+, Build.SOC_MANUFACTURER) says "Google",
+// "QTI", "Mediatek", "Samsung"; the shims are named after the same vendors.
+// Null when the property is absent or names nobody in the table -- which is
+// not a guess: the caller then leaves LiteRT to its own choice.
+const NpuVendor *vendorOfThisSoc(std::string *socModel)
+{
+#if defined(__ANDROID__)
+  char buf[PROP_VALUE_MAX] = {0};
+  if (socModel && __system_property_get("ro.soc.model", buf) > 0)
+    *socModel = buf;
+  buf[0] = 0;
+  if (__system_property_get("ro.soc.manufacturer", buf) <= 0)
+    return nullptr;
+  std::string maker;
+  for (const char *c = buf; *c; c++)
+    maker += (char)std::tolower((unsigned char)*c);
+  struct { const char *needle; const char *vendor; } const kMakers[] = {
+      {"google", "Google"},   {"qti", "Qualcomm"},     {"qualcomm", "Qualcomm"},
+      {"mediatek", "MediaTek"}, {"samsung", "Samsung"}, {"intel", "Intel"},
+  };
+  for (const auto &m : kMakers)
+    if (maker.find(m.needle) != std::string::npos)
+      for (const auto &v : kNpuVendors)
+        if (std::string(v.vendor) == m.vendor)
+          return &v;
+  return nullptr;
+#else
+  (void)socModel;
+  return nullptr;
+#endif
+}
+
+// One vendor's shims in a directory of their own (Android).  LiteRT loads
+// the first libLiteRtDispatch_* it lists in the dispatch directory, so an
+// app that packages every vendor's shims -- the one APK that serves a
+// Pixel and a Snapdragon alike -- has to hand it a directory holding one
+// vendor's, and the app's lib dir is not that.  With a stage directory
+// given (litertSetNpuStageDir: the app's support directory) and more than
+// one vendor beside the runtime, the SoC's vendor gets `<stage>/<tag>/`
+// holding links to its packaged files.  Links, not copies: the lib dir
+// moves with every install, so the links are remade at every launch, and
+// nothing is duplicated.  With one vendor or none, nothing changes.
+//
+// The Qualcomm runtime's Hexagon-side libraries (libQnnHtpV*Skel.so) stay
+// in the lib dir, and the DSP's loader finds them through
+// ADSP_LIBRARY_PATH: LiteRT points that at the dispatch directory unless it
+// is already set, in which case it prepends -- so it is set here first, to
+// the lib dir, and the ONNX QNN plugin honours an existing value the same
+// way.
+void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
+{
+  litertSetNpuResolvedDir("");
+  if (!litertNpuDirOverride().empty())
+    return;
+  const std::string stage = litertNpuStageDir();
+  const std::vector<const NpuVendor *> present = findNpuVendors(rt.libraryDir);
+  const NpuVendor *pick = vendorOfThisSoc(socModel);
+  if (present.size() <= 1 || stage.empty())
+    return;
+  if (!pick)
+  {
+    CLPEAK_VLOG("litert: %zu vendors' NPU shims beside the runtime and no SoC vendor "
+                "to choose by (ro.soc.manufacturer); LiteRT loads the first it lists\n",
+                present.size());
+    return;
+  }
+  if (std::find(present.begin(), present.end(), pick) == present.end())
+  {
+    CLPEAK_VLOG("litert: this SoC is %s's and no %s shim is beside the runtime\n",
+                pick->vendor, pick->vendor);
+    return;
+  }
+
+  std::error_code ec;
+  const std::filesystem::path dir = std::filesystem::path(stage) / pick->fileTag;
+  std::filesystem::remove_all(dir, ec);
+  std::filesystem::create_directories(dir, ec);
+  if (ec)
+  {
+    CLPEAK_VLOG("litert: cannot stage %s's shims in %s: %s\n", pick->vendor,
+                dir.string().c_str(), ec.message().c_str());
+    return;
+  }
+  int linked = 0;
+  std::filesystem::directory_iterator it(rt.libraryDir, ec), end;
+  for (; !ec && it != end; it.increment(ec))
+  {
+    const std::string name = it->path().filename().string();
+    const bool shim = name.rfind("libLiteRtDispatch_", 0) == 0 ||
+                      name.rfind("libLiteRtCompilerPlugin_", 0) == 0;
+    if (!shim || !nameCarriesTag(name, pick->fileTag))
+      continue;
+    std::error_code lec;
+    std::filesystem::create_symlink(it->path(), dir / name, lec);
+    if (lec)
+      CLPEAK_VLOG("litert: cannot link %s into %s: %s\n", name.c_str(),
+                  dir.string().c_str(), lec.message().c_str());
+    else
+      linked++;
+  }
+  if (!linked)
+    return;
+#if !defined(_WIN32)
+  if (std::string(pick->vendor) == "Qualcomm")
+    setenv("ADSP_LIBRARY_PATH", rt.libraryDir.c_str(), /*overwrite=*/0);
+#endif
+  CLPEAK_VLOG("litert: staged %d of %s's shims in %s for this SoC\n", linked,
+              pick->vendor, dir.string().c_str());
+  litertSetNpuResolvedDir(dir.string());
 }
 
 // The GPU accelerator library that registered, from what LiteRT logged
@@ -165,13 +300,18 @@ std::vector<litert_device_info_t> litertUsableDevices(
     // LiteRT itself picks the library: it lists the directory and loads the
     // first libLiteRtDispatch_* it finds (litert_dispatch.cc, with a warning
     // when there are several), once per process.  So the device is whatever
-    // it loaded -- its log names the path -- and staging one vendor's shim
-    // is the way to choose.
+    // it loaded -- its log names the path -- and a directory holding one
+    // vendor's shim is the way to choose, which litertStageNpuVendor
+    // arranges on a phone carrying several.
     {
       litert_device_info_t dev;
       dev.accel = LitertAccel::Npu;
       dev.typeStr = "NPU";
       dev.deviceType = DeviceType::Accelerator;
+      std::string socModel;
+      litertStageNpuVendor(rt, &socModel);
+      g_devNpuDir = litertNpuDir();
+      dev.detail = socModel;
       const std::vector<const NpuVendor *> vendors = findNpuVendors(litertNpuDir());
       if (vendors.empty())
       {

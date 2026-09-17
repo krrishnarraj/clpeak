@@ -120,6 +120,14 @@ void litertSetLibraryOverride(const std::string &path);
 // `--litert-npu-dir`.  Empty means beside the runtime library.
 void litertSetNpuDirOverride(const std::string &dir);
 
+// A writable directory the backend may stage one vendor's NPU shims in
+// (Android; the FFI's clpeak_set_litert_npu_stage_dir).  LiteRT loads the
+// first libLiteRtDispatch_* it lists in one directory, so an app that
+// carries every vendor's shims gives the one for this SoC a directory of
+// its own here -- links to the packaged files, remade at every launch.
+// Empty (the default) leaves the runtime's own directory as it is.
+void litertSetNpuStageDir(const std::string &dir);
+
 // Why the runtime failed to load, ready to show a user; empty when it loaded.
 std::string litertLoadDiagnostic();
 

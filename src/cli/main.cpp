@@ -10,6 +10,7 @@
 #include <common/host_info.h>
 #include <version.h>
 #include <iostream>
+#include <vector>
 
 #ifdef ENABLE_ONNX
 #include <onnx/onnx_peak.h>  // onnxSetLibraryOverride, for --onnx-lib
@@ -28,6 +29,17 @@ int main(int argc, char **argv)
     // and enumerate() is what loads it.
     if (!opts.onnxLibPath.empty())
         onnxSetLibraryOverride(opts.onnxLibPath);
+    // Plugin providers register on the runtime's environment, which the
+    // first enumeration creates: the set has to be in place before it.
+    if (!opts.onnxEpLibraries.empty())
+    {
+        std::vector<OnnxEpLibrary> libs;
+        for (const auto &e : opts.onnxEpLibraries)
+            libs.push_back({e.first, e.second, true});
+        onnxSetEpLibraries(std::move(libs));
+    }
+    if (opts.onnxWinml)
+        onnxSetWinml(true, opts.onnxWinmlPath);
 #endif
 #ifdef ENABLE_LITERT
     if (!opts.litertLibPath.empty())
