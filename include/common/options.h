@@ -22,7 +22,7 @@ struct BackendInfo {
 
 const BackendInfo &backendInfo(Backend b);
 
-// One item of --device, `backend:index`, exactly as --list-devices prints
+// One item of --devices, `backend:index`, exactly as --list-devices prints
 // it.  The list is an allow-list: when it is given, only the devices on it
 // run, and a backend with none of its devices listed does not run at all.
 struct DeviceSelector {
@@ -43,7 +43,7 @@ struct CliOptions {
   // this build" from "CUDA is simply not in this build".
   std::bitset<static_cast<size_t>(Backend::COUNT)> requestedBackends;
 
-  // --device: the devices that run.  Empty = every device of every enabled
+  // --devices: the devices that run.  Empty = every device of every enabled
   // backend.
   std::vector<DeviceSelector> devices;
 
@@ -104,9 +104,9 @@ struct CliOptions {
     enabledCategories.set();
   }
 
-  // Whether a backend has anything to run: its flag is on, and if --device
+  // Whether a backend has anything to run: its flag is on, and if --devices
   // was given, at least one of its devices is on the list.  The run loop
-  // skips the rest without constructing them, so `--device cuda:0` never
+  // skips the rest without constructing them, so `--devices cuda:0` never
   // loads the ONNX runtime.
   bool backendEnabled(Backend b) const
   {

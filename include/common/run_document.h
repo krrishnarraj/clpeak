@@ -277,7 +277,7 @@ struct RunDocument {
 
     // Every backend's `--list-devices` view, taken before the run: which
     // backends were available (and why not), and every device each one saw
-    // -- including the ones a --device list left out.  Written under
+    // -- including the ones a --devices list left out.  Written under
     // --verbose only: in the CLI it costs an enumeration pass, and it is the
     // evidence for "my NPU is not listed", which is a debugging question.
     std::vector<BackendInventory> inventory;

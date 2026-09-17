@@ -50,7 +50,7 @@ public:
     }
 
     // ---- Device selection ------------------------------------------------
-    // The --device items that name this backend, resolved by applyOptions.
+    // The --devices items that name this backend, resolved by applyOptions.
     // Empty = every device.  `index` is the backend's own numbering, the one
     // --list-devices prints and the document records.
     std::vector<int> selectedDevices;

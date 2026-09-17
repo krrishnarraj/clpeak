@@ -88,7 +88,7 @@ run and the result document all share.
 ## Quick Lookups
 
 - **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h` (a `Benchmark` names what is measured, never which backend; reuse one when the measurement exists elsewhere)
-- **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface; then a `Backend` enum value (`include/common/benchmark_enums.h`), a row in the backend table (`src/common/options.cpp`), an `entry<YourPeak>()` in `src/registry/backend_registry.cpp`, and its name in the `foreach` of `src/common/cmake/backends.cmake` -- the CLI, the GUI bridge, the help, the listing and `--device` need nothing else
+- **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface; then a `Backend` enum value (`include/common/benchmark_enums.h`), a row in the backend table (`src/common/options.cpp`), an `entry<YourPeak>()` in `src/registry/backend_registry.cpp`, and its name in the `foreach` of `src/common/cmake/backends.cmake` -- the CLI, the GUI bridge, the help, the listing and `--devices` need nothing else
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)
 - **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`

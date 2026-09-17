@@ -69,7 +69,7 @@ class RunConfig {
   /// Only backend/device/category/time flags are ever emitted -- never
   /// individual test flags, so test churn in the core needs no app changes.
   /// Devices: the whole catalog selected means no flags (native runs
-  /// everything); anything less is one `--device` list naming every selected
+  /// everything); anything less is one `--devices` list naming every selected
   /// device as `<flag>:<index>`, which is exactly the set that runs -- a
   /// backend with nothing on the list is skipped natively, so there is no
   /// separate `--no-<backend>`.
@@ -95,10 +95,10 @@ class RunConfig {
     }
     if (!complete) {
       if (deviceItems.isNotEmpty) {
-        args.addAll(['--device', deviceItems.join(',')]);
+        args.addAll(['--devices', deviceItems.join(',')]);
       } else {
         // Nothing selected.  Callers gate on hasSelection, but an empty
-        // --device list cannot say "run nothing", so say it per backend.
+        // --devices list cannot say "run nothing", so say it per backend.
         for (final backend in catalog.usable) {
           args.add('--no-${backend.flag}');
         }

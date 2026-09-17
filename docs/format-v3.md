@@ -123,7 +123,7 @@ from it.
 
 `backend` / `platform` / `name` / `device_index` identify it. `device_index`
 is the backend's own numbering -- the one `--list-devices` prints and
-`--device` takes -- and runs consecutively across an OpenCL backend's
+`--devices` takes -- and runs consecutively across an OpenCL backend's
 platforms. All three strings are whitespace-trimmed: drivers pad them (Intel's OpenCL runtime
 returns its CPU name with five trailing spaces), and padding in an identity is
 two names for one device the day a driver changes how much of it there is. The index is
@@ -291,7 +291,7 @@ offers it for export.
 GUI's run screen and `--list-devices` see it, taken before the run: every
 backend compiled in, whether it was `available` and if not its `reason`, any
 `notes` from enumeration (a provider the runtime names but nothing here can
-run), and every device each backend saw — including the ones a `--device`
+run), and every device each backend saw — including the ones a `--devices`
 list left out. It is the evidence for "my NPU is not listed", which is a
 debugging question; in the CLI it costs an enumeration pass, which is why it
 is not on by default.

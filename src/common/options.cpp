@@ -274,9 +274,9 @@ static std::string helpText()
   }
   s += "\n";
   s += " DEVICES (default: every device of every backend that runs):\n";
-  helpLine(s, "--device list",     "run only these devices: comma-separated backend:index\n"
+  helpLine(s, "--devices list",    "run only these devices: comma-separated backend:index\n"
                                    "items, exactly as --list-devices prints them\n"
-                                   "(e.g. --device cuda:0,vulkan:1)");
+                                   "(e.g. --devices cuda:0,vulkan:1)");
   s += "\n";
   s += " CATEGORIES (--<category> / --no-<category>; default: all):\n";
   for (int i = 0; i < numCategoryFlags; i++)
@@ -342,7 +342,7 @@ static const BackendRow *findBackendFlag(const std::string &flag)
   return nullptr;
 }
 
-// Parse the --device list: comma-separated `backend:index` items, the
+// Parse the --devices list: comma-separated `backend:index` items, the
 // tokens --list-devices prints.  Empty items ("cuda:0,,cuda:2"), unknown
 // backends and negative indices fail; `why` names the offending item.
 static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
@@ -513,7 +513,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     }
 
     // ---- devices ---------------------------------------------------------------
-    if (!strcmp(a, "--device"))
+    if (!strcmp(a, "--devices"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -524,7 +524,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       std::string why;
       if (!parseDeviceList(v, out.devices, out.requestedBackends, why))
       {
-        err = std::string("clpeak: invalid --device ") + why + "\n";
+        err = std::string("clpeak: invalid --devices ") + why + "\n";
         return ParseResult::Error;
       }
       continue;
@@ -611,7 +611,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     return ParseResult::Error;
   }
 
-  // `--device cuda:0 --vulkan` selects nothing: every device named is on a
+  // `--devices cuda:0 --vulkan` selects nothing: every device named is on a
   // backend the backend flags switched off.  Contradictory, so say so.
   if (!out.devices.empty())
   {
@@ -621,7 +621,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         any = true;
     if (!any)
     {
-      err = "clpeak: --device names only devices of backends that are switched off\n";
+      err = "clpeak: --devices names only devices of backends that are switched off\n";
       return ParseResult::Error;
     }
   }

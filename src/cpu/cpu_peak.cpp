@@ -129,7 +129,7 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
 
 int CpuPeak::runAll()
 {
-  // The one CPU is device 0; a --device that names another index means it.
+  // The one CPU is device 0; a --devices list naming another index skips it.
   if (!isDeviceSelected(0))
     return 0;
 

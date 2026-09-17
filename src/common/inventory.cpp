@@ -11,7 +11,7 @@
 namespace
 {
 
-  // The token --device takes for this device.
+  // The token --devices takes for this device.
   std::string deviceToken(const BackendInventory &b, const InventoryDevice &d)
   {
     return std::string(backendInfo(b.id).flag) + ":" + std::to_string(d.index);
@@ -161,7 +161,7 @@ void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os)
   tokenWidth = std::max<size_t>(tokenWidth, 8) + 2;
   nameWidth  = std::min<size_t>(nameWidth, 40) + 2;
 
-  os << "\n Devices, named as --device takes them (e.g. --device cuda:0,vulkan:1):\n";
+  os << "\n Devices, named as --devices takes them (e.g. --devices cuda:0,vulkan:1):\n";
 
   for (const auto &b : inv)
   {

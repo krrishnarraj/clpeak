@@ -32,7 +32,7 @@ CLPEAK_FFI_EXPORT const char *clpeak_version(void);
 //   {"backends":[{"name","flag","available",info?,reason?,notes?,
 //     "platforms":[{"index","name",
 //       "devices":[{"index","name","type",arch?,driver?,api?,...}]}]}]}
-// `flag` is the backend's command-line name; `--device <flag>:<index>`
+// `flag` is the backend's command-line name; `--devices <flag>:<index>`
 // names a device, and a run's argv narrows to exactly the devices listed.
 // `reason` says why an unavailable backend is unavailable; `info` is a
 // backend-level fact (the ONNX Runtime version, the OS release).

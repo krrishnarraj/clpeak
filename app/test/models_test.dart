@@ -84,7 +84,7 @@ void main() {
       final config = RunConfig.allDevices(catalog);
       config.selectedDevices.remove('Metal');
       expect(config.toArgs(catalog),
-          ['--device', 'opencl:0,opencl:1,cpu:0,onnx:0,onnx:1']);
+          ['--devices', 'opencl:0,opencl:1,cpu:0,onnx:0,onnx:1']);
     });
 
     test('a partial selection names every selected device as flag:index', () {
@@ -94,7 +94,7 @@ void main() {
           'OpenCL', (platformIndex: 0, deviceIndex: 0), false);
       config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 1), false);
       expect(config.toArgs(catalog),
-          ['--device', 'metal:0,opencl:1,cpu:0,onnx:0']);
+          ['--devices', 'metal:0,opencl:1,cpu:0,onnx:0']);
     });
 
     test('the flag comes from the catalog, not the display name', () {
@@ -119,7 +119,7 @@ void main() {
       });
       final config = RunConfig.allDevices(catalog);
       config.toggleDevice('Core ML', (platformIndex: 0, deviceIndex: 1), false);
-      expect(config.toArgs(catalog), ['--device', 'coreml:0']);
+      expect(config.toArgs(catalog), ['--devices', 'coreml:0']);
     });
 
     test('nothing selected runs nothing', () {

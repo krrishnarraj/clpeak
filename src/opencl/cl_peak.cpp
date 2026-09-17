@@ -41,7 +41,7 @@ int clPeak::runAll()
     cl::Platform::get(&platforms);
 
     // Devices are numbered consecutively across platforms -- the index
-    // --device takes, --list-devices prints and the document records -- so
+    // --devices takes, --list-devices prints and the document records -- so
     // OpenCL selects like every other backend.  The platform is still part
     // of the device's identity in the output; it is just not a selector.
     int deviceIndex = 0;

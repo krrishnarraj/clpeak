@@ -75,7 +75,7 @@ class CatalogBackend {
 
   final String name; // "OpenCL" / "Vulkan" / "CUDA" / ... / "CPU"
 
-  /// The backend's command-line name: `--device <flag>:<index>` names one
+  /// The backend's command-line name: `--devices <flag>:<index>` names one
   /// of its devices.  Authored natively (the backend table in
   /// src/common/options.cpp), never derived here.
   final String flag;

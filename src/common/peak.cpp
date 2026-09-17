@@ -13,7 +13,7 @@ void Peak::applyOptions(const CliOptions &opts)
     enabledCategories = opts.enabledCategories;
 
     // Only the items that name this backend.  The run loop already skips a
-    // backend with none when --device was given (CliOptions::backendEnabled),
+    // backend with none when --devices was given (CliOptions::backendEnabled),
     // so an empty list here means "every device".
     selectedDevices.clear();
     for (const DeviceSelector &sel : opts.devices)

@@ -31,7 +31,7 @@ as a `Log` event for the channel to render.
 
 | File | Purpose |
 |------|---------|
-| `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, and the `--device` items that name `backend()`) |
+| `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, and the `--devices` items that name `backend()`) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
 | `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): devices, the `--verbose` inventory, and the `log` stream one entry per line. Also `RunDocument::append`, which folds each backend's logger into the document a host saves, and `runLogHeaderJson()` for the sidecar's first line |
 | `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps the log at 4 MiB of Debug/Info, and renders through the attached logger or the host's fallback |

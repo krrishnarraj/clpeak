@@ -184,9 +184,9 @@ whichever API is doing the work.
 ./clpeak                            # every test, every available backend
 ./clpeak --metal                    # one backend
 ./clpeak --cuda --vulkan            # or several
-./clpeak --list-devices             # every device, named as --device takes it
-./clpeak --device onnx:0            # one NPU/GPU provider (--onnx-lib PATH picks the runtime)
-./clpeak --device coreml:0          # Core ML on the Neural Engine (coreml:1 GPU, coreml:2 CPU)
+./clpeak --list-devices             # every device, named as --devices takes it
+./clpeak --devices onnx:0           # one NPU/GPU provider (--onnx-lib PATH picks the runtime)
+./clpeak --devices coreml:0         # Core ML on the Neural Engine (coreml:1 GPU, coreml:2 CPU)
 ./clpeak --single-precision-compute # one test, everywhere
 ./clpeak --gemm                     # the vendor's tuned matmul, everywhere
 ./clpeak --describe                 # explain what each reading measures

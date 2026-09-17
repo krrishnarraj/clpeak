@@ -14,7 +14,7 @@
 // without forcing a discriminated union.
 struct InventoryDevice
 {
-  int           index = -1;       // the backend's own numbering: what --device takes
+  int           index = -1;       // the backend's own numbering: what --devices takes
   std::string   name;
   std::string   typeStr;          // "GPU" / "CPU" / "NPU" / "Discrete GPU" / ...
   std::string   arch;             // "sm_120" (CUDA), "gfx1201" (ROCm)
@@ -69,7 +69,7 @@ void writeInventoryBackends(JsonWriter &w, const std::vector<BackendInventory> &
 
 // --list-devices.  One format for every backend: a header per backend, then
 // one line per device that starts with the exact `backend:index` token
-// --device takes, so what a user reads is what they pass.  Backends print
+// --devices takes, so what a user reads is what they pass.  Backends print
 // in the order given, which is the registry's -- the run order.
 void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os);
 
