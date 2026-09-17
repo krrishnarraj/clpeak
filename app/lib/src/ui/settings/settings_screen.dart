@@ -331,9 +331,9 @@ class _RuntimePanel extends StatelessWidget {
                         fixed
                             ? 'Built into the app'
                             : s.path.isNotEmpty
-                                ? s.path
+                                ? p.basename(s.path)
                                 : savedPath.isNotEmpty
-                                    ? savedPath
+                                    ? p.basename(savedPath)
                                     : 'Found by name on the system paths',
                         style: t.monoSmallDim,
                       ),
