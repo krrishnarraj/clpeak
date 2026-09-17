@@ -239,6 +239,25 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     pt.glue = coremlGlueNote(*s);
   };
 
+  // Core ML's compiler crashes -- a segfault inside BNNS's graph compiler,
+  // reached through Espresso's CPU-backend lowering pass -- on the block's
+  // decode form on macOS 27.0 (26A428): on the CPU compute unit for every
+  // weight format (int4_weight's kv2048 point compiled, its next did not),
+  // on the GPU unit for fp16 weights, whose M=1 projections the planner
+  // hands to BNNS.  Prefill of the same block compiles everywhere, the
+  // Neural Engine (which takes the whole graph, so BNNS never compiles it)
+  // runs every form, and the same build ran clean on 26.6.  A crash in a
+  // system library cannot be caught, so on that OS those rows are not
+  // asked for; lift the fence when a release fixes it.
+  auto decodeFence = [&](const Variant &v) -> std::string {
+    if (coremlOsMajorVersion() < 27 || dev.kind == CoremlDeviceKind::NeuralEngine)
+      return std::string();
+    if (dev.kind == CoremlDeviceKind::Cpu || v.w == CoremlWeight::Fp16)
+      return "Core ML's compiler crashes (a segfault in BNNS graph compilation, macOS 27) on the "
+             "block's decode form for this compute unit, so only prefill is sent to it";
+    return std::string();
+  };
+
   // Everything that has to be true before a variant is worth timing: the OS
   // accepts its format, the fixed geometry fits, and one small session
   // compiles and lands on this compute unit.
@@ -246,6 +265,12 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
   {
     if (vr.usable || !vr.skipReason.empty())
       return vr.usable;
+    if (v.decodeOnly)
+      if (const std::string fence = decodeFence(v); !fence.empty())
+      {
+        vr.skipReason = fence;
+        return false;
+      }
     if (coremlSpecForWeight(v.w) > spec)
     {
       vr.skipReason = "needs " + coremlOsForSpec(coremlSpecForWeight(v.w)) + " (model specification " +
@@ -314,7 +339,12 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       return;
     Point pt;
     const double flops = blockFlops(1, kv);
-    if (!affordable(flops, refDecodeRate))
+    if (const std::string fence = decodeFence(v); !fence.empty())
+    {
+      pt.status = ResultStatus::Unsupported;
+      pt.error = fence;
+    }
+    else if (!affordable(flops, refDecodeRate))
     {
       pt.status = ResultStatus::Error;
       pt.error = "one token would take about " + std::to_string((long long)(flops / refDecodeRate / 1.0e6)) +

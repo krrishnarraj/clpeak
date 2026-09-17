@@ -38,6 +38,11 @@ std::string coremlOsVersionString()
   return ss.str();
 }
 
+int coremlOsMajorVersion()
+{
+  return (int)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion;
+}
+
 int coremlSpecVersion()
 {
   if (@available(macOS 26.0, iOS 26.0, *))

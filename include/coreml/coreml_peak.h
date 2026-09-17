@@ -95,6 +95,8 @@ int coremlSpecVersion();
 
 // "macOS 26.1" / "iOS 18.4" -- the runtime that compiled and ran the models.
 std::string coremlOsVersionString();
+// Its major version (26, 27, ...), for fences on an OS release's faults.
+int coremlOsMajorVersion();
 
 #endif // ENABLE_COREML
 #endif // COREML_PEAK_H

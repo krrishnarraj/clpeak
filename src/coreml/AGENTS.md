@@ -246,6 +246,19 @@ session uses the deprecated synchronous `compileModelAtURL:error:` inside
 `@try` so it becomes the row's reason.  Keep it that way.  The type exists
 so that some OS may take it; the row will say when one does.
 
+**macOS 27.0 crashes compiling the block's decode form for the GPU and
+CPU compute units**: a segfault inside `bnns::GraphCompile`, reached
+through Espresso's CPU-backend lowering pass (`MILCompilerForBnns`).  On the
+CPU unit every weight format's decode crashes (int4_weight's kv2048 point
+compiled, the next one did not); on the GPU unit only the fp16-weight
+variants (`fp16`, `int8_kv`), whose M=1 projections the planner hands to
+BNNS.  Prefill of the same block compiles everywhere, the Neural Engine
+runs every form (it takes the whole graph, so BNNS never compiles it), and
+26.6 ran everything.  It cannot be caught (no exception, a signal in a
+system library), so `block.cpp`'s `decodeFence` keeps those rows off on
+macOS >= 27 with the reason in the row; re-test and lift it when a release
+fixes it.
+
 ## Reference readings, M1 Pro (macOS 26.6)
 
 `coreml_gemm`, peak over the ladder:
