@@ -247,11 +247,9 @@ class _RuntimeView {
                 : 'No runtime loaded',
         path: s?.path ?? '',
         error: s?.error ?? '',
-        hint: 'Which runtime is loaded decides which execution providers '
-            'exist: a stock build offers CPU only, while a vendor build '
-            'brings its NPU. Changing it re-enumerates straight away.',
-        fixedHint: 'ONNX Runtime is linked into this build, so there is no '
-            'other library to point at.',
+        hint: 'Decides which providers exist: a vendor build brings '
+            'its NPU.',
+        fixedHint: 'Linked into the app; there is nothing else to choose.',
       );
 
   factory _RuntimeView.litert(LitertStatus? s) => _RuntimeView(
@@ -268,12 +266,9 @@ class _RuntimeView {
                 : 'No runtime loaded',
         path: s?.path ?? '',
         error: s?.error ?? '',
-        hint: 'The app carries LiteRT on Android; elsewhere a pip '
-            'ai-edge-litert wheel has a libLiteRt to point at. The GPU '
-            'accelerator and any NPU dispatch library are found beside it.',
-        fixedHint: 'LiteRT and its Metal accelerator ship inside this app, '
-            'and iOS loads no library from outside the bundle, so there is '
-            'no other one to point at.',
+        hint: 'Bundled on mobile; if none is found, choose a pip '
+            'ai-edge-litert libLiteRt.',
+        fixedHint: 'Bundled with the app; iOS loads nothing else.',
       );
 }
 
@@ -455,12 +450,8 @@ class _DiagnosticsPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'A debug option, off by default. When it is on, every run records '
-          'enough for the project maintainers to debug and analyse it — the '
-          'backends\' debug output, the device inventory and the runtimes\' '
-          'own messages — into the saved JSON. If a number looks wrong on '
-          'this device, turn it on, run again, export the run and attach the '
-          'file when raising an issue on GitHub.',
+          'Off by default. When on, saved runs include debug output — '
+          'enable it before re-running a suspicious result for an issue report.',
           style: t.micro.copyWith(color: t.dim),
         ),
       ],
