@@ -422,10 +422,26 @@ class _RuntimeView {
                 : 'No runtime loaded',
         path: s?.path ?? '',
         error: s?.error ?? '',
-        hint: 'Decides which providers exist: a vendor build brings '
-            'its NPU.',
+        hint: _onnxRuntimeHint,
         fixedHint: 'Linked into the app; there is nothing else to choose.',
       );
+
+  /// The engine's own hint text, worded to what actually follows it on this
+  /// platform: a plugin-library section and (Windows) Windows ML on
+  /// desktop, neither of which the phone build shows — there the app adds
+  /// a vendor NPU's plugin on its own when the device has one.
+  static String get _onnxRuntimeHint {
+    if (Platform.isAndroid) {
+      return 'The engine ONNX runs on. A vendor NPU plugin (Qualcomm\'s QNN) '
+          'is added automatically when this device has one.';
+    }
+    final more = Platform.isWindows
+        ? 'a plugin library below, or Windows ML further down'
+        : 'a plugin library below';
+    return 'The engine ONNX runs on — its build decides which providers '
+        'exist by default (always CPU, plus GPU/NPU if it shipped one). '
+        'Add a vendor NPU it left out with $more.';
+  }
 
   factory _RuntimeView.litert(LitertStatus? s) => _RuntimeView(
         known: s != null,
@@ -664,9 +680,10 @@ class _EpLibrariesPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'A provider shipped apart from the runtime — Qualcomm\'s QNN plugin '
-          '(onnxruntime_providers_qnn) reaches the Hexagon NPU on a stock '
-          'ONNX Runtime 1.24 or newer.',
+          'Add a provider the runtime above does not already include — most '
+          'vendor NPUs ship this way now, separately from ONNX Runtime '
+          'itself: Qualcomm\'s QNN plugin (onnxruntime_providers_qnn) reaches '
+          'the Hexagon NPU this way on a stock ONNX Runtime 1.24 or newer.',
           style: t.micro.copyWith(color: t.dim),
         ),
         const SizedBox(height: 12),
@@ -774,9 +791,11 @@ class _WinmlPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Windows 11 24H2 installs the vendor providers (Qualcomm QNN, Intel '
-          'OpenVINO, AMD Vitis AI, NVIDIA TensorRT for RTX) from the Microsoft '
-          'Store on first use — a download. The catalog DLL comes with the '
+          'The automatic version of the plugin providers above: turning this '
+          'on installs the vendor providers (Qualcomm QNN, Intel OpenVINO, '
+          'AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this machine from '
+          'the Microsoft Store on first use — a download — instead of you '
+          'naming the library yourself. The catalog DLL comes with the '
           'Microsoft.Windows.AI.MachineLearning package, not with clpeak.',
           style: t.micro.copyWith(color: t.dim),
         ),
@@ -790,7 +809,7 @@ class _WinmlPanel extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             CButton(
-              label: 'Search',
+              label: 'Use default',
               onPressed: locked || path.isEmpty ? null : onClearDir,
             ),
           ],

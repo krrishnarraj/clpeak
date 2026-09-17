@@ -256,15 +256,21 @@ static std::string helpText()
   helpLine(s, "--list-devices",    "list available devices for every backend and exit");
   helpLine(s, "-o, --output file", "save results to a JSON file");
   helpLine(s, "--compare file",    "compare results against a saved run");
-  helpLine(s, "--onnx-lib path",   "onnxruntime shared library to load\n"
+  helpLine(s, "--onnx-lib path",   "the ONNX Runtime library to load; decides which\n"
+                                   "providers exist before anything below adds more\n"
                                    "(default: the platform's conventional names)");
-  helpLine(s, "--onnx-ep NAME=path", "register a plugin execution-provider library\n"
-                                   "under NAME (ONNX Runtime 1.22+; repeatable), e.g.\n"
-                                   "QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll");
-  helpLine(s, "--onnx-winml [path]", "register the execution providers Windows ML installs\n"
-                                   "from the Microsoft Store (Windows 11 24H2+); path names\n"
-                                   "Microsoft.Windows.AI.MachineLearning.dll or its directory\n"
-                                   "(default: beside the loaded runtime, then the executable)");
+  helpLine(s, "--onnx-ep NAME=path", "add one more provider the loaded runtime does not\n"
+                                   "include -- most vendor NPUs ship this way now, e.g.\n"
+                                   "QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll\n"
+                                   "(ONNX Runtime 1.22+; repeatable)");
+#ifdef _WIN32
+  helpLine(s, "--onnx-winml [path]", "Windows 11 24H2+: install and add those same vendor\n"
+                                   "providers automatically, from the Microsoft Store,\n"
+                                   "instead of naming them with --onnx-ep; path names\n"
+                                   "Microsoft.Windows.AI.MachineLearning.dll or its\n"
+                                   "directory (default: beside the loaded runtime, then\n"
+                                   "the executable)");
+#endif
   helpLine(s, "--litert-lib path", "LiteRT shared library (libLiteRt) to load\n"
                                    "(default: the platform's conventional names)");
   helpLine(s, "--litert-npu-dir dir", "where LiteRT's NPU dispatch / compiler-plugin\n"
@@ -583,6 +589,12 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       out.onnxEpLibraries.emplace_back(std::string(v, eq - v), std::string(eq + 1));
       continue;
     }
+#ifdef _WIN32
+    // Windows ML is a Windows 11 feature with nothing to parse elsewhere --
+    // unlike --onnx-lib (a no-op on iOS) or --litert-npu-dir (harmless with
+    // no NPU), there is no "default's fine, ignore it" reading of this flag
+    // off Windows, so a build for another platform does not know it at all
+    // and rejects it the way any other unsupported flag would.
     if (!strcmp(a, "--onnx-winml"))
     {
       out.onnxWinml = true;
@@ -591,6 +603,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         out.onnxWinmlPath = argv[++i];
       continue;
     }
+#endif
     if (!strcmp(a, "--litert-lib"))
     {
       const char *v = nextArg(argc, argv, i);
