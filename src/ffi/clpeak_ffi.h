@@ -66,7 +66,10 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // path, or NULL/"" to search the conventional names) and, separately, the
 // directory holding the NPU dispatch / compiler-plugin libraries and the
 // vendor runtime (NULL/"" = beside the LiteRT library).  Between runs only;
-// no-ops on a build without the backend.
+// no-ops on a build without the backend.  On iOS the runtime is dlopen'd
+// from the app bundle's own Frameworks directory, the one place the platform
+// loads a library from, so a path named here could never be loaded there
+// and the settings screen does not offer one.
 CLPEAK_FFI_EXPORT void clpeak_set_litert_library(const char *path);
 CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
 

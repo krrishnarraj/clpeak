@@ -16,6 +16,9 @@
 #else
 #include <dlfcn.h>
 #endif
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 static std::mutex g_mutex;
 static LitertRuntime g_rt;
@@ -111,6 +114,14 @@ static void loadRuntime()
 #if defined(_WIN32)
         "libLiteRt.dll",
         "LiteRt.dll",
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+        // iOS: the app's Frameworks directory, where the Runner's embed phase
+        // puts Google's libLiteRt.dylib next to its Metal accelerator
+        // (tool/build_ios_native.sh stages both).  dyld expands
+        // @executable_path in a dlopen path, and dladdr below turns it into
+        // the real directory the accelerator is then searched in.  Nothing
+        // outside the signed bundle would load, so this is the whole list.
+        "@executable_path/Frameworks/libLiteRt.dylib",
 #elif defined(__APPLE__)
         "libLiteRt.dylib",
         "@executable_path/libLiteRt.dylib",

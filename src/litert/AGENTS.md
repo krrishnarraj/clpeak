@@ -56,8 +56,11 @@ each reading is a different format, shape, size or context length.
 
 Only the platform's conventional names are searched (`libLiteRt.so` on
 Android, where the app packages the `com.google.ai.edge.litert` AAR and the
-bare soname resolves out of the APK; `libLiteRt.dylib` / `.dll` on desktops,
-where the pip `ai-edge-litert` wheel or `--litert-lib PATH` supplies one).
+bare soname resolves out of the APK; `@executable_path/Frameworks/
+libLiteRt.dylib` on iOS, where the Runner embeds Google's dylib and iOS
+would load nothing from outside the bundle anyway; `libLiteRt.dylib` /
+`.dll` on desktops, where the pip `ai-edge-litert` wheel or `--litert-lib
+PATH` supplies one).
 Every C entry point is resolved by name -- LiteRT has no single
 `OrtGetApiBase`-style getter on its public surface -- through the X-macro
 lists in `litert_runtime.h`: a REQUIRED symbol missing fails the load with
@@ -429,8 +432,49 @@ budgets.
   memory gate on 4 GB.  The release APK builds with the AAR's `litert-api`
   excluded (it repeats the AAR's namespace, which AGP 9 rejects) and R8
   told not to chase the AAR's unused Java classes.
-- **iOS**: not yet wired; LiteRT's dylibs can be dlopen'd from an embedded
-  framework there (MLPerf Mobile does), unlike ONNX Runtime.
+- **iOS**: the same dlopen design, unlike ONNX Runtime, because Google
+  builds LiteRT for iOS as plain dylibs meant for an app's `Frameworks/`
+  directory (install name `@rpath/libLiteRt.dylib`, rpath
+  `@executable_path/Frameworks`, iOS 15) and iOS will load a library that
+  sits inside the signed bundle.  They are on neither CocoaPods (the
+  `LiteRTC` pod is the old Interpreter API, nightlies that stopped in June
+  2025) nor the GitHub release; Google publishes them per version in its
+  bucket, `storage.googleapis.com/litert/binaries/<version>/{ios_arm64,
+  ios_sim_arm64}/{libLiteRt,libLiteRtMetalAccelerator}.dylib`, ~8 MB each
+  (the `litert_prebuilts.zip` beside them carries only the accelerator).
+  `tool/build_ios_native.sh` fetches the version named by the vendored
+  headers' tag (`third_party/litert/README.md`), caches them under
+  `build-ios/litert/<version>/`, stages them in `app/ios/clpeak_native/
+  embed-{device,simulator}/`, and the Runner's embed phase copies the
+  slice's two into `Frameworks/` and signs them with the app's identity
+  (Google's device slice is unsigned).  The loader's iOS list is the one
+  path `@executable_path/Frameworks/libLiteRt.dylib`; `dladdr` resolves it
+  to the real directory, which is passed as `RuntimeLibraryDir`, and that
+  is where the runtime looks for `libLiteRtMetalAccelerator.dylib` -- the
+  two must share a directory, which is why they are not wrapped as
+  framework bundles the way Google's own `ios_framework` Bazel target
+  does (`libLiteRt.dylib.framework`, the layout of its 2.1.5 upload).  An
+  App Store submission may want that wrapping (bare dylibs have drawn
+  ITMS-90171); the app has not been submitted, so this is untested.  All 49
+  entry points the backend resolves are exported by both 2.2.0 slices
+  (431 `LiteRt*` symbols, the macOS wheel's set), XNNPACK is built in, and
+  the runtime's own search list on iOS is `libLiteRtGpuAccelerator`,
+  `libLiteRtMetalAccelerator`, `libLiteRtWebGpuAccelerator`.  The settings
+  picker is fixed on iOS, as for ONNX Runtime: `--litert-lib` could only
+  name a file the platform refuses to load.  `--no-litert` leaves the
+  backend out of the framework; `CLPEAK_IOS_LITERT_DIR` points at a local
+  directory holding both slices.  No NPU device: Core ML is the route to
+  the Neural Engine.  Verified on the iOS 27 simulator (iPhone 18 Pro):
+  both devices probe and the full run completes on each, the CPU rows the
+  host M1 Pro's and the GPU rows the translated host GPU's (fp16 gemm 2.9
+  TFLOPS against 4.7 native); unverified on a device.  One simulator
+  observation to re-check there: the Metal accelerator's simulator slice
+  logs LiteRT's own `WARNING: [compiled_model.cc:1357] Failed to get
+  buffer requirements for tensor` for the gemm and conv sessions' scalar
+  and output tensors -- upstream falling back to host-memory requirements
+  when its buffer context has none for a tensor of a fully delegated model,
+  benign, absent on macOS with the same session code -- and those lines
+  reach the run log at LiteRT's severity, as any of its warnings do.
 
 ## When You Change This Directory
 

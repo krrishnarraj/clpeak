@@ -42,7 +42,9 @@ shared library / Apple framework.
   Vulkan headers from `third_party/`)
 - iOS build? → `ios/CMakeLists.txt` + `tool/build_ios_native.sh` (device +
   simulator frameworks → `app/ios/clpeak_native/clpeak_ffi.xcframework`;
-  Vulkan/MoltenVK env-gated on the LunarG iOS SDK)
+  Vulkan/MoltenVK env-gated on the LunarG iOS SDK; ONNX Runtime linked in
+  from the static pod; LiteRT's dylibs fetched and staged for the Runner to
+  embed and dlopen)
 
 ## Key Files
 
@@ -54,7 +56,7 @@ shared library / Apple framework.
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
 | `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |
 | `android/CMakeLists.txt` | Android superproject (OpenCL stub + NDK Vulkan + CPU) |
-| `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + optional MoltenVK Vulkan) |
+| `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + Core ML + ONNX Runtime + LiteRT + optional MoltenVK Vulkan) |
 
 ## Traps
 

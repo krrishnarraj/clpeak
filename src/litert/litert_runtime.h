@@ -11,7 +11,9 @@
 //
 // Where the runtime is found: `--litert-lib PATH` / the FFI setter, then the
 // platform's conventional names (the bare soname on Android, where the app
-// packages the AAR's .so; the pip wheel's dylib/so/dll paths on desktops).
+// packages the AAR's .so; the app bundle's Frameworks directory on iOS, where
+// the Runner embeds Google's dylib; the pip wheel's dylib/so/dll paths on
+// desktops).
 // The directory the library loaded from is remembered: LiteRT looks for its
 // GPU accelerator (libLiteRtOpenClAccelerator / libLiteRtMetalAccelerator /
 // libLiteRtWebGpuAccelerator) and the NPU dispatch libraries next to it

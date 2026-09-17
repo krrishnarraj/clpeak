@@ -6,9 +6,10 @@ project(clpeak_ffi_ios LANGUAGES C CXX OBJCXX)
 # simulator) and combines the products into clpeak_ffi.xcframework for the
 # Flutter runner's local pod (app/ios/clpeak_native/).
 #
-#   device:    Metal + CPU + Vulkan-over-MoltenVK (when the LunarG iOS SDK
-#              is discoverable; env-gated exactly like the retired ios/ app)
-#   simulator: Metal + CPU only (the Vulkan loader framework is device-only)
+#   device:    Metal + CPU + Core ML + ONNX Runtime + LiteRT, and
+#              Vulkan-over-MoltenVK when the LunarG iOS SDK is discoverable
+#              (env-gated exactly like the retired ios/ app)
+#   simulator: the same minus Vulkan (the loader framework is device-only)
 #
 # Configure with -DCMAKE_SYSTEM_NAME=iOS and either
 # -DCMAKE_OSX_SYSROOT=iphoneos or =iphonesimulator.
@@ -115,6 +116,23 @@ if(CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK)
   endif()
 endif()
 
+# ---- LiteRT backend (CPU via XNNPACK / GPU via Metal) -----------------------
+# Dynamic, as on every other platform: only the vendored C headers are needed
+# to build, and libLiteRt.dylib is dlopen'd from the app's Frameworks
+# directory at run time, where the Runner's embed phase puts it together with
+# libLiteRtMetalAccelerator.dylib (tool/build_ios_native.sh fetches Google's
+# iOS builds of both, device and simulator, and stages them under
+# app/ios/clpeak_native/embed-{device,simulator}/).  iOS loads a library from
+# inside the signed bundle, which is the one place --litert-lib and the
+# settings picker could never name -- so, as with ONNX Runtime, the runtime
+# the app carries is the runtime it measures.  No NPU: Core ML is the route
+# to the Neural Engine on Apple platforms.
+option(CLPEAK_IOS_ENABLE_LITERT "Enable the LiteRT backend on iOS" ON)
+if(CLPEAK_IOS_ENABLE_LITERT)
+  set(CLPEAK_ENABLE_LITERT ON)
+  add_subdirectory(${CLPEAK_ROOT}/src/litert ${CMAKE_BINARY_DIR}/litert)
+endif()
+
 # ---- The FFI bridge framework ------------------------------------------------
 set(CLPEAK_FFI_STANDALONE ON)
 add_subdirectory(${CLPEAK_ROOT}/src/ffi ${CMAKE_BINARY_DIR}/ffi)
@@ -146,7 +164,7 @@ if(CLPEAK_IOS_ONNX_AVAILABLE)
       "-framework UIKit")
 endif()
 
-foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx peak_coreml)
+foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx peak_coreml peak_litert)
   if(TARGET ${_dep})
     set_target_properties(${_dep} PROPERTIES
       "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"

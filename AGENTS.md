@@ -62,7 +62,7 @@ run and the result document all share.
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` and `litert/` (C APIs — no library needed to build) |
-| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_litert_npu.sh` — stage LiteRT's NPU dispatch shims for the Android app) |
+| `tool/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_litert_npu.sh` — stage LiteRT's NPU dispatch shims for the Android app) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |

@@ -257,7 +257,10 @@ class _RuntimeView {
   factory _RuntimeView.litert(LitertStatus? s) => _RuntimeView(
         known: s != null,
         available: s?.available ?? false,
-        fixed: false,
+        // iOS embeds Google's LiteRT dylibs in the app bundle, and loads no
+        // library from anywhere else -- so there is nothing to choose,
+        // though unlike ONNX Runtime it is still loaded, not linked.
+        fixed: Platform.isIOS,
         title: s == null
             ? 'Checking…'
             : s.available
@@ -268,7 +271,9 @@ class _RuntimeView {
         hint: 'The app carries LiteRT on Android; elsewhere a pip '
             'ai-edge-litert wheel has a libLiteRt to point at. The GPU '
             'accelerator and any NPU dispatch library are found beside it.',
-        fixedHint: '',
+        fixedHint: 'LiteRT and its Metal accelerator ship inside this app, '
+            'and iOS loads no library from outside the bundle, so there is '
+            'no other one to point at.',
       );
 }
 

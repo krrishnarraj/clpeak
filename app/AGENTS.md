@@ -43,7 +43,13 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX
   Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
   `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
-  own build.
+  own build.  It fetches LiteRT too -- Google's iOS dylibs of the runtime
+  and its Metal accelerator, device and simulator slices, ~31 MB, from its
+  litert bucket -- and stages them under `ios/clpeak_native/embed-{device,
+  simulator}/`, from where the Runner's embed phase copies and signs them
+  into `Frameworks/` to be dlopen'd; `--no-litert` leaves the backend out,
+  `CLPEAK_IOS_LITERT_DIR` points at your own slices.  See
+  `src/litert/AGENTS.md`, Packaging.
 - Tests: `flutter test` (pure Dart) or
   `CLPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
 
