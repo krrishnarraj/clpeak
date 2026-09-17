@@ -115,12 +115,24 @@ inline bool litertKernelIsInteger(const std::string &kernel)
   return false;
 }
 
-// The sentence an integer-format row needs when its kernel was a float one.
+// Whether an integer format's profiled kernel was a float one.  On the GPU
+// accelerator every kernel not named integer is: it computes in float
+// unless a kernel says otherwise.  Elsewhere only a tag that carries a
+// quantize pass says so -- the interpreter's own reference kernels are
+// plain op names ("FULLY_CONNECTED") and are integer arithmetic.
+inline bool litertKernelIsFloatForInteger(const std::string &kernel, LitertAccel accel)
+{
+  if (litertKernelIsInteger(kernel))
+    return false;
+  return accel == LitertAccel::Gpu || kernel.find("quantize") != std::string::npos;
+}
+
+// The clause such a row's kernel gets (appended to "..., as `kernel`").
 inline const char *litertFloatKernelNote()
 {
-  return "  That is a float kernel between quantize and dequantize passes, not integer "
-         "arithmetic: the accelerator has no integer multiply for this shape and this "
-         "rate is its float one, with the format's traffic savings.";
+  return " -- a float kernel between quantize and dequantize passes, not integer "
+         "arithmetic, so this is the accelerator's float rate with the format's "
+         "traffic savings";
 }
 
 // The session config a plan asks for on a device.

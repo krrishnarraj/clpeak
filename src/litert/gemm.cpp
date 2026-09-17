@@ -81,47 +81,35 @@ struct Variant
 
 const Variant kVariants[] = {
     {LitertFormat::Fp32,
-     "Full 32-bit precision, as a control: on the GPU this row asks for its "
-     "fp32 policy, since the accelerator otherwise computes an fp32 graph in "
-     "half precision."},
+     "Full 32-bit precision as a control; the GPU is asked for its fp32 policy, "
+     "since it otherwise computes an fp32 graph in half."},
     {LitertFormat::Fp16,
-     "16-bit storage and arithmetic.  On the CPU the tensors are half-typed and "
-     "XNNPACK runs its fp16 GEMM; on the GPU it is the accelerator's fp16 "
-     "policy over an fp32 graph whose weights are stored as half -- what a "
-     "float16-quantized model gets by default on a phone."},
+     "16-bit storage and arithmetic: half-typed tensors and XNNPACK's fp16 GEMM "
+     "on the CPU, the fp16 policy over half-stored weights on the GPU."},
     {LitertFormat::Fp16Acc32,
-     "The GPU's third precision policy: fp16 storage and arithmetic with the "
-     "matmul accumulated in fp32.  Whether it costs anything against plain "
-     "fp16 is what this row is for, and the accuracy row says what it buys."},
+     "The GPU's fp16 policy with the matmul accumulated in fp32; the accuracy "
+     "row says what that buys over plain fp16."},
     {LitertFormat::Bf16,
-     "bfloat16 tensors: in the .tflite schema, so a model can be written in it; "
-     "whether any kernel takes it is what this row records."},
+     "bfloat16 tensors, which the .tflite schema allows; whether any kernel "
+     "takes them is the row."},
     {LitertFormat::Int8Qdq,
-     "8-bit weights and 8-bit activations with an 8-bit result -- TFLite's "
-     "full-integer quantization, the format every mobile NPU is built around "
-     "and the one headline TOPS figures are quoted for.  Measured in ops."},
+     "8-bit weights, activations and result -- TFLite's full-integer "
+     "quantization, what headline TOPS figures are quoted for."},
     {LitertFormat::Int16x8,
      "16-bit activations over 8-bit weights, TFLite's higher-accuracy integer "
-     "scheme.  No XNNPACK kernel exists for it, so on the CPU this is the "
-     "runtime's own reference kernel; on an NPU it is the format the vendor "
-     "quotes for audio and higher-fidelity vision.  Measured in ops."},
+     "scheme; the CPU has only the reference kernel for it, an NPU may have a "
+     "real one."},
     {LitertFormat::Int8Weight,
-     "8-bit weights, one scale per output row, against float activations -- "
-     "dynamic-range quantization, the format a post-training-quantized model "
-     "ships in.  XNNPACK quantizes the activations on the fly and multiplies "
-     "in int8; the GPU unpacks the weights to half and multiplies in float; "
-     "the kernel name says which."},
+     "8-bit per-row weights against float activations (dynamic-range "
+     "quantization): int8 arithmetic on XNNPACK, unpacked to half and "
+     "multiplied in float on the GPU."},
     {LitertFormat::Int4Weight,
-     "4-bit weights, one scale per block of 32 along the reduction axis, "
-     "against float activations -- what an on-device language model ships as.  "
-     "XNNPACK's QB4W kernel runs it as int8 arithmetic on dynamically "
-     "quantized activations; the GPU unpacks to half.  The arithmetic "
-     "differs by accelerator, so the accuracy row is the other half of "
-     "this one."},
+     "4-bit blockwise weights (32 per scale) against float activations, what "
+     "an on-device language model ships as; XNNPACK runs it as int8 "
+     "arithmetic, the GPU unpacks to half."},
     {LitertFormat::Fp8Weight,
-     "8-bit float (E4M3) weights with a scale per row.  The type arrived in "
-     "the schema in 2026; this row records which accelerator, if any, has a "
-     "kernel for it."},
+     "8-bit float (E4M3) weights with a scale per row; which accelerator has a "
+     "kernel for them is the row."},
 };
 
 // The kernel that did the multiply, from a profiled run.
@@ -147,10 +135,9 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
   auto test = currentDeviceScope->beginTest(
       {"litert_gemm", "LiteRT matmul peak", "flops", Category::Unknown,
        "Matrix-multiply rate through LiteRT on this accelerator, one model "
-       "format per row, swept over square sizes and reported at its best.  The "
-       "same FULLY_CONNECTED runs on the NPU, the GPU and the CPU, each in the "
-       "kernel it has for the format, and the row names that kernel; a format "
-       "the accelerator handed back to the CPU reports unsupported instead.",
+       "format per row, swept over square sizes and reported at its best.  Each "
+       "row names the kernel that ran; a format handed back to the CPU reports "
+       "unsupported.",
        TestShape::Heterogeneous, "model format"});
 
   // The cost of asking, measured once: a 64^3 multiply whose arithmetic is
@@ -178,7 +165,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     const LitertPlan plan = litertPlanFor(v.f, dev.accel);
 
     logger::EmitOptions o;
-    o.description = std::string("Peak over a doubling sweep of square sizes.  ") + v.note;
+    o.description = v.note;
     if (plan.integerOps)
       o.unit = "ops";
 
@@ -398,16 +385,16 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
 
     if (best > 0.0)
     {
-      o.description = "Peak over a doubling sweep of square sizes; fastest at " +
-                      std::to_string(bestDim) + " cubed.  " + v.note;
+      o.description = std::string(v.note) + "  Fastest at " + std::to_string(bestDim) + " cubed";
       if (!kernel.empty())
       {
-        o.description += "  Ran as `" + kernel + "`.";
-        // A row that says "ops" for float arithmetic needs the sentence;
-        // the kernel's name, not the passes around it, says which it was.
-        if (plan.integerOps && !litertKernelIsInteger(kernel))
+        o.description += ", as `" + kernel + "`";
+        // A row that says "ops" for float arithmetic needs the words; the
+        // kernel's name, not the passes around it, says which it was.
+        if (plan.integerOps && litertKernelIsFloatForInteger(kernel, dev.accel))
           o.description += litertFloatKernelNote();
       }
+      o.description += ".";
       test.emit(label, (float)best, o);
     }
     else

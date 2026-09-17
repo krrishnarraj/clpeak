@@ -55,48 +55,48 @@ struct Variant
   const char *note;
   bool int8Kv;        // the cache stored as int8
   bool decodeOnly;    // a cache format has no prefill row
+  bool composite;     // attention as the odml.scaled_dot_product_attention composite
 };
 
 const Variant kVariants[] = {
     {"fp16", LitertFormat::Fp16, true, nullptr,
-     "16-bit weights and 16-bit arithmetic, the form an unquantized model is "
-     "served in and the reference the other rows are read against.",
-     false, false},
+     "16-bit weights and arithmetic, the form an unquantized model is served "
+     "in and the reference for the other rows.",
+     false, false, false},
+    {"fp16_composite", LitertFormat::Fp16, false, nullptr,
+     "fp16 with attention spelt as the odml.scaled_dot_product_attention "
+     "composite that AI Edge Torch and LiteRT-LM ship; an accelerator either "
+     "fuses it into one kernel or hands it back, and the guard says which.",
+     false, false, true},
     {"int4_weight", LitertFormat::Int4Weight, true, nullptr,
-     "4-bit weights, one scale per 32, against float activations -- what a "
-     "quantized language model ships as.  XNNPACK runs the projections as int8 "
-     "arithmetic on dynamically quantized activations; an NPU does whatever its "
-     "compiler makes of the blocked form with live activations, which is the "
-     "finding.",
-     false, false},
+     "4-bit blockwise weights against float activations, what a quantized "
+     "language model ships as; XNNPACK runs the projections as int8 "
+     "arithmetic, an NPU compiler does what it can with the blocked form.",
+     false, false, false},
     {"int8_weight", LitertFormat::Int8Weight, false, nullptr,
-     "8-bit weights, one scale per output row, against float activations -- "
-     "dynamic-range quantization, the format a post-training-quantized model "
-     "ships in.",
-     false, false},
+     "8-bit per-row weights against float activations -- dynamic-range "
+     "quantization, the post-training-quantized format.",
+     false, false, false},
     {"int8_qdq", LitertFormat::Int8Qdq, false, "ops",
-     "8-bit weights and 8-bit arithmetic through the projections, quantized in "
-     "and out -- what headline TOPS figures are quoted for, measured on a whole "
-     "layer.  Attention and the softmax stay in float, as they do in every "
-     "real deployment.",
-     false, false},
+     "8-bit arithmetic through the seven projections, quantized in and out, "
+     "with attention and the softmax in float as in any real deployment.",
+     false, false, false},
     {"fp32", LitertFormat::Fp32, false, nullptr,
-     "Full precision, which nobody serves a language model in, here as a "
-     "control: an accelerator whose fp16 row fails to beat it is not running "
-     "half-precision hardware.",
-     false, false},
+     "Full precision as a control: an accelerator whose fp16 row fails to beat "
+     "it is not running half-precision hardware.",
+     false, false, false},
     {"bf16", LitertFormat::Bf16, false, nullptr,
-     "bfloat16 tensors throughout; a layer needs bf16 kernels for every "
-     "operation in it, and the row records what LiteRT says to that.",
-     false, false},
+     "bfloat16 throughout, which needs a bf16 kernel for every operation in "
+     "the layer; the row records LiteRT's answer.",
+     false, false, false},
     {"fp8_weight", LitertFormat::Fp8Weight, false, nullptr,
      "8-bit float weights with a scale per row, if any kernel takes them.",
-     false, false},
+     false, false, false},
     {"int8_kv", LitertFormat::Fp16, true, nullptr,
-     "16-bit throughout with only the cached context stored as 8-bit integers "
-     "and decompressed into attention -- the axis that decides how long a "
-     "conversation a device can hold, which is why this row sweeps context.",
-     true, true},
+     "16-bit throughout with only the cached context stored as int8 and "
+     "decompressed into attention -- the axis that decides how long a "
+     "conversation a device can hold.",
+     true, true, false},
 };
 
 uint64_t weightBytes(const LitertPlan &p)
@@ -160,6 +160,19 @@ struct VariantResult
   std::map<int64_t, Point> prefill, decode;
 };
 
+// Why a variant's decode form cannot be sent to this accelerator, or empty.
+// The GPU accelerator's graph reader CHECK-fails -- an abort, not a refusal
+// (object_reader.cc, "CanReadValue(node_input_index)", LiteRT 2.2.0) -- on a
+// composite whose input is a constant, and decode's cache is one; prefill,
+// whose K and V are computed, is fine.
+std::string decodeFence(const Variant &v, LitertAccel accel)
+{
+  if (v.composite && accel == LitertAccel::Gpu)
+    return "the GPU accelerator aborts the process on a composite with a constant input "
+           "(LiteRT 2.2.0), and decode's cache is a constant, so only prefill is sent to it";
+  return std::string();
+}
+
 LitertBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq)
 {
   LitertBlockShape sh;
@@ -170,6 +183,7 @@ LitertBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t 
   sh.seq = decode ? 1 : prefillSeq;
   sh.kvLen = decode ? kvLen : 0;
   sh.int8Kv = v.int8Kv;
+  sh.composite = v.composite;
   return sh;
 }
 
@@ -332,7 +346,12 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       return;
     Point pt;
     const double flops = blockFlops(1, kv);
-    if (!affordable(flops, refDecodeRate))
+    if (const std::string fence = decodeFence(kVariants[vi], dev.accel); !fence.empty())
+    {
+      pt.status = ResultStatus::Unsupported;
+      pt.error = fence;
+    }
+    else if (!affordable(flops, refDecodeRate))
     {
       pt.status = ResultStatus::Error;
       pt.error = "one token would take about " + std::to_string((long long)(flops / refDecodeRate / 1.0e6)) +
@@ -356,7 +375,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
-                      " tokens in one pass, counting every multiply in the layer.";
+                      " tokens in one pass, counting every multiply.";
       if (v.unit)
         o.unit = v.unit;
       if (!vr.usable)
@@ -375,33 +394,29 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
   };
 
   const std::string geometry =
-      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters)";
+      "one 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters)";
 
   const logger::TestSpec prefillSpec = {
       "litert_block_prefill", "Transformer block, prefill", "flops", Category::Ai,
-      geometry + ", working through a prompt on this accelerator -- the phase that decides "
-      "how long you wait for the first word -- at each format a model ships in, with attention "
-      "as explicit batched matmul, softmax and matmul.  Only the seven projection matmuls "
-      "change format, so whatever separates two rows is the projection format; and LiteRT's "
-      "own answer proves every operation ran here.",
+      "Prefill through " + geometry + " on this accelerator, at each format a model ships "
+      "in: the phase that decides time to the first word.  Only the seven projections change "
+      "format between rows, and LiteRT's own answer proves every operation ran here.",
       TestShape::Heterogeneous, "format and prompt length"};
   const logger::TestSpec prefillOpsSpec = {
       "litert_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
       prefillSpec.description, TestShape::Heterogeneous, "format and prompt length"};
   const logger::TestSpec decodeSpec = {
       "litert_block_decode", "Transformer block, decode", "bps", Category::Ai,
-      "How fast " + geometry + " streams its weights on this accelerator while generating a "
-      "token with 2048 of context, at each format.  Each row counts the bytes that format "
-      "actually moves, so it compares directly against the resident-weight bandwidth rows -- "
-      "and a narrow-weight row far below the 16-bit one is an accelerator unpacking to full "
-      "width before using them, or one whose unpack costs more per byte than the byte saved.",
+      "How fast " + geometry + " streams its weights while generating one token with 2048 "
+      "of context, counting the bytes each format actually moves.  A narrow-weight row far "
+      "below the 16-bit one is an accelerator unpacking to full width before using them.",
       TestShape::Heterogeneous, "format"};
   const logger::TestSpec latencySpec = {
       "litert_block_latency", "Transformer block latency", "s", Category::Ai,
-      "How long " + geometry + " takes on this accelerator at each format: multiply by a "
-      "model's layer count for a floor on its time-to-first-token and per-token time here.  "
-      "Everything but attention costs the same at every context length, so whatever the decode "
-      "rows add as the context grows is attention.",
+      "How long " + geometry + " takes at each format: multiply by a model's layer count "
+      "for a floor on its time-to-first-token and per-token time.  Everything but attention "
+      "costs the same at every context length, so what the decode rows add with context is "
+      "attention.",
       TestShape::Heterogeneous, "format, phase and context length"};
 
   // ---- Prefill, flops ------------------------------------------------------
@@ -474,8 +489,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  One token with 2048 of context: " +
                       std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " +
-                      std::to_string((unsigned long long)(kvB >> 20)) +
-                      " MB of cached context, read in full for one token.";
+                      std::to_string((unsigned long long)(kvB >> 20)) + " MB of cache, read once.";
       if (!validateVariant(vi))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -521,8 +535,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
-        const std::string note = "One generated token with " + std::to_string(kv) +
-                                 " tokens of context behind it.  " + v.note;
+        const std::string note = "One token with " + std::to_string(kv) + " of context.  " + v.note;
         if (!vr.usable)
         {
           test.skip(metric, vr.skipStatus, vr.skipReason, note);

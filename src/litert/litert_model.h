@@ -174,6 +174,12 @@ struct LitertBlockShape
   int64_t seq = 512;
   int64_t kvLen = 0;
   bool int8Kv = false;
+  // Attention as the odml.scaled_dot_product_attention composite (a
+  // STABLEHLO_COMPOSITE whose decomposition subgraph is the explicit
+  // matmul / scale / softmax / matmul), the spelling AI Edge Torch and
+  // LiteRT-LM ship, which an accelerator may fuse into one kernel or hand
+  // back to the interpreter.
+  bool composite = false;
 };
 clpeak_tflite::TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh);
 

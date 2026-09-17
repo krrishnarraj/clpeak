@@ -207,6 +207,21 @@ one** (`fp16`, `int8_qdq`, `int8_weight`, `int4_weight`), so a block
 reading here divides by a GEMM reading there.  `int16x8` and `fp16_acc32`
 are this backend's own.
 
+**The block's `fp16_composite` variant spells attention as the
+`odml.scaled_dot_product_attention` composite** AI Edge Torch and LiteRT-LM
+ship: a `STABLEHLO_COMPOSITE` (BuiltinOptions2 union position 21) over
+(q, k, v) in the exporter's `[1, tokens, heads, head_dim]` boundary layout,
+its FlexBuffer attributes `{"scale": 1/sqrt(head_dim)}` written byte for
+byte as the Python encoder does (a 64-bit map), and the explicit form --
+head transposes included -- as its decomposition subgraph.  What each
+accelerator does with it is the row: Metal reads it into its own graph with
+its own transposes and lands within 1% of the explicit spelling (no fused
+kernel); XNNPACK runs the decomposition, and decode pays the two cache
+transposes it carries (58 GB/s against 102); an NPU compiler that fuses it
+is what the variant exists to find.  The boundary layout matters: with
+heads leading, Metal silently computed something else (a 4400 where the
+explicit graph gave 207).
+
 ## The runtime's own answer is the guard
 
 `LiteRtCompiledModelIsFullyAccelerated()` says whether every operation
@@ -240,7 +255,7 @@ and uploading every constant twice was the other half of that six minutes.
 
 ## What the accelerator libraries do wrong, and how the backend stays up
 
-Four faults in LiteRT 2.2.0's GPU accelerator would take the whole run
+Five faults in LiteRT 2.2.0's GPU accelerator would take the whole run
 down, and a benchmark that dies to prove a point has proved the wrong one.
 Each is fenced in `litertPlanFor()` or `litert_session.cpp` with the fault
 recorded in the row's reason, so lifting the fence when a release fixes it
@@ -257,6 +272,11 @@ is a one-line change:
   rungs later.  Per-row int4 goes through a different path and is safe, but
   it is not the format language models ship in, so the blocked format is not
   sent to the GPU rather than measured as something else.
+- **A composite with a constant input aborts the process.**  The graph
+  reader CHECK-fails on `CanReadValue(node_input_index)` (`object_reader.cc`)
+  when a `STABLEHLO_COMPOSITE`'s operand is a constant tensor, which the
+  block's decode form has (its K/V cache); the composite variant's decode
+  rows are not sent to the GPU, its prefill rows are.
 - **The OpenCL accelerator crashes without an OpenCL library.**  On a
   machine with no `libOpenCL` at all (an emulator, a box without a driver)
   `libLiteRtClGlAccelerator` dereferences a null inside `strlen` when it
@@ -337,6 +357,7 @@ compiling), GPU rows ±10%.
 | error int8_qdq / int8_weight / int4_weight | 10430 / 4692 / — | 9317 / 3918 / 4377 |
 | conv3x3 fp32 / fp16 / int8 | 8.60 / 12.7 T (Winograd-counted) / 12.6 TOPS | 484 G / 984 G / 2.31 TOPS |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 4.34 TFLOPS / 102 GB/s | 0.85 TFLOPS / 101 GB/s |
+| block fp16_composite prefill s512 / decode kv2048 | 4.33 TFLOPS / aborts (fenced) | 0.95 TFLOPS / 58 GB/s |
 | tensor_bw 8mb / 128mb | 484 / 142 GB/s | 261 / 115 GB/s |
 | dispatch trivial / matmul_256 / create | 268 µs / 390 µs / 1.36 ms | 602 ns / 144 µs / 277 µs |
 
@@ -421,3 +442,6 @@ budgets.
 - A new recipe: `litert_model.h` declares, `litert_model.cpp` builds
   through `Recipe`; keep the leading batch dimension and the runtime scalar.
 - Update `third_party/litert` with `tool/update_litert_headers.sh <tag>`.
+- Descriptions -- a test's and a row's, with whatever the row appends
+  (fastest size, kernel, caveat) -- stay within three sentences; the
+  reasoning behind a row belongs here, not in the row.

@@ -52,38 +52,34 @@ struct Variant
 
 const Variant kVariants[] = {
     {LitertFormat::Fp32,
-     "Full precision; near zero, and the control the other rows are read "
-     "against.  A figure in the hundreds of ppm here is an accelerator "
+     "Full precision, the control: hundreds of ppm here is an accelerator "
      "substituting a narrower type for the fp32 it was asked for."},
     {LitertFormat::Fp16,
-     "16-bit inputs and a 16-bit answer.  Around 200 ppm is an answer "
-     "accumulated in fp32 and rounded once at the end; ten times that is a "
-     "unit accumulating in fp16 all the way."},
+     "16-bit inputs and answer: around 200 ppm is fp32 accumulation rounded "
+     "once at the end, ten times that is accumulating in fp16 all the way."},
     {LitertFormat::Fp16Acc32,
-     "The GPU's fp16 policy with fp32 accumulation, if it changes anything: "
-     "the difference from the fp16 row is what the accumulator width was "
-     "worth."},
+     "The GPU's fp16 policy with fp32 accumulation; the difference from the "
+     "fp16 row is what the accumulator width was worth."},
     {LitertFormat::Bf16,
-     "bfloat16 has three fewer mantissa bits than fp16; eight times the fp16 "
-     "figure is what that costs, if any kernel takes it."},
+     "bfloat16 has three fewer mantissa bits than fp16, so eight times the "
+     "fp16 figure is what it costs, if any kernel takes it."},
     {LitertFormat::Int8Qdq,
-     "8-bit weights and 8-bit activations, with the answer itself quantized "
-     "to 8 bits.  Around 9000 ppm is what keeping the result in int8 costs on "
-     "this data; the quantization of the operands is not counted."},
+     "8-bit weights and activations with the answer itself quantized to 8 "
+     "bits: around 9000 ppm is what keeping the result in int8 costs on this "
+     "data (the operands' quantization is not counted)."},
     {LitertFormat::Int16x8,
-     "16-bit activations over 8-bit weights, the answer kept in 16 bits; the "
+     "16-bit activations over 8-bit weights, the answer kept in 16 bits; its "
      "result quantization costs about 256 times less than int8_qdq's."},
     {LitertFormat::Int8Weight,
-     "8-bit weights against float activations.  On an accelerator that "
-     "multiplies in float this reads near the fp16 or fp32 row; on XNNPACK, "
-     "which quantizes the activations to int8 as it goes, that rounding is "
-     "counted, and this is what dynamic-range quantization costs there."},
+     "8-bit weights against float activations: near the fp16 or fp32 row on "
+     "an accelerator that multiplies in float, and on XNNPACK -- which "
+     "quantizes the activations as it goes -- what dynamic-range quantization "
+     "really costs."},
     {LitertFormat::Int4Weight,
-     "4-bit blockwise weights against float activations.  The codes are "
-     "shared with the reference, so whatever separates this from int8_weight "
-     "is the accelerator's arithmetic, not the format."},
-    {LitertFormat::Fp8Weight,
-     "8-bit float weights, if any kernel takes them."},
+     "4-bit blockwise weights against float activations; the codes are shared "
+     "with the reference, so whatever separates this from int8_weight is the "
+     "accelerator's arithmetic."},
+    {LitertFormat::Fp8Weight, "8-bit float weights, if any kernel takes them."},
 };
 
 double relativeRmsPpm(const std::vector<float> &got, const std::vector<double> &ref)
@@ -328,12 +324,11 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
 
   auto test = currentDeviceScope->beginTest(
       {"litert_numeric_error", "LiteRT matmul numeric error", "ppm", Category::Compute,
-       "How far each format's answer drifts from a full-precision one, in parts "
-       "per million, on a fixed 1024-cubed matrix multiply -- what the speed "
-       "rows cost.  The reference multiplies the values the accelerator was "
-       "handed, in double precision on the host, so this is the arithmetic and "
-       "the width the answer was kept in; where an accelerator quantizes the "
-       "activations itself, inside the kernel, that rounding is counted too.",
+       "How far each format's 1024-cubed matmul drifts from a double-precision "
+       "reference built from the exact values the accelerator was handed, in "
+       "parts per million -- what the speed rows cost.  The stored operands' "
+       "rounding cancels; what remains is the arithmetic and the width the "
+       "answer was kept in.",
        TestShape::Heterogeneous, "model format"});
 
   for (const Variant &v : kVariants)
@@ -349,8 +344,8 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     }
     std::string note = v.note;
     if (c.ppm >= kLitertWrongAnswerPpm)
-      note += "  This is a wrong answer, not a loss of precision: the accelerator's kernel for "
-              "this format does not compute it, and the rate rows for the format are withheld.";
+      note += "  A wrong answer, not a loss of precision: the accelerator's kernel does not "
+              "compute this format, and its rate rows are withheld.";
     test.emit(label, (float)c.ppm, note.c_str());
   }
 

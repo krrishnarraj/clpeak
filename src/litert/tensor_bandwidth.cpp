@@ -47,7 +47,7 @@ const Size kSizes[] = {
      "512 megabytes -- beyond any cache shipping today, so this is main memory "
      "on anything that still shows a falling rate by this point."},
     {32768, "2gb",
-     "Two gigabytes.  Only reached by a device whose rate was still dropping at "
+     "Two gigabytes, reached only by a device whose rate was still dropping at "
      "512 MB, meaning a cache larger than anything current."},
 };
 
@@ -122,11 +122,10 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
 
   auto test = currentDeviceScope->beginTest(
       {"litert_tensor_bw", "LiteRT resident-weight bandwidth", "bps", Category::Bandwidth,
-       "How fast this accelerator streams a weight matrix it already holds "
-       "through a matrix-vector product -- the shape of generating one token -- "
-       "at growing sizes, net of the cost of asking.  Where the rate drops is "
-       "where a model stopped fitting in fast local memory, and it decides "
-       "whether a model streams from main memory on every token.",
+       "How fast this accelerator streams a resident weight matrix through a "
+       "matrix-vector product -- the shape of generating one token -- at growing "
+       "sizes, net of the cost of asking.  Where the rate drops, a model of that "
+       "size stopped fitting in fast local memory.",
        TestShape::Heterogeneous, "working set"});
 
   // The floor is the smallest graph's whole time.

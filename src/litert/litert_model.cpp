@@ -1196,6 +1196,32 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
 namespace
 {
 
+// The composite's attributes as a FlexBuffer: the map {"scale": <double>}
+// AI Edge Torch writes for odml.scaled_dot_product_attention, laid out
+// byte for byte as the FlexBuffers encoder does (a 64-bit-wide map because
+// 1/sqrt(128) is not a float32; checked against the Python encoder's
+// output).  Trailing: root offset, root type (map, 64-bit), root width.
+std::vector<uint8_t> sdpaAttributes(double scale)
+{
+  std::vector<uint8_t> out = {'s', 'c', 'a', 'l', 'e', 0,   // the key
+                              1, 7};                         // keys vector: size, offset back to the key
+  auto u64 = [&](uint64_t v) {
+    for (int i = 0; i < 8; i++)
+      out.push_back((uint8_t)(v >> (8 * i)));
+  };
+  u64(1);   // offset back to the keys vector
+  u64(1);   // the keys vector's byte width
+  u64(1);   // one entry
+  uint64_t bits;
+  std::memcpy(&bits, &scale, 8);
+  u64(bits);                      // the value
+  out.push_back(0x0f);            // its type: FBT_FLOAT, 64-bit
+  out.push_back(0x09);            // root: offset back to the values
+  out.push_back(0x27);            // root type: FBT_MAP, 64-bit
+  out.push_back(0x01);            // root byte width
+  return out;
+}
+
 // The activation scale for a quantized projection input: four sigma of a
 // d-deep dot product of [-0.25, 0.25) operands, the ONNX backend's
 // blockQdqScale.  One scale for all seven projections; the feed-forward's
@@ -1329,63 +1355,131 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     r.m.addOp(0, TfOp::Transpose, 1, {rs, permHeads}, {h});
     return h;
   };
-  const int qh = toHeads(q, "Q");
-
   // ---- Attention ---------------------------------------------------------
-  // Decode reads a resident cache [1, H, ctx, Dh]; prefill builds K/V from
-  // this pass.
-  int kh, vh;
-  const std::vector<int32_t> cacheShape = {1, (int32_t)H, (int32_t)ctx, (int32_t)Dh};
-  if (decode)
+  // Heads go to the front ([1, H, S, Dh]) for the explicit form.  The
+  // composite form keeps AI Edge Torch's boundary layout, [1, S, H, Dh]
+  // (batch, tokens, heads, head size), and does the transposes inside the
+  // decomposition, the way its exporter does; an accelerator that fuses
+  // the composite expects that layout.  Decode reads a resident cache in
+  // whichever layout the form wants; prefill builds K/V from this pass.
+  const std::vector<int32_t> hsdCache = {1, (int32_t)H, (int32_t)ctx, (int32_t)Dh};
+  const std::vector<int32_t> shdCache = {1, (int32_t)ctx, (int32_t)H, (int32_t)Dh};
+  const std::vector<int32_t> &cacheShape = sh.composite ? shdCache : hsdCache;
+  const int64_t cacheRows = sh.composite ? ctx * H : H * ctx;   // rows of Dh either way
+  auto cache = [&](const std::string &name, uint32_t seed) -> int {
+    if (!sh.int8Kv)
+      return r.actConstant(fp, cacheShape, name, cacheRows, Dh, seed, mag);
+    // Quantized per tensor: the cache spends the whole int8 range and one
+    // scale quarters it back to the [-0.25, 0.25) the float cache holds.
+    const float scale = 0.25f / 127.0f;
+    TfQuant cq;
+    cq.scale = {scale};
+    cq.zeroPoint = {0};
+    const int packed = r.m.addTensor(0, cacheShape, TfType::I8, name + "_q",
+                                     r.constant(cacheRows, Dh, TfType::I8, seed, mag, scale, 127), cq);
+    const int deq = tensor(cacheShape, name);
+    r.m.addOp(0, TfOp::Dequantize, 2, {packed}, {deq});
+    return deq;
+  };
+  auto transposeHeads = [&](int sg, int t, const std::vector<int32_t> &to, const std::string &name) {
+    const int perm = r.m.addTensor(sg, {4}, TfType::I32, name + "_perm", r.ints({0, 2, 1, 3}));
+    const int out = r.m.addTensor(sg, to, act, name, 0);
+    r.m.addOp(sg, TfOp::Transpose, 1, {t, perm}, {out});
+    return out;
+  };
+
+  // Scaled dot-product attention over [1, H, ., Dh] operands: scores =
+  // Q K^T * 1/sqrt(Dh), softmax, times V.  Spelt out in subgraph `sg`: the
+  // main graph, or the composite's decomposition subgraph.
+  const std::vector<int32_t> scoresShape = {1, (int32_t)H, (int32_t)S, (int32_t)ctx};
+  const float attnScale = 1.0f / std::sqrt((float)Dh);
+  auto attention = [&](int sg, int q_, int k_, int v_) -> int {
+    const int scores = r.m.addTensor(sg, scoresShape, act, "Scores", 0);
+    TfOptions bmm;
+    bmm.kind = TfOptions::Kind::BatchMatMul;
+    bmm.adjY = true;
+    r.m.addOp(sg, TfOp::BatchMatMul, 1, {q_, k_}, {scores}, bmm);
+    const std::string scaleBytes = litertScalarBytes(act, attnScale);
+    r.halfBuffers.push_back(std::vector<uint16_t>((scaleBytes.size() + 1) / 2, 0));
+    std::memcpy(r.halfBuffers.back().data(), scaleBytes.data(), scaleBytes.size());
+    const int scaleT = r.m.addTensor(sg, {1}, act, "attn_scale",
+                                     r.m.addBuffer(r.halfBuffers.back().data(), scaleBytes.size()));
+    const int scoresS = r.m.addTensor(sg, scoresShape, act, "ScoresS", 0);
+    r.m.addOp(sg, TfOp::Mul, mulVersion(fp), {scores, scaleT}, {scoresS}, mulOptions());
+    const int probs = r.m.addTensor(sg, scoresShape, act, "P", 0);
+    TfOptions so;
+    so.kind = TfOptions::Kind::Softmax;
+    so.beta = 1.0f;
+    r.m.addOp(sg, TfOp::Softmax, 1, {scoresS}, {probs}, so);
+    const int out = r.m.addTensor(sg, hsdShape, act, "Ctx", 0);
+    TfOptions bmm2;
+    bmm2.kind = TfOptions::Kind::BatchMatMul;
+    r.m.addOp(sg, TfOp::BatchMatMul, 1, {probs, v_}, {out}, bmm2);
+    return out;
+  };
+
+  int ctxT;   // attention's answer as [1, S, H, Dh]
+  if (!sh.composite)
   {
-    auto cache = [&](const std::string &name, uint32_t seed) -> int {
-      if (!sh.int8Kv)
-        return r.actConstant(fp, cacheShape, name, H * ctx, Dh, seed, mag);
-      // Quantized per tensor: the cache spends the whole int8 range and one
-      // scale quarters it back to the [-0.25, 0.25) the float cache holds.
-      const float scale = 0.25f / 127.0f;
-      TfQuant cq;
-      cq.scale = {scale};
-      cq.zeroPoint = {0};
-      const int packed = r.m.addTensor(0, cacheShape, TfType::I8, name + "_q",
-                                       r.constant(H * ctx, Dh, TfType::I8, seed, mag, scale, 127), cq);
-      const int deq = tensor(cacheShape, name);
-      r.m.addOp(0, TfOp::Dequantize, 2, {packed}, {deq});
-      return deq;
-    };
-    kh = cache("Kc", 0x88888888u);
-    vh = cache("Vc", 0x99999999u);
+    const int qh = toHeads(q, "Q");
+    int kh, vh;
+    if (decode)
+    {
+      kh = cache("Kc", 0x88888888u);
+      vh = cache("Vc", 0x99999999u);
+    }
+    else
+    {
+      kh = toHeads(projection("Knew", x, d, d, 0x22222222u), "K");
+      vh = toHeads(projection("Vnew", x, d, d, 0x33333333u), "V");
+    }
+    const int ctxH = attention(0, qh, kh, vh);
+    ctxT = tensor(headsShape, "CtxT");
+    r.m.addOp(0, TfOp::Transpose, 1, {ctxH, permHeads}, {ctxT});
   }
   else
   {
-    kh = toHeads(projection("Knew", x, d, d, 0x22222222u), "K");
-    vh = toHeads(projection("Vnew", x, d, d, 0x33333333u), "V");
+    // odml.scaled_dot_product_attention over (q, k, v) in [1, ., H, Dh],
+    // with the explicit form -- transposes included -- as its decomposition.
+    auto toTokens = [&](int t, const std::string &name) {
+      const int rs = tensor(headsShape, name + "r");
+      TfOptions ro;
+      ro.kind = TfOptions::Kind::Reshape;
+      ro.newShape = headsShape;
+      const int shapeT = r.m.addTensor(0, {4}, TfType::I32, name + "_shape", r.ints(headsShape));
+      r.m.addOp(0, TfOp::Reshape, 1, {t, shapeT}, {rs}, ro);
+      return rs;
+    };
+    const int q4 = toTokens(q, "Q");
+    int k4, v4;
+    if (decode)
+    {
+      k4 = cache("Kc", 0x88888888u);
+      v4 = cache("Vc", 0x99999999u);
+    }
+    else
+    {
+      k4 = toTokens(projection("Knew", x, d, d, 0x22222222u), "K");
+      v4 = toTokens(projection("Vnew", x, d, d, 0x33333333u), "V");
+    }
+    const int dsg = r.m.addSubgraph("sdpa");
+    const int dq = r.m.addTensor(dsg, headsShape, act, "q", 0);
+    const int dk = r.m.addTensor(dsg, shdCache, act, "k", 0);
+    const int dv = r.m.addTensor(dsg, shdCache, act, "v", 0);
+    const int dout = attention(dsg, transposeHeads(dsg, dq, hsdShape, "qh"),
+                               transposeHeads(dsg, dk, hsdCache, "kh"), transposeHeads(dsg, dv, hsdCache, "vh"));
+    const int dctx = transposeHeads(dsg, dout, headsShape, "ctx");
+    r.m.setInputs(dsg, {dq, dk, dv});
+    r.m.setOutputs(dsg, {dctx});
+    ctxT = tensor(headsShape, "CtxT");
+    TfOptions co;
+    co.kind = TfOptions::Kind::Composite;
+    co.compositeName = "odml.scaled_dot_product_attention";
+    co.decompositionSubgraph = dsg;
+    co.compositeVersion = 1;
+    co.compositeAttributes = sdpaAttributes(1.0 / std::sqrt((double)Dh));
+    r.m.addOp(0, TfOp::StablehloComposite, 1, {q4, k4, v4}, {ctxT}, co);
   }
-
-  const std::vector<int32_t> scoresShape = {1, (int32_t)H, (int32_t)S, (int32_t)ctx};
-  const int scores = tensor(scoresShape, "Scores");
-  TfOptions bmm;
-  bmm.kind = TfOptions::Kind::BatchMatMul;
-  bmm.adjY = true;
-  r.m.addOp(0, TfOp::BatchMatMul, 1, {qh, kh}, {scores}, bmm);
-  const std::string scaleBytes = litertScalarBytes(act, 1.0f / std::sqrt((float)Dh));
-  r.halfBuffers.push_back(std::vector<uint16_t>((scaleBytes.size() + 1) / 2, 0));
-  std::memcpy(r.halfBuffers.back().data(), scaleBytes.data(), scaleBytes.size());
-  const int scaleT = r.m.addTensor(0, {1}, act, "attn_scale",
-                                   r.m.addBuffer(r.halfBuffers.back().data(), scaleBytes.size()));
-  const int scoresS = tensor(scoresShape, "ScoresS");
-  r.m.addOp(0, TfOp::Mul, mulVersion(fp), {scores, scaleT}, {scoresS}, mulOptions());
-  const int probs = tensor(scoresShape, "P");
-  TfOptions so;
-  so.kind = TfOptions::Kind::Softmax;
-  so.beta = 1.0f;
-  r.m.addOp(0, TfOp::Softmax, 1, {scoresS}, {probs}, so);
-  const int ctxH = tensor(hsdShape, "Ctx");
-  TfOptions bmm2;
-  bmm2.kind = TfOptions::Kind::BatchMatMul;
-  r.m.addOp(0, TfOp::BatchMatMul, 1, {probs, vh}, {ctxH}, bmm2);
-  const int ctxT = tensor(headsShape, "CtxT");
-  r.m.addOp(0, TfOp::Transpose, 1, {ctxH, permHeads}, {ctxT});
   const int ctxF = tensor(xShape, "CtxF");
   {
     TfOptions ro;

@@ -123,11 +123,10 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
 
   auto test = currentDeviceScope->beginTest(
       {"litert_transfer_bw", "LiteRT host transfer bandwidth", "bps", Category::Bandwidth,
-       "How fast a tensor reaches this accelerator and comes back -- the copy "
+       "How fast a tensor reaches this accelerator and comes back: the copy "
        "into LiteRT's tensor buffer, the run, and for the round trip the copy "
-       "out -- which every input and output of a real model pays.  Swept over "
-       "sizes; the trip out is reported at the largest, the round trip at the "
-       "smallest, and the trip back is their difference.",
+       "out.  The trip out is reported at the largest size, the round trip at "
+       "the smallest, and the trip back is their difference.",
        TestShape::Heterogeneous, "direction"});
 
   const char *h2dNote = "Host to accelerator: a tensor handed to LiteRT and one element read "

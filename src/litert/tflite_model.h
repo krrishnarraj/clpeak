@@ -130,7 +130,7 @@ struct TfOptions
     Cast,             // castIn, castOut
     Gelu,             // approximate
     Concatenation,    // axis, act
-    Composite,        // compositeName, decompositionSubgraph, compositeVersion
+    Composite,        // compositeName, decompositionSubgraph, compositeVersion, compositeAttributes
   };
   Kind kind = Kind::None;
 
@@ -152,6 +152,7 @@ struct TfOptions
   std::string compositeName;
   int32_t decompositionSubgraph = -1;
   int32_t compositeVersion = 1;
+  std::vector<uint8_t> compositeAttributes;   // a FlexBuffer map; empty for none
 };
 
 // The finished model.  The bytes live inside `storage` starting at `head`

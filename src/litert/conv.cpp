@@ -52,31 +52,26 @@ struct Shape
 };
 
 const Format kFormats[] = {
-    {LitertFormat::Fp32, "fp32",
-     "FP32 in and out; on the GPU under its fp32 policy."},
+    {LitertFormat::Fp32, "fp32", "In fp32, the GPU under its fp32 policy."},
     {LitertFormat::Fp16, "fp16",
-     "16-bit floats: half-typed tensors on the CPU, the GPU's fp16 policy over "
-     "an fp32 graph with half-stored weights."},
+     "In fp16: half-typed on the CPU, the GPU's fp16 policy over half-stored "
+     "weights."},
     {LitertFormat::Int8Qdq, "int8",
-     "8-bit activations and per-channel 8-bit weights with an 8-bit result -- "
-     "TFLite's full-integer convolution, the operation every mobile NPU is "
-     "rated on.  Measured in ops."},
+     "Full-integer int8 with per-channel weights, the operation every mobile "
+     "NPU is rated on."},
 };
 
 const Shape kShapes[] = {
     {3, false, "conv3x3",
-     "A 3x3 convolution over 256 channels, the shape most vision networks are "
-     "built from and the one accelerators were designed around.  Counted as "
-     "direct-convolution multiplies: a Winograd kernel does far fewer, and "
-     "reads above the matmul peak."},
+     "A 3x3 convolution over 256 channels, the shape vision networks are built "
+     "from, counted as direct multiplies (a Winograd kernel does fewer and can "
+     "read above the matmul peak)."},
     {1, false, "conv1x1",
-     "Arithmetically a matrix multiply at every pixel, so it should land near "
-     "the matmul rows; where it does not, the two shapes reach different "
-     "machinery."},
+     "A 1x1 convolution, arithmetically a matmul at every pixel, so it should "
+     "land near the matmul rows."},
     {3, true, "depthwise3x3",
-     "The 3x3 shape with each channel kept separate, so far less arithmetic "
-     "per value loaded.  Hardware built around dense arrays collapses here, "
-     "which is why mobile networks run slower than their FLOP counts."},
+     "A depthwise 3x3, each channel on its own: far less arithmetic per byte "
+     "loaded, where hardware built around dense arrays collapses."},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
@@ -106,12 +101,10 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
   auto test = currentDeviceScope->beginTest(
       {"litert_conv", "LiteRT convolution peak", "flops", Category::Compute,
-       "2-D convolution rate through LiteRT on this accelerator, three shapes "
-       "at 256 channels in fp32, fp16 and full-integer int8, each swept over "
-       "feature-map size and reported at its best.  Against the matmul rows "
-       "this says whether the accelerator was built for convolution -- mobile "
-       "NPUs were -- and the depthwise row says what it does when the "
-       "arithmetic per byte collapses.",
+       "2-D convolution rate through LiteRT on this accelerator: a 3x3, a 1x1 "
+       "and a depthwise 3x3 at 256 channels, in fp32, fp16 and full-integer "
+       "int8, each swept over feature-map size.  Against the matmul rows it says "
+       "whether the accelerator was built for convolution, as mobile NPUs were.",
        TestShape::Heterogeneous, "format and shape"});
 
   for (const Format &fmt : kFormats)
@@ -257,13 +250,14 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       if (best > 0.0)
       {
         o.description = std::string(v.note) + "  " + fmt.note + "  Fastest at a " + std::to_string(bestSp) +
-                        " by " + std::to_string(bestSp) + " feature map.";
+                        " by " + std::to_string(bestSp) + " feature map";
         if (!kernel.empty())
         {
-          o.description += "  Ran as `" + kernel + "`.";
-          if (plan.integerOps && !litertKernelIsInteger(kernel))
+          o.description += ", as `" + kernel + "`";
+          if (plan.integerOps && litertKernelIsFloatForInteger(kernel, dev.accel))
             o.description += litertFloatKernelNote();
         }
+        o.description += ".";
         test.emit(row, (float)best, o);
       }
       else

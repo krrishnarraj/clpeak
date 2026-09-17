@@ -270,11 +270,12 @@ enum class BuiltinOptionsType : uint8_t
   GeluOptions = 116,
 };
 
-// schema.fbs `union BuiltinOptions2`.
+// schema.fbs `union BuiltinOptions2` (position 21: after nineteen
+// stablehlo.* option tables and the deprecated ReduceWindowOptions).
 enum class BuiltinOptions2Type : uint8_t
 {
   None = 0,
-  StableHLOCompositeOptions = 22,
+  StableHLOCompositeOptions = 21,
 };
 
 // Writes one options table; returns its offset and which union it belongs
@@ -429,11 +430,15 @@ OptionsRef writeOptions(Builder &b, const TfOptions &o)
   case K::Composite:
   {
     // StableHLOCompositeOptions: name(0), decomposition_subgraph_index(1),
-    // composite_attributes(2), composite_attributes_format(3), version(4)
+    // composite_attributes(2), composite_attributes_format(3) (FLEXBUFFERS =
+    // 0, the default), version(4)
     const uint32_t name = b.createString(o.compositeName);
+    const uint32_t attrs = o.compositeAttributes.empty() ? 0 : b.createVector(o.compositeAttributes);
     b.startTable();
     b.addOffset(0, name);
     b.addScalar<int32_t>(1, o.decompositionSubgraph, 0);
+    if (attrs)
+      b.addOffset(2, attrs);
     b.addScalar<int32_t>(4, o.compositeVersion, 0);
     r.off = b.endTable();
     r.type2 = BuiltinOptions2Type::StableHLOCompositeOptions;

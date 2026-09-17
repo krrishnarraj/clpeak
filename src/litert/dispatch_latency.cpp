@@ -92,10 +92,10 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
 
   auto test = currentDeviceScope->beginTest(
       {"litert_dispatch_latency", "LiteRT dispatch latency", "s", Category::Latency,
-       "The fixed cost of handing this accelerator one piece of work: a "
-       "one-operator graph, a matmul small enough that its arithmetic is "
-       "negligible, and creating a compiled model in the first place -- the "
-       "toll every inference pays before any arithmetic happens.",
+       "The fixed cost of handing this accelerator one piece of work and taking "
+       "the result back: a one-operator graph, a 256-cubed matmul whose "
+       "arithmetic is negligible, and creating a compiled model in the first "
+       "place.",
        TestShape::Heterogeneous, "what is submitted"});
 
   std::string trivialIn;
@@ -105,9 +105,8 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
                         forceIters, specifiedIters);
 
   const std::string trivialNote =
-      "One elementwise multiply over 64 values: the smallest graph that can be "
-      "expressed, so its whole time is the runtime's and the accelerator's "
-      "per-inference overhead.";
+      "One elementwise multiply over 64 values, the smallest graph there is: its "
+      "whole time is per-inference overhead.";
   if (trivial.perRunUs > 0.0)
     test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), trivialNote.c_str());
   else
@@ -117,20 +116,16 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
   Run matmul = measure(rt, dev, plan, litertMatMulModel(plan, kSmallMatMul, kSmallMatMul, kSmallMatMul),
                        scalar, warmupCount, forceIters, specifiedIters);
   const std::string mmNote =
-      "A 256-cubed matmul with its operands resident: 34 MFLOP, well under a "
-      "millisecond on anything here, so the time above the trivial row is "
-      "what a real kernel adds in setup -- buffers, synchronisation, a "
-      "reduction -- rather than arithmetic.";
+      "A 256-cubed matmul with resident operands, 34 MFLOP: the time above the "
+      "trivial row is what a real kernel adds in setup, not arithmetic.";
   if (matmul.perRunUs > 0.0)
     test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str());
   else
     test.skip("matmul_256", matmul.status, matmul.error, mmNote);
 
   const std::string createNote =
-      "Building a compiled model for the one-operator graph: what an "
-      "application pays at start-up before its first inference.  On an NPU "
-      "this is the vendor compiler, and it is why cold start and steady state "
-      "are such different numbers there.";
+      "Compiling the one-operator graph, what an application pays at start-up "
+      "before its first inference; on an NPU this is the vendor compiler.";
   if (trivial.createUs > 0.0)
     test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote.c_str());
   else

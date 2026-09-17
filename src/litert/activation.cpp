@@ -68,15 +68,13 @@ struct Variant
 
 const Variant kVariants[] = {
     {LitertActivation::Silu, "silu",
-     "x times sigmoid(x) -- the gate in the feed-forward network of most "
-     "current language models, two operators in a .tflite."},
+     "x times sigmoid(x), the feed-forward gate of most language models."},
     {LitertActivation::Softmax, "softmax",
-     "Softmax across the row, at the heart of attention: two passes and a "
-     "maximum before it can divide."},
+     "Softmax across each row, the heart of attention: a maximum and two "
+     "passes before it can divide."},
     {LitertActivation::LayerNorm, "layernorm",
-     "Mean and variance across each row, then rescale -- every transformer "
-     "layer does this at least twice, and a .tflite spells it as seven "
-     "operators."},
+     "Mean, variance and rescale across each row, seven operators in a "
+     ".tflite; every transformer layer does it at least twice."},
 };
 
 struct Run
@@ -145,11 +143,10 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
   auto test = currentDeviceScope->beginTest(
       {"litert_activation", "LiteRT activation throughput", "bps", Category::Bandwidth,
        "How fast this accelerator applies the operations between the matrix "
-       "multiplies -- the feed-forward gate, softmax, layer normalisation -- "
-       "as the bandwidth each achieves over a transformer-shaped tensor, at "
-       "the same three working-set sizes the resident-weight rows use.  Each "
-       "is net of reading, scaling and reducing the same tensor with nothing "
-       "applied, so it is the operation's own cost.",
+       "multiplies -- the SiLU gate, softmax, layer norm -- as the bandwidth "
+       "each achieves over a transformer-shaped tensor.  Each is net of a "
+       "reference graph that reads, scales and reduces the same tensor with "
+       "nothing applied.",
        TestShape::Heterogeneous, "operation and working set"});
 
   struct Ref
@@ -167,8 +164,8 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
         break;
       const Size &sz = kSizes[si];
       const std::string metric = std::string(v.label) + "_" + sz.label;
-      const std::string note = std::string(sz.label) + " of activations -- " + v.note +
-                               "  Net of the read, scale and reduction around it.";
+      const std::string note = std::string(v.note) + "  Over " + sz.label +
+                               " of activations, net of the read, scale and reduction around it.";
       // The working set is sized in the bytes the accelerator streams, half
       // on every accelerator under this plan; `graphBytes` is what the model
       // holds, which is the same now that the GPU's constants are stored as
@@ -233,9 +230,9 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       const double refStreamBps = 3.0 * (double)sz.bytes / (ref.run.us * 1.0e-6);
       std::string row = note;
       if (bps > 2.0 * refStreamBps)
-        row += "  Faster than this accelerator streamed the same tensor in the reference "
-               "graph, so the operation was fused into the passes around it or the working "
-               "set stayed in cache: this is the rate of its arithmetic, not of memory.";
+        row += "  Faster than the reference graph streamed the same tensor, so the "
+               "operation was fused into the passes around it or stayed in cache: the rate "
+               "of its arithmetic, not of memory.";
       test.emit(metric, (float)bps, row.c_str());
     }
   }
