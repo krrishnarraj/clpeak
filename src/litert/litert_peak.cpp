@@ -350,7 +350,7 @@ int LitertPeak::runAll()
     std::vector<DeviceProp> details = {
         {"Accelerator", litertAccelName(dev.accel)},
         {"Type", dev.typeStr},
-        {"LiteRT", "ABI " + rt->abiVersion + (rt->path.empty() ? "" : " (" + rt->path + ")")},
+        {"LiteRT", "ABI " + rt->abiVersion},
     };
     if (!dev.vendor.empty())
       details.push_back({dev.accel == LitertAccel::Gpu ? "GPU backend" : "NPU vendor", dev.vendor});
@@ -451,7 +451,7 @@ BackendInventory LitertPeak::enumerate()
     inv.unavailableReason = why.empty() ? "LiteRT library (libLiteRt) not found" : why;
     return inv;
   }
-  inv.info = "LiteRT ABI " + rt->abiVersion + (rt->path.empty() ? "" : ", " + rt->path);
+  inv.info = "LiteRT ABI " + rt->abiVersion;
   inv.available = true;
 
   std::vector<std::pair<litert_device_info_t, std::string>> skipped;
