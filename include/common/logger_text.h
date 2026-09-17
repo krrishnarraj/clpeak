@@ -32,8 +32,9 @@ public:
     explicit LoggerText(std::ostream &out = std::cout,
                         std::string compareFileName = "",
                         bool describe = false,
-                        bool verbose = false)
-        : logger(std::move(compareFileName)), out(out), describe(describe), verbose(verbose) {}
+                        bool verbose = false,
+                        bool mirrorToRunLog = false)
+        : logger(std::move(compareFileName), mirrorToRunLog), out(out), describe(describe), verbose(verbose) {}
 
 protected:
     void onEvent(const LogEvent &e) override;

@@ -1,6 +1,8 @@
 #include <common/logger.h>
 #include <common/run_log.h>
 #include <cassert>
+#include <iomanip>
+#include <sstream>
 
 namespace {
 
@@ -48,8 +50,9 @@ std::string trimmed(const std::string &s)
 
 // ── Constructor ────────────────────────────────────────────────────────────
 
-logger::logger(std::string compareFileName)
-    : compareEnabled(!compareFileName.empty())
+logger::logger(std::string compareFileName, bool mirrorToRunLog)
+    : compareEnabled(!compareFileName.empty()),
+      mirrorToRunLog(mirrorToRunLog)
 {
     // While this logger lives, it is the scope every diagnostic in the
     // process is stamped with, and the channel that shows it.
@@ -146,7 +149,135 @@ void logger::log(clpeak::LogLevel level, std::string message, std::string source
     // Recorded before it is shown, so what the sidecar holds when a render
     // crashes the process is the line that was being rendered.
     if (RunLog *run = RunLog::current()) run->record(e.log);
+    dispatchEvent(e);
+}
+
+void logger::recordTranscriptLine(const LogEvent &e, const std::string &message)
+{
+    if (message.empty()) return;
+    RunLog *run = RunLog::current();
+    if (!run) return;
+    LogEntry entry;
+    entry.level       = clpeak::LogLevel::Info;
+    entry.backend     = e.backend;
+    entry.device      = e.device;
+    entry.deviceIndex = e.deviceIndex;
+    entry.test        = e.testKey();
+    entry.message     = message;
+    run->record(entry);
+}
+
+void logger::dispatchEvent(const LogEvent &e)
+{
     onEvent(e);
+    if (mirrorToRunLog)
+        mirrorEvent(e);
+}
+
+void logger::mirrorEvent(const LogEvent &e)
+{
+    switch (e.kind)
+    {
+    case LogEvent::Kind::BackendBegin:
+        recordTranscriptLine(e, "Backend: " + e.backend);
+        break;
+
+    case LogEvent::Kind::DeviceBegin:
+    {
+        if (e.showPlatformLine)
+        {
+            std::string pline = e.platformIndex >= 0
+                ? "Platform " + std::to_string(e.platformIndex) + ": " + e.platform
+                : "Platform: " + e.platform;
+            recordTranscriptLine(e, "  " + pline);
+        }
+        std::string dline = e.deviceIndex >= 0
+            ? "Device " + std::to_string(e.deviceIndex) + ": " + e.device
+            : "Device: " + e.device;
+        recordTranscriptLine(e, "  " + dline);
+        break;
+    }
+
+    case LogEvent::Kind::TestBegin:
+    {
+        std::string header = e.testTitle;
+        if (!e.testVariant.empty()) header += " [" + e.testVariant + "]";
+        recordTranscriptLine(e, "    " + header);
+        break;
+    }
+
+    case LogEvent::Kind::Metric:
+    {
+        UnitInfo unit;
+        if (e.metric.hasUnit)
+        {
+            unit.symbol   = e.metric.unit;
+            unit.quantity = e.metric.quantity;
+        }
+        else
+        {
+            unit.symbol   = e.unit;
+            unit.quantity = e.quantity;
+        }
+        Direction direction = (e.metric.direction == Direction::FromUnit)
+                                  ? e.direction
+                                  : e.metric.direction;
+
+        std::ostringstream line;
+        line << "      " << e.metric.displayLabel() << " : ";
+        if (e.metric.status == ResultStatus::Ok)
+        {
+            const ScaledValue sv = formatScaledValue(e.metric.value, unit);
+            line << sv.text;
+            if (!sv.unit.empty())
+                line << " " << sv.unit;
+
+            // Optional baseline delta, using the same scaling as the row.
+            if (compareEnabled)
+            {
+                const std::string key = baselineKey(e.backend, e.platform,
+                                                    e.deviceKey(), e.testKey(),
+                                                    e.metric.id);
+                auto it = baseline.find(key);
+                if (it != baseline.end())
+                {
+                    const double base  = it->second;
+                    const double delta = (base != 0.0)
+                                             ? 100.0 * (e.metric.value - base) / base
+                                             : 0.0;
+                    const char   sign     = (delta >= 0.0) ? '+' : '-';
+                    const double absDelta = (delta < 0.0) ? -delta : delta;
+                    const bool   improved = (direction == Direction::LowerIsBetter)
+                                                ? (delta < 0.0)
+                                                : (delta > 0.0);
+                    const ScaledValue svb = formatScaledValue(base, unit);
+                    line << "  (was " << svb.text;
+                    if (!svb.unit.empty())
+                        line << " " << svb.unit;
+                    line << ", " << sign << std::fixed
+                         << std::setprecision(1) << absDelta << "%";
+                    if (absDelta >= 0.05)
+                        line << (improved ? " better" : " worse");
+                    line << ")";
+                }
+            }
+        }
+        else
+        {
+            line << "[" << statusString(e.metric.status) << "] " << e.metric.reason;
+        }
+        recordTranscriptLine(e, line.str());
+        break;
+    }
+
+    case LogEvent::Kind::TestSkippedAll:
+        recordTranscriptLine(e, std::string("      [") + statusString(e.status) +
+                                  "] " + e.reason);
+        break;
+
+    default:
+        break;  // TestEnd/DeviceEnd/BackendEnd/Log: nothing to mirror here.
+    }
 }
 
 // ── BackendScope ───────────────────────────────────────────────────────────
@@ -160,7 +291,7 @@ logger::BackendScope::BackendScope(logger *log, const std::string &name)
     log->curDevice.clear();
     log->curDriver.clear();
     log->contextDepth = 1;
-    log->onEvent(log->makeEvent(LogEvent::Kind::BackendBegin));
+    log->dispatchEvent(log->makeEvent(LogEvent::Kind::BackendBegin));
 }
 
 logger::BackendScope::~BackendScope()
@@ -181,7 +312,7 @@ void logger::BackendScope::end()
     if (closed) return;
     closed = true;
     assert(log->contextDepth == 1);
-    log->onEvent(log->makeEvent(LogEvent::Kind::BackendEnd));
+    log->dispatchEvent(log->makeEvent(LogEvent::Kind::BackendEnd));
     log->curBackend.clear();
     log->contextDepth = 0;
 }
@@ -239,7 +370,7 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
     e.platformIndex    = spec.platform_index;
     e.deviceIndex      = spec.device_index;
     e.showPlatformLine = (log->curPlatform != log->curBackend);
-    log->onEvent(e);
+    log->dispatchEvent(e);
 }
 
 logger::DeviceScope::~DeviceScope()
@@ -260,7 +391,7 @@ void logger::DeviceScope::end()
     if (closed) return;
     closed = true;
     assert(log->contextDepth == 2);
-    log->onEvent(log->makeEvent(LogEvent::Kind::DeviceEnd));
+    log->dispatchEvent(log->makeEvent(LogEvent::Kind::DeviceEnd));
     log->curDevice.clear();
     log->curDriver.clear();
     log->curPlatform.clear();
@@ -276,7 +407,7 @@ void logger::closeOpenTest()
         t->durationS += std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - testOpenedAt)
                             .count();
-    onEvent(makeEvent(LogEvent::Kind::TestEnd));
+    dispatchEvent(makeEvent(LogEvent::Kind::TestEnd));
     curTestIdx   = kNoIndex;
     contextDepth = 2;
     curTestSeq   = 0;          // any live TestScope for it is now stale
@@ -355,7 +486,7 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
 
     LogEvent e = log->makeEvent(LogEvent::Kind::TestBegin);
     e.reopened   = reopened;
-    log->onEvent(e);
+    log->dispatchEvent(e);
 }
 
 logger::TestScope::~TestScope()
@@ -397,7 +528,7 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
 
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));
-    log->onEvent(e);
+    log->dispatchEvent(e);
 }
 
 void logger::TestScope::emit(std::string metric, float value,
@@ -422,7 +553,7 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
 
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));
-    log->onEvent(e);
+    log->dispatchEvent(e);
 }
 
 void logger::TestScope::skip(std::string metric, ResultStatus status,
@@ -453,7 +584,7 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
 
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));
-    log->onEvent(e);
+    log->dispatchEvent(e);
 }
 
 void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,
@@ -476,7 +607,7 @@ void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,
         e.metricNames.push_back(metric);
     }
 
-    log->onEvent(e);
+    log->dispatchEvent(e);
 }
 
 void logger::TestScope::end()

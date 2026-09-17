@@ -13,8 +13,9 @@
 class LoggerFfi : public logger
 {
 public:
-    LoggerFfi(ClpeakEventCallback onEventCb, void *userData)
-        : onEventCb(onEventCb), userData(userData) {}
+    LoggerFfi(ClpeakEventCallback onEventCb, void *userData,
+              bool mirrorToRunLog = false)
+        : logger("", mirrorToRunLog), onEventCb(onEventCb), userData(userData) {}
 
 protected:
     void onEvent(const LogEvent &e) override;

@@ -121,8 +121,12 @@ int main(int argc, char **argv)
             continue;
 
         auto peak = be.create();
+        // --verbose with -o: the base logger mirrors a canonical transcript
+        // of backend/device/test headers and metric rows onto the run's log,
+        // so the file's `log` reads as the run looked live.
+        const bool mirror = opts.verbose && opts.enableOutput;
         peak->log.reset(
-            new LoggerText(std::cout, opts.compareFile, opts.describe, opts.verbose));
+            new LoggerText(std::cout, opts.compareFile, opts.describe, opts.verbose, mirror));
         peak->applyOptions(opts);
         int status = peak->runAll();
         combined.append(peak->log->doc);
