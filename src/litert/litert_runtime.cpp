@@ -5,9 +5,11 @@
 #include <common/common.h>
 #include <common/dynlib.h>
 
+#include <filesystem>
 #include <map>
 #include <mutex>
 #include <string>
+#include <system_error>
 
 #include "litert/c/internal/litert_runtime_c_api.h"   // LITERT_RUNTIME_ABI_VERSION
 
@@ -100,15 +102,19 @@ static void loadRuntime()
 
   // A library the user named is the library to measure, and nothing else
   // will do: falling through to whatever else is installed would report one
-  // runtime's numbers under another's name.
+  // runtime's numbers under another's name.  Absolute before the loader
+  // sees it: a relative module path finds the file itself but not the
+  // sibling libraries beside it (see clpeak::absoluteModulePath).
   const char *named = g_override.empty() ? nullptr : g_override.c_str();
+  const std::string absNamed =
+      named ? clpeak::absoluteModulePath(named) : std::string();
 
   void *lib = nullptr;
   if (named)
   {
-    lib = clpeak::dynOpen({named});
+    lib = clpeak::dynOpen({absNamed.c_str()});
     if (!lib)
-      g_loadError = std::string("could not load LiteRT from '") + named + "'";
+      g_loadError = std::string("could not load LiteRT from '") + absNamed + "'";
   }
   else
   {
@@ -151,7 +157,7 @@ static void loadRuntime()
     return;
 
   cur.lib = lib;
-  cur.path = named ? named : resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
+  cur.path = named ? absNamed : resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
   if (cur.path.empty())
     cur.path = resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
   cur.libraryDir = dirOf(cur.path);
@@ -178,7 +184,18 @@ void litertSetLibraryOverride(const std::string &path)
 void litertSetNpuDirOverride(const std::string &dir)
 {
   std::lock_guard<std::mutex> lock(g_mutex);
-  g_npuDir = dir;
+  if (dir.empty())
+  {
+    g_npuDir.clear();
+    return;
+  }
+  // Absolute: LiteRT's own loader lists and loads from this directory, and
+  // a relative one would name a different place after any directory change.
+  // A directory is always a filesystem path (never a loader search token),
+  // so this applies even to a bare name.
+  std::error_code ec;
+  const std::string abs = std::filesystem::absolute(dir, ec).string();
+  g_npuDir = ec ? dir : abs;
 }
 
 std::string litertNpuDirOverride()

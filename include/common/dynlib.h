@@ -22,11 +22,21 @@
 // exit.
 
 #include <initializer_list>
+#include <string>
 
 namespace clpeak {
 
 // Try each candidate name in order; return the first that loads, or nullptr.
 void *dynOpen(std::initializer_list<const char *> names);
+
+// Absolute form of a user-named module path for the OS loader.  A relative
+// module path finds the file itself against the current directory but not
+// the sibling libraries beside it, so on Windows the same file fails to
+// load by relative path and succeeds by absolute one (the --onnx-winml
+// steered runtime proved it).  Bare sonames ("libfoo.so") and Apple
+// @-paths are loader search tokens rather than filesystem paths and pass
+// through untouched, as does empty.
+std::string absoluteModulePath(const char *name);
 
 // Resolve a symbol; nullptr if missing.
 void *dynSym(void *lib, const char *name);

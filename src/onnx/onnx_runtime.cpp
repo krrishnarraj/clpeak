@@ -177,7 +177,15 @@ static std::string winmlDefaultRuntime()
   if (hint.empty())
     return "";
   const std::string beside = hint + "\\onnxruntime.dll";
-  return GetFileAttributesA(beside.c_str()) == INVALID_FILE_ATTRIBUTES ? "" : beside;
+  if (GetFileAttributesA(beside.c_str()) == INVALID_FILE_ATTRIBUTES)
+    return "";
+  // Absolute: a relative module path finds the file itself against the
+  // current directory but not the sibling libraries beside it, so the same
+  // file fails to load by relative path and succeeds by absolute one.
+  // Every other path LoadLibrary gets here is absolute already.
+  std::error_code ec;
+  const std::string absBeside = std::filesystem::absolute(beside, ec).string();
+  return ec ? beside : absBeside;
 }
 #endif
 
@@ -218,6 +226,12 @@ static void loadRuntime()
   // name of the one that was asked for, which is the one mistake this setting
   // exists to prevent.
   const char *named = g_override.empty() ? nullptr : g_override.c_str();
+  // Absolute before the loader sees it: a relative module path finds the
+  // file itself but not the sibling libraries beside it, so the same file
+  // fails by relative path and loads by absolute one (see
+  // clpeak::absoluteModulePath).
+  const std::string absNamed =
+      named ? clpeak::absoluteModulePath(named) : std::string();
   // The default search names no file, except when the Windows ML catalog
   // steered it to the runtime beside itself: that one is recorded, so the
   // status can say which runtime a catalog-driven run measured.
@@ -227,12 +241,12 @@ static void loadRuntime()
   if (named)
   {
 #ifdef _WIN32
-    searchBesideRuntime(named);
+    searchBesideRuntime(absNamed);
 #endif
-    lib = clpeak::dynOpen({named});
+    lib = clpeak::dynOpen({absNamed.c_str()});
     if (!lib)
-      g_loadError = std::string("could not load onnxruntime from '") + named +
-                    "'";
+      g_loadError = std::string("could not load onnxruntime from '") +
+                    absNamed + "'";
   }
   else
   {
@@ -322,7 +336,7 @@ static void loadRuntime()
   // Deliberately not dlclosed for the rest of the process: see the note on
   // onnxSetLibraryOverride() in the header.
   cur.lib  = lib;
-  cur.path = named ? named : steered;
+  cur.path = named ? absNamed : steered;
   g_rt     = cur;
   g_cache[key] = cur;
   g_loaded = true;

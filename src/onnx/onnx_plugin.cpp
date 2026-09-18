@@ -5,6 +5,7 @@
 #include "onnx_winml.h"
 
 #include <common/common.h>
+#include <common/dynlib.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -100,6 +101,12 @@ uint64_t onnxEpConfigGeneration()
 
 void onnxSetEpLibraries(std::vector<OnnxEpLibrary> libs)
 {
+  // Absolute before the runtime's own loader sees them: a relative plugin
+  // path has the same sibling-resolution problem as a relative runtime one
+  // (see clpeak::absoluteModulePath).  Covers the CLI and the FFI setter;
+  // the catalog-appended libraries are absolute already.
+  for (auto &lib : libs)
+    lib.path = clpeak::absoluteModulePath(lib.path.c_str());
   std::lock_guard<std::mutex> lock(g_cfgMutex);
   bool same = libs.size() == g_libs.size();
   for (size_t i = 0; same && i < libs.size(); i++)
