@@ -362,10 +362,17 @@ class _CrashLogTile extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 9),
-            Row(
+            // A Wrap, not a Row with an inflexible metadata Text: date +
+            // line count + version alone can outgrow a phone, and then the
+            // metadata sits on its own line instead of overflowing.
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
-                  child: Wrap(
+                if (log.backends.isNotEmpty || log.verbose)
+                  Wrap(
                     spacing: 5,
                     runSpacing: 5,
                     children: [
@@ -374,8 +381,6 @@ class _CrashLogTile extends StatelessWidget {
                       if (log.verbose) const CTag(text: 'verbose'),
                     ],
                   ),
-                ),
-                const SizedBox(width: 10),
                 Text(
                   [
                     formatDate(log.startedAt),
@@ -384,7 +389,6 @@ class _CrashLogTile extends StatelessWidget {
                   ].join('  ·  '),
                   style: t.micro,
                 ),
-                const SizedBox(width: 4),
               ],
             ),
           ],
@@ -588,10 +592,16 @@ class _RunTile extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 9),
-              Row(
+              // Same Wrap as the unfinished-run tile above: the metadata
+              // Text must be allowed its own line on a narrow screen.
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Expanded(
-                    child: Wrap(
+                  if (summary.backends.isNotEmpty)
+                    Wrap(
                       spacing: 5,
                       runSpacing: 5,
                       children: [
@@ -599,8 +609,6 @@ class _RunTile extends StatelessWidget {
                           CTag(text: backend, upper: false),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 10),
                   Text(
                     [
                       formatDate(summary.startedAt),
@@ -610,7 +618,6 @@ class _RunTile extends StatelessWidget {
                     ].join('  ·  '),
                     style: t.micro,
                   ),
-                  const SizedBox(width: 4),
                 ],
               ),
             ],
