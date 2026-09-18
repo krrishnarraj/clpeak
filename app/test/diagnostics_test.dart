@@ -1,7 +1,8 @@
 // The diagnostic stream end to end on the Dart side: a `log` event decodes
-// into the same entry the file holds, the results view shows the problems
-// outright and folds the rest, a run-log sidecar left behind by a crash is
-// adopted by history, and the verbose setting round-trips.
+// into the same entry the file holds, the results view shows a counts-only
+// diagnostics panel (the full log lives in the exported file), a run-log
+// sidecar left behind by a crash is adopted by history, and the verbose
+// setting round-trips.
 //
 // Pure Dart — no native bridge needed.
 import 'dart:convert';
@@ -90,7 +91,7 @@ void main() {
   });
 
   group('results diagnostics section', () {
-    testWidgets('problems are shown outright; the rest is folded',
+    testWidgets('diagnostics are counts-only; contents stay in the file',
         (tester) async {
       final doc = RunDocument();
       doc.runFor('CPU', 'CPU', 'M1 Pro', '');
@@ -109,15 +110,11 @@ void main() {
       await tester.pump();
 
       expect(find.text('DIAGNOSTICS'), findsOneWidget);
-      expect(find.text('1 warning, 2 lines'), findsOneWidget);
-      expect(find.textContaining('CPU providers only'), findsOneWidget);
-      // Debug lines wait behind the fold.
+      expect(find.text('2 lines'), findsOneWidget);
+      // No per-line contents are rendered — the exported file holds them.
+      expect(find.textContaining('CPU providers only'), findsNothing);
       expect(find.textContaining('STREAM array'), findsNothing);
-      expect(find.text('FULL LOG (2)'), findsOneWidget);
-
-      await tester.tap(find.text('FULL LOG (2)'));
-      await tester.pump();
-      expect(find.textContaining('STREAM array'), findsOneWidget);
+      expect(find.text('FULL LOG (2)'), findsNothing);
     });
 
     testWidgets('a run with no diagnostics shows no section', (tester) async {

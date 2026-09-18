@@ -66,12 +66,13 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Diagnostics? → the document's `log` (`LogEntry` in
   `lib/src/model/run_document.dart`, one stream for the whole run, built from
   `log` events live and read straight off the file in history).
-  `_DiagnosticsSection` at the foot of `results_body.dart` shows warnings and
-  errors outright — they are the only record of *why* something is absent —
-  and folds the full log beneath; the file a user exports has it all.
-  Settings → "Verbose diagnostics" (`settings_screen.dart`) turns debug-level
-  recording on for every run and links to the issue tracker, which is how a
-  problem on a phone reaches a maintainer
+  `_DiagnosticsSection` at the foot of `results_body.dart` is counts-only
+  (total lines + a pointer at the exported file): rendering per-line rows
+  made the GUI sluggish on phones during heavy runs, so the file a user
+  exports is where the contents are read.  Settings → "Verbose diagnostics"
+  (`settings_screen.dart`) turns debug-level recording on for every run and
+  links to the issue tracker, which is how a problem on a phone reaches a
+  maintainer
 - A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
   streams `<id>.clpeak.log` while a run is in flight and removes it once the
   document is written, so one left behind is a crashed run's only record.
