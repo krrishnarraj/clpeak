@@ -412,7 +412,7 @@ budgets.
   `libLiteRtClGlAccelerator.so` 3.1 MB); its manifest's `uses-native-library`
   entries merge into ours.  NPU dispatch and compiler-plugin shims come from
   the release's `litert_npu_runtime_libraries_jit.zip` via
-  `tool/fetch_litert_npu.sh qualcomm|google_tensor|all` into
+  `tools/fetch_litert_npu.sh qualcomm|google_tensor|all` into
   `src/main/jniLibs/` (git-ignored).  LiteRT lists the dispatch directory
   and loads the first `libLiteRtDispatch_*` it finds (`litert_dispatch.cc`,
   still so on main), so with `all` staged the lib dir is not what it is
@@ -471,7 +471,7 @@ budgets.
   bucket, `storage.googleapis.com/litert/binaries/<version>/{ios_arm64,
   ios_sim_arm64}/{libLiteRt,libLiteRtMetalAccelerator}.dylib`, ~8 MB each
   (the `litert_prebuilts.zip` beside them carries only the accelerator).
-  `tool/build_ios_native.sh` fetches the version named by the vendored
+  `tools/build_ios_native.sh` fetches the version named by the vendored
   headers' tag (`third_party/litert/README.md`), caches them under
   `build-ios/litert/<version>/`, stages them in `app/ios/clpeak_native/
   embed-{device,simulator}/`, and the Runner's embed phase copies the
@@ -514,7 +514,7 @@ budgets.
   `nm -gU libLiteRt.dylib` -- and REQUIRED only if every path uses it.
 - A new recipe: `litert_model.h` declares, `litert_model.cpp` builds
   through `Recipe`; keep the leading batch dimension and the runtime scalar.
-- Update `third_party/litert` with `tool/update_litert_headers.sh <tag>`.
+- Update `third_party/litert` with `tools/update_litert_headers.sh <tag>`.
 - Descriptions -- a test's and a row's, with whatever the row appends
   (fastest size, kernel, caveat) -- stay within three sentences; the
   reasoning behind a row belongs here, not in the row.

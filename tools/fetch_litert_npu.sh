@@ -1,7 +1,7 @@
 #!/bin/sh
 # fetch_litert_npu.sh — stage LiteRT's NPU dispatch libraries for the Android app.
 #
-#   tool/fetch_litert_npu.sh qualcomm|google_tensor|all [tag]
+#   tools/fetch_litert_npu.sh qualcomm|google_tensor|all [tag]
 #                                       tag defaults to the one pinned in
 #                                       third_party/litert/README.md
 #
@@ -54,7 +54,7 @@ case "$vendor" in
     google_tensor) vendors=google_tensor ;;
     all)           vendors="qualcomm google_tensor" ;;
     *)
-        echo "usage: tool/fetch_litert_npu.sh qualcomm|google_tensor|all [tag]" >&2
+        echo "usage: tools/fetch_litert_npu.sh qualcomm|google_tensor|all [tag]" >&2
         exit 2 ;;
 esac
 module_of() {

@@ -202,7 +202,7 @@ executable -- and every certified provider it makes ready joins the
 plugin set under the catalog's own name (which is the registration name
 Qualcomm's plugin requires, "QNNExecutionProvider").  Uncertified
 providers are listed in the status and not registered, as Windows ML
-itself does.  The DLL is not shipped with clpeak: `tool/fetch_winml.ps1`
+itself does.  The DLL is not shipped with clpeak: `tools/fetch_winml.ps1`
 downloads Microsoft's NuGet package and stages its `runtimes/win-<arch>/
 native/` DLLs under `build/winml/<arch>/`, and with a directory given to
 `--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll` beside the
@@ -1999,7 +1999,7 @@ behaviour before the operator.
   for ONNX.
 - Adding EP support → `kEpTable` (`onnx_peak.cpp`) **and** `epOptionsFor()`
   (`onnx_session.cpp`). Both, or the EP enumerates but refuses to run.
-- Bumping the vendored header → `tool/update_onnx_headers.sh <tag>` (never by
+- Bumping the vendored header → `tools/update_onnx_headers.sh <tag>` (never by
   hand: it refetches all three files from one release tag and rewrites the
   recorded pin). Then check `kMinApiVersion` still names the oldest runtime
   worth supporting.

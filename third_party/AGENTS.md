@@ -15,7 +15,7 @@ Both are consumed by `src/ffi/android/CMakeLists.txt`. Run
 | Directory | Purpose |
 |-----------|---------|
 | `onnxruntime/` | ONNX Runtime C API headers (`onnxruntime_c_api.h` + its two includes), copied from one upstream release tag. Header-only on purpose: the ONNX backend dlopens the runtime, so no library or SDK is needed to build it. The pinned `ORT_API_VERSION` is the compatibility contract `src/onnx/onnx_runtime.cpp` negotiates down from |
-| `litert/` | LiteRT C API headers (`litert/c/`, the include closure of what `src/litert` uses, from one release's `litert_cc_sdk.zip`) plus a stand-in for the configure-generated `build_config.h`. Header-only for the same reason; `tool/update_litert_headers.sh <tag>` refreshes them |
+| `litert/` | LiteRT C API headers (`litert/c/`, the include closure of what `src/litert` uses, from one release's `litert_cc_sdk.zip`) plus a stand-in for the configure-generated `build_config.h`. Header-only for the same reason; `tools/update_litert_headers.sh <tag>` refreshes them |
 
 Deliberately **not** submodules: `microsoft/onnxruntime` is a whole runtime,
 so a `--depth 1` clone costs ~814 MB (10,866 files) for three headers, and

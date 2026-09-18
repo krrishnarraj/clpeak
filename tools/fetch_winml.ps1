@@ -1,6 +1,6 @@
 # fetch_winml.ps1 -- stage the Windows ML runtime for clpeak's --onnx-winml.
 #
-#   tool\fetch_winml.ps1 [-Version 2.3.42] [-Arch x64|arm64] [-Dest <dir>]
+#   tools\fetch_winml.ps1 [-Version 2.3.42] [-Arch x64|arm64] [-Dest <dir>]
 #
 # Windows ML (Windows 11 24H2+) installs the vendor execution providers --
 # Qualcomm QNN, Intel OpenVINO, AMD Vitis AI, NVIDIA TensorRT for RTX -- from

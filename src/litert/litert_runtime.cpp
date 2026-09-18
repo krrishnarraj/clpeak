@@ -119,7 +119,7 @@ static void loadRuntime()
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
         // iOS: the app's Frameworks directory, where the Runner's embed phase
         // puts Google's libLiteRt.dylib next to its Metal accelerator
-        // (tool/build_ios_native.sh stages both).  dyld expands
+        // (tools/build_ios_native.sh stages both).  dyld expands
         // @executable_path in a dlopen path, and dladdr below turns it into
         // the real directory the accelerator is then searched in.  Nothing
         // outside the signed bundle would load, so this is the whole list.

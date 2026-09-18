@@ -23,7 +23,7 @@
 # other platform; --no-litert leaves the backend out, and CLPEAK_IOS_LITERT_DIR
 # points at a local directory holding ios_arm64/ and ios_sim_arm64/ instead.
 #
-# Usage: tool/build_ios_native.sh [--no-vulkan] [--no-onnx] [--no-litert]
+# Usage: tools/build_ios_native.sh [--no-vulkan] [--no-onnx] [--no-litert]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

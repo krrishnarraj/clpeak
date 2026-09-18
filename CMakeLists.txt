@@ -382,7 +382,7 @@ include(CPack)
 # clpeak-gui-dmg` after the normal build, which CI does on tag builds.
 if(APPLE AND TARGET clpeak-gui)
     add_custom_target(clpeak-gui-dmg
-        COMMAND "${CMAKE_CURRENT_LIST_DIR}/tool/make_dmg.sh"
+        COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/make_dmg.sh"
                 "${CMAKE_BINARY_DIR}/clpeak-gui/clpeak-gui.app"
                 "${CMAKE_BINARY_DIR}/${_clpeak_pkg}.dmg"
                 "clpeak ${CLPEAK_VERSION_STR}"

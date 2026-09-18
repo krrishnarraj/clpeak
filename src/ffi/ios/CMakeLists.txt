@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 project(clpeak_ffi_ios LANGUAGES C CXX OBJCXX)
 
 # Standalone superproject that builds clpeak_ffi as an iOS dynamic framework.
-# Driven by tool/build_ios_native.sh, which configures it twice (device +
+# Driven by tools/build_ios_native.sh, which configures it twice (device +
 # simulator) and combines the products into clpeak_ffi.xcframework for the
 # Flutter runner's local pod (app/ios/clpeak_native/).
 #
@@ -89,7 +89,7 @@ add_subdirectory(${CLPEAK_ROOT}/src/coreml ${CMAKE_BINARY_DIR}/coreml)
 # baked in -- which is also why --onnx-lib and the settings screen's library
 # picker do nothing here: there is no second runtime to choose.
 #
-# tool/build_ios_native.sh fetches and unpacks the pod archive, then passes
+# tools/build_ios_native.sh fetches and unpacks the pod archive, then passes
 # its path in.  Point CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK at an existing
 # onnxruntime.xcframework to use your own build; the backend is left out
 # entirely when it is absent.
@@ -120,7 +120,7 @@ endif()
 # Dynamic, as on every other platform: only the vendored C headers are needed
 # to build, and libLiteRt.dylib is dlopen'd from the app's Frameworks
 # directory at run time, where the Runner's embed phase puts it together with
-# libLiteRtMetalAccelerator.dylib (tool/build_ios_native.sh fetches Google's
+# libLiteRtMetalAccelerator.dylib (tools/build_ios_native.sh fetches Google's
 # iOS builds of both, device and simulator, and stages them under
 # app/ios/clpeak_native/embed-{device,simulator}/).  iOS loads a library from
 # inside the signed bundle, which is the one place --litert-lib and the

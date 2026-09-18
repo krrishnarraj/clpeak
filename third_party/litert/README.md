@@ -24,13 +24,13 @@ installation, and the shipped binary has no link-time dependency on it.
 
 `google-ai-edge/LiteRT` is the whole runtime plus the TFLite converter: a
 `--depth 1` clone is well over a gigabyte to deliver 33 files. The release
-zip is 280 KB and `tool/update_litert_headers.sh` refetches it.
+zip is 280 KB and `tools/update_litert_headers.sh` refetches it.
 
 ## Updating
 
 ```sh
-tool/update_litert_headers.sh --check    # pinned tag vs latest upstream
-tool/update_litert_headers.sh v2.3.0     # refetch the closure, rewrite the pin
+tools/update_litert_headers.sh --check    # pinned tag vs latest upstream
+tools/update_litert_headers.sh v2.3.0     # refetch the closure, rewrite the pin
 ```
 
 The script downloads the release's `litert_cc_sdk.zip`, recomputes the

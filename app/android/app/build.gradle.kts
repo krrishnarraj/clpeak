@@ -14,7 +14,7 @@ plugins {
 // License (com.qualcomm.qti:qnn-runtime), so it is not in the default APK.
 // Two stacks reach the NPU through it, and the flag brings both:
 //  - LiteRT, through its Qualcomm shims (libLiteRtDispatch_Qualcomm.so and
-//    the compiler plugin, from tool/fetch_litert_npu.sh) which must sit
+//    the compiler plugin, from tools/fetch_litert_npu.sh) which must sit
 //    beside it -- built against QAIRT 2.47 for LiteRT 2.2.0 (the release's
 //    fetch_qualcomm_library.sh names it);
 //  - ONNX Runtime, through Qualcomm's plugin execution provider
@@ -30,7 +30,7 @@ plugins {
 // Unverified on a Snapdragon: the first tester's run is the proof.
 val clpeakQnn = (project.findProperty("clpeakQnn")?.toString() ?: "false") == "true"
 
-// NPU shims staged by tool/fetch_litert_npu.sh (any vendor, or all: the
+// NPU shims staged by tools/fetch_litert_npu.sh (any vendor, or all: the
 // backend picks the SoC's vendor at launch and stages its shims in a
 // directory of their own).  LiteRT finds a dispatch library by listing the
 // directory it is told (litert_dispatch.cc), as the backend does to pick,
@@ -126,7 +126,7 @@ dependencies {
     // needs on Android 12+ (libOpenCL, Qualcomm's libcdsprpc, the Google
     // Tensor and MediaTek NPU system libraries) and the merger brings them
     // into ours.  NPU dispatch libraries are not on Maven: see
-    // tool/fetch_litert_npu.sh, which stages them under src/main/jniLibs.
+    // tools/fetch_litert_npu.sh, which stages them under src/main/jniLibs.
     // The AAR's Kotlin/Java surface (and the `litert-api` it depends on,
     // which declares the same namespace and trips AGP 9's uniqueness
     // check) is unused: only the .so files are wanted.

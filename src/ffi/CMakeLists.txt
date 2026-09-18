@@ -36,7 +36,7 @@ endif()
 
 # Apple platforms ship clpeak_ffi as a framework: macOS embeds it directly
 # into the .app (clpeak-gui target below); iOS wraps device+simulator builds
-# into an xcframework consumed by a local CocoaPods pod (tool/build_ios_native.sh).
+# into an xcframework consumed by a local CocoaPods pod (tools/build_ios_native.sh).
 # On iOS CMake produces the shallow framework layout automatically.
 if(APPLE)
     set_target_properties(clpeak_ffi PROPERTIES

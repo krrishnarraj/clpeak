@@ -42,7 +42,7 @@ shared library / Apple framework.
 - Android build? → `android/CMakeLists.txt` (standalone superproject used by
   `app/android/app/build.gradle.kts` externalNativeBuild; OpenCL stub +
   Vulkan headers from `third_party/`)
-- iOS build? → `ios/CMakeLists.txt` + `tool/build_ios_native.sh` (device +
+- iOS build? → `ios/CMakeLists.txt` + `tools/build_ios_native.sh` (device +
   simulator frameworks → `app/ios/clpeak_native/clpeak_ffi.xcframework`;
   Vulkan/MoltenVK env-gated on the LunarG iOS SDK; ONNX Runtime linked in
   from the static pod; LiteRT's dylibs fetched and staged for the Runner to

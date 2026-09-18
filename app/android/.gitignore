@@ -14,5 +14,5 @@ key.properties
 **/*.jks
 
 # LiteRT NPU dispatch / compiler-plugin shims and vendor runtimes staged by
-# tool/fetch_litert_npu.sh: fetched per release, never committed.
+# tools/fetch_litert_npu.sh: fetched per release, never committed.
 /app/src/main/jniLibs/

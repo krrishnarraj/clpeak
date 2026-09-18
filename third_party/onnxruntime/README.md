@@ -23,13 +23,13 @@ installation, and the shipped binary has no link-time dependency on it.
 `--depth 1` clone measures ~814 MB (243 MB pack + 10,866 files) to deliver
 the three files above, and every clone and CI job that inits submodules
 would pay it. There is no upstream headers-only repo to point at. Checked-in
-copies cost ~400 KB and `tool/update_onnx_headers.sh` keeps updating cheap.
+copies cost ~400 KB and `tools/update_onnx_headers.sh` keeps updating cheap.
 
 ## Updating
 
 ```sh
-tool/update_onnx_headers.sh --check      # pinned tag vs latest upstream
-tool/update_onnx_headers.sh v1.30.0      # refetch all three, rewrite the pin
+tools/update_onnx_headers.sh --check      # pinned tag vs latest upstream
+tools/update_onnx_headers.sh v1.30.0      # refetch all three, rewrite the pin
 ```
 
 The script fetches every file before writing any, so a bad tag cannot leave

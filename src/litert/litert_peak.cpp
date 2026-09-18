@@ -57,7 +57,7 @@ const NpuVendor kNpuVendors[] = {
 // Android app's libraries stay inside the APK ("base.apk!/lib/arm64-v8a",
 // which the linker opens but no directory iterator can) -- each vendor's
 // library is tried by name, the way LiteRT itself will open it.  More than
-// one is normal: tool/fetch_litert_npu.sh stages every vendor's shim, and
+// one is normal: tools/fetch_litert_npu.sh stages every vendor's shim, and
 // only the one for the silicon underneath will bring up a device.
 std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
 {
