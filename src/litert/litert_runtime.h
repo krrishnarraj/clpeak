@@ -109,7 +109,10 @@
 
 struct LitertApi
 {
-#define CLPEAK_LITERT_DECL(name) decltype(&name) name = nullptr;
+// Pin the global lookup with `::`: without it `&name` inside the class
+// would re-resolve to the member being declared in the completed scope,
+// which GCC rejects as "declaration changes meaning" (Clang accepts).
+#define CLPEAK_LITERT_DECL(name) decltype(&::name) name = nullptr;
   CLPEAK_LITERT_REQUIRED(CLPEAK_LITERT_DECL)
   CLPEAK_LITERT_OPTIONAL(CLPEAK_LITERT_DECL)
 #undef CLPEAK_LITERT_DECL

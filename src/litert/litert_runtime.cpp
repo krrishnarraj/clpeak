@@ -71,13 +71,13 @@ static bool resolveApi(void *lib, LitertApi &api, const char *what)
 {
   std::string missing;
 #define CLPEAK_LITERT_RESOLVE_REQ(name)                                        \
-  api.name = reinterpret_cast<decltype(&name)>(clpeak::dynSym(lib, #name));   \
+  api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));   \
   if (!api.name)                                                              \
     missing += missing.empty() ? #name : std::string(", ") + #name;
   CLPEAK_LITERT_REQUIRED(CLPEAK_LITERT_RESOLVE_REQ)
 #undef CLPEAK_LITERT_RESOLVE_REQ
 #define CLPEAK_LITERT_RESOLVE_OPT(name)                                        \
-  api.name = reinterpret_cast<decltype(&name)>(clpeak::dynSym(lib, #name));
+  api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));
   CLPEAK_LITERT_OPTIONAL(CLPEAK_LITERT_RESOLVE_OPT)
 #undef CLPEAK_LITERT_RESOLVE_OPT
   if (!missing.empty())
