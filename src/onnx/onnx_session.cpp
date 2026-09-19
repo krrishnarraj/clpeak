@@ -47,6 +47,28 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
   return std::string();
 }
 
+std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
+                                    bool qdq)
+{
+  // TensorRT for RTX on a per-tensor float4 QDQ matmul: GetCapability takes
+  // the whole graph and the engine build that follows dies with an access
+  // violation (exit 0xC0000005 -- NvTensorRTRTX EP 0.3.0 from the Windows ML
+  // package 2.30.43, ONNX Runtime 1.27.1, RTX 5060), after the fp32, fp16,
+  // bf16 and fp8_e4m3 rows had built and run on the same provider.  It is
+  // the graph classic TensorRT *declines*, with "CHECK(output_quantize_axis_
+  // .has_value()) failed": a float4 path that wants a quantization axis,
+  // which only block scaling has.  The RTX library does not survive its own
+  // check.  The block-scaled float4 rows (nvfp4, fp4_weight) are a different
+  // graph -- the one that check asks for -- and are still put to it.
+  if (ep.providerKey == "NvTensorRTRTXExecutionProvider" &&
+      dtype == ONNX_DT_FLOAT4E2M1 && qdq)
+    return "TensorRT for RTX takes the process down (an access violation in "
+           "its engine build) on a per-tensor float4 QDQ matmul instead of "
+           "declining it as TensorRT does -- its float4 path wants a block "
+           "scale, which the nvfp4 row has -- so this graph is not sent to it";
+  return std::string();
+}
+
 // Device loss, latched.  Written from ORT's logger thread and from whatever
 // thread a status came back on, read by runAll between tests.
 static std::atomic<bool> g_deviceLost{false};

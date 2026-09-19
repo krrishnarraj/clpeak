@@ -17,7 +17,7 @@ backend.
 - Looking for how the runtime library is found/loaded, or how `--onnx-lib` picks one? → `onnx_runtime.cpp` + `onnx_runtime.h`
 - Looking for plugin providers (`--onnx-ep`), their registration on the environment and the OrtEpDevice enumeration? → `onnx_plugin.cpp` + `onnx_plugin.h`
 - Looking for the Windows ML catalog (`--onnx-winml`), which installs vendor providers from the Store? → `onnx_winml.cpp` + `onnx_winml.h`
-- Looking for session creation / per-EP options / the CPU-fallback guard? → `onnx_session.cpp`
+- Looking for session creation / per-EP options / the CPU-fallback guard / the crash fence? → `onnx_session.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the convolution benchmark? → `conv.cpp`
@@ -34,7 +34,7 @@ backend.
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
-| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`) |
+| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`, `onnxSetWinml`), `onnxRegisterEpLibraries()` (called by `onnxEnv()` on every fresh environment), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
@@ -691,6 +691,25 @@ have. Its float4 path wants block scaling, not one scale for the whole tensor �
 which is to say it wants NVFP4, and a symmetric per-tensor E2M1 graph is not a
 shape it implements. That is worth knowing before attempting NVFP4 rather than
 after.
+
+**TensorRT for RTX does not decline that graph; it crashes on it.** The same
+32³ per-tensor E2M1 QDQ probe through the NvTensorRTRTX plugin (EP 0.3.0 from
+the Windows ML package 2.30.43, ONNX Runtime 1.27.1, RTX 5060, 2026-09-18)
+passes `GetCapability` whole — "Whole graph will run on TensorRT execution
+provider" — and the engine build that follows ends the process with an access
+violation (`ERRORLEVEL` -1073741819, 0xC0000005), after fp32, fp16, bf16 and
+fp8_e4m3 had built and run on the same provider. Nothing after it ran: not
+nvfp4, not the block, not the other two providers' rows. The RTX library is
+the same Myelin float4 path without the check that made classic TensorRT
+refuse. A crash inside a vendor JIT cannot be caught, so `fp4_e2m1` is never
+built for that provider: `onnxProviderFenceReason()` in `onnx_session.cpp`,
+asked by the gemm probe before it builds a variant (and every test consults
+that cache) and again by the accuracy row, which builds the same graph in its
+input/output shape. The row reports the fence as its reason. It is the first
+per-provider fence in this backend and is kept to the one graph proven fatal;
+the block-scaled float4 rows (`nvfp4`, `fp4_weight`) are the shape TensorRT's
+check asks for and are still put to the RTX provider — the next Windows run
+decides them.
 
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph

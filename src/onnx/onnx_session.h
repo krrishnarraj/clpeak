@@ -122,6 +122,20 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 // the constant-folding guard in gemm.cpp reports.
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 
+// Empty when `ep` can be handed a `dtype` graph -- quantized in and out with
+// a per-tensor scale when `qdq` -- otherwise the reason it must not be,
+// phrased for a skip row.
+//
+// Every other refusal in this backend is learned by asking: the provider
+// builds the graph or says why not, and the row reports its words.  This is
+// for the graphs a provider does not decline but takes the process down with,
+// where asking is the fault -- the answer arrives as an access violation, and
+// every row after it, on every provider, is never run.  Checked before the
+// gemm probe builds a variant, which is what every test consults, and again
+// by the accuracy row, which builds the same graph in its own shape.
+std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
+                                    bool qdq);
+
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
 // provider accepts clpeak's options for this target (an OpenVINO target

@@ -330,6 +330,14 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       test.skip(v.label, ResultStatus::Unsupported, why, o.description);
       continue;
     }
+    // And the fence, for the same reason: this graph is the probe's in
+    // another shape, and a provider that crashes on it must not be handed
+    // it whatever the cache says.
+    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq); !why.empty())
+    {
+      test.skip(v.label, ResultStatus::Unsupported, why, o.description);
+      continue;
+    }
 
     // Paired suppression: gemm's ladder proved this provider folded the
     // resident operands for this label, so its rate was refused as

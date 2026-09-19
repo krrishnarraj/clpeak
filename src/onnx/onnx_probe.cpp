@@ -138,6 +138,16 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       out[v.label] = r;
       return;
     }
+    // A graph this provider crashes on rather than declines is not built,
+    // here or anywhere downstream of this cache.
+    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq); !why.empty())
+    {
+      CLPEAK_VLOG("onnx-probe[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
+                  v.label, why.c_str());
+      r.reason = why;
+      out[v.label] = r;
+      return;
+    }
 
     const bool needsFusion = v.qdq || v.blockSize > 0 || v.nvfp4;
     const std::vector<OnnxLiveShape> shapes = liveShapesFor(v);
