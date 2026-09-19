@@ -59,7 +59,7 @@ jobs:
             cuda: true
 
           - name: Linux arm64 CUDA
-            runner: ubuntu-26.04-arm
+            runner: ubuntu-24.04-arm
             artifact: clpeak-linux-arm64-cuda
             binary: build/clpeak
             suffix: cuda
