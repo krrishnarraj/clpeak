@@ -327,7 +327,9 @@ with `CreateEnvWithCustomLogger` (`onnx_session.cpp`, `ortLogMessage`), so a
 provider explaining why it declined a graph, or which nodes fell back to the
 CPU, lands on the run log at ORT's own severity — errors and warnings in
 every dump, INFO as debug under `--verbose` (minus the per-pass
-`GraphTransformer` narration). The Env is opened at INFO once per runtime
+`GraphTransformer` narration, and the TensorRT for RTX plugin's per-run
+`CudaMempoolAllocator::DoAlloc`/`DoFree` pair, which it logs at INFO on
+every `Run()`). The Env is opened at INFO once per runtime
 and the callback applies the current run's verbosity, because the GUI can
 toggle `--verbose` between runs of one process.
 

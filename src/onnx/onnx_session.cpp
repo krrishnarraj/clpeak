@@ -164,12 +164,18 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
     return;
   // The optimizer narrates every pass over every session -- forty
   // "GraphTransformer X modified: 0" lines per session, none of them about
-  // the device -- and clpeak creates sessions by the hundred.  Everything
-  // else INFO says (provider registration, partitioning, the session
-  // options) is kept.
+  // the device -- and clpeak creates sessions by the hundred.  The TensorRT
+  // for RTX plugin's pool allocator does the same per *run*: a
+  // "CudaMempoolAllocator::DoAlloc" and a "::DoFree" at INFO for every
+  // Run(), which over a ladder is tens of thousands of lines saying the
+  // output buffer came and went.  Everything else INFO says (provider
+  // registration, partitioning, the session options, the pool's creation
+  // and the arena's growth) is kept.
   if (level == clpeak::LogLevel::Debug && message &&
       (std::strncmp(message, "GraphTransformer ", 17) == 0 ||
-       std::strncmp(message, "Running graph optimizations", 27) == 0))
+       std::strncmp(message, "Running graph optimizations", 27) == 0 ||
+       std::strncmp(message, "CudaMempoolAllocator::DoAlloc", 29) == 0 ||
+       std::strncmp(message, "CudaMempoolAllocator::DoFree", 28) == 0))
     return;
   std::string text;
   if (category && *category && std::strcmp(category, "onnxruntime") != 0)
