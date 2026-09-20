@@ -575,7 +575,10 @@ int LitertPeak::runAll()
     // how much came back.
     unsigned long fdsBefore = 0, fdsAfter = 0, fdLimit = 0;
     const bool fdsKnown = clpeak::openFileDescriptors(fdsBefore, fdLimit);
-    litertResetEnvironment(*rt, dev.accel);
+    {
+      clpeak::ScopedConsoleMute mute;
+      litertResetEnvironment(*rt, dev.accel);
+    }
     if (fdsKnown)
     {
       (void)clpeak::openFileDescriptors(fdsAfter, fdLimit);
