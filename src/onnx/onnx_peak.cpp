@@ -447,6 +447,57 @@ int OnnxPeak::runAll()
     // included, in Core ML's compile cache, which nothing evicts; see
     // include/common/coreml_cache.h.  A no-op everywhere else.
     clpeak::purgeCoreMLCompileCache();
+
+    // What a plugin provider holds on the environment goes with its device.
+    // Registering a plugin library makes ORT create a shared allocator for
+    // each of its devices on the OrtEnv (ORT 1.23+), from the factory's own
+    // implementation -- for a GPU provider a device-memory pool -- and that
+    // allocator outlives every session.  Sessions are what clpeak releases;
+    // the pool is what a provider that runs after it sees.  On an RTX 5060
+    // (ORT 1.30, the CUDA provider as a plugin), every TensorRT graph with a
+    // matmul or a convolution failed to build after the plugin's tests, and
+    // the built-in CUDA provider after that lost its largest points, where
+    // the same providers run clean alone -- the signature of a device whose
+    // memory is spoken for.  Creating the shared allocator again replaces
+    // the one registration made (the API's own "create/replace"), so the
+    // old one is destroyed, returning what it held, and the device is left
+    // exactly as registration left it for a later run.  A memory type the
+    // factory does not provide is skipped; a refusal is logged, not fatal.
+    if (ep.epDevicePtr && rt->apiVersion >= 23 && rt->api->CreateSharedAllocator &&
+        rt->api->EpDevice_MemoryInfo)
+    {
+      if (OrtEnv *env = onnxEnv(*rt))
+      {
+        const OrtDeviceMemoryType kinds[] = {OrtDeviceMemoryType_DEFAULT,
+                                             OrtDeviceMemoryType_HOST_ACCESSIBLE};
+        for (OrtDeviceMemoryType kind : kinds)
+        {
+          if (!rt->api->EpDevice_MemoryInfo(ep.epDevicePtr, kind))
+            continue;
+          OrtStatus *st = rt->api->CreateSharedAllocator(env, ep.epDevicePtr, kind,
+                                                         OrtDeviceAllocator, nullptr, nullptr);
+          if (st)
+            CLPEAK_VLOG("onnx[%s]: could not replace the shared %s allocator: %s\n",
+                        ep.displayName.c_str(),
+                        kind == OrtDeviceMemoryType_DEFAULT ? "device" : "host-accessible",
+                        onnxStatusText(*rt, st).c_str());
+          else
+            CLPEAK_VLOG("onnx[%s]: replaced the shared %s allocator, releasing what it held\n",
+                        ep.displayName.c_str(),
+                        kind == OrtDeviceMemoryType_DEFAULT ? "device" : "host-accessible");
+        }
+      }
+    }
+
+    // The descriptor budget after each provider: a runtime that leaks them
+    // (LiteRT's WebGPU accelerator does) starves everything that follows,
+    // and this is the line that shows it happening.
+    {
+      unsigned long fds = 0, limit = 0;
+      if (clpeak::openFileDescriptors(fds, limit))
+        CLPEAK_VLOG("onnx[%s]: %lu open file descriptors%s\n", ep.displayName.c_str(), fds,
+                    limit ? (" (limit " + std::to_string(limit) + ")").c_str() : "");
+    }
   }
 
   return 0;

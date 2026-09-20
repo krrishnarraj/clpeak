@@ -562,16 +562,47 @@ int LitertPeak::runAll()
       phase(Benchmark::KernelLatency, &LitertPeak::runDispatchLatency);
     }
 
+    // The accelerator's environment goes with its device.  Nothing needs it
+    // once the device's tests are done -- a later run rebuilds it -- and
+    // while it lives it holds the accelerator: the GPU's memory, the Dawn or
+    // OpenCL device, and on Linux the file descriptors those keep.  A WebGPU
+    // device that died by exhausting the process's descriptors ("Ran out of
+    // file descriptors", VK_ERROR_OUT_OF_HOST_MEMORY) had, when its
+    // environment lived on, taken every ONNX GPU provider that ran after it
+    // in the same process down with it.  Tearing the environment down is
+    // the one thing that can hand any of that back, so it happens here for
+    // a lost device and a healthy one alike, and the descriptor count says
+    // how much came back.
+    unsigned long fdsBefore = 0, fdsAfter = 0, fdLimit = 0;
+    const bool fdsKnown = clpeak::openFileDescriptors(fdsBefore, fdLimit);
+    litertResetEnvironment(*rt, dev.accel);
+    if (fdsKnown)
+    {
+      (void)clpeak::openFileDescriptors(fdsAfter, fdLimit);
+      CLPEAK_VLOG("litert[%s]: environment released; %lu open file descriptors, %lu before"
+                  "%s\n",
+                  dev.displayName.c_str(), fdsAfter, fdsBefore,
+                  fdLimit ? (" (limit " + std::to_string(fdLimit) + ")").c_str() : "");
+    }
+
     // Emitted after the mute closes, so it reaches the console: a device lost
     // mid-run leaves any rates already printed for it untrustworthy, and this
     // says so rather than letting a clean table imply they are sound.
     if (deviceLost)
+    {
+      std::string fds;
+      if (fdsKnown)
+        fds = "; the process holds " + std::to_string(fdsAfter) + " open file descriptors" +
+              (fdLimit ? " of a limit of " + std::to_string(fdLimit) : std::string()) +
+              " after releasing its environment (" + std::to_string(fdsBefore) +
+              " before), which is what every later backend in this process has left";
       CLPEAK_LOG(Warning,
                  "LiteRT %s: the accelerator reported it was lost during the run "
                  "(a Vulkan/WebGPU file-descriptor or host-memory exhaustion on "
                  "this platform); any rates shown for it are unreliable and its "
-                 "remaining tests were skipped",
-                 dev.displayName.c_str());
+                 "remaining tests were skipped%s",
+                 dev.displayName.c_str(), fds.c_str());
+    }
 
     currentDeviceScope = nullptr;
   }

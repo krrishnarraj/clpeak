@@ -355,6 +355,21 @@ Raising `RLIMIT_NOFILE` delays the loss but the desktop WebGPU delegate stays
 unreliable (it also silently no-ops some rungs without losing the device), so
 clpeak flags rather than trusts it.
 
+**The loss does not stay inside this backend.**  Its environment -- the
+Dawn device and whatever Vulkan objects and descriptors it leaked -- used
+to live until the process ended, and on the RTX 5060 box a run that lost
+the WebGPU device first then had every ONNX GPU provider fail after it:
+the descriptors were gone for everyone.  `runAll()` now tears down each
+device's environment as soon as its tests are done
+(`litertResetEnvironment`), lost or not: nothing needs it afterwards, a
+later run rebuilds it (`environmentFor`), and destroying the device is the
+only thing that can return what it holds.  The count of open descriptors
+before and after goes to the verbose log for every device, and into the
+loss warning, so the next run of that scenario says whether the teardown
+gave the process its descriptors back or whether the delegate leaked them
+past its own device -- in which case nothing short of a new process helps,
+and the WebGPU device should run last, or not at all.
+
 ## Reference readings, M1 Pro (LiteRT 2.2.0, macOS 26)
 
 One run, 2026-09-16, after the fill/sync/fp16-constant changes; CPU rows

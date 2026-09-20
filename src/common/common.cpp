@@ -253,8 +253,12 @@ void populate(float *ptr, uint64_t N)
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <sys/sysctl.h>
+#include <dirent.h>
+#include <sys/resource.h>
 #else
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/resource.h>
 #endif
 
 namespace clpeak {
@@ -291,6 +295,41 @@ uint64_t memoryBudget(uint64_t ceiling, unsigned fraction)
     return ceiling;
   const uint64_t share = total / fraction;
   return share < ceiling ? share : ceiling;
+}
+
+bool openFileDescriptors(unsigned long &used, unsigned long &limit)
+{
+  used = 0;
+  limit = 0;
+#if defined(_WIN32)
+  return false;
+#else
+  // The kernel's own list of this process's descriptors, one entry each:
+  // /proc/self/fd on Linux, /dev/fd on the BSDs and macOS.  Counting them
+  // costs one directory read, where probing every descriptor below the
+  // limit would cost a syscall per number (a million on macOS).
+  const char *dirs[] = {"/proc/self/fd", "/dev/fd"};
+  bool counted = false;
+  for (const char *d : dirs)
+  {
+    DIR *dir = opendir(d);
+    if (!dir)
+      continue;
+    unsigned long n = 0;
+    while (struct dirent *e = readdir(dir))
+      if (e->d_name[0] != '.')
+        n++;
+    closedir(dir);
+    // opendir held one descriptor of its own while we counted.
+    used = n > 0 ? n - 1 : 0;
+    counted = true;
+    break;
+  }
+  struct rlimit rl;
+  if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+    limit = (unsigned long)rl.rlim_cur;
+  return counted;
+#endif
 }
 
 } // namespace clpeak

@@ -120,6 +120,27 @@ log level — six lines of it against a 1.23 runtime, before any test runs.
 
 ## Plugin providers: a library registered on the environment
 
+**What a plugin holds on the environment is replaced after its run.**
+Registering a plugin library makes ORT create a shared allocator on the
+OrtEnv for each device the library serves (1.23+, `CreateSharedAllocatorImpl`
+at registration), from the factory's own implementation -- for a GPU
+provider, a device-memory pool -- and that allocator outlives every session.
+On the RTX 5060 (ORT 1.30 with the CUDA provider built as a plugin and
+passed through `--onnx-ep`) a run over plugin CUDA, then the built-in
+TensorRT, then the built-in CUDA provider had every TensorRT graph with a
+matmul or a convolution fail to build (its elementwise graphs, transfer
+rows and trivial dispatch ran) and the built-in CUDA provider lose its
+largest points, where each provider runs clean on its own: the signature
+of device memory spoken for by something that had finished.  `runAll()`
+therefore calls `CreateSharedAllocator` again for each of a plugin
+device's memory types once its tests are done -- the API's own
+create/replace, so the allocator registration made is destroyed, returning
+what it held, and the device is left as registration left it for a later
+run.  Whether that is the whole story is still to be confirmed on that box
+with `--verbose -o`: the log carries the session errors TensorRT gave, and
+the open-descriptor count after every provider, which is the other thing
+a dead provider can have run out of (see the LiteRT backend's WebGPU loss).
+
 A provider no longer has to be compiled into the runtime.  Since ONNX
 Runtime 1.22 a separately shipped shared library exporting
 `CreateEpFactories` can be registered on the environment by path

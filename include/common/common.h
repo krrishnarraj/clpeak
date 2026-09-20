@@ -350,6 +350,14 @@ uint64_t systemMemoryBytes();
 // on modest hardware rather than the most a big machine could manage.
 uint64_t memoryBudget(uint64_t ceiling, unsigned fraction = 4);
 
+// How many file descriptors this process holds open, and its soft limit
+// (0 when unlimited or unknown).  False where the count cannot be read
+// (Windows).  A vendor runtime that leaks descriptors -- LiteRT's WebGPU
+// accelerator on Linux exhausts them and is lost -- takes every later
+// backend in the process down with it, and this is how a run says so
+// instead of leaving the later failures to look like their own.
+bool openFileDescriptors(unsigned long &used, unsigned long &limit);
+
 } // namespace clpeak
 
 // ---------------------------------------------------------------------------
