@@ -1224,13 +1224,27 @@ CoremlProgram coremlTransferModel(int spec, CoremlTransfer dir, int64_t rows, in
     p.output("y", CML_FP16, {rows, N});
     return p;
   }
+  // One row of the result, sliced, not a reduction over all of them: a
+  // reduce along 8192 rows is a pass the Neural Engine runs at ~20 GB/s,
+  // slower than the copy back the round trip is measured against, and on
+  // macOS 27 the whole-result graph came out *faster* than the reduced one
+  // (3004 against 3492 us at 16 MB) -- the trip back could not be separated
+  // and the round trip was inflated by the reduction it did not do.  A
+  // slice reads one row.
+  auto sliceRow = [&](const std::string &out, const std::string &in)
+  {
+    p.op("slice_by_index",
+         {{"x", in}, {"begin", p.constInts(out + "_b", {0, 0})},
+          {"end", p.constInts(out + "_e", {1, (int32_t)N})}},
+         {out, CML_FP16, {1, N}});
+  };
   if (dir == CoremlTransfer::Resident && resultScaled)
   {
-    reduceMax(p, "r", "y", {0}, true, CML_FP16, {1, N});
+    sliceRow("r", "y");
     p.op("mul", {{"x", "r"}, {"y", "s"}}, {"out", CML_FP16, {1, N}});
   }
   else
-    reduceMax(p, "out", "y", {0}, true, CML_FP16, {1, N});
+    sliceRow("out", "y");
   p.output("out", CML_FP16, {1, N});
   return p;
 }
@@ -1306,10 +1320,20 @@ CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh)
   p.op("transpose", {{"x", "Qr"}, {"perm", permHeads}}, {"Qh", act, {H, S, Dh}});
 
   // ---- Attention ---------------------------------------------------------
-  // Decode reads a constant cache [H, ctx, Dh]; prefill builds K/V from this
-  // pass.  The cache is stored in `act` unless the int8 row asks otherwise,
-  // in which case it is dequantized on the way into attention -- a weight
+  // Decode reads a constant cache; prefill builds K/V from this pass.  The
+  // cache is stored in `act` unless the int8 row asks otherwise, in which
+  // case it is dequantized on the way into attention -- a weight
   // decompression, which is how Core ML treats any constant.
+  //
+  // The key's layout follows the attention spelling.  The fused op takes
+  // keys as [H, ctx, Dh] and that is how a converted model stores its
+  // cache.  The explicit spelling stores the key already transposed,
+  // [H, Dh, ctx], so the score matmul needs no transpose at run time --
+  // the ONNX backend's layout, and what an author spelling attention out
+  // would do: transposing the cache per token is a pass over it, and on
+  // the M1 Pro's Neural Engine that pass was the whole difference between
+  // the two backends' decode rows (4.5 against 3.4 ms at 8192 of context).
+  const bool keyTransposed = !sh.fusedAttention && !sh.int8Kv;
   std::string Kh, Vh;
   if (decode)
   {
@@ -1337,7 +1361,10 @@ CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh)
     }
     else
     {
-      p.constTensor("Kc", act, {H, ctx, Dh}, coremlFillFloats(act, H * ctx * Dh, 0x88888888u, mag));
+      if (keyTransposed)
+        p.constTensor("Kc", act, {H, Dh, ctx}, coremlFillFloats(act, H * ctx * Dh, 0x88888888u, mag));
+      else
+        p.constTensor("Kc", act, {H, ctx, Dh}, coremlFillFloats(act, H * ctx * Dh, 0x88888888u, mag));
       p.constTensor("Vc", act, {H, ctx, Dh}, coremlFillFloats(act, H * ctx * Dh, 0x99999999u, mag));
     }
     Kh = "Kc";
@@ -1346,7 +1373,11 @@ CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh)
   else
   {
     p.op("reshape", {{"x", "Knew"}, {"shape", shHeads}}, {"Kr", act, {S, H, Dh}});
-    p.op("transpose", {{"x", "Kr"}, {"perm", permHeads}}, {"Kh", act, {H, S, Dh}});
+    if (keyTransposed)
+      p.op("transpose", {{"x", "Kr"}, {"perm", p.constInts("perm_kt", {1, 2, 0})}},
+           {"Kh", act, {H, Dh, S}});
+    else
+      p.op("transpose", {{"x", "Kr"}, {"perm", permHeads}}, {"Kh", act, {H, S, Dh}});
     p.op("reshape", {{"x", "Vnew"}, {"shape", shHeads}}, {"Vr", act, {S, H, Dh}});
     p.op("transpose", {{"x", "Vr"}, {"perm", permHeads}}, {"Vh", act, {H, S, Dh}});
     Kh = "Kh";
@@ -1362,10 +1393,15 @@ CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh)
   }
   else
   {
-    p.op("transpose", {{"x", Kh}, {"perm", p.constInts("perm_kt", {0, 2, 1})}},
-         {"KT", act, {H, Dh, ctx}});
+    std::string KT = Kh;
+    if (!keyTransposed)
+    {
+      p.op("transpose", {{"x", Kh}, {"perm", p.constInts("perm_kt", {0, 2, 1})}},
+           {"KT", act, {H, Dh, ctx}});
+      KT = "KT";
+    }
     p.op("matmul",
-         {{"x", "Qh"}, {"y", "KT"}, {"transpose_x", p.constBool("s_tx", false)},
+         {{"x", "Qh"}, {"y", KT}, {"transpose_x", p.constBool("s_tx", false)},
           {"transpose_y", p.constBool("s_ty", false)}},
          {"Scores", act, {H, S, ctx}});
     p.op("mul", {{"x", "Scores"}, {"y", p.constFloat("scale", act, 1.0f / std::sqrt((float)Dh))}},

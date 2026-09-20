@@ -34,12 +34,13 @@ backend.
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
-| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built |
+| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built |
+| `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`, `onnxSetWinml`), `onnxRegisterEpLibraries()` (called by `onnxEnv()` on every fresh environment), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
-| `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
+| `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
@@ -437,12 +438,78 @@ graph the EP cannot take **fails session creation** and the row reports
 `Unsupported` with the runtime's own message instead of a wrong number.
 
 Limits worth knowing: the guard is enforced at the ORT partitioning level.
-An EP that accepts a node and then falls back *internally* (CoreML choosing
-CPU over the ANE; QNN dropping from HTP to the DSP) is invisible to ORT and
-to clpeak. Two cross-checks close most of that gap: the CPU EP row — always
-enumerated, always last — should be far below any accelerator row, and the
-`onnx-numeric-error` fp32 row exposes an EP that took an fp32 graph and
-computed it at lower precision (see below).
+An EP that accepts a node and then falls back *internally* (QNN dropping
+from HTP to the DSP) is invisible to ORT and to clpeak.  Two cross-checks
+narrow that gap: the CPU EP row — always enumerated, always last — should
+be far below any accelerator row, and the `onnx-numeric-error` fp32 row
+exposes an EP that took an fp32 graph and computed it at lower precision
+(see below).
+
+**They did not close it for Core ML, and the placement guard exists because
+of what they let through.**  Core ML has no Neural-Engine-only mode
+(`CPUAndNeuralEngine` is the strictest request) and moves an operation the
+ANE cannot take, or one its planner judges too small to send, onto the CPU
+without a word — and on Apple silicon that CPU path (BNNS on the AMX units)
+is *faster* than ORT's CPU EP at everything, so "accelerator row ≫ CPU-EP
+row" held for numbers that were CPU numbers.  Compared against the native
+Core ML backend, whose `MLComputePlan` guard refuses exactly these, the M1
+Pro run of 2026-09-19 had published under "Apple CoreML (Neural Engine)":
+the fp32 matmul at 2.37 TFLOPS (the Core ML CPU unit's 2.36), every fp32
+convolution and block row, the 8 and 32 MB resident-tensor rungs (the ANE
+is never given a GEMV that small), the dispatch rows (a 64-value multiply
+never leaves the CPU), and the fp16 64-token prefill at 190 GFLOPS — a
+plan of 26 operations, all `MLCPUComputeDevice`, all costed 0.000000.
+Worse, `onnxStreamDtype` had chosen fp32 for the provider because fp32
+"streamed faster" — it did, on the CPU — and so every activation and
+resident-tensor row had moved to the CPU with it (softmax 152 GB/s where
+the ANE does 18).
+
+The guard (`onnx_coreml_plan.{h,cpp}`, applied in `onnxCreateSession`):
+the CoreML provider is registered with `ProfileComputePlan=1` (ORT 1.20+),
+under which it loads `MLComputePlan` for the compiled model — synchronously,
+before the session initialises, at the cost of loading the model a second
+time — and NSLogs one line per operation:
+
+```
+Operation: ios18.matmul, Device Usage: <MLNeuralEngineComputeDevice: 0x…>, Estimated Cost: 0.049300
+```
+
+NSLog writes to stderr, so session creation on that provider runs under
+`ScopedConsoleMute(Capture::Always)` and the capture is parsed.  The
+judgement is the native backend's: the operations placed off the unit the
+`MLComputeUnits` request names must carry under 5% of the estimated cost,
+or the session is released and the row reports where Core ML sent the work
+("Core ML's compute plan sends matmul, softmax (97% of the estimated cost)
+to the CPU rather than the Neural Engine, so this would not be a Neural
+Engine number").  A plan costed at zero everywhere is judged by operation
+count, since weighing it would pass a session whose every operation moved.
+The plan names only the preferred device, not the capable ones, so a
+refusal cannot say whether the unit *could* have taken the work.
+
+Three consequences shape the callers:
+
+- **The probes do not verify placement** (`verifyPlacement=false`): the
+  viability check's 64-value multiply and the 32-cube fusion probes ask
+  whether a graph builds and fuses, not where a real size runs, and Core ML
+  keeps everything that small on the CPU — verified, the provider would be
+  declared dead on a machine whose ANE takes every 2048-cube.  The block's
+  profiled fusion probe at 64 tokens is the same case.
+- **A ladder climbs past a placement refusal below its first measured
+  rung** (`OnnxSessionResult::offDevice`, `kOnnxOffDevicePatience` = 4
+  sizes): too small for the planner is not too big for the unit — the ANE
+  declines a 1024-cube and takes the 2048, refused the 8 and 32 MB GEMVs
+  and took 128 — while a refusal above a measured rung ends the sweep.  The
+  row says which sizes were sent elsewhere.  The patience bounds what an
+  fp32 graph, which the ANE never takes, costs in compiles before its row
+  says so.
+- **The stream-width probe now lands on fp16 for the provider**, because
+  its fp32 GEMV is refused, and the activation, resident-tensor and
+  dispatch rows follow it back to the ANE.
+
+A plan that never arrives — an OS before macOS 14.4 / iOS 17.4, where
+`MLComputePlan` does not exist and the provider says so through its logger
+— leaves the session unverified rather than refused, which is what every
+other provider gets; the verbose log says which it was.
 
 ## `Unsupported` is a claim about the format, not about the device
 
@@ -1550,15 +1617,26 @@ offloading is worth doing at all, and no vendor quotes it.
 
 Three rows:
 
-- `h2d` sends a tensor and gathers one element back, so nearly all of it is
+- `h2d` sends a tensor and gathers one row back, so nearly all of it is
   the trip out. Swept, since the rate climbs with size until the link
   saturates.
 - `roundtrip` sends a tensor, squares it and returns the result — the real
   cost of offloading a trivial operation. Measured once at the smallest rung,
   never swept: a link saturates rather than improving, and the compile cost
-  does not scale gently (see below).
+  does not scale gently (see below).  Attempted even when no `h2d` size was
+  usable, because a runtime that places per operation treats the two graphs
+  differently: Core ML keeps the gather on the CPU (so the placement guard
+  refuses `h2d` on the Neural Engine device) and sends the 16 MB elementwise
+  pass to the ANE.  The row names its size, since it is not the one `h2d`
+  reports at.
 - `d2h` is the round trip minus a third graph that does everything the round
   trip does except ship the result back.
+
+**The tensor is `[rows, 4096]`, never a flat vector** (`kOnnxTransferCols`).
+The ANE's compiler took 255 s over `Mul` on a flat `[8388608]` fp16 input
+(macOS 27.0, ORT 1.29) — the whole test's wall time, spent on one session
+that the 30 s budget could only refuse after the fact — where the same bytes
+shaped as rows of 4096, the activation graphs' shape, compile in seconds.
 
 **The return trip must be isolated against that third graph, not against
 `h2d`.** Subtracting `h2d` leaves the elementwise pass in the answer, and that
@@ -1582,7 +1660,12 @@ throughput, the compile is a separate cost and can dwarf everything else.
 
 Reference wall times, M1 Pro CoreML EP with a warm compile cache: conv 64 s,
 block 62 s, gemm 46 s, activation 32 s, bandwidth 11 s, transfer 2 s,
-dispatch 1 s, numeric error under 1 s — 218 s for the provider.
+dispatch 1 s, numeric error under 1 s — 218 s for the provider.  With the
+placement guard (every timed session loads its model twice for the plan)
+the same provider took 367 s on macOS 27.0 / ORT 1.29, of which 91 s is the
+resident-tensor ladder's refused 512 MB rung (72 s to compile) and the rest
+the compiles; the transfer test, which had spent 255 s on one flat-tensor
+session, takes 3 s.
 
 A wall-clock deadline on the sweeps was tried and removed. It would have had
 to be an invented number — there is no measurement that says how long a
@@ -1675,7 +1758,13 @@ achieve — at `onnx-tensor-bw`'s own three working-set sizes, so the two
 ladders divide row for row rather than being compared by eye.
 
 M1 Pro, CoreML EP, each rung beside `onnx-tensor-bw`'s rung of the same name
-(GB/s, with the share of streaming in brackets):
+(GB/s, with the share of streaming in brackets; fp16, on the Neural Engine
+-- with the placement guard the 2026-09-19 run reads silu 49.5 / 43.1 /
+17.6, softmax 18.7 / 16.5 / 10.9, layernorm 16.4 / 13.1 / 11.6, within a
+few percent of the native Core ML backend's ANE rows, and the 8 and 32 MB
+resident-tensor rungs are refused as the planner's; between commit c6c8145
+and the guard the stream-width probe had chosen fp32, which runs on the CPU,
+and the same rows read 152 / 107 / 109 for softmax):
 
 | | 8mb | 32mb | 128mb |
 |---|---|---|---|
@@ -1844,6 +1933,15 @@ the same matmul despite its 25x cheaper dispatch. That crossover — cheap to
 ask but slow to compute, versus expensive to ask but fast once asked — is
 the whole reason a device advertising tens of TOPS can still lose, and no
 throughput row in this backend can show it.
+
+**Those Core ML figures were the CPU's.**  The compute plan (see the
+CPU-fallback guard) shows a 64-value multiply and a 256-cube matmul never
+leave the CPU under the Neural Engine configuration, so on that provider
+the three rows now report the placement instead of a number.  The native
+Core ML backend answers the question this test cannot: it climbs a size
+ladder to the smallest work the planner sends to the unit and times that
+(an 8 MB elementwise op at ~0.8 ms, a 1024-cube at ~0.6 ms, a compile at
+~210 ms on the M1 Pro's ANE — `src/coreml/dispatch_latency.cpp`).
 
 ## ORT's own graph rewrites can cost NPU placement
 

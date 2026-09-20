@@ -85,7 +85,10 @@ namespace
   const Shape kShapes[] = {
       {3, false, "conv3x3",
        "A 3x3 convolution over 256 channels, the shape most vision networks "
-       "are built from and the one accelerators were designed around."},
+       "are built from and the one accelerators were designed around.  "
+       "Counted as direct multiplies: a Winograd kernel does fewer, so this "
+       "can read above the matmul peak without the device being built for "
+       "convolution."},
       {1, false, "conv1x1",
        "Arithmetically a matrix multiply at every pixel, so it should land "
        "near the matmul rows; where it does not, the two shapes reach "
@@ -141,6 +144,7 @@ namespace
     OrtValue *outVal = nullptr;
     std::vector<uint8_t> inBuf, outBuf;
     std::string error;
+    bool offDevice = false; // refused for where it would run, not for what it is
   };
 
   void destroySetup(const OrtRuntime &rt, ConvSetup &c)
@@ -187,6 +191,7 @@ namespace
       if (!ses.session)
       {
         c.error = ses.error;
+        c.offDevice = ses.offDevice;
         return c;
       }
       c.session = ses.session;
@@ -299,8 +304,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       double lastRate = 0.0;
       double prevCreateUs = 0.0;
       int strikes = 0;
+      int rungs = 0;
       std::string firstErr;
       ResultStatus errStatus = ResultStatus::Unsupported;
+      // Feature maps the provider's runtime sent to another compute unit
+      // (onnx_session.h, offDevice): climbed past below the first measured
+      // rung, the end of the ladder above it -- as in gemm.cpp.
+      int offDeviceBelow = 0;
+      int64_t firstSpatial = 0, offDeviceAbove = 0;
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
       {
@@ -327,12 +338,13 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
-        // The first rung is profiled: one run tells us the width the Conv
-        // kernel actually consumed.  A provider without an fp16 convolution
-        // runs the fp16 row in fp32 behind an inserted cast and the two
-        // precision rows then land on each other -- the CPU EP's do, to three
-        // figures -- which is worth saying rather than leaving to be noticed.
-        const bool profileThis = (sp == kMinSpatial);
+        // The first rung that runs is profiled: one run tells us the width
+        // the Conv kernel actually consumed.  A provider without an fp16
+        // convolution runs the fp16 row in fp32 behind an inserted cast and
+        // the two precision rows then land on each other -- the CPU EP's do,
+        // to three figures -- which is worth saying rather than leaving to be
+        // noticed.
+        const bool profileThis = (rungs == 0);
         auto createStart = std::chrono::steady_clock::now();
         ConvSetup c = makeSetup(rt, ep, dt.dtype, v, sp, profileThis);
         auto createEnd = std::chrono::steady_clock::now();
@@ -345,6 +357,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {
           if (firstErr.empty())
             firstErr = c.error;
+          if (c.offDevice)
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s\n", ep.providerKey.c_str(),
+                        row.c_str(), (long long)sp, (long long)sp, c.error.c_str());
+            if (rungs > 0)
+            {
+              offDeviceAbove = sp;
+              break;
+            }
+            prevCreateUs = createUs;
+            if (++offDeviceBelow < kOnnxOffDevicePatience)
+              continue;
+          }
           break;
         }
 
@@ -389,6 +414,9 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (mean_us <= 0.0)
           break;
 
+        rungs++;
+        if (firstSpatial == 0)
+          firstSpatial = sp;
         const double flops = convFlops(v, sp);
         const double rate = flops * 1.0e6 / mean_us;
         lastRate = flops / mean_us;
@@ -465,6 +493,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                            " convolution kernel and ran it in " + ranWider +
                            ", so this is that width rather than " +
                            dt.label + ".";
+        if (offDeviceBelow > 0)
+          o.description += "  Feature maps below " + std::to_string(firstSpatial) +
+                           " square were sent to another compute unit by the "
+                           "provider's runtime and are not in this figure.";
+        if (offDeviceAbove > 0)
+          o.description += "  From " + std::to_string(offDeviceAbove) +
+                           " square the provider's runtime sent the work to "
+                           "another compute unit, which ended the sweep.";
         test.emit(row, (float)best, o);
       }
       else

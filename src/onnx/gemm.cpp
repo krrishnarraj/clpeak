@@ -228,6 +228,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     double prevUs = 0.0;
     int64_t prevD = 0;
     int strikes = 0;
+    // Sizes the provider's runtime sent elsewhere (onnx_session.h,
+    // offDevice): below the first measured rung the ladder climbs past
+    // them, above it they end the ladder, and the row says both.
+    int offDeviceBelow = 0;
+    int64_t offDeviceAbove = 0;
 
     for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
@@ -291,6 +296,27 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         if (firstErr.empty())
           firstErr = g.error;
+        if (g.offDevice)
+        {
+          // The runtime placed this size on another unit.  Below the first
+          // rung that ran, too small for its planner is not too big for the
+          // unit -- Core ML's Neural Engine declines a 1024-cube and takes
+          // the 2048 -- so the ladder climbs on, for a few sizes: a shape
+          // the unit cannot run at all will not become runnable by growing,
+          // and each refused size still costs a compile.  Above a measured
+          // rung it is the unit declining larger work, which ends the
+          // ladder the way any other limit does.
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 %s\n", ep.providerKey.c_str(),
+                      v.label, (long long)D, g.error.c_str());
+          if (rungs > 0)
+          {
+            offDeviceAbove = D;
+            break;
+          }
+          prevCreateUs = createUs;
+          if (++offDeviceBelow < kOnnxOffDevicePatience)
+            continue;
+        }
         // Larger sizes need strictly more of everything, so nothing above
         // this one can succeed either.
         break;
@@ -556,6 +582,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         o.description += "  The product is cast to fp32 before the reduction; "
                          "the multiply is unaffected.";
       o.description += shapeNote(v, shape);
+      if (offDeviceBelow > 0)
+        o.description += "  Sizes below " + std::to_string(firstDim) +
+                         " cubed were sent to another compute unit by the "
+                         "provider's runtime and are not in this figure.";
+      if (offDeviceAbove > 0)
+        o.description += "  From " + std::to_string(offDeviceAbove) +
+                         " cubed the provider's runtime sent the work to "
+                         "another compute unit, which ended the sweep.";
       test.emit(v.label, (float)best, o);
     }
     else

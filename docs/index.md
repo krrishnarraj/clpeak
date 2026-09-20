@@ -68,7 +68,10 @@ Each provider is enumerated as a device. The ONNX runtime is loaded at run
 time, never linked (except on iOS), so no ONNX install is needed to build:
 a machine without one reports "library not found", and `--onnx-lib PATH`
 points at another build. A graph a provider can't fully own reports
-`unsupported` rather than silently measuring the CPU.
+`unsupported` rather than silently measuring the CPU — and on the CoreML
+provider, whose runtime can move work to the CPU behind ONNX Runtime's
+back, clpeak reads Core ML's compute plan for every timed session and
+refuses a row the Neural Engine did not run.
 
 The Core ML backend reaches the same Neural Engine without ONNX Runtime: it
 emits Core ML's ML Program format directly, compiles it on the device, and

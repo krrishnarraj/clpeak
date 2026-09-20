@@ -23,6 +23,10 @@ struct OnnxSessionResult
 {
   OrtSession *session = nullptr;
   std::string error;               // set when session == nullptr
+  // The provider took the graph but its runtime placed the work on another
+  // unit (onnx_coreml_plan.h): a refusal about size or shape, not about the
+  // format, so a ladder may climb past it where it would stop at any other.
+  bool offDevice = false;
 };
 
 // Build a session for `ep` from in-memory model bytes.  For non-CPU EPs the
@@ -43,12 +47,22 @@ struct OnnxSessionResult
 // input parameter (A_q) of operator (QLinearMatMul) is invalid".  A provider
 // with real float8 matmul hardware consumes the QDQ nodes itself and never
 // wanted the rewrite.
+// `verifyPlacement` asks the provider's runtime where it put the work and
+// refuses the session when that is not the unit the row is named for.
+// Today that is the CoreML provider's compute plan (onnx_coreml_plan.h);
+// every other provider is judged by the fallback guard alone.  It is off
+// for the probes -- the viability check and the 32-cube fusion probe --
+// which ask whether a graph builds and fuses, not where a real size runs:
+// Core ML sends anything that small to the CPU, and verifying it would
+// declare the provider dead on a machine whose Neural Engine takes every
+// 2048-cube it is offered.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded = false,
                                     bool profile = false,
-                                    bool keepQdqUnfused = false);
+                                    bool keepQdqUnfused = false,
+                                    bool verifyPlacement = true);
 
 // Names of the kernels a profiled session executed, one entry per kernel
 // launch in execution order -- so a kernel that ran twice appears twice.

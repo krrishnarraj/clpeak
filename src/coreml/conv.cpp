@@ -58,7 +58,10 @@ const DType kDTypes[] = {
 const Shape kShapes[] = {
     {3, false, "conv3x3",
      "A 3x3 convolution over 256 channels, the shape most vision networks are "
-     "built from and the one accelerators were designed around."},
+     "built from and the one accelerators were designed around.  Counted as "
+     "direct multiplies: a Winograd kernel does fewer, so this can read above "
+     "the matmul peak (an M1 Pro's GPU: 6.0 against 4.7 TFLOPS) without the "
+     "unit being built for convolution."},
     {1, false, "conv1x1",
      "Arithmetically a matrix multiply at every pixel, so it should land near "
      "the matmul rows; where it does not, the two shapes reach different "
@@ -89,7 +92,9 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
        "shapes at 256 channels, each swept over feature-map size and reported "
        "at its best.  Against the matmul rows this says whether the unit was "
        "built for convolution -- the Neural Engine was -- and the depthwise "
-       "row says what it does when the arithmetic per byte collapses.",
+       "row says what it does when the arithmetic per byte collapses.  The "
+       "3x3 rows count direct multiplies, so a Winograd kernel reads above "
+       "the unit's matmul peak.",
        TestShape::Heterogeneous, "data type and shape"});
 
   for (const DType &dt : kDTypes)

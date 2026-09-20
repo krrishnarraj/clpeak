@@ -18,14 +18,18 @@
 // heavy enough to be placed -- is built three ways that differ only in what
 // crosses the boundary, and the transfers are the differences between them:
 //
-//   resident   x constant, result reduced           nothing crosses
-//   to-device  x a model input, result reduced      x crosses, out
-//   round trip x a model input, whole result out    x out and y back
+//   resident   x constant, one row of the result     nothing crosses
+//   to-device  x a model input, one row of the result x crosses, out
+//   round trip x a model input, whole result out      x out and y back
 //
-// The matmul's own time cancels in every subtraction.  Sizes double from
-// 16 MB; the trip out is reported at the largest size (a runtime may pass
-// small tensors by pointer and copy only big ones), the round trip and the
-// trip back at the smallest.
+// The matmul's own time cancels in every subtraction.  The kept row is a
+// slice, not a reduction: a reduce over 8192 rows is a pass the Neural
+// Engine runs at ~20 GB/s, which does not cancel against the round trip's
+// graph (it has none) and outweighed the copy back on macOS 27.  Sizes
+// double from 16 MB; the trip out is reported at the largest size (a
+// runtime may pass small tensors by pointer and copy only big ones), the
+// round trip and the trip back at the smallest.  The M1 Pro's Neural Engine
+// declines a live [32768, 1024] input, so its ladder ends at 32 MB.
 
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
@@ -135,20 +139,30 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
        "presenting a tensor, which for the Neural Engine is a real copy.",
        TestShape::Heterogeneous, "direction"});
 
-  const char *h2dNote =
+  // The sizes are named in the rows because they differ: the trip out is
+  // reported at the largest size and the round trip at the smallest, so a
+  // reader sees the round trip outrun the trip out (47.6 against 14.7 GB/s
+  // on an M1 Pro's Neural Engine) and should not take it as one subtraction
+  // from the other.
+  auto mb = [](int64_t rows, int64_t width) {
+    return std::to_string(((uint64_t)rows * (uint64_t)width * 2) >> 20) + " MB";
+  };
+  std::string h2dNote =
       "Host to device: the input-fed multiply less the resident one, so what is "
-      "left is the trip out.  Reported at the largest size measured.";
-  const char *d2hNote =
+      "left is the trip out.  Reported at the largest size measured";
+  std::string d2hNote =
       "Device to host: the multiply that returns its whole result less the one that "
       "reduces it on the device.  What is left is the return journey alone, reported "
-      "at the largest size measured.";
-  const char *rtNote =
+      "at the largest size measured";
+  std::string rtNote =
       "Both transfers of an offloaded operation, in and out, less the arithmetic "
-      "between them -- the bar any offloaded work has to clear.";
+      "between them -- the bar any offloaded work has to clear.  Measured at the "
+      "smallest size, where the trip out is reported at the largest, so the two rows "
+      "are not one subtraction apart";
 
   double lastH2dBps = 0.0;
   double firstResidentUs = 0.0, firstToDeviceUs = 0.0;
-  double lastToDeviceUs = 0.0;
+  double lastResidentUs = 0.0, lastToDeviceUs = 0.0;
   int64_t firstRows = 0, lastRows = 0;
   std::string firstErr;
   ResultStatus errStatus = ResultStatus::Unsupported;
@@ -174,6 +188,10 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
     if (res.us <= 0.0 || in.us <= 0.0)
     {
       const Run &bad = res.us <= 0.0 ? res : in;
+      CLPEAK_VLOG("coreml-transfer[%s/h2d]: %lld MB: %s form failed: %s\n",
+                  dev.displayName.c_str(), (long long)(bytes >> 20),
+                  res.us <= 0.0 ? "resident" : "input-fed",
+                  bad.error.empty() ? "run failed" : bad.error.c_str());
       if (firstErr.empty())
       {
         firstErr = bad.error.empty() ? "run failed" : bad.error;
@@ -191,13 +209,24 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
       firstToDeviceUs = in.us;
     }
     lastRows = rows;
+    lastResidentUs = res.us;
     lastToDeviceUs = in.us;
     if (tripUs > 0.0)
       lastH2dBps = (double)bytes / (tripUs * 1.0e-6);
   }
 
+  if (lastRows > 0)
+    h2dNote += " (" + mb(lastRows, kK) + ")";
+  h2dNote += ".";
+  if (firstRows > 0)
+    rtNote += " (" + mb(firstRows, kK) + " in, " + mb(firstRows, kN) + " out)";
+  rtNote += ".";
+  if (lastRows > 0)
+    d2hNote += " (" + mb(lastRows, kN) + ")";
+  d2hNote += ".";
+
   if (lastH2dBps > 0.0)
-    test.emit("h2d", (float)lastH2dBps, h2dNote);
+    test.emit("h2d", (float)lastH2dBps, h2dNote.c_str());
   else if (firstRows > 0)
     test.skip("h2d", ResultStatus::Error,
               "handing the input over cost no more than holding it resident, so no copy "
@@ -221,7 +250,7 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
     else
     {
       if (rt.us > firstResidentUs)
-        test.emit("roundtrip", (float)((double)(inBytes + outBytes) / ((rt.us - firstResidentUs) * 1.0e-6)), rtNote);
+        test.emit("roundtrip", (float)((double)(inBytes + outBytes) / ((rt.us - firstResidentUs) * 1.0e-6)), rtNote.c_str());
       else
         test.skip("roundtrip", ResultStatus::Error,
                   "moving the tensors cost no more than keeping them resident", rtNote);
@@ -230,11 +259,18 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
       // output back in the buffer the unit wrote -- the Neural Engine's
       // 16 MB result came back in 15 us, a terabyte a second of nothing --
       // so the trip back is measured at the largest size too and has to
-      // have grown with it.  Where it did, the largest size is reported,
+      // have grown with it, and has to be resolvable beside the trip out
+      // at that size: the difference of two nearly equal times is noise
+      // around zero, and 3 us against 51 us once passed the growth test and
+      // published 659 GB/s for a return that costs nothing.  A twentieth of
+      // the trip out keeps the GPU's real copy (1.9 ms back against 4.7 ms
+      // out for 128 MB) and drops the Neural Engine's nothing (-12 us
+      // against 2 ms).  Where it did grow, the largest size is reported,
       // as for the trip out.
+      constexpr double kMinReturnShare = 0.05;
       double d2hFirst = rt.us - firstToDeviceUs;
       double d2hBps = d2hFirst > 0.0 ? (double)outBytes / (d2hFirst * 1.0e-6) : 0.0;
-      bool copies = true;
+      bool copies = d2hFirst >= kMinReturnShare * (firstToDeviceUs - firstResidentUs);
       if (lastRows > firstRows && !clpeak::cancelRequested())
       {
         Run rtLast = measure(dev, spec, CoremlTransfer::RoundTrip, lastRows, true, warmupCount, forceIters,
@@ -243,12 +279,13 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
         CLPEAK_VLOG("coreml-transfer[%s/d2h]: %.0f us at %lld MB, %.0f us at %lld MB\n",
                     dev.displayName.c_str(), d2hFirst, (long long)(outBytes >> 20), d2hLast,
                     (long long)(((uint64_t)lastRows * kN * 2) >> 20));
-        copies = d2hLast > 0.0 && d2hFirst > 0.0 && d2hLast > d2hFirst * 2.0;
+        copies = d2hLast > 0.0 && d2hFirst > 0.0 && d2hLast > d2hFirst * 2.0 &&
+                 d2hLast >= kMinReturnShare * (lastToDeviceUs - lastResidentUs);
         if (copies)
           d2hBps = (double)((uint64_t)lastRows * kN * 2) / (d2hLast * 1.0e-6);
       }
       if (copies && d2hBps > 0.0)
-        test.emit("d2h", (float)d2hBps, d2hNote);
+        test.emit("d2h", (float)d2hBps, d2hNote.c_str());
       else if (!copies)
         test.skip("d2h", ResultStatus::Unsupported,
                   "the result is handed back without a copy -- the time did not grow with its size",

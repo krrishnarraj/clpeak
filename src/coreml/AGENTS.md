@@ -130,6 +130,16 @@ a CPU number under the accelerator's name.  Reading the plan costs as much
 as loading the model (it loads the model again); it is paid on every
 session because the ANE's acceptance depends on shape and size.
 
+**A plan costed at zero everywhere is judged by count, not weight.**  Core
+ML answers that for a model it keeps on the CPU end to end — the ONNX
+backend's 64-token transformer block under the same configuration read 26
+operations, all `MLCPUComputeDevice`, all `0.000000` — and weighed, such a
+plan passes `onDevice()` with every operation off the device (0 ≤ 5%).
+`CoremlSession::create` marks every weight unknown when none is positive,
+which counts each operation whole and fails the session.  The ONNX backend
+reads the same plan through the provider's `ProfileComputePlan` option
+(`src/onnx/onnx_coreml_plan.h`) and applies the same rule.
+
 ## Core ML's compile cache is purged, and free space is checked
 
 E5RT, the runtime behind the GPU and the Neural Engine, caches every model
@@ -174,7 +184,20 @@ measure the CPU under the Neural Engine's name here, so:
 - **`coreml_transfer_bw`** builds one 1024-wide fp16 matmul three ways —
   input resident, input handed in, whole result handed back — and reports
   the differences, so the arithmetic cancels and the model is heavy enough
-  to be placed.  M1 Pro ANE: h2d 14 GB/s, d2h 95 GB/s.
+  to be placed.  The two graphs that keep the result on the unit keep one
+  *sliced* row of it, not a reduction over all of them: `reduce_max` over
+  8192 rows is a pass the ANE runs at ~20 GB/s, it has no counterpart in
+  the round-trip graph, and on macOS 27 it outweighed the copy back — the
+  whole-result graph ran *faster* than the reduced one (3004 against 3492
+  µs at 16 MB), which inverted `d2h` and inflated `roundtrip` (47.6 GB/s;
+  33 with the slice).  The trip back must also be a twentieth of the trip
+  out at the same size to count as a copy: 3 µs against 51 µs once passed
+  the growth test and published 659 GB/s of nothing.  M1 Pro, macOS 27.0:
+  ANE h2d 17 GB/s (its ladder ends at 32 MB — the ANE declines a live
+  [32768, 1024] input), roundtrip 33, d2h no copy; GPU 28 / 46 / 76 GB/s;
+  CPU 15 / 31 / no copy.  On 26.6 the ANE's d2h read 95 GB/s.  `h2d` is
+  reported at the largest size and `roundtrip` at the smallest, and each
+  row names its size so the two are not read as one subtraction apart.
 - **`coreml_tensor_bw`** tries each of its three base rungs even when an
   earlier one was refused: the ANE gets the 128 MB GEMV (45-51 GB/s) and
   not the 8 or 32 MB ones.  The 512 MB rung takes the ANE compiler ~58 s
@@ -290,6 +313,7 @@ codes and applies the scale after accumulating (`dequantizedTo` in
 | row | prefill s512 | decode kv2048 | per token |
 |---|---|---|---|
 | fp16 | 4.93 TFLOPS | 43.8 GB/s | 2.69 ms |
+| fp16_explicit | 4.83 | 48.4 | 2.44 ms (3.40 at 8192, against fp16's 4.74: the cache transpose, see below) |
 | int4_lut | **7.85** | 29.1 (of 4-bit bytes) | **1.45 ms** |
 | int8_weight | 6.80 | 37.7 | 1.79 ms |
 | int8_qdq | 7.97 TOPS | 37.7 | 1.79 ms |
@@ -304,7 +328,25 @@ and a model has live activations.  That is why the block test exists beside
 the GEMM one.  Both rows are true; the block's is the one a model sees.
 
 Attention is Core ML's fused `scaled_dot_product_attention` where the OS has
-it (spec 9), which is what a converted model carries.
+it (spec 9), which is what a converted model carries.  The `fp16_explicit`
+row spells it out as matmul, softmax and matmul over a key cache stored
+already transposed, `[H, Dh, ctx]` — the ONNX backend's form, so the two
+backends' fp16 blocks divide row for row — and sweeps context.  It exists
+because the ONNX backend's block, verified on the ANE by its compute plan,
+decoded *faster* than this one: 2.21 / 2.45 / 3.41 ms at kv 512 / 2048 /
+8192 against the fused op's 2.27 / 2.74 / 4.79 (macOS 27.0), 0.16 µs per
+cached token against 0.33.  The explicit row reads 2.20 / 2.44 / 3.40 —
+the ONNX figures to the hundredth — and an explicit spelling over the
+*untransposed* `[H, ctx, Dh]` cache read 2.26 / 2.73 / 4.53, the fused
+op's figures.  So the op is not the cost; the layout is: the fused op
+takes keys as `[H, ctx, Dh]`, and on the M1 Pro's Neural Engine that is a
+transpose pass over the whole cache every token, which a model storing its
+cache transposed does not pay.  At prefill the fused op is slightly ahead
+(4.95 against 4.83 TFLOPS at 512 tokens).  The explicit row's 64-token
+prompt is one the planner keeps on the CPU (the fused form's goes to the
+ANE), which is why `block.cpp` probes each variant at the first point it
+reports and lets a point the planner declined for its size stand as that
+point's row instead of settling the variant.
 
 ## When You Change This Directory
 

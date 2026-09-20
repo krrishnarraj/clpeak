@@ -54,6 +54,14 @@ struct Variant
   const char *note;
   bool int8Kv;        // the cache stored as int8
   bool decodeOnly;    // a cache format has no prefill row
+  // Attention spelled as matmul, softmax and matmul instead of Core ML's
+  // fused scaled_dot_product_attention op -- the form the ONNX backend's
+  // block carries, and the one to read the fused op's own cost against.
+  bool explicitAttention = false;
+  // Walk the context ladder but not the prompt one: the row exists for how
+  // attention scales with the cache, and prefill at one prompt is enough
+  // to show whether the fused op wins there.
+  bool sweepContext = false;
 };
 
 const Variant kVariants[] = {
@@ -61,6 +69,17 @@ const Variant kVariants[] = {
      "16-bit weights and 16-bit arithmetic, the form an unquantized Core ML "
      "model is served in and the reference the other rows are read against.",
      false, false},
+    {"fp16_explicit", CoremlWeight::Fp16, false, nullptr,
+     "The fp16 row with attention spelled out as matmul, softmax and matmul "
+     "over a key cache stored already transposed, instead of Core ML's fused "
+     "scaled-dot-product op over the [heads, context, head_dim] cache it "
+     "takes -- the form the ONNX backend's block carries, so this row divides "
+     "directly against it.  Whatever separates it from the fp16 row is the "
+     "fused op and its cache layout on this compute unit: on an M1 Pro's "
+     "Neural Engine the fused op prefills slightly faster and decodes slower, "
+     "half again the cost per cached token, the transpose of the cache it "
+     "makes every token.",
+     false, false, /*explicitAttention=*/true, /*sweepContext=*/true},
     {"int4_weight", CoremlWeight::Int4Block, true, nullptr,
      "4-bit weights, one scale per 32, against 16-bit activations -- what a "
      "quantized language model ships as.  The arithmetic stays 16-bit, so "
@@ -129,7 +148,7 @@ std::vector<int64_t> promptsFor(const Variant &v)
 
 std::vector<int64_t> contextsFor(const Variant &v)
 {
-  if (v.sweep)
+  if (v.sweep || v.sweepContext)
     return {kKvLadder[0], kKvLadder[1], kKvLadder[2]};
   return {kDecodeKv};
 }
@@ -152,6 +171,10 @@ struct Point
   std::string error;
   ResultStatus status = ResultStatus::Ok;
   std::string glue;   // negligible operations the plan placed elsewhere
+  // The plan sent the work elsewhere though this unit could run it: the
+  // planner's size decision, which says nothing about the variant's other
+  // points.
+  bool plannerDeclined = false;
 };
 
 struct VariantResult
@@ -173,7 +196,7 @@ CoremlBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t 
   sh.kvLen = decode ? kvLen : 0;
   sh.weights = v.w;
   sh.int8Kv = v.int8Kv;
-  sh.fusedAttention = spec >= 9;
+  sh.fusedAttention = spec >= 9 && !v.explicitAttention;
   return sh;
 }
 
@@ -209,6 +232,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     {
       pt.error = coremlOffDeviceReason(dev, *s);
       pt.status = ResultStatus::Unsupported;
+      pt.plannerDeclined = s->offDeviceCapable();
       CLPEAK_VLOG("coreml-block[%s/%s]: %s %s\n", dev.displayName.c_str(), v.label, what.c_str(),
                   pt.error.c_str());
       return;
@@ -277,6 +301,14 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
                       std::to_string(coremlSpecForWeight(v.w)) + "); this OS accepts " + std::to_string(spec);
       return false;
     }
+    if (v.explicitAttention && spec < 9)
+    {
+      // Below spec 9 there is no fused op, so the fp16 row already spells
+      // attention out and this one would repeat it.
+      vr.skipReason = "this OS has no fused attention op (model specification 9, " +
+                      coremlOsForSpec(9) + "), so the fp16 row already spells attention out";
+      return false;
+    }
     {
       const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) +
                               (64ull << 20) * coremlElemBytes(coremlActDtype(v.w), 1) / 2;
@@ -288,12 +320,18 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         return false;
       }
     }
-    // The probe is the smallest point of the regime the row has, and its
-    // timing is kept: a point measured is a point measured.
+    // The probe is the smallest point the variant reports -- its first
+    // prompt, or its first context for a cache format -- and its timing is
+    // kept: a point measured is a point measured.  A point the planner
+    // declined for its size does not settle the variant: the explicit
+    // attention block's 64-token prompt stays on the CPU where its 512-token
+    // one goes to the Neural Engine, so that point reports the planner's
+    // decision and the others are measured.
     Point pt;
     const bool decode = v.decodeOnly;
-    measure(v, decode, kKvLadder[0], kPromptLadder[0], pt);
-    if (pt.us <= 0.0)
+    const int64_t probeSeq = decode ? kPrefillSeq : promptsFor(v).front();
+    measure(v, decode, kKvLadder[0], probeSeq, pt);
+    if (pt.us <= 0.0 && !pt.plannerDeclined)
     {
       vr.skipReason = pt.error.empty() ? std::string("the block could not be built for ") + v.label : pt.error;
       vr.skipStatus = pt.status;
@@ -302,7 +340,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     if (decode)
       vr.decode[kKvLadder[0]] = pt;
     else
-      vr.prefill[kPromptLadder[0]] = pt;
+      vr.prefill[probeSeq] = pt;
     vr.usable = true;
     return true;
   };
@@ -389,7 +427,8 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
 
   const std::string geometry =
       "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters)";
-  const std::string attention = spec >= 9 ? "attention as Core ML's fused scaled-dot-product op"
+  const std::string attention = spec >= 9 ? "attention as Core ML's fused scaled-dot-product op "
+                                            "(the fp16_explicit row spells it out instead)"
                                           : "attention as explicit matmul, softmax and matmul";
 
   const logger::TestSpec prefillSpec = {
@@ -552,7 +591,11 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         else
         {
           test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, note);
-          break;
+          // A longer context is more work, so a point the unit could not
+          // run ends the ladder -- but one the planner kept back for its
+          // size says nothing about the next.
+          if (!pt.plannerDeclined)
+            break;
         }
       }
     }

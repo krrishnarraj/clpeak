@@ -70,6 +70,16 @@ constexpr double kOnnxCreateGrowthFloor = 2.0e6;
 // If it exceeds this, the dtype is emulated/slow and the full 1024
 // ladder will be minutes - skip the variant early.
 constexpr double kOnnxTinyMaxCreateUs = 10.0e6;
+// How many sizes a doubling ladder climbs past a provider's runtime sending
+// the work to another compute unit (onnx_session.h, offDevice) before
+// concluding the unit will never take the shape.  Core ML's planner is the
+// case: it keeps a 1024-cube matmul and a 32-square convolution on the CPU
+// under the Neural Engine configuration and sends the next sizes up, and
+// its resident-tensor ladder was refused twice (8 and 32 MB) before the
+// 128 MB rung landed.  Four covers that with one to spare, and bounds what
+// an fp32 graph -- which the Neural Engine never takes -- costs in compiles
+// before its row says so.
+constexpr int kOnnxOffDevicePatience = 4;
 
 // One benchmarkable "device" of this backend: an ONNX Runtime execution
 // provider (EP).  NPUs are reachable only through such vendor runtimes --

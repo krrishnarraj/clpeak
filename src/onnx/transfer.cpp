@@ -90,24 +90,26 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   }
 
   // Every graph here takes the whole tensor in; they differ in what comes
-  // back.  ToDevice and ComputeOnly gather one element, RoundTrip returns the
-  // lot.
+  // back.  ToDevice and ComputeOnly gather one row, RoundTrip returns the
+  // lot.  The tensor is [rows, kOnnxTransferCols] (onnx_model.h says why).
+  const int64_t cols = kOnnxTransferCols;
+  const int64_t rows = elems / cols;
   std::vector<uint16_t> inBuf((size_t)elems, floatToHalf(0.5f));
-  std::vector<uint16_t> outBuf((size_t)(bigOut ? elems : 1), 0);
+  std::vector<uint16_t> outBuf((size_t)(bigOut ? elems : cols), 0);
 
   OrtMemoryInfo *mi = nullptr;
   OrtValue *inVal = nullptr, *outVal = nullptr;
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
                                               OrtMemTypeDefault, &mi);
-  const int64_t big[1] = {elems};
+  const int64_t big[2] = {rows, cols};
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, inBuf.data(), inBuf.size() * 2, big, 1,
+        mi, inBuf.data(), inBuf.size() * 2, big, 2,
         ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
-  const int64_t one[1] = {1};
+  const int64_t one[2] = {1, cols};
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
-        mi, outBuf.data(), outBuf.size() * 2, bigOut ? big : one, 1,
+        mi, outBuf.data(), outBuf.size() * 2, bigOut ? big : one, 2,
         ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &outVal);
   if (mi) rt.api->ReleaseMemoryInfo(mi);
 
@@ -154,6 +156,11 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     r.error = onnxStatusText(rt, st);
   if (r.us <= 0.0 && r.status == ResultStatus::Ok)
     r.status = ResultStatus::Error;
+  if (r.us <= 0.0)
+    CLPEAK_VLOG("onnx-transfer[%s/%s]: run failed: %s\n", ep.providerKey.c_str(),
+                (dir == OnnxTransfer::ToDevice) ? "h2d"
+                : (dir == OnnxTransfer::RoundTrip) ? "roundtrip" : "compute-only",
+                r.error.empty() ? "no error text" : r.error.c_str());
 
   if (inVal)  rt.api->ReleaseValue(inVal);
   if (outVal) rt.api->ReleaseValue(outVal);
@@ -250,17 +257,19 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                   (long long)((lastElems * 2) >> 20));
   }
 
-  const char *h2dNote =
-      "Host to device: the tensor is handed over and one element comes back, "
-      "so almost all of the time is the trip out.  Reported at the largest "
-      "size measured, since some providers copy only the big tensors and "
-      "pass small ones by pointer.";
+  const std::string h2dNote =
+      "Host to device: the tensor is handed over and one row of it comes "
+      "back, so almost all of the time is the trip out.  Reported at the "
+      "largest size measured" +
+      (lastElems > 0 ? " (" + std::to_string((lastElems * 2) >> 20) + " MB)" : std::string()) +
+      ", since some providers copy only the big tensors and pass small ones "
+      "by pointer.";
   const char *sharedNote =
       "this provider shares memory with the host -- the tensor is handed over "
       "by pointer and no copy takes place";
 
   if (lastBps > 0.0 && transfers)
-    test.emit("h2d", (float)lastBps, h2dNote);
+    test.emit("h2d", (float)lastBps, h2dNote.c_str());
   else if (lastBps > 0.0)
     test.skip("h2d", ResultStatus::Unsupported, sharedNote, h2dNote);
   else
@@ -273,24 +282,35 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   // than improving with size, so a sweep buys nothing -- and the compilation
   // this graph provokes does not scale gently: the ANE compiles a 16 MB
   // elementwise graph in seconds and a 64 MB one in more than ten minutes.
+  //
+  // Attempted even when no trip-out size was usable.  The two graphs are
+  // placed differently by a runtime that decides per operation: Core ML
+  // keeps the trip-out's gather on the CPU under the Neural Engine
+  // configuration, which refuses that row, while the round trip's
+  // elementwise pass over 16 MB is exactly the smallest thing its planner
+  // sends to the Neural Engine.
+  const int64_t rtElems = (firstElems > 0) ? firstElems : kMinElems;
+  const std::string rtSize = " (" + std::to_string((rtElems * 2) >> 20) + " MB)";
   double roundUs = 0.0;
-  if (firstElems > 0 && !clpeak::cancelRequested())
+  if ((uint64_t)rtElems * 2ull <= maxTensorBytes() && !clpeak::cancelRequested())
   {
-    Run r = measure(rt, ep, OnnxTransfer::RoundTrip, firstElems, warmupCount,
+    Run r = measure(rt, ep, OnnxTransfer::RoundTrip, rtElems, warmupCount,
                     forceIters, specifiedIters);
     if (r.us > 0.0)
     {
       roundUs = r.us;
-      const double bps = 2.0 * (double)firstElems * 2.0 / (r.us * 1.0e-6);
+      const double bps = 2.0 * (double)rtElems * 2.0 / (r.us * 1.0e-6);
       CLPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
                   ep.providerKey.c_str(),
-                  (long long)((firstElems * 2) >> 20), bps);
+                  (long long)((rtElems * 2) >> 20), bps);
       test.emit("roundtrip", (float)bps,
-                "The full cost of offloading: a tensor out, one trivial "
-                "operation, the result back -- the bar any offloaded work has "
-                "to clear.  It includes one elementwise pass on the device, "
-                "which on hardware slow at that (see the activation rows) is "
-                "what dominates.");
+                ("The full cost of offloading: a tensor out, one trivial "
+                 "operation, the result back -- the bar any offloaded work has "
+                 "to clear.  It includes one elementwise pass on the device, "
+                 "which on hardware slow at that (see the activation rows) is "
+                 "what dominates.  Measured at the smallest size" + rtSize +
+                 ", where the trip out is reported at the largest, so the two "
+                 "rows are not one subtraction apart.").c_str());
     }
     else
     {
@@ -313,10 +333,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   // leave the elementwise pass in the answer, and that pass is not always
   // cheap: the ANE applies a pointwise operation at about a seventh of the
   // rate it reads memory (see onnx-activation).
-  const char *d2hNote =
+  const std::string d2hNote =
       "Device to host, worked out as the difference between the round trip "
       "and an otherwise identical graph that keeps its result on the device.  "
-      "What is left is the return journey alone.";
+      "What is left is the return journey alone, at the round trip's size" +
+      rtSize + ".";
 
   if (!transfers)
   {
@@ -325,24 +346,35 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   else
   {
     double computeUs = 0.0;
-    if (firstElems > 0 && roundUs > 0.0 && !clpeak::cancelRequested())
+    Run compute;
+    if (roundUs > 0.0 && !clpeak::cancelRequested())
     {
-      Run r = measure(rt, ep, OnnxTransfer::ComputeOnly, firstElems,
-                      warmupCount, forceIters, specifiedIters);
-      if (r.us > 0.0)
-        computeUs = r.us;
+      compute = measure(rt, ep, OnnxTransfer::ComputeOnly, rtElems,
+                        warmupCount, forceIters, specifiedIters);
+      if (compute.us > 0.0)
+        computeUs = compute.us;
       CLPEAK_VLOG("onnx-transfer[%s/compute-only]: %.0f us vs round trip "
-                  "%.0f us\n", ep.providerKey.c_str(), r.us, roundUs);
+                  "%.0f us\n", ep.providerKey.c_str(), compute.us, roundUs);
     }
 
     if (computeUs > 0.0 && roundUs > computeUs)
       test.emit("d2h",
-                (float)((double)firstElems * 2.0 /
+                (float)((double)rtElems * 2.0 /
                         ((roundUs - computeUs) * 1.0e-6)),
-                d2hNote);
+                d2hNote.c_str());
     else if (roundUs <= 0.0)
       test.skip("d2h", ResultStatus::Error,
                 "the round trip it is derived from could not be measured",
+                d2hNote);
+    else if (computeUs <= 0.0)
+      // The graph that keeps the result on the device could not be run --
+      // on the CoreML provider because Core ML costs the one-row gather at
+      // half the plan and places it on the CPU, which is itself the return
+      // journey: the round trip cannot be separated into its halves there.
+      test.skip("d2h", compute.status,
+                "the graph that keeps its result on the device could not be measured, so "
+                "the return trip cannot be separated from the round trip: " +
+                    (compute.error.empty() ? std::string("run failed") : compute.error),
                 d2hNote);
     else
       test.skip("d2h", ResultStatus::Error,

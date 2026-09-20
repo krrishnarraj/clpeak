@@ -92,6 +92,7 @@ float qdqOutputScale(int64_t K, int outDtype);
 struct GemmSetup
 {
   OrtSession *session = nullptr;
+  bool offDevice = false;     // refused for where it would run, not for what it is
   OrtValue *inVal = nullptr;  // the runtime scalar S
   OrtValue *zaVal = nullptr;  // Add forms only: the literal zero ZA
   OrtValue *outVal = nullptr; // reduced row
@@ -114,11 +115,13 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 
 // Build model + session + bound tensors for one (variant, D) in `shape`.
 // `actDtype`/`wgtDtype` apply to the QDQ form; `reduceInFloat` to the plain
-// one.  On failure `error` is set and `session` is null.
+// one.  On failure `error` is set and `session` is null.  `verifyPlacement`
+// is onnxCreateSession's: off for the 32-cube probes, on for every rung a
+// ladder times.
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
-                    OnnxLiveShape shape);
+                    OnnxLiveShape shape, bool verifyPlacement = true);
 
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n);

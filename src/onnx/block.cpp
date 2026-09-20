@@ -345,8 +345,14 @@ namespace
       // gets it.
       const bool keepQdqUnfused = v.qdq && (!onnxQdqFusionIsLegal(qActDtype) ||
                                             !onnxQdqFusionIsLegal(v.wDtype));
+      // A profiled run is the fusion probe at the smallest point, which asks
+      // what the provider fused and not where it ran: Core ML keeps the
+      // 64-token layer on the CPU and sends the 512-token one to the Neural
+      // Engine, and verifying the probe would refuse every point above it
+      // (onnx_session.h).  The timed points verify.
       auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
-                                   profile, keepQdqUnfused);
+                                   profile, keepQdqUnfused,
+                                   /*verifyPlacement=*/!profile);
       // The model is the largest allocation in the process; drop it before
       // anything else is allocated on top of the session's own copy.
       model.clear();

@@ -343,10 +343,17 @@ enum class OnnxTransfer { ToDevice, RoundTrip, ComputeOnly };
 //                out -- everything the round trip does except ship the result
 //                back, so the difference between them is the trip back
 //
-// One element is *gathered*, never reduced: a reduction reads the whole
-// tensor on the device, and that pass lands in whatever the test was trying
-// to isolate.  A graph input is materialised in full before any kernel sees
+// One row is *gathered*, never reduced: a reduction reads the whole tensor
+// on the device, and that pass lands in whatever the test was trying to
+// isolate.  A graph input is materialised in full before any kernel sees
 // it, so gathering still forces the transfer.
+//
+// The tensor is two-dimensional, [elems / kOnnxTransferCols, kOnnxTransferCols]
+// of fp16, never a flat vector: the Neural Engine's compiler spent 255 s on
+// an elementwise multiply over a flat [8388608] (macOS 27, ORT 1.29) where
+// the same bytes shaped as rows of 4096 -- the activation graphs' shape --
+// compile in seconds.  `elems` is a multiple of the width.
+constexpr int64_t kOnnxTransferCols = 4096;
 std::string onnxTransferModel(OnnxTransfer dir, int64_t elems);
 
 // ---------------------------------------------------------------------------

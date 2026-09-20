@@ -1,6 +1,7 @@
 #ifdef ENABLE_ONNX
 
 #include "onnx_session.h"
+#include "onnx_coreml_plan.h"
 #include "onnx_model.h"
 #include "onnx_plugin.h"
 
@@ -324,20 +325,32 @@ void qnnBackend(const onnx_ep_info_t &ep, const char *type, const char *file,
   out.kv.emplace_back("backend_path", file);
 }
 
+// The compute units the CoreML provider is asked for.  CoreML has no
+// NPU-only mode; CPUAndNeuralEngine is the strictest available request,
+// and what Core ML then does with each operation is read back from its
+// compute plan (onnx_coreml_plan.h).
+constexpr const char *kCoremlComputeUnits = "CPUAndNeuralEngine";
+
 // Providers registered through the generic string-keyed API -- and the
 // plugin providers, which take the same key/value options through the
 // OrtEpDevice append (onnx_plugin.h).  Returns false for anything not
 // handled here; the caller then tries the typed paths.
-bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
+// `wantPlan` asks the CoreML provider to log its compute plan while it
+// loads the model (ProfileComputePlan, ORT 1.20+): the provider then loads
+// the compiled model a second time to read MLComputePlan, which is what
+// the native backend pays too and the price of knowing where the work ran.
+// Off for the probes and the attach-only check, which never time a run.
+bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
 {
   const std::string &providerKey = ep.providerKey;
   if (providerKey == "CoreMLExecutionProvider")
   {
-    // MLProgram + Neural Engine: the fp16-native ANE path.  CoreML has no
-    // NPU-only mode; CPUAndNeuralEngine is the strictest available request.
+    // MLProgram + Neural Engine: the fp16-native ANE path.
     out = {"CoreML",
            {{"ModelFormat", "MLProgram"},
-            {"MLComputeUnits", "CPUAndNeuralEngine"}}};
+            {"MLComputeUnits", kCoremlComputeUnits}}};
+    if (wantPlan)
+      out.kv.emplace_back("ProfileComputePlan", "1");
     return true;
   }
   if (providerKey == "QNNExecutionProvider")
@@ -433,7 +446,7 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
 // one-line reason -- including "no wiring", so an unknown provider is
 // reported as unsupported rather than silently run with defaults.
 std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
-                           const onnx_ep_info_t &ep)
+                           const onnx_ep_info_t &ep, bool wantPlan)
 {
   const OrtApi *api = rt.api;
   const std::string &providerKey = ep.providerKey;
@@ -449,13 +462,13 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   if (ep.epDevicePtr)
   {
     EpOptions opts;
-    if (!genericEpOptions(ep, opts))
+    if (!genericEpOptions(ep, opts, wantPlan))
       opts = {"", {}};
     return onnxAppendPluginDevice(rt, so, ep, opts.kv);
   }
 
   EpOptions opts;
-  if (genericEpOptions(ep, opts))
+  if (genericEpOptions(ep, opts, wantPlan))
   {
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
@@ -591,7 +604,7 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   OrtSessionOptions *so = nullptr;
   if (OrtStatus *st = rt.api->CreateSessionOptions(&so))
     return onnxStatusText(rt, st);
-  std::string err = appendProvider(rt, so, ep);
+  std::string err = appendProvider(rt, so, ep, /*wantPlan=*/false);
   rt.api->ReleaseSessionOptions(so);
   return err;
 }
@@ -853,10 +866,20 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded,
                                     bool profile,
-                                    bool keepQdqUnfused)
+                                    bool keepQdqUnfused,
+                                    bool verifyPlacement)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
+
+  // The one provider whose runtime can be asked where the work went.  The
+  // unit is the one its MLComputeUnits request names; a request no single
+  // unit answers for is not verified.
+  const OnnxCoremlUnit unit =
+      (verifyPlacement && ep.providerKey == "CoreMLExecutionProvider")
+          ? onnxCoremlUnitFor(kCoremlComputeUnits)
+          : OnnxCoremlUnit{};
+  const bool wantPlan = !unit.cls.empty();
 
   OrtEnv *env = onnxEnv(rt);
   if (!env)
@@ -922,7 +945,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // one provider that needs no registration and keeps its fallback.
   if (ep.providerKey != "CPUExecutionProvider")
   {
-    res.error = appendProvider(rt, so, ep);
+    res.error = appendProvider(rt, so, ep, wantPlan);
     if (!res.error.empty())
     {
       api->ReleaseSessionOptions(so);
@@ -943,11 +966,21 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // registry -- the XNNPACK EP emits hundreds of "Schema error: ... already
   // registered" lines from the bundled ONNX library, straight to the console
   // and below any ORT log level.  Mute the build; --verbose keeps it visible.
+  // When the CoreML provider was asked for its compute plan, the console is
+  // where it arrives (NSLog, one line per operation, before the session is
+  // initialised), so that build is captured rather than discarded.
   OrtSession *session = nullptr;
+  std::string console;
   {
-    clpeak::ScopedConsoleMute mute;
+    clpeak::ScopedConsoleMute mute(wantPlan ? clpeak::ScopedConsoleMute::Capture::Always
+                                            : clpeak::ScopedConsoleMute::Capture::Verbose);
     st = api->CreateSessionFromArray(env, modelBytes.data(), modelBytes.size(),
                                      so, &session);
+    if (wantPlan)
+    {
+      mute.finish();
+      console = mute.text();
+    }
   }
   api->ReleaseSessionOptions(so);
   if (st)
@@ -963,6 +996,39 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     res.error = "the runtime returned no session and no error";
     removeProfileArtifacts(profilePrefix);
     return res;
+  }
+
+  // The placement guard.  ORT's fallback guard above proved the provider
+  // took every node; this proves its runtime ran them on the unit the row is
+  // named for, by the same 5%-of-cost rule the native Core ML backend
+  // applies to its own plans.  A plan that never arrived -- an OS before
+  // macOS 14.4 / iOS 17.4, where MLComputePlan does not exist and the
+  // provider says so through its logger -- leaves the session unverified
+  // rather than refused: it is what every other provider gets, and the
+  // verbose log says which it was.
+  if (wantPlan)
+  {
+    const OnnxCoremlPlan plan = onnxParseCoremlPlan(console);
+    if (!plan.known)
+      CLPEAK_VLOG("onnx: no compute plan from the CoreML provider (%s); placement unverified\n",
+                  plan.failure.empty() ? "no placement lines on the console" : plan.failure.c_str());
+    else
+    {
+      size_t onUnit = 0;
+      for (const auto &op : plan.ops)
+        onUnit += (op.device == unit.cls) ? 1 : 0;
+      CLPEAK_VLOG("onnx: compute plan: %zu of %zu operations on %s\n", onUnit, plan.ops.size(),
+                  unit.name.c_str());
+      const std::string why = onnxCoremlPlanOffDeviceReason(plan, unit.cls, unit.name);
+      if (!why.empty())
+      {
+        api->ReleaseSession(session);
+        removeProfileArtifacts(profilePrefix);
+        res.error = why;
+        res.offDevice = true;
+        return res;
+      }
+    }
   }
 
   res.session = session;

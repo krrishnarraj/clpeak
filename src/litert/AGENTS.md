@@ -371,10 +371,17 @@ compiling), GPU rows ±10%.
 | conv3x3 fp32 / fp16 / int8 | 8.60 / 12.7 T (Winograd-counted) / 12.6 TOPS | 484 G / 984 G / 2.31 TOPS |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 4.34 TFLOPS / 102 GB/s | 0.85 TFLOPS / 101 GB/s |
 | block fp16_composite prefill s512 / decode kv2048 | 4.33 TFLOPS / aborts (fenced) | 0.95 TFLOPS / 58 GB/s |
+| activation softmax 32mb / 128mb | 92-117 / 122 GB/s | 111 / 116 GB/s |
+| activation layernorm 32mb / 128mb | 138-203 / **36-39** GB/s | 16.4 / 16.9 GB/s |
 | tensor_bw 8mb / 128mb | 484 / 142 GB/s | 261 / 115 GB/s |
 | dispatch trivial / matmul_256 / create | 268 µs / 390 µs / 1.36 ms | 602 ns / 144 µs / 277 µs |
 
-The whole backend, both devices, takes 6:46 here; the time is the timed
+The Metal delegate's layer norm falls off a cliff at 128 MB -- the 7-op
+decomposition over [8192, 4096] reads 36-39 GB/s on three runs where the
+32 MB tensor reads 138-203 and softmax at the same size reads 122 -- which
+is reproducible and therefore the row, not noise; the SiLU rows and every
+8 MB row are fused or lost in the reference's spread and say so.  The
+whole backend, both devices, takes 6:46 here; the time is the timed
 budgets (1 s per activation/tensor size, 2 s per gemm/conv rung, 5 s per
 block point, the ONNX and Core ML backends' figures), not the models.
 

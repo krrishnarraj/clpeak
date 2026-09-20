@@ -28,6 +28,8 @@ struct CoremlPlacement
   CoremlDeviceKind preferred;
   bool capable;
   double weight;          // the plan's estimated share of the model's cost; -1 unknown
+                          // (also when the whole plan is costed at zero, so that
+                          // every operation counts whole -- see create())
 };
 
 // The share of a model's estimated cost that may run off its device before

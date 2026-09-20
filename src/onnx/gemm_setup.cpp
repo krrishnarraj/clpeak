@@ -55,6 +55,13 @@ const Variant kFpVariants[] = {
      "multiply, so this reads in TFLOPS: four bits buys weight traffic, not "
      "rate, and well below the fp16 row is a costly unpack.",
      /*blockSize=*/32, false},
+    {ONNX_DT_INT8, false, "int8_weight",
+     "8-bit integer weights, blocked the same way, against 16-bit "
+     "activations.  This narrows only the weights where int8_qdq narrows the "
+     "arithmetic too, so the gap between them is what the integer units are "
+     "worth -- and the same row the Core ML and LiteRT backends measure, so "
+     "the three ladders line up.",
+     /*blockSize=*/32, false},
 };
 const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 
@@ -243,7 +250,7 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         GemmSetup &g, const std::string &modelBytes,
                         int sDtype, int ioDtype, int64_t D, bool profile,
-                        bool keepQdqUnfused, int zaDtype)
+                        bool keepQdqUnfused, int zaDtype, bool verifyPlacement)
 {
   // Every model here holds its operands as constants and needs ORT's own
   // folding held off: the result-scaled form is otherwise evaluated once at
@@ -251,10 +258,11 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // that would be baked into full-width weights.
   auto ses = onnxCreateSession(rt, ep, modelBytes,
                                /*keepConstantsUnfolded=*/true, profile,
-                               keepQdqUnfused);
+                               keepQdqUnfused, verifyPlacement);
   if (!ses.session)
   {
     g.error = ses.error;
+    g.offDevice = ses.offDevice;
     return;
   }
   g.session = ses.session;
@@ -310,7 +318,7 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
-                    OnnxLiveShape shape)
+                    OnnxLiveShape shape, bool verifyPlacement)
 {
   GemmSetup g;
   std::string modelBytes;
@@ -331,7 +339,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::string().swap(bPacked);
     std::string().swap(bScales);
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT, ONNX_DT_FLOAT, D,
-                profile, /*keepQdqUnfused=*/true, /*zaDtype=*/0);
+                profile, /*keepQdqUnfused=*/true, /*zaDtype=*/0, verifyPlacement);
     return g;
   }
 
@@ -350,7 +358,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::string().swap(wPacked);
     std::string().swap(wScales);
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, D,
-                profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0);
+                profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0, verifyPlacement);
     return g;
   }
 
@@ -389,7 +397,8 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const bool addForm = v.qdq && (shape == OnnxLiveShape::Add0 ||
                                  shape == OnnxLiveShape::QdqAdd0);
   finishSetup(rt, ep, g, modelBytes, sDtype, ioDtype, D, profile,
-              /*keepQdqUnfused=*/unfusable, addForm ? actDtype : 0);
+              /*keepQdqUnfused=*/unfusable, addForm ? actDtype : 0,
+              verifyPlacement);
   return g;
 }
 

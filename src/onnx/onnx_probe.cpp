@@ -61,8 +61,12 @@ Build probeBuild(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 {
   Build b;
   auto t0 = std::chrono::steady_clock::now();
+  // Unverified placement (onnx_session.h): a 32-cube runs on Core ML's CPU
+  // whatever unit was asked for, and this probe asks what builds and fuses,
+  // not where the ladder's sizes will run.
   GemmSetup s = makeSetup(rt, ep, v, kProbeDim, /*profile=*/true, actDtype,
-                          reduceInFloat, wgtDtype, shape);
+                          reduceInFloat, wgtDtype, shape,
+                          /*verifyPlacement=*/false);
   b.createUs = elapsedUs(t0);
   if (!s.session)
   {
@@ -137,6 +141,21 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       r.reason = why;
       out[v.label] = r;
       return;
+    }
+    // A blocked weight is spelled with DequantizeLinear's block_size, opset
+    // 21, whatever its own type needs: int8 is opset 17 on its own and the
+    // check above would pass it on a runtime that cannot load the graph.
+    if (v.blockSize > 0)
+    {
+      const uint32_t needApi = onnxMinOrtApiForOpset(21);
+      if (needApi && rt.apiVersion < needApi)
+      {
+        r.reason = "needs opset 21 for the blocked weight scales, which arrived in "
+                   "ONNX Runtime 1." + std::to_string(needApi) + "; this runtime is " +
+                   rt.versionString;
+        out[v.label] = r;
+        return;
+      }
     }
     // A graph this provider crashes on rather than declines is not built,
     // here or anywhere downstream of this cache.
@@ -627,7 +646,13 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   {
     auto t0 = std::chrono::steady_clock::now();
-    auto ses = onnxCreateSession(rt, ep, onnxTrivialMulModel());
+    // Placement is not the question here (onnx_session.h): Core ML runs a
+    // 64-value multiply on the CPU under every configuration, and a
+    // provider that builds it is alive.
+    auto ses = onnxCreateSession(rt, ep, onnxTrivialMulModel(),
+                                 /*keepConstantsUnfolded=*/false,
+                                 /*profile=*/false, /*keepQdqUnfused=*/false,
+                                 /*verifyPlacement=*/false);
     const double us = elapsedUs(t0);
     if (ses.session)
     {
@@ -651,7 +676,7 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     GemmSetup s =
         makeSetup(rt, ep, v, kProbeDim, /*profile=*/false, actDtype,
                   /*reduceInFloat=*/false, wgtDtype,
-                  OnnxLiveShape::ResultScaled);
+                  OnnxLiveShape::ResultScaled, /*verifyPlacement=*/false);
     const double us = elapsedUs(t0);
     const bool ok = (s.session != nullptr);
     if (!ok && firstErr.empty())

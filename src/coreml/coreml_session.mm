@@ -397,6 +397,21 @@ std::unique_ptr<CoremlSession> CoremlSession::create(const coreml_device_info_t 
             pl.weight = cost ? cost.weight : -1.0;
             s->placement.push_back(pl);
           }
+          // A plan whose every operation is costed at zero has said where
+          // the work goes and nothing about how much of it -- Core ML
+          // answers that for a model it keeps on the CPU end to end (a
+          // 64-token transformer block under the Neural Engine
+          // configuration read 26 operations, all CPU, all 0.000000).
+          // Weighed, such a plan would pass onDevice() with every operation
+          // off the device; so the weights are marked unknown, which counts
+          // each operation whole.
+          bool anyCost = false;
+          for (const auto &pl : s->placement)
+            if (pl.weight > 0.0)
+              anyCost = true;
+          if (!anyCost)
+            for (auto &pl : s->placement)
+              pl.weight = -1.0;
         }
       }
     }

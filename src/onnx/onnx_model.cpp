@@ -435,7 +435,9 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               OnnxLiveShape shape)
 {
   OnnxGraph g;
-  g.setOpset(onnxOpsetForDtype(wDtype));
+  // The blocked DequantizeLinear (block_size) is opset 21 whatever the
+  // weight type: int4 and float4 arrive there anyway, int8 does not.
+  g.setOpset(std::max(onnxOpsetForDtype(wDtype), 21));
 
   // Activations are fp16 and resident, exactly as in the plain throughput
   // model: only the weights are narrow, and only the weights are what a
@@ -733,31 +735,34 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
 std::string onnxTransferModel(OnnxTransfer dir, int64_t elems)
 {
   OnnxGraph g;
+  const int64_t cols = kOnnxTransferCols;
+  const int64_t rows = elems / cols;
   switch (dir)
   {
   case OnnxTransfer::ToDevice:
-    // Everything arrives; one element goes back.  Gather rather than a
+    // Everything arrives; one row goes back.  Gather rather than a
     // reduction: a reduction reads the whole tensor on the device, and on a
     // provider with no real host transfer that read *is* the measurement --
     // the CPU EP reported 4 GB/s for a "transfer" that never happens, which
-    // was its fp16 reduction rate and nothing else.  Picking one element
-    // still forces the whole input across, because a graph input is
-    // materialised in full before any kernel sees it.
-    g.input("X", ONNX_DT_FLOAT16, {elems});
+    // was its fp16 reduction rate and nothing else.  Picking one row still
+    // forces the whole input across, because a graph input is materialised
+    // in full before any kernel sees it; 8 KB back against 16 MB and more
+    // in cannot be seen.
+    g.input("X", ONNX_DT_FLOAT16, {rows, cols});
     {
       std::string idx(sizeof(int64_t), '\0');
-      g.initializer("idx", ONNX_DT_INT64, {1}, idx);   // element 0
+      g.initializer("idx", ONNX_DT_INT64, {1}, idx);   // row 0
     }
     g.node("Gather", {"X", "idx"}, {"Y"}, {OnnxAttr::num("axis", 0)});
-    g.output("Y", ONNX_DT_FLOAT16, {1});
+    g.output("Y", ONNX_DT_FLOAT16, {1, cols});
     break;
 
   case OnnxTransfer::RoundTrip:
     // Squared rather than scaled: same shape on both operands avoids
     // broadcasting, which some providers decline, and needs no constant.
-    g.input("X", ONNX_DT_FLOAT16, {elems});
+    g.input("X", ONNX_DT_FLOAT16, {rows, cols});
     g.node("Mul", {"X", "X"}, {"Y"});
-    g.output("Y", ONNX_DT_FLOAT16, {elems});
+    g.output("Y", ONNX_DT_FLOAT16, {rows, cols});
     break;
 
   case OnnxTransfer::ComputeOnly:
@@ -765,16 +770,16 @@ std::string onnxTransferModel(OnnxTransfer dir, int64_t elems)
     // with a Gather, not summarised with a reduction: a reduction would read
     // the whole result back on the device, and that extra pass would be
     // subtracted out of the return trip along with everything else, flattering
-    // it.  Gathering one element leaves exactly the round trip's work minus
-    // the journey home.
-    g.input("X", ONNX_DT_FLOAT16, {elems});
+    // it.  Gathering one row leaves exactly the round trip's work minus the
+    // journey home.
+    g.input("X", ONNX_DT_FLOAT16, {rows, cols});
     {
       std::string idx(sizeof(int64_t), '\0');
       g.initializer("idx", ONNX_DT_INT64, {1}, idx);
     }
     g.node("Mul", {"X", "X"}, {"T"});
     g.node("Gather", {"T", "idx"}, {"Y"}, {OnnxAttr::num("axis", 0)});
-    g.output("Y", ONNX_DT_FLOAT16, {1});
+    g.output("Y", ONNX_DT_FLOAT16, {1, cols});
     break;
   }
   return g.build();
