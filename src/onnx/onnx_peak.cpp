@@ -349,17 +349,30 @@ int OnnxPeak::runAll()
     };
     if (ep.epDevicePtr)
     {
-      // A plugin provider: which library it came from and what the
-      // runtime says about the silicon behind this device -- the vendor,
-      // and whatever metadata the provider attached (a SoC model, a
-      // driver version), which is the only inventory an NPU offers.
-      details.push_back({"Plugin library", onnxEpLibraryPath(ep.library)});
+      // A plugin provider: what the runtime says about the silicon behind
+      // this device -- the vendor and whatever metadata the provider
+      // attached (a SoC model, a device name), which is the only inventory
+      // an NPU offers.  Bus trivia the provider also reports (PCI ids,
+      // device indices, its own path and version) is not shown.
+      static const char *const kHidden[] = {
+          "Device", "card_idx", "Discrete", "pci_bus_id",
+          "cuda_compute_capability", "cuda_device_id", "version",
+          "library_path",
+      };
       if (!ep.vendor.empty())
         details.push_back({"Vendor", ep.vendor});
-      if (!ep.epDevice.empty())
-        details.push_back({"Device", ep.epDevice});
       for (const auto &kv : ep.hardware)
-        details.push_back({kv.first, kv.second});
+      {
+        bool hidden = false;
+        for (const char *h : kHidden)
+          if (kv.first == h)
+          {
+            hidden = true;
+            break;
+          }
+        if (!hidden)
+          details.push_back({kv.first, kv.second});
+      }
     }
     // The OpenVINO target is part of what was measured (NPU vs GPU vs
     // CPU are different silicon behind one provider name), so record it
