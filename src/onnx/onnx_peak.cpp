@@ -260,15 +260,13 @@ OnnxRuntimeStatus onnxRuntimeStatus()
   if (st.winmlEnabled && st.available)
   {
     // Only what the last enumeration or run found: resolving the catalog
-    // here could install a provider, and a status query must not.
+    // here could install a provider, and a status query must not.  Nothing
+    // resolved yet leaves both empty -- pending, like the plugin-library
+    // status -- so a settings screen shows it as such rather than an error.
     if (const OnnxWinmlResolution *res = onnxWinmlResolved(ortRuntime()))
     {
       st.winmlPath  = res->dllPath;
       st.winmlError = res->error;
-    }
-    else
-    {
-      st.winmlError = "not resolved yet; enumerate or run first";
     }
   }
   return st;

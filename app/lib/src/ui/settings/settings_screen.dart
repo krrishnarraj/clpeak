@@ -38,15 +38,48 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   OnnxStatus? _onnx;
   LitertStatus? _litert;
+  BenchmarkService? _service;
+  VoidCallback? _catalogListener;
+  bool _lastLoading = false;
+  bool _lastReady = false;
 
   @override
   void initState() {
     super.initState();
+    final service = context.read<BenchmarkService>();
+    _service = service;
+    _lastLoading = service.isLoadingCatalog;
+    _lastReady = service.catalogReady;
     _refreshOnnx();
+    // The first catalog load lands after this screen may already be open
+    // (enumeration takes seconds, longer with Windows ML installing): pick
+    // up the resolved status when it does, without a toggle. Guarded to
+    // catalog transitions only so live-run ticks never re-query.
+    _catalogListener = () {
+      if (!mounted) return;
+      final s = _service;
+      if (s == null || s.isRunning) return;
+      if (s.isLoadingCatalog == _lastLoading &&
+          s.catalogReady == _lastReady) {
+        return;
+      }
+      _lastLoading = s.isLoadingCatalog;
+      _lastReady = s.catalogReady;
+      _refreshOnnx();
+    };
+    service.addListener(_catalogListener!);
+  }
+
+  @override
+  void dispose() {
+    if (_service != null && _catalogListener != null) {
+      _service!.removeListener(_catalogListener!);
+    }
+    super.dispose();
   }
 
   void _refreshOnnx() {
-    final service = context.read<BenchmarkService>();
+    final service = _service ?? context.read<BenchmarkService>();
     setState(() {
       _onnx = service.onnxStatus();
       _litert = service.litertStatus();
@@ -722,12 +755,26 @@ class _WinmlPanel extends StatelessWidget {
   final VoidCallback onPickDir;
   final VoidCallback onClearDir;
 
+  /// What older native builds reported while nothing had resolved the
+  /// catalog yet; current ones leave the error empty instead. Both mean
+  /// pending, never a failure.
+  static const _pendingError = 'not resolved yet; enumerate or run first';
+
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final s = status;
     final resolved = s != null && s.winmlEnabled && s.winmlPath.isNotEmpty;
-    final error = s != null && s.winmlEnabled ? s.winmlError : '';
+    // Pending until the next enumeration or run resolves the catalog -- the
+    // native status leaves both empty for that (older builds sent the
+    // sentence below as the error, which is still treated as pending here).
+    // Like the plugin list's empty-until-enumerated, it is not a failure.
+    final isPending = enabled &&
+        (s == null ||
+            (s.winmlEnabled &&
+                s.winmlPath.isEmpty &&
+                (s.winmlError.isEmpty || s.winmlError == _pendingError)));
+    final error = s != null && s.winmlEnabled && !isPending ? s.winmlError : '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -751,7 +798,7 @@ class _WinmlPanel extends StatelessWidget {
                 ),
               ),
               CRow(
-                rule: enabled && error.isNotEmpty,
+                rule: enabled && (error.isNotEmpty || isPending),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -771,6 +818,21 @@ class _WinmlPanel extends StatelessWidget {
                   ],
                 ),
               ),
+              if (enabled && isPending)
+                CRow(
+                  rule: false,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.hourglass_empty, size: 15, color: t.dim),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text('Waiting for enumeration…',
+                            style: t.monoSmallDim),
+                      ),
+                    ],
+                  ),
+                ),
               if (enabled && error.isNotEmpty)
                 CRow(
                   rule: false,

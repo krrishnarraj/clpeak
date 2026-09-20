@@ -244,7 +244,8 @@ struct OnnxRuntimeStatus
   std::vector<OnnxEpLibraryStatus> epLibraries;
   bool winmlEnabled = false;
   std::string winmlPath;   // the catalog DLL that answered; empty when none
-  std::string winmlError;  // why the catalog gave nothing, when enabled
+  std::string winmlError;  // why the catalog gave nothing, when enabled;
+                           // both empty while nothing has resolved it yet
 };
 OnnxRuntimeStatus onnxRuntimeStatus();
 

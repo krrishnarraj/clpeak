@@ -282,7 +282,9 @@ class OnnxStatus {
   final List<OnnxEpLibraryStatus> epLibraries;
 
   /// The Windows ML catalog: whether it is on, which DLL answered, and why
-  /// it gave nothing (or that nothing has resolved it yet).
+  /// it gave nothing. Both [winmlPath] and [winmlError] empty while enabled
+  /// means nothing has resolved it yet (pending until the next enumeration
+  /// or run, like [epLibraries]).
   final bool winmlEnabled;
   final String winmlPath;
   final String winmlError;

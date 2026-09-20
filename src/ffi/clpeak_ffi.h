@@ -88,8 +88,9 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // naming a library that cannot be opened is the ordinary way to get here.
 // `epLibraries` is what the last environment registered, so a library set
 // since the last enumeration is absent until the next one; `winml.path` is
-// the catalog DLL that answered and `winml.error` why it did not, or that
-// nothing has resolved it yet.
+// the catalog DLL that answered and `winml.error` why it did not.  When
+// enabled but nothing has resolved the catalog yet both are empty --
+// pending until the next enumeration or run, like `epLibraries`.
 // {"available":false,"error":"ONNX backend not built in"} without one.
 CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 
