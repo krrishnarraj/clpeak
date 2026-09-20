@@ -248,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(p.basename(path), style: t.monoSmallDim),
+            Text(path, style: t.monoSmallDim),
             const SizedBox(height: 10),
             TextField(
               controller: controller,
@@ -555,9 +555,9 @@ class _RuntimePanel extends StatelessWidget {
                         fixed
                             ? 'Built into the app'
                             : s.path.isNotEmpty
-                                ? p.basename(s.path)
+                                ? s.path
                                 : savedPath.isNotEmpty
-                                    ? p.basename(savedPath)
+                                    ? savedPath
                                     : 'Found by name on the system paths',
                         style: t.monoSmallDim,
                       ),
@@ -675,7 +675,7 @@ class _EpLibrariesPanel extends StatelessWidget {
                             children: [
                               Text(lib.name, style: t.mono),
                               const SizedBox(height: 3),
-                              Text(p.basename(lib.path), style: t.monoSmallDim),
+                              Text(lib.path, style: t.monoSmallDim),
                               if (st != null && !registered) ...[
                                 const SizedBox(height: 3),
                                 Text(st.error,
