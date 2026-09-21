@@ -604,7 +604,15 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   OrtSessionOptions *so = nullptr;
   if (OrtStatus *st = rt.api->CreateSessionOptions(&so))
     return onnxStatusText(rt, st);
-  std::string err = appendProvider(rt, so, ep, /*wantPlan=*/false);
+  // Appending a target with no hardware behind it (OpenVINO NPU with no
+  // NPU) makes the provider log straight to the console, below any ORT
+  // log level -- the same class of spam session creation already mutes.
+  // Mute the append; the returned status still carries the reason.
+  std::string err;
+  {
+    clpeak::ScopedConsoleMute mute;
+    err = appendProvider(rt, so, ep, /*wantPlan=*/false);
+  }
   rt.api->ReleaseSessionOptions(so);
   return err;
 }
