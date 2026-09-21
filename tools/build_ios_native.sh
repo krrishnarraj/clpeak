@@ -53,7 +53,7 @@ EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_VULKAN=$VULKAN)
 # the app.  So it is fetched here and linked in.  Cached under build-ios/, not
 # checked in -- it is 61 MB.  Set CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK to point
 # at your own build instead, or pass --no-onnx to leave the backend out.
-ORT_POD_VERSION="${CLPEAK_IOS_ONNXRUNTIME_VERSION:-1.29.0}"
+ORT_POD_VERSION="${CLPEAK_IOS_ONNXRUNTIME_VERSION:-1.30.0}"
 ORT_DIR="$BUILD/onnxruntime/$ORT_POD_VERSION"
 
 if [[ $NO_ONNX -eq 0 ]]; then

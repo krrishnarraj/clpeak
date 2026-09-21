@@ -118,7 +118,7 @@ android {
 dependencies {
     // Packaged for its jni/<abi>/libonnxruntime.so; the Java API that comes
     // with it is unused (clpeak talks to the C API through the FFI library).
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
 
     // LiteRT: jni/<abi>/libLiteRt.so plus its OpenCL GPU accelerator
     // (libLiteRtClGlAccelerator.so), 8.6 MB for arm64-v8a.  The AAR's own

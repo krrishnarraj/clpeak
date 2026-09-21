@@ -4,7 +4,7 @@ Copied verbatim from the ONNX Runtime source tree, MIT licensed
 (copyright notices retained in each file).
 
 - **Upstream:** https://github.com/microsoft/onnxruntime
-- **Tag:** `v1.29.0`  (`ORT_API_VERSION` 29)
+- **Tag:** `v1.30.0`  (`ORT_API_VERSION` 30)
 - **Path:** `include/onnxruntime/core/session/`
 
 | File | |
