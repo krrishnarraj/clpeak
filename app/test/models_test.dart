@@ -10,6 +10,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
       'backends': [
         {
           'name': 'Metal',
+          'flag': 'metal',
           'available': true,
           'platforms': [
             {
@@ -23,6 +24,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
         },
         {
           'name': 'OpenCL',
+          'flag': 'opencl',
           'available': true,
           'platforms': [
             {
@@ -37,6 +39,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
         },
         {
           'name': 'CPU',
+          'flag': 'cpu',
           'available': true,
           'platforms': [
             {
@@ -50,6 +53,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
         },
         {
           'name': 'ONNX',
+          'flag': 'onnx',
           'available': true,
           'platforms': [
             {
@@ -62,7 +66,7 @@ BackendCatalog _catalog() => BackendCatalog.fromJson({
             }
           ]
         },
-        {'name': 'Vulkan', 'available': false, 'platforms': []},
+        {'name': 'Vulkan', 'flag': 'vulkan', 'available': false, 'platforms': []},
       ]
     });
 
@@ -74,34 +78,56 @@ void main() {
       expect(config.toArgs(catalog), isEmpty);
     });
 
-    test('deselected backend emits --no-<backend>', () {
+    test('a deselected backend leaves the explicit list of everything else',
+        () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
       config.selectedDevices.remove('Metal');
-      expect(config.toArgs(catalog), ['--no-metal']);
+      expect(config.toArgs(catalog),
+          ['--devices', 'opencl:0,opencl:1,cpu:0,onnx:0,onnx:1']);
     });
 
-    test('partial OpenCL selection emits platform+device lists', () {
+    test('a partial selection names every selected device as flag:index', () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
       config.toggleDevice(
           'OpenCL', (platformIndex: 0, deviceIndex: 0), false);
-      final args = config.toArgs(catalog);
-      expect(args, ['--cl-platform', '0', '--cl-device', '1']);
+      config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 1), false);
+      expect(config.toArgs(catalog),
+          ['--devices', 'metal:0,opencl:1,cpu:0,onnx:0']);
     });
 
-    test('deselected ONNX backend emits --no-onnx', () {
-      final catalog = _catalog();
+    test('the flag comes from the catalog, not the display name', () {
+      final catalog = BackendCatalog.fromJson({
+        'backends': [
+          {
+            'name': 'Core ML',
+            'flag': 'coreml',
+            'available': true,
+            'platforms': [
+              {
+                'index': 0,
+                'name': 'Core ML',
+                'devices': [
+                  {'index': 0, 'name': 'Apple Neural Engine', 'type': 'NPU'},
+                  {'index': 1, 'name': 'CPU via Core ML', 'type': 'CPU'},
+                ]
+              }
+            ]
+          },
+        ]
+      });
       final config = RunConfig.allDevices(catalog);
-      config.selectedDevices.remove('ONNX');
-      expect(config.toArgs(catalog), ['--no-onnx']);
+      config.toggleDevice('Core ML', (platformIndex: 0, deviceIndex: 1), false);
+      expect(config.toArgs(catalog), ['--devices', 'coreml:0']);
     });
 
-    test('partial ONNX selection emits an EP index list', () {
+    test('nothing selected runs nothing', () {
       final catalog = _catalog();
       final config = RunConfig.allDevices(catalog);
-      config.toggleDevice('ONNX', (platformIndex: 0, deviceIndex: 0), false);
-      expect(config.toArgs(catalog), ['--onnx-device', '1']);
+      config.selectedDevices.clear();
+      expect(config.toArgs(catalog),
+          ['--no-metal', '--no-opencl', '--no-cpu', '--no-onnx']);
     });
 
     test('category subset flips to allow-list flags', () {
@@ -522,9 +548,21 @@ void main() {
         'generated_at': '2026-08-29T14:03:11Z',
         'duration_s': 12.5,
         'cancelled': true,
+        'build': {
+          'backends': ['CPU', 'ONNX']
+        },
         'host': {'os': 'Macintosh', 'cpu': 'Apple M1 Pro'},
-        'notes': [
-          {'backend': 'ONNX', 'message': 'QNN EP not found'}
+        'invocation': {
+          'argv': ['clpeak', '--verbose'],
+          'verbose': true,
+        },
+        'log': [
+          {
+            'elapsed_s': 0.4,
+            'level': 'warning',
+            'backend': 'ONNX',
+            'message': 'QNN EP not found'
+          }
         ],
         'devices': [
           {
@@ -576,7 +614,12 @@ void main() {
       final run = doc.runs.single;
       expect(doc.meta!.cancelled, isTrue);
       expect(doc.meta!.host['cpu'], 'Apple M1 Pro');
-      expect(doc.notes.single.message, 'QNN EP not found');
+      expect(doc.log.single.message, 'QNN EP not found');
+      expect(doc.log.single.level, LogLevel.warning);
+      expect(doc.log.single.backend, 'ONNX');
+      expect(doc.problems, hasLength(1));
+      expect(doc.meta!.builtBackends, ['CPU', 'ONNX']);
+      expect(doc.meta!.verbose, isTrue);
       expect(run.props.map((p) => p.key), ['Cores', 'RAM']);
 
       final group = run.categories.single;

@@ -2,13 +2,14 @@ cmake_minimum_required(VERSION 3.24)
 project(clpeak_ffi_ios LANGUAGES C CXX OBJCXX)
 
 # Standalone superproject that builds clpeak_ffi as an iOS dynamic framework.
-# Driven by tool/build_ios_native.sh, which configures it twice (device +
+# Driven by tools/build_ios_native.sh, which configures it twice (device +
 # simulator) and combines the products into clpeak_ffi.xcframework for the
 # Flutter runner's local pod (app/ios/clpeak_native/).
 #
-#   device:    Metal + CPU + Vulkan-over-MoltenVK (when the LunarG iOS SDK
-#              is discoverable; env-gated exactly like the retired ios/ app)
-#   simulator: Metal + CPU only (the Vulkan loader framework is device-only)
+#   device:    Metal + CPU + Core ML + ONNX Runtime + LiteRT, and
+#              Vulkan-over-MoltenVK when the LunarG iOS SDK is discoverable
+#              (env-gated exactly like the retired ios/ app)
+#   simulator: the same minus Vulkan (the loader framework is device-only)
 #
 # Configure with -DCMAKE_SYSTEM_NAME=iOS and either
 # -DCMAKE_OSX_SYSROOT=iphoneos or =iphonesimulator.
@@ -74,6 +75,12 @@ add_subdirectory(${CLPEAK_ROOT}/src/metal ${CMAKE_BINARY_DIR}/metal)
 set(CLPEAK_ENABLE_CPU ON CACHE BOOL "" FORCE)
 add_subdirectory(${CLPEAK_ROOT}/src/cpu ${CMAKE_BINARY_DIR}/cpu)
 
+# Core ML backend — the Neural Engine, GPU and CPU through the system
+# framework, no pod needed.  On the simulator Core ML enumerates the CPU (and
+# GPU) only; a device gets the Neural Engine.
+set(CLPEAK_ENABLE_COREML ON CACHE BOOL "" FORCE)
+add_subdirectory(${CLPEAK_ROOT}/src/coreml ${CMAKE_BINARY_DIR}/coreml)
+
 # ---- ONNX Runtime backend (CoreML / XNNPACK / CPU) -------------------------
 # Statically linked, and it has to be: Apple's official pod ships
 # onnxruntime.xcframework as a *static* framework (`static_framework = true`
@@ -82,7 +89,7 @@ add_subdirectory(${CLPEAK_ROOT}/src/cpu ${CMAKE_BINARY_DIR}/cpu)
 # baked in -- which is also why --onnx-lib and the settings screen's library
 # picker do nothing here: there is no second runtime to choose.
 #
-# tool/build_ios_native.sh fetches and unpacks the pod archive, then passes
+# tools/build_ios_native.sh fetches and unpacks the pod archive, then passes
 # its path in.  Point CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK at an existing
 # onnxruntime.xcframework to use your own build; the backend is left out
 # entirely when it is absent.
@@ -107,6 +114,23 @@ if(CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK)
     message(WARNING "No ${_ort_slice} slice under "
                     "${CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK} - ONNX backend disabled.")
   endif()
+endif()
+
+# ---- LiteRT backend (CPU via XNNPACK / GPU via Metal) -----------------------
+# Dynamic, as on every other platform: only the vendored C headers are needed
+# to build, and libLiteRt.dylib is dlopen'd from the app's Frameworks
+# directory at run time, where the Runner's embed phase puts it together with
+# libLiteRtMetalAccelerator.dylib (tools/build_ios_native.sh fetches Google's
+# iOS builds of both, device and simulator, and stages them under
+# app/ios/clpeak_native/embed-{device,simulator}/).  iOS loads a library from
+# inside the signed bundle, which is the one place --litert-lib and the
+# settings picker could never name -- so, as with ONNX Runtime, the runtime
+# the app carries is the runtime it measures.  No NPU: Core ML is the route
+# to the Neural Engine on Apple platforms.
+option(CLPEAK_IOS_ENABLE_LITERT "Enable the LiteRT backend on iOS" ON)
+if(CLPEAK_IOS_ENABLE_LITERT)
+  set(CLPEAK_ENABLE_LITERT ON)
+  add_subdirectory(${CLPEAK_ROOT}/src/litert ${CMAKE_BINARY_DIR}/litert)
 endif()
 
 # ---- The FFI bridge framework ------------------------------------------------
@@ -140,7 +164,7 @@ if(CLPEAK_IOS_ONNX_AVAILABLE)
       "-framework UIKit")
 endif()
 
-foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx)
+foreach(_dep peak_common peak_metal peak_cpu peak_vulkan peak_onnx peak_coreml peak_litert)
   if(TARGET ${_dep})
     set_target_properties(${_dep} PROPERTIES
       "XCODE_ATTRIBUTE_EXCLUDED_ARCHS[sdk=iphonesimulator*]" "x86_64"

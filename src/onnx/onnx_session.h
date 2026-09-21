@@ -7,6 +7,7 @@
 // the EP cannot run entirely fails session creation (and the row reports
 // Unsupported) instead of silently measuring the CPU.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,12 +15,19 @@
 #include <onnx/onnx_peak.h>
 
 // Process-wide OrtEnv (created on first use; log level follows --verbose).
+// Null when the runtime refuses to create one, with the reason in
+// onnxEnvError(); a refusal is remembered per runtime rather than retried.
 OrtEnv *onnxEnv(const OrtRuntime &rt);
+std::string onnxEnvError();
 
 struct OnnxSessionResult
 {
   OrtSession *session = nullptr;
   std::string error;               // set when session == nullptr
+  // The provider took the graph but its runtime placed the work on another
+  // unit (onnx_coreml_plan.h): a refusal about size or shape, not about the
+  // format, so a ladder may climb past it where it would stop at any other.
+  bool offDevice = false;
 };
 
 // Build a session for `ep` from in-memory model bytes.  For non-CPU EPs the
@@ -40,23 +48,62 @@ struct OnnxSessionResult
 // input parameter (A_q) of operator (QLinearMatMul) is invalid".  A provider
 // with real float8 matmul hardware consumes the QDQ nodes itself and never
 // wanted the rewrite.
+// `verifyPlacement` asks the provider's runtime where it put the work and
+// refuses the session when that is not the unit the row is named for.
+// Today that is the CoreML provider's compute plan (onnx_coreml_plan.h);
+// every other provider is judged by the fallback guard alone.  It is off
+// for the probes -- the viability check and the 32-cube fusion probe --
+// which ask whether a graph builds and fuses, not where a real size runs:
+// Core ML sends anything that small to the CPU, and verifying it would
+// declare the provider dead on a machine whose Neural Engine takes every
+// 2048-cube it is offered.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded = false,
                                     bool profile = false,
-                                    bool keepQdqUnfused = false);
+                                    bool keepQdqUnfused = false,
+                                    bool verifyPlacement = true);
 
-// Names of the kernels a profiled session executed, distinct, in first-seen
-// order.  Empty when profiling was off or unavailable.
+// Names of the kernels a profiled session executed, one entry per kernel
+// launch in execution order -- so a kernel that ran twice appears twice.
+// Empty when profiling was off or unavailable.
 //
 // This answers a question no timing can: whether a row measured the operation
 // its name claims.  ONNX Runtime rewrites graphs before running them, and a
 // provider that declines to fuse a quantized matmul will dequantize the
 // operands and multiply them in floating point instead -- producing a
-// perfectly good number that is not an int8 number at all.
+// perfectly good number that is not an int8 number at all.  Duplicates are
+// kept because counts matter too: a graph shape that adds one more Cast to
+// a provider that already casts once is running an extra pass, and the
+// shape probe compares the counts.
+// When `opInType` is non-null it also receives the element type the compute
+// kernel actually consumed, as ORT names it in the profile ("float",
+// "float16", "bfloat16", ...), or empty when no such kernel ran.  `ofOp`
+// picks which kernel to read it from; null means the MatMul family.
+// SessionEndProfiling is one-shot, so this is the only chance to read it.
+//
+// It is the one signal that catches a provider quietly widening the
+// arithmetic: ORT inserts a "precision-free" Cast in front of an fp16 kernel
+// when the one it picks wants fp32, and the row then measures fp32 under the
+// fp16 label -- the CPU EP's fp16 convolution rows land on its fp32 rows to
+// three figures for exactly this reason.  A cast *count* cannot see it, since
+// the widened graph can carry fewer Cast nodes than the narrow one.
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
-                                                OrtSession *session);
+                                                OrtSession *session,
+                                                std::string *opInType = nullptr,
+                                                const char *ofOp = nullptr);
+
+// The element type ORT names in a profile for `dtype` ("float", "float16",
+// "bfloat16"), or "" for a type with no plain kernel to read.
+const char *onnxProfileTypeName(int dtype);
+
+// How many times `name` appears among `ops`.
+size_t onnxCountOp(const std::vector<std::string> &ops, const char *name);
+
+// `ops` distinct, in first-seen order, comma-joined -- for skip reasons and
+// the verbose log.
+std::string onnxJoinOps(const std::vector<std::string> &ops);
 
 // Did the provider actually multiply in integers?
 //
@@ -90,6 +137,23 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 // the constant-folding guard in gemm.cpp reports.
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 
+// Empty when `ep` can be handed a `dtype` graph -- quantized in and out with
+// a per-tensor scale when `qdq`, weights blocked one scale per `blockSize`
+// rows when that is positive -- otherwise the reason it must not be, phrased
+// for a skip row.
+//
+// Every other refusal in this backend is learned by asking: the provider
+// builds the graph or says why not, and the row reports its words.  This is
+// for the graphs a provider does not decline but takes the process down with,
+// where asking is the fault -- the answer arrives as an access violation or
+// a divide by zero, and every row after it, on every provider, is never run.  Checked before the
+// gemm probe builds a variant, which is what every test consults, and again
+// by the accuracy row, which builds the same graph in its own shape.  Every
+// entry is a runtime defect and is listed in NOTES.md at the repository
+// root, with what lifting it takes.
+std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
+                                    bool qdq, int64_t blockSize);
+
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
 // provider accepts clpeak's options for this target (an OpenVINO target
@@ -100,5 +164,41 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
+
+// Has the runtime reported its accelerator device lost since the flag was
+// last cleared?
+//
+// A GPU that is reset out from under the provider -- a Mali driver timing out
+// a hung shader and answering vkWaitForFences with VK_ERROR_DEVICE_LOST, which
+// is what a Pixel 7a does to the WebGPU EP on the first non-trivial graph --
+// does not come back.  Every later session still builds, every later inference
+// still fails, and the run spends its whole budget proving it: 52 of 83 rows
+// and 53 of 58 seconds in the report that prompted this.  So the loss is
+// latched the moment the runtime mentions it, whether that is in a status
+// message handed back to us or a line it only logged, and runAll() abandons
+// the provider rather than asking it 52 more questions.
+//
+// Set from the ORT logger (above any verbosity filter -- the WebGPU EP reports
+// the loss at INFO, so a non-verbose run would otherwise never see it) and
+// from onnxStatusText().  Cleared per provider in runAll().
+bool onnxDeviceLost();
+void onnxClearDeviceLost();
+
+// True when `reason` is a runtime or device failure rather than the provider
+// saying it has no kernel for this format.
+bool onnxReasonIsDeviceLoss(const std::string &reason);
+
+// The status a refusal deserves.  ONNX's ordinary refusals *are* capability
+// facts -- a provider declining nodes under the CPU-fallback guard, a missing
+// bf16 kernel, the empty status ORT returns for a float4 graph -- so
+// Unsupported stays the default and only a device failure is promoted to
+// Error.  Reporting a dead GPU as "unsupported" would be a claim about the
+// format, and a reader has no way to tell it from a real one: this run said
+// "unsupported" against fp32 matmul on a GPU that does fp32 matmul perfectly
+// well when it is alive.
+// `current` is never downgraded: a caller that has already concluded the
+// ladder failed for a reason of its own keeps its Error.
+ResultStatus onnxFailureStatus(const std::string &reason,
+                               ResultStatus current = ResultStatus::Unsupported);
 
 #endif // CLPEAK_ONNX_SESSION_H

@@ -16,15 +16,21 @@ clPeak::clPeak()
 {
 }
 
-void clPeak::applyOptions(const CliOptions &opts)
+namespace
 {
-    // Common fields handled by base class
-    Peak::applyOptions(opts);
 
-    // OpenCL-specific device selection
-    platformIndices = opts.platformIndices;
-    deviceIndices   = opts.deviceIndices;
+// The context's error callback.  A driver reports a failing command here
+// -- NVIDIA's "CL_OUT_OF_RESOURCES error executing CL_COMMAND_NDRANGE_KERNEL
+// on ..." -- with more than the status code the call returned, and the run
+// log is where that reaches a file.  May arrive on a driver thread; the log
+// route is built for it.
+void CL_CALLBACK contextNotify(const char *errinfo, const void *, size_t, void *)
+{
+  if (errinfo)
+    clpeak::logMessage(clpeak::LogLevel::Error, "opencl", errinfo);
 }
+
+} // namespace
 
 int clPeak::runAll()
 {
@@ -34,14 +40,16 @@ int clPeak::runAll()
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
 
+    // Devices are numbered consecutively across platforms -- the index
+    // --devices takes, --list-devices prints and the document records -- so
+    // OpenCL selects like every other backend.  The platform is still part
+    // of the device's identity in the output; it is just not a selector.
+    int deviceIndex = 0;
+
     for (size_t p = 0; p < platforms.size(); p++)
     {
       if (clpeak::cancelRequested())
         break;
-      if (!platformIndices.empty() &&
-          std::find(platformIndices.begin(), platformIndices.end(),
-                    static_cast<unsigned long>(p)) == platformIndices.end())
-        continue;
 
       std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
       trimString(platformName);
@@ -55,7 +63,7 @@ int clPeak::runAll()
       std::vector<cl::Device> devices;
       try
       {
-        ctx = cl::Context(CL_DEVICE_TYPE_ALL, cps);
+        ctx = cl::Context(CL_DEVICE_TYPE_ALL, cps, contextNotify);
         devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
       }
       catch (cl::Error &error)
@@ -64,13 +72,11 @@ int clPeak::runAll()
         continue;
       }
 
-      for (size_t d = 0; d < devices.size(); d++)
+      for (size_t d = 0; d < devices.size(); d++, deviceIndex++)
       {
         if (clpeak::cancelRequested())
           break;
-        if (!deviceIndices.empty() &&
-            std::find(deviceIndices.begin(), deviceIndices.end(),
-                      static_cast<unsigned long>(d)) == deviceIndices.end())
+        if (!isDeviceSelected(deviceIndex))
           continue;
 
         device_info_t devInfo = getDeviceInfo(devices[d]);
@@ -88,7 +94,7 @@ int clPeak::runAll()
             {"Clock frequency", std::to_string(devInfo.maxClockFreq) + " MHz"},
           },
           static_cast<int>(p),
-          static_cast<int>(d)
+          deviceIndex
         });
         currentDeviceScope = &deviceScope;
 
@@ -101,9 +107,13 @@ int clPeak::runAll()
         }
         catch (cl::Error &error)
         {
-          UNUSED(error);
-          CLPEAK_VLOG("  Build Log: %s\n\n",
-                      prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
+          // The device produces nothing after this, and only the compiler
+          // says why -- so the build log is an error on the run log, not a
+          // --verbose extra, and a file from a machine nobody can reach
+          // still explains the missing device.
+          CLPEAK_LOG(Error, "OpenCL: program build failed on %s (%s %d):\n%s",
+                     devInfo.deviceName.c_str(), error.what(), error.err(),
+                     prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
           currentDeviceScope = nullptr;
           continue;
         }
@@ -351,14 +361,17 @@ float clPeak::run_kernel(cl::CommandQueue &queue, cl::Kernel &kernel,
 BackendInventory clPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "OpenCL";
+  inv.id = kBackend;
 
   try
   {
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
     inv.available = !platforms.empty();
+    if (!inv.available)
+      inv.unavailableReason = "no platforms found";
 
+    int deviceIndex = 0;  // consecutive across platforms, as runAll numbers them
     for (size_t p = 0; p < platforms.size(); p++)
     {
       InventoryPlatform plat;
@@ -379,7 +392,7 @@ BackendInventory clPeak::enumerate()
         {
           device_info_t info = getDeviceInfo(devices[d]);
           InventoryDevice dev;
-          dev.index           = static_cast<int>(d);
+          dev.index           = deviceIndex++;
           dev.name            = info.deviceName;
           dev.typeStr         = (info.clDeviceType & CL_DEVICE_TYPE_CPU) ? "CPU"
                               : (info.clDeviceType & CL_DEVICE_TYPE_GPU) ? "GPU"
@@ -403,39 +416,13 @@ BackendInventory clPeak::enumerate()
       inv.platforms.push_back(std::move(plat));
     }
   }
-  catch (cl::Error &)
+  catch (cl::Error &error)
   {
     inv.available = false;
+    inv.unavailableReason = std::string("no platforms found (") + error.what() +
+                            " " + std::to_string(error.err()) + ")";
     inv.platforms.clear();
   }
 
   return inv;
-}
-
-void clPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-    os << "\n=== OpenCL backend ===\n";
-    for (const auto &plat : b.platforms)
-    {
-        os << "Platform " << plat.index << ": " << plat.name << "\n";
-        for (const auto &d : plat.devices)
-        {
-            os << "  Device " << d.index << ": " << d.name;
-            if (!d.typeStr.empty())
-                os << " [" << d.typeStr << "]";
-            os << "\n";
-            if (!d.driverVersion.empty())
-                os << "    Driver    : " << d.driverVersion << "\n";
-            if (d.numComputeUnits)
-                os << "    CUs       : " << d.numComputeUnits << "\n";
-            if (d.maxClockMHz)
-                os << "    Clock     : " << d.maxClockMHz << " MHz\n";
-            if (d.globalMemBytes)
-                os << "    Global mem: " << (d.globalMemBytes / (1024 * 1024)) << " MB\n";
-            if (d.maxAllocBytes)
-                os << "    Max alloc : " << (d.maxAllocBytes / (1024 * 1024)) << " MB\n";
-            os << "    FP16      : " << (d.hasFp16 ? "yes" : "no") << "\n";
-            os << "    FP64      : " << (d.hasFp64 ? "yes" : "no") << "\n";
-        }
-    }
 }

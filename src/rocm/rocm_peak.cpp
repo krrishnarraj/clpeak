@@ -23,12 +23,6 @@ RocmPeak::RocmPeak()
 
 RocmPeak::~RocmPeak() {}
 
-void RocmPeak::applyOptions(const CliOptions &opts)
-{
-  Peak::applyOptions(opts);
-  deviceIndices = opts.rocmDeviceIndices;
-}
-
 bool RocmPeak::initRuntime()
 {
   if (initialised)
@@ -39,7 +33,7 @@ bool RocmPeak::initRuntime()
   if (r != hipSuccess)
   {
     m_initResult = r;
-    fprintf(stderr, "hipGetDeviceCount failed: %s\n", hipErrStr(r));
+    CLPEAK_LOG(Error, "ROCm: hipGetDeviceCount failed: %s", hipErrStr(r));
     return false;
   }
   for (int i = 0; i < n; i++)
@@ -138,8 +132,7 @@ int RocmPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     RocmDevice dev;
@@ -189,17 +182,21 @@ int RocmPeak::runAll()
       runComputeInt32(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-    if (isAllowed(Benchmark::Wmma))
+    // One flag, every matrix-core path: native WMMA (RDNA) or MFMA + sparse
+    // MFMA (CDNA) -- the arch decides which of those two exists -- plus the
+    // rocWMMA library over the same silicon.  Gated per call, not once for
+    // the group: isAllowed also carries the cancel request.
+    if (isAllowed(Benchmark::MatrixCompute))
       runWmma(dev, cfg);
-    if (isAllowed(Benchmark::Rocwmma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runRocwmma(dev, cfg);
-    if (isAllowed(Benchmark::Mfma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runMfma(dev, cfg);
-    if (isAllowed(Benchmark::Mfma))
+    if (isAllowed(Benchmark::MatrixCompute))
       runSparseMfma(dev, cfg);
-    if (isAllowed(Benchmark::Rocblas))
+    if (isAllowed(Benchmark::Gemm))
       runRocblas(dev, cfg);
-    if (isAllowed(Benchmark::Rocblas))
+    if (isAllowed(Benchmark::Gemm))
       runHipblasLt(dev, cfg);
 
 
@@ -224,11 +221,14 @@ int RocmPeak::runAll()
 BackendInventory RocmPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "ROCm";
+  inv.id = kBackend;
 
   int n = 0;
   if (hipGetDeviceCount(&n) != hipSuccess || n == 0)
+  {
+    inv.unavailableReason = "runtime init failed or no devices found";
     return inv;
+  }
   inv.available = true;
 
   InventoryPlatform plat;
@@ -245,29 +245,12 @@ BackendInventory RocmPeak::enumerate()
     dev.index = i;
     dev.name = props.name;
     dev.typeStr = "GPU";
+    dev.arch = props.gcnArchName;
     plat.devices.push_back(std::move(dev));
   }
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void RocmPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== ROCm backend ===\n";
-  if (!b.available)
-  {
-    os << "ROCm: runtime init failed or no devices found\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-    for (const auto &d : plat.devices)
-    {
-      os << "  ROCm Device " << d.index << ": " << d.name;
-      if (!d.typeStr.empty())
-        os << " [" << d.typeStr << "]";
-      os << "\n";
-    }
 }
 
 #endif // ENABLE_ROCM

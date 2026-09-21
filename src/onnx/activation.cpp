@@ -17,7 +17,11 @@
 // same constant with no operation applied.  Subtracting it leaves the
 // operation's own cost rather than the cost of the scaffolding around it.
 // The reference depends only on the tensor size, so it is timed once per size
-// and shared by all three operations rather than re-timed for each.
+// and shared by all three operations rather than re-timed for each.  Both
+// graphs scale the tensor by a runtime value before doing anything else, so
+// neither is a constant expression a vendor compiler can evaluate at build
+// time -- OpenVINO did exactly that to the earlier result-scaled form and
+// every row read "too close to the reference", both being dispatch.
 //
 // Every rung is reported, at the same three working-set sizes onnx-tensor-bw
 // uses, so the two ladders divide row for row: silu_32mb against that test's
@@ -41,6 +45,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -63,14 +68,14 @@ namespace
 
   struct Size
   {
-    int64_t rows; // bytes = rows * kCols * 2
+    uint64_t bytes; // the working set; rows follow from the element width
     const char *label;
   };
 
   const Size kSizes[] = {
-      {1024, "8mb"},
-      {4096, "32mb"},
-      {16384, "128mb"},
+      {8ull << 20, "8mb"},
+      {32ull << 20, "32mb"},
+      {128ull << 20, "128mb"},
   };
 
   // The rungs are fixed, so the budget check is the only thing standing between
@@ -85,6 +90,34 @@ namespace
 
   constexpr unsigned int kSizeBudgetUs = 1000000;
 
+  // The share of the work the operation itself has to account for before the
+  // difference is worth reporting -- the work being the measurement less the
+  // provider's submission charge, since both graphs pay that and it cancels
+  // in the subtraction.
+  //
+  // A tenth, and the number is doing less than it looks.  What it rejects is
+  // a remainder of zero or below: TensorRT fuses SiLU into a graph that then
+  // costs the same as the reference (177 us against 176), and its softmax
+  // comes out *faster* than doing nothing.  Those are not measurements and
+  // never were.
+  //
+  // It cannot do more than that, and two attempts to make it are worth not
+  // repeating.  Raising it to a fifth threw away every CUDA row -- all eight
+  // sit between 15.1% and 17.7%, three operations across three working sets,
+  // a band too tight to be noise.  And a ceiling drawn from what the provider
+  // streams cannot be calibrated at any single size (see below).  The reason
+  // neither works is that the rows this would catch are not distinguishable
+  // by share: Core ML's softmax lands in the same 8-18% band CUDA's good rows
+  // do, and differs only in that it does not reproduce.
+  //
+  // So the rows near this floor are the least trustworthy thing this backend
+  // publishes, and the ladder is what protects a reader: three sizes and
+  // three operations, where one row disagreeing with its neighbours is
+  // visible.  Core ML's softmax is the known case -- it has read 19 and 139
+  // GB/s on a device that streams 89 -- and that instability is a property of
+  // that provider's compiler, which the row cannot outvote.
+  constexpr double kMinOpShare = 0.10;
+
   struct Variant
   {
     OnnxActivation act;
@@ -97,12 +130,11 @@ namespace
        "x times sigmoid(x) -- the gate in the feed-forward network of most "
        "current language models."},
       {OnnxActivation::Softmax, "softmax",
-       "Softmax across the row, the operation at the heart of attention.  It "
-       "needs two passes over the data and a maximum before it can divide, which "
-       "makes it far harder for fixed-function hardware than its cost suggests."},
+       "Softmax across the row, at the heart of attention: two passes and a "
+       "maximum before it can divide."},
       {OnnxActivation::LayerNorm, "layernorm",
-       "Layer normalisation: mean and variance across each row, then rescale.  "
-       "Every transformer layer does this at least twice."},
+       "Mean and variance across each row, then rescale -- every transformer "
+       "layer does this at least twice."},
   };
 
   struct Run
@@ -112,16 +144,18 @@ namespace
     ResultStatus status = ResultStatus::Ok;
   };
 
-  Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+  Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int dtype,
               OnnxActivation act, int64_t rows,
               unsigned int warmup, bool forceIters, unsigned int forced)
   {
     Run r;
+    const size_t es = (size_t)onnxElemBytes(dtype, 1);
 
     OrtSession *session = nullptr;
     {
-      std::string xRaw((size_t)rows * kCols * 2, '\0');
+      std::string xRaw((size_t)rows * kCols * es, '\0');
       {
+        float *f = reinterpret_cast<float *>(&xRaw[0]);
         uint16_t *h = reinterpret_cast<uint16_t *>(&xRaw[0]);
         uint32_t s = 0x9e3779b9u;
         for (int64_t i = 0; i < rows * kCols; i++)
@@ -129,10 +163,14 @@ namespace
           s ^= s << 13;
           s ^= s >> 17;
           s ^= s << 5;
-          h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
+          const float v = (float)(s >> 8) / 16777216.0f - 0.5f;
+          if (dtype == ONNX_DT_FLOAT)
+            f[i] = v;
+          else
+            h[i] = floatToHalf(v);
         }
       }
-      std::string model = onnxResidentActivationModel(rows, kCols, act, xRaw);
+      std::string model = onnxResidentActivationModel(rows, kCols, dtype, act, xRaw);
       xRaw.clear();
       xRaw.shrink_to_fit();
 
@@ -148,7 +186,7 @@ namespace
       if (!ses.session)
       {
         r.error = ses.error;
-        r.status = ResultStatus::Unsupported;
+        r.status = onnxFailureStatus(ses.error);
         return r;
       }
       if (createUs > kOnnxMaxCreateUs)
@@ -168,8 +206,11 @@ namespace
       session = ses.session;
     }
 
-    uint16_t sVal = floatToHalf(1.0009765625f);
-    std::vector<uint16_t> outBuf((size_t)kCols, 0);
+    // Exactly one: the scalar scales the tensor before the operation, so
+    // one keeps every value the operation sees identical to the constant
+    // -- and a compiler cannot know it is one.
+    const std::string sVal = onnxFloatScalar(1.0f, dtype);
+    std::vector<uint8_t> outBuf((size_t)kCols * es, 0);
 
     OrtMemoryInfo *mi = nullptr;
     OrtValue *inVal = nullptr, *outVal = nullptr;
@@ -178,12 +219,12 @@ namespace
     const int64_t outShape[1] = {kCols};
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, &sVal, sizeof(sVal), nullptr, 0,
-          ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
+          mi, const_cast<char *>(sVal.data()), sVal.size(), nullptr, 0,
+          (ONNXTensorElementDataType)dtype, &inVal);
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, outBuf.data(), outBuf.size() * 2, outShape, 1,
-          ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &outVal);
+          mi, outBuf.data(), outBuf.size(), outShape, 1,
+          (ONNXTensorElementDataType)dtype, &outVal);
     if (mi)
       rt.api->ReleaseMemoryInfo(mi);
 
@@ -246,37 +287,52 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        Category::Bandwidth,
        "How fast this provider runs the operations between the matrix "
        "multiplies -- normalisation, softmax, the feed-forward gate.  They do "
-       "almost no arithmetic, so their limit is how fast data moves, and the "
-       "figure here is the bandwidth each one achieves.  Held against the "
-       "resident-tensor rows, it shows how much of a layer goes on the cheap "
-       "parts: hardware built for matrix multiplication often runs these at a "
-       "small fraction of its streaming speed, and they are also the "
-       "operations a provider is most likely to hand back to the CPU.  Each "
-       "row is net of a reference graph that reads the same tensor and "
-       "applies nothing, and is measured at the same three working-set sizes "
-       "as the resident-tensor rows, so the two divide row for row.  Where a "
-       "row drops sharply against the one above it, the activations have "
-       "outgrown the memory the provider keeps close.",
+       "almost no arithmetic, so their limit is memory and the figure is the "
+       "bandwidth each achieves, net of a reference graph that reads the same "
+       "tensor and applies nothing.  The sizes are the resident-tensor rows' "
+       "own, so the two ladders divide row for row.",
        // Three operations across three working-set sizes: nine separate
        // measurements, no one of which stands for the rest.
        TestShape::Heterogeneous, "operation and size"});
+
+  // The width this provider streams fastest (see onnxStreamDtype): fp16
+  // wherever the accelerator has fp16 kernels, fp32 on a provider that would
+  // otherwise convert every fp16 tensor on the way in and report the
+  // conversion under this heading.  The working sets are in bytes, so the
+  // row count halves in fp32 and each rung still names its size truthfully.
+  const int dtype = onnxStreamDtype(rt, ep);
+  const size_t es = (size_t)onnxElemBytes(dtype, 1);
+  const char *widthNote =
+      (dtype == ONNX_DT_FLOAT)
+          ? "  Measured in fp32, which this provider streams faster than fp16."
+          : "";
 
   // The reference: same tensor, same read and reduction, no operation.  It
   // depends only on the size, so it is measured once per size and reused by
   // every variant -- three variants over one ladder otherwise pay for the
   // identical session three times over, and on providers that compile ahead
   // of time the session is the expensive part.
+  // One row of the same reference graph: 8-16 KB, so essentially all of its
+  // time is what the provider charges to accept a submission.  The guard
+  // below needs it because on a provider that charges 156 us the measurement
+  // and its reference are mostly that charge, and the share the operation
+  // accounts for looks far smaller than it is.
   std::map<int64_t, Run> floors;
   auto floorFor = [&](int64_t rows) -> const Run &
   {
     auto it = floors.find(rows);
     if (it == floors.end())
       it = floors.emplace(rows,
-                          measure(rt, ep, OnnxActivation::None, rows,
+                          measure(rt, ep, dtype, OnnxActivation::None, rows,
                                   warmupCount, forceIters, specifiedIters))
                .first;
     return it->second;
   };
+
+  const Run &dispatch = floorFor(1);
+  const double dispatchUs = (dispatch.us > 0.0) ? dispatch.us : 0.0;
+  CLPEAK_VLOG("onnx-activation[%s]: submission floor %.0f us\n",
+              ep.providerKey.c_str(), dispatchUs);
 
   for (const Variant &v : kVariants)
   {
@@ -288,13 +344,14 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (clpeak::cancelRequested())
         break;
 
-      const uint64_t bytes = (uint64_t)sz.rows * kCols * 2ull;
+      const uint64_t bytes = sz.bytes;
+      const int64_t rows = (int64_t)(bytes / ((uint64_t)kCols * es));
       const std::string metric = std::string(v.label) + "_" + sz.label;
       const std::string note =
           std::string(sz.label) + " of activations -- " + v.note +
-          "  Read against onnx-tensor-bw's rung of the same name: the ratio is "
-          "how much of its streaming rate this provider keeps once it has to "
-          "apply a function to the data.";
+          "  Against onnx-tensor-bw's rung of the same name, the ratio is how "
+          "much of its streaming rate this provider keeps once it has to touch "
+          "the data." + widthNote;
 
       if (bytes * kCopiesAtPeak > maxTensorBytes())
       {
@@ -303,8 +360,8 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         continue;
       }
 
-      const Run &floor = floorFor(sz.rows);
-      Run full = measure(rt, ep, v.act, sz.rows, warmupCount, forceIters,
+      const Run &floor = floorFor(rows);
+      Run full = measure(rt, ep, dtype, v.act, rows, warmupCount, forceIters,
                          specifiedIters);
       if (full.us <= 0.0)
       {
@@ -313,20 +370,27 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         continue;
       }
 
-      // The operation has to account for a real share of the time, not one
+      // The operation has to account for a real share of the work, not one
       // microsecond of difference between two noisy measurements.  TensorRT
       // reported 249 us against a 248 us reference, and the microsecond
       // between them divided out to 17 TB/s -- forty times the card's memory
-      // bandwidth, published as a peak.  A tenth is a low bar that still
-      // rejects anything the reference's own jitter could account for.
+      // bandwidth, published as a peak.
+      //
+      // The share is taken of the work, not of the wall time: both graphs pay
+      // the provider's submission charge and it cancels in the subtraction,
+      // so leaving it in the denominator makes a well-resolved operation look
+      // marginal wherever dispatch is expensive.  DirectML charges 156 us and
+      // CUDA 69 us against measurements of a few hundred.
       const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
       const double netUs = full.us - floorUs;
-      if (netUs <= 0.1 * full.us)
+      const double workUs = full.us - dispatchUs;
+      if (netUs <= 0.0 || workUs <= 0.0 || netUs <= kMinOpShare * workUs)
       {
         CLPEAK_VLOG("onnx-activation[%s/%s]: %s lost in the noise "
-                    "(%.0f us against a %.0f us reference)\n",
+                    "(%.0f us against a %.0f us reference, %.0f us of "
+                    "submission)\n",
                     ep.providerKey.c_str(), v.label, sz.label,
-                    full.us, floorUs);
+                    full.us, floorUs, dispatchUs);
         test.skip(metric, ResultStatus::Error,
                   "too close to the reference graph it is measured against",
                   note);
@@ -335,6 +399,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       // One pass in, one pass out.
       const double bps = 2.0 * (double)bytes / (netUs * 1.0e-6);
+
       CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n",
                   ep.providerKey.c_str(), v.label,

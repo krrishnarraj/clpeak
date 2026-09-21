@@ -15,7 +15,9 @@ backend.
 
 - Looking for the main class (`OnnxPeak` ctor, `runAll`, inventory, EP table)? → `onnx_peak.cpp`
 - Looking for how the runtime library is found/loaded, or how `--onnx-lib` picks one? → `onnx_runtime.cpp` + `onnx_runtime.h`
-- Looking for session creation / per-EP options / the CPU-fallback guard? → `onnx_session.cpp`
+- Looking for plugin providers (`--onnx-ep`), their registration on the environment and the OrtEpDevice enumeration? → `onnx_plugin.cpp` + `onnx_plugin.h`
+- Looking for the Windows ML catalog (`--onnx-winml`), which installs vendor providers from the Store? → `onnx_winml.cpp` + `onnx_winml.h`
+- Looking for session creation / per-EP options / the CPU-fallback guard / the crash fence? → `onnx_session.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the convolution benchmark? → `conv.cpp`
@@ -30,18 +32,22 @@ backend.
 
 | File | Purpose |
 |------|---------|
-| `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()`, `runAll()`, `enumerate()`, `printInventory()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
+| `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
-| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options and the CPU-fallback guard |
+| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built |
+| `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
+| `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`, `onnxSetWinml`), `onnxRegisterEpLibraries()` (called by `onnxEnv()` on every fresh environment), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
+| `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `gemm.cpp` | `runGemm` (`--onnx-gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4 weight-only in flops, int8 QDQ carrying its own `ops` unit |
-| `transfer.cpp` | `runTransferBandwidth` (`--onnx-transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
-| `activation.cpp` | `runActivation` (`--onnx-activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three |
-| `conv.cpp` | `runConv` (`--onnx-conv`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
-| `numeric_error.cpp` | `runNumericError` (`--onnx-numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--onnx-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
-| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--onnx-tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
-| `dispatch_latency.cpp` | `runDispatchLatency` (`--onnx-dispatch-latency`) — per-submission overhead and session-creation cost (s) |
+| `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
+| `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit |
+| `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
+| `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
+| `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
+| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
+| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
+| `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
+| `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — per-submission overhead and session-creation cost (s) |
 
 ## The runtime is dlopen'd, never linked (except on iOS)
 
@@ -62,6 +68,32 @@ carries the reason, and `onnxRuntimeStatus()` packages it for a UI.
 Naming a different library after one is loaded takes effect on the next
 `ortRuntime()` call, so the settings screen needs no restart.
 
+**Switching runtimes in one process** (the GUI, between runs) works because
+every piece of per-runtime state is keyed by the runtime, not by a name: the
+`OrtEnv` is tracked by the `OrtApi`/`OrtApiBase` it came from and recreated
+when they change (the old one released with its own API), and the three probe
+memos in `onnx_probe.cpp` (viability, gemm variants, streaming width) all key
+on `rt.base` beside the provider — what a provider fuses or casts is the
+runtime's answer, and the CPU provider of a 1.17 is not that of a 1.30.  A
+handle is never unmapped (`include/common/dynlib.h`), so the pointer is a
+stable identity and the same path picked again reuses its handle and its
+memos.  Verified with the C ABI on a Threadripper: Debian's 1.23.2 → a 1.30.0
+build with CUDA and TensorRT providers → 1.23.2 → the default search, each run
+on the runtime it named.  The cost of the runtime left behind is its mapping
+(~13–20 MB resident) plus whatever it dragged in: nothing to speak of for a
+CPU-only build, but the CUDA/TensorRT build left ~2 GB in the process
+(libnvinfer/cuBLASLt/cuDNN code, the CUDA context, TensorRT's host state) that
+no `dlclose` of libonnxruntime would have returned either.
+
+One limitation is ORT's, not ours: a runtime that links a *shared* libonnx
+(Debian's and Homebrew's both do) registers its schemas into that library's
+process-wide registry, so a second such runtime cannot create an
+environment — `Trying to add a domain to DomainToVersion map, but the domain
+is already exist` — and every provider row says so.  `onnxEnv()` keeps the
+refusal per runtime (no retry per probe) and `onnxEnvError()` carries the
+runtime's words into the skip reason; switching back to the first works.
+Upstream builds carry their own ONNX and coexist.
+
 **iOS is the exception** (`CLPEAK_ONNX_STATIC`): Apple's official pod ships
 `onnxruntime.xcframework` as a *static* framework, and iOS will not dlopen a
 library that was not built into the app.  There the runtime is linked in,
@@ -75,7 +107,9 @@ installation is required to compile the backend.  `onnx_runtime.cpp` requests
 against a new header still runs on an older installed runtime.
 
 **Never `dlclose` the runtime.** ONNX Runtime keeps worker threads alive; the
-handle is deliberately leaked at exit.
+handle is deliberately leaked at exit.  Nor is a file that turned out not to
+be an ONNX Runtime closed: `include/common/dynlib.h` has the exit crash a
+dlclose of the wrong library produced.
 
 **Ask for the right API version in one call.** ORT numbers its API after its
 own minor version (1.23.x serves API 23), so `onnx_runtime.cpp` parses
@@ -83,6 +117,135 @@ own minor version (1.23.x serves API 23), so `onnx_runtime.cpp` parses
 `ORT_API_VERSION` instead makes ORT print `The requested API version [N] is
 not available` once per failed attempt, straight to the console and below any
 log level — six lines of it against a 1.23 runtime, before any test runs.
+
+## Plugin providers: a library registered on the environment
+
+**What a plugin holds on the environment is replaced after its run.**
+Registering a plugin library makes ORT create a shared allocator on the
+OrtEnv for each device the library serves (1.23+, `CreateSharedAllocatorImpl`
+at registration), from the factory's own implementation -- for a GPU
+provider, a device-memory pool -- and that allocator outlives every session.
+On the RTX 5060 (ORT 1.30 with the CUDA provider built as a plugin and
+passed through `--onnx-ep`) a run over plugin CUDA, then the built-in
+TensorRT, then the built-in CUDA provider had every TensorRT graph with a
+matmul or a convolution fail to build (its elementwise graphs, transfer
+rows and trivial dispatch ran) and the built-in CUDA provider lose its
+largest points, where each provider runs clean on its own: the signature
+of device memory spoken for by something that had finished.  `runAll()`
+therefore calls `CreateSharedAllocator` again for each of a plugin
+device's memory types once its tests are done -- the API's own
+create/replace, so the allocator registration made is destroyed, returning
+what it held, and the device is left as registration left it for a later
+run.  Whether that is the whole story is still to be confirmed on that box
+with `--verbose -o`: the log carries the session errors TensorRT gave, and
+the open-descriptor count after every provider, which is the other thing
+a dead provider can have run out of (see the LiteRT backend's WebGPU loss).
+
+A provider no longer has to be compiled into the runtime.  Since ONNX
+Runtime 1.22 a separately shipped shared library exporting
+`CreateEpFactories` can be registered on the environment by path
+(`RegisterExecutionProviderLibrary`), after which the runtime enumerates
+every hardware device the plugin can serve (`GetEpDevices`, one
+`OrtEpDevice` per provider × device) and a session is attached to one of
+them with `SessionOptionsAppendExecutionProvider_V2`.  This is not a
+convenience: **Qualcomm's QNN provider only exists in this shape now**
+(`onnxruntime-qnn` 2.x, a 60 MB zip with `onnxruntime_providers_qnn.dll`
+and the whole QAIRT set beside it; Microsoft's built-in QNN packages end
+at ORT 1.24.4), and it is how Windows ML hands out the vendor providers it
+installs from the Store.  A stock runtime on a Snapdragon laptop reaches
+the CPU and DirectML, and without this nothing else.
+
+`--onnx-ep NAME=PATH` (repeatable; the FFI's
+`clpeak_set_onnx_ep_libraries`) names the libraries; `--onnx-winml
+[PATH]` adds whatever the catalog resolves (below).  Three things differ
+from a built-in provider, and `onnx_plugin.cpp` keeps all three in one
+place:
+
+- **Registration is per environment.**  `onnxEnv()` registers the
+  configured set right after creating an environment, and the set is part
+  of the environment's identity: a change between runs (the GUI's
+  Settings) bumps `onnxEpConfigGeneration()`, the next `onnxEnv()` releases
+  the old environment (taking its plugin libraries with it) and builds a
+  fresh one.  Every session must be gone by then -- the same
+  between-runs-only contract the runtime override has.  The status a
+  settings screen reads (`onnxEpLibraryStatus()`) is what the *current*
+  environment registered and is empty after a change until the next
+  enumeration; and a set that became empty rebuilds the environment on the
+  next enumeration even though nothing else would ask for one, or the old
+  registrations would stand behind a status that no longer names them.
+- **The devices come from the runtime, not from a table.**  A plugin's
+  devices are the `OrtEpDevice`s whose provider name was not there before
+  registering (names, not pointers: the runtime may rebuild its list).
+  Each becomes one `onnx_ep_info_t` with `epDevicePtr` set, the hardware
+  type from `HardwareDevice_Type` (NPU → Accelerator, GPU, CPU), the vendor
+  and metadata the runtime reports, and `epDevice` a label ("NPU", "GPU#2")
+  that keys the probe memos exactly as OpenVINO's target does.  The
+  display name is `kEpTable`'s when the provider is known *and* the device
+  is the one the table means -- QNN's HTP row is "Hexagon NPU", its GPU
+  backend is not -- else built from what the runtime said ("QNN (Qualcomm
+  GPU)").  A registered library that offers no device on this machine is
+  reported as such: a plugin enumerates the hardware it can serve, and on
+  the wrong machine that is nothing, which is the answer rather than a
+  fault.  Plugin devices list first (accelerators, then GPUs), their
+  CPU-class devices after the built-in accelerators.
+- **The append is the V2 one.**  `appendProvider()` sends a device with
+  `epDevicePtr` through `onnxAppendPluginDevice()`; the string-keyed append
+  knows the built-in names only and answers "QNN execution provider is not
+  supported in this build" for a plugin, whatever was registered.  The
+  options are the same table (`genericEpOptions`): a plugin QNN takes the
+  HTP options a built-in one does, with the backend chosen by the device's
+  type (`backend_type` htp/gpu/cpu) -- or `backend_path` naming the
+  `QnnHtp.dll` beside the plugin outright when it is there, so nothing is
+  left to a loader search.  A plugin clpeak has no wiring for runs with
+  the provider's own defaults: the person naming the library asked for
+  exactly that, and the fallback guard still fails any session the
+  provider does not take whole.
+
+The API is gated on `rt.apiVersion >= 22`: an older runtime hands out a
+shorter `OrtApi` table, so the slots must not even be read.  Registration
+paths are UTF-8 at the C ABI and `ORTCHAR_T` (wide) on Windows; the
+conversion happens once, at registration.  Verified on macOS against
+Homebrew's 1.29 for the refusal paths (a runtime named as a plugin exports
+no `CreateEpFactories`; a missing file; the built-in device set staying
+untouched); a real plugin is a Windows or Android matter.
+
+### The Windows ML catalog
+
+On Windows 11 24H2 the vendor providers -- Qualcomm QNN, Intel OpenVINO,
+AMD Vitis AI, NVIDIA TensorRT for RTX -- are Store packages that Windows
+ML installs and updates, and the flat C API of
+`Microsoft.Windows.AI.MachineLearning.dll` (`WinMLEpCatalog.h`:
+`WinMLEpCatalogCreate` → `WinMLEpCatalogEnumProviders` →
+`WinMLEpEnsureReady` → `WinMLEpGetLibraryPath`) says which fit this
+machine, installs them, and returns each one's plugin library path.
+`onnx_winml.cpp` dlopens that DLL -- named by `--onnx-winml PATH` (the
+file or its directory), else found beside the loaded runtime or the
+executable -- and every certified provider it makes ready joins the
+plugin set under the catalog's own name (which is the registration name
+Qualcomm's plugin requires, "QNNExecutionProvider").  Uncertified
+providers are listed in the status and not registered, as Windows ML
+itself does.  The DLL is not shipped with clpeak: `tools/fetch_winml.ps1`
+downloads Microsoft's NuGet package and stages its `runtimes/win-<arch>/
+native/` DLLs under `build/winml/<arch>/`, and with a directory given to
+`--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll` beside the
+catalog becomes the runtime (`winmlDefaultRuntime()` in
+`onnx_runtime.cpp`, cached under its own key so switching the catalog off
+does not keep it).  `DirectML.dll` is staged too: that runtime delay-loads
+it the moment its DirectML provider is attached, which the viability probe
+does, and a delay-load with nothing to find is a structured exception,
+not a refusal -- which is also why a runtime loaded by path gets its
+directory put on the DLL search (`SetDllDirectory`, `searchBesideRuntime`).
+
+Installing is a download of tens to hundreds of megabytes, so the catalog
+is opt-in, the run says out loud when it is installing, and a status query
+(`onnxRuntimeStatus`) never resolves the catalog -- it reads the memo the
+last enumeration left (`onnxWinmlResolved`) or says nothing has.  The
+resolution is memoized per configuration generation and per runtime
+(the DLL search starts beside the runtime).  The whole thing is a no-op off
+Windows, where `--onnx-winml` still parses and the status says why it did
+nothing.  Unverified on Windows at the time of writing: the flat C API was
+transcribed from the 2.3.42 package's header and the DLL's export table,
+and the first Windows 11 run is the proof.
 
 ## Verifying a row measured what its name says
 
@@ -162,6 +325,16 @@ answers the only question clpeak asks — all of it, or none. Measured on the
 same E5M2 graph that produced the flood: **four seconds and dozens of identical
 errors became one millisecond and two lines.**
 
+## The CoreML provider fills Core ML's compile cache; runAll purges it
+
+Every model the CoreML execution provider compiles is cached by Core ML's
+runtime under `~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`
+with its weights, and never evicted -- 292 GB had accumulated on the
+development Mac before it was noticed.  `OnnxPeak::runAll` calls
+`clpeak::purgeCoreMLCompileCache()` (`include/common/coreml_cache.h`, a
+no-op off Apple) after each provider; the Core ML backend does the same per
+session, and the header says why.
+
 ## Vendor console spam is muted, not tolerated
 
 Registering a provider can pull in a second copy of the ONNX schema registry:
@@ -169,7 +342,18 @@ the XNNPACK EP emits hundreds of `Schema error: ... already registered` lines
 from the bundled ONNX library, direct to the console, below any ORT log
 level. Session creation therefore runs inside `clpeak::ScopedConsoleMute`
 (`common/console_mute.h`, shared with the ROCm backend's hipBLASLt query).
-The mute is a no-op under `--verbose`.
+Under `--verbose` the mute captures into the run log instead of discarding.
+
+ORT's own logger is a different channel and is not muted: the Env is created
+with `CreateEnvWithCustomLogger` (`onnx_session.cpp`, `ortLogMessage`), so a
+provider explaining why it declined a graph, or which nodes fell back to the
+CPU, lands on the run log at ORT's own severity — errors and warnings in
+every dump, INFO as debug under `--verbose` (minus the per-pass
+`GraphTransformer` narration, and the TensorRT for RTX plugin's per-run
+`CudaMempoolAllocator::DoAlloc`/`DoFree` pair, which it logs at INFO on
+every `Run()`). The Env is opened at INFO once per runtime
+and the callback applies the current run's verbosity, because the GUI can
+toggle `--verbose` between runs of one process.
 
 ## Models are emitted as protobuf bytes, not files
 
@@ -219,8 +403,12 @@ at the moment it emits.
 
 ## Test shape and ids
 
-Test ids are lower_snake (`onnx_gemm`, `onnx_tensor_bw`) — the `--onnx-*` CLI
-flags are a separate namespace and keep their hyphens.
+Test ids are lower_snake and keep the `onnx_` prefix (`onnx_gemm`,
+`onnx_tensor_bw`): the id is the record, and it stays stable so a saved
+baseline still compares.  The CLI flags that gate them are backend-neutral
+(`--gemm`, `--tensor-bandwidth`, …) and apply to every backend that runs;
+the `Benchmark` values behind them are shared with Core ML, and the transfer
+and dispatch rows share `TransferBW` / `KernelLatency` with the GPUs.
 
 Every ONNX test here is heterogeneous: each reading is a different data type,
 operation, working-set size or context length, and for several of them the
@@ -271,12 +459,116 @@ graph the EP cannot take **fails session creation** and the row reports
 `Unsupported` with the runtime's own message instead of a wrong number.
 
 Limits worth knowing: the guard is enforced at the ORT partitioning level.
-An EP that accepts a node and then falls back *internally* (CoreML choosing
-CPU over the ANE; QNN dropping from HTP to the DSP) is invisible to ORT and
-to clpeak. Two cross-checks close most of that gap: the CPU EP row — always
-enumerated, always last — should be far below any accelerator row, and the
-`onnx-numeric-error` fp32 row exposes an EP that took an fp32 graph and
-computed it at lower precision (see below).
+An EP that accepts a node and then falls back *internally* (QNN dropping
+from HTP to the DSP) is invisible to ORT and to clpeak.  Two cross-checks
+narrow that gap: the CPU EP row — always enumerated, always last — should
+be far below any accelerator row, and the `onnx-numeric-error` fp32 row
+exposes an EP that took an fp32 graph and computed it at lower precision
+(see below).
+
+**They did not close it for Core ML, and the placement guard exists because
+of what they let through.**  Core ML has no Neural-Engine-only mode
+(`CPUAndNeuralEngine` is the strictest request) and moves an operation the
+ANE cannot take, or one its planner judges too small to send, onto the CPU
+without a word — and on Apple silicon that CPU path (BNNS on the AMX units)
+is *faster* than ORT's CPU EP at everything, so "accelerator row ≫ CPU-EP
+row" held for numbers that were CPU numbers.  Compared against the native
+Core ML backend, whose `MLComputePlan` guard refuses exactly these, the M1
+Pro run of 2026-09-19 had published under "Apple CoreML (Neural Engine)":
+the fp32 matmul at 2.37 TFLOPS (the Core ML CPU unit's 2.36), every fp32
+convolution and block row, the 8 and 32 MB resident-tensor rungs (the ANE
+is never given a GEMV that small), the dispatch rows (a 64-value multiply
+never leaves the CPU), and the fp16 64-token prefill at 190 GFLOPS — a
+plan of 26 operations, all `MLCPUComputeDevice`, all costed 0.000000.
+Worse, `onnxStreamDtype` had chosen fp32 for the provider because fp32
+"streamed faster" — it did, on the CPU — and so every activation and
+resident-tensor row had moved to the CPU with it (softmax 152 GB/s where
+the ANE does 18).
+
+The guard (`onnx_coreml_plan.{h,cpp}`, applied in `onnxCreateSession`):
+the CoreML provider is registered with `ProfileComputePlan=1` (ORT 1.20+),
+under which it loads `MLComputePlan` for the compiled model — synchronously,
+before the session initialises, at the cost of loading the model a second
+time — and NSLogs one line per operation:
+
+```
+Operation: ios18.matmul, Device Usage: <MLNeuralEngineComputeDevice: 0x…>, Estimated Cost: 0.049300
+```
+
+NSLog writes to stderr, so session creation on that provider runs under
+`ScopedConsoleMute(Capture::Always)` and the capture is parsed.  The
+judgement is the native backend's: the operations placed off the unit the
+`MLComputeUnits` request names must carry under 5% of the estimated cost,
+or the session is released and the row reports where Core ML sent the work
+("Core ML's compute plan sends matmul, softmax (97% of the estimated cost)
+to the CPU rather than the Neural Engine, so this would not be a Neural
+Engine number").  A plan costed at zero everywhere is judged by operation
+count, since weighing it would pass a session whose every operation moved.
+The plan names only the preferred device, not the capable ones, so a
+refusal cannot say whether the unit *could* have taken the work.
+
+Three consequences shape the callers:
+
+- **The probes do not verify placement** (`verifyPlacement=false`): the
+  viability check's 64-value multiply and the 32-cube fusion probes ask
+  whether a graph builds and fuses, not where a real size runs, and Core ML
+  keeps everything that small on the CPU — verified, the provider would be
+  declared dead on a machine whose ANE takes every 2048-cube.  The block's
+  profiled fusion probe at 64 tokens is the same case.
+- **A ladder climbs past a placement refusal below its first measured
+  rung** (`OnnxSessionResult::offDevice`, `kOnnxOffDevicePatience` = 4
+  sizes): too small for the planner is not too big for the unit — the ANE
+  declines a 1024-cube and takes the 2048, refused the 8 and 32 MB GEMVs
+  and took 128 — while a refusal above a measured rung ends the sweep.  The
+  row says which sizes were sent elsewhere.  The patience bounds what an
+  fp32 graph, which the ANE never takes, costs in compiles before its row
+  says so.
+- **The stream-width probe now lands on fp16 for the provider**, because
+  its fp32 GEMV is refused, and the activation, resident-tensor and
+  dispatch rows follow it back to the ANE.
+
+A plan that never arrives — an OS before macOS 14.4 / iOS 17.4, where
+`MLComputePlan` does not exist and the provider says so through its logger
+— leaves the session unverified rather than refused, which is what every
+other provider gets; the verbose log says which it was.
+
+## `Unsupported` is a claim about the format, not about the device
+
+Every refusal in this backend defaults to `Unsupported`, and that is right
+for almost all of them: a provider declining nodes under the fallback guard,
+a missing bf16 kernel, the empty `OrtStatus` ORT returns for a float4 graph.
+They are capability facts, and they stay true on a healthy machine.
+
+A **device loss** is not one of those, and must never be reported as one.  A
+GPU reset out from under the provider -- a Mali driver timing out a hung
+shader and answering `vkWaitForFences` with `VK_ERROR_DEVICE_LOST`, which is
+what a Pixel 7a does to the WebGPU EP on the first non-trivial graph -- makes
+every later session fail for a reason that has nothing to do with the format
+being asked for.  Labelling that `Unsupported` tells a reader the provider
+cannot do fp32 matmul, and a reader has no way to tell it from a real
+refusal.  `onnxFailureStatus()` (`onnx_session.h`) therefore promotes exactly
+those to `Error` and leaves everything else alone; use it wherever a
+runtime-produced reason becomes a row's status.
+
+**And a lost device does not come back.**  Every later session still builds
+and every later inference still fails, so a run that keeps asking spends its
+whole budget proving it: the report that prompted this guard had 52 of 83
+rows and 53 of its 58 seconds against a GPU that had been dead since t=4.1 s,
+and was still dispatching `MatMul` programs to it at t=57.7 s.  So the loss is
+latched the moment the runtime mentions it -- `onnxDeviceLost()`, set from
+`onnxStatusText()` and from the ORT logger *above its verbosity filter*,
+since the WebGPU EP announces the loss at INFO and a non-verbose run would
+otherwise never see the earliest signal.  `runAll()` clears the latch per
+provider, and the first test that trips it skips the rest of that provider's
+tests and files one `Error` line instead.
+
+Only a provider with a device of its own is subject to it (`deviceType !=
+Cpu`): the latch is process-wide, and ORT's device-lost callback can still
+fire for the GPU that just died while the CPU provider is running.
+
+Note what this guard does *not* do.  It does not rescue the run -- there is
+nothing to rescue, the device is gone -- it makes the report say so once,
+honestly, instead of 52 times in the wrong vocabulary.
 
 ## What the numeric-error rows are for
 
@@ -414,7 +706,11 @@ pre-VNNI x86. clpeak deliberately does **not** reduce the range — the point
 is to report what full-range int8 actually costs on that hardware, and a
 throughput row alone would have called it a win.
 
-CPU-EP fp32 at exactly 0.0 is the methodology validating itself. CoreML's
+CPU-EP fp32 reads exactly 0.0, and that is a plumbing check rather than a
+validation of the arithmetic: the reference *is* the CPU EP's own fp32
+matmul, so that row compares a kernel with itself and could not read anything
+else. What the row is worth is on the other providers, where it is a
+downgrade detector. CoreML's
 fp16 error matching the CPU's says both accumulate in fp16 — combined with
 6.2 TFLOPS (1.5x this machine's MPS GEMM fp16 peak) that row is the ANE.
 CoreML's fp32 row is the interesting one: 0.4 ppm rules out fp16 arithmetic,
@@ -485,6 +781,41 @@ have. Its float4 path wants block scaling, not one scale for the whole tensor �
 which is to say it wants NVFP4, and a symmetric per-tensor E2M1 graph is not a
 shape it implements. That is worth knowing before attempting NVFP4 rather than
 after.
+
+**TensorRT for RTX does not decline that graph; it crashes on it.** The same
+32³ per-tensor E2M1 QDQ probe through the NvTensorRTRTX plugin (EP 0.3.0 from
+the Windows ML package 2.30.43, ONNX Runtime 1.27.1, RTX 5060, 2026-09-18)
+passes `GetCapability` whole — "Whole graph will run on TensorRT execution
+provider" — and the engine build that follows ends the process with an access
+violation (`ERRORLEVEL` -1073741819, 0xC0000005), after fp32, fp16, bf16 and
+fp8_e4m3 had built and run on the same provider. Nothing after it ran: not
+nvfp4, not the block, not the other two providers' rows. The RTX library is
+the same Myelin float4 path without the check that made classic TensorRT
+refuse. A crash inside a vendor JIT cannot be caught, so `fp4_e2m1` is never
+built for that provider: `onnxProviderFenceReason()` in `onnx_session.cpp`,
+asked by the gemm probe before it builds a variant (and every test consults
+that cache) and again by the accuracy row, which builds the same graph in its
+input/output shape. The row reports the fence as its reason. It is kept to
+the one graph proven fatal; the block-scaled float4 rows (`nvfp4`,
+`fp4_weight`) are the shape TensorRT's check asks for and are still put to
+the RTX provider — the next Windows run decides them.
+
+**DirectML is the second entry, and it fences a format rather than a graph.**
+The transformer block's `int8_weight` session — seven blocked int8
+`DequantizeLinear`s (opset 21, `block_size=32`, `axis=0`) into 2048-wide
+MatMuls — ended the process with an integer divide by zero (0xC0000094)
+inside session creation on ONNX Runtime 1.24.4's DirectML provider (RTX 4060,
+2026-09-21), after the same block's fp16 and int4_weight forms had run. int4
+survives because ORT's `DQMatMulToMatMulNBits` rewrites it first and that
+transformer takes 4-bit weights only, so the int8 graph reaches DirectML as a
+raw `DequantizeLinear`, which the provider registers with no support query.
+The 32³ probe of that graph built and ran, but with a single scale row — a
+per-column broadcast as far as DirectML is concerned — and every gemm rung
+carries the block's real layout, so `int8_weight` is not sent to DirectML at
+any size. `int8_qdq` (per-tensor) and `int4_weight` (fused away) are
+untouched. A DirectML run that builds the 1024³ `int8_weight` rung with the
+entry removed is what would narrow the fence to the block; every fence in the
+tree, and what lifting it takes, is listed in `NOTES.md` at the root.
 
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph
@@ -851,7 +1182,7 @@ lives in the latency scope. Reporting fp16-equivalent bytes would inflate the
 four-bit row four-fold and hide the failure the row exists to catch.
 
 Measured, M1 Pro, ONNX Runtime 1.29 — prefill at 512 tokens, decode at 2048 of
-context. The CPU-EP figures are from a `--onnx-device 1` run: measured straight
+context. The CPU-EP figures are from a `--devices onnx:1` run: measured straight
 after Core ML's session compiles they come out about 30% lower across the board,
 with every ordering below intact, so only same-run comparisons mean anything.
 
@@ -965,42 +1296,19 @@ Three details are load-bearing:
 
 - **Constant folding must be off** (`keepConstantsUnfolded` on
   `onnxCreateSession`). Two constant operands are otherwise multiplied once at
-  load time and every timed run measures an empty graph. `gemm.cpp` guards
-  this per doubling (a >4x rate jump in one doubling is folding; legitimate
-  gains are gradual) with the whole-ladder 64x check as the backstop, so
-  timings that stay flat are reported as an error rather than as a
-  spectacular number. The flag only stops ORT's own folder -- a vendor AOT
-  backend folds in its own compiler instead, which is what the per-doubling
-  guard catches.
+  load time and every timed run measures an empty graph. The flag only stops
+  ORT's own folder -- a vendor AOT backend folds in its own compiler instead,
+  which is what `OnnxLiveShape` and the timing guards below are for.
 - **Reduce with `ReduceMax`, never `ReduceSum`.** Summing the rows of `A*B`
   equals multiplying the summed rows of `A` — a rewrite an optimiser is free
   to make, and it would quietly turn the matrix multiply into a matrix-vector
   one. Max does not distribute over the product. (At opset 17 `ReduceMax`
   takes its axes as an attribute while `ReduceSum` takes them as an input.)
-- **The runtime scalar scales the result, not an operand.** That leaves the
-  matmul a product of two constants, so the graph is correct only while
-  constant folding stays disabled — and ONNX Runtime before about 1.18
-  accepts `optimization.disable_specified_optimizers` and ignores it. It then
-  folds the multiply at load time and the timed phase measures an empty
-  graph: 6789 TFLOPS on an RTX 5060 through DirectML, 183000 on its CPU. The
-  scaling guard in `gemm.cpp` catches exactly this and reports an error.
-
-  Scaling an *operand* instead would make the graph unfoldable outright, and
-  it was tried twice. A `Mul` cannot be used: **the CPU provider has no fp16
-  kernel for the multiply**, so it inserts a `Cast` and runs the whole matmul
-  in fp32 — the half-precision row came back equal to the single-precision
-  one, 0.41 against 0.40, measuring the wrong arithmetic entirely. An `Add-0`
-  avoids the wrong arithmetic but costs ~20% on the ANE (2.30 -> 1.74 fp32,
-  8.60 -> 6.97 fp16 peaks, back-to-back against these graphs on the same hot
-  machine): a dynamic operand compiles to a different, slower ANE program.
-  A guarded fold beats both a silent upcast and a quiet regression, so the
-  plain rows keep this shape and folding providers report an error instead
-  (QNN folded it: flat ~170 us at 1024 and 2048, 98 TFLOPS fp32 against a 45
-  TOPS spec). The int8 QDQ row is the exception: its Add-0 profiles clean on
-  the CPU and its headline NPU needs it, so the probe uses it there — and
-  falls back to this shape wherever the profile shows an inserted `Cast`.
-  Adding any elementwise op to a half-precision graph risks this; check the
-  executed kernels for a `Cast` before believing an improvement.
+- **Where the runtime scalar enters is per provider, and the probe decides.**
+  See "Four shapes, and why no one of them wins" below. Scaling the *result*
+  is fastest and foldable; scaling an *operand* cannot be folded and costs a
+  pass. Neither is right everywhere, so `liveShapesFor()` lists both in
+  preference order and the ladder falls through on a detected fold.
 - **Every quantization scale is a build-time constant.** Supplying the
   activation scale as a runtime input is tidier — it keeps the dequantize out
   of constant folding's reach with no optimizer disabled — and ONNX Runtime
@@ -1059,6 +1367,151 @@ the provider, the more of its ladder lands in that regime.
 `onnx-dispatch-latency` is the one deliberate exception, and its own comment
 says why: there the per-submission overhead is the measurement rather than a
 thing to divide out, so it probes with five and carries a far larger cap.
+
+## The decode rows declare bytes; two providers do not move them
+
+`onnx-block-decode`'s numerator is what the *model declares* -- that is all
+clpeak can know, and a provider is free to store the weights narrower than
+asked.  Two of them do, from opposite directions, and both land in the same
+place: a row reading twice its neighbour off the same wall clock.
+
+| provider | fp16 | fp32 | same block, same context |
+|---|---|---|---|
+| OpenVINO GPU | 52.6 GB/s @ 2.24 ms | 104 GB/s @ 2.28 ms | serves fp32 at 16 bits |
+| ORT x86 CPU EP | 31.0 GB/s @ 3.80 ms | 62.6 GB/s @ 3.77 ms | converts fp16 *up* |
+
+**The absolute check misses both.**  Comparing the row against what the
+device was measured streaming only fires when the implied traffic is
+impossible, and 104 GB/s on a part that streams 191 is not.  What gives it
+away is the pair: the two rows run the identical layer and differ only in
+the width each declares, so if one declares half again as many bytes as the
+other and takes the same time, the byte count is not describing the traffic.
+
+The rule is therefore a comparison against the fp16 row -- declared bytes
+1.5x or more, wall time within a quarter -- and the row says that one of the
+two is not moving what it declares rather than guessing which, because that
+differs by provider and the fp32 numeric-error row already answers it (261
+ppm on the OpenVINO GPU, 0.00 on the CPU EP).  The window's lower bound
+matters as much as its upper: ONNX Runtime's CPU EP runs fp32 decode in a
+quarter of fp16's time because its fp16 path has no kernel at all, and that
+is a different fault which this row must not claim.
+
+## Nothing about a device may be hardcoded by its name
+
+The provider tables that map a registration name to its options
+(`epOptionsFor`) and to a display name (`kEpTable`) are the one legitimate
+place a provider is named: registration genuinely differs per provider and
+there is no way to discover it. **Everything that affects a number has to be
+measured**, because the providers this backend exists to reach are the ones
+nobody has run yet, and a table of known vendors is exactly what such a
+device falls off the end of.
+
+Two rules were written the wrong way round first, and both are worth
+remembering as shapes:
+
+- **A behaviour asserted by provider name.** Several accelerators serve an
+  fp32 graph at 16 bits by default -- QNN's HTP and OpenVINO's GPU and NPU
+  targets do -- and the decode row's byte count was corrected for them from a
+  hardcoded list. It gave the right answer on the two providers in the list
+  and no answer at all anywhere else. What replaced it is a measurement: the
+  decode rows count the bytes the model *declares*, and a row implying more
+  traffic than `onnxStreamBps()` saw the device move says so. A provider that
+  stores an fp32 graph narrower than asked is caught by arithmetic that never
+  needed to know whose it was.
+
+- **A capability assumed universal.** The shape probe rejects a graph shape
+  that widens the multiply, which is right when another shape keeps the width
+  and wrong when none does. ONNX Runtime 1.17's x86 CPU EP has no fp16 MatMul
+  at all and casts in every shape, so a veto deleted its fp16 row -- and
+  through the shared probe cache, every fp16 row in conv and the transformer
+  block. The width check is a preference now: a widening shape is a second
+  choice, and where it is the only choice the row is measured and reports the
+  width it ran at.
+
+The same discipline is why the int8 scheme is chosen by trying both spellings
+and reading the profile rather than by asking which vendor this is, and why
+the fold and resolvability guards are ratios against a measured submission
+cost rather than absolute times. The constants that remain are workload
+shapes (the block's geometry, the conv channel count), search bounds
+(`kImproveFactor`, `kMaxStrikes`), time budgets, and dimensionless thresholds
+calibrated across every provider available -- never a rate any particular
+device is expected to reach.
+
+## Four shapes, and why no one of them wins
+
+A throughput graph holds both operands as constants so nothing large crosses
+the host boundary per run -- and a graph of constants is a constant
+expression, which a vendor compiler is entitled to evaluate while it builds.
+QNN and OpenVINO both do. ORT's `ConstantFolding` switch cannot reach them:
+it stops ORT's own folder and nothing else. So the graph has to carry a
+runtime dependency *in front of the work*, and `OnnxLiveShape`
+(`onnx_model.h`) names the four ways of doing that:
+
+| shape | where the runtime value enters | cost | foldable |
+|---|---|---|---|
+| `ResultScaled` | scales the reduced result | none | **yes** |
+| `OperandScaled` | scales A before the multiply | one elementwise pass | no |
+| `Add0` | adds a runtime zero to the int8 codes | one 1-byte pass | no |
+| `QdqAdd0` | the same as a quantized node unit (DQ/Add/Q) | one 1-byte pass | no |
+
+**No single choice is right, which is the whole reason there is a list.**
+`ResultScaled` is the fastest and the only one a compiler can fold;
+`OperandScaled` costs ~20% on the ANE, where a dynamic operand compiles to a
+different program (8.7 -> 7.0 TFLOPS fp16), and on the CPU EP it makes ORT
+insert a precision-free `Cast` and run the whole fp16 matmul in fp32 -- 416
+GFLOPS against 87 for the real thing. `Add0` is cheapest for int8 but QNN's
+HTP refuses a bare `ElementWiseAdd` on quantized codes, which is what
+`QdqAdd0` exists for.
+
+So `liveShapesFor()` (`gemm_setup.cpp`) returns them most-preferred-first,
+`ResultScaled` always leading, and the 32^3 probe keeps every one that
+**builds**, **fuses** where the row requires fusion, and **runs the multiply
+at the row's own width**. `gemm.cpp` then walks the kept list: it uses the
+first, and drops to the next only when it catches that one folding. A
+provider that does not fold never leaves the head of the list and pays
+nothing; one that does ends up on a shape it cannot fold.
+
+**The width check is the part that is easy to get wrong.** A cast *count*
+cannot see the widening: the widened graph carries *fewer* `Cast` nodes than
+the narrow one, because a fp16 matmul whose result is reduced in fp32 needs a
+cast the all-fp32 version does not. The signal is the kernel's own input
+type, which `onnxCollectExecutedOps()` reads out of the profile
+(`onnxProfileTypeName()` names the expected one). `conv.cpp` asks the same
+question of `Conv` and says so in the row: the CPU EP's fp16 convolutions
+land on its fp32 ones to three figures because that is literally what ran.
+
+**Folding is detected on work, and work is time less the cost of asking.**
+Every raw-time or raw-rate test tried here failed on a provider with
+expensive dispatch, because on those the rungs are mostly dispatch and any
+ratio drawn from them is a ratio of dispatch:
+
+- `>4x rate in one doubling` failed OpenVINO's int8 row for working
+  correctly, and failed Windows TensorRT's nvfp4 at 4.02x.
+- `t(2D) < 2*t(D)` failed the same nvfp4 row at 1.99x -- 163.5 us against
+  325.9 us on a provider charging 114 us a submission. Net of that the rungs
+  are 49.5 and 211.9 us: 4.3x for 8x the work, a card climbing toward the
+  215 TFLOPS Linux measures on the same silicon.
+
+So the 32^3 probe records what one run of that row's own graph costs
+(`OnnxProbeResult::probeUs`) -- at that size the multiply is 65 kFLOP, so it
+is very nearly the submission charge -- and the ladder asks two questions of
+`t - probeUs`:
+
+- **Did this rung compute anything?** Work below a quarter of the submission
+  charge did not: DirectML spent 153.6 us on a 1024-cube it charges 156 us
+  merely to accept. One rung answers this, which is what lets a provider
+  whose compile budget affords a single size still be judged.
+- **Did the work grow with the size?** Eight times the arithmetic must cost
+  at least twice the time however much the rate improves, because a folded
+  graph's residue is the reduction and that grows with D rather than D cubed.
+
+The whole-ladder 64x check and the single-rung-on-a-compile-gate rule remain
+as backstops.
+
+**The block and conv graphs never needed any of this**: they have scaled the
+resident activations before the work all along, which is the `OperandScaled`
+shape under another name, and it is why QNN's block rows were real while its
+gemm rows were dispatch.
 
 ## Bound a ladder on what it measured, not on what it predicts
 
@@ -1201,15 +1654,26 @@ offloading is worth doing at all, and no vendor quotes it.
 
 Three rows:
 
-- `h2d` sends a tensor and gathers one element back, so nearly all of it is
+- `h2d` sends a tensor and gathers one row back, so nearly all of it is
   the trip out. Swept, since the rate climbs with size until the link
   saturates.
 - `roundtrip` sends a tensor, squares it and returns the result — the real
   cost of offloading a trivial operation. Measured once at the smallest rung,
   never swept: a link saturates rather than improving, and the compile cost
-  does not scale gently (see below).
+  does not scale gently (see below).  Attempted even when no `h2d` size was
+  usable, because a runtime that places per operation treats the two graphs
+  differently: Core ML keeps the gather on the CPU (so the placement guard
+  refuses `h2d` on the Neural Engine device) and sends the 16 MB elementwise
+  pass to the ANE.  The row names its size, since it is not the one `h2d`
+  reports at.
 - `d2h` is the round trip minus a third graph that does everything the round
   trip does except ship the result back.
+
+**The tensor is `[rows, 4096]`, never a flat vector** (`kOnnxTransferCols`).
+The ANE's compiler took 255 s over `Mul` on a flat `[8388608]` fp16 input
+(macOS 27.0, ORT 1.29) — the whole test's wall time, spent on one session
+that the 30 s budget could only refuse after the fact — where the same bytes
+shaped as rows of 4096, the activation graphs' shape, compile in seconds.
 
 **The return trip must be isolated against that third graph, not against
 `h2d`.** Subtracting `h2d` leaves the elementwise pass in the answer, and that
@@ -1233,7 +1697,12 @@ throughput, the compile is a separate cost and can dwarf everything else.
 
 Reference wall times, M1 Pro CoreML EP with a warm compile cache: conv 64 s,
 block 62 s, gemm 46 s, activation 32 s, bandwidth 11 s, transfer 2 s,
-dispatch 1 s, numeric error under 1 s — 218 s for the provider.
+dispatch 1 s, numeric error under 1 s — 218 s for the provider.  With the
+placement guard (every timed session loads its model twice for the plan)
+the same provider took 367 s on macOS 27.0 / ORT 1.29, of which 91 s is the
+resident-tensor ladder's refused 512 MB rung (72 s to compile) and the rest
+the compiles; the transfer test, which had spent 255 s on one flat-tensor
+session, takes 3 s.
 
 A wall-clock deadline on the sweeps was tried and removed. It would have had
 to be an invented number — there is no measurement that says how long a
@@ -1326,7 +1795,13 @@ achieve — at `onnx-tensor-bw`'s own three working-set sizes, so the two
 ladders divide row for row rather than being compared by eye.
 
 M1 Pro, CoreML EP, each rung beside `onnx-tensor-bw`'s rung of the same name
-(GB/s, with the share of streaming in brackets):
+(GB/s, with the share of streaming in brackets; fp16, on the Neural Engine
+-- with the placement guard the 2026-09-19 run reads silu 49.5 / 43.1 /
+17.6, softmax 18.7 / 16.5 / 10.9, layernorm 16.4 / 13.1 / 11.6, within a
+few percent of the native Core ML backend's ANE rows, and the 8 and 32 MB
+resident-tensor rungs are refused as the planner's; between commit c6c8145
+and the guard the stream-width probe had chosen fp32, which runs on the CPU,
+and the same rows read 152 / 107 / 109 for softmax):
 
 | | 8mb | 32mb | 128mb |
 |---|---|---|---|
@@ -1346,11 +1821,56 @@ worse, published it as the operation's rate. The 8 MB and 32 MB rungs hold to
 a few percent between runs; the 128 MB one moves by up to a fifth on a 16 GB
 machine, since it is a large allocation competing with everything else.
 
-How much the subtraction matters is entirely a property of the provider and it
-spans the whole range: negligible on CoreML, whose reference costs a flat
-44–46 µs at every size (under 1% of the measurement), half to three quarters of
-the measurement on the CPU EP, and on TensorRT proportional to the tensor. On
-the CPU EP the rows are correspondingly noisier than the accelerator ones.
+**The reference is no longer nearly free, and that changed what this test can
+resolve.**  It used to cost CoreML a flat 44-46 µs at every size -- because it
+was foldable, so the provider evaluated it at build time and the "reference"
+was dispatch.  Both graphs scale the tensor by a runtime value now, so neither
+folds and the reference is a real read: 681 µs at 8 MB there.  That is correct,
+and it means the subtraction removes a large number instead of a negligible
+one, so a cheap operation is left resting on the difference of two big
+measurements.
+
+One guard keeps that honest: the operation has to account for at least a
+tenth of the *work*, which is the measurement less the provider's submission
+charge (a one-row reference graph measures it).  Taking the share of wall
+time instead makes a well-resolved operation look marginal wherever dispatch
+is expensive -- DirectML charges 156 us against measurements of a few hundred.
+
+**What that tenth rejects is a remainder of zero or below**, and that is most
+of its value.  TensorRT fuses SiLU into a graph that then costs the same as
+the reference -- 177 us against 176 -- and its softmax comes out *faster*
+than doing nothing at all.  Those are not measurements.
+
+**Two attempts to make the guard do more both cost more than they bought**,
+and neither should be tried again without new evidence:
+
+- *Raising the share to a fifth* threw away every CUDA activation row.  All
+  eight sit between 15.1% and 17.7% -- three operations across three working
+  sets, a band far too tight to be noise -- while the row it was aimed at,
+  Core ML's softmax, lands in the same 8-18% band.  The share does not
+  separate them.
+- *A ceiling against what the provider streams* cannot be calibrated at any
+  one size.  Measured on a small working set it is cache-resident and permits
+  anything (CUDA read 2511 GB/s from a 3 us net); measured on a large one it
+  is the DRAM rate and refuses rows that legitimately ran out of cache, which
+  is most 8 MB rows on a GPU.  Between the two it produced false refusals on
+  four providers -- every activation row on DirectML, CUDA and TensorRT at
+  one point -- and caught one real case.  The reference graph is no better as
+  a yardstick: it is dominated by its reduction, so on CUDA it achieves
+  166 GB/s on a 430 GB/s card.
+
+What actually distinguishes the bad row is that it does not reproduce, and
+one measurement cannot see that.  So the rows near the floor are the least
+trustworthy thing this backend publishes, and the ladder is what protects a
+reader: three sizes and three operations, where one row disagreeing with its
+neighbours is visible.  Core ML's softmax is the known case -- 19 GB/s and
+139 GB/s on a device that streams 89 -- and that is a property of that
+provider's compiler rather than something the row can outvote.
+
+`onnxStreamBps()` survives for a job it *is* well sized for: the decode rows
+read a hundred megabytes of weights from main memory, and a 64 MB probe net
+of its dispatch floor is the right reference for whether a provider is
+actually moving the bytes a precision declares.
 
 ## Why convolution is measured separately
 
@@ -1405,9 +1925,17 @@ estimate lands relative to a bucket edge.
 
 ## Measuring bandwidth needs a matmul, not something simpler
 
-`onnx-tensor-bw` streams a resident fp16 weight matrix through a GEMV,
-because that is the operation generating a token performs and the one every
-provider tunes hardest. An elementwise-plus-reduction graph reads ~22 GB/s
+`onnx-tensor-bw` streams a resident weight matrix through a GEMV, because
+that is the operation generating a token performs and the one every provider
+tunes hardest.  **The width is measured, not assumed.**  It used to be fp16
+outright, which on a provider with no fp16 kernel measured the conversion
+ORT inserts on the way in and nothing else: the CPU EP read a flat 6.2 GB/s
+at every size on a machine whose fp32 rows stream 236 / 100 / 92, a real
+DRAM curve.  `onnxStreamDtype()` times eight megabytes through this same
+GEMV in fp16 and in fp32 and the ladder, the activation rows and the
+dispatch matmul all take the faster; the rungs are named for their byte
+size, so an fp32 matrix simply has half the columns and every reading still
+means what it says. An elementwise-plus-reduction graph reads ~22 GB/s
 on the M1 Pro against a machine that does roughly ten times that — it
 measures the reduction, not memory. Two operations per weight also puts the
 arithmetic far enough below the memory cost that only memory is left.
@@ -1443,6 +1971,15 @@ ask but slow to compute, versus expensive to ask but fast once asked — is
 the whole reason a device advertising tens of TOPS can still lose, and no
 throughput row in this backend can show it.
 
+**Those Core ML figures were the CPU's.**  The compute plan (see the
+CPU-fallback guard) shows a 64-value multiply and a 256-cube matmul never
+leave the CPU under the Neural Engine configuration, so on that provider
+the three rows now report the placement instead of a number.  The native
+Core ML backend answers the question this test cannot: it climbs a size
+ladder to the smallest work the planner sends to the unit and times that
+(an 8 MB elementwise op at ~0.8 ms, a 1024-cube at ~0.6 ms, a compile at
+~210 ms on the M1 Pro's ANE — `src/coreml/dispatch_latency.cpp`).
+
 ## ORT's own graph rewrites can cost NPU placement
 
 `MatMulAddFusion` turns `MatMul` + `Add` into `Gemm`, and several NPU
@@ -1473,7 +2010,10 @@ and dedicated append calls. A provider matching neither is reported as
 unsupported rather than run with defaults — silently measuring something
 unintended is the thing this backend must not do. The CPU EP is implicit in
 every session and is the one provider that registers nothing and keeps its
-fallback.
+fallback.  A plugin provider (`epDevicePtr` set) takes the same key/value
+table through the OrtEpDevice append, `onnxAppendPluginDevice()`; there
+the one exception to "no defaults" applies, since a person named that
+library (see "Plugin providers").
 
 ## A datatype needs a runtime, not just an opset
 
@@ -1561,7 +2101,9 @@ install enumerates something like Dnnl / XNNPACK / CPU and nothing else, even
 on a machine with an obvious GPU in it — which makes the backend look broken
 when it is the runtime that cannot reach the hardware. `runAll()` emits a
 one-line note when no accelerator provider is present; `--onnx-lib` (or the
-GUI's settings screen) selects a different runtime library.
+GUI's settings screen) selects a different runtime library, and `--onnx-ep`
+/ `--onnx-winml` add plugin providers to a stock one (see "Plugin providers"
+above) — on Windows that is now the only route to a Qualcomm NPU.
 
 The mobile packages are the counter-example, and it is why they are bundled:
 `com.microsoft.onnxruntime:onnxruntime-android` carries NNAPI, and the iOS
@@ -1581,6 +2123,9 @@ agree; skipped entries surface once as a verbose-only note with the refusal
 reason.
 OpenVINO enumerates as three targets (NPU/GPU/CPU, see `onnx_peak.cpp`) and
 each is filtered independently. Answers are memoized per runtime and target.
+Plugin providers are the one part of the list that *is* hardware-derived:
+`GetEpDevices` reports the devices a plugin can serve, so they enter the
+raw list per device already and the probe only confirms them.
 The probe tries cheapest first -- provider attach with no model, then the
 dispatch-latency trivial Mul, then the matmul legs -- so a live EP never
 pays for a matmul session it was only ever going to pass.
@@ -1600,24 +2145,17 @@ on real hardware:
 When a graph works on one provider and not another, suspect the optional
 behaviour before the operator.
 
-## WebGPU is not offered on Android
-
-`onnxUsableEps()` (`onnx_peak.cpp`) filters `WebGpuExecutionProvider` out on
-`__ANDROID__` with a reason, so listing and runs agree and the device list
-says why it is missing. Its Dawn backend shares the process GPU with the
-app's own UI, where a lost device is unrecoverable -- and its Android
-support is experimental: every matmul fails there, and one fp16 run never
-returned, wedging the phone's GPU until reboot. Other OSes keep it, and the
-session wiring in `onnx_session.cpp` stays for them.
-
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `src/onnx/CMakeLists.txt`,
-  a `Benchmark` enum value + CLI flag (`include/common/benchmark_enums.h`,
-  `src/common/options.cpp`), a call in `runAll()`, and a row in Key Files above.
+  a call in `runAll()` gated on a `Benchmark` value, and a row in Key Files
+  above.  Reuse an existing value when the measurement already has a name on
+  another backend (`include/common/benchmark_enums.h`); a new one needs a
+  flag row in `src/common/options.cpp` -- named for what it measures, never
+  for ONNX.
 - Adding EP support → `kEpTable` (`onnx_peak.cpp`) **and** `epOptionsFor()`
   (`onnx_session.cpp`). Both, or the EP enumerates but refuses to run.
-- Bumping the vendored header → `tool/update_onnx_headers.sh <tag>` (never by
+- Bumping the vendored header → `tools/update_onnx_headers.sh <tag>` (never by
   hand: it refetches all three files from one release tag and rewrites the
   recorded pin). Then check `kMinApiVersion` still names the oldest runtime
   worth supporting.

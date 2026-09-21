@@ -36,9 +36,6 @@ const std::string& clGetInt8DpKernels();
 class clPeak : public Peak
 {
 public:
-    // OpenCL-specific device selection.  Empty index list = run all.
-    std::vector<unsigned long> platformIndices, deviceIndices;
-
     clPeak();
     ~clPeak() override = default;
 
@@ -46,12 +43,14 @@ public:
     // and the per-benchmark methods.
     logger::DeviceScope *currentDeviceScope = nullptr;
 
-    void applyOptions(const CliOptions &opts) override;
+    // Which backend this is -- the one place that says so; the registry,
+    // the inventory and the device selector all read it from here.
+    static constexpr Backend kBackend = Backend::OpenCL;
+    Backend backend() const override { return kBackend; }
     int runAll() override;
 
     // Inventory.
     static BackendInventory enumerate();
-    static void printInventory(const BackendInventory &inv, std::ostream &os);
 
     // Time a kernel batched as `iters` dispatches, where `iters` is calibrated
     // from a one-shot warmup so the timed phase lands at ~targetTimeUs.

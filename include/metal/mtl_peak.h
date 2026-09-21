@@ -120,14 +120,14 @@ struct mtl_compute_desc_t
 class MetalPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices; // empty = run all
-
   MetalPeak();
   ~MetalPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Metal;
+  Backend backend() const override { return kBackend; }
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
   int runAll() override;
 
   int runComputeSP(MetalDevice &dev, benchmark_config_t &cfg);

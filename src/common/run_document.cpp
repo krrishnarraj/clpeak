@@ -1,13 +1,12 @@
 #include <common/run_document.h>
 #include <common/common.h>
 #include <common/json.h>
+#include <common/json_writer.h>
 #include <version.h>
 
 #include <ctime>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
-#include <locale>
 #include <sstream>
 
 // ── Enum <-> string ────────────────────────────────────────────────────────
@@ -130,7 +129,6 @@ void RunDocument::append(const RunDocument &other)
         }
         if (existing->properties.empty()) existing->properties = d.properties;
     }
-    notes.insert(notes.end(), other.notes.begin(), other.notes.end());
 }
 
 // ── Baselines ──────────────────────────────────────────────────────────────
@@ -182,87 +180,7 @@ std::string isoTimestampUtc()
 
 namespace {
 
-// Every number written here goes through the classic locale.  The GUI hosts
-// this writer inside toolkits that call setlocale(LC_ALL, "") -- GTK's
-// gtk_init does -- and a comma decimal separator produces a file that is not
-// JSON at all.  The dump is machine interchange, never user-facing text.
-//
-// Seven significant digits: enough to round-trip a float's worth of precision
-// (measurements are floats), enough to keep a six-digit GFLOPS reading whole,
-// and -- unlike the fixed four decimals this replaces -- it does not flatten
-// the ONNX numeric-error readings, which are parts-per-million and used to be
-// written as 0.0000.
-std::string fmtNum(double v)
-{
-    std::ostringstream ss;
-    ss.imbue(std::locale::classic());
-    ss << std::setprecision(7) << v;
-    return ss.str();
-}
-
-std::string fmtUint(std::uint64_t v)
-{
-    std::ostringstream ss;
-    ss.imbue(std::locale::classic());
-    ss << v;
-    return ss.str();
-}
-
-// Indent-tracking JSON emitter.  The document is pretty-printed because it is
-// now the only format clpeak writes: people read these files, diff them, and
-// paste them into bug reports.
-class Writer
-{
-public:
-    explicit Writer(std::ostream &o) : out(o) { out.imbue(std::locale::classic()); }
-
-    void beginObject()          { punctuate(); out << "{";  depth++; fresh = true; }
-    void beginObject(const char *k) { key(k);  out << "{";  depth++; fresh = true; }
-    void endObject()            { depth--; newline(); out << "}"; fresh = false; }
-    void beginArray(const char *k)  { key(k);  out << "[";  depth++; fresh = true; }
-    void endArray()             { depth--; newline(); out << "]"; fresh = false; }
-
-    void num(const char *k, double v)        { key(k); out << fmtNum(v); }
-    void uint(const char *k, std::uint64_t v){ key(k); out << fmtUint(v); }
-    void integer(const char *k, long long v) { key(k); out << v; }
-    void boolean(const char *k, bool v)      { key(k); out << (v ? "true" : "false"); }
-    void str(const char *k, const std::string &v)
-    {
-        key(k);
-        out << "\"" << jsonEscape(v) << "\"";
-    }
-    // Optional string: absent rather than empty, so a file carries only facts.
-    void strIf(const char *k, const std::string &v) { if (!v.empty()) str(k, v); }
-
-    void rawString(const std::string &v)
-    {
-        punctuate();
-        out << "\"" << jsonEscape(v) << "\"";
-    }
-
-private:
-    void newline()
-    {
-        out << "\n" << std::string(static_cast<size_t>(depth) * 2, ' ');
-    }
-    void punctuate()
-    {
-        if (!fresh) out << ",";
-        newline();
-        fresh = false;
-    }
-    void key(const char *k)
-    {
-        punctuate();
-        out << "\"" << k << "\": ";
-    }
-
-    std::ostream &out;
-    int  depth = 0;
-    bool fresh = true;   // nothing written at this depth yet -> no leading comma
-};
-
-void writeHost(Writer &w, const HostInfo &h)
+void writeHost(JsonWriter &w, const HostInfo &h)
 {
     w.beginObject("host");
     w.strIf("os",         h.os);
@@ -274,7 +192,7 @@ void writeHost(Writer &w, const HostInfo &h)
     w.endObject();
 }
 
-void writeInvocation(Writer &w, const Invocation &inv)
+void writeInvocation(JsonWriter &w, const Invocation &inv)
 {
     w.beginObject("invocation");
     if (!inv.argv.empty())
@@ -302,10 +220,38 @@ void writeInvocation(Writer &w, const Invocation &inv)
         for (const std::string &t : inv.tests) w.rawString(t);
         w.endArray();
     }
+    if (inv.verbose) w.boolean("verbose", true);
     w.endObject();
 }
 
-void writeMetric(Writer &w, const MetricResult &m)
+void writeBuild(JsonWriter &w, const BuildInfo &b)
+{
+    if (b.backends.empty()) return;
+    w.beginObject("build");
+    w.beginArray("backends");
+    for (const std::string &name : b.backends) w.rawString(name);
+    w.endArray();
+    w.strIf("config", b.config);
+    w.endObject();
+}
+
+// One entry per line: the log reads as a transcript and greps like one,
+// while the rest of the document keeps its one-key-per-line layout.
+void writeLogEntry(JsonWriter &w, const LogEntry &e)
+{
+    w.beginObjectInline();
+    w.num("elapsed_s", e.elapsedS);
+    w.str("level", clpeak::logLevelString(e.level));
+    w.strIf("source",  e.source);
+    w.strIf("backend", e.backend);
+    w.strIf("device",  e.device);
+    if (e.deviceIndex >= 0) w.integer("device_index", e.deviceIndex);
+    w.strIf("test", e.test);
+    w.str("message", e.message);
+    w.endObject();
+}
+
+void writeMetric(JsonWriter &w, const MetricResult &m)
 {
     w.beginObject();
     w.str("id", m.id);
@@ -332,7 +278,7 @@ void writeMetric(Writer &w, const MetricResult &m)
     w.endObject();
 }
 
-void writeTest(Writer &w, const TestResult &t)
+void writeTest(JsonWriter &w, const TestResult &t)
 {
     w.beginObject();
     w.str("id", t.id);
@@ -345,13 +291,14 @@ void writeTest(Writer &w, const TestResult &t)
     w.str("quantity", quantityString(t.quantity));
     w.str("unit", t.unit);
     w.strIf("description", t.description);
+    if (t.durationS > 0.0) w.num("duration_s", t.durationS);
     w.beginArray("metrics");
     for (const MetricResult &m : t.metrics) writeMetric(w, m);
     w.endArray();
     w.endObject();
 }
 
-void writeDevice(Writer &w, const DeviceResult &d)
+void writeDevice(JsonWriter &w, const DeviceResult &d)
 {
     w.beginObject();
     w.str("backend", d.backend);
@@ -381,7 +328,7 @@ void writeDevice(Writer &w, const DeviceResult &d)
 
 void writeDocument(const RunDocument &doc, std::ostream &out)
 {
-    Writer w(out);
+    JsonWriter w(out);
     w.beginObject();
     w.str("schema", "clpeak/run");
     w.integer("format_version", RESULT_FORMAT_VERSION);
@@ -392,32 +339,60 @@ void writeDocument(const RunDocument &doc, std::ostream &out)
     if (doc.meta.durationS > 0.0) w.num("duration_s", doc.meta.durationS);
     if (doc.meta.cancelled)       w.boolean("cancelled", true);
 
+    writeBuild(w, doc.meta.build);
     writeHost(w, doc.meta.host);
     writeInvocation(w, doc.meta.invocation);
-
-    if (!doc.notes.empty())
-    {
-        w.beginArray("notes");
-        for (const RunNote &n : doc.notes)
-        {
-            w.beginObject();
-            w.strIf("backend", n.backend);
-            w.strIf("device",  n.device);
-            w.str("message",   n.message);
-            w.endObject();
-        }
-        w.endArray();
-    }
 
     w.beginArray("devices");
     for (const DeviceResult &d : doc.devices) writeDevice(w, d);
     w.endArray();
+
+    // Results first; the two blocks a reader consults when they look wrong
+    // come after, and the log is the one that can run long.
+    if (!doc.inventory.empty())
+    {
+        w.beginArray("inventory");
+        writeInventoryBackends(w, doc.inventory);
+        w.endArray();
+    }
+    if (!doc.log.empty())
+    {
+        w.beginArray("log");
+        for (const LogEntry &e : doc.log) writeLogEntry(w, e);
+        w.endArray();
+    }
 
     w.endObject();
     out << "\n";
 }
 
 } // namespace
+
+std::string logEntryToJson(const LogEntry &entry)
+{
+    std::ostringstream ss;
+    JsonWriter w(ss);
+    writeLogEntry(w, entry);
+    return ss.str();
+}
+
+std::string runLogHeaderJson(const RunMeta &meta)
+{
+    std::ostringstream ss;
+    JsonWriter w(ss);
+    w.beginObjectInline();
+    w.str("schema", "clpeak/run-log");
+    w.integer("format_version", RESULT_FORMAT_VERSION);
+    w.str("clpeak_version", meta.clpeakVersion.empty()
+                                ? std::string(CLPEAK_VERSION_STR)
+                                : meta.clpeakVersion);
+    w.strIf("generated_at", meta.generatedAt);
+    writeBuild(w, meta.build);
+    writeHost(w, meta.host);
+    writeInvocation(w, meta.invocation);
+    w.endObject();
+    return ss.str();
+}
 
 bool saveRunJson(const RunDocument &doc, const std::string &filename)
 {
@@ -466,6 +441,21 @@ void readInvocation(const JsonValue &v, Invocation &inv)
         for (const JsonValue &x : c->items()) inv.categories.push_back(x.asString());
     if (const JsonValue *t = v.find("tests"))
         for (const JsonValue &x : t->items()) inv.tests.push_back(x.asString());
+    inv.verbose = v.flag("verbose");
+}
+
+LogEntry readLogEntry(const JsonValue &v)
+{
+    LogEntry e;
+    e.elapsedS    = v.num("elapsed_s");
+    e.level       = clpeak::logLevelFromString(v.str("level"));
+    e.source      = v.str("source");
+    e.backend     = v.str("backend");
+    e.device      = v.str("device");
+    e.deviceIndex = static_cast<int>(v.num("device_index", -1));
+    e.test        = v.str("test");
+    e.message     = v.str("message");
+    return e;
 }
 
 MetricResult readMetric(const JsonValue &v)
@@ -510,6 +500,7 @@ TestResult readTest(const JsonValue &v)
     t.direction   = directionFromString(v.str("direction"));
     t.quantity    = quantityFromString(v.str("quantity"));
     t.unit        = v.str("unit");
+    t.durationS   = v.num("duration_s");
     if (const JsonValue *ms = v.find("metrics"))
         for (const JsonValue &m : ms->items()) t.metrics.push_back(readMetric(m));
     return t;
@@ -569,13 +560,20 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     out.meta.generatedAt   = root.str("generated_at");
     out.meta.durationS     = root.num("duration_s");
     out.meta.cancelled     = root.flag("cancelled");
+    if (const JsonValue *b = root.find("build")) {
+        if (const JsonValue *names = b->find("backends"))
+            for (const JsonValue &x : names->items())
+                out.meta.build.backends.push_back(x.asString());
+        out.meta.build.config = b->str("config");
+    }
     if (const JsonValue *h = root.find("host"))       readHost(*h, out.meta.host);
     if (const JsonValue *i = root.find("invocation")) readInvocation(*i, out.meta.invocation);
-    if (const JsonValue *n = root.find("notes"))
-        for (const JsonValue &x : n->items())
-            out.notes.push_back({x.str("backend"), x.str("device"), x.str("message")});
     if (const JsonValue *ds = root.find("devices"))
         for (const JsonValue &d : ds->items()) out.devices.push_back(readDevice(d));
+    // `inventory` is not read back: this loader serves --compare, which needs
+    // readings, and the GUI reads the file with its own parser.
+    if (const JsonValue *l = root.find("log"))
+        for (const JsonValue &x : l->items()) out.log.push_back(readLogEntry(x));
 
     return true;
 }

@@ -13,12 +13,6 @@ MetalPeak::MetalPeak()
 
 MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
 
-void MetalPeak::applyOptions(const CliOptions &opts)
-{
-    Peak::applyOptions(opts);
-    deviceIndices = opts.mtlDeviceIndices;
-}
-
 // ---------------------------------------------------------------------------
 // Benchmark methods live in separate files:
 //   mtl_device.mm          compute_kernel.mm     mtl_utils.mm
@@ -43,8 +37,7 @@ int MetalPeak::runAll()
     {
         if (clpeak::cancelRequested())
             break;
-        if (!deviceIndices.empty() &&
-            std::find(deviceIndices.begin(), deviceIndices.end(), static_cast<int>(d)) == deviceIndices.end())
+        if (!isDeviceSelected(static_cast<int>(d)))
             continue;
 
         MetalDevice dev;
@@ -90,9 +83,9 @@ int MetalPeak::runAll()
         if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
         if (isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
         if (isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isAllowed(Benchmark::SimdgroupMatrix))   runSimdgroupMatrix(dev, cfg);
-        if (isAllowed(Benchmark::MpsGemm))           runMpsGemm(dev, cfg);
-        if (isAllowed(Benchmark::MpsAttention))      runMpsAttention(dev, cfg);
+        if (isAllowed(Benchmark::MatrixCompute))     runSimdgroupMatrix(dev, cfg);
+        if (isAllowed(Benchmark::Gemm))              runMpsGemm(dev, cfg);
+        if (isAllowed(Benchmark::Attention))         runMpsAttention(dev, cfg);
 
         // ---- Phase 2: bandwidth (GBPS) -----------------------------------
         if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
@@ -115,10 +108,14 @@ int MetalPeak::runAll()
 BackendInventory MetalPeak::enumerate()
 {
     BackendInventory inv;
-    inv.backend = "Metal";
+    inv.id = kBackend;
 
     NSArray<id<MTLDevice>> *devs = copyClpeakMetalDevices();
-    if (devs.count == 0) return inv;
+    if (devs.count == 0)
+    {
+        inv.unavailableReason = "no devices found";
+        return inv;
+    }
 
     inv.available = true;
     InventoryPlatform plat;
@@ -128,26 +125,14 @@ BackendInventory MetalPeak::enumerate()
     for (NSUInteger i = 0; i < devs.count; i++)
     {
         InventoryDevice dev;
-        dev.index = static_cast<int>(i);
-        dev.name  = [devs[i].name UTF8String];
+        dev.index   = static_cast<int>(i);
+        dev.name    = [devs[i].name UTF8String];
+        dev.typeStr = "GPU";
         plat.devices.push_back(std::move(dev));
     }
 
     inv.platforms.push_back(std::move(plat));
     return inv;
-}
-
-void MetalPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-    os << "\n=== Metal backend ===\n";
-    if (!b.available)
-    {
-        os << "Metal: no devices found\n";
-        return;
-    }
-    for (const auto &plat : b.platforms)
-        for (const auto &d : plat.devices)
-            os << "  Metal Device " << d.index << ": " << d.name << "\n";
 }
 
 #endif // ENABLE_METAL

@@ -22,6 +22,8 @@ set_target_properties(clpeak_ffi PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
+# See src/cli/CMakeLists.txt: the run document records the configuration.
+target_compile_definitions(clpeak_ffi PRIVATE CLPEAK_BUILD_CONFIG="$<CONFIG>")
 if(NOT ANDROID)
     # Place the library at the build root for easy discovery (clpeak-gui,
     # CLPEAK_FFI_PATH dev override).  Android keeps CMake defaults so the
@@ -34,7 +36,7 @@ endif()
 
 # Apple platforms ship clpeak_ffi as a framework: macOS embeds it directly
 # into the .app (clpeak-gui target below); iOS wraps device+simulator builds
-# into an xcframework consumed by a local CocoaPods pod (tool/build_ios_native.sh).
+# into an xcframework consumed by a local CocoaPods pod (tools/build_ios_native.sh).
 # On iOS CMake produces the shallow framework layout automatically.
 if(APPLE)
     set_target_properties(clpeak_ffi PROPERTIES
@@ -47,40 +49,10 @@ if(APPLE)
     )
 endif()
 
-# Link enabled backends (targets exist only if their CMakeLists was processed)
-if(TARGET peak_opencl)
-    target_link_libraries(clpeak_ffi PRIVATE peak_opencl)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_OPENCL)
-endif()
-if(TARGET peak_vulkan)
-    target_link_libraries(clpeak_ffi PRIVATE peak_vulkan)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_VULKAN)
-endif()
-if(TARGET peak_cuda)
-    target_link_libraries(clpeak_ffi PRIVATE peak_cuda)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_CUDA)
-endif()
-if(TARGET peak_rocm)
-    target_link_libraries(clpeak_ffi PRIVATE peak_rocm)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_ROCM)
-endif()
-if(TARGET peak_metal)
-    target_link_libraries(clpeak_ffi PRIVATE peak_metal)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_METAL)
-endif()
-if(TARGET peak_cpu)
-    target_link_libraries(clpeak_ffi PRIVATE peak_cpu)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_CPU)
-endif()
-if(TARGET peak_onnx)
-    target_link_libraries(clpeak_ffi PRIVATE peak_onnx)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_ONNX)
-endif()
-if(TARGET peak_oneapi)
-    target_link_libraries(clpeak_ffi PRIVATE peak_oneapi)
-    target_compile_definitions(clpeak_ffi PRIVATE ENABLE_ONEAPI)
-    add_sycl_to_target(TARGET clpeak_ffi SOURCES clpeak_ffi.cpp)
-endif()
+# Every backend in this build, through the shared registry (also what the
+# CLI links), so both binaries run the same backends in the same order.
+include(${CMAKE_CURRENT_LIST_DIR}/../common/cmake/backends.cmake)
+clpeak_link_backends(clpeak_ffi)
 
 if(ANDROID)
     target_link_libraries(clpeak_ffi PRIVATE log)

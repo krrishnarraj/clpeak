@@ -7,6 +7,10 @@
 #include <dlfcn.h>
 #endif
 
+#include <filesystem>
+#include <string>
+#include <system_error>
+
 namespace clpeak {
 
 void *dynOpen(std::initializer_list<const char *> names)
@@ -40,15 +44,16 @@ void *dynSym(void *lib, const char *name)
 #endif
 }
 
-void dynClose(void *lib)
+std::string absoluteModulePath(const char *name)
 {
-  if (!lib)
-    return;
-#if defined(_WIN32)
-  FreeLibrary(reinterpret_cast<HMODULE>(lib));
-#else
-  dlclose(lib);
-#endif
+  if (!name || !*name || name[0] == '@')
+    return name ? name : std::string();
+  const std::string s(name);
+  if (s.find_first_of("/\\") == std::string::npos)
+    return s;
+  std::error_code ec;
+  const std::string abs = std::filesystem::absolute(s, ec).string();
+  return ec ? s : abs;
 }
 
 } // namespace clpeak

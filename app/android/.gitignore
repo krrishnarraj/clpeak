@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# LiteRT NPU dispatch / compiler-plugin shims and vendor runtimes staged by
+# tools/fetch_litert_npu.sh: fetched per release, never committed.
+/app/src/main/jniLibs/

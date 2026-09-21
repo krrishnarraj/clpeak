@@ -30,9 +30,18 @@ typedef _RequestCancelNative = Void Function();
 typedef ClpeakRequestCancel = void Function();
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
+typedef _SetOnnxEpLibsNative = Void Function(Pointer<Utf8> spec);
+typedef _SetOnnxEpLibs = void Function(Pointer<Utf8> spec);
+typedef _SetOnnxWinmlNative = Void Function(Int32 enabled, Pointer<Utf8> path);
+typedef _SetOnnxWinml = void Function(int enabled, Pointer<Utf8> path);
 typedef _OnnxStatusNative = Pointer<Utf8> Function();
+typedef _SetLitertLibNative = Void Function(Pointer<Utf8> path);
+typedef _SetLitertLib = void Function(Pointer<Utf8> path);
+typedef _SetLitertStageNative = Void Function(Pointer<Utf8> dir);
+typedef _SetLitertStage = void Function(Pointer<Utf8> dir);
+typedef _LitertStatusNative = Pointer<Utf8> Function();
 
-/// Thin, manual dart:ffi bindings over the 9 clpeak_* symbols.
+/// Thin, manual dart:ffi bindings over the 12 clpeak_* symbols.
 class ClpeakBindings {
   ClpeakBindings._(DynamicLibrary lib)
       : _version = lib.lookupFunction<_VersionNative, _VersionNative>(
@@ -48,8 +57,22 @@ class ClpeakBindings {
                 'clpeak_request_cancel'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'clpeak_set_onnx_library'),
+        _setOnnxEpLibraries =
+            lib.lookupFunction<_SetOnnxEpLibsNative, _SetOnnxEpLibs>(
+                'clpeak_set_onnx_ep_libraries'),
+        _setOnnxWinml = lib.lookupFunction<_SetOnnxWinmlNative, _SetOnnxWinml>(
+            'clpeak_set_onnx_winml'),
         _onnxStatus = lib.lookupFunction<_OnnxStatusNative, _OnnxStatusNative>(
-            'clpeak_copy_onnx_status_json');
+            'clpeak_copy_onnx_status_json'),
+        _setLitertLibrary =
+            lib.lookupFunction<_SetLitertLibNative, _SetLitertLib>(
+                'clpeak_set_litert_library'),
+        _setLitertNpuStageDir =
+            lib.lookupFunction<_SetLitertStageNative, _SetLitertStage>(
+                'clpeak_set_litert_npu_stage_dir'),
+        _litertStatus =
+            lib.lookupFunction<_LitertStatusNative, _LitertStatusNative>(
+                'clpeak_copy_litert_status_json');
 
   factory ClpeakBindings.open() => ClpeakBindings._(openClpeakLibrary());
 
@@ -59,7 +82,12 @@ class ClpeakBindings {
   final ClpeakLaunch launch;
   final ClpeakRequestCancel requestCancel;
   final _SetOnnxLib _setOnnxLibrary;
+  final _SetOnnxEpLibs _setOnnxEpLibraries;
+  final _SetOnnxWinml _setOnnxWinml;
   final _OnnxStatusNative _onnxStatus;
+  final _SetLitertLib _setLitertLibrary;
+  final _SetLitertStage _setLitertNpuStageDir;
+  final _LitertStatusNative _litertStatus;
 
   /// clpeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();
@@ -96,6 +124,38 @@ class ClpeakBindings {
     }
   }
 
+  /// The plugin execution-provider libraries to register on the runtime's
+  /// environment (ONNX Runtime 1.22+), replacing the previous set.  Each
+  /// entry is the registration name the provider expects and the library to
+  /// load; an implicit entry is one the app bundled speculatively, whose
+  /// failure to register is a verbose-log matter rather than a run note.
+  /// Same contract as [setOnnxLibrary]: before enumeration, between runs.
+  void setOnnxEpLibraries(List<OnnxEpLibrary> libs) {
+    final spec = libs
+        .map((l) => '${l.implicit ? '!' : ''}${l.name}=${l.path}')
+        .join('\n');
+    final ptr = spec.toNativeUtf8();
+    try {
+      _setOnnxEpLibraries(ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
+  /// Windows ML's execution-provider catalog: when enabled, the vendor
+  /// providers Windows 11 installs from the Microsoft Store are registered
+  /// on the next enumeration or run.  [path] names
+  /// Microsoft.Windows.AI.MachineLearning.dll or its directory, or is empty
+  /// to search beside the loaded runtime and the executable.
+  void setOnnxWinml({required bool enabled, required String path}) {
+    final ptr = path.toNativeUtf8();
+    try {
+      _setOnnxWinml(enabled ? 1 : 0, ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
   /// Which ONNX Runtime is loaded, or why none is — see [OnnxStatus].
   OnnxStatus onnxStatus() {
     final json = takeString(_onnxStatus());
@@ -103,6 +163,83 @@ class ClpeakBindings {
     return OnnxStatus.fromJson(jsonDecode(json) as Map<String, dynamic>);
   }
 
+  /// The same for LiteRT: which libLiteRt the backend loads, ahead of the
+  /// platform's conventional names (on Android the one packaged in the app).
+  /// Same contract as [setOnnxLibrary]: before enumeration, between runs.
+  void setLitertLibrary(String path) {
+    final ptr = path.toNativeUtf8();
+    try {
+      _setLitertLibrary(ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
+  /// Android: where the LiteRT backend may stage one vendor's NPU shims when
+  /// the APK carries several (links under `dir/<vendor>/`, remade at every
+  /// launch).  Before enumeration; a no-op elsewhere.
+  void setLitertNpuStageDir(String dir) {
+    final ptr = dir.toNativeUtf8();
+    try {
+      _setLitertNpuStageDir(ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
+  /// Which LiteRT is loaded, or why none is — see [LitertStatus].
+  LitertStatus litertStatus() {
+    final json = takeString(_litertStatus());
+    if (json == null) return const LitertStatus.unavailable('no response');
+    return LitertStatus.fromJson(jsonDecode(json) as Map<String, dynamic>);
+  }
+
+}
+
+/// One plugin execution-provider library, as [ClpeakBindings.setOnnxEpLibraries]
+/// takes it: the registration name the provider expects and the library.
+class OnnxEpLibrary {
+  const OnnxEpLibrary(
+      {required this.name, required this.path, this.implicit = false});
+
+  final String name; // "QNNExecutionProvider"
+  final String path; // absolute, or a bare soname on Android
+  final bool implicit; // bundled on the off-chance; failures stay verbose-only
+
+  Map<String, dynamic> toJson() =>
+      {'name': name, 'path': path, if (implicit) 'implicit': true};
+
+  factory OnnxEpLibrary.fromJson(Map<String, dynamic> m) => OnnxEpLibrary(
+        name: m['name'] as String? ?? '',
+        path: m['path'] as String? ?? '',
+        implicit: m['implicit'] as bool? ?? false,
+      );
+}
+
+/// How one plugin library fared on the runtime's environment.
+class OnnxEpLibraryStatus {
+  const OnnxEpLibraryStatus({
+    required this.name,
+    required this.path,
+    required this.named,
+    required this.registered,
+    required this.error,
+  });
+
+  final String name;
+  final String path;
+  final bool named; // asked for by a person (not an implicit bundle)
+  final bool registered;
+  final String error; // when !registered
+
+  factory OnnxEpLibraryStatus.fromJson(Map<String, dynamic> m) =>
+      OnnxEpLibraryStatus(
+        name: m['name'] as String? ?? '',
+        path: m['path'] as String? ?? '',
+        named: m['named'] as bool? ?? true,
+        registered: m['registered'] as bool? ?? false,
+        error: m['error'] as String? ?? '',
+      );
 }
 
 /// State of the ONNX Runtime, as clpeak_copy_onnx_status_json() reports it.
@@ -113,13 +250,21 @@ class OnnxStatus {
     required this.version,
     required this.path,
     required this.error,
+    this.epLibraries = const [],
+    this.winmlEnabled = false,
+    this.winmlPath = '',
+    this.winmlError = '',
   });
 
   const OnnxStatus.unavailable(this.error)
       : available = false,
         linkedIn = false,
         version = '',
-        path = '';
+        path = '',
+        epLibraries = const [],
+        winmlEnabled = false,
+        winmlPath = '',
+        winmlError = '';
 
   final bool available;
 
@@ -132,9 +277,60 @@ class OnnxStatus {
   final String path; // what was loaded; empty when found by name
   final String error; // populated only when !available
 
-  factory OnnxStatus.fromJson(Map<String, dynamic> m) => OnnxStatus(
+  /// What the last environment registered; a library chosen since is absent
+  /// until the next enumeration.
+  final List<OnnxEpLibraryStatus> epLibraries;
+
+  /// The Windows ML catalog: whether it is on, which DLL answered, and why
+  /// it gave nothing. Both [winmlPath] and [winmlError] empty while enabled
+  /// means nothing has resolved it yet (pending until the next enumeration
+  /// or run, like [epLibraries]).
+  final bool winmlEnabled;
+  final String winmlPath;
+  final String winmlError;
+
+  factory OnnxStatus.fromJson(Map<String, dynamic> m) {
+    final winml = m['winml'] as Map<String, dynamic>? ?? const {};
+    return OnnxStatus(
+      available: m['available'] as bool? ?? false,
+      linkedIn: m['linkedIn'] as bool? ?? false,
+      version: m['version'] as String? ?? '',
+      path: m['path'] as String? ?? '',
+      error: m['error'] as String? ?? '',
+      epLibraries: [
+        for (final e in (m['epLibraries'] as List<dynamic>? ?? const []))
+          OnnxEpLibraryStatus.fromJson(e as Map<String, dynamic>),
+      ],
+      winmlEnabled: winml['enabled'] as bool? ?? false,
+      winmlPath: winml['path'] as String? ?? '',
+      winmlError: winml['error'] as String? ?? '',
+    );
+  }
+}
+
+/// State of the LiteRT runtime, as clpeak_copy_litert_status_json() reports
+/// it.  LiteRT has no runtime version string; `version` is the ABI version
+/// the app was built against.
+class LitertStatus {
+  const LitertStatus({
+    required this.available,
+    required this.version,
+    required this.path,
+    required this.error,
+  });
+
+  const LitertStatus.unavailable(this.error)
+      : available = false,
+        version = '',
+        path = '';
+
+  final bool available;
+  final String version; // "ABI 1.0.0"
+  final String path; // what was loaded
+  final String error; // populated only when !available
+
+  factory LitertStatus.fromJson(Map<String, dynamic> m) => LitertStatus(
         available: m['available'] as bool? ?? false,
-        linkedIn: m['linkedIn'] as bool? ?? false,
         version: m['version'] as String? ?? '',
         path: m['path'] as String? ?? '',
         error: m['error'] as String? ?? '',

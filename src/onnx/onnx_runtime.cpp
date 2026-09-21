@@ -1,11 +1,13 @@
 #ifdef ENABLE_ONNX
 
 #include "onnx_runtime.h"
+#include "onnx_plugin.h"   // onnxWinmlEnabled / onnxWinmlPathHint
 
 #include <common/common.h>
 #include <common/dynlib.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <mutex>
 #include <string>
@@ -32,6 +34,32 @@ static std::string g_loadError;         // why the last attempt failed
 static std::map<std::string, OrtRuntime> g_cache;  // key = g_override value
 
 #ifdef _WIN32
+// Let a runtime loaded by path find the DLLs it ships with.  A dependency
+// linked at build time is resolved beside the DLL that needs it, but ONNX
+// Runtime *delay-loads* DirectML.dll (and d3d12/dxgi), and a delay-load is
+// a plain LoadLibrary by name when the provider is first attached -- exe
+// directory, system, current directory, PATH, never the runtime's own
+// directory.  So a DirectML-capable onnxruntime.dll picked from a package
+// directory (the Windows ML runtime, the DirectML NuGet) attached its
+// provider, went looking for DirectML.dll, and a delay-load with nothing
+// to find is a structured exception, not a refusal: the process died in
+// the viability probe.  SetDllDirectory puts the runtime's directory in
+// the current-directory slot of that search, for the whole process, which
+// is where every other backend's libraries live anyway (system32).
+static void searchBesideRuntime(const std::string &path)
+{
+  const size_t slash = path.find_last_of("/\\");
+  if (slash == std::string::npos)
+    return;
+  // Absolute, so a directory given relative to where clpeak was started
+  // still names the same place after the current directory changes.
+  std::error_code ec;
+  const std::filesystem::path dir =
+      std::filesystem::absolute(path.substr(0, slash), ec);
+  if (!ec)
+    SetDllDirectoryA(dir.string().c_str());
+}
+
 // Absolute filesystem path of the default runtime, bypassing the loader's
 // already-loaded-module cache.  LoadLibrary("onnxruntime.dll") with a bare
 // name returns the first-loaded module of that basename -- after one or more
@@ -117,17 +145,73 @@ static void loadRuntime()
 }
 
 void onnxSetLibraryOverride(const std::string &) {}
+void onnxRuntimeRecheck() {}
 
 #else
 
 static std::string g_override;  // --onnx-lib / clpeak_set_onnx_library
+
+#ifdef _WIN32
+// The onnxruntime.dll beside the Windows ML catalog DLL, when --onnx-winml
+// named that DLL or its directory and nobody named a runtime.  Microsoft's
+// package puts the two side by side, and that runtime is the one its
+// providers were built and tested against -- so it is the default
+// candidate then, ahead of whatever else the search path holds.  Empty
+// when the catalog is off, was not given a path, or has no runtime beside
+// it.
+static std::string winmlDefaultRuntime()
+{
+  if (!onnxWinmlEnabled())
+    return "";
+  std::string hint = onnxWinmlPathHint();
+  if (hint.empty())
+    return "";
+  const DWORD attrs = GetFileAttributesA(hint.c_str());
+  const bool isDir = attrs != INVALID_FILE_ATTRIBUTES &&
+                     (attrs & FILE_ATTRIBUTE_DIRECTORY);
+  if (!isDir)
+  {
+    const size_t slash = hint.find_last_of("/\\");
+    hint = slash == std::string::npos ? "" : hint.substr(0, slash);
+  }
+  if (hint.empty())
+    return "";
+  const std::string beside = hint + "\\onnxruntime.dll";
+  if (GetFileAttributesA(beside.c_str()) == INVALID_FILE_ATTRIBUTES)
+    return "";
+  // Absolute: a relative module path finds the file itself against the
+  // current directory but not the sibling libraries beside it, so the same
+  // file fails to load by relative path and succeeds by absolute one.
+  // Every other path LoadLibrary gets here is absolute already.
+  std::error_code ec;
+  const std::string absBeside = std::filesystem::absolute(beside, ec).string();
+  return ec ? beside : absBeside;
+}
+#endif
+
+// The cache key of the current choice: the named library, or -- for the
+// default search -- what steered it, so that a default that followed the
+// Windows ML catalog is not confused with the plain one when the catalog
+// is later switched off.
+static std::string cacheKey()
+{
+  if (!g_override.empty())
+    return g_override;
+#ifdef _WIN32
+  const std::string winml = winmlDefaultRuntime();
+  if (!winml.empty())
+    return "\x1fwinml:" + winml;
+#endif
+  return "";
+}
 
 static void loadRuntime()
 {
   // A repeat pick reuses the still-mapped handle: no second mapping of the
   // same file, and (on Windows) no chance for a bare-name search to alias a
   // different file of the same basename.
-  auto cached = g_cache.find(g_override);
+  const std::string key = cacheKey();
+  auto cached = g_cache.find(key);
   if (cached != g_cache.end())
   {
     g_rt     = cached->second;
@@ -142,14 +226,27 @@ static void loadRuntime()
   // name of the one that was asked for, which is the one mistake this setting
   // exists to prevent.
   const char *named = g_override.empty() ? nullptr : g_override.c_str();
+  // Absolute before the loader sees it: a relative module path finds the
+  // file itself but not the sibling libraries beside it, so the same file
+  // fails by relative path and loads by absolute one (see
+  // clpeak::absoluteModulePath).
+  const std::string absNamed =
+      named ? clpeak::absoluteModulePath(named) : std::string();
+  // The default search names no file, except when the Windows ML catalog
+  // steered it to the runtime beside itself: that one is recorded, so the
+  // status can say which runtime a catalog-driven run measured.
+  std::string steered;
 
   void *lib = nullptr;
   if (named)
   {
-    lib = clpeak::dynOpen({named});
+#ifdef _WIN32
+    searchBesideRuntime(absNamed);
+#endif
+    lib = clpeak::dynOpen({absNamed.c_str()});
     if (!lib)
-      g_loadError = std::string("could not load onnxruntime from '") + named +
-                    "'";
+      g_loadError = std::string("could not load onnxruntime from '") +
+                    absNamed + "'";
   }
   else
   {
@@ -158,7 +255,14 @@ static void loadRuntime()
     // what resolves -- a packaged runtime lands in the APK's read-only lib
     // dir, which is on the linker path.
 #ifdef _WIN32
-    const std::string absDefault = resolveWindowsDefaultAbsolute();
+    // The runtime beside the Windows ML catalog first (see
+    // winmlDefaultRuntime), then the system's.
+    std::string absDefault = winmlDefaultRuntime();
+    steered = absDefault;
+    if (absDefault.empty())
+      absDefault = resolveWindowsDefaultAbsolute();
+    else
+      searchBesideRuntime(absDefault);
     if (!absDefault.empty())
     {
       // Absolute path: loads the file it names even when custom DLLs of the
@@ -182,11 +286,12 @@ static void loadRuntime()
         // succeeded: that is an already-mapped custom DLL shining through
         // (see resolveWindowsDefaultAbsolute), not a default.  Adopting it
         // would report the previous pick's version under the default's name.
+        // This call's extra reference on it is simply kept: the module is
+        // leaked for the life of the process anyway.
         for (const auto &kv : g_cache)
         {
           if (kv.second.lib == lib)
           {
-            clpeak::dynClose(lib);  // drop this call's ref; the leaked one stays
             g_loadError = "onnxruntime library not found";
             lib = nullptr;
             break;
@@ -212,29 +317,28 @@ static void loadRuntime()
   if (!lib)
     return;
 
+  // A file that turns out not to be a usable ONNX Runtime stays mapped like
+  // any other handle: unloading a library whose constructors have run is
+  // what common/dynlib.h explains is never safe.
   auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(
       clpeak::dynSym(lib, "OrtGetApiBase"));
   if (!getBase)
   {
     g_loadError = std::string(named ? named : "onnxruntime") +
                   " exports no OrtGetApiBase -- not an ONNX Runtime library";
-    clpeak::dynClose(lib);
     return;
   }
 
   OrtRuntime cur;
   if (!adoptApiBase(getBase(), cur))
-  {
-    clpeak::dynClose(lib);
     return;
-  }
 
   // Deliberately not dlclosed for the rest of the process: see the note on
   // onnxSetLibraryOverride() in the header.
   cur.lib  = lib;
-  cur.path = named ? named : "";
+  cur.path = named ? absNamed : steered;
   g_rt     = cur;
-  g_cache[g_override] = cur;
+  g_cache[key] = cur;
   g_loaded = true;
 }
 
@@ -246,6 +350,17 @@ void onnxSetLibraryOverride(const std::string &path)
   g_override = path;
   // Force the next ortRuntime() to search again.  The previously loaded
   // handle stays mapped; g_rt is simply repointed once the new one loads.
+  g_loaded    = false;
+  g_attempted = false;
+  g_rt        = OrtRuntime{};
+  g_loadError.clear();
+}
+
+void onnxRuntimeRecheck()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_override.empty())
+    return;   // a named library is not steered by anything else
   g_loaded    = false;
   g_attempted = false;
   g_rt        = OrtRuntime{};

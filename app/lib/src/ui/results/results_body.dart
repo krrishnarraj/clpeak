@@ -171,6 +171,8 @@ class _ResultsBodyState extends State<ResultsBody> {
         ],
       if (selected.unavailable.isNotEmpty)
         _WidgetRow(_UnavailableSection(run: selected), padTop: 22),
+      if (widget.document.log.isNotEmpty)
+        _WidgetRow(_DiagnosticsSection(log: widget.document.log), padTop: 22),
     ];
 
     return ListView.builder(
@@ -1008,6 +1010,59 @@ class _UnavailableSection extends StatelessWidget {
             const SizedBox(height: 4),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The run's diagnostic stream, at the foot of the page.  Counts-only by
+/// design: rendering per-line log rows (up to hundreds of rich-text rows,
+/// rebuilt on every live tick) made the GUI sluggish on phones during heavy
+/// runs.  The full log — problems, debug lines, runtimes' own messages —
+/// stays in the document and in the exported file; the panel just says how
+/// much of it there is.
+///
+/// Run-level, not per device: the stream is one run's, in order, and a line
+/// between two devices belongs to neither.
+class _DiagnosticsSection extends StatelessWidget {
+  const _DiagnosticsSection({required this.log});
+
+  final List<LogEntry> log;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final summary =
+        '${log.length} ${log.length == 1 ? 'line' : 'lines'}';
+
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: t.line)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.notes, size: 13, color: t.faint),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text('DIAGNOSTICS', style: t.micro),
+                ),
+                Text(summary, style: t.micro),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 7, 12, 9),
+            child: Text(
+              'The exported file holds the full log.',
+              style: t.monoSmall.copyWith(color: t.faint),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -22,7 +22,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 
 | File | Purpose |
 |------|---------|
-| `vk_peak.cpp` | `vkPeak` class: ctor, `applyOptions()`, `initInstance()`, `cleanup()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `vk_peak.cpp` | `vkPeak` class: ctor, `initInstance()`, `cleanup()`, `runKernel()`, `runAll()`, `enumerate()` |
 | `vulkan_device.cpp` | `VulkanDevice` class: `init()` (4-step: basic info → CU count → optional features → logical device), `cleanup()`, `createBuffer()`, `createComputePipeline()`, `submitAndWait()`, `zeroBuffer()` |
 | `compute_kernel.cpp` | `vkPeak::runComputeKernel()` — shared compute-peak driver: buffer/descriptor/pipeline scaffolding used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
@@ -69,15 +69,6 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.
 - If you add a new `.comp` shader → add to `CLPEAK_VK_SHADERS` in `CMakeLists.txt`
   and declare its extern in the `vk_shaders` namespace (`include/vulkan/vk_peak.h`).
-- **Never change a compute-peak shader's inner loop without reading the compiled
-  SPIR-V back.**  `tool/shader_ops.py <shader.comp> [--tile MxNxK]` freezes the
-  specialization constants to a real device's tile and prints what the loop
-  actually issues: the work ops, anything issued beside them that the op budget
-  does not credit, how many distinct operand pairs the run uses, and whether the
-  chain is dependent.  It exits non-zero on the two failure modes that have
-  shipped wrong numbers from here — an uncounted op in the loop, and a run of
-  identical work ops a compiler can strength-reduce.  Every backend has a dtype
-  somebody cannot test on; this is the check that needs no hardware.
 - Shaders compile to **SPIR-V 1.5** (`--target-env=vulkan1.2`), not 1.6.  At 1.6
   a specialized work-group size becomes `OpExecutionModeId LocalSizeId`, gated on
   maintenance4; at 1.5 the same GLSL becomes the classic `LocalSize` mode plus a

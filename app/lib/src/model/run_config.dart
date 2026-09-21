@@ -4,31 +4,6 @@ import 'result_model.dart';
 /// Time-budget presets.  Custom keeps whatever the user configured.
 enum RunPreset { full, custom }
 
-/// Per-backend CLI flag vocabulary (mirrors src/common/options.cpp).
-/// Only backend/device/category/time flags are ever emitted — never
-/// individual test flags, so test churn in the core needs no app changes.
-class _BackendFlags {
-  const _BackendFlags(this.skipFlag, this.deviceFlag);
-
-  /// `--no-<skipFlag>` disables the backend entirely.
-  final String skipFlag;
-
-  /// Flag for a partial device selection (comma-separated indices); null
-  /// means the backend has no per-device selector (CPU).
-  final String? deviceFlag;
-}
-
-const Map<String, _BackendFlags> _backendFlags = {
-  'OpenCL': _BackendFlags('opencl', null), // uses --cl-platform/--cl-device
-  'Vulkan': _BackendFlags('vulkan', '--vk-device'),
-  'CUDA': _BackendFlags('cuda', '--cuda-device'),
-  'ROCm': _BackendFlags('rocm', '--rocm-device'),
-  'Metal': _BackendFlags('metal', '--mtl-device'),
-  'oneAPI': _BackendFlags('oneapi', '--oneapi-device'),
-  'CPU': _BackendFlags('cpu', null),
-  'ONNX': _BackendFlags('onnx', '--onnx-device'), // device index = EP index
-};
-
 /// A device reference within a backend: platform index (OpenCL) + device
 /// index.  For single-platform backends platformIndex is the synthetic 0.
 typedef DeviceRef = ({int platformIndex, int deviceIndex});
@@ -91,39 +66,42 @@ class RunConfig {
 
   /// Build the clpeak_launch argv (without the program name).
   ///
-  /// Semantics match the retired mobile apps: a fully-selected backend emits
-  /// no device flags (native runs all), a deselected backend emits
-  /// `--no-<backend>`, and a partial selection emits index lists.
+  /// Only backend/device/category/time flags are ever emitted -- never
+  /// individual test flags, so test churn in the core needs no app changes.
+  /// Devices: the whole catalog selected means no flags (native runs
+  /// everything); anything less is one `--devices` list naming every selected
+  /// device as `<flag>:<index>`, which is exactly the set that runs -- a
+  /// backend with nothing on the list is skipped natively, so there is no
+  /// separate `--no-<backend>`.
   List<String> toArgs(BackendCatalog catalog) {
     final args = <String>[];
 
+    final deviceItems = <String>[];
+    var complete = true;
     for (final backend in catalog.usable) {
-      final flags = _backendFlags[backend.name];
-      if (flags == null) continue; // unknown backend: let native defaults run
       final selected = selectedDevices[backend.name] ?? const <DeviceRef>{};
-
-      if (selected.isEmpty) {
-        args.add('--no-${flags.skipFlag}');
-        continue;
-      }
-
       final all = <DeviceRef>{
         for (final p in backend.platforms)
           for (final d in p.devices)
             (platformIndex: p.index, deviceIndex: d.index)
       };
-      if (selected.containsAll(all)) continue; // full selection: no flags
+      if (!selected.containsAll(all)) complete = false;
 
-      if (backend.name == 'OpenCL') {
-        final platforms = selected.map((r) => r.platformIndex).toSet().toList()
-          ..sort();
-        final devices = selected.map((r) => r.deviceIndex).toSet().toList()
-          ..sort();
-        args.addAll(['--cl-platform', platforms.join(',')]);
-        args.addAll(['--cl-device', devices.join(',')]);
-      } else if (flags.deviceFlag != null) {
-        final devices = selected.map((r) => r.deviceIndex).toList()..sort();
-        args.addAll([flags.deviceFlag!, devices.join(',')]);
+      // Device indices are per backend and unique across platforms (OpenCL
+      // numbers its devices consecutively), so flag:index names one device.
+      final devices = selected.map((r) => r.deviceIndex).toSet().toList()
+        ..sort();
+      deviceItems.addAll(devices.map((d) => '${backend.flag}:$d'));
+    }
+    if (!complete) {
+      if (deviceItems.isNotEmpty) {
+        args.addAll(['--devices', deviceItems.join(',')]);
+      } else {
+        // Nothing selected.  Callers gate on hasSelection, but an empty
+        // --devices list cannot say "run nothing", so say it per backend.
+        for (final backend in catalog.usable) {
+          args.add('--no-${backend.flag}');
+        }
       }
     }
 

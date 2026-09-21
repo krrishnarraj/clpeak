@@ -129,6 +129,10 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
 
 int CpuPeak::runAll()
 {
+  // The one CPU is device 0; a --devices list naming another index skips it.
+  if (!isDeviceSelected(0))
+    return 0;
+
   detectCpuInfo(info);
   if (!pool)
     pool = new CpuThreadPool(info.logicalCores);
@@ -207,9 +211,9 @@ int CpuPeak::runAll()
   if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
   if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
   if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
-  if (isAllowed(Benchmark::Amx))         runCpuMatrix(cfg);
+  if (isAllowed(Benchmark::MatrixCompute)) runCpuMatrix(cfg);
 #ifdef __APPLE__
-  if (isAllowed(Benchmark::AppleBlas)) runAppleBlas(cfg);
+  if (isAllowed(Benchmark::Gemm))          runAppleBlas(cfg);
 #endif
   if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
 
@@ -242,7 +246,7 @@ int CpuPeak::runAll()
 BackendInventory CpuPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "CPU";
+  inv.id = kBackend;
 
   cpu_device_info_t info;
   detectCpuInfo(info);
@@ -263,23 +267,6 @@ BackendInventory CpuPeak::enumerate()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void CpuPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== CPU backend ===\n";
-  if (!b.available)
-  {
-    os << "CPU: no host CPU detected\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-    for (const auto &d : plat.devices)
-    {
-      os << "  CPU Device " << d.index << ": " << d.name;
-      if (d.numComputeUnits) os << " [" << d.numComputeUnits << " threads]";
-      os << "\n";
-    }
 }
 
 #endif // ENABLE_CPU

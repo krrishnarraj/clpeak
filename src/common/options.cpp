@@ -8,310 +8,318 @@
 #include <sstream>
 #include <version.h>
 
-// Help text.  Backend-specific flags are gated by the same ENABLE_* macros
-// as the runtime so the help reflects the binary's actual capability.  v2
-// flag surface: 4 category flags, canonical test names, --no-<x> for both.
-static const char *helpStr =
-    "\n clpeak [OPTIONS]"
-    "\n"
-    "\n GLOBAL OPTIONS:"
-    "\n  -h, --help                  display help message"
-    "\n  -v, --version               display version"
-    "\n  -i, --iters num             force a fixed iter count (overrides --max-time calibration)"
-    "\n  -w, --warmup num            number of warm-up kernel runs before timing (default: 2)"
-    "\n  --max-time ms               per-test time budget for the timed phase, all backends"
-    "\n                              except CPU (default: 500 ms)"
-#ifdef ENABLE_CPU
-    "\n  --max-time-cpu ms           per-test time budget for the CPU backend (default: 2000 ms)"
-#endif
-    "\n                              picks iters automatically; set lower if you hit a GPU watchdog"
-    "\n  --verbose                   print backend debug logs (kernel build logs, API errors)"
-    "\n  --describe                  explain what each test and each reading measures"
-    "\n  --list-devices              list available devices for every backend and exit"
-    "\n  -o, --output file           save results to a JSON file"
-    "\n  --compare file              compare results against a saved run"
-    "\n"
-    "\n BACKEND SELECTION (default: run every available backend):"
-#ifdef ENABLE_OPENCL
-    "\n  --opencl                    run only the OpenCL backend"
-#endif
-#ifdef ENABLE_VULKAN
-    "\n  --vulkan                    run only the Vulkan backend"
-#endif
-#ifdef ENABLE_CUDA
-    "\n  --cuda                      run only the CUDA backend"
-#endif
-#ifdef ENABLE_ROCM
-    "\n  --rocm                      run only the ROCm/HIP backend"
-#endif
-#ifdef ENABLE_METAL
-    "\n  --metal                     run only the Metal backend"
-#endif
-#ifdef ENABLE_ONEAPI
-    "\n  --oneapi                    run only the oneAPI/SYCL backend"
-#endif
-#ifdef ENABLE_CPU
-    "\n  --cpu                       run only the native CPU backend"
-#endif
-#ifdef ENABLE_ONNX
-    "\n  --onnx                      run only the ONNX Runtime backend"
-#endif
-    "\n  (multiple --<backend> flags can be combined)"
-#ifdef ENABLE_OPENCL
-    "\n  --no-opencl                 skip the OpenCL backend"
-#endif
-#ifdef ENABLE_VULKAN
-    "\n  --no-vulkan                 skip the Vulkan backend"
-#endif
-#ifdef ENABLE_CUDA
-    "\n  --no-cuda                   skip the CUDA backend"
-#endif
-#ifdef ENABLE_ROCM
-    "\n  --no-rocm                   skip the ROCm/HIP backend"
-#endif
-#ifdef ENABLE_METAL
-    "\n  --no-metal                  skip the Metal backend"
-#endif
-#ifdef ENABLE_ONEAPI
-    "\n  --no-oneapi                 skip the oneAPI/SYCL backend"
-#endif
-#ifdef ENABLE_CPU
-    "\n  --no-cpu                    skip the native CPU backend"
-#endif
-#ifdef ENABLE_ONNX
-    "\n  --no-onnx                   skip the ONNX Runtime backend"
-#endif
-    "\n"
-    "\n DEVICE SELECTION (indices are 0-based; comma-separated for multiple,"
-    "\n default: run every device):"
-#ifdef ENABLE_OPENCL
-    "\n  --cl-platform list          OpenCL platform index/indices (e.g. 0 or 0,1)"
-    "\n  --cl-device list            OpenCL device index/indices within the platform"
-#endif
-#ifdef ENABLE_VULKAN
-    "\n  --vk-device list            Vulkan physical-device index/indices"
-#endif
-#ifdef ENABLE_CUDA
-    "\n  --cuda-device list          CUDA device ordinal(s) (e.g. 0 or 0,2)"
-#endif
-#ifdef ENABLE_ROCM
-    "\n  --rocm-device list          ROCm/HIP device ordinal(s)"
-#endif
-#ifdef ENABLE_METAL
-    "\n  --mtl-device list           Metal device index/indices"
-#endif
-#ifdef ENABLE_ONEAPI
-    "\n  --oneapi-device list        oneAPI/SYCL device index/indices"
-#endif
-#ifdef ENABLE_ONNX
-    "\n  --onnx-device list          ONNX Runtime execution-provider index/indices"
-    "\n  --onnx-lib path             onnxruntime shared library to load"
-    "\n                              (default: the platform's conventional names)"
-#endif
-    "\n"
-    "\n TEST CATEGORY SELECTION (default: run every category):"
-    "\n  --compute     / --no-compute         compute (flops / ops)"
-#ifdef ENABLE_CPU
-    "\n  --crypto      / --no-crypto          crypto/hash silicon (bps)      [CPU]"
-    "\n  --string      / --no-string          string/text processing (bps)   [CPU]"
-#endif
-    "\n  --bandwidth   / --no-bandwidth       memory & transfer bandwidth (bps)"
-    "\n  --latency     / --no-latency         kernel-launch latency (s)"
-#ifdef ENABLE_ONNX
-    "\n  --ai          / --no-ai              AI-composite micro-graphs      [ONNX]"
-#endif
-    "\n  Any positive --<category> flag switches to allow-list mode."
-    "\n"
-    "\n TEST SELECTION (default: every test the backend supports;"
-    "\n any positive --<test> flag switches to allow-list mode;"
-    "\n --no-<test> always subtracts):"
-    "\n  --single-precision-compute        | --no-single-precision-compute"
-    "\n  --half-precision-compute          | --no-half-precision-compute"
-    "\n  --double-precision-compute        | --no-double-precision-compute"
-    "\n  --mixed-precision-compute         | --no-mixed-precision-compute"
-    "\n  --bfloat16-compute                | --no-bfloat16-compute"
-    "\n  --integer-compute                 | --no-integer-compute"
-#ifdef ENABLE_OPENCL
-    "\n  --integer-compute-fast            | --no-integer-compute-fast      [OpenCL]"
-    "\n  --integer-compute-char            | --no-integer-compute-char      [OpenCL]"
-    "\n  --integer-compute-short           | --no-integer-compute-short     [OpenCL]"
-#endif
-    "\n  --int8-dot-product-compute        | --no-int8-dot-product-compute"
-#ifdef ENABLE_CPU
-    "\n  --int16-dot-product-compute       | --no-int16-dot-product-compute [CPU: x86 VNNI]"
-    "\n  --fp8-dot-product-compute         | --no-fp8-dot-product-compute   [CPU: ARM FP8]"
-    "\n  --divide-sqrt-compute             | --no-divide-sqrt-compute       [CPU]"
-    "\n  --integer-divide-compute          | --no-integer-divide-compute    [CPU]"
-#endif
-#ifdef ENABLE_CUDA
-    "\n  --wmma                            | --no-wmma                      [CUDA]"
-    "\n  --cublas                          | --no-cublas                    [CUDA]"
-#endif
-#ifdef ENABLE_ROCM
-    "\n  --rocwmma                         | --no-rocwmma                   [ROCm]"
-    "\n  --mfma                            | --no-mfma                      [ROCm]"
-    "\n  --rocblas                         | --no-rocblas                   [ROCm]"
-#endif
-#ifdef ENABLE_VULKAN
-    "\n  --coopmat                         | --no-coopmat                   [Vulkan]"
-#endif
-#ifdef ENABLE_METAL
-    "\n  --simdgroup-matrix                | --no-simdgroup-matrix          [Metal]"
-    "\n  --mps-gemm                        | --no-mps-gemm                  [Metal]"
-    "\n  --mps-attention                   | --no-mps-attention             [Metal: SDPA fp16]"
-    "\n  --texture-sample                  | --no-texture-sample            [Metal: bilinear texels/s]"
-#endif
-#ifdef ENABLE_ONEAPI
-    "\n  --joint-matrix                    | --no-joint-matrix              [oneAPI]"
-    "\n  --onemkl                          | --no-onemkl                    [oneAPI]"
-#endif
-#ifdef ENABLE_CPU
-    "\n  --amx                             | --no-amx                       [CPU: AMX/I8MM/SME]"
-    "\n  --accelerate                      | --no-accelerate                [CPU: Apple Accelerate/BNNS GEMM]"
-    "\n  --aes                             | --no-aes                       [CPU: AES-NI/VAES/ARM AES]"
-    "\n  --sha256                          | --no-sha256                    [CPU: SHA-NI/ARM SHA2]"
-    "\n  --sha512                          | --no-sha512                    [CPU: ARM SHA512]"
-    "\n  --crc32c                          | --no-crc32c                    [CPU]"
-    "\n  --string-scan                     | --no-string-scan               [CPU: memchr-style]"
-    "\n  --utf8-validate                   | --no-utf8-validate             [CPU: PSHUFB/TBL]"
-#endif
-    "\n  --global-memory-bandwidth         | --no-global-memory-bandwidth"
-    "\n  --local-memory-bandwidth          | --no-local-memory-bandwidth"
-    "\n  --image-memory-bandwidth          | --no-image-memory-bandwidth"
-    "\n  --transfer-bandwidth              | --no-transfer-bandwidth"
-#ifdef ENABLE_CPU
-    "\n  --cache-bandwidth                 | --no-cache-bandwidth           [CPU]"
-    "\n  --memory-latency                  | --no-memory-latency            [CPU]"
-    "\n  --atomics                         | --no-atomics                   [CPU]"
-    "\n  --branch-penalty                  | --no-branch-penalty            [CPU]"
-    "\n  --store-forward                   | --no-store-forward             [CPU]"
-    "\n  --smt-scaling                     | --no-smt-scaling               [CPU: Linux/Windows SMT]"
-#endif
-    "\n  --kernel-launch-latency           | --no-kernel-launch-latency"
-#ifdef ENABLE_ONNX
-    "\n  --onnx-gemm                       | --no-onnx-gemm                 [ONNX: MatMul via EP]"
-    "\n  --onnx-numeric-error              | --no-onnx-numeric-error        [ONNX: dtype accuracy cost]"
-    "\n  --onnx-conv                       | --no-onnx-conv                 [ONNX: convolution peak]"
-    "\n  --onnx-block                      | --no-onnx-block                [ONNX: transformer block]"
-    "\n  --onnx-activation                 | --no-onnx-activation           [ONNX: softmax/norm GB/s]"
-    "\n  --onnx-tensor-bandwidth           | --no-onnx-tensor-bandwidth     [ONNX: resident-tensor GB/s]"
-    "\n  --onnx-transfer-bandwidth         | --no-onnx-transfer-bandwidth   [ONNX: host<->device GB/s]"
-    "\n  --onnx-dispatch-latency           | --no-onnx-dispatch-latency     [ONNX: submission overhead]"
-#endif
-    "\n"
-;
+// The command line has three kinds of selection flag, all spelt the same
+// way: --<x> runs only what is named (an allow-list; several combine) and
+// --no-<x> subtracts.  Backends say WHERE, categories and tests say WHAT,
+// and the two are independent -- a test flag applies to every backend that
+// runs.  So there is no --cuda-gemm or --onnx-gemm: `--cuda --gemm` is
+// cuBLASLt and `--onnx --gemm` is a MatMul through an execution provider.
+//
+// Every flag parses in every build.  A script that says --no-cuda must work
+// on a Mac, and the GUI emits the same argv on every platform.  A backend
+// that is not built in is simply absent from the run (and named, when it
+// was asked for -- see CliOptions::requestedButNotBuilt); a test no built-in
+// backend implements runs nothing.
 
-// ---- Flag tables ----------------------------------------------------------
+// ---- Backend table --------------------------------------------------------
 
-struct TestFlag {
-  const char *name;        // flag suffix; e.g. "wmma" matches --wmma / --no-wmma
-  Benchmark   test;
+#ifdef ENABLE_OPENCL
+#define CLPEAK_BUILT_OPENCL true
+#else
+#define CLPEAK_BUILT_OPENCL false
+#endif
+#ifdef ENABLE_VULKAN
+#define CLPEAK_BUILT_VULKAN true
+#else
+#define CLPEAK_BUILT_VULKAN false
+#endif
+#ifdef ENABLE_CUDA
+#define CLPEAK_BUILT_CUDA true
+#else
+#define CLPEAK_BUILT_CUDA false
+#endif
+#ifdef ENABLE_ROCM
+#define CLPEAK_BUILT_ROCM true
+#else
+#define CLPEAK_BUILT_ROCM false
+#endif
+#ifdef ENABLE_METAL
+#define CLPEAK_BUILT_METAL true
+#else
+#define CLPEAK_BUILT_METAL false
+#endif
+#ifdef ENABLE_ONEAPI
+#define CLPEAK_BUILT_ONEAPI true
+#else
+#define CLPEAK_BUILT_ONEAPI false
+#endif
+#ifdef ENABLE_CPU
+#define CLPEAK_BUILT_CPU true
+#else
+#define CLPEAK_BUILT_CPU false
+#endif
+#ifdef ENABLE_ONNX
+#define CLPEAK_BUILT_ONNX true
+#else
+#define CLPEAK_BUILT_ONNX false
+#endif
+#ifdef ENABLE_COREML
+#define CLPEAK_BUILT_COREML true
+#else
+#define CLPEAK_BUILT_COREML false
+#endif
+#ifdef ENABLE_LITERT
+#define CLPEAK_BUILT_LITERT true
+#else
+#define CLPEAK_BUILT_LITERT false
+#endif
+
+struct BackendRow
+{
+  BackendInfo info;
+  const char *blurb; // one line for --help
 };
 
-static const TestFlag testFlags[] = {
-  {"single-precision-compute",  Benchmark::ComputeSP},
-  {"half-precision-compute",    Benchmark::ComputeHP},
-  {"double-precision-compute",  Benchmark::ComputeDP},
-  {"mixed-precision-compute",   Benchmark::ComputeMP},
-  {"bfloat16-compute",          Benchmark::ComputeBF16},
-  {"integer-compute",           Benchmark::ComputeInt},
-#ifdef ENABLE_OPENCL
-  {"integer-compute-fast",      Benchmark::ComputeIntFast},
-  {"integer-compute-char",      Benchmark::ComputeChar},
-  {"integer-compute-short",     Benchmark::ComputeShort},
-#endif
-  {"int8-dot-product-compute",  Benchmark::ComputeInt8DP},
-#ifdef ENABLE_CPU
-  {"int16-dot-product-compute", Benchmark::ComputeInt16DP},
-  {"fp8-dot-product-compute",   Benchmark::ComputeFP8DP},
-  {"divide-sqrt-compute",       Benchmark::ComputeDivSqrt},
-  {"integer-divide-compute",    Benchmark::ComputeIntDiv},
-#endif
-#ifdef ENABLE_CUDA
-  {"wmma",                      Benchmark::Wmma},
-#endif
-#ifdef ENABLE_VULKAN
-  {"coopmat",                   Benchmark::CoopMatrix},
-#endif
-#ifdef ENABLE_METAL
-  {"simdgroup-matrix",          Benchmark::SimdgroupMatrix},
-#endif
-#ifdef ENABLE_CUDA
-  {"cublas",                    Benchmark::Cublas},
-#endif
-#ifdef ENABLE_ROCM
-  {"rocwmma",                   Benchmark::Rocwmma},
-  {"mfma",                      Benchmark::Mfma},
-  {"rocblas",                   Benchmark::Rocblas},
-#endif
-#ifdef ENABLE_METAL
-  {"mps-gemm",                  Benchmark::MpsGemm},
-  {"mps-attention",             Benchmark::MpsAttention},
-  {"texture-sample",            Benchmark::TextureSample},
-#endif
-#ifdef ENABLE_ONEAPI
-  {"joint-matrix",              Benchmark::JointMatrix},
-  {"onemkl",                    Benchmark::Onemkl},
-#endif
-#ifdef ENABLE_CPU
-  {"amx",                       Benchmark::Amx},
-  // Apple-only test, but the flag parses everywhere under ENABLE_CPU (like
-  // every other arch-specific CPU flag) so a cross-platform script can pass
-  // --no-accelerate without tripping "unknown option" on Linux/Windows.
-  {"accelerate",                Benchmark::AppleBlas},
-  {"aes",                       Benchmark::CryptoAes},
-  {"sha256",                    Benchmark::CryptoSha256},
-  {"sha512",                    Benchmark::CryptoSha512},
-  {"crc32c",                    Benchmark::CryptoCrc32c},
-  {"string-scan",               Benchmark::StringScan},
-  {"utf8-validate",             Benchmark::Utf8Validate},
-  {"cache-bandwidth",           Benchmark::CacheBandwidth},
-  {"memory-latency",            Benchmark::MemoryLatency},
-  {"atomics",                   Benchmark::Atomics},
-  {"branch-penalty",            Benchmark::BranchPenalty},
-  {"store-forward",             Benchmark::StoreForward},
-  {"smt-scaling",               Benchmark::SmtScaling},
-#endif
-  {"global-memory-bandwidth",   Benchmark::GlobalBW},
-  {"local-memory-bandwidth",    Benchmark::LocalBW},
-  {"image-memory-bandwidth",    Benchmark::ImageBW},
-  {"transfer-bandwidth",        Benchmark::TransferBW},
-  {"kernel-launch-latency",     Benchmark::KernelLatency},
-
-  {"onnx-gemm",                 Benchmark::OnnxGemm},
-  {"onnx-numeric-error",        Benchmark::OnnxNumericError},
-  {"onnx-conv",                 Benchmark::OnnxConv},
-  {"onnx-block",                Benchmark::OnnxBlock},
-  {"onnx-activation",           Benchmark::OnnxActivation},
-  {"onnx-tensor-bandwidth",     Benchmark::OnnxTensorBW},
-  {"onnx-transfer-bandwidth",   Benchmark::OnnxTransferBW},
-  {"onnx-dispatch-latency",     Benchmark::OnnxDispatchLatency},
+// Indexed by Backend: one row per enum value, in enum order, which the
+// static_asserts below enforce so a row can never describe the wrong
+// backend.
+static constexpr BackendRow backendTable[] = {
+    {{Backend::Cuda, "CUDA", "cuda", CLPEAK_BUILT_CUDA}, "CUDA"},
+    {{Backend::Rocm, "ROCm", "rocm", CLPEAK_BUILT_ROCM}, "ROCm/HIP"},
+    {{Backend::Metal, "Metal", "metal", CLPEAK_BUILT_METAL}, "Metal"},
+    {{Backend::Oneapi, "oneAPI", "oneapi", CLPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
+    {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
+    {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
+    {{Backend::Cpu, "CPU", "cpu", CLPEAK_BUILT_CPU}, "native CPU"},
+    {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
+    {{Backend::Litert, "LiteRT", "litert", CLPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
+    {{Backend::Onnx, "ONNX", "onnx", CLPEAK_BUILT_ONNX}, "ONNX Runtime (NPU / GPU / CPU via execution providers)"},
 };
-static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
+static constexpr int numBackends = sizeof(backendTable) / sizeof(backendTable[0]);
+static_assert(numBackends == static_cast<int>(Backend::COUNT),
+              "backendTable must have one row per Backend");
 
-struct CategoryFlag {
+static constexpr bool backendTableInEnumOrder()
+{
+  for (int i = 0; i < numBackends; i++)
+    if (backendTable[i].info.id != static_cast<Backend>(i))
+      return false;
+  return true;
+}
+static_assert(backendTableInEnumOrder(),
+              "backendTable rows must be in Backend enum order");
+
+const BackendInfo &backendInfo(Backend b)
+{
+  return backendTable[static_cast<size_t>(b)].info;
+}
+
+std::vector<Backend> CliOptions::requestedButNotBuilt() const
+{
+  std::vector<Backend> out;
+  for (int i = 0; i < numBackends; i++)
+    if (requestedBackends.test(static_cast<size_t>(i)) && !backendTable[i].info.builtIn)
+      out.push_back(backendTable[i].info.id);
+  return out;
+}
+
+// ---- Category and test tables ------------------------------------------------
+
+struct CategoryFlag
+{
   const char *name;
-  Category    cat;
+  Category cat;
+  const char *blurb;
 };
 
 static const CategoryFlag categoryFlags[] = {
-  {"compute",   Category::Compute},
-  {"crypto",    Category::Crypto},
-  {"string",    Category::String},
-  {"bandwidth", Category::Bandwidth},
-  {"latency",   Category::Latency},
-  {"ai",        Category::Ai},
+    {"compute", Category::Compute, "arithmetic, matrix engines and library GEMM (flops / ops)"},
+    {"crypto", Category::Crypto, "crypto/hash silicon (bps)"},
+    {"string", Category::String, "string/text processing (bps)"},
+    {"bandwidth", Category::Bandwidth, "memory and transfer bandwidth (bps)"},
+    {"latency", Category::Latency, "launch, memory and micro-architectural latency (s)"},
+    {"ai", Category::Ai, "AI composites: the transformer block (flops, bps, s)"},
 };
 static const int numCategoryFlags = sizeof(categoryFlags) / sizeof(categoryFlags[0]);
 
-// ---- Helpers --------------------------------------------------------------
+struct TestFlag
+{
+  const char *name; // flag suffix; e.g. "gemm" matches --gemm / --no-gemm
+  Benchmark test;
+  const char *blurb;
+};
+
+// --help groups these by categoryOf(test), in table order within a group,
+// so a test can never be listed under the wrong heading.
+static const TestFlag testFlags[] = {
+    {"single-precision-compute", Benchmark::ComputeSP, "fp32"},
+    {"half-precision-compute", Benchmark::ComputeHP, "fp16"},
+    {"double-precision-compute", Benchmark::ComputeDP, "fp64"},
+    {"mixed-precision-compute", Benchmark::ComputeMP, "fp16 inputs, fp32 accumulate"},
+    {"bfloat16-compute", Benchmark::ComputeBF16, "bf16"},
+    {"integer-compute", Benchmark::ComputeInt, "int32"},
+    {"integer-compute-fast", Benchmark::ComputeIntFast, "24-bit integer (mad24)"},
+    {"integer-compute-char", Benchmark::ComputeChar, "8-bit integer vectors"},
+    {"integer-compute-short", Benchmark::ComputeShort, "16-bit integer vectors"},
+    {"int8-dot-product-compute", Benchmark::ComputeInt8DP, "int8 dot product (DP4a / VNNI / SDOT / dot())"},
+    {"int16-dot-product-compute", Benchmark::ComputeInt16DP, "int16 dot product (x86 VNNI)"},
+    {"fp8-dot-product-compute", Benchmark::ComputeFP8DP, "fp8 dot product (ARM FP8)"},
+    {"divide-sqrt-compute", Benchmark::ComputeDivSqrt, "fp divide and sqrt throughput"},
+    {"integer-divide-compute", Benchmark::ComputeIntDiv, "64-bit integer divide throughput"},
+    {"matrix-compute", Benchmark::MatrixCompute, "matrix engine via intrinsics: tensor cores, MFMA/WMMA,\n"
+                                                 "coopmat, simdgroup_matrix, joint_matrix, AMX/SME"},
+    {"gemm", Benchmark::Gemm, "the vendor library's tuned matmul: cuBLASLt, hipBLASLt,\n"
+                              "oneMKL, MPS, Accelerate, ONNX MatMul, Core ML"},
+    {"attention", Benchmark::Attention, "scaled-dot-product attention through the vendor library"},
+    {"convolution", Benchmark::Conv, "2-D convolution peak through a graph runtime"},
+    {"numeric-error", Benchmark::NumericError, "accuracy cost of each dtype vs an fp32 reference (ppm)"},
+    {"smt-scaling", Benchmark::SmtScaling, "fp32 FMA at one thread per core vs every SMT thread"},
+
+    {"aes", Benchmark::CryptoAes, "AES-128 (AES-NI / VAES / ARM AES)"},
+    {"sha256", Benchmark::CryptoSha256, "SHA-256 (SHA-NI / ARM SHA2)"},
+    {"sha512", Benchmark::CryptoSha512, "SHA-512 (ARM SHA512)"},
+    {"crc32c", Benchmark::CryptoCrc32c, "CRC32-C"},
+    {"string-scan", Benchmark::StringScan, "memchr-style SIMD byte scan"},
+    {"utf8-validate", Benchmark::Utf8Validate, "UTF-8 validation (PSHUFB / TBL)"},
+
+    {"global-memory-bandwidth", Benchmark::GlobalBW, "device memory"},
+    {"local-memory-bandwidth", Benchmark::LocalBW, "work-group local / shared memory"},
+    {"image-memory-bandwidth", Benchmark::ImageBW, "image / texture memory"},
+    {"transfer-bandwidth", Benchmark::TransferBW, "host <-> device, each direction"},
+    {"tensor-bandwidth", Benchmark::TensorBW, "resident-tensor read through a graph runtime"},
+    {"activation", Benchmark::Activation, "softmax / layer-norm / SiLU throughput through a graph\n"
+                                          "runtime"},
+    {"cache-bandwidth", Benchmark::CacheBandwidth, "per cache level and DRAM"},
+    {"texture-sample", Benchmark::TextureSample, "bilinear texel rate"},
+
+    {"kernel-launch-latency", Benchmark::KernelLatency, "the fixed cost of one submission: a kernel launch, a\n"
+                                                        "session run, a prediction"},
+    {"memory-latency", Benchmark::MemoryLatency, "pointer chase per memory level, MLP and TLB"},
+    {"atomics", Benchmark::Atomics, "atomic fetch-add, uncontended and contended"},
+    {"branch-penalty", Benchmark::BranchPenalty, "branch mispredict cost"},
+    {"store-forward", Benchmark::StoreForward, "store-to-load forwarding round trip"},
+
+    {"transformer-block", Benchmark::TransformerBlock, "one decoder block: prefill, decode and latency at each\n"
+                                                       "precision"},
+};
+static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
+static_assert(numTestFlags == static_cast<int>(Benchmark::COUNT),
+              "every Benchmark needs exactly one flag");
+
+// ---- Help ---------------------------------------------------------------------
+
+// One help entry: the flag, padded to the description column, then the
+// text; a '\n' inside the text continues on the next line at that column.
+static void helpLine(std::string &s, const std::string &flag, const char *text,
+                     int indent = 2)
+{
+  const size_t column = 33;
+  s += std::string(static_cast<size_t>(indent), ' ');
+  s += flag;
+  if (flag.size() + static_cast<size_t>(indent) + 2 > column)
+  {
+    s += "\n";
+    s += std::string(column, ' ');
+  }
+  else
+  {
+    s += std::string(column - flag.size() - static_cast<size_t>(indent), ' ');
+  }
+  for (const char *c = text; *c; c++)
+  {
+    s += *c;
+    if (*c == '\n')
+      s += std::string(column, ' ');
+  }
+  s += "\n";
+}
+
+static std::string helpText()
+{
+  std::string s;
+  s += "\n clpeak [OPTIONS]\n";
+  s += "\n";
+  s += " Selection flags come in pairs: --<x> runs only what is named (an allow-list;\n";
+  s += " several combine) and --no-<x> subtracts.  Backends say where, categories and\n";
+  s += " tests say what, and a test flag applies to every backend that runs.\n";
+  s += "\n";
+  s += " GLOBAL OPTIONS:\n";
+  helpLine(s, "-h, --help", "display help message");
+  helpLine(s, "-v, --version", "display version");
+  helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time calibration)");
+  helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
+  helpLine(s, "--max-time ms", "per-test time budget for the timed phase, every backend\n"
+                               "except CPU (default: 500 ms).  Iters are picked to fit it,\n"
+                               "so set it lower if you hit a GPU watchdog");
+  helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
+  helpLine(s, "--verbose", "print backend debug logs (kernel build logs, API errors);\n"
+                           "with -o, record them in the file's log, with the device\n"
+                           "inventory, so the file alone can be debugged");
+  helpLine(s, "--describe", "explain what each test and each reading measures");
+  helpLine(s, "--list-devices", "list available devices for every backend and exit");
+  helpLine(s, "-o, --output file", "save results to a JSON file");
+  helpLine(s, "--compare file", "compare results against a saved run");
+  helpLine(s, "--onnx-lib path", "the ONNX Runtime library to load; decides which\n"
+                                 "providers exist before anything below adds more\n"
+                                 "(default: the platform's conventional names)");
+  helpLine(s, "--onnx-ep NAME=path", "add one more provider the loaded runtime does not\n"
+                                     "include -- most vendor NPUs ship this way now, e.g.\n"
+                                     "QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll\n"
+                                     "(ONNX Runtime 1.22+; repeatable)");
+#ifdef _WIN32
+  helpLine(s, "--onnx-winml [path]", "Windows 11 24H2+: install and add those same vendor\n"
+                                     "providers automatically, from the Microsoft Store,\n"
+                                     "instead of naming them with --onnx-ep; path names\n"
+                                     "Microsoft.Windows.AI.MachineLearning.dll or its\n"
+                                     "directory (default: beside the loaded runtime, then\n"
+                                     "the executable)");
+#endif
+  helpLine(s, "--litert-lib path", "LiteRT shared library (libLiteRt) to load\n"
+                                   "(default: the platform's conventional names)");
+  helpLine(s, "--litert-npu-dir dir", "where LiteRT's NPU dispatch / compiler-plugin\n"
+                                      "libraries and the vendor runtime are (default: beside\n"
+                                      "the LiteRT library)");
+  s += "\n";
+  s += " BACKENDS (--<backend> / --no-<backend>; default: every one in this build):\n";
+  for (int i = 0; i < numBackends; i++)
+  {
+    std::string text = backendTable[i].blurb;
+    if (!backendTable[i].info.builtIn)
+      text += "  (not in this build)";
+    helpLine(s, std::string("--") + backendTable[i].info.flag, text.c_str());
+  }
+  s += "\n";
+  s += " DEVICES (default: every device of every backend that runs):\n";
+  helpLine(s, "--devices list", "run only these devices: comma-separated backend:index\n"
+                                "items, exactly as --list-devices prints them\n"
+                                "(e.g. --devices cuda:0,vulkan:1)");
+  s += "\n";
+  s += " CATEGORIES (--<category> / --no-<category>; default: all):\n";
+  for (int i = 0; i < numCategoryFlags; i++)
+    helpLine(s, std::string("--") + categoryFlags[i].name, categoryFlags[i].blurb);
+  s += "\n";
+  s += " TESTS (--<test> / --no-<test>; default: every test a backend supports):\n";
+  for (int c = 0; c < numCategoryFlags; c++)
+  {
+    s += "  ";
+    s += categoryFlags[c].name;
+    s += "\n";
+    for (int t = 0; t < numTestFlags; t++)
+      if (categoryOf(testFlags[t].test) == categoryFlags[c].cat)
+        helpLine(s, std::string("--") + testFlags[t].name, testFlags[t].blurb, 3);
+  }
+  s += "\n";
+  return s;
+}
 
 static void printHelpAndExit(int code)
 {
-  std::cout << helpStr << "\n";
+  std::cout << helpText();
   std::cout.flush();
   std::exit(code);
 }
+
+// ---- Value parsing ---------------------------------------------------------------
 
 static bool parseUnsignedLongArg(const char *arg, unsigned long &value)
 {
@@ -342,49 +350,72 @@ static bool parseIntArg(const char *arg, int &value)
   return true;
 }
 
-// Parse a comma-separated list of indices (single value = list of one).  Each
-// token must be a valid non-negative index; empty tokens (e.g. "0,,2") fail.
-static bool parseIndexList(const char *arg, std::vector<unsigned long> &out)
+static const BackendRow *findBackendFlag(const std::string &flag)
 {
-  std::vector<unsigned long> parsed;
+  for (int i = 0; i < numBackends; i++)
+    if (flag == backendTable[i].info.flag)
+      return &backendTable[i];
+  return nullptr;
+}
+
+// Parse the --devices list: comma-separated `backend:index` items, the
+// tokens --list-devices prints.  Empty items ("cuda:0,,cuda:2"), unknown
+// backends and negative indices fail; `why` names the offending item.
+static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
+                            std::bitset<static_cast<size_t>(Backend::COUNT)> &requested,
+                            std::string &why)
+{
+  std::vector<DeviceSelector> parsed;
   std::stringstream ss(arg);
   std::string tok;
   while (std::getline(ss, tok, ','))
   {
-    unsigned long v;
-    if (tok.empty() || !parseUnsignedLongArg(tok.c_str(), v))
+    DeviceSelector sel;
+    const size_t colon = tok.find(':');
+    if (colon == std::string::npos)
+    {
+      why = "'" + tok + "': expected backend:index, as --list-devices prints it";
       return false;
-    parsed.push_back(v);
+    }
+    const std::string backendPart = tok.substr(0, colon);
+    const BackendRow *row = findBackendFlag(backendPart);
+    if (!row)
+    {
+      why = "'" + tok + "': unknown backend '" + backendPart + "'";
+      return false;
+    }
+    sel.backend = row->info.id;
+    requested.set(static_cast<size_t>(row->info.id));
+    const std::string indexPart = tok.substr(colon + 1);
+    if (indexPart.empty() || !parseIntArg(indexPart.c_str(), sel.index))
+    {
+      why = "'" + tok + "': expected backend:index, as --list-devices prints it";
+      return false;
+    }
+    parsed.push_back(sel);
   }
-  if (parsed.empty())  // arg was empty string
+  if (parsed.empty()) // arg was empty string
+  {
+    why = "empty list";
     return false;
-  out = std::move(parsed);
+  }
+  out.insert(out.end(), parsed.begin(), parsed.end());
   return true;
 }
 
-static bool parseIndexList(const char *arg, std::vector<int> &out)
-{
-  std::vector<int> parsed;
-  std::stringstream ss(arg);
-  std::string tok;
-  while (std::getline(ss, tok, ','))
-  {
-    int v;
-    if (tok.empty() || !parseIntArg(tok.c_str(), v))
-      return false;
-    parsed.push_back(v);
-  }
-  if (parsed.empty())
-    return false;
-  out = std::move(parsed);
-  return true;
-}
+// ---- Parser ------------------------------------------------------------------------
 
 // Parse outcome of the exit-free core.  parseCliOptions maps Help/Version/
 // Error onto the historical print-and-exit behavior; parseCliOptionsNoExit
 // surfaces them as a bool + message so embedders (clpeak_ffi) never die on
 // a bad argv.
-enum class ParseResult { Ok, Help, Version, Error };
+enum class ParseResult
+{
+  Ok,
+  Help,
+  Version,
+  Error
+};
 
 static const char *nextArg(int argc, char **argv, int &i)
 {
@@ -405,127 +436,79 @@ static ParseResult invalidValue(std::string &err, const char *flag, const char *
   return ParseResult::Error;
 }
 
-static ParseResult invalidList(std::string &err, const char *what, const char *v)
+// Split "--<name>" / "--no-<name>" into the name and its polarity.  Returns
+// false for anything that is not a long flag.
+static bool splitSelectionFlag(const char *flag, std::string &name, bool &negated)
 {
-  err = std::string("clpeak: invalid ") + what + ": " + v + "\n";
-  return ParseResult::Error;
-}
-
-// Return true if `flag` matches "--<name>" or "--no-<name>".  In the latter
-// case `out_negated` is set; otherwise it's cleared.
-static bool matchFlag(const char *flag, const char *name, bool &out_negated)
-{
-  // strip leading '--'
-  if (flag[0] != '-' || flag[1] != '-') return false;
+  if (flag[0] != '-' || flag[1] != '-')
+    return false;
   const char *body = flag + 2;
   if (strncmp(body, "no-", 3) == 0)
   {
-    if (strcmp(body + 3, name) == 0) { out_negated = true; return true; }
-    return false;
+    name = body + 3;
+    negated = true;
   }
-  if (strcmp(body, name) == 0) { out_negated = false; return true; }
-  return false;
+  else
+  {
+    name = body;
+    negated = false;
+  }
+  return !name.empty();
 }
 
-// Apply one test-selection flip.  Honours allow-list semantics.
-static void applyTestFlag(CliOptions &out, Benchmark b, bool negated, bool &forcedTests)
+// One allow-list flip, shared by backends, categories and tests: the first
+// positive flag clears the set and switches to "only what is named";
+// --no-<x> always subtracts.
+template <size_t N>
+static void applySelection(std::bitset<N> &set, size_t bit, bool negated, bool &forced)
 {
   if (negated)
   {
-    out.enabledTests.reset(static_cast<size_t>(b));
+    set.reset(bit);
     return;
   }
-  if (!forcedTests)
+  if (!forced)
   {
-    out.enabledTests.reset();
-    forcedTests = true;
+    set.reset();
+    forced = true;
   }
-  out.enabledTests.set(static_cast<size_t>(b));
-}
-
-static void applyCategoryFlag(CliOptions &out, Category c, bool negated, bool &forcedCategories)
-{
-  if (negated)
-  {
-    out.enabledCategories.reset(static_cast<size_t>(c));
-    return;
-  }
-  if (!forcedCategories)
-  {
-    out.enabledCategories.reset();
-    forcedCategories = true;
-  }
-  out.enabledCategories.set(static_cast<size_t>(c));
+  set.set(bit);
 }
 
 static ParseResult parseCore(int argc, char **argv, CliOptions &out,
                              std::string &err)
 {
-  // Positive backend includes.  When any --<backend> flag is present, only
-  // listed backends run; everything else gets skipped at the end of parsing.
-  bool includeAny = false;
-  bool incOpenCL = false, incVulkan = false, incCuda = false, incRocm = false, incMetal = false, incOneapi = false, incCpu = false, incOnnx = false;
+  bool forcedBackends = false;
   bool forcedTests = false;
   bool forcedCategories = false;
 
   for (int i = 1; i < argc; i++)
   {
     const char *a = argv[i];
-    bool negated = false;
 
-    // ---- help / version ---------------------------------------------------
+    // ---- help / version / modes --------------------------------------------
     if (!strcmp(a, "-h") || !strcmp(a, "--help"))
-    {
       return ParseResult::Help;
-    }
-    else if (!strcmp(a, "-v") || !strcmp(a, "--version"))
-    {
+    if (!strcmp(a, "-v") || !strcmp(a, "--version"))
       return ParseResult::Version;
-    }
-    else if (!strcmp(a, "--verbose"))
+    if (!strcmp(a, "--verbose"))
     {
       out.verbose = true;
+      continue;
     }
-    else if (!strcmp(a, "--describe"))
+    if (!strcmp(a, "--describe"))
     {
       out.describe = true;
+      continue;
     }
-    // ---- backend selection ----------------------------------------------
-#ifdef ENABLE_OPENCL
-    else if (!strcmp(a, "--no-opencl")) out.skipOpenCL = true;
-    else if (!strcmp(a, "--opencl"))    { incOpenCL = true; includeAny = true; }
-#endif
-#ifdef ENABLE_VULKAN
-    else if (!strcmp(a, "--no-vulkan")) out.skipVulkan = true;
-    else if (!strcmp(a, "--vulkan"))    { incVulkan = true; includeAny = true; }
-#endif
-#ifdef ENABLE_CUDA
-    else if (!strcmp(a, "--no-cuda"))   out.skipCuda   = true;
-    else if (!strcmp(a, "--cuda"))      { incCuda   = true; includeAny = true; }
-#endif
-#ifdef ENABLE_ROCM
-    else if (!strcmp(a, "--no-rocm")) out.skipRocm = true;
-    else if (!strcmp(a, "--rocm"))    { incRocm = true; includeAny = true; }
-#endif
-#ifdef ENABLE_METAL
-    else if (!strcmp(a, "--no-metal"))  out.skipMetal  = true;
-    else if (!strcmp(a, "--metal"))     { incMetal  = true; includeAny = true; }
-#endif
-#ifdef ENABLE_ONEAPI
-    else if (!strcmp(a, "--no-oneapi")) out.skipOneapi = true;
-    else if (!strcmp(a, "--oneapi"))    { incOneapi = true; includeAny = true; }
-#endif
-#ifdef ENABLE_CPU
-    else if (!strcmp(a, "--no-cpu"))    out.skipCpu = true;
-    else if (!strcmp(a, "--cpu"))       { incCpu = true; includeAny = true; }
-#endif
-#ifdef ENABLE_ONNX
-    else if (!strcmp(a, "--no-onnx"))   out.skipOnnx = true;
-    else if (!strcmp(a, "--onnx"))      { incOnnx = true; includeAny = true; }
-#endif
+    if (!strcmp(a, "--list-devices"))
+    {
+      out.listDevices = true;
+      continue;
+    }
 
-    // ---- iters / warmup -------------------------------------------------
-    else if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
+    // ---- iters / warmup / budgets --------------------------------------------
+    if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -535,8 +518,9 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         return invalidValue(err, a, v);
       out.forceIters = true;
       out.iters = parsed;
+      continue;
     }
-    else if (!strcmp(a, "-w") || !strcmp(a, "--warmup"))
+    if (!strcmp(a, "-w") || !strcmp(a, "--warmup"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -545,8 +529,9 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!parseUIntArg(v, parsed))
         return invalidValue(err, a, v);
       out.warmupCount = parsed;
+      continue;
     }
-    else if (!strcmp(a, "--max-time"))
+    if (!strcmp(a, "--max-time") || !strcmp(a, "--max-time-cpu"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -555,176 +540,160 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
           parsed > std::numeric_limits<unsigned int>::max() / 1000u)
         return invalidValue(err, a, v);
-      out.targetTimeUs = parsed * 1000u; // ms -> us
-    }
-#ifdef ENABLE_CPU
-    else if (!strcmp(a, "--max-time-cpu"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      unsigned int parsed;
-      if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
-          parsed > std::numeric_limits<unsigned int>::max() / 1000u)
-        return invalidValue(err, a, v);
-      out.targetTimeUsCpu = parsed * 1000u; // ms -> us
-    }
-#endif
-
-    // ---- OpenCL device selection ----------------------------------------
-#ifdef ENABLE_OPENCL
-    else if (!strcmp(a, "--cl-platform"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.platformIndices))
-        return invalidList(err, "platform index list", v);
-    }
-    else if (!strcmp(a, "--cl-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.deviceIndices))
-        return invalidList(err, "device index list", v);
-    }
-#endif
-
-    // ---- Per-backend device selection -----------------------------------
-#ifdef ENABLE_VULKAN
-    else if (!strcmp(a, "--vk-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.vkDeviceIndices))
-        return invalidList(err, "Vulkan device index list", v);
-    }
-#endif
-#ifdef ENABLE_CUDA
-    else if (!strcmp(a, "--cuda-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.cudaDeviceIndices))
-        return invalidList(err, "CUDA device index list", v);
-    }
-#endif
-#ifdef ENABLE_ROCM
-    else if (!strcmp(a, "--rocm-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.rocmDeviceIndices))
-        return invalidList(err, "ROCm device index list", v);
-    }
-#endif
-#ifdef ENABLE_METAL
-    else if (!strcmp(a, "--mtl-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.mtlDeviceIndices))
-        return invalidList(err, "Metal device index list", v);
-    }
-#endif
-#ifdef ENABLE_ONEAPI
-    else if (!strcmp(a, "--oneapi-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.oneapiDeviceIndices))
-        return invalidList(err, "oneAPI device index list", v);
-    }
-#endif
-#ifdef ENABLE_ONNX
-    else if (!strcmp(a, "--onnx-device"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      if (!parseIndexList(v, out.onnxDeviceIndices))
-        return invalidList(err, "ONNX device index list", v);
-    }
-    else if (!strcmp(a, "--onnx-lib"))
-    {
-      const char *v = nextArg(argc, argv, i);
-      if (!v)
-        return missingArg(err, a);
-      out.onnxLibPath = v;
-    }
-#endif
-
-    // ---- Modes ----------------------------------------------------------
-    else if (!strcmp(a, "--list-devices"))
-    {
-      out.listDevices = true;
+      if (!strcmp(a, "--max-time"))
+        out.targetTimeUs = parsed * 1000u; // ms -> us
+      else
+        out.targetTimeUsCpu = parsed * 1000u;
+      continue;
     }
 
-    // ---- Output ---------------------------------------------------------
-    else if (!strcmp(a, "-o") || !strcmp(a, "--output"))
+    // ---- devices ---------------------------------------------------------------
+    if (!strcmp(a, "--devices"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
         return missingArg(err, a);
-      out.outputFile   = v;
+      // Naming a device is asking for its backend, so a backend this build
+      // lacks gets reported (CliOptions::requestedButNotBuilt) rather than
+      // silently running nothing.
+      std::string why;
+      if (!parseDeviceList(v, out.devices, out.requestedBackends, why))
+      {
+        err = std::string("clpeak: invalid --devices ") + why + "\n";
+        return ParseResult::Error;
+      }
+      continue;
+    }
+
+    // ---- output / compare / runtime ---------------------------------------------
+    if (!strcmp(a, "-o") || !strcmp(a, "--output"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.outputFile = v;
       out.enableOutput = true;
+      continue;
     }
-    else if (!strcmp(a, "--compare"))
+    if (!strcmp(a, "--compare"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
         return missingArg(err, a);
       out.compareFile = v;
+      continue;
     }
-
-    // ---- Category / test selection --------------------------------------
-    else
+    if (!strcmp(a, "--onnx-lib"))
     {
-      bool matched = false;
-
-      for (int t = 0; t < numCategoryFlags && !matched; t++)
-      {
-        if (matchFlag(a, categoryFlags[t].name, negated))
-        {
-          applyCategoryFlag(out, categoryFlags[t].cat, negated, forcedCategories);
-          matched = true;
-        }
-      }
-
-      for (int t = 0; t < numTestFlags && !matched; t++)
-      {
-        if (matchFlag(a, testFlags[t].name, negated))
-        {
-          applyTestFlag(out, testFlags[t].test, negated, forcedTests);
-          matched = true;
-        }
-      }
-
-      if (matched) continue;
-
-      err = std::string("clpeak: unknown option '") + a + "'\n";
-      return ParseResult::Error;
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.onnxLibPath = v;
+      continue;
     }
+    if (!strcmp(a, "--onnx-ep"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      // NAME=PATH; the '=' after the name is the first one, since a path
+      // may carry its own (a Windows drive letter never does, a URL-ish
+      // directory might).
+      const char *eq = strchr(v, '=');
+      if (!eq || eq == v || !eq[1])
+      {
+        err = std::string("clpeak: --onnx-ep expects NAME=PATH, the "
+                          "registration name the provider wants (Qualcomm's "
+                          "QNN: QNNExecutionProvider) and the library to load; got '") +
+              v + "'\n";
+        return ParseResult::Error;
+      }
+      out.onnxEpLibraries.emplace_back(std::string(v, eq - v), std::string(eq + 1));
+      continue;
+    }
+#ifdef _WIN32
+    // Windows ML is a Windows 11 feature with nothing to parse elsewhere --
+    // unlike --onnx-lib (a no-op on iOS) or --litert-npu-dir (harmless with
+    // no NPU), there is no "default's fine, ignore it" reading of this flag
+    // off Windows, so a build for another platform does not know it at all
+    // and rejects it the way any other unsupported flag would.
+    if (!strcmp(a, "--onnx-winml"))
+    {
+      out.onnxWinml = true;
+      // The path is optional: the next word is one unless it is a flag.
+      if (i + 1 < argc && argv[i + 1][0] != '-')
+        out.onnxWinmlPath = argv[++i];
+      continue;
+    }
+#endif
+    if (!strcmp(a, "--litert-lib"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.litertLibPath = v;
+      continue;
+    }
+    if (!strcmp(a, "--litert-npu-dir"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.litertNpuDir = v;
+      continue;
+    }
+
+    // ---- backend / category / test selection -------------------------------------
+    std::string name;
+    bool negated = false;
+    if (splitSelectionFlag(a, name, negated))
+    {
+      if (const BackendRow *row = findBackendFlag(name))
+      {
+        const size_t bit = static_cast<size_t>(row->info.id);
+        applySelection(out.enabledBackends, bit, negated, forcedBackends);
+        if (!negated)
+          out.requestedBackends.set(bit);
+        continue;
+      }
+      bool matched = false;
+      for (int t = 0; t < numCategoryFlags && !matched; t++)
+        if (name == categoryFlags[t].name)
+        {
+          applySelection(out.enabledCategories,
+                         static_cast<size_t>(categoryFlags[t].cat), negated,
+                         forcedCategories);
+          matched = true;
+        }
+      for (int t = 0; t < numTestFlags && !matched; t++)
+        if (name == testFlags[t].name)
+        {
+          applySelection(out.enabledTests,
+                         static_cast<size_t>(testFlags[t].test), negated,
+                         forcedTests);
+          matched = true;
+        }
+      if (matched)
+        continue;
+    }
+
+    err = std::string("clpeak: unknown option '") + a + "'\n";
+    return ParseResult::Error;
   }
 
-  // Apply positive backend selection: any --<backend> flag means "only run
-  // the listed backends".  Skips set by --no-<backend> still apply.
-  if (includeAny)
+  // `--devices cuda:0 --vulkan` selects nothing: every device named is on a
+  // backend the backend flags switched off.  Contradictory, so say so.
+  if (!out.devices.empty())
   {
-    if (!incOpenCL) out.skipOpenCL = true;
-    if (!incVulkan) out.skipVulkan = true;
-    if (!incCuda)   out.skipCuda   = true;
-    if (!incRocm)   out.skipRocm   = true;
-    if (!incMetal)  out.skipMetal  = true;
-    if (!incOneapi) out.skipOneapi = true;
-    if (!incCpu)    out.skipCpu    = true;
-    if (!incOnnx)   out.skipOnnx   = true;
+    bool any = false;
+    for (const DeviceSelector &sel : out.devices)
+      if (out.enabledBackends.test(static_cast<size_t>(sel.backend)))
+        any = true;
+    if (!any)
+    {
+      err = "clpeak: --devices names only devices of backends that are switched off\n";
+      return ParseResult::Error;
+    }
   }
 
   return ParseResult::Ok;
@@ -778,30 +747,27 @@ Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
   Invocation inv;
 
   for (int i = 0; i < argc; i++)
-    if (argv[i]) inv.argv.push_back(argv[i]);
+    if (argv[i])
+      inv.argv.push_back(argv[i]);
 
-  inv.targetTimeUs    = opts.targetTimeUs;
+  inv.targetTimeUs = opts.targetTimeUs;
   inv.targetTimeUsCpu = opts.targetTimeUsCpu;
-  inv.warmup          = opts.warmupCount;
+  inv.warmup = opts.warmupCount;
   // Only when pinned with -i.  Left at 0 the run calibrated each test to a
   // time budget instead, which is the normal mode and the comparable one.
-  inv.iters           = opts.forceIters ? opts.iters : 0;
+  inv.iters = opts.forceIters ? opts.iters : 0;
 
   for (int c = 0; c < numCategoryFlags; c++)
     if (opts.enabledCategories.test(static_cast<size_t>(categoryFlags[c].cat)))
       inv.categories.push_back(categoryString(categoryFlags[c].cat));
 
   // Recorded only when the run was narrowed.  A full run would list every
-  // test in the build, which says nothing and would differ between builds
-  // that enable different backends.
-  bool allTests = true;
-  for (int t = 0; t < numTestFlags; t++)
-    if (!opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
-      allTests = false;
-  if (!allTests)
+  // test there is, which says nothing.
+  if (!opts.enabledTests.all())
     for (int t = 0; t < numTestFlags; t++)
       if (opts.enabledTests.test(static_cast<size_t>(testFlags[t].test)))
         inv.tests.push_back(testFlags[t].name);
 
+  inv.verbose = opts.verbose;
   return inv;
 }

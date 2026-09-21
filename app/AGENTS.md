@@ -14,25 +14,42 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   release zip puts it next to the CLI binary of that name. macOS keeps the
   user-visible name "clpeak" via `CFBundleName`/`CFBundleDisplayName`.
 - macOS disk image: `cmake --build build --target clpeak-gui-dmg`
-  (`tool/make_dmg.sh`; ad-hoc signed, so a downloaded copy is quarantined).
+  (`tools/make_dmg.sh`; ad-hoc signed, so a downloaded copy is quarantined).
 - Desktop dev loop: build `clpeak_ffi` once, then
   `CLPEAK_FFI_PATH=<build>/clpeak_ffi.framework/clpeak_ffi flutter run -d macos`
   (a plain `flutter build macos` does NOT embed the framework — the
   clpeak-gui target owns final assembly).
 - Android: `flutter build apk --release` / `flutter build appbundle --release`
   (Gradle drives `src/ffi/android/CMakeLists.txt`; needs
-  `git submodule update --init`). The bundle includes ONNX Runtime for
+  `git submodule update --init`). The bundle includes ONNX Runtime and
+  LiteRT (`libLiteRt.so` + its OpenCL GPU accelerator, 8.6 MB) for
   **arm64-v8a** (devices) and **x86_64** (emulator / Chromebooks) —
   `armeabi-v7a`/`x86` are excluded as legacy 32-bit ABIs; see the packaging
   block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
   per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
-  107 MB for every slice).
-- iOS: `tool/build_ios_native.sh` first (stages
+  107 MB for every slice).  LiteRT's NPU dispatch shims are not on Maven:
+  `tools/fetch_litert_npu.sh qualcomm|google_tensor` stages one vendor's under
+  `android/app/src/main/jniLibs/` (git-ignored) before a build that should
+  reach that NPU -- one vendor, because LiteRT loads the first shim it lists.
+  Staging any switches the build to extracting native libraries at install
+  (LiteRT finds the shim by listing a directory, which an APK's internal
+  `lib/` is not).  Qualcomm's own runtime is a further 67 MB opt-in,
+  `clpeakQnn=true` in `android/gradle.properties` (Maven Central's
+  `com.qualcomm.qti:qnn-runtime`, every Hexagon generation); MediaTek's and
+  Google Tensor's are system libraries on the device.  See
+  `src/litert/AGENTS.md`, Packaging.
+- iOS: `tools/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX
   Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
   `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
-  own build.
+  own build.  It fetches LiteRT too -- Google's iOS dylibs of the runtime
+  and its Metal accelerator, device and simulator slices, ~31 MB, from its
+  litert bucket -- and stages them under `ios/clpeak_native/embed-{device,
+  simulator}/`, from where the Runner's embed phase copies and signs them
+  into `Frameworks/` to be dlopen'd; `--no-litert` leaves the backend out,
+  `CLPEAK_IOS_LITERT_DIR` points at your own slices.  See
+  `src/litert/AGENTS.md`, Packaging.
 - Tests: `flutter test` (pure Dart) or
   `CLPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
 
@@ -43,7 +60,25 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `NativeCallable.listener` + `Isolate.run`, `done` event = drain barrier)
 - Argv construction (device/category/time flags)? → `lib/src/model/run_config.dart`
   (never emits per-test flags — the UI is data-driven so test churn in the
-  core needs no app changes)
+  core needs no app changes). `--verbose` is not run configuration: it is the
+  app setting `SettingsService.verbose`, read at the moment of launch and
+  passed as `BenchmarkService.start(verbose:)` by every launch site
+- Diagnostics? → the document's `log` (`LogEntry` in
+  `lib/src/model/run_document.dart`, one stream for the whole run, built from
+  `log` events live and read straight off the file in history).
+  `_DiagnosticsSection` at the foot of `results_body.dart` is counts-only
+  (total lines + a pointer at the exported file): rendering per-line rows
+  made the GUI sluggish on phones during heavy runs, so the file a user
+  exports is where the contents are read.  Settings → "Verbose diagnostics"
+  (`settings_screen.dart`) turns debug-level recording on for every run and
+  links to the issue tracker, which is how a problem on a phone reaches a
+  maintainer
+- A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
+  streams `<id>.clpeak.log` while a run is in flight and removes it once the
+  document is written, so one left behind is a crashed run's only record.
+  History lists it under "Runs that did not finish" (`_CrashLogTile`) with
+  export and delete; the in-flight run's own sidecar is excluded by
+  `BenchmarkService.inFlightRunId`
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
@@ -103,6 +138,15 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   replaced by "Built into the app": ONNX Runtime is statically linked there
   (Apple's pod is a static framework and iOS will not dlopen another), which
   `OnnxStatus.linkedIn` reports.
+- Plugin execution providers and Windows ML? → the same screen, desktop
+  only: `SettingsService.onnxEpLibraries` (name + path per library, the
+  registration name guessed from the file name and confirmed in a dialog)
+  and `onnxWinml` / `onnxWinmlPath` (Windows), applied in `main()` beside
+  the library path and, on change, through `BenchmarkService.setOnnxEpLibraries`
+  / `setOnnxWinml` + a re-enumeration.  `OnnxStatus.epLibraries` says how
+  each registered on the last enumeration (empty = pending), and the panel
+  shows it per row.  Enabling Windows ML makes the next enumeration install
+  the Store providers, so it can take minutes the first time.
 - Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
   (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
   Android/iOS only — a sleeping display stops the frames the run was budgeted
@@ -164,14 +208,14 @@ the platform dirs:
   matches an installed `.desktop` file by application ID instead.
 - `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.clpeak.ios` +
   "Embed clpeak native frameworks" script phase (consumes
-  `ios/clpeak_native/`, staged by `tool/build_ios_native.sh`)
+  `ios/clpeak_native/`, staged by `tools/build_ios_native.sh`)
 - `android/app/build.gradle.kts` — `kr.clpeak`, minSdk 33, abiFilters,
   `externalNativeBuild` → `src/ffi/android/CMakeLists.txt`
 - `android/app/src/main/AndroidManifest.xml` — `uses-native-library
   libOpenCL.so`
 - every platform's app icon — all generated by
-  `tool/icons/generate_icons.py` (needs Pillow) from the original clpeak
-  wordmark in `tool/icons/clpeak_master_1024.png` (both repo-root `tool/`,
+  `tools/icons/generate_icons.py` (needs Pillow) from the original clpeak
+  wordmark in `tools/icons/clpeak_master_1024.png` (both repo-root `tools/`,
   alongside `build_ios_native.sh`). Never hand-edit an icon
   PNG; change the script and re-run it. It also writes the iOS
   `AppIcon.appiconset/Contents.json` (single 1024 universal + dark/tinted)
@@ -182,6 +226,9 @@ the platform dirs:
 
 - If the event schema or C ABI changes → update `lib/src/ffi/` and
   `src/ffi/AGENTS.md`.
+- If `LogEntry` or the sidecar header changes natively → mirror it in
+  `lib/src/model/run_document.dart` and `CrashLog.read()` in
+  `lib/src/services/run_history_store.dart`.
 - If you add a CLI-flag mapping → keep `run_config.dart` in sync with
   `src/common/options.cpp`.
 - versionCode continues the retired native app's sequence (pubspec

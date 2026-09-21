@@ -223,14 +223,79 @@ class DeviceRun {
   }
 }
 
-/// A note the run emitted outside any reading — a missing library, a driver
-/// warning.  Usually the only record of *why* something is absent.
-class RunNote {
-  const RunNote({this.backend = '', this.device = '', required this.message});
+/// Severity of one diagnostic line — the native clpeak::LogLevel.
+enum LogLevel {
+  error,
+  warning,
+  info,
+  debug;
 
+  static LogLevel fromString(String s) => switch (s) {
+        'error' => LogLevel.error,
+        'warning' => LogLevel.warning,
+        'debug' => LogLevel.debug,
+        _ => LogLevel.info,
+      };
+
+  /// Something went wrong, or explains why something is missing — the
+  /// entries a user is shown without asking.
+  bool get isProblem => this == LogLevel.error || this == LogLevel.warning;
+}
+
+/// One line of the run's diagnostic stream (the document's `log` array,
+/// docs/format-v3.md): what clpeak or a library it called had to say, at
+/// what moment, inside which scope.  The whole stream in order is what a
+/// maintainer reads when a number from a device they cannot reach looks
+/// wrong; the warnings and errors in it are the only record of *why*
+/// something is absent.
+class LogEntry {
+  const LogEntry({
+    this.elapsedSeconds = 0,
+    required this.level,
+    this.source = '',
+    this.backend = '',
+    this.device = '',
+    this.deviceIndex = -1,
+    this.test = '',
+    required this.message,
+  });
+
+  /// Seconds since the run started.
+  final double elapsedSeconds;
+  final LogLevel level;
+
+  /// The library a message was relayed from ("onnxruntime", "vulkan",
+  /// "opencl", "console"); empty for clpeak's own.
+  final String source;
+
+  /// The scope the line fired in; empty where no such scope was open.
   final String backend;
   final String device;
+  final int deviceIndex;
+
+  /// The open test's key (`id` or `id@variant`), matching TestResult.key.
+  final String test;
+
   final String message;
+
+  /// "Vulkan · Apple M1 Pro · single_precision_compute", or as much of it
+  /// as the entry has.
+  String get scope => [
+        backend,
+        device,
+        test,
+      ].where((s) => s.isNotEmpty).join(' · ');
+
+  factory LogEntry.fromJson(Map<String, dynamic> m) => LogEntry(
+        elapsedSeconds: (m['elapsed_s'] as num?)?.toDouble() ?? 0,
+        level: LogLevel.fromString(m['level'] as String? ?? ''),
+        source: m['source'] as String? ?? '',
+        backend: m['backend'] as String? ?? '',
+        device: m['device'] as String? ?? '',
+        deviceIndex: (m['device_index'] as num?)?.toInt() ?? -1,
+        test: m['test'] as String? ?? '',
+        message: m['message'] as String? ?? '',
+      );
 }
 
 /// How the run was invoked and what it ran on.  Present for a saved run;
@@ -241,12 +306,21 @@ class RunMeta {
     this.generatedAt = '',
     this.durationSeconds = 0,
     this.cancelled = false,
+    this.verbose = false,
+    this.builtBackends = const [],
     this.host = const {},
   });
 
   final String clpeakVersion;
   final String generatedAt;
   final double durationSeconds;
+
+  /// The run recorded debug-level diagnostics (`--verbose`).
+  final bool verbose;
+
+  /// Backends compiled into the binary that produced the file — the first
+  /// question on any "backend X is missing" report.
+  final List<String> builtBackends;
 
   /// A cancelled run is a partial one; without this every test it never
   /// reached would read as hardware that lacks the feature.
@@ -262,6 +336,14 @@ class RunMeta {
         generatedAt: m['generated_at'] as String? ?? '',
         durationSeconds: (m['duration_s'] as num?)?.toDouble() ?? 0,
         cancelled: m['cancelled'] as bool? ?? false,
+        verbose: (m['invocation'] as Map<String, dynamic>?)?['verbose']
+                as bool? ??
+            false,
+        builtBackends: [
+          ...((m['build'] as Map<String, dynamic>?)?['backends'] as List? ??
+                  const [])
+              .cast<String>(),
+        ],
         host: (m['host'] as Map<String, dynamic>?) ?? const {},
       );
 }
@@ -271,10 +353,16 @@ class RunDocument {
   RunDocument();
 
   final List<DeviceRun> runs = [];
-  final List<RunNote> notes = [];
+
+  /// The diagnostic stream, in emission order — from `log` events during a
+  /// live run, from the file's `log` array when a run is reopened.
+  final List<LogEntry> log = [];
   RunMeta? meta;
 
   bool get isEmpty => runs.isEmpty;
+
+  /// The lines a user is shown without asking: warnings and errors.
+  List<LogEntry> get problems => log.where((e) => e.level.isProblem).toList();
 
   DeviceRun runFor(String backend, String platform, String device,
       String driver, [int index = -1]) {
@@ -324,13 +412,8 @@ class RunDocument {
       }
     }
 
-    for (final n in (doc['notes'] as List? ?? const [])) {
-      final nm = n as Map<String, dynamic>;
-      out.notes.add(RunNote(
-        backend: nm['backend'] as String? ?? '',
-        device: nm['device'] as String? ?? '',
-        message: nm['message'] as String? ?? '',
-      ));
+    for (final e in (doc['log'] as List? ?? const [])) {
+      out.log.add(LogEntry.fromJson(e as Map<String, dynamic>));
     }
 
     return out;

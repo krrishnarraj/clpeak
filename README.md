@@ -7,7 +7,7 @@
 
 **clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs, GPUs and NPUs. It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.
 
-Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
+Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX, Core ML, LiteRT and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
 
 [![clpeak desktop app showing Metal results on an Apple M1 Pro](docs/assets/img/results-dark.png)](https://krrishnarraj.github.io/clpeak/)
 
@@ -82,27 +82,36 @@ Backends auto-enable when their SDK is found; opt out with `-DCLPEAK_ENABLE_<X>=
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
 | `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (otherwise always available) |
 | `CLPEAK_ENABLE_ONNX` | `ON` | Skip ONNX Runtime backend (otherwise always built; runtime loaded at run time) |
+| `CLPEAK_ENABLE_COREML` | `ON` | Skip Core ML backend (Apple only; Neural Engine / GPU / CPU through the system framework) |
+| `CLPEAK_ENABLE_LITERT` | `ON` | Skip LiteRT backend (otherwise always built; libLiteRt loaded at run time — NPU / GPU / CPU accelerators) |
 | `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped when no Flutter SDK is found) |
 
 The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmake --build build --target clpeak-gui`).
 
 ## CLI
 
-`./clpeak --help` prints all flags. Selection is uniform: `--<backend>` runs only that backend, `--<test>` runs only that test, `--no-<x>` always subtracts.
+`./clpeak --help` prints all flags. Selection is uniform: `--<backend>` runs only that backend, `--<category>` or `--<test>` runs only that test, `--no-<x>` always subtracts. Backends say where and tests say what: a test flag applies to every backend that runs, so there are no backend-specific test flags.
 
 ```console
 ./clpeak                              # everything, everywhere
-./clpeak --cuda --vulkan              # one or more backends (--onnx, --metal, --rocm, --oneapi, --cpu, …)
+./clpeak --cuda --vulkan              # one or more backends (--onnx, --coreml, --metal, --rocm, --oneapi, --cpu, …)
 ./clpeak --single-precision-compute   # one test, on every backend
-./clpeak --onnx-gemm --onnx-block     # ONNX tests (--onnx-conv, --onnx-numeric-error, --onnx-tensor-bandwidth, …)
-./clpeak --onnx --onnx-device 0       # one ONNX provider; --onnx-lib PATH picks the runtime
+./clpeak --gemm                       # the vendor's tuned matmul on every backend: cuBLASLt, MPS, Accelerate, ONNX, Core ML, …
+./clpeak --onnx --transformer-block   # the AI composite on every ONNX provider (--convolution, --numeric-error, --tensor-bandwidth, …)
+./clpeak --devices coreml:0           # one device, as --list-devices names it (here: the Neural Engine)
+./clpeak --devices cuda:0,vulkan:1    # a few devices across backends; nothing else runs
+./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
+./clpeak --onnx --onnx-ep QNNExecutionProvider=DIR/onnxruntime_providers_qnn.dll   # register a plugin provider (ORT 1.22+; Qualcomm's QNN ships as one)
+./clpeak --onnx --onnx-winml DIR      # Windows 11: the vendor providers Windows ML installs from the Store (tools/fetch_winml.ps1 stages Microsoft's runtime in DIR)
+./clpeak --litert --litert-lib PATH   # pick the LiteRT library (a pip ai-edge-litert wheel has one); --litert-npu-dir for the vendor NPU runtime (Android app: tools/fetch_litert_npu.sh, app/AGENTS.md)
 ./clpeak --describe                   # what each test and reading measures
 ./clpeak -o out.clpeak.json           # save results (one JSON document)
+./clpeak --verbose -o out.clpeak.json # …with every diagnostic and the device inventory: attach this to a bug report
 ./clpeak --compare baseline.clpeak.json   # diff against a saved baseline
 ./clpeak --list-devices               # enumerate devices, no benchmarks
 ```
 
-`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. Device indices (`--cl-platform/--cl-device`, `--vk-device`, `--cuda-device`, `--rocm-device`, `--mtl-device`, `--oneapi-device`) take one index or a comma-separated list; the CPU backend has no index (`--no-cpu` skips it).
+`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. `--list-devices` prints one line per device that starts with its `backend:index` name; `--devices` takes a comma-separated list of exactly those and runs only them. Every flag parses in every build, so a script can say `--no-cuda` on a Mac.
 
 ## For AI agents
 

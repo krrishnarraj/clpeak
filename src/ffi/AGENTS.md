@@ -7,7 +7,9 @@ shared library / Apple framework.
 ## Quick Lookups
 
 - The C ABI? → `clpeak_ffi.h` (catalog JSON, blocking `clpeak_launch` with a
-  streaming event callback, `clpeak_request_cancel`). There is no saved-result
+  streaming event callback, `clpeak_request_cancel`, the runtime setters:
+  `clpeak_set_onnx_library` / `_ep_libraries` / `_winml`, `clpeak_set_litert_*`,
+  each with a `clpeak_copy_*_status_json`). There is no saved-result
   loader: result files are JSON in the shape the GUI renders, so it reads them
   with `dart:convert` and history survives a native library that won't load
 - Event JSON schema? → documented in `clpeak_ffi.h`; produced in
@@ -18,9 +20,17 @@ shared library / Apple framework.
   (`include/common/AGENTS.md`).  The test's arrives once on `test_begin`, with
   the rest of the resolved header (`shape`, `axis`, `direction`, `unit`);
   each reading's rides the reading
-- Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: same order,
-  `RunDocument::append` merge, centralized `-o` save — which also stamps
-  `cancelled` so a partial run does not read as a complete one)
+- Backend run loop? → `clpeak_ffi.cpp` (ports `src/cli/main.cpp`: both walk
+  the shared `backendRegistry()` so the catalog, the run and the CLI agree on
+  which backends exist and in what order; `RunDocument::append` merge,
+  centralized `-o` save — which also stamps `cancelled` so a partial run does
+  not read as a complete one). The `RunLog` is created before argv is parsed,
+  so a rejected argument is a `log` event like any other diagnostic; with `-o`
+  it streams the `<output>.log` sidecar the app adopts after a native crash
+- Diagnostics (`log` events, `--verbose`)? → `clpeak_ffi.h` documents the
+  event; the entry is the document's `LogEntry` verbatim. Vendor-relayed
+  entries (ONNX Runtime's logger, a Vulkan messenger, a console capture) can
+  arrive on another thread, which `NativeCallable.listener` is built for
 - Desktop build + `clpeak-gui` target? → `CMakeLists.txt` (gated on
   `CLPEAK_ENABLE_GUI` + detected Flutter SDK; assembles the final bundle at
   `<build>/clpeak-gui/` so Flutter-generated runner projects stay untouched)
@@ -32,21 +42,23 @@ shared library / Apple framework.
 - Android build? → `android/CMakeLists.txt` (standalone superproject used by
   `app/android/app/build.gradle.kts` externalNativeBuild; OpenCL stub +
   Vulkan headers from `third_party/`)
-- iOS build? → `ios/CMakeLists.txt` + `tool/build_ios_native.sh` (device +
+- iOS build? → `ios/CMakeLists.txt` + `tools/build_ios_native.sh` (device +
   simulator frameworks → `app/ios/clpeak_native/clpeak_ffi.xcframework`;
-  Vulkan/MoltenVK env-gated on the LunarG iOS SDK)
+  Vulkan/MoltenVK env-gated on the LunarG iOS SDK; ONNX Runtime linked in
+  from the static pod; LiteRT's dylibs fetched and staged for the Runner to
+  embed and dlopen)
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `clpeak_ffi.h` | `extern "C"` surface + event schema + `CLPEAK_RUN_*` codes |
-| `clpeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save |
+| `clpeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save, the run's `RunLog` + sidecar, the `--verbose` inventory |
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |
 | `cmake/stage_windows_bundle.cmake` | Build-time copy of Flutter's `build/windows/<arch>/runner/Release` into the staging dir |
 | `android/CMakeLists.txt` | Android superproject (OpenCL stub + NDK Vulkan + CPU) |
-| `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + optional MoltenVK Vulkan) |
+| `ios/CMakeLists.txt` | iOS superproject (Metal + CPU + Core ML + ONNX Runtime + LiteRT + optional MoltenVK Vulkan) |
 
 ## Traps
 
@@ -68,6 +80,9 @@ shared library / Apple framework.
   decodes after the native call returns.
 - One launch at a time (`CLPEAK_RUN_BUSY`); the final `done` event is the
   consumer's drain barrier.
+- The catalog JSON keys are snake_case (`compute_units`, `global_mem_bytes`)
+  — the same serializer writes the run document's `inventory`, so the two
+  cannot drift.
 - argv follows the CLI grammar; parsing uses `parseCliOptionsNoExit` so a bad
   flag can never kill the host process.
 
@@ -75,5 +90,6 @@ shared library / Apple framework.
 
 - If you change the C ABI or event schema → update `clpeak_ffi.h` docs,
   `app/lib/src/ffi/clpeak_bindings.dart` + `clpeak_events.dart`, and this file.
-- If backend wiring changes in `src/cli/main.cpp` → mirror it in
-  `clpeak_ffi.cpp`.
+- If the run loop changes in `src/cli/main.cpp` → mirror it in
+  `clpeak_ffi.cpp`.  A new backend needs nothing here: the registry and
+  `src/common/cmake/backends.cmake` bring it into both binaries.

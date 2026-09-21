@@ -76,28 +76,27 @@ namespace
   // bfloat16 among its types at opset 14, which is why gemm keeps its row.
   const DType kDTypes[] = {
       {ONNX_DT_FLOAT, "fp32",
-       "FP32 inputs and outputs, like the fp32 matmul row.  An accelerator "
-       "that refuses it, or falls far short of its own fp16 row, has no full-"
-       "precision convolution path."},
+       "FP32 in and out; far short of this provider's own fp16 row means no "
+       "full-precision convolution path."},
       {ONNX_DT_FLOAT16, "fp16",
        "16-bit floats, the native currency of most convolution engines."},
   };
 
   const Shape kShapes[] = {
       {3, false, "conv3x3",
-       "A 3x3 convolution over 256 channels -- the shape most vision networks "
-       "are built from, and the one accelerators were designed "
-       "around."},
+       "A 3x3 convolution over 256 channels, the shape most vision networks "
+       "are built from and the one accelerators were designed around.  "
+       "Counted as direct multiplies: a Winograd kernel does fewer, so this "
+       "can read above the matmul peak without the device being built for "
+       "convolution."},
       {1, false, "conv1x1",
-       "A 1x1 convolution: arithmetically a matrix multiply applied at every "
-       "pixel, so it should land near the matmul rows.  Where it does not, "
-       "the provider is handling the two shapes with different machinery."},
+       "Arithmetically a matrix multiply at every pixel, so it should land "
+       "near the matmul rows; where it does not, the two shapes reach "
+       "different machinery."},
       {3, true, "depthwise3x3",
-       "A depthwise 3x3 convolution -- the same shape as the first but with "
-       "each channel kept separate, so there is far less arithmetic per value "
-       "loaded.  Hardware built around dense multiply-accumulate arrays "
-       "usually collapses here, which is why efficient mobile networks are "
-       "often slower than their arithmetic suggests."},
+       "The 3x3 shape with each channel kept separate, so far less arithmetic "
+       "per value loaded.  Hardware built around dense arrays collapses here, "
+       "which is why mobile networks run slower than their FLOP counts."},
   };
 
   // Deterministic fp values in [-0.5, 0.5), as in gemm.cpp's filler: small
@@ -145,6 +144,7 @@ namespace
     OrtValue *outVal = nullptr;
     std::vector<uint8_t> inBuf, outBuf;
     std::string error;
+    bool offDevice = false; // refused for where it would run, not for what it is
   };
 
   void destroySetup(const OrtRuntime &rt, ConvSetup &c)
@@ -165,7 +165,8 @@ namespace
   }
 
   ConvSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
-                      int dtype, const Shape &v, int64_t spatial)
+                      int dtype, const Shape &v, int64_t spatial,
+                      bool profile = false)
   {
     ConvSetup c;
     const int64_t group = v.depthwise ? kChannels : 1;
@@ -183,12 +184,14 @@ namespace
       wRaw.clear();
       wRaw.shrink_to_fit();
 
-      auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
+      auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
+                                   profile);
       model.clear();
       model.shrink_to_fit();
       if (!ses.session)
       {
         c.error = ses.error;
+        c.offDevice = ses.offDevice;
         return c;
       }
       c.session = ses.session;
@@ -264,12 +267,10 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
-       "Convolution speed at the precision each row names, swept over "
-       "feature-map sizes and reported at its best.  Accelerators were "
-       "built for this operation before they were asked to do anything else, "
-       "and many reach a higher share of their arithmetic peak here than on a "
-       "plain matrix multiply.  Read alongside the matmul rows: the gap "
-       "between them says what the hardware was shaped for.",
+       "Convolution rate at the precision and shape each row names, swept "
+       "over feature-map sizes and reported at its best.  Accelerators were "
+       "built for this before anything else, so the gap against the matmul "
+       "rows says what the hardware was shaped for.",
        TestShape::Heterogeneous, "convolution shape and data type"});
 
   for (const DType &dt : kDTypes)
@@ -291,18 +292,26 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {
           logger::EmitOptions o;
           o.description = std::string("Peak over a doubling sweep of feature-map sizes.  ") + dt.note + "  " + v.note;
-          test.skip(row, ResultStatus::Unsupported, it->second.reason, o.description);
+          test.skip(row, onnxFailureStatus(it->second.reason), it->second.reason,
+                    o.description);
           continue;
         }
       }
 
       double best = 0.0;
       int64_t bestSpatial = 0;
+      std::string ranWider; // set when the provider widened the arithmetic
       double lastRate = 0.0;
       double prevCreateUs = 0.0;
       int strikes = 0;
+      int rungs = 0;
       std::string firstErr;
       ResultStatus errStatus = ResultStatus::Unsupported;
+      // Feature maps the provider's runtime sent to another compute unit
+      // (onnx_session.h, offDevice): climbed past below the first measured
+      // rung, the end of the ladder above it -- as in gemm.cpp.
+      int offDeviceBelow = 0;
+      int64_t firstSpatial = 0, offDeviceAbove = 0;
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
       {
@@ -329,8 +338,15 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
+        // The first rung that runs is profiled: one run tells us the width
+        // the Conv kernel actually consumed.  A provider without an fp16
+        // convolution runs the fp16 row in fp32 behind an inserted cast and
+        // the two precision rows then land on each other -- the CPU EP's do,
+        // to three figures -- which is worth saying rather than leaving to be
+        // noticed.
+        const bool profileThis = (rungs == 0);
         auto createStart = std::chrono::steady_clock::now();
-        ConvSetup c = makeSetup(rt, ep, dt.dtype, v, sp);
+        ConvSetup c = makeSetup(rt, ep, dt.dtype, v, sp, profileThis);
         auto createEnd = std::chrono::steady_clock::now();
         double createUs = std::chrono::duration<double, std::micro>(
                               createEnd - createStart).count();
@@ -341,12 +357,37 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {
           if (firstErr.empty())
             firstErr = c.error;
+          if (c.offDevice)
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s\n", ep.providerKey.c_str(),
+                        row.c_str(), (long long)sp, (long long)sp, c.error.c_str());
+            if (rungs > 0)
+            {
+              offDeviceAbove = sp;
+              break;
+            }
+            prevCreateUs = createUs;
+            if (++offDeviceBelow < kOnnxOffDevicePatience)
+              continue;
+          }
           break;
         }
 
         double per_iter_us = -1.0;
         if (timeRuns(rt, c, 1 + warmupCount) > 0.0)
           per_iter_us = timeRuns(rt, c, 1);
+        if (profileThis)
+        {
+          std::string ranIn;
+          (void)onnxCollectExecutedOps(rt, c.session, &ranIn, "Conv");
+          const char *want = onnxProfileTypeName(dt.dtype);
+          if (want[0] && !ranIn.empty() && ranIn != want)
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: ran in %s, not %s\n",
+                        ep.providerKey.c_str(), row.c_str(), ranIn.c_str(), want);
+            ranWider = ranIn;
+          }
+        }
         if (per_iter_us <= 0.0)
         {
           if (firstErr.empty())
@@ -373,6 +414,9 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (mean_us <= 0.0)
           break;
 
+        rungs++;
+        if (firstSpatial == 0)
+          firstSpatial = sp;
         const double flops = convFlops(v, sp);
         const double rate = flops * 1.0e6 / mean_us;
         lastRate = flops / mean_us;
@@ -412,6 +456,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
 
         bool createCliff = (prevCreateUs > 0.0 &&
+                            createUs > kOnnxCreateGrowthFloor &&
                             createUs > prevCreateUs * kOnnxCreateGrowthFactor);
         if (createCliff)
         {
@@ -443,6 +488,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         "fastest at " +
                         std::to_string(bestSpatial) + " square.  " + dt.note +
                         "  " + v.note;
+        if (!ranWider.empty())
+          o.description += "  This provider has no " + std::string(dt.label) +
+                           " convolution kernel and ran it in " + ranWider +
+                           ", so this is that width rather than " +
+                           dt.label + ".";
+        if (offDeviceBelow > 0)
+          o.description += "  Feature maps below " + std::to_string(firstSpatial) +
+                           " square were sent to another compute unit by the "
+                           "provider's runtime and are not in this figure.";
+        if (offDeviceAbove > 0)
+          o.description += "  From " + std::to_string(offDeviceAbove) +
+                           " square the provider's runtime sent the work to "
+                           "another compute unit, which ended the sweep.";
         test.emit(row, (float)best, o);
       }
       else
@@ -451,7 +509,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                     "feature-map sizes.  ") +
                         dt.note + "  " +
                         v.note;
-        test.skip(row, errStatus,
+        test.skip(row, onnxFailureStatus(firstErr, errStatus),
                   firstErr.empty() ? "convolution unsupported" : firstErr,
                   o.description);
       }

@@ -18,6 +18,7 @@
 
 #include <onnx/onnx_peak.h>
 #include "onnx_model.h"
+#include "onnx_probe.h"
 #include "onnx_session.h"
 
 #include <chrono>
@@ -41,17 +42,27 @@ double nowUs()
 // session rather than a matmul).  Y = X * K over [1, width] fp16; K is a
 // full-size constant rather than a scalar on purpose -- see there.
 
-std::string smallMatMulModel(int64_t d)
+// In whichever width the provider streams faster (onnxStreamDtype): the
+// arithmetic is meant to be negligible, and on a provider without native
+// fp16 kernels a fp16 matmul is not -- ONNX Runtime's CPU EP took 1.1 ms for
+// this graph in fp16 on a Threadripper, twenty times its fp32 time, all of it
+// arithmetic rather than the overhead the row is named for.
+std::string smallMatMulModel(int64_t d, int dtype)
 {
-  std::string w((size_t)d * d * 2, '\0');
+  std::string w((size_t)onnxElemBytes(dtype, d * d), '\0');
+  float *f = reinterpret_cast<float *>(&w[0]);
   uint16_t *h = reinterpret_cast<uint16_t *>(&w[0]);
   uint32_t s = 0x243f6a88u;
   for (int64_t i = 0; i < d * d; i++)
   {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    h[i] = floatToHalf((float)(s >> 8) / 16777216.0f - 0.5f);
+    const float v = (float)(s >> 8) / 16777216.0f - 0.5f;
+    if (dtype == ONNX_DT_FLOAT)
+      f[i] = v;
+    else
+      h[i] = floatToHalf(v);
   }
-  return onnxMatMulModel(d, d, d, ONNX_DT_FLOAT16, w);
+  return onnxMatMulModel(d, d, d, dtype, w);
 }
 
 struct Timed
@@ -65,7 +76,7 @@ struct Timed
 Timed timeGraph(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                 const std::string &model,
                 const char *inName, const char *outName,
-                int64_t rows, int64_t cols,
+                int64_t rows, int64_t cols, int dtype,
                 unsigned int warmup, bool forceIters, unsigned int forced)
 {
   Timed t;
@@ -76,17 +87,18 @@ Timed timeGraph(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   if (!ses.session)
   {
     t.error  = ses.error;
-    t.status = ResultStatus::Unsupported;
+    t.status = onnxFailureStatus(ses.error);
     t.createUs = -1.0;
     return t;
   }
 
-  std::vector<uint8_t> in((size_t)rows * cols * 2, 0);
-  std::vector<uint8_t> out((size_t)rows * cols * 2, 0);
+  const size_t es = (size_t)onnxElemBytes(dtype, 1);
+  std::vector<uint8_t> in((size_t)rows * cols * es, 0);
+  std::vector<uint8_t> out((size_t)rows * cols * es, 0);
   {
-    uint16_t *h = reinterpret_cast<uint16_t *>(in.data());
+    const std::string half = onnxFloatScalar(0.5f, dtype);
     for (int64_t i = 0; i < rows * cols; i++)
-      h[i] = floatToHalf(0.5f);
+      std::memcpy(&in[(size_t)i * es], half.data(), es);
   }
 
   OrtMemoryInfo *mi = nullptr;
@@ -97,11 +109,11 @@ Timed timeGraph(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
         mi, in.data(), in.size(), shape, 2,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &inVal);
+        (ONNXTensorElementDataType)dtype, &inVal);
   if (!st)
     st = rt.api->CreateTensorWithDataAsOrtValue(
         mi, out.data(), out.size(), shape, 2,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16, &outVal);
+        (ONNXTensorElementDataType)dtype, &outVal);
   if (mi) rt.api->ReleaseMemoryInfo(mi);
 
   auto run = [&](unsigned int n) -> double {
@@ -157,23 +169,22 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   (void)cfg;
 
   Timed trivial = timeGraph(rt, ep, onnxTrivialMulModel(kTrivialWidth), "X", "Y",
-                            1, kTrivialWidth, warmupCount, forceIters,
-                            specifiedIters);
+                            1, kTrivialWidth, ONNX_DT_FLOAT16, warmupCount,
+                            forceIters, specifiedIters);
+  const int mmDtype = onnxStreamDtype(rt, ep);
   Timed matmul;
   if (!clpeak::cancelRequested())
-    matmul = timeGraph(rt, ep, smallMatMulModel(kSmallMatMul), "A", "C",
-                       kSmallMatMul, kSmallMatMul, warmupCount, forceIters,
-                       specifiedIters);
+    matmul = timeGraph(rt, ep, smallMatMulModel(kSmallMatMul, mmDtype), "A", "C",
+                       kSmallMatMul, kSmallMatMul, mmDtype, warmupCount,
+                       forceIters, specifiedIters);
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_dispatch_latency", "ONNX dispatch latency", "s",
        Category::Latency,
-       "The fixed cost of handing one piece of work to this execution "
-       "provider, with the arithmetic made deliberately negligible.  Reaching "
-       "an accelerator means crossing a runtime, a driver and sometimes an "
-       "on-device compiler, and each crossing is charged per submission.  "
-       "This is why a chip advertising tens of TOPS can still lose to the CPU "
-       "on small work, and none of the throughput rows can show it.",
+       "The fixed cost of handing one piece of work to this provider, with "
+       "the arithmetic made deliberately negligible.  It is why a chip "
+       "advertising tens of TOPS can still lose to the host on small work, "
+       "and no throughput row can show it.",
        TestShape::Heterogeneous, "what is submitted"});
 
   if (trivial.perRunUs > 0.0)
@@ -184,22 +195,23 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     test.skip("trivial_op", trivial.status, trivial.error,
               "One multiply over 64 values.");
 
+  const std::string mmNote =
+      std::string("A 256x256x256 matrix multiply in ") +
+      (mmDtype == ONNX_DT_FLOAT ? "fp32" : "fp16") +
+      ": 34 million operations, which any accelerator here should finish in "
+      "well under a millisecond.  Whatever this reads above the row before "
+      "it is still mostly overhead.";
   if (matmul.perRunUs > 0.0)
-    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6),
-              "A 256x256x256 matrix multiply: 34 million operations, which "
-              "any accelerator here should finish in well under a "
-              "millisecond.  Whatever this reads above the row before it is "
-              "still mostly overhead.");
+    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str());
   else
     test.skip("matmul_256", matmul.status, matmul.error,
               "A 256x256x256 matrix multiply.");
 
   if (trivial.createUs > 0.0)
     test.emit("session_create", (float)(trivial.createUs * 1e-6),
-              "Preparing that trivial graph for execution.  On providers that "
-              "compile graphs ahead of time this runs a compiler rather than "
-              "bookkeeping, which is why starting up and running steadily are "
-              "such different stories.");
+              "Preparing that trivial graph for execution.  On providers "
+              "that compile ahead of time this runs a compiler, not "
+              "bookkeeping.");
   else
     test.skip("session_create", trivial.status, trivial.error,
               "Preparing the trivial graph for execution.");

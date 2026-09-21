@@ -30,7 +30,7 @@ jobs:
           cache: true
 
       - name: Build clpeak_ffi xcframework
-        run: tool/build_ios_native.sh
+        run: tools/build_ios_native.sh
 
       - name: Build iOS app (unsigned)
         working-directory: app

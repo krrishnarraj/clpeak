@@ -28,9 +28,14 @@ extern "C" {
 CLPEAK_FFI_EXPORT const char *clpeak_version(void);
 
 // Device catalog for every backend compiled into this library, as the
-// inventoryToJson() document:
-//   {"backends":[{"name","available","platforms":[{"index","name",
-//     "devices":[{"index","name","type",...}]}]}]}
+// inventoryToJson() document (include/common/inventory.h has the keys):
+//   {"backends":[{"name","flag","available",info?,reason?,notes?,
+//     "platforms":[{"index","name",
+//       "devices":[{"index","name","type",arch?,driver?,api?,...}]}]}]}
+// `flag` is the backend's command-line name; `--devices <flag>:<index>`
+// names a device, and a run's argv narrows to exactly the devices listed.
+// `reason` says why an unavailable backend is unavailable; `info` is a
+// backend-level fact (the ONNX Runtime version, the OS release).
 CLPEAK_FFI_EXPORT char *clpeak_copy_backend_catalog_json(void);
 
 CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
@@ -48,14 +53,72 @@ CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 // that link ONNX Runtime statically (iOS) or omit the backend entirely.
 CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 
+// Plugin execution-provider libraries to register on the ONNX Runtime
+// environment (ONNX Runtime 1.22+; src/onnx/onnx_plugin.h): `spec` is one
+// `NAME=PATH` per line ('\n'-separated), NAME being the registration name
+// the provider expects ("QNNExecutionProvider" for Qualcomm's plugin) and
+// PATH the library -- absolute, or on Android a bare soname the APK's lib
+// dir resolves.  Lines starting with '!' name an implicit library: one the
+// app bundles on the off-chance the hardware is there, whose failure to
+// register goes to the verbose log rather than the run's notes.  NULL/""
+// clears the set.  Between runs only, like clpeak_set_onnx_library(): the
+// environment is rebuilt on the next enumeration or run.
+CLPEAK_FFI_EXPORT void clpeak_set_onnx_ep_libraries(const char *spec);
+
+// Windows ML's execution-provider catalog (Windows 11 24H2+): when
+// `enabled`, the vendor providers the catalog installs from the Microsoft
+// Store are registered as plugin libraries on the next enumeration or run.
+// `path` names Microsoft.Windows.AI.MachineLearning.dll or its directory,
+// or is NULL/"" to search beside the loaded runtime and the executable; with
+// a path and no library chosen through clpeak_set_onnx_library(), the
+// onnxruntime.dll beside the catalog becomes the runtime.  Installing a
+// provider is a download, which is why this is a switch and not a default.
+// Accepted everywhere; off Windows the status reports the catalog as
+// unavailable.
+CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
+
 // State of the ONNX Runtime, for a settings screen to report back with:
-//   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str}
+//   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str,
+//    "epLibraries":[{"name":str,"path":str,"named":bool,"registered":bool,
+//                    "error":str}],
+//    "winml":{"enabled":bool,"path":str,"error":str}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
 // clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
 // empty when it was found by name.  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
+// `epLibraries` is what the last environment registered, so a library set
+// since the last enumeration is absent until the next one; `winml.path` is
+// the catalog DLL that answered and `winml.error` why it did not.  When
+// enabled but nothing has resolved the catalog yet both are empty --
+// pending until the next enumeration or run, like `epLibraries`.
 // {"available":false,"error":"ONNX backend not built in"} without one.
 CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
+
+// The same two entry points for LiteRT: which libLiteRt to load (absolute
+// path, or NULL/"" to search the conventional names) and, separately, the
+// directory holding the NPU dispatch / compiler-plugin libraries and the
+// vendor runtime (NULL/"" = beside the LiteRT library).  Between runs only;
+// no-ops on a build without the backend.  On iOS the runtime is dlopen'd
+// from the app bundle's own Frameworks directory, the one place the platform
+// loads a library from, so a path named here could never be loaded there
+// and the settings screen does not offer one.
+CLPEAK_FFI_EXPORT void clpeak_set_litert_library(const char *path);
+CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
+
+// Android: a writable directory (the app's support directory) where the
+// backend stages one vendor's NPU shims when the APK carries several.
+// LiteRT loads the first libLiteRtDispatch_* it lists in a directory, so
+// the shims for this SoC (ro.soc.manufacturer) get `<dir>/<vendor>/` of
+// links to the packaged files, remade at every launch.  Before enumeration;
+// a no-op elsewhere and with one vendor or none packaged.
+CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_stage_dir(const char *dir);
+
+// State of the LiteRT runtime, for a settings screen:
+//   {"available":bool,"version":str,"path":str,"error":str}
+// `version` is the ABI version this build was compiled against -- LiteRT
+// exposes no runtime version string.  {"available":false,"error":"LiteRT
+// backend not built in"} without the backend.
+CLPEAK_FFI_EXPORT char *clpeak_copy_litert_status_json(void);
 
 // ---- Event stream -------------------------------------------------------------
 
@@ -102,10 +165,22 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // reading's note travels with the reading, never up-front, because that is
 // where it is authored (logger::EmitOptions::description).
 //   test_end      {}          device_end {}          backend_end {}
-//   note          {message}
+//   log           {..., test, variant, level, source, elapsed_s, message}
 //   done          {status, cancelled}   // ALWAYS the last event of a launch
 //
-// Callbacks fire on the thread that called clpeak_launch().
+// `log` is one line of the run's diagnostic stream -- the same entry the
+// saved document holds in its `log` array (docs/format-v3.md): `level` is
+// error | warning | info | debug, `source` names the library a message was
+// relayed from ("onnxruntime", "vulkan", "opencl", "console") or is empty
+// for clpeak's own, `elapsed_s` is seconds since the run started, and the
+// scope fields say where it fired.  Debug entries arrive only when argv has
+// --verbose.  The scope fields are empty for a message outside any backend
+// (a rejected argument, a backend not in this build).
+//
+// Callbacks fire on the thread that called clpeak_launch(), except `log`
+// events relayed from a vendor runtime's own logging callback or a console
+// capture, which fire on whatever thread produced them.  The Dart listener
+// (NativeCallable.listener) is built for exactly that.
 typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 
 // ---- Run -----------------------------------------------------------------------
@@ -123,6 +198,10 @@ typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 // meaningful here and are rejected.  `-o <file>` is honored at the end of the
 // run exactly like the CLI, so partial results of a cancelled run still get
 // saved -- with `"cancelled": true` in the document to say they are partial.
+// While the run is in flight, `<file>` with `.json` swapped for `.log` holds
+// the diagnostic stream so far, one JSON object per line (run_log.h); it is
+// removed once the document is written, so one left behind means the process
+// died mid-run and the sidecar is that run's only record.
 // Never calls exit().
 CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
                                     ClpeakEventCallback on_event,

@@ -350,6 +350,14 @@ uint64_t systemMemoryBytes();
 // on modest hardware rather than the most a big machine could manage.
 uint64_t memoryBudget(uint64_t ceiling, unsigned fraction = 4);
 
+// How many file descriptors this process holds open, and its soft limit
+// (0 when unlimited or unknown).  False where the count cannot be read
+// (Windows).  A vendor runtime that leaks descriptors -- LiteRT's WebGPU
+// accelerator on Linux exhausts them and is lost -- takes every later
+// backend in the process down with it, and this is how a run says so
+// instead of leaving the later failures to look like their own.
+bool openFileDescriptors(unsigned long &used, unsigned long &limit);
+
 } // namespace clpeak
 
 // ---------------------------------------------------------------------------
@@ -390,15 +398,63 @@ struct benchmark_config_t {
 };
 
 // ---------------------------------------------------------------------------
-// Verbose diagnostics gate (--verbose).  Backend build logs, kernel launch /
-// API errors and similar debug spam are suppressed by default and only
-// emitted when verbose is enabled.  A process-global flag is used because the
-// gated sites include free functions and error macros in the *_device.cpp
-// files that have no access to the Peak object or the logger.
+// Diagnostics.  Everything clpeak has to say outside a reading -- a missing
+// library, a failed kernel build, a calibration decision -- is one message
+// at one level, routed through clpeak::logMessage():
+//
+//   Error    something failed that was expected to work
+//   Warning  why something is absent or partial (the old logger::note())
+//   Info     a fact worth keeping in every dump, not worth printing
+//   Debug    the trace a maintainer reads when a number looks wrong
+//
+// Info and above are always recorded on the run document's `log` (see
+// run_log.h); Debug only when --verbose is on.  The CLI prints its own
+// warnings inline with the results, and everything else to stderr under
+// --verbose; the GUI gets every entry as an event and keeps it in the file
+// a user exports.  A process-global route, like the verbose flag, because
+// the emitting sites include free functions and error macros in the
+// *_device.cpp files that have no access to the Peak object or the logger.
+//
+// `source` names the library a message came from when clpeak merely relayed
+// it: "onnxruntime", "vulkan", "opencl", or "console" for output captured
+// off stdout/stderr.  Empty for clpeak's own messages.
 // ---------------------------------------------------------------------------
 namespace clpeak {
 bool verboseEnabled();
 void setVerbose(bool on);
+
+enum class LogLevel { Error, Warning, Info, Debug };
+const char *logLevelString(LogLevel level);
+LogLevel    logLevelFromString(const std::string &s);
+
+// Route one diagnostic.  Trailing whitespace is dropped; embedded newlines
+// (a compiler's build log) are kept -- the line structure is the message.
+void logMessage(LogLevel level, const std::string &source, std::string message);
+
+// printf-style form of the same.
+void logf(LogLevel level, const char *fmt, ...);
+
+// Where a message goes.  Installed for the duration of a run by RunLog
+// (run_log.h); with nothing installed -- `--list-devices`, the GUI's
+// catalog enumeration -- messages fall through to stderr, Debug ones only
+// under --verbose.
+class LogSink {
+public:
+  virtual ~LogSink() = default;
+  virtual void onLog(LogLevel level, const std::string &source,
+                     const std::string &message) = 0;
+};
+void    setLogSink(LogSink *sink);
+LogSink *logSink();
+
+// Write straight to the process's real stderr, bypassing any console capture
+// in progress (console_mute.h).  What renders a captured line must not write
+// into the capture, or the line would be captured again; and stderr is
+// unbuffered, so a line that reaches here is on screen before a driver-side
+// crash can take the process down.
+void stderrWrite(const std::string &text);
+// The fd stderrWrite() uses while a capture is redirecting fd 2, or -1.
+void setRealStderrFd(int fd);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,12 +471,18 @@ bool cancelRequested();
 void resetCancel();
 }
 
-// Gated stderr diagnostic — no-op unless --verbose was passed.  Flushed, so the
-// last line printed before a driver-side crash is actually on screen: --verbose
-// is the only tool we have for locating a fault inside someone else's shader
-// compiler, and a buffered line would be the one that mattered.
+// One diagnostic at an explicit level: CLPEAK_LOG(Error, "cuInit failed: %s", s).
+#define CLPEAK_LOG(level, ...) \
+    ::clpeak::logf(::clpeak::LogLevel::level, __VA_ARGS__)
+
+// Debug-level diagnostic -- a no-op unless --verbose was passed.  Gated at
+// the call site, not inside logf(), so the arguments are never evaluated
+// when it is off: some of them are expensive (an OpenCL build-log query).
+// --verbose is the only tool we have for locating a fault inside someone
+// else's shader compiler, so every line is flushed as it is written, and
+// with -o it is also on disk before the next line runs (run_log.h).
 #define CLPEAK_VLOG(...) \
-    do { if (::clpeak::verboseEnabled()) { fprintf(stderr, __VA_ARGS__); \
-                                           fflush(stderr); } } while (0)
+    do { if (::clpeak::verboseEnabled()) \
+             ::clpeak::logf(::clpeak::LogLevel::Debug, __VA_ARGS__); } while (0)
 
 #endif  // COMMON_H

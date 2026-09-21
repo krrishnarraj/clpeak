@@ -287,15 +287,11 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {"onnx_numeric_error", "ONNX MatMul numeric error", "ppm",
        Category::Compute,
        "How far each datatype's answer drifts from a full-precision one, in "
-       "parts per million, on a fixed 1024x1024x1024 matrix multiply.  Speed "
-       "rows alone cannot be compared honestly across datatypes: a format is "
-       "fast because it discarded precision, and this is how much.  The "
-       "reference multiplies the very same operands the device was given, so "
-       "what is measured is the arithmetic and the width the answer is kept "
-       "in -- not the rounding of the inputs, which is a property of the "
-       "format rather than of the hardware and would be identical everywhere.  "
-       "The fp32 row also catches a provider that accepts a full-precision "
-       "graph and then computes it at lower precision behind your back.",
+       "parts per million, on a fixed 1024-cubed matrix multiply -- what the "
+       "speed rows cost.  The reference multiplies the same operands the "
+       "device was handed, so this is the arithmetic and the width the answer "
+       "was kept in, not the rounding of the inputs, which is the format's "
+       "and identical everywhere.",
        // Lower is better, which the `ppm` unit already says.
        TestShape::Heterogeneous, "data type"});
 
@@ -321,7 +317,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       auto it = probe.find(v.label);
       if (it != probe.end() && !it->second.ok)
       {
-        test.skip(v.label, ResultStatus::Unsupported, it->second.reason, o.description);
+        test.skip(v.label, onnxFailureStatus(it->second.reason), it->second.reason,
+                  o.description);
         continue;
       }
     }
@@ -329,6 +326,15 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // runtime reports whatever ORT says about IR versions, which names neither
     // the datatype nor the fix.
     if (std::string why = onnxDtypeUnsupportedReason(rt, v.dtype); !why.empty())
+    {
+      test.skip(v.label, ResultStatus::Unsupported, why, o.description);
+      continue;
+    }
+    // And the fence, for the same reason: this graph is the probe's in
+    // another shape, and a provider that crashes on it must not be handed
+    // it whatever the cache says.  The accuracy rows have no blocked-weight
+    // form, so the block size is zero.
+    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq, 0); !why.empty())
     {
       test.skip(v.label, ResultStatus::Unsupported, why, o.description);
       continue;
@@ -487,7 +493,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     if (raw.empty())
     {
-      test.skip(v.label, ResultStatus::Unsupported,
+      test.skip(v.label, onnxFailureStatus(err),
                 err.empty() ? "run failed" : err, o.description);
       continue;
     }

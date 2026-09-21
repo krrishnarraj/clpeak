@@ -11,6 +11,7 @@ No backend-specific includes live here.
 - Looking for CLI options struct? → `options.h`
 - Looking for result output format? → `run_document.h` (model) / `docs/format-v3.md` (schema)
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
+- Emitting a diagnostic? → `CLPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `CLPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
 - Looking for device inventory structs? → `inventory.h`
 - Looking for gating? → `peak.h` (gating is part of Peak)
 - Classifying or documenting a test? → see *What a backend authors at beginTest()* below
@@ -74,13 +75,22 @@ Two things are easy to get wrong here:
   mislabelled by the test header.
 
 **A test's `CLPEAK_VLOG` lines belong after its `beginTest()`.** The table
-streams per metric; a diagnostic emitted during the *setup* that precedes
-`beginTest()` therefore appears under the previous test's readings, where it
-reads as belonging to them. Open the scope first — it needs nothing from the
-setup — and let the diagnostic land under its own header. The
+streams per metric, and the run log stamps every diagnostic with the *open*
+scope; a line emitted during the *setup* that precedes `beginTest()` therefore
+prints under the previous test's readings and is filed under that test in the
+document, where it reads as belonging to it. Open the scope first — it needs
+nothing from the setup — and let the diagnostic land under its own header. The
 global-bandwidth working-set line is the worked example, in all five GPU
 backends. Device-scope diagnostics (a failed program build, an enumeration
 dump) are the exception and correctly precede every test.
+
+**Pick the level by who needs the line.** `Error` for something that was
+expected to work and did not (a driver init, a kernel build — put the build
+log in the message), `Warning` for why something is absent (`note()` is this),
+`Debug` for what a maintainer reads when a number looks wrong. Errors and
+warnings reach every dump; debug lines only a `--verbose` one. Never
+`fprintf(stderr)` or `NSLog` a diagnostic: on a phone that reaches nobody,
+while the log reaches the exported file.
 
 **Reopen across scopes, not within one.** A family whose data types are each
 measured in their own block should open ONE scope and pass it down, not open
@@ -155,16 +165,18 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 |------|---------|
 | `peak.h` | `Peak` abstract base class + gating — every backend implements this |
 | `benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums, `categoryOf()` |
-| `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration |
+| `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration, the diagnostics route (`LogLevel`, `logMessage()`, `CLPEAK_LOG` / `CLPEAK_VLOG`, `LogSink`) |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
 | `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
 | `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix |
 | `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
-| `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, single `onEvent()` hook, accumulated `results` |
+| `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
+| `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |
+| `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
-| `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` |
-| `dynlib.h` | `dynOpen()`/`dynSym()`/`dynClose()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver |
+| `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
+| `dynlib.h` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver. No close: a handle stays mapped for the life of the process, even one that turned out to be the wrong file (the header has the exit crash that proved it) |
 
 ## When You Change This Directory
 

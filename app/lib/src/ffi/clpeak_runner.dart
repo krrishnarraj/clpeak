@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import 'clpeak_bindings.dart';
+import '../model/run_document.dart';
 import 'clpeak_events.dart';
 
 /// A single in-flight benchmark run.
@@ -55,7 +56,8 @@ class ClpeakRun {
     try {
       event = ClpeakEvent.fromJson(jsonDecode(json) as Map<String, dynamic>);
     } catch (_) {
-      event = NoteEvent(json);
+      event = LogEntryEvent(LogEntry(
+          level: LogLevel.warning, message: 'undecodable event: $json'));
     }
     _events.add(event);
     if (event is DoneEvent) {

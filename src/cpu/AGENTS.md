@@ -35,7 +35,7 @@ local memory, DRAM ↔ global memory.
 
 | File | Purpose |
 |------|---------|
-| `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup → MT clock settle → probe → `pickIters` timed batch), `enumerate`, `printInventory` |
+| `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup → MT clock settle → probe → `pickIters` timed batch), `enumerate` |
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, per-instance **and aggregate** cache sizes, ISA flags from the `cpu_dispatch.cpp` probe |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
@@ -56,8 +56,8 @@ local memory, DRAM ↔ global memory.
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
 | `string.cpp` | `runStringScan/Utf8Validate` — `Category::String` in GB/s, own `--string` flag |
-| `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::Amx` |
-| `apple_blas.cpp` | `runAppleBlas` (`--accelerate`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
+| `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::MatrixCompute` (`--matrix-compute`) |
+| `apple_blas.cpp` | `runAppleBlas` (`--gemm`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width) |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level, plus the `DRAM linear`, MLP (`DRAM x8`/`x32`) and TLB-miss rows |
 | `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (seconds-per-op cost probes) and `runSmtScaling` (flops at 1 thread/core vs all logical threads) |
@@ -67,8 +67,9 @@ local memory, DRAM ↔ global memory.
 - Built by default (`CLPEAK_ENABLE_CPU=ON`); the one backend with no external
   dependency, so it is always enabled.
 - Optimization flags are scoped to `peak_cpu` only (see `CMakeLists.txt`).
-- `peak_common` is compiled with `ENABLE_CPU` too, because `options.cpp` and the
-  help text gate the CPU flags on that macro.
+- `peak_common` is compiled with `ENABLE_CPU` too: `options.cpp` reads the
+  `ENABLE_*` macros to know which backends this binary carries (every flag
+  parses everywhere; the macro only feeds `BackendInfo::builtIn`).
 - **The ISA feature TUs never take part in LTO** (`clpeak_add_isa_tu` appends
   `-fno-lto` / `/GL-`). A TU's `-m`/`-march` flags don't survive GCC's LTRANS
   re-compile, so the assembler stops accepting its instructions: gcc 16.2 +
@@ -293,9 +294,10 @@ rows — if it returns, frame it as GHASH GB/s or Gops.
 
 - If you add a new benchmark → add it to the appropriate file, the `runAll()`
   dispatch, the `CpuPeak` interface (`include/cpu/cpu_peak.h`), `CMakeLists.txt`,
-  and this file. New CPU-specific tests also need a `Benchmark` enum value +
-  `categoryOf()` entry in `include/common/benchmark_enums.h` and a flag in
-  `src/common/options.cpp`.
+  and this file. A measurement no other backend makes also needs a `Benchmark`
+  enum value + `categoryOf()` entry in `include/common/benchmark_enums.h` and
+  a flag row in `src/common/options.cpp`, named for what it measures (never
+  `--cpu-…`: the backend flag already says where).
 - If you add a new ISA capability gate → set it in `cpu_device.cpp::detectIsa()`
   and document it under `cpu_device_info_t`.
 - If you validate a codegen-only path on real silicon → move it out of the

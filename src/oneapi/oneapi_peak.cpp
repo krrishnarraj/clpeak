@@ -17,12 +17,6 @@ OneapiPeak::OneapiPeak()
 
 OneapiPeak::~OneapiPeak() {}
 
-void OneapiPeak::applyOptions(const CliOptions &opts)
-{
-  Peak::applyOptions(opts);
-  deviceIndices = opts.oneapiDeviceIndices;
-}
-
 // Collect every SYCL device of a given type across all platforms.
 static void collectDevices(sycl::info::device_type type,
                            std::vector<sycl::device> &out)
@@ -35,7 +29,7 @@ static void collectDevices(sycl::info::device_type type,
   }
   catch (const sycl::exception &e)
   {
-    fprintf(stderr, "sycl::platform::get_platforms failed: %s\n", e.what());
+    CLPEAK_LOG(Error, "oneAPI: sycl::platform::get_platforms failed: %s", e.what());
   }
 }
 
@@ -145,8 +139,7 @@ int OneapiPeak::runAll()
   {
     if (clpeak::cancelRequested())
       break;
-    if (!deviceIndices.empty() &&
-        std::find(deviceIndices.begin(), deviceIndices.end(), idx) == deviceIndices.end())
+    if (!isDeviceSelected(idx))
       continue;
 
     OneapiDevice dev;
@@ -185,8 +178,8 @@ int OneapiPeak::runAll()
     if (isAllowed(Benchmark::ComputeMP))     runComputeMP(dev, cfg);
     if (isAllowed(Benchmark::ComputeBF16))   runComputeBF16(dev, cfg);
     if (isAllowed(Benchmark::ComputeInt))         runComputeInt32(dev, cfg);
-    if (isAllowed(Benchmark::JointMatrix))   runJointMatrix(dev, cfg);
-    if (isAllowed(Benchmark::Onemkl))        runOnemkl(dev, cfg);
+    if (isAllowed(Benchmark::MatrixCompute)) runJointMatrix(dev, cfg);
+    if (isAllowed(Benchmark::Gemm))          runOnemkl(dev, cfg);
 
 
     if (isAllowed(Benchmark::GlobalBW))     runGlobalBandwidth(dev, cfg);
@@ -205,11 +198,14 @@ int OneapiPeak::runAll()
 BackendInventory OneapiPeak::enumerate()
 {
   BackendInventory inv;
-  inv.backend = "oneAPI";
+  inv.id = kBackend;
 
   auto devs = enumerateDevices();
   if (devs.empty())
+  {
+    inv.unavailableReason = "no SYCL devices found";
     return inv;
+  }
   inv.available = true;
 
   InventoryPlatform plat;
@@ -228,24 +224,6 @@ BackendInventory OneapiPeak::enumerate()
 
   inv.platforms.push_back(std::move(plat));
   return inv;
-}
-
-void OneapiPeak::printInventory(const BackendInventory &b, std::ostream &os)
-{
-  os << "\n=== oneAPI backend ===\n";
-  if (!b.available)
-  {
-    os << "oneAPI: no SYCL devices found\n";
-    return;
-  }
-  for (const auto &plat : b.platforms)
-    for (const auto &d : plat.devices)
-    {
-      os << "  oneAPI Device " << d.index << ": " << d.name;
-      if (!d.typeStr.empty())
-        os << " [" << d.typeStr << "]";
-      os << "\n";
-    }
 }
 
 #endif // ENABLE_ONEAPI

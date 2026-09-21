@@ -116,75 +116,57 @@ namespace
   const Variant kVariants[] = {
       {"fp16", ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true, nullptr,
        "16-bit weights and 16-bit arithmetic, the form an unquantized model is "
-       "served in and the reference every other row here is read against."},
+       "served in and the reference the other rows are read against."},
 
       {"int4_weight", ONNX_DT_FLOAT16, ONNX_DT_INT4, kWeightBlock, false,
        /*sweep=*/true, nullptr,
-       "4-bit weights with one scale per 32 of them, against 16-bit activations "
-       "-- what a quantized language model actually ships as.  The arithmetic is "
-       "still 16-bit, because the weights are unpacked on the way into the "
-       "multiply, so what four bits buys is a quarter of the weight traffic.  "
-       "That is worth nothing while the layer is compute-bound and worth "
-       "everything while it is not, which is exactly what the prompt ladder and "
-       "the decode rows respectively show."},
+       "4-bit weights, one scale per 32, against 16-bit activations -- what a "
+       "quantized language model ships as.  The arithmetic stays 16-bit, so "
+       "four bits buys weight traffic rather than rate."},
 
       {"fp4_weight", ONNX_DT_FLOAT16, ONNX_DT_FLOAT4E2M1, kWeightBlock, false,
        /*sweep=*/false, nullptr,
-       "The same shape as the int4 row -- identical geometry, identical block of "
-       "32, identical 16-bit activations -- with the four bits spent on a float "
-       "instead of an integer.  Nothing else differs, so a gap between the two is "
-       "the format and not the arrangement."},
+       "The int4 row's shape exactly, with the four bits spent on a float "
+       "instead of an integer, so a gap between the two is the format alone."},
 
       {"int8_weight", ONNX_DT_FLOAT16, ONNX_DT_INT8, kWeightBlock, false,
        /*sweep=*/false, nullptr,
-       "8-bit weights, blocked the same way, against 16-bit activations.  Read "
-       "beside int8_qdq it separates the two things quantization does: this row "
-       "narrows only the weights, that one narrows the arithmetic as well, and "
-       "the difference between them is what the integer units are worth."},
+       "8-bit weights, blocked the same way, against 16-bit activations.  This "
+       "narrows only the weights where int8_qdq narrows the arithmetic too, so "
+       "the gap between them is what the integer units are worth."},
 
       {"int8_qdq", ONNX_DT_FLOAT16, ONNX_DT_INT8, 0, /*qdq=*/true,
        /*sweep=*/false, "ops",
-       "8-bit weights and 8-bit arithmetic through the projections, quantized in "
-       "and quantized out -- the form vendors usually quote headline TOPS figures "
-       "for, now measured on a whole layer rather than one matmul.  Attention and "
-       "the softmax stay 16-bit, as they do in every real deployment."},
+       "8-bit weights and 8-bit arithmetic through the projections, quantized "
+       "in and out -- what headline TOPS figures are quoted for, measured on a "
+       "whole layer.  Attention and the softmax stay 16-bit, as they do in "
+       "every real deployment."},
 
       {"fp32", ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
-       "Full precision, which nobody serves a language model in.  It is here as a "
+       "Full precision, which nobody serves a language model in, here as a "
        "control: a provider whose fp16 row fails to beat it is not running "
-       "half-precision hardware, and on some providers this is the only row "
-       "with a native kernel behind it."},
+       "half-precision hardware."},
 
       {"bf16", ONNX_DT_BFLOAT16, ONNX_DT_BFLOAT16, 0, false, /*sweep=*/false,
        nullptr,
-       "The 16-bit float with fp32's exponent range and three fewer mantissa bits. "
-       " A whole layer is a far harder test of it than a matmul is: it needs bf16 "
-       "kernels for every operation in the block -- the elementwise multiplies, "
-       "the softmax, the sigmoid, the residual adds and the reduction -- and not "
-       "merely for the matrix multiply.  A refusal here beside a working bf16 row "
-       "in the MatMul test is exactly that gap, and it is why a model in this "
-       "format can fail to run at all on hardware whose spec sheet advertises "
-       "it."},
+       "The 16-bit float with fp32's exponent range and three fewer mantissa "
+       "bits.  A layer needs bf16 kernels for every operation in it, not just "
+       "the matmul, so a refusal here beside a working MatMul bf16 row is that "
+       "gap."},
 
       {"fp8_e4m3", ONNX_DT_FLOAT16, ONNX_DT_FLOAT8E4M3FN, 0, /*qdq=*/true,
        /*sweep=*/false, nullptr,
-       "8-bit floats through the projections -- four exponent bits and three of "
-       "mantissa -- quantized in and quantized out, against 16-bit attention.  "
-       "This is what quantized inference uses when it goes below 16 bits without "
-       "going to integers, and unlike int8 it keeps enough exponent range for "
-       "activations that have some.  Reported in TFLOPS, not TOPS: it is a "
-       "floating-point format."},
+       "8-bit floats through the projections, quantized in and out, against "
+       "16-bit attention.  Unlike int8 it keeps exponent range for activations "
+       "that have some, and it reports in TFLOPS because it is a float."},
 
       {"int8_kv", ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true,
        nullptr,
-       "16-bit weights and arithmetic throughout, with only the cached context "
-       "stored as 8-bit integers -- an axis of its own, and the one that decides "
-       "how long a conversation a device can hold.  At 8192 tokens the cache is "
-       "67 MB against 101 MB of weights, so halving it moves the total meaningfully "
-       "in a way it does not at short context, which is why this row sweeps.  It "
-       "is only a real measurement if the provider folds the dequantize into its "
-       "attention kernel; if it reads the whole cache back at full width every "
-       "token the row is refused, because that is slower than not quantizing.",
+       "16-bit throughout with only the cached context stored as 8-bit "
+       "integers -- the axis that decides how long a conversation a device can "
+       "hold, which is why this row sweeps context.  It counts only if the "
+       "provider folds the dequantize into its attention kernel; reading the "
+       "cache back at full width every token is refused.",
        /*kvDtype=*/ONNX_DT_INT8, /*decodeOnly=*/true},
   };
 
@@ -195,9 +177,9 @@ namespace
            + kFfnHidden * kDModel;    // Wd
   }
 
-  // Bytes of projection weights this variant actually keeps resident, blocked
-  // scales included.  This is the numerator of the decode row, so it has to be
-  // what moves rather than what an fp16 model would have moved.
+  // Bytes of projection weights this variant declares, blocked scales
+  // included.  This is the model's own size: what has to be built, uploaded
+  // and held, which is what the memory gate asks about.
   uint64_t weightBytes(const Variant &v)
   {
     const int64_t n = weightParams();
@@ -363,8 +345,14 @@ namespace
       // gets it.
       const bool keepQdqUnfused = v.qdq && (!onnxQdqFusionIsLegal(qActDtype) ||
                                             !onnxQdqFusionIsLegal(v.wDtype));
+      // A profiled run is the fusion probe at the smallest point, which asks
+      // what the provider fused and not where it ran: Core ML keeps the
+      // 64-token layer on the CPU and sends the 512-token one to the Neural
+      // Engine, and verifying the probe would refuse every point above it
+      // (onnx_session.h).  The timed points verify.
       auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
-                                   profile, keepQdqUnfused);
+                                   profile, keepQdqUnfused,
+                                   /*verifyPlacement=*/!profile);
       // The model is the largest allocation in the process; drop it before
       // anything else is allocated on top of the session's own copy.
       model.clear();
@@ -486,7 +474,7 @@ namespace
     if (!r.session)
     {
       error = r.error;
-      status = ResultStatus::Unsupported;
+      status = onnxFailureStatus(r.error);
       return -1.0;
     }
 
@@ -579,26 +567,37 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return v.unit != nullptr;
   };
 
-  auto provenanceEarly = [](const Variant &v, const VariantResult &vr)
-  {
-    std::string s = "  " +
-                    std::to_string((unsigned long long)(weightBytes(v) >> 20)) +
-                    " MB of weights";
-    if (!vr.ranAs.empty())
-    {
-      s += ", run as " + vr.ranAs;
-      if (vr.schemeName[0])
-        s += " with " + std::string(vr.schemeName);
-      if (vr.castedActs)
-        s += ", after casting the activations to the width its kernel wanted "
-             "-- a full pass over them inside this figure";
-    }
-    return s + ".";
-  };
+  // The fp16 variant is kVariants[0] and is measured first, which makes it
+  // the reference every other decode row is compared against: same layer,
+  // same context, differing only in the width each declares.
+  constexpr size_t kRefVariant = 0;
+  double refDecodeUs = 0.0, refDecodeBytes = 0.0;
 
-  const char *geometryEarly =
-      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
-      "(50.6M parameters).  ";
+  // What this provider demonstrably streams, measured (see onnxStreamBps).
+  // The decode rows count the bytes the model *declares*, which is all clpeak
+  // can know: a provider is free to store them narrower than asked, and no
+  // vendor publishes which do.  A row implying more traffic than the device
+  // has been seen to move is that happening, and it is caught by measurement
+  // rather than by a list of provider names -- the point being that a
+  // provider nobody here has run gets the same treatment.
+  const double streamBps = onnxStreamBps(rt, ep);
+
+  // What only a run can say: the kernel the provider fused to, the scheme it
+  // settled on, and whether it converted the activations first.
+  auto provenance = [](const Variant &v, const VariantResult &vr)
+  {
+    (void)v;
+    if (vr.ranAs.empty())
+      return std::string();
+    std::string s = "  Ran as " + vr.ranAs;
+    if (vr.schemeName[0])
+      s += " (" + std::string(vr.schemeName) + ")";
+    s += ".";
+    if (vr.castedActs)
+      s += "  The provider casts the activations to the width its kernel "
+           "wanted, a full pass inside this figure.";
+    return s;
+  };
 
   // The affordability seed, carried across variants.  Each one's first point
   // has no measurement of its own to predict from, and letting all six pay
@@ -610,12 +609,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto emitPrefillTo = [&](logger::TestScope &test, const Variant &vv,
                            const VariantResult &vvr)
   {
-    const std::string prov = provenanceEarly(vv, vvr);
+    const std::string prov = provenance(vv, vvr);
     for (int64_t sseq : promptsFor(vv))
     {
       const std::string metric = std::string(vv.label) + "_s" + std::to_string(sseq);
       logger::EmitOptions o;
-      o.description = std::string(geometryEarly) + vv.note + "  A prompt of " +
+      o.description = std::string(vv.note) + "  A prompt of " +
                       std::to_string(sseq) +
                       " tokens in one pass, counting every multiply in the "
                       "layer." +
@@ -639,99 +638,177 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   };
 
 
+  // Everything that has to be true before a variant is worth timing, in one
+  // place: the tiny gemm probe's verdict for the datatype, the opset the
+  // runtime can parse, the memory the fixed geometry needs, and -- for the
+  // quantized forms -- one profiled session proving the provider fused
+  // rather than dequantizing 101 MB of weights on every run.  Sets
+  // vr.usable, or vr.skipReason saying which of them failed.  Three call
+  // sites (both prefill units and decode) asked the same four questions.
+  auto validateVariant = [&](const Variant &v, VariantResult &vr) -> bool
+  {
+    if (vr.usable || !vr.skipReason.empty())
+      return vr.usable; // already decided by an earlier scope
+
+    // Gemm's 32^3 probe already knows if this dtype is unsupported here, and
+    // answering from it costs nothing where the block's 50M-weight model
+    // would cost a compile.
+    {
+      const auto &probe = onnxProbeGemmCache(rt, ep);
+      auto it = probe.find(v.label);
+      if (it != probe.end() && !it->second.ok)
+      {
+        vr.skipReason = it->second.reason;
+        return false;
+      }
+    }
+
+    // Naming the datatype that raised the opset turns "IR version 9 is not
+    // supported" into a sentence about the row.
+    {
+      std::string why = onnxDtypeUnsupportedReason(rt, v.wDtype);
+      if (why.empty())
+        why = onnxDtypeUnsupportedReason(rt, v.actDtype);
+      if (why.empty())
+      {
+        const int opset = variantOpset(v);
+        const uint32_t needApi = onnxMinOrtApiForOpset(opset);
+        if (needApi && rt.apiVersion < needApi)
+          why = "needs opset " + std::to_string(opset) +
+                ", which arrived in ONNX Runtime 1." + std::to_string(needApi) +
+                "; this runtime is " + rt.versionString;
+      }
+      if (!why.empty())
+      {
+        vr.skipReason = why;
+        return false;
+      }
+    }
+
+    // The geometry is fixed, so this test cannot shrink to fit: a device too
+    // small reports unsupported rather than measuring a smaller layer under
+    // the same name.
+    {
+      const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) +
+                              (64ull << 20) * onnxElemBytes(v.actDtype, 1) / 2;
+      const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
+      if (budget && budget < needed)
+      {
+        CLPEAK_VLOG("onnx-block[%s/%s]: needs %llu MB, budget %llu MB\n",
+                    ep.providerKey.c_str(), v.label,
+                    (unsigned long long)(needed >> 20),
+                    (unsigned long long)(budget >> 20));
+        vr.skipReason = "not enough memory for the canonical block; its "
+                        "geometry is fixed so the numbers stay comparable, and "
+                        "a smaller layer would not be the same test";
+        return false;
+      }
+    }
+
+    if (v.qdq || v.wBlock > 0 || v.kvDtype)
+    {
+      std::string tried, firstErr;
+      Scheme schemes[2];
+      const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
+      for (size_t si = 0; si < nSchemes; si++)
+      {
+        if (clpeak::cancelRequested())
+          break;
+        const int qAct = v.qdq ? schemes[si].actDtype : ONNX_DT_INT8;
+        const char *what = v.qdq ? schemes[si].name
+                                 : (v.kvDtype ? "quantized cache" : "weight-only");
+        // A cache-format row has to be probed in the regime that has a cache.
+        BlockRun probe = makeRun(rt, ep, v, v.decodeOnly, kKvLadder[0],
+                                 kPromptLadder[0], qAct, true);
+        if (!probe.session)
+        {
+          if (firstErr.empty())
+            firstErr = probe.error;
+          CLPEAK_VLOG("onnx-block[%s/%s]: %s rejected: %s\n",
+                      ep.providerKey.c_str(), v.label, what, probe.error.c_str());
+          continue;
+        }
+        timeRuns(rt, probe, 1);
+        auto ops = onnxCollectExecutedOps(rt, probe.session);
+        destroyRun(rt, probe);
+        const std::string joined = onnxJoinOps(ops);
+        CLPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n",
+                    ep.providerKey.c_str(), v.label, what, joined.c_str());
+        if (projectionsRanQuantized(ops))
+        {
+          vr.qActDtype = qAct;
+          vr.schemeName = v.qdq ? schemes[si].name : "";
+          if (!v.qdq)
+            vr.castedActs = onnxCountOp(ops, "Cast") > 0;
+          const std::string named = onnxQuantizedKernelName(ops);
+          vr.ranAs = named.empty() ? "a kernel it compiled itself" : named;
+          break;
+        }
+        if (!ops.empty())
+          tried = joined;
+      }
+      if (vr.ranAs.empty())
+      {
+        vr.skipReason =
+            tried.empty()
+                ? (firstErr.empty()
+                       ? std::string("this provider accepted no session for ") + v.label
+                       : firstErr)
+                : std::string("provider did not fuse a quantized matmul -- it "
+                              "dequantized the ") +
+                      (v.kvDtype ? "cache" : "weights") +
+                      " to full width and multiplied in floating point, a "
+                      "complete pass over them on every run, so this is not a " +
+                      v.label + " rate (ran: " + tried + ")";
+        return false;
+      }
+    }
+
+    vr.usable = true;
+    return true;
+  };
+
   // ---- Test specs (single header per test, streaming per variant) ----
   const logger::TestSpec prefillFlopsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "flops",
       Category::Ai,
-      "Speed of one whole transformer layer while it is chewing through a "
-      "prompt, at each precision a model ships in.  This is the phase that "
-      "decides how long you wait before the first word appears.  Unlike "
-      "the raw matmul rows, everything a real layer does is in here: "
-      "attention, softmax, the feed-forward network and the data shuffling "
-      "between them, so it is what a device actually delivers rather than "
-      "what its silicon could do in principle.  Only the seven projection "
-      "matmuls change precision -- attention and the softmax stay 16-bit, "
-      "as they do in every real deployment -- so whatever separates two "
-      "rows is the projection format and nothing else.  A short prompt "
-      "cannot fill wide hardware, so the fp16 rate climbs with the prompt "
-      "and then flattens; where it flattens is how much text has to arrive "
-      "together before batching requests stops helping.",
+      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
+      "(50.6M parameters), working through a prompt -- the "
+      "phase that decides how long you wait for the first word -- at each "
+      "precision a model ships in.  Everything a real layer does is in here, "
+      "and only the seven projection matmuls change precision, so whatever "
+      "separates two rows is the projection format.",
       TestShape::Heterogeneous, "data type and prompt length"};
   const logger::TestSpec prefillOpsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "ops",
       Category::Ai,
-      "Speed of one whole transformer layer while it is chewing through a "
-      "prompt, at each precision a model ships in.  This is the phase that "
-      "decides how long you wait before the first word appears.  Unlike "
-      "the raw matmul rows, everything a real layer does is in here: "
-      "attention, softmax, the feed-forward network and the data shuffling "
-      "between them, so it is what a device actually delivers rather than "
-      "what its silicon could do in principle.  Only the seven projection "
-      "matmuls change precision -- attention and the softmax stay 16-bit, "
-      "as they do in every real deployment -- so whatever separates two "
-      "rows is the projection format and nothing else.  A short prompt "
-      "cannot fill wide hardware, so the fp16 rate climbs with the prompt "
-      "and then flattens; where it flattens is how much text has to arrive "
-      "together before batching requests stops helping.",
+      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
+      "(50.6M parameters), working through a prompt -- the "
+      "phase that decides how long you wait for the first word -- at each "
+      "precision a model ships in.  Everything a real layer does is in here, "
+      "and only the seven projection matmuls change precision, so whatever "
+      "separates two rows is the projection format.",
       TestShape::Heterogeneous, "data type and prompt length"};
   const logger::TestSpec decodeSpec = {
       "onnx_block_decode", "Transformer block, decode", "bps",
       Category::Ai,
-      "How fast the same layer streams its weights while generating one "
-      "token with 2048 tokens of context behind it, at each precision.  "
-      "Generating text one token at a time is limited by memory, not "
-      "arithmetic: every weight has to be read to produce a single word, "
-      "which is the whole reason quantized models exist.  Each row counts "
-      "the bytes that format actually moves, so the rows are a measure of "
-      "how much of the device's bandwidth the AI stack keeps -- compare "
-      "them with the plain memory-bandwidth rows, and expect them to agree "
-      "with each other.  A narrow-weight row far below the 16-bit one is a "
-      "provider unpacking the weights to full width before using them.",
+      "How fast one 2048-wide, 16-head decoder block (50.6M parameters) "
+      "streams its weights while generating a token with 2048 of context, at "
+      "each precision.  Each row counts the bytes "
+      "that format actually moves, so it compares directly against the plain "
+      "memory-bandwidth rows -- and a narrow-weight row far below the 16-bit "
+      "one is a provider unpacking to full width before using them.",
       TestShape::Heterogeneous, "data type"};
   const logger::TestSpec latencySpec = {
       "onnx_block_latency", "Transformer block latency", "s",
       Category::Ai,
-       "How long one layer takes, in seconds, at each precision.  "
-      "Multiply by a model's layer count for a floor on that model's "
-      "time-to-first-token and per-token time on this device -- a 32-layer "
-      "7B model runs 32 of these back to back per token.  It is the honest "
-      "way to check a tokens-per-second claim without downloading "
-      "anything, and the only scope here where a quantized format's "
-      "advantage appears as the thing a user feels: less time.  The decode "
-      "rows also show what a longer conversation costs -- everything but "
-      "attention takes the same time at every context length, so whatever "
-      "they add as the context grows is attention.  A device whose time "
-      "barely moves is reading its cached context efficiently; one that "
-      "climbs steeply will feel fine in a demo and poor in use.",
+      "How long one 2048-wide, 16-head decoder block (50.6M parameters) takes "
+      "at each precision: multiply by a model's "
+      "layer count for a floor on its time-to-first-token and per-token time "
+      "here, without downloading anything.  Everything but attention costs "
+      "the same at every context length, so whatever the decode rows add as "
+      "the context grows is attention.",
       TestShape::Heterogeneous, "data type, phase and context length"};
-
-  auto provenance = [](const Variant &v, const VariantResult &vr)
-  {
-    std::string s = "  " +
-                    std::to_string((unsigned long long)(weightBytes(v) >> 20)) +
-                    " MB of weights";
-    if (!vr.ranAs.empty())
-    {
-      s += ", run as " + vr.ranAs;
-      if (vr.schemeName[0])
-        s += " with " + std::string(vr.schemeName);
-      if (vr.castedActs)
-        s += ", after casting the activations to the width its kernel wanted "
-             "-- a full pass over them inside this figure";
-    }
-    return s + ".";
-  };
-
-  const char *geometry =
-      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward "
-      "(50.6M parameters).  ";
-
-  auto doVariant = [&](const Variant &v, VariantResult &vr,
-                       logger::TestScope &test)
-  {
-    (void)v; (void)vr; (void)test;
-  };
-  (void)doVariant;
 
   // ---- Prefill: flops vs ops split, single header per unit, per-variant ----
   // Measures only the prompt ladder; decode/latency are measured in their
@@ -746,76 +823,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (isIntVariant(v)) continue;
       VariantResult &vr = results[vi];
 
-      // Global probe fast-path: if gemm's tiny probe already says this
-      // dtype is unsupported/emulated on this EP, skip without paying
-      // block's 50M-weight model compilation.
+      if (!validateVariant(v, vr))
       {
-        const auto &probe = onnxProbeGemmCache(rt, ep);
-        auto it = probe.find(v.label);
-        if (it != probe.end() && !it->second.ok)
-        {
-          vr.skipReason = it->second.reason;
-          emitPrefillTo(testFlops, v, vr);
-          continue;
-        }
+        emitPrefillTo(testFlops, v, vr);
+        continue;
       }
-      // dtype / opset
-      {
-        std::string why = onnxDtypeUnsupportedReason(rt, v.wDtype);
-        if (why.empty()) why = onnxDtypeUnsupportedReason(rt, v.actDtype);
-        if (why.empty())
-        {
-          const int opset = variantOpset(v);
-          const uint32_t needApi = onnxMinOrtApiForOpset(opset);
-          if (needApi && rt.apiVersion < needApi)
-            why = "needs opset " + std::to_string(opset) +
-                  ", which arrived in ONNX Runtime 1." + std::to_string(needApi) +
-                  "; this runtime is " + rt.versionString;
-        }
-        if (!why.empty()) { vr.skipReason = why; emitPrefillTo(testFlops, v, vr); continue; }
-      }
-      {
-        const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) + (64ull << 20) * onnxElemBytes(v.actDtype, 1) / 2;
-        const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
-        if (budget && budget < needed)
-        {
-          vr.skipReason = "not enough memory for the canonical block; its geometry is fixed so the numbers stay comparable, and a smaller layer would not be the same test";
-          CLPEAK_VLOG("onnx-block[%s/%s]: needs %llu MB, budget %llu MB\n", ep.providerKey.c_str(), v.label, (unsigned long long)(needed >> 20), (unsigned long long)(budget >> 20));
-          emitPrefillTo(testFlops, v, vr); continue;
-        }
-      }
-      if (v.qdq || v.wBlock > 0 || v.kvDtype)
-      {
-        std::string tried, firstErr; Scheme schemes[2];
-        const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
-        const bool probeDecode = v.decodeOnly;
-        for (size_t si = 0; si < nSchemes; si++)
-        {
-          if (clpeak::cancelRequested()) break;
-          const int qAct = v.qdq ? schemes[si].actDtype : ONNX_DT_INT8;
-          const char *what = v.qdq ? schemes[si].name : (v.kvDtype ? "quantized cache" : "weight-only");
-          BlockRun probe = makeRun(rt, ep, v, probeDecode, kKvLadder[0], kPromptLadder[0], qAct, true);
-          if (!probe.session) { if (firstErr.empty()) firstErr = probe.error; CLPEAK_VLOG("onnx-block[%s/%s]: %s rejected: %s\n", ep.providerKey.c_str(), v.label, what, probe.error.c_str()); continue; }
-          timeRuns(rt, probe, 1);
-          auto ops = onnxCollectExecutedOps(rt, probe.session); destroyRun(rt, probe);
-          std::string joined; for (auto &o: ops) joined += (joined.empty()?"":", ")+o;
-          CLPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n", ep.providerKey.c_str(), v.label, what, joined.c_str());
-          if (projectionsRanQuantized(ops))
-          {
-            vr.qActDtype = qAct; vr.schemeName = v.qdq ? schemes[si].name : "";
-            if (!v.qdq) for (auto &o: ops) if (o=="Cast") vr.castedActs = true;
-            const std::string named = onnxQuantizedKernelName(ops);
-            vr.ranAs = named.empty() ? "a kernel it compiled itself" : named; break;
-          }
-          if (!ops.empty()) tried = joined;
-        }
-        if (vr.ranAs.empty())
-        {
-          vr.skipReason = tried.empty() ? (firstErr.empty()? std::string("this provider accepted no session for ")+v.label : firstErr) : std::string("provider did not fuse a quantized matmul -- it dequantized the ")+(v.kvDtype?"cache":"weights")+" to full width and multiplied in floating point, a complete pass over them on every run, so this is not a "+v.label+" rate (ran: "+tried+")";
-          emitPrefillTo(testFlops, v, vr); continue;
-        }
-      }
-      vr.usable = true;
       // affordability uses refPrefillRate which is shared across all variants
       double prefillRate = refPrefillRate;
       auto affordable = [&](double flops, double rate){ return rate<=0.0 || (flops/rate) <= (double)kBlockBudgetUs; };
@@ -835,14 +847,17 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         vr.prefill[seq] = pt;
       }
-      // keep decodeRate warm for later groups (measure decode in its own test below,
-      // but seed it from prefill's last rate to avoid cold start)
-      if (!vr.prefill.empty())
-      {
-        // seed decode rate from last prefill point if available
-        auto it = vr.prefill.find(kPrefillSeq);
-        if (it != vr.prefill.end() && it->second.us > 0.0) refDecodeRate = blockFlops(1, kDecodeKv) / it->second.us;
-      }
+      // Seed the decode affordability gate from the prefill rate, so the
+      // first decode point of the run is not measured blind.  It has to be a
+      // *rate* -- flops per microsecond -- and both regimes report one, which
+      // is what makes the seed transferable.  Dividing decode's flops by
+      // prefill's duration instead yields a "rate" that predicts every decode
+      // token will take as long as a whole 512-token prompt, and a provider
+      // whose prefill overran the budget then had its millisecond-scale decode
+      // rows skipped as too slow to measure.
+      if (auto it = vr.prefill.find(kPrefillSeq);
+          it != vr.prefill.end() && it->second.us > 0.0)
+        refDecodeRate = blockFlops(kPrefillSeq, kPrefillSeq) / it->second.us;
       emitPrefillTo(testFlops, v, vr);
     }
     testFlops.end();
@@ -855,70 +870,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       if (!isIntVariant(v)) continue;
       VariantResult &vr = results[vi];
+      if (!validateVariant(v, vr))
       {
-        const auto &probe = onnxProbeGemmCache(rt, ep);
-        auto it = probe.find(v.label);
-        if (it != probe.end() && !it->second.ok)
-        {
-          vr.skipReason = it->second.reason;
-          emitPrefillTo(testOps, v, vr);
-          continue;
-        }
+        emitPrefillTo(testOps, v, vr);
+        continue;
       }
-      {
-        std::string why = onnxDtypeUnsupportedReason(rt, v.wDtype);
-        if (why.empty()) why = onnxDtypeUnsupportedReason(rt, v.actDtype);
-        if (why.empty())
-        {
-          const int opset = variantOpset(v);
-          const uint32_t needApi = onnxMinOrtApiForOpset(opset);
-          if (needApi && rt.apiVersion < needApi)
-            why = "needs opset " + std::to_string(opset) + ", which arrived in ONNX Runtime 1." + std::to_string(needApi) + "; this runtime is " + rt.versionString;
-        }
-        if (!why.empty()) { vr.skipReason = why; emitPrefillTo(testOps, v, vr); continue; }
-      }
-      {
-        const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) + (64ull << 20) * onnxElemBytes(v.actDtype, 1) / 2;
-        const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
-        if (budget && budget < needed)
-        {
-          vr.skipReason = "not enough memory for the canonical block; its geometry is fixed so the numbers stay comparable, and a smaller layer would not be the same test";
-          CLPEAK_VLOG("onnx-block[%s/%s]: needs %llu MB, budget %llu MB\n", ep.providerKey.c_str(), v.label, (unsigned long long)(needed >> 20), (unsigned long long)(budget >> 20));
-          emitPrefillTo(testOps, v, vr); continue;
-        }
-      }
-      if (v.qdq || v.wBlock > 0 || v.kvDtype)
-      {
-        std::string tried, firstErr; Scheme schemes[2];
-        const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
-        const bool probeDecode = v.decodeOnly;
-        for (size_t si = 0; si < nSchemes; si++)
-        {
-          if (clpeak::cancelRequested()) break;
-          const int qAct = v.qdq ? schemes[si].actDtype : ONNX_DT_INT8;
-          const char *what = v.qdq ? schemes[si].name : (v.kvDtype ? "quantized cache" : "weight-only");
-          BlockRun probe = makeRun(rt, ep, v, probeDecode, kKvLadder[0], kPromptLadder[0], qAct, true);
-          if (!probe.session) { if (firstErr.empty()) firstErr = probe.error; CLPEAK_VLOG("onnx-block[%s/%s]: %s rejected: %s\n", ep.providerKey.c_str(), v.label, what, probe.error.c_str()); continue; }
-          timeRuns(rt, probe, 1);
-          auto ops = onnxCollectExecutedOps(rt, probe.session); destroyRun(rt, probe);
-          std::string joined; for (auto &o: ops) joined += (joined.empty()?"":", ")+o;
-          CLPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n", ep.providerKey.c_str(), v.label, what, joined.c_str());
-          if (projectionsRanQuantized(ops))
-          {
-            vr.qActDtype = qAct; vr.schemeName = v.qdq ? schemes[si].name : "";
-            if (!v.qdq) for (auto &o: ops) if (o=="Cast") vr.castedActs = true;
-            const std::string named = onnxQuantizedKernelName(ops);
-            vr.ranAs = named.empty() ? "a kernel it compiled itself" : named; break;
-          }
-          if (!ops.empty()) tried = joined;
-        }
-        if (vr.ranAs.empty())
-        {
-          vr.skipReason = tried.empty() ? (firstErr.empty()? std::string("this provider accepted no session for ")+v.label : firstErr) : std::string("provider did not fuse a quantized matmul -- it dequantized the ")+(v.kvDtype?"cache":"weights")+" to full width and multiplied in floating point, a complete pass over them on every run, so this is not a "+v.label+" rate (ran: "+tried+")";
-          emitPrefillTo(testOps, v, vr); continue;
-        }
-      }
-      vr.usable = true;
       double prefillRate = refPrefillRate;
       auto affordable = [&](double flops, double rate){ return rate<=0.0 || (flops/rate) <= (double)kBlockBudgetUs; };
       for (int64_t seq : promptsFor(v))
@@ -951,55 +907,19 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
-      const double bytes = (double)(weightBytes(v) + kvBytes(v, kDecodeKv));
+      const uint64_t wBytes = weightBytes(v);
+      const uint64_t kvB = kvBytes(v, kDecodeKv);
+      const double bytes = (double)(wBytes + kvB);
       logger::EmitOptions o;
-      o.description = std::string(geometry) + v.note + "  One token with 2048 of context: " + std::to_string((unsigned long long)(weightBytes(v) >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvBytes(v, kDecodeKv) >> 20)) + " MB of cached context, all of which must be read to emit a single token." + provenance(v, vr);
+      o.description = std::string(v.note) + "  One token with 2048 of context: " + std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvB >> 20)) + " MB of cached context, read in full for one token." + provenance(v, vr);
 
-      // If variant was already determined unusable in prefill phase, reuse skip
-      if (!vr.usable && !vr.skipReason.empty())
+      // Prefill settled most variants already; validateVariant answers from
+      // what it recorded and only probes the ones it has not seen -- the
+      // cache-format row, whose prefill has no reading to settle it.
+      if (!validateVariant(v, vr))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
         continue;
-      }
-      // For variants not yet evaluated (e.g. those skipped only for prefill decodeOnly), ensure fusion/memory checks are done
-      // Reuse the same checks as prefill if vr still empty
-      if (!vr.usable && vr.skipReason.empty())
-      {
-        // dtype / memory / fusion already handled in prefill loops for most variants;
-        // if we reach here for a decodeOnly variant that was skipped in prefill's int check, handle it
-        std::string why = onnxDtypeUnsupportedReason(rt, v.wDtype);
-        if (why.empty()) why = onnxDtypeUnsupportedReason(rt, v.actDtype);
-        if (why.empty())
-        {
-          const int opset = variantOpset(v);
-          const uint32_t needApi = onnxMinOrtApiForOpset(opset);
-          if (needApi && rt.apiVersion < needApi) why = "needs opset " + std::to_string(opset) + ", which arrived in ONNX Runtime 1." + std::to_string(needApi) + "; this runtime is " + rt.versionString;
-        }
-        if (!why.empty()) { vr.skipReason = why; test.skip(metric, vr.skipStatus, vr.skipReason, o); continue; }
-        const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) + (64ull << 20) * onnxElemBytes(v.actDtype, 1) / 2;
-        const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
-        if (budget && budget < needed) { vr.skipReason = "not enough memory for the canonical block; its geometry is fixed so the numbers stay comparable, and a smaller layer would not be the same test"; test.skip(metric, vr.skipStatus, vr.skipReason, o); continue; }
-        // fusion probe if needed
-        if (v.qdq || v.wBlock > 0 || v.kvDtype)
-        {
-          std::string tried, firstErr; Scheme schemes[2];
-          const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
-          for (size_t si = 0; si < nSchemes; si++)
-          {
-            if (clpeak::cancelRequested()) break;
-            const int qAct = v.qdq ? schemes[si].actDtype : ONNX_DT_INT8;
-            const char *what = v.qdq ? schemes[si].name : (v.kvDtype ? "quantized cache" : "weight-only");
-            BlockRun probe = makeRun(rt, ep, v, true, kKvLadder[0], kPromptLadder[0], qAct, true);
-            if (!probe.session) { if (firstErr.empty()) firstErr = probe.error; continue; }
-            timeRuns(rt, probe, 1);
-            auto ops = onnxCollectExecutedOps(rt, probe.session); destroyRun(rt, probe);
-            std::string joined; for (auto &o: ops) joined += (joined.empty()?"":", ")+o;
-            if (projectionsRanQuantized(ops)) { vr.qActDtype = qAct; vr.schemeName = v.qdq ? schemes[si].name : ""; if (!v.qdq) for (auto &o: ops) if (o=="Cast") vr.castedActs = true; const std::string named = onnxQuantizedKernelName(ops); vr.ranAs = named.empty() ? "a kernel it compiled itself" : named; break; }
-            if (!ops.empty()) tried = joined;
-          }
-          if (vr.ranAs.empty()) { vr.skipReason = tried.empty() ? (firstErr.empty()? std::string("this provider accepted no session for ")+v.label : firstErr) : std::string("provider did not fuse a quantized matmul -- it dequantized the ")+(v.kvDtype?"cache":"weights")+" to full width and multiplied in floating point, a complete pass over them on every run, so this is not a "+v.label+" rate (ran: "+tried+")"; test.skip(metric, vr.skipStatus, vr.skipReason, o); continue; }
-        }
-        vr.usable = true;
       }
 
       // If decode measurement already exists from prefill phase (when we measured both), reuse it;
@@ -1027,7 +947,56 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       if (it != vr.decode.end())
       {
-        if (it->second.us > 0.0) test.emit(metric, (float)(bytes / (it->second.us * 1.0e-6)), o);
+        if (it->second.us > 0.0)
+        {
+          const double bps = bytes / (it->second.us * 1.0e-6);
+          // More traffic than this provider has been seen to move means it is
+          // not moving what the format declares -- it stored the weights
+          // narrower than asked, which several accelerators do to an fp32
+          // graph by default.  Measured, so it holds for any provider.
+          if (streamBps > 0.0 && bps > streamBps)
+            o.description += "  This is more than the " +
+                             std::to_string((long long)(streamBps / 1.0e9)) +
+                             " GB/s this provider was measured streaming, so "
+                             "it is not moving the bytes this precision "
+                             "declares -- it is storing them narrower.";
+
+          // The cheaper and far more sensitive version of the same question,
+          // and it needs no second measurement: this row and the fp16
+          // reference ran the identical layer and differ only in the width
+          // they declare.  If one declares half again as many bytes as the
+          // other and takes the same time to move them, the byte count is not
+          // describing the traffic -- and which of the two is wrong depends on
+          // the provider, so the row says what was seen rather than guessing.
+          //
+          // OpenVINO's GPU serves an fp32 graph at 16 bits, so its fp32 row
+          // declares 235 MB against fp16's 117 and reads 104 GB/s against
+          // 52.6 -- off the same 2.2 ms.  ONNX Runtime's x86 CPU EP has the
+          // opposite fault, converting fp16 up, and lands in exactly the same
+          // place from the other side.  The absolute check above misses both:
+          // 104 GB/s is comfortably under what that device streams.
+          if (refDecodeUs > 0.0 && refDecodeBytes > 0.0 && vi != kRefVariant)
+          {
+            const double byteRatio = bytes / refDecodeBytes;
+            const double timeRatio = it->second.us / refDecodeUs;
+            if (byteRatio >= 1.5 && timeRatio > 0.9 && timeRatio < 1.25)
+              o.description += "  It declares " +
+                               std::to_string((long long)(byteRatio * 10) / 10) +
+                               "." +
+                               std::to_string((long long)(byteRatio * 10) % 10) +
+                               " times the bytes of the fp16 row and took the "
+                               "same time, so one of the two is not moving "
+                               "what it declares; the fp32 numeric-error row "
+                               "says whether this provider computes fp32 at "
+                               "full width.";
+          }
+          if (vi == kRefVariant)
+          {
+            refDecodeUs = it->second.us;
+            refDecodeBytes = bytes;
+          }
+          test.emit(metric, (float)bps, o);
+        }
         else test.skip(metric, it->second.status, it->second.error, o);
       }
     }

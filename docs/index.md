@@ -10,9 +10,9 @@ actually reach — not what the spec sheet claims.
 {: .lede }
 
 Originally an OpenCL benchmark, clpeak now drives OpenCL, Vulkan, CUDA,
-ROCm/HIP, Metal, oneAPI/SYCL, a native CPU backend and an ONNX Runtime backend
-(NPUs via execution providers) from one codebase, so the
-same tests can be compared across APIs on the same machine.
+ROCm/HIP, Metal, oneAPI/SYCL, a native CPU backend, and the ONNX Runtime,
+Core ML and LiteRT backends that reach NPUs, from one codebase, so the same
+tests can be compared across APIs on the same machine.
 
 <figure>
   <img src="{{ '/assets/img/results-dark.png' | relative_url }}"
@@ -37,7 +37,7 @@ same tests can be compared across APIs on the same machine.
   DRAM levels; NPU resident-tensor and transfer bandwidth.
 - **Latency** — kernel launch round-trip, memory latency, atomics and
   branch-mispredict cost; NPU dispatch overhead.
-- **AI composites** — ONNX transformer-block prefill/decode, convolution and
+- **AI composites** — ONNX, Core ML and LiteRT transformer-block prefill/decode, convolution and
   activation throughput, plus per-dtype numeric error, so a rate always ships
   with its accuracy cost.
 
@@ -51,14 +51,16 @@ both in the app (the info glyph beside each row) and on the CLI
 
 | Backend | Runs on |
 |---|---|
-| OpenCL | Any conformant CPU/GPU/accelerator |
-| Vulkan | Any Vulkan 1.1+ GPU, including cooperative-matrix paths |
 | CUDA | NVIDIA GPUs |
 | ROCm/HIP | AMD GPUs |
 | Metal | Apple silicon and Intel Macs |
 | oneAPI/SYCL | Intel GPUs |
+| Vulkan | Any Vulkan 1.1+ GPU, including cooperative-matrix paths |
+| OpenCL | Any conformant CPU/GPU/accelerator |
 | CPU | x86-64 and AArch64, runtime-dispatched per ISA |
-| ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
+| Core ML | Apple's Neural Engine, GPU and CPU through the system framework, no runtime to install (macOS 14.4+ / iOS 17.4+) |
+| ONNX Runtime | NPU / GPU / CPU via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
+| LiteRT | Android's native AI runtime: NPUs through vendor dispatch libraries (Qualcomm, MediaTek, Google Tensor, Samsung; Intel on desktops), its GPU accelerator (OpenCL / Metal / WebGPU) and XNNPACK on the CPU, each as a device |
 
 </div>
 
@@ -66,7 +68,20 @@ Each provider is enumerated as a device. The ONNX runtime is loaded at run
 time, never linked (except on iOS), so no ONNX install is needed to build:
 a machine without one reports "library not found", and `--onnx-lib PATH`
 points at another build. A graph a provider can't fully own reports
-`unsupported` rather than silently measuring the CPU.
+`unsupported` rather than silently measuring the CPU — and on the CoreML
+provider, whose runtime can move work to the CPU behind ONNX Runtime's
+back, clpeak reads Core ML's compute plan for every timed session and
+refuses a row the Neural Engine did not run.
+
+The Core ML backend reaches the same Neural Engine without ONNX Runtime: it
+emits Core ML's ML Program format directly, compiles it on the device, and
+reads Core ML's compute plan to prove per operation which unit ran it — so a
+row that Core ML would have moved to the CPU reports so, with the reason.
+Its tests mirror the ONNX ones (matmul, numeric error, convolution,
+transformer-block prefill/decode, activations, bandwidth, transfer,
+dispatch), across every weight format Core ML can store: fp32, fp16, int8
+per-channel, int4 blockwise and palettized, 8-bit quantized activations —
+and bf16 and fp8, which it reports as Core ML refuses them.
 
 ## The desktop app
 
@@ -172,10 +187,14 @@ whichever API is doing the work.
 ./clpeak                            # every test, every available backend
 ./clpeak --metal                    # one backend
 ./clpeak --cuda --vulkan            # or several
-./clpeak --onnx --onnx-device 0     # one NPU/GPU provider (--onnx-lib PATH picks the runtime)
+./clpeak --list-devices             # every device, named as --devices takes it
+./clpeak --devices onnx:0           # one NPU/GPU provider (--onnx-lib PATH picks the runtime)
+./clpeak --devices coreml:0         # Core ML on the Neural Engine (coreml:1 GPU, coreml:2 CPU)
 ./clpeak --single-precision-compute # one test, everywhere
+./clpeak --gemm                     # the vendor's tuned matmul, everywhere
 ./clpeak --describe                 # explain what each reading measures
 ./clpeak -o out.clpeak.json         # save results (one JSON document)
+./clpeak --verbose -o out.clpeak.json   # …with every diagnostic and the device inventory: attach this to a bug report
 ./clpeak --compare baseline.json    # diff this run against a saved baseline
 ```
 

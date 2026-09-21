@@ -30,7 +30,7 @@ ROCm headers. Built as `peak_rocm` static library.
 
 | File | Purpose |
 |------|---------|
-| `rocm_peak.cpp` | `RocmPeak` class: ctor, `applyOptions()`, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()`, `printInventory()` |
+| `rocm_peak.cpp` | `RocmPeak` class: ctor, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()` |
 | `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (code-object `hipModuleLoadData` + module caching) |
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |

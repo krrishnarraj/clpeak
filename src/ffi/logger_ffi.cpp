@@ -24,7 +24,7 @@ const char *kindTag(LogEvent::Kind k)
     case LogEvent::Kind::TestEnd:        return "test_end";
     case LogEvent::Kind::DeviceEnd:      return "device_end";
     case LogEvent::Kind::BackendEnd:     return "backend_end";
-    case LogEvent::Kind::Note:           return "note";
+    case LogEvent::Kind::Log:            return "log";
     }
     return "unknown";
 }
@@ -148,8 +148,16 @@ std::string ffiEventToJson(const LogEvent &e)
         appendStr(ss, "reason", e.reason);
         break;
 
-    case LogEvent::Kind::Note:
-        appendStr(ss, "message", e.message);
+    case LogEvent::Kind::Log:
+        // The entry as the document records it (run_document.h LogEntry):
+        // the consumer appends it to its own `log` and, when the run ends,
+        // reads the same line back from the file.
+        appendStr(ss, "level",  clpeak::logLevelString(e.log.level));
+        appendStr(ss, "source", e.log.source);
+        ss << ",\"elapsed_s\":" << fmtNum(e.log.elapsedS);
+        appendStr(ss, "test",    e.testId);
+        appendStr(ss, "variant", e.testVariant);
+        appendStr(ss, "message", e.log.message);
         break;
 
     default:

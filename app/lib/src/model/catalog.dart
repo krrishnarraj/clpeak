@@ -1,5 +1,6 @@
 /// Parsed device catalog — the inventoryToJson() document from
-/// clpeak_copy_backend_catalog_json (src/common/inventory.cpp).
+/// clpeak_copy_backend_catalog_json (src/common/inventory.cpp).  The same
+/// `backends` array a verbose run document embeds as its `inventory`.
 library;
 
 class CatalogDevice {
@@ -33,9 +34,9 @@ class CatalogDevice {
         type: m['type'] as String? ?? '',
         driver: m['driver'] as String? ?? '',
         api: m['api'] as String? ?? '',
-        computeUnits: (m['computeUnits'] as num?)?.toInt() ?? 0,
-        clockMHz: (m['clockMHz'] as num?)?.toInt() ?? 0,
-        globalMemBytes: (m['globalMemBytes'] as num?)?.toInt() ?? 0,
+        computeUnits: (m['compute_units'] as num?)?.toInt() ?? 0,
+        clockMHz: (m['clock_mhz'] as num?)?.toInt() ?? 0,
+        globalMemBytes: (m['global_mem_bytes'] as num?)?.toInt() ?? 0,
         fp16: m['fp16'] as bool? ?? false,
         fp64: m['fp64'] as bool? ?? false,
       );
@@ -65,12 +66,27 @@ class CatalogPlatform {
 class CatalogBackend {
   const CatalogBackend({
     required this.name,
+    required this.flag,
     required this.available,
+    required this.info,
+    required this.reason,
     required this.platforms,
   });
 
   final String name; // "OpenCL" / "Vulkan" / "CUDA" / ... / "CPU"
+
+  /// The backend's command-line name: `--devices <flag>:<index>` names one
+  /// of its devices.  Authored natively (the backend table in
+  /// src/common/options.cpp), never derived here.
+  final String flag;
   final bool available;
+
+  /// A backend-level fact worth showing: the ONNX Runtime version, the OS
+  /// release Core ML comes with.  Empty when there is none.
+  final String info;
+
+  /// Why `available` is false.  Empty when it is true.
+  final String reason;
   final List<CatalogPlatform> platforms;
 
   bool get hasDevices => platforms.any((p) => p.devices.isNotEmpty);
@@ -79,7 +95,10 @@ class CatalogBackend {
 
   factory CatalogBackend.fromJson(Map<String, dynamic> m) => CatalogBackend(
         name: m['name'] as String? ?? '',
+        flag: m['flag'] as String? ?? '',
         available: m['available'] as bool? ?? false,
+        info: m['info'] as String? ?? '',
+        reason: m['reason'] as String? ?? '',
         platforms: [
           for (final p in (m['platforms'] as List? ?? const []))
             CatalogPlatform.fromJson(p as Map<String, dynamic>)

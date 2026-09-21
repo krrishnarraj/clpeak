@@ -321,6 +321,8 @@ class ClpeakTheme {
   static IconData backendIcon(String backend) => switch (backend) {
         'CPU' => Icons.memory,
         'ONNX' => Icons.hub_outlined,
+        'CoreML' => Icons.psychology_outlined,
+        'LiteRT' => Icons.bolt_outlined,
         'Metal' || 'Vulkan' || 'OpenCL' || 'CUDA' || 'ROCm' || 'oneAPI' =>
           Icons.developer_board,
         _ => Icons.device_unknown,

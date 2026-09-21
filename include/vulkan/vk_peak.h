@@ -328,12 +328,13 @@ struct vk_compute_desc_t
 class vkPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices; // empty = run all
-
   vkPeak();
   ~vkPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Vulkan;
+  Backend backend() const override { return kBackend; }
   int runAll() override;
 
   // Individual benchmarks
@@ -365,12 +366,16 @@ public:
   int runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg);
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
 private:
   VkInstance instance;
   std::vector<VkPhysicalDevice> physicalDevices;
   VkResult m_instanceResult = VK_SUCCESS;
+
+  // VK_EXT_debug_utils messenger, when the loader offers the extension: what
+  // the driver (or MoltenVK) has to say goes to the run log rather than only
+  // to a console.  VK_NULL_HANDLE when unavailable.
+  VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
 
   bool initInstance();
   void cleanup();

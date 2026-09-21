@@ -13,8 +13,9 @@
 class LoggerFfi : public logger
 {
 public:
-    LoggerFfi(ClpeakEventCallback onEventCb, void *userData)
-        : onEventCb(onEventCb), userData(userData) {}
+    LoggerFfi(ClpeakEventCallback onEventCb, void *userData,
+              bool mirrorToRunLog = false)
+        : logger("", mirrorToRunLog), onEventCb(onEventCb), userData(userData) {}
 
 protected:
     void onEvent(const LogEvent &e) override;
@@ -25,7 +26,7 @@ private:
 };
 
 // Serialize one event to its JSON document (exposed for the synthetic
-// `note`/`done` events clpeak_launch emits itself).
+// `log`/`done` events clpeak_launch emits itself).
 std::string ffiEventToJson(const LogEvent &e);
 
 // malloc-copy a string and hand it to the callback (no-op when cb is null).

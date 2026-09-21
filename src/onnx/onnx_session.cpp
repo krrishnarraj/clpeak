@@ -1,7 +1,9 @@
 #ifdef ENABLE_ONNX
 
 #include "onnx_session.h"
+#include "onnx_coreml_plan.h"
 #include "onnx_model.h"
+#include "onnx_plugin.h"
 
 #include <common/common.h>
 #include <common/console_mute.h>
@@ -13,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -45,6 +48,103 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
   return std::string();
 }
 
+std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
+                                    bool qdq, int64_t blockSize)
+{
+  // TensorRT for RTX on a per-tensor float4 QDQ matmul: GetCapability takes
+  // the whole graph and the engine build that follows dies with an access
+  // violation (exit 0xC0000005 -- NvTensorRTRTX EP 0.3.0 from the Windows ML
+  // package 2.30.43, ONNX Runtime 1.27.1, RTX 5060), after the fp32, fp16,
+  // bf16 and fp8_e4m3 rows had built and run on the same provider.  It is
+  // the graph classic TensorRT *declines*, with "CHECK(output_quantize_axis_
+  // .has_value()) failed": a float4 path that wants a quantization axis,
+  // which only block scaling has.  The RTX library does not survive its own
+  // check.  The block-scaled float4 rows (nvfp4, fp4_weight) are a different
+  // graph -- the one that check asks for -- and are still put to it.
+  if (ep.providerKey == "NvTensorRTRTXExecutionProvider" &&
+      dtype == ONNX_DT_FLOAT4E2M1 && qdq)
+    return "TensorRT for RTX takes the process down (an access violation in "
+           "its engine build) on a per-tensor float4 QDQ matmul instead of "
+           "declining it as TensorRT does -- its float4 path wants a block "
+           "scale, which the nvfp4 row has -- so this graph is not sent to it";
+
+  // DirectML on blocked int8 weights: the transformer block's int8_weight
+  // session -- seven DequantizeLinear(int8, one fp16 scale per 32 rows:
+  // block_size=32, axis=0) feeding 2048-wide MatMuls -- ended the process
+  // with an integer divide by zero (exit 0xC0000094) inside session
+  // creation, after ORT's own transformers had finished with the graph (the
+  // last line logged is its attention scale being folded away) and before
+  // the allocation planner spoke: the window in which the DML provider
+  // compiles its fused partitions.  ONNX Runtime 1.24.4 with its DirectML
+  // provider on adapter 0, an RTX 4060 by the runtime's own device listing,
+  // 2026-09-21; the fp16 and int4_weight forms of the same block had built
+  // and run first.  Nothing after it ran.
+  //
+  // int4 survives because ORT rewrites it first: DQMatMulToMatMulNBits takes
+  // only 4-bit weights (Is4BitIntType, qdq_selectors.cc), so the int4 block
+  // reaches DirectML as MatMulNBits and the int8 one as a raw opset-21
+  // DequantizeLinear, which the DML provider registers with no support
+  // query and hands straight to DML_DEQUANTIZE_OPERATOR_DESC
+  // (DmlOperatorQuantization21).  The 32-cube probe of the same graph
+  // built and ran, but its scale is one row -- a layout DirectML can read
+  // as a plain per-column broadcast -- and every rung the gemm ladder times
+  // (1024 and up) has the block layout the block had.  A crash inside a
+  // system DLL cannot be caught, so the format is not sent to this provider
+  // at any size rather than only in the graph seen to die; a run that
+  // proves the ladder survives its own layout is what narrows this to the
+  // block.  int8_qdq is per-tensor and unaffected; int4_weight is fused
+  // away before DirectML sees it.
+  if (ep.providerKey == "DmlExecutionProvider" && dtype == ONNX_DT_INT8 &&
+      !qdq && blockSize > 0)
+    return "DirectML takes the process down (an integer divide by zero while "
+           "the session is created, seen on ONNX Runtime 1.24.4) on blocked int8 "
+           "weights -- a DequantizeLinear with one scale per 32 rows, which "
+           "ORT hands it unfused because only 4-bit weights become "
+           "MatMulNBits -- so this format is not sent to it";
+  return std::string();
+}
+
+// Device loss, latched.  Written from ORT's logger thread and from whatever
+// thread a status came back on, read by runAll between tests.
+static std::atomic<bool> g_deviceLost{false};
+
+bool onnxReasonIsDeviceLoss(const std::string &reason)
+{
+  // What the WebGPU/Dawn EP says on a driver reset, in the three places it
+  // surfaces: the device-lost callback, the failed readback that follows, and
+  // the Vulkan error underneath.  "device lost" also covers D3D12's
+  // DXGI_ERROR_DEVICE_REMOVED path, which ORT reports with the same words.
+  static const char *kMarkers[] = {
+      "Device] is lost",
+      "device lost",
+      "Device lost",
+      "DEVICE_LOST",
+      "DEVICE_REMOVED",
+      "Failed to download data from buffer",
+  };
+  for (const char *m : kMarkers)
+    if (reason.find(m) != std::string::npos)
+      return true;
+  return false;
+}
+
+// Latch when `text` carries the loss; harmless for anything else.
+static void noteDeviceLost(const std::string &text)
+{
+  if (!g_deviceLost.load(std::memory_order_relaxed) && onnxReasonIsDeviceLoss(text))
+    g_deviceLost.store(true, std::memory_order_relaxed);
+}
+
+bool onnxDeviceLost() { return g_deviceLost.load(std::memory_order_relaxed); }
+void onnxClearDeviceLost() { g_deviceLost.store(false, std::memory_order_relaxed); }
+
+ResultStatus onnxFailureStatus(const std::string &reason, ResultStatus current)
+{
+  if (current == ResultStatus::Error)
+    return current;
+  return onnxReasonIsDeviceLoss(reason) ? ResultStatus::Error : ResultStatus::Unsupported;
+}
+
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 {
   if (!st)
@@ -52,6 +152,8 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
   const char *msg = rt.api->GetErrorMessage(st);
   std::string out = msg ? msg : "";
   rt.api->ReleaseStatus(st);
+  // Before the first line is kept below: the loss is often named further down.
+  noteDeviceLost(out);
   // A status with an empty message is as useless as no status: the row would
   // report a refusal with nothing in it, which is what a stock ONNX Runtime
   // 1.23 does for the float4 graphs.  Never hand back an empty reason.
@@ -64,6 +166,67 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
     out.resize(nl);
   return out;
 }
+
+namespace
+{
+
+// OrtLoggingFunction: ORT's severities onto the run log's levels.  INFO is
+// the session-creation narration -- providers registered, transformers
+// applied -- which is debug material and dropped unless --verbose; ERROR
+// includes a provider declining a graph, which is exactly why a reading is
+// Unsupported, so it is kept.  May be called from ORT's own threads.
+void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
+                                const char *category, const char *,
+                                const char *codeLocation, const char *message)
+{
+  // Before any filtering: the WebGPU EP announces the loss at INFO
+  // ("WebGPU device lost (1): vkWaitForFences failed with VK_ERROR_DEVICE_LOST"),
+  // which is debug material here and dropped without --verbose -- so latching
+  // after the filter would see it only in verbose runs, the ones least in need
+  // of the guard.
+  if (message)
+    noteDeviceLost(message);
+
+  clpeak::LogLevel level;
+  switch (severity)
+  {
+  case ORT_LOGGING_LEVEL_FATAL:
+  case ORT_LOGGING_LEVEL_ERROR:   level = clpeak::LogLevel::Error;   break;
+  case ORT_LOGGING_LEVEL_WARNING: level = clpeak::LogLevel::Warning; break;
+  default:                        level = clpeak::LogLevel::Debug;   break;
+  }
+  if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
+    return;
+  // The optimizer narrates every pass over every session -- forty
+  // "GraphTransformer X modified: 0" lines per session, none of them about
+  // the device -- and clpeak creates sessions by the hundred.  The TensorRT
+  // for RTX plugin's pool allocator does the same per *run*: a
+  // "CudaMempoolAllocator::DoAlloc" and a "::DoFree" at INFO for every
+  // Run(), which over a ladder is tens of thousands of lines saying the
+  // output buffer came and went.  Everything else INFO says (provider
+  // registration, partitioning, the session options, the pool's creation
+  // and the arena's growth) is kept.
+  if (level == clpeak::LogLevel::Debug && message &&
+      (std::strncmp(message, "GraphTransformer ", 17) == 0 ||
+       std::strncmp(message, "Running graph optimizations", 27) == 0 ||
+       std::strncmp(message, "CudaMempoolAllocator::DoAlloc", 29) == 0 ||
+       std::strncmp(message, "CudaMempoolAllocator::DoFree", 28) == 0))
+    return;
+  std::string text;
+  if (category && *category && std::strcmp(category, "onnxruntime") != 0)
+    text = std::string("[") + category + "] ";
+  text += message ? message : "";
+  if (codeLocation && *codeLocation)
+    text += std::string(" (") + codeLocation + ")";
+  clpeak::logMessage(level, "onnxruntime", text);
+}
+
+} // namespace
+
+// Why the last onnxEnv() refused, for the rows that report it.  Written
+// and read under onnxEnv()'s lock or on the same thread after it returned
+// null, so a plain string will do.
+static std::string g_envError;
 
 OrtEnv *onnxEnv(const OrtRuntime &rt)
 {
@@ -81,9 +244,22 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   static OrtEnv *env = nullptr;
   static const OrtApi *envApi = nullptr;
   static const OrtApiBase *envBase = nullptr;
+  // The plugin libraries an Env registers are part of its identity too
+  // (onnx_plugin.h): a different set between runs means a fresh Env, on
+  // which the new set is registered and the old one is unloaded with it.
+  static uint64_t envGeneration = 0;
+  // A runtime that refused once refuses again: remembered per runtime, so
+  // enumeration does not pay for the same failed attempt at every probe,
+  // and a different library gets its own try.
+  static const OrtApi *failedApi = nullptr;
+  static const OrtApiBase *failedBase = nullptr;
   std::lock_guard<std::mutex> lock(mutex);
-  if (env && envApi == rt.api && envBase == rt.base)
+  const uint64_t generation = onnxEpConfigGeneration();
+  if (env && envApi == rt.api && envBase == rt.base &&
+      envGeneration == generation)
     return env;
+  if (!env && failedApi == rt.api && failedBase == rt.base)
+    return nullptr;
   if (env)
   {
     // Release with the API that created it; the old shared object is still
@@ -96,25 +272,42 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
     envApi = nullptr;
     envBase = nullptr;
   }
-  // A provider declining a graph is an expected outcome here -- it becomes
-  // an Unsupported row -- but ORT reports it at ERROR level and writes it
-  // straight to stderr.  Normal runs stay silent (the skip row carries the
-  // message); --verbose opens the runtime's own log up.
-  OrtLoggingLevel level = clpeak::verboseEnabled() ? ORT_LOGGING_LEVEL_WARNING
-                                                   : ORT_LOGGING_LEVEL_FATAL;
-  OrtStatus *st = rt.api->CreateEnv(level, "clpeak", &env);
-  if (st)
+  // The runtime's own log goes to the run log (ortLogMessage) instead of
+  // to stderr: a provider explaining why it declined a graph, or which
+  // nodes fell back to the CPU, is the line that explains an Unsupported
+  // row or a slow one, and on a phone there is no stderr to read it from.
+  // The Env is created once per runtime and its level is fixed, while
+  // --verbose can differ from run to run in the GUI, so it is opened at
+  // INFO and the callback applies the current run's verbosity.
+  OrtStatus *st = rt.api->CreateEnvWithCustomLogger(
+      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &env);
+  if (st || !env)
   {
-    CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", onnxStatusText(rt, st).c_str());
+    // Two package-built runtimes (Debian's, Homebrew's) share one system
+    // libonnx, whose schema registry is process-wide: the second to create
+    // an environment finds every schema "already registered" and refuses.
+    // The reason is the runtime's own words, kept for the skip rows.
+    g_envError = st ? onnxStatusText(rt, st)
+                    : "the runtime returned no environment and no error";
+    CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", g_envError.c_str());
     env = nullptr;
+    failedApi = rt.api;
+    failedBase = rt.base;
     return nullptr;
   }
-  if (env)
-  {
-    envApi = rt.api;
-    envBase = rt.base;
-  }
+  envApi = rt.api;
+  envBase = rt.base;
+  envGeneration = generation;
+  g_envError.clear();
+  // Plugin providers live on the Env, so this is where they are registered
+  // -- once per Env, before anything enumerates or attaches them.
+  onnxRegisterEpLibraries(rt, env);
   return env;
+}
+
+std::string onnxEnvError()
+{
+  return g_envError;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,42 +326,126 @@ namespace
 struct EpOptions
 {
   const char *registrationName;     // name the generic append API expects
-  std::vector<std::pair<const char *, const char *>> kv;
+  std::vector<std::pair<std::string, std::string>> kv;
 };
 
-// Providers registered through the generic string-keyed API.  Returns false
-// for anything not handled here; the caller then tries the typed paths.
-bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
+// The QNN backend library for a device: `backend_path` naming the file
+// beside the plugin library when it is there to be named, else
+// `backend_type` and the provider's own search.  A built-in QNN provider
+// resolves a bare file name against its runtime's directory (and the
+// plugin against its own), but naming the file outright when it is in
+// sight leaves nothing to a loader search that depends on which
+// directory the process started in.
+void qnnBackend(const onnx_ep_info_t &ep, const char *type, const char *file,
+                EpOptions &out)
+{
+  if (ep.epDevicePtr)
+  {
+    const std::string lib = onnxEpLibraryPath(ep.library);
+    const size_t slash = lib.find_last_of("/\\");
+    if (slash != std::string::npos)
+    {
+      const std::string beside = lib.substr(0, slash + 1) + file;
+      std::error_code ec;
+      if (std::filesystem::exists(beside, ec))
+      {
+        out.kv.emplace_back("backend_path", beside);
+        return;
+      }
+    }
+    out.kv.emplace_back("backend_type", type);
+    return;
+  }
+  out.kv.emplace_back("backend_path", file);
+}
+
+// The compute units the CoreML provider is asked for.  CoreML has no
+// NPU-only mode; CPUAndNeuralEngine is the strictest available request,
+// and what Core ML then does with each operation is read back from its
+// compute plan (onnx_coreml_plan.h).
+constexpr const char *kCoremlComputeUnits = "CPUAndNeuralEngine";
+
+// Providers registered through the generic string-keyed API -- and the
+// plugin providers, which take the same key/value options through the
+// OrtEpDevice append (onnx_plugin.h).  Returns false for anything not
+// handled here; the caller then tries the typed paths.
+// `wantPlan` asks the CoreML provider to log its compute plan while it
+// loads the model (ProfileComputePlan, ORT 1.20+): the provider then loads
+// the compiled model a second time to read MLComputePlan, which is what
+// the native backend pays too and the price of knowing where the work ran.
+// Off for the probes and the attach-only check, which never time a run.
+bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
 {
   const std::string &providerKey = ep.providerKey;
   if (providerKey == "CoreMLExecutionProvider")
   {
-    // MLProgram + Neural Engine: the fp16-native ANE path.  CoreML has no
-    // NPU-only mode; CPUAndNeuralEngine is the strictest available request.
+    // MLProgram + Neural Engine: the fp16-native ANE path.
     out = {"CoreML",
            {{"ModelFormat", "MLProgram"},
-            {"MLComputeUnits", "CPUAndNeuralEngine"}}};
+            {"MLComputeUnits", kCoremlComputeUnits}}};
+    if (wantPlan)
+      out.kv.emplace_back("ProfileComputePlan", "1");
     return true;
   }
   if (providerKey == "QNNExecutionProvider")
   {
-    // HTP is the NPU proper; without this the EP would settle for the DSP or
-    // the CPU reference backend and the row would not mean what it says.
 #if defined(_WIN32)
-    out = {"QNN", {{"backend_path", "QnnHtp.dll"}}};
+    const char *htpFile = "QnnHtp.dll";
+    const char *gpuFile = "QnnGpu.dll";
+    const char *cpuFile = "QnnCpu.dll";
 #else
-    out = {"QNN", {{"backend_path", "libQnnHtp.so"}}};
+    const char *htpFile = "libQnnHtp.so";
+    const char *gpuFile = "libQnnGpu.so";
+    const char *cpuFile = "libQnnCpu.so";
 #endif
+    out = {"QNN", {}};
+    // The plugin enumerates each backend's device on its own (the HTP as
+    // an NPU, the Adreno as a GPU, the reference backend as a CPU), and
+    // the row is the device it says.  The built-in provider enumerates
+    // once, and there HTP is the NPU proper: without naming it the EP
+    // would settle for the DSP or the CPU reference backend and the row
+    // would not mean what it says.
+    if (ep.epDevicePtr && ep.deviceType == DeviceType::Gpu)
+    {
+      qnnBackend(ep, "gpu", gpuFile, out);
+      return true;
+    }
+    if (ep.epDevicePtr && ep.deviceType == DeviceType::Cpu)
+    {
+      qnnBackend(ep, "cpu", cpuFile, out);
+      return true;
+    }
+    qnnBackend(ep, "htp", htpFile, out);
+    // Peak clocks.  The HTP's default performance mode is a power
+    // saver; "burst" is what a benchmark -- and Qualcomm's own
+    // profiling tools -- ask for, and the difference is a large
+    // multiple on sustained work.
+    out.kv.emplace_back("htp_performance_mode", "burst");
+    out.kv.emplace_back("qnn_context_priority", "high");
+    // The most optimised graph the finalizer will produce.  Costs
+    // preparation time, which the session-creation budgets bound.
+    out.kv.emplace_back("htp_graph_finalization_optimization_mode", "3");
+    // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
+    // HTP.  The default hands them to the CPU EP, which the fallback
+    // guard then refuses -- and a quantized input arriving through
+    // a dequantize is exactly what the numeric-error and live QDQ
+    // graphs have at their boundary.
+    out.kv.emplace_back("offload_graph_io_quantization", "0");
     return true;
   }
   if (providerKey == "OpenVINOExecutionProvider")
   {
     // One registration per enumerated target (see onnxAvailableEps):
     // NPU, GPU and CPU are different silicon behind one provider name,
-    // and the target is part of what the row measures.  The pointer
-    // borrows ep.epDevice, which outlives the append call below.
-    const char *dev = ep.epDevice.empty() ? "NPU" : ep.epDevice.c_str();
-    out = {"OpenVINO", {{"device_type", dev}}};
+    // and the target is part of what the row measures.  A plugin OpenVINO
+    // is appended for its OrtEpDevice, which already names the silicon.
+    if (ep.epDevicePtr)
+    {
+      out = {"OpenVINO", {}};
+      return true;
+    }
+    out = {"OpenVINO",
+           {{"device_type", ep.epDevice.empty() ? "NPU" : ep.epDevice}}};
     return true;
   }
   if (providerKey == "VitisAIExecutionProvider")
@@ -203,19 +480,35 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out)
 // one-line reason -- including "no wiring", so an unknown provider is
 // reported as unsupported rather than silently run with defaults.
 std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
-                           const onnx_ep_info_t &ep)
+                           const onnx_ep_info_t &ep, bool wantPlan)
 {
   const OrtApi *api = rt.api;
   const std::string &providerKey = ep.providerKey;
 
+  // ---- Plugin providers: appended for their OrtEpDevice -----------------
+  // The string-keyed append below knows the built-in names only and
+  // answers "not supported in this build" for a plugin, however it was
+  // registered.  The options are the same table: a plugin QNN takes the
+  // HTP options a built-in one does.  A plugin clpeak has no wiring for
+  // runs with the provider's own defaults -- the person naming the library
+  // asked for exactly that, and the fallback guard still fails a session
+  // the provider does not take whole.
+  if (ep.epDevicePtr)
+  {
+    EpOptions opts;
+    if (!genericEpOptions(ep, opts, wantPlan))
+      opts = {"", {}};
+    return onnxAppendPluginDevice(rt, so, ep, opts.kv);
+  }
+
   EpOptions opts;
-  if (genericEpOptions(ep, opts))
+  if (genericEpOptions(ep, opts, wantPlan))
   {
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
     {
-      keys.push_back(kvp.first);
-      vals.push_back(kvp.second);
+      keys.push_back(kvp.first.c_str());
+      vals.push_back(kvp.second.c_str());
     }
     return onnxStatusText(rt, api->SessionOptionsAppendExecutionProvider(
         so, opts.registrationName, keys.data(), vals.data(), keys.size()));
@@ -340,12 +633,20 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   // registration (TensorRT, CUDA) fail with "Attempt to use DefaultLogger
   // but none has been registered" instead of attaching.
   if (!onnxEnv(rt))
-    return "onnxruntime environment creation failed";
+    return "onnxruntime environment creation failed: " + onnxEnvError();
 
   OrtSessionOptions *so = nullptr;
   if (OrtStatus *st = rt.api->CreateSessionOptions(&so))
     return onnxStatusText(rt, st);
-  std::string err = appendProvider(rt, so, ep);
+  // Appending a target with no hardware behind it (OpenVINO NPU with no
+  // NPU) makes the provider log straight to the console, below any ORT
+  // log level -- the same class of spam session creation already mutes.
+  // Mute the append; the returned status still carries the reason.
+  std::string err;
+  {
+    clpeak::ScopedConsoleMute mute;
+    err = appendProvider(rt, so, ep, /*wantPlan=*/false);
+  }
   rt.api->ReleaseSessionOptions(so);
   return err;
 }
@@ -431,10 +732,25 @@ static void removeProfileArtifacts(const std::string &prefix)
   }
 }
 
+const char *onnxProfileTypeName(int dtype)
+{
+  switch (dtype)
+  {
+  case ONNX_DT_FLOAT:    return "float";
+  case ONNX_DT_FLOAT16:  return "float16";
+  case ONNX_DT_BFLOAT16: return "bfloat16";
+  default:               return ""; // quantized: no plain kernel to check
+  }
+}
+
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
-                                                OrtSession *session)
+                                                OrtSession *session,
+                                                std::string *opInType,
+                                                const char *ofOp)
 {
   std::vector<std::string> ops;
+  if (opInType)
+    opInType->clear();
   if (!session)
     return ops;
 
@@ -492,11 +808,62 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
       break;
     std::string name = json.substr(pos, end - pos);
     pos = end;
-    if (!name.empty() &&
-        std::find(ops.begin(), ops.end(), name) == ops.end())
+
+    // Capture the element type of the kernel's first input.  ORT writes
+    // `"input_type_shape" : [ { "float16" : [32,32] }, ...` in the same
+    // event's args; find it near this op_name and read the first quoted key
+    // inside the first brace.
+    const bool wanted = ofOp ? (name == ofOp)
+                             : (name == "MatMul" || name == "FusedMatMul" ||
+                                name == "Gemm");
+    if (opInType && opInType->empty() && wanted)
+    {
+      const std::string itsKey = "\"input_type_shape\"";
+      // The args object holds op_name and input_type_shape together; search a
+      // bounded window on either side rather than counting braces.
+      size_t lo = (pos > 800) ? pos - 800 : 0;
+      size_t its = json.find(itsKey, lo);
+      if (its != std::string::npos && its < pos + 800)
+      {
+        size_t br = json.find('{', its); // first tensor's { "<type>": ... }
+        size_t q1 = (br == std::string::npos) ? std::string::npos
+                                              : json.find('"', br);
+        if (q1 != std::string::npos)
+        {
+          size_t q2 = json.find('"', q1 + 1);
+          if (q2 != std::string::npos)
+            *opInType = json.substr(q1 + 1, q2 - q1 - 1);
+        }
+      }
+    }
+
+    if (!name.empty())
       ops.push_back(std::move(name));
   }
   return ops;
+}
+
+size_t onnxCountOp(const std::vector<std::string> &ops, const char *name)
+{
+  size_t n = 0;
+  for (const auto &op : ops)
+    if (op == name)
+      n++;
+  return n;
+}
+
+std::string onnxJoinOps(const std::vector<std::string> &ops)
+{
+  std::string out;
+  std::vector<std::string> seen;
+  for (const auto &op : ops)
+  {
+    if (std::find(seen.begin(), seen.end(), op) != seen.end())
+      continue;
+    seen.push_back(op);
+    out += (out.empty() ? "" : ", ") + op;
+  }
+  return out;
 }
 
 // The kernels that do the multiply in integer arithmetic, across providers.
@@ -541,15 +908,25 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded,
                                     bool profile,
-                                    bool keepQdqUnfused)
+                                    bool keepQdqUnfused,
+                                    bool verifyPlacement)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
 
+  // The one provider whose runtime can be asked where the work went.  The
+  // unit is the one its MLComputeUnits request names; a request no single
+  // unit answers for is not verified.
+  const OnnxCoremlUnit unit =
+      (verifyPlacement && ep.providerKey == "CoreMLExecutionProvider")
+          ? onnxCoremlUnitFor(kCoremlComputeUnits)
+          : OnnxCoremlUnit{};
+  const bool wantPlan = !unit.cls.empty();
+
   OrtEnv *env = onnxEnv(rt);
   if (!env)
   {
-    res.error = "onnxruntime environment creation failed";
+    res.error = "onnxruntime environment creation failed: " + onnxEnvError();
     return res;
   }
 
@@ -610,7 +987,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // one provider that needs no registration and keeps its fallback.
   if (ep.providerKey != "CPUExecutionProvider")
   {
-    res.error = appendProvider(rt, so, ep);
+    res.error = appendProvider(rt, so, ep, wantPlan);
     if (!res.error.empty())
     {
       api->ReleaseSessionOptions(so);
@@ -631,11 +1008,21 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // registry -- the XNNPACK EP emits hundreds of "Schema error: ... already
   // registered" lines from the bundled ONNX library, straight to the console
   // and below any ORT log level.  Mute the build; --verbose keeps it visible.
+  // When the CoreML provider was asked for its compute plan, the console is
+  // where it arrives (NSLog, one line per operation, before the session is
+  // initialised), so that build is captured rather than discarded.
   OrtSession *session = nullptr;
+  std::string console;
   {
-    clpeak::ScopedConsoleMute mute;
+    clpeak::ScopedConsoleMute mute(wantPlan ? clpeak::ScopedConsoleMute::Capture::Always
+                                            : clpeak::ScopedConsoleMute::Capture::Verbose);
     st = api->CreateSessionFromArray(env, modelBytes.data(), modelBytes.size(),
                                      so, &session);
+    if (wantPlan)
+    {
+      mute.finish();
+      console = mute.text();
+    }
   }
   api->ReleaseSessionOptions(so);
   if (st)
@@ -651,6 +1038,39 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     res.error = "the runtime returned no session and no error";
     removeProfileArtifacts(profilePrefix);
     return res;
+  }
+
+  // The placement guard.  ORT's fallback guard above proved the provider
+  // took every node; this proves its runtime ran them on the unit the row is
+  // named for, by the same 5%-of-cost rule the native Core ML backend
+  // applies to its own plans.  A plan that never arrived -- an OS before
+  // macOS 14.4 / iOS 17.4, where MLComputePlan does not exist and the
+  // provider says so through its logger -- leaves the session unverified
+  // rather than refused: it is what every other provider gets, and the
+  // verbose log says which it was.
+  if (wantPlan)
+  {
+    const OnnxCoremlPlan plan = onnxParseCoremlPlan(console);
+    if (!plan.known)
+      CLPEAK_VLOG("onnx: no compute plan from the CoreML provider (%s); placement unverified\n",
+                  plan.failure.empty() ? "no placement lines on the console" : plan.failure.c_str());
+    else
+    {
+      size_t onUnit = 0;
+      for (const auto &op : plan.ops)
+        onUnit += (op.device == unit.cls) ? 1 : 0;
+      CLPEAK_VLOG("onnx: compute plan: %zu of %zu operations on %s\n", onUnit, plan.ops.size(),
+                  unit.name.c_str());
+      const std::string why = onnxCoremlPlanOffDeviceReason(plan, unit.cls, unit.name);
+      if (!why.empty())
+      {
+        api->ReleaseSession(session);
+        removeProfileArtifacts(profilePrefix);
+        res.error = why;
+        res.offDevice = true;
+        return res;
+      }
+    }
   }
 
   res.session = session;

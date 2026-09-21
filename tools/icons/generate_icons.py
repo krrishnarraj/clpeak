@@ -14,7 +14,7 @@ the wordmark as an alpha mask and re-composes it per platform:
   Windows  multi-resolution .ico
   Linux    single 256px PNG, loaded as the GTK window icon at runtime
 
-Usage:  python3 tool/icons/generate_icons.py      (needs Pillow)
+Usage:  python3 tools/icons/generate_icons.py      (needs Pillow)
 """
 
 from __future__ import annotations

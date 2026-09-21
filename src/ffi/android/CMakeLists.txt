@@ -4,7 +4,7 @@ project(clpeak_android)
 # Standalone superproject consumed by the Flutter app's Gradle build
 # (app/android/app/build.gradle.kts → externalNativeBuild).  Builds the
 # clpeak_ffi shared library with the Android backend set:
-# OpenCL (dlopen stub) + Vulkan (NDK) + CPU.
+# OpenCL (dlopen stub) + Vulkan (NDK) + CPU + ONNX Runtime + LiteRT.
 
 # Support 16 KB page sizes on Android 15+
 set(ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES ON CACHE BOOL "" FORCE)
@@ -88,6 +88,15 @@ endif()
 # -----------------------------------------------------------------------
 set(CLPEAK_ENABLE_ONNX ON)
 add_subdirectory(${CLPEAK_ROOT}/src/onnx ${CMAKE_BINARY_DIR}/onnx)
+
+# -----------------------------------------------------------------------
+# LiteRT backend -- CPU (XNNPACK) / GPU (OpenCL) / NPU (vendor dispatch).
+# Headers only at build time; libLiteRt.so comes from the
+# com.google.ai.edge.litert AAR the app packages (see
+# app/android/app/build.gradle.kts) and is dlopen'd by its bare soname.
+# -----------------------------------------------------------------------
+set(CLPEAK_ENABLE_LITERT ON)
+add_subdirectory(${CLPEAK_ROOT}/src/litert ${CMAKE_BINARY_DIR}/litert)
 
 # -----------------------------------------------------------------------
 # The FFI bridge — the same library every other platform loads

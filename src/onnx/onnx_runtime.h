@@ -35,8 +35,9 @@ struct OrtRuntime
 // Naming a different library after one is already loaded takes effect: the
 // next ortRuntime() call loads the new one.  The old handle is deliberately
 // leaked rather than dlclosed -- ONNX Runtime keeps worker threads alive past
-// the last session, so unloading it is not safe.  No-op when statically
-// linked.
+// the last session, so unloading it is not safe (nor is unloading a file
+// that turned out not to be an ONNX Runtime at all; common/dynlib.h has the
+// crash that proved it).  No-op when statically linked.
 //
 // Call it between runs only: ortRuntime() hands out a pointer to the loader's
 // own record, and changing the library repoints that record.
@@ -46,6 +47,12 @@ void onnxSetLibraryOverride(const std::string &path);
 // exposes no API version we can use.  A failed load is remembered, so a
 // missing runtime costs one search rather than one per call.
 const OrtRuntime *ortRuntime();
+
+// Ask the loader to run its default search again on the next ortRuntime():
+// the plugin configuration steers that search (an --onnx-winml directory's
+// own runtime comes first), so a change to it is a reason to look again.
+// A named library is unaffected.  Between runs only, like the override.
+void onnxRuntimeRecheck();
 
 // Why the last load attempt failed, ready to show a user; empty when the
 // runtime loaded or has not been asked for yet.  A refusal is only as useful

@@ -32,8 +32,9 @@ public:
     explicit LoggerText(std::ostream &out = std::cout,
                         std::string compareFileName = "",
                         bool describe = false,
-                        bool verbose = false)
-        : logger(std::move(compareFileName)), out(out), describe(describe), verbose(verbose) {}
+                        bool verbose = false,
+                        bool mirrorToRunLog = false)
+        : logger(std::move(compareFileName), mirrorToRunLog), out(out), describe(describe), verbose(verbose) {}
 
 protected:
     void onEvent(const LogEvent &e) override;
@@ -44,8 +45,10 @@ protected:
     // --describe: render the documentation alongside the readings.
     bool describe = false;
 
-    // --verbose: print skipped/unsupported/error readings in default
-    // mode they are hidden; only shown when --verbose is passed.
+    // --verbose: print skipped/unsupported/error readings (hidden by
+    // default), and the debug / library diagnostics, which go to stderr so
+    // the results table stays pipeable.  Warnings and errors of clpeak's own
+    // print inline whatever the mode.
     bool verbose = false;
 
 private:
@@ -56,6 +59,7 @@ private:
     void renderTestBegin(const LogEvent &e);
     void renderMetric(const LogEvent &e);
     void renderTestSkippedAll(const LogEvent &e);
+    void renderLog(const LogEntry &l);
     void renderTestEnd();
     void noteClosedTest(const std::string &key);
     void renderDeviceEnd();

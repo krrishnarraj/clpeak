@@ -193,17 +193,17 @@ struct cuda_compute_desc_t
 class CudaPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices;  // empty = run all
-
   CudaPeak();
   ~CudaPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Cuda;
+  Backend backend() const override { return kBackend; }
   int runAll() override;
 
   // Inventory.
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   int runComputeSP(CudaDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(CudaDevice &dev, benchmark_config_t &cfg);

@@ -110,11 +110,14 @@ public:
   CpuPeak();
   ~CpuPeak();
 
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Cpu;
+  Backend backend() const override { return kBackend; }
   void applyOptions(const CliOptions &opts) override;
   int  runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   // Timed launcher: runs body(tid, iters) across nThreads (warmups + one probe
   // + pickIters() timed batch) and returns the mean wall-clock microseconds per

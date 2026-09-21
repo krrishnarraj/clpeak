@@ -11,4 +11,12 @@ void Peak::applyOptions(const CliOptions &opts)
     targetTimeUs   = opts.targetTimeUs;
     enabledTests      = opts.enabledTests;
     enabledCategories = opts.enabledCategories;
+
+    // Only the items that name this backend.  The run loop already skips a
+    // backend with none when --devices was given (CliOptions::backendEnabled),
+    // so an empty list here means "every device".
+    selectedDevices.clear();
+    for (const DeviceSelector &sel : opts.devices)
+        if (sel.backend == backend())
+            selectedDevices.push_back(sel.index);
 }

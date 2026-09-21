@@ -134,16 +134,16 @@ struct rocm_compute_desc_t
 class RocmPeak : public Peak
 {
 public:
-  std::vector<int> deviceIndices;  // empty = run all
-
   RocmPeak();
   ~RocmPeak();
 
-  void applyOptions(const CliOptions &opts) override;
+  // Which backend this is -- the one place that says so; the registry,
+  // the inventory and the device selector all read it from here.
+  static constexpr Backend kBackend = Backend::Rocm;
+  Backend backend() const override { return kBackend; }
   int runAll() override;
 
   static BackendInventory enumerate();
-  static void printInventory(const BackendInventory &inv, std::ostream &os);
 
   int runComputeSP(RocmDevice &dev, benchmark_config_t &cfg);
   int runComputeHP(RocmDevice &dev, benchmark_config_t &cfg);

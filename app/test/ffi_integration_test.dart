@@ -11,6 +11,7 @@ import 'package:clpeak/src/ffi/clpeak_events.dart';
 import 'package:clpeak/src/ffi/clpeak_runner.dart';
 import 'package:clpeak/src/model/result_model.dart';
 import 'package:clpeak/src/model/run_document.dart';
+import 'package:clpeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -46,8 +47,8 @@ void main() {
           '${Directory.systemTemp.path}/clpeak_dart_ffi_test.clpeak.json');
       if (out.existsSync()) out.deleteSync();
 
-      final run =
-          ClpeakRunner(bindings).start(['--cpu', '-i', '1', '-o', out.path]);
+      final run = ClpeakRunner(bindings)
+          .start(['--cpu', '-i', '1', '--verbose', '-o', out.path]);
       final events = await run.events.toList();
       final rc = await run.result;
 
@@ -89,6 +90,30 @@ void main() {
               .firstWhere((m) => m.id == 'DRAM x8')
               .description,
           isNotEmpty);
+
+      // --verbose: the debug lines the CPU backend prints reach the stream
+      // live and the file alike, scoped to where they fired; the file also
+      // says the run was verbose, what the binary was built with, and what
+      // --list-devices would have shown.
+      final live = events.whereType<LogEntryEvent>().map((e) => e.entry);
+      expect(live.any((e) => e.level == LogLevel.debug && e.backend == 'CPU'),
+          isTrue);
+      expect(doc.log.any((e) => e.level == LogLevel.debug && e.backend == 'CPU'),
+          isTrue);
+      expect(doc.meta!.verbose, isTrue);
+      expect(doc.meta!.builtBackends, contains('CPU'));
+      final raw = jsonDecode(out.readAsStringSync()) as Map<String, dynamic>;
+      expect((raw['inventory'] as List).map((b) => b['name']), contains('CPU'));
+      expect(
+          (raw['devices'][0]['tests'] as List)
+              .any((t) => (t['duration_s'] as num? ?? 0) > 0),
+          isTrue);
+      // The run-log sidecar lived while the run did and went with the save.
+      expect(
+          File(RunHistoryStore.logFileNameFor(out.path.substring(
+                  0, out.path.length - RunHistoryStore.fileSuffix.length)))
+              .existsSync(),
+          isFalse);
       out.deleteSync();
     });
 
@@ -103,7 +128,11 @@ void main() {
               'overran its timeout rather than this test misbehaving');
       expect(rc, clpeakRunBadArgs);
       final events = await run.events.toList();
-      expect(events.whereType<NoteEvent>(), isNotEmpty);
+      // The rejection reaches the stream as an error-level log entry, not a
+      // silent failure code.
+      final rejected = events.whereType<LogEntryEvent>().toList();
+      expect(rejected, isNotEmpty);
+      expect(rejected.first.entry.level, LogLevel.error);
       final done = events.last as DoneEvent;
       expect(done.status, clpeakRunBadArgs);
     });

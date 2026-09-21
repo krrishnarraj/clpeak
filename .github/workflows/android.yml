@@ -24,7 +24,14 @@ jobs:
           distribution: temurin
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # Default is `tools platform-tools`, but `tools` was removed from
+          # the SDK repository, so `sdkmanager tools` fails the job. The
+          # runner image already ships cmdline-tools/platform-tools, so skip
+          # the extra install; this still puts sdkmanager on PATH and
+          # accepts the SDK licenses.
+          packages: ''
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true

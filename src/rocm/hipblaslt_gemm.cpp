@@ -88,7 +88,8 @@ bool HipblasLtApi::load()
 #undef CLPEAK_HLT_SYM
   if (!ok)
   {
-    clpeak::dynClose(lib);
+    // Forgotten, not unloaded: common/dynlib.h explains why no handle is
+    // ever closed.
     lib = nullptr;
   }
   return ok;
