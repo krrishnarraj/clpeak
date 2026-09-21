@@ -357,7 +357,16 @@ int OnnxPeak::runAll()
       static const char *const kHidden[] = {
           "Device", "card_idx", "Discrete", "pci_bus_id",
           "cuda_compute_capability", "cuda_device_id", "version",
-          "library_path",
+          "library_path", "LUID", "DxgiAdapterNumber",
+          "DxgiHighPerformanceIndex", "DxgiVideoMemory", "ov_device",
+          "ov_meta_device", "AVAILABLE_DEVICES", "DEVICE_ARCHITECTURE",
+          "DEVICE_GOPS", "DEVICE_LUID", "DEVICE_PCI_INFO", "DEVICE_TYPE",
+          "DEVICE_UUID", "FULL_DEVICE_NAME", "GPU_DEVICE_ID",
+          "GPU_DEVICE_MAX_ALLOC_MEM_SIZE", "GPU_DEVICE_TOTAL_MEM_SIZE",
+          "GPU_EXECUTION_UNITS_COUNT", "GPU_MEMORY_STATISTICS",
+          "GPU_UARCH_VERSION", "MAX_BATCH_SIZE", "OPTIMAL_BATCH_SIZE",
+          "OPTIMIZATION_CAPABILITIES", "RANGE_FOR_ASYNC_INFER_REQUESTS",
+          "RANGE_FOR_STREAMS", "nv_ep_ort_api_version",
       };
       if (!ep.vendor.empty())
         details.push_back({"Vendor", ep.vendor});
@@ -374,11 +383,6 @@ int OnnxPeak::runAll()
           details.push_back({kv.first, kv.second});
       }
     }
-    // The OpenVINO target is part of what was measured (NPU vs GPU vs
-    // CPU are different silicon behind one provider name), so record it
-    // alongside the provider rather than leaving rows to guess.
-    else if (!ep.epDevice.empty())
-      details.push_back({"OpenVINO device", ep.epDevice});
 
     auto deviceScope = backendScope.beginDevice({
         ep.displayName,
