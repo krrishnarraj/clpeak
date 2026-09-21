@@ -74,25 +74,26 @@
 #define CLPEAK_BUILT_LITERT false
 #endif
 
-struct BackendRow {
+struct BackendRow
+{
   BackendInfo info;
-  const char *blurb;   // one line for --help
+  const char *blurb; // one line for --help
 };
 
 // Indexed by Backend: one row per enum value, in enum order, which the
 // static_asserts below enforce so a row can never describe the wrong
 // backend.
 static constexpr BackendRow backendTable[] = {
-  {{Backend::Cuda,   "CUDA",   "cuda",   CLPEAK_BUILT_CUDA},   "CUDA"},
-  {{Backend::Rocm,   "ROCm",   "rocm",   CLPEAK_BUILT_ROCM},   "ROCm/HIP"},
-  {{Backend::Metal,  "Metal",  "metal",  CLPEAK_BUILT_METAL},  "Metal"},
-  {{Backend::Oneapi, "oneAPI", "oneapi", CLPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
-  {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
-  {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
-  {{Backend::Cpu,    "CPU",    "cpu",    CLPEAK_BUILT_CPU},    "native CPU"},
-  {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
-  {{Backend::Litert, "LiteRT", "litert", CLPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
-  {{Backend::Onnx,   "ONNX",   "onnx",   CLPEAK_BUILT_ONNX},   "ONNX Runtime (NPUs via execution providers)"},
+    {{Backend::Cuda, "CUDA", "cuda", CLPEAK_BUILT_CUDA}, "CUDA"},
+    {{Backend::Rocm, "ROCm", "rocm", CLPEAK_BUILT_ROCM}, "ROCm/HIP"},
+    {{Backend::Metal, "Metal", "metal", CLPEAK_BUILT_METAL}, "Metal"},
+    {{Backend::Oneapi, "oneAPI", "oneapi", CLPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
+    {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
+    {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
+    {{Backend::Cpu, "CPU", "cpu", CLPEAK_BUILT_CPU}, "native CPU"},
+    {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
+    {{Backend::Litert, "LiteRT", "litert", CLPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
+    {{Backend::Onnx, "ONNX", "onnx", CLPEAK_BUILT_ONNX}, "ONNX Runtime (NPU / GPU / CPU via execution providers)"},
 };
 static constexpr int numBackends = sizeof(backendTable) / sizeof(backendTable[0]);
 static_assert(numBackends == static_cast<int>(Backend::COUNT),
@@ -124,80 +125,82 @@ std::vector<Backend> CliOptions::requestedButNotBuilt() const
 
 // ---- Category and test tables ------------------------------------------------
 
-struct CategoryFlag {
+struct CategoryFlag
+{
   const char *name;
-  Category    cat;
+  Category cat;
   const char *blurb;
 };
 
 static const CategoryFlag categoryFlags[] = {
-  {"compute",   Category::Compute,   "arithmetic, matrix engines and library GEMM (flops / ops)"},
-  {"crypto",    Category::Crypto,    "crypto/hash silicon (bps)"},
-  {"string",    Category::String,    "string/text processing (bps)"},
-  {"bandwidth", Category::Bandwidth, "memory and transfer bandwidth (bps)"},
-  {"latency",   Category::Latency,   "launch, memory and micro-architectural latency (s)"},
-  {"ai",        Category::Ai,        "AI composites: the transformer block (flops, bps, s)"},
+    {"compute", Category::Compute, "arithmetic, matrix engines and library GEMM (flops / ops)"},
+    {"crypto", Category::Crypto, "crypto/hash silicon (bps)"},
+    {"string", Category::String, "string/text processing (bps)"},
+    {"bandwidth", Category::Bandwidth, "memory and transfer bandwidth (bps)"},
+    {"latency", Category::Latency, "launch, memory and micro-architectural latency (s)"},
+    {"ai", Category::Ai, "AI composites: the transformer block (flops, bps, s)"},
 };
 static const int numCategoryFlags = sizeof(categoryFlags) / sizeof(categoryFlags[0]);
 
-struct TestFlag {
-  const char *name;        // flag suffix; e.g. "gemm" matches --gemm / --no-gemm
-  Benchmark   test;
+struct TestFlag
+{
+  const char *name; // flag suffix; e.g. "gemm" matches --gemm / --no-gemm
+  Benchmark test;
   const char *blurb;
 };
 
 // --help groups these by categoryOf(test), in table order within a group,
 // so a test can never be listed under the wrong heading.
 static const TestFlag testFlags[] = {
-  {"single-precision-compute",  Benchmark::ComputeSP,       "fp32"},
-  {"half-precision-compute",    Benchmark::ComputeHP,       "fp16"},
-  {"double-precision-compute",  Benchmark::ComputeDP,       "fp64"},
-  {"mixed-precision-compute",   Benchmark::ComputeMP,       "fp16 inputs, fp32 accumulate"},
-  {"bfloat16-compute",          Benchmark::ComputeBF16,     "bf16"},
-  {"integer-compute",           Benchmark::ComputeInt,      "int32"},
-  {"integer-compute-fast",      Benchmark::ComputeIntFast,  "24-bit integer (mad24)"},
-  {"integer-compute-char",      Benchmark::ComputeChar,     "8-bit integer vectors"},
-  {"integer-compute-short",     Benchmark::ComputeShort,    "16-bit integer vectors"},
-  {"int8-dot-product-compute",  Benchmark::ComputeInt8DP,   "int8 dot product (DP4a / VNNI / SDOT / dot())"},
-  {"int16-dot-product-compute", Benchmark::ComputeInt16DP,  "int16 dot product (x86 VNNI)"},
-  {"fp8-dot-product-compute",   Benchmark::ComputeFP8DP,    "fp8 dot product (ARM FP8)"},
-  {"divide-sqrt-compute",       Benchmark::ComputeDivSqrt,  "fp divide and sqrt throughput"},
-  {"integer-divide-compute",    Benchmark::ComputeIntDiv,   "64-bit integer divide throughput"},
-  {"matrix-compute",            Benchmark::MatrixCompute,   "matrix engine via intrinsics: tensor cores, MFMA/WMMA,\n"
-                                                            "coopmat, simdgroup_matrix, joint_matrix, AMX/SME"},
-  {"gemm",                      Benchmark::Gemm,            "the vendor library's tuned matmul: cuBLASLt, hipBLASLt,\n"
-                                                            "oneMKL, MPS, Accelerate, ONNX MatMul, Core ML"},
-  {"attention",                 Benchmark::Attention,       "scaled-dot-product attention through the vendor library"},
-  {"convolution",               Benchmark::Conv,            "2-D convolution peak through a graph runtime"},
-  {"numeric-error",             Benchmark::NumericError,    "accuracy cost of each dtype vs an fp32 reference (ppm)"},
-  {"smt-scaling",               Benchmark::SmtScaling,      "fp32 FMA at one thread per core vs every SMT thread"},
+    {"single-precision-compute", Benchmark::ComputeSP, "fp32"},
+    {"half-precision-compute", Benchmark::ComputeHP, "fp16"},
+    {"double-precision-compute", Benchmark::ComputeDP, "fp64"},
+    {"mixed-precision-compute", Benchmark::ComputeMP, "fp16 inputs, fp32 accumulate"},
+    {"bfloat16-compute", Benchmark::ComputeBF16, "bf16"},
+    {"integer-compute", Benchmark::ComputeInt, "int32"},
+    {"integer-compute-fast", Benchmark::ComputeIntFast, "24-bit integer (mad24)"},
+    {"integer-compute-char", Benchmark::ComputeChar, "8-bit integer vectors"},
+    {"integer-compute-short", Benchmark::ComputeShort, "16-bit integer vectors"},
+    {"int8-dot-product-compute", Benchmark::ComputeInt8DP, "int8 dot product (DP4a / VNNI / SDOT / dot())"},
+    {"int16-dot-product-compute", Benchmark::ComputeInt16DP, "int16 dot product (x86 VNNI)"},
+    {"fp8-dot-product-compute", Benchmark::ComputeFP8DP, "fp8 dot product (ARM FP8)"},
+    {"divide-sqrt-compute", Benchmark::ComputeDivSqrt, "fp divide and sqrt throughput"},
+    {"integer-divide-compute", Benchmark::ComputeIntDiv, "64-bit integer divide throughput"},
+    {"matrix-compute", Benchmark::MatrixCompute, "matrix engine via intrinsics: tensor cores, MFMA/WMMA,\n"
+                                                 "coopmat, simdgroup_matrix, joint_matrix, AMX/SME"},
+    {"gemm", Benchmark::Gemm, "the vendor library's tuned matmul: cuBLASLt, hipBLASLt,\n"
+                              "oneMKL, MPS, Accelerate, ONNX MatMul, Core ML"},
+    {"attention", Benchmark::Attention, "scaled-dot-product attention through the vendor library"},
+    {"convolution", Benchmark::Conv, "2-D convolution peak through a graph runtime"},
+    {"numeric-error", Benchmark::NumericError, "accuracy cost of each dtype vs an fp32 reference (ppm)"},
+    {"smt-scaling", Benchmark::SmtScaling, "fp32 FMA at one thread per core vs every SMT thread"},
 
-  {"aes",                       Benchmark::CryptoAes,       "AES-128 (AES-NI / VAES / ARM AES)"},
-  {"sha256",                    Benchmark::CryptoSha256,    "SHA-256 (SHA-NI / ARM SHA2)"},
-  {"sha512",                    Benchmark::CryptoSha512,    "SHA-512 (ARM SHA512)"},
-  {"crc32c",                    Benchmark::CryptoCrc32c,    "CRC32-C"},
-  {"string-scan",               Benchmark::StringScan,      "memchr-style SIMD byte scan"},
-  {"utf8-validate",             Benchmark::Utf8Validate,    "UTF-8 validation (PSHUFB / TBL)"},
+    {"aes", Benchmark::CryptoAes, "AES-128 (AES-NI / VAES / ARM AES)"},
+    {"sha256", Benchmark::CryptoSha256, "SHA-256 (SHA-NI / ARM SHA2)"},
+    {"sha512", Benchmark::CryptoSha512, "SHA-512 (ARM SHA512)"},
+    {"crc32c", Benchmark::CryptoCrc32c, "CRC32-C"},
+    {"string-scan", Benchmark::StringScan, "memchr-style SIMD byte scan"},
+    {"utf8-validate", Benchmark::Utf8Validate, "UTF-8 validation (PSHUFB / TBL)"},
 
-  {"global-memory-bandwidth",   Benchmark::GlobalBW,        "device memory"},
-  {"local-memory-bandwidth",    Benchmark::LocalBW,         "work-group local / shared memory"},
-  {"image-memory-bandwidth",    Benchmark::ImageBW,         "image / texture memory"},
-  {"transfer-bandwidth",        Benchmark::TransferBW,      "host <-> device, each direction"},
-  {"tensor-bandwidth",          Benchmark::TensorBW,        "resident-tensor read through a graph runtime"},
-  {"activation",                Benchmark::Activation,      "softmax / layer-norm / SiLU throughput through a graph\n"
-                                                            "runtime"},
-  {"cache-bandwidth",           Benchmark::CacheBandwidth,  "per cache level and DRAM"},
-  {"texture-sample",            Benchmark::TextureSample,   "bilinear texel rate"},
+    {"global-memory-bandwidth", Benchmark::GlobalBW, "device memory"},
+    {"local-memory-bandwidth", Benchmark::LocalBW, "work-group local / shared memory"},
+    {"image-memory-bandwidth", Benchmark::ImageBW, "image / texture memory"},
+    {"transfer-bandwidth", Benchmark::TransferBW, "host <-> device, each direction"},
+    {"tensor-bandwidth", Benchmark::TensorBW, "resident-tensor read through a graph runtime"},
+    {"activation", Benchmark::Activation, "softmax / layer-norm / SiLU throughput through a graph\n"
+                                          "runtime"},
+    {"cache-bandwidth", Benchmark::CacheBandwidth, "per cache level and DRAM"},
+    {"texture-sample", Benchmark::TextureSample, "bilinear texel rate"},
 
-  {"kernel-launch-latency",     Benchmark::KernelLatency,   "the fixed cost of one submission: a kernel launch, a\n"
-                                                            "session run, a prediction"},
-  {"memory-latency",            Benchmark::MemoryLatency,   "pointer chase per memory level, MLP and TLB"},
-  {"atomics",                   Benchmark::Atomics,         "atomic fetch-add, uncontended and contended"},
-  {"branch-penalty",            Benchmark::BranchPenalty,   "branch mispredict cost"},
-  {"store-forward",             Benchmark::StoreForward,    "store-to-load forwarding round trip"},
+    {"kernel-launch-latency", Benchmark::KernelLatency, "the fixed cost of one submission: a kernel launch, a\n"
+                                                        "session run, a prediction"},
+    {"memory-latency", Benchmark::MemoryLatency, "pointer chase per memory level, MLP and TLB"},
+    {"atomics", Benchmark::Atomics, "atomic fetch-add, uncontended and contended"},
+    {"branch-penalty", Benchmark::BranchPenalty, "branch mispredict cost"},
+    {"store-forward", Benchmark::StoreForward, "store-to-load forwarding round trip"},
 
-  {"transformer-block",         Benchmark::TransformerBlock, "one decoder block: prefill, decode and latency at each\n"
-                                                             "precision"},
+    {"transformer-block", Benchmark::TransformerBlock, "one decoder block: prefill, decode and latency at each\n"
+                                                       "precision"},
 };
 static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 static_assert(numTestFlags == static_cast<int>(Benchmark::COUNT),
@@ -241,41 +244,41 @@ static std::string helpText()
   s += " tests say what, and a test flag applies to every backend that runs.\n";
   s += "\n";
   s += " GLOBAL OPTIONS:\n";
-  helpLine(s, "-h, --help",        "display help message");
-  helpLine(s, "-v, --version",     "display version");
-  helpLine(s, "-i, --iters num",   "force a fixed iter count (overrides --max-time calibration)");
-  helpLine(s, "-w, --warmup num",  "number of warm-up kernel runs before timing (default: 2)");
-  helpLine(s, "--max-time ms",     "per-test time budget for the timed phase, every backend\n"
-                                   "except CPU (default: 500 ms).  Iters are picked to fit it,\n"
-                                   "so set it lower if you hit a GPU watchdog");
+  helpLine(s, "-h, --help", "display help message");
+  helpLine(s, "-v, --version", "display version");
+  helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time calibration)");
+  helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
+  helpLine(s, "--max-time ms", "per-test time budget for the timed phase, every backend\n"
+                               "except CPU (default: 500 ms).  Iters are picked to fit it,\n"
+                               "so set it lower if you hit a GPU watchdog");
   helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
-  helpLine(s, "--verbose",         "print backend debug logs (kernel build logs, API errors);\n"
-                                   "with -o, record them in the file's log, with the device\n"
-                                   "inventory, so the file alone can be debugged");
-  helpLine(s, "--describe",        "explain what each test and each reading measures");
-  helpLine(s, "--list-devices",    "list available devices for every backend and exit");
+  helpLine(s, "--verbose", "print backend debug logs (kernel build logs, API errors);\n"
+                           "with -o, record them in the file's log, with the device\n"
+                           "inventory, so the file alone can be debugged");
+  helpLine(s, "--describe", "explain what each test and each reading measures");
+  helpLine(s, "--list-devices", "list available devices for every backend and exit");
   helpLine(s, "-o, --output file", "save results to a JSON file");
-  helpLine(s, "--compare file",    "compare results against a saved run");
-  helpLine(s, "--onnx-lib path",   "the ONNX Runtime library to load; decides which\n"
-                                   "providers exist before anything below adds more\n"
-                                   "(default: the platform's conventional names)");
+  helpLine(s, "--compare file", "compare results against a saved run");
+  helpLine(s, "--onnx-lib path", "the ONNX Runtime library to load; decides which\n"
+                                 "providers exist before anything below adds more\n"
+                                 "(default: the platform's conventional names)");
   helpLine(s, "--onnx-ep NAME=path", "add one more provider the loaded runtime does not\n"
-                                   "include -- most vendor NPUs ship this way now, e.g.\n"
-                                   "QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll\n"
-                                   "(ONNX Runtime 1.22+; repeatable)");
+                                     "include -- most vendor NPUs ship this way now, e.g.\n"
+                                     "QNNExecutionProvider=<dir>/onnxruntime_providers_qnn.dll\n"
+                                     "(ONNX Runtime 1.22+; repeatable)");
 #ifdef _WIN32
   helpLine(s, "--onnx-winml [path]", "Windows 11 24H2+: install and add those same vendor\n"
-                                   "providers automatically, from the Microsoft Store,\n"
-                                   "instead of naming them with --onnx-ep; path names\n"
-                                   "Microsoft.Windows.AI.MachineLearning.dll or its\n"
-                                   "directory (default: beside the loaded runtime, then\n"
-                                   "the executable)");
+                                     "providers automatically, from the Microsoft Store,\n"
+                                     "instead of naming them with --onnx-ep; path names\n"
+                                     "Microsoft.Windows.AI.MachineLearning.dll or its\n"
+                                     "directory (default: beside the loaded runtime, then\n"
+                                     "the executable)");
 #endif
   helpLine(s, "--litert-lib path", "LiteRT shared library (libLiteRt) to load\n"
                                    "(default: the platform's conventional names)");
   helpLine(s, "--litert-npu-dir dir", "where LiteRT's NPU dispatch / compiler-plugin\n"
-                                   "libraries and the vendor runtime are (default: beside\n"
-                                   "the LiteRT library)");
+                                      "libraries and the vendor runtime are (default: beside\n"
+                                      "the LiteRT library)");
   s += "\n";
   s += " BACKENDS (--<backend> / --no-<backend>; default: every one in this build):\n";
   for (int i = 0; i < numBackends; i++)
@@ -287,9 +290,9 @@ static std::string helpText()
   }
   s += "\n";
   s += " DEVICES (default: every device of every backend that runs):\n";
-  helpLine(s, "--devices list",    "run only these devices: comma-separated backend:index\n"
-                                   "items, exactly as --list-devices prints them\n"
-                                   "(e.g. --devices cuda:0,vulkan:1)");
+  helpLine(s, "--devices list", "run only these devices: comma-separated backend:index\n"
+                                "items, exactly as --list-devices prints them\n"
+                                "(e.g. --devices cuda:0,vulkan:1)");
   s += "\n";
   s += " CATEGORIES (--<category> / --no-<category>; default: all):\n";
   for (int i = 0; i < numCategoryFlags; i++)
@@ -391,7 +394,7 @@ static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
     }
     parsed.push_back(sel);
   }
-  if (parsed.empty())  // arg was empty string
+  if (parsed.empty()) // arg was empty string
   {
     why = "empty list";
     return false;
@@ -406,7 +409,13 @@ static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
 // Error onto the historical print-and-exit behavior; parseCliOptionsNoExit
 // surfaces them as a bool + message so embedders (clpeak_ffi) never die on
 // a bad argv.
-enum class ParseResult { Ok, Help, Version, Error };
+enum class ParseResult
+{
+  Ok,
+  Help,
+  Version,
+  Error
+};
 
 static const char *nextArg(int argc, char **argv, int &i)
 {
@@ -431,16 +440,17 @@ static ParseResult invalidValue(std::string &err, const char *flag, const char *
 // false for anything that is not a long flag.
 static bool splitSelectionFlag(const char *flag, std::string &name, bool &negated)
 {
-  if (flag[0] != '-' || flag[1] != '-') return false;
+  if (flag[0] != '-' || flag[1] != '-')
+    return false;
   const char *body = flag + 2;
   if (strncmp(body, "no-", 3) == 0)
   {
-    name    = body + 3;
+    name = body + 3;
     negated = true;
   }
   else
   {
-    name    = body;
+    name = body;
     negated = false;
   }
   return !name.empty();
@@ -468,8 +478,8 @@ static void applySelection(std::bitset<N> &set, size_t bit, bool negated, bool &
 static ParseResult parseCore(int argc, char **argv, CliOptions &out,
                              std::string &err)
 {
-  bool forcedBackends   = false;
-  bool forcedTests      = false;
+  bool forcedBackends = false;
+  bool forcedTests = false;
   bool forcedCategories = false;
 
   for (int i = 1; i < argc; i++)
@@ -481,9 +491,21 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       return ParseResult::Help;
     if (!strcmp(a, "-v") || !strcmp(a, "--version"))
       return ParseResult::Version;
-    if (!strcmp(a, "--verbose"))      { out.verbose     = true; continue; }
-    if (!strcmp(a, "--describe"))     { out.describe    = true; continue; }
-    if (!strcmp(a, "--list-devices")) { out.listDevices = true; continue; }
+    if (!strcmp(a, "--verbose"))
+    {
+      out.verbose = true;
+      continue;
+    }
+    if (!strcmp(a, "--describe"))
+    {
+      out.describe = true;
+      continue;
+    }
+    if (!strcmp(a, "--list-devices"))
+    {
+      out.listDevices = true;
+      continue;
+    }
 
     // ---- iters / warmup / budgets --------------------------------------------
     if (!strcmp(a, "-i") || !strcmp(a, "--iters"))
@@ -519,7 +541,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
           parsed > std::numeric_limits<unsigned int>::max() / 1000u)
         return invalidValue(err, a, v);
       if (!strcmp(a, "--max-time"))
-        out.targetTimeUs = parsed * 1000u;    // ms -> us
+        out.targetTimeUs = parsed * 1000u; // ms -> us
       else
         out.targetTimeUsCpu = parsed * 1000u;
       continue;
@@ -549,7 +571,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       const char *v = nextArg(argc, argv, i);
       if (!v)
         return missingArg(err, a);
-      out.outputFile   = v;
+      out.outputFile = v;
       out.enableOutput = true;
       continue;
     }
@@ -725,14 +747,15 @@ Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
   Invocation inv;
 
   for (int i = 0; i < argc; i++)
-    if (argv[i]) inv.argv.push_back(argv[i]);
+    if (argv[i])
+      inv.argv.push_back(argv[i]);
 
-  inv.targetTimeUs    = opts.targetTimeUs;
+  inv.targetTimeUs = opts.targetTimeUs;
   inv.targetTimeUsCpu = opts.targetTimeUsCpu;
-  inv.warmup          = opts.warmupCount;
+  inv.warmup = opts.warmupCount;
   // Only when pinned with -i.  Left at 0 the run calibrated each test to a
   // time budget instead, which is the normal mode and the comparable one.
-  inv.iters           = opts.forceIters ? opts.iters : 0;
+  inv.iters = opts.forceIters ? opts.iters : 0;
 
   for (int c = 0; c < numCategoryFlags; c++)
     if (opts.enabledCategories.test(static_cast<size_t>(categoryFlags[c].cat)))

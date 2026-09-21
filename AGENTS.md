@@ -18,7 +18,7 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 ├── RocmPeak   → src/rocm/                           ← ROCm/HIP backend
 ├── MetalPeak  → src/metal/                          ← Metal backend
 ├── OneapiPeak → src/oneapi/                         ← oneAPI/SYCL backend (Intel GPUs)
-├── OnnxPeak   → src/onnx/                           ← ONNX Runtime backend (NPUs via execution providers)
+├── OnnxPeak   → src/onnx/                           ← ONNX Runtime backend (NPU / GPU / CPU via execution providers)
 ├── CoreMLPeak → src/coreml/                         ← Core ML backend (Apple Neural Engine / GPU / CPU; Apple only)
 └── LitertPeak → src/litert/                         ← LiteRT backend (NPU / GPU / CPU accelerators; Android's native AI runtime)
 ```

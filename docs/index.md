@@ -59,7 +59,7 @@ both in the app (the info glyph beside each row) and on the CLI
 | OpenCL | Any conformant CPU/GPU/accelerator |
 | CPU | x86-64 and AArch64, runtime-dispatched per ISA |
 | Core ML | Apple's Neural Engine, GPU and CPU through the system framework, no runtime to install (macOS 14.4+ / iOS 17.4+) |
-| ONNX Runtime | NPUs via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
+| ONNX Runtime | NPU / GPU / CPU via execution providers (CoreML, QNN, OpenVINO, VitisAI, NNAPI), plus GPU/CPU providers for side-by-side comparison |
 | LiteRT | Android's native AI runtime: NPUs through vendor dispatch libraries (Qualcomm, MediaTek, Google Tensor, Samsung; Intel on desktops), its GPU accelerator (OpenCL / Metal / WebGPU) and XNNPACK on the CPU, each as a device |
 
 </div>
