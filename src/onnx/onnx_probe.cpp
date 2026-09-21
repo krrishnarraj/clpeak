@@ -159,7 +159,8 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
     }
     // A graph this provider crashes on rather than declines is not built,
     // here or anywhere downstream of this cache.
-    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq); !why.empty())
+    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq, v.blockSize);
+        !why.empty())
     {
       CLPEAK_VLOG("onnx-probe[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
                   v.label, why.c_str());

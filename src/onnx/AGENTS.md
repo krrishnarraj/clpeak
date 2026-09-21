@@ -795,11 +795,27 @@ refuse. A crash inside a vendor JIT cannot be caught, so `fp4_e2m1` is never
 built for that provider: `onnxProviderFenceReason()` in `onnx_session.cpp`,
 asked by the gemm probe before it builds a variant (and every test consults
 that cache) and again by the accuracy row, which builds the same graph in its
-input/output shape. The row reports the fence as its reason. It is the first
-per-provider fence in this backend and is kept to the one graph proven fatal;
-the block-scaled float4 rows (`nvfp4`, `fp4_weight`) are the shape TensorRT's
-check asks for and are still put to the RTX provider — the next Windows run
-decides them.
+input/output shape. The row reports the fence as its reason. It is kept to
+the one graph proven fatal; the block-scaled float4 rows (`nvfp4`,
+`fp4_weight`) are the shape TensorRT's check asks for and are still put to
+the RTX provider — the next Windows run decides them.
+
+**DirectML is the second entry, and it fences a format rather than a graph.**
+The transformer block's `int8_weight` session — seven blocked int8
+`DequantizeLinear`s (opset 21, `block_size=32`, `axis=0`) into 2048-wide
+MatMuls — ended the process with an integer divide by zero (0xC0000094)
+inside session creation on ONNX Runtime 1.24.4's DirectML provider (RTX 4060,
+2026-09-21), after the same block's fp16 and int4_weight forms had run. int4
+survives because ORT's `DQMatMulToMatMulNBits` rewrites it first and that
+transformer takes 4-bit weights only, so the int8 graph reaches DirectML as a
+raw `DequantizeLinear`, which the provider registers with no support query.
+The 32³ probe of that graph built and ran, but with a single scale row — a
+per-column broadcast as far as DirectML is concerned — and every gemm rung
+carries the block's real layout, so `int8_weight` is not sent to DirectML at
+any size. `int8_qdq` (per-tensor) and `int4_weight` (fused away) are
+untouched. A DirectML run that builds the 1024³ `int8_weight` rung with the
+entry removed is what would narrow the fence to the block; every fence in the
+tree, and what lifting it takes, is listed in `NOTES.md` at the root.
 
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph
