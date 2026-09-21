@@ -13,7 +13,7 @@
 
 struct CliOptions;
 struct OrtRuntime;
-struct OrtEpDevice;   // ONNX Runtime's (EP, hardware device) pair; opaque here
+struct OrtEpDevice; // ONNX Runtime's (EP, hardware device) pair; opaque here
 
 // Ceiling on the iteration count of a timed batch, for every throughput test
 // in this backend.  It is not a time budget -- each test keeps its own of
@@ -44,7 +44,7 @@ constexpr unsigned int kOnnxMaxIters = 500;
 // execution gate never fires because per-iter stays in ms.  Two guards:
 //
 //  * absolute: one create > kOnnxMaxCreateUs -> stop ladder after this rung
-//    (keep its result, skip larger).  30s for the doubling ladders (gemm,
+//    (keep its result, skip larger).  60s for the doubling ladders (gemm,
 //    conv), 60s for the fixed-geometry block whose 8192 context legitimately
 //    needs ~1 min on CoreML/TensorRT AOT toolchains.
 //
@@ -55,7 +55,7 @@ constexpr unsigned int kOnnxMaxIters = 500;
 //
 // The first rung (kMinDim) is allowed to exceed the absolute once - its time
 // is the seed for the factor gate; truncating it would discard a valid peak.
-constexpr double kOnnxMaxCreateUs = 30.0e6;
+constexpr double kOnnxMaxCreateUs = 60.0e6;
 constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
 constexpr double kOnnxCreateGrowthFactor = 6.0;
 // ...and only once creation is expensive enough for its growth to mean
@@ -111,13 +111,13 @@ struct onnx_ep_info_t
   std::string displayName; // e.g. "CoreML (Apple Neural Engine)"
   std::string typeStr;     // "NPU" / "GPU" / "CPU"
   DeviceType deviceType = DeviceType::Unknown;
-  std::string epDevice;    // OpenVINO `device_type` ("NPU"/"GPU"/"CPU"), a
-                           // plugin's device label ("NPU", "GPU#1"); empty otherwise
+  std::string epDevice; // OpenVINO `device_type` ("NPU"/"GPU"/"CPU"), a
+                        // plugin's device label ("NPU", "GPU#1"); empty otherwise
 
   // Plugin-provider devices only.
   const OrtEpDevice *epDevicePtr = nullptr;
-  std::string library;     // registration name of the plugin library
-  std::string vendor;      // the hardware vendor the runtime reports
+  std::string library;                                       // registration name of the plugin library
+  std::string vendor;                                        // the hardware vendor the runtime reports
   std::vector<std::pair<std::string, std::string>> hardware; // device metadata, as reported
 };
 
@@ -160,7 +160,7 @@ struct OnnxEpLibraryStatus
 {
   OnnxEpLibrary lib;
   bool registered = false;
-  std::string error;   // when !registered
+  std::string error; // when !registered
 };
 std::vector<OnnxEpLibraryStatus> onnxEpLibraryStatus();
 
@@ -243,9 +243,9 @@ struct OnnxRuntimeStatus
   // the Windows ML catalog's own state when it is enabled.
   std::vector<OnnxEpLibraryStatus> epLibraries;
   bool winmlEnabled = false;
-  std::string winmlPath;   // the catalog DLL that answered; empty when none
-  std::string winmlError;  // why the catalog gave nothing, when enabled;
-                           // both empty while nothing has resolved it yet
+  std::string winmlPath;  // the catalog DLL that answered; empty when none
+  std::string winmlError; // why the catalog gave nothing, when enabled;
+                          // both empty while nothing has resolved it yet
 };
 OnnxRuntimeStatus onnxRuntimeStatus();
 
