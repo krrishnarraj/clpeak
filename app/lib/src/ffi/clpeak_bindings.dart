@@ -274,7 +274,8 @@ class OnnxStatus {
   final bool linkedIn;
 
   final String version; // "1.29.0"
-  final String path; // what was loaded; empty when found by name
+  final String path; // what was loaded; the resolved file even when found
+  // by name, empty only when statically linked
   final String error; // populated only when !available
 
   /// What the last environment registered; a library chosen since is absent

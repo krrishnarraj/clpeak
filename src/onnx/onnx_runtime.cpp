@@ -14,6 +14,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 // Oldest OrtApi we are prepared to speak.  Every entry point this backend
@@ -205,6 +207,28 @@ static std::string cacheKey()
   return "";
 }
 
+// The file a loaded handle came from, when the platform can say.  A bare
+// soname resolves out of the APK's lib dir on Android and out of a wheel or
+// Homebrew prefix on desktops; reporting it is what lets a settings screen
+// show which runtime is actually loaded, the way the LiteRT backend does.
+static std::string resolveLoadedPath(void *lib, void *anySymbol)
+{
+#ifdef _WIN32
+  (void)anySymbol;
+  char buf[MAX_PATH * 4];
+  const DWORD n = GetModuleFileNameA(reinterpret_cast<HMODULE>(lib), buf, sizeof buf);
+  if (n == 0 || n >= sizeof buf)
+    return "";
+  return std::string(buf, n);
+#else
+  (void)lib;
+  Dl_info info;
+  if (anySymbol && dladdr(anySymbol, &info) && info.dli_fname)
+    return info.dli_fname;
+  return "";
+#endif
+}
+
 static void loadRuntime()
 {
   // A repeat pick reuses the still-mapped handle: no second mapping of the
@@ -320,8 +344,8 @@ static void loadRuntime()
   // A file that turns out not to be a usable ONNX Runtime stays mapped like
   // any other handle: unloading a library whose constructors have run is
   // what common/dynlib.h explains is never safe.
-  auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(
-      clpeak::dynSym(lib, "OrtGetApiBase"));
+  void *sym = clpeak::dynSym(lib, "OrtGetApiBase");
+  auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(sym);
   if (!getBase)
   {
     g_loadError = std::string(named ? named : "onnxruntime") +
@@ -335,8 +359,20 @@ static void loadRuntime()
 
   // Deliberately not dlclosed for the rest of the process: see the note on
   // onnxSetLibraryOverride() in the header.
-  cur.lib  = lib;
-  cur.path = named ? absNamed : steered;
+  cur.lib = lib;
+  if (named)
+  {
+    cur.path = absNamed;
+  }
+  else
+  {
+    // Found by name: resolve where it came from so a settings screen can
+    // show the file, the way the LiteRT backend does.  The Windows ML
+    // steered path is the fallback when the platform cannot say.
+    cur.path = resolveLoadedPath(lib, sym);
+    if (cur.path.empty())
+      cur.path = steered;
+  }
   g_rt     = cur;
   g_cache[key] = cur;
   g_loaded = true;

@@ -24,7 +24,8 @@ struct OrtRuntime
   const OrtApi     *api  = nullptr;   // table for `apiVersion`
   uint32_t          apiVersion = 0;   // highest version the runtime granted
   std::string       versionString;   // e.g. "1.29.0" (base->GetVersionString)
-  std::string       path;            // what was loaded; empty when static
+  std::string       path;            // what was loaded; the resolved file even
+                                     // when found by name, empty only when static
 };
 
 // Point the loader at a specific library, ahead of the platform's conventional

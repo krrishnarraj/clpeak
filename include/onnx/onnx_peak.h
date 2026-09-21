@@ -237,7 +237,8 @@ struct OnnxRuntimeStatus
   bool available = false;
   bool linkedIn = false; // built in rather than loaded (iOS)
   std::string version;   // "1.29.0"
-  std::string path;      // what was loaded; empty = found by name
+  std::string path;      // what was loaded; the resolved file even when found
+                           // by name, empty only when statically linked
   std::string error;     // populated only when !available
   // The plugin libraries and how they registered (see onnxEpLibraryStatus);
   // the Windows ML catalog's own state when it is enabled.

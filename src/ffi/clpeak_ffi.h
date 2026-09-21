@@ -84,7 +84,8 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 //    "winml":{"enabled":bool,"path":str,"error":str}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
 // clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
-// empty when it was found by name.  `error` says why nothing loaded --
+// the resolved file even when it was found by name (empty only when
+// statically linked).  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
 // `epLibraries` is what the last environment registered, so a library set
 // since the last enumeration is absent until the next one; `winml.path` is
