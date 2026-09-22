@@ -173,10 +173,10 @@ jobs:
 
       - name: Install CUDA Toolkit
         if: matrix.cuda
-        uses: vhrabar/cuda-toolkit@master
+        uses: Navegos/cuda-toolkit-dev@master
         with:
           cuda: '13.4.2'
-          sub-packages: '["nvcc", "cublas"]'
+          sub-packages: '["nvcc", "cudart", "cublas"]'
           method: 'network'
           log-file-suffix: '${{matrix.os}}.log'
 
