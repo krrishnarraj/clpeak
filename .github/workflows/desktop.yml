@@ -173,12 +173,7 @@ jobs:
 
       - name: Install CUDA Toolkit
         if: matrix.cuda
-        uses: Navegos/cuda-toolkit-dev@master
-        with:
-          cuda: '13.4.2'
-          sub-packages: '["nvcc", "cudart", "cublas"]'
-          method: 'network'
-          log-file-suffix: '${{matrix.os}}.log'
+        uses: krrishnarraj/cuda-toolkit@master
 
       - name: Install ROCm
         if: matrix.rocm
