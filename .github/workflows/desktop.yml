@@ -208,14 +208,23 @@ jobs:
         run: |
           Get-Command nvcc -ErrorAction Continue
           nvcc --version
+          Write-Host "--- supported archs ---"
+          nvcc --list-gpu-arch
           Write-Host "CUDA_PATH=$env:CUDA_PATH"
           Get-ChildItem "$env:CUDA_PATH/bin/nvcc*" | Select-Object FullName
           Write-Host "--- CMake cache ---"
           Select-String -Path build/CMakeCache.txt -Pattern "CUDAToolkit_NVCC_EXECUTABLE|CUDAToolkit_VERSION|CUDAToolkit_BIN_DIR"
           Write-Host "--- peak_cuda CustomBuild command ---"
-          Select-String -Path build/src/cuda/peak_cuda.vcxproj -Pattern "<Command>.*nvcc" | Select-Object -First 2
-          Write-Host "--- manual nvcc probe ---"
-          & nvcc -v -fatbin -gencode arch=compute_70,code=sm_70 -o "$env:RUNNER_TEMP/probe.fatbin" src/cuda/cuda_kernels/compute_sp.cu
+          Select-String -Path build/src/cuda/peak_cuda.vcxproj -Pattern "nvcc" | Select-Object -First 2
+          Select-String -Path build/src/cuda/peak_cuda.vcxproj -Pattern "fatbin" | Select-Object -First 4
+          Write-Host "--- manual nvcc probes (mapping the supported floor) ---"
+          & nvcc -fatbin -gencode arch=compute_70,code=sm_70 -o "$env:RUNNER_TEMP/probe70.fatbin" src/cuda/cuda_kernels/compute_sp.cu
+          Write-Host "probe70 exit=$LASTEXITCODE"
+          & nvcc -fatbin -gencode arch=compute_75,code=sm_75 -o "$env:RUNNER_TEMP/probe75.fatbin" src/cuda/cuda_kernels/compute_sp.cu
+          Write-Host "probe75 exit=$LASTEXITCODE"
+          & nvcc -fatbin -gencode arch=compute_80,code=sm_80 -o "$env:RUNNER_TEMP/probe80.fatbin" src/cuda/cuda_kernels/compute_sp.cu
+          Write-Host "probe80 exit=$LASTEXITCODE"
+          exit 0
 
       - name: Build
         if: ${{ !matrix.oneapi }}
