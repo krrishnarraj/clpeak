@@ -176,6 +176,7 @@ jobs:
         uses: vhrabar/cuda-toolkit@master
         with:
           cuda: '13.4.2'
+          log-file-suffix: '${{matrix.os}}.log'
 
       - name: Install ROCm
         if: matrix.rocm
