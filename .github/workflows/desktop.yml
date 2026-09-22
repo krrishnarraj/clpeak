@@ -194,10 +194,32 @@ jobs:
         if: matrix.oneapi
         uses: ./.github/actions/setup-oneapi
 
-      - name: Configure CMake & Build
+      - name: Configure CMake
         if: ${{ !matrix.oneapi }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+
+      # Runs between configure and build: dumps the exact nvcc CustomBuild
+      # command MSBuild will execute plus a manual nvcc -v probe, so a
+      # failing fatbin rule shows its real stderr instead of just MSB8066.
+      - name: Debug CUDA paths (Windows)
+        if: ${{ !matrix.oneapi && matrix.cuda && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          Get-Command nvcc -ErrorAction Continue
+          nvcc --version
+          Write-Host "CUDA_PATH=$env:CUDA_PATH"
+          Get-ChildItem "$env:CUDA_PATH/bin/nvcc*" | Select-Object FullName
+          Write-Host "--- CMake cache ---"
+          Select-String -Path build/CMakeCache.txt -Pattern "CUDAToolkit_NVCC_EXECUTABLE|CUDAToolkit_VERSION|CUDAToolkit_BIN_DIR"
+          Write-Host "--- peak_cuda CustomBuild command ---"
+          Select-String -Path build/src/cuda/peak_cuda.vcxproj -Pattern "<Command>.*nvcc" | Select-Object -First 2
+          Write-Host "--- manual nvcc probe ---"
+          & nvcc -v -fatbin -gencode arch=compute_70,code=sm_70 -o "$env:RUNNER_TEMP/probe.fatbin" src/cuda/cuda_kernels/compute_sp.cu
+
+      - name: Build
+        if: ${{ !matrix.oneapi }}
+        run: |
           cmake --build build --config Release -j4 --verbose
 
       # setup-oneapi already exported what setvars produces into the job
