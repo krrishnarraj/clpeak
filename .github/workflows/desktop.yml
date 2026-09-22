@@ -59,7 +59,7 @@ jobs:
             cuda: true
 
           - name: Linux arm64 CUDA
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
             artifact: clpeak-linux-arm64-cuda
             binary: build/clpeak
             suffix: cuda
@@ -68,6 +68,13 @@ jobs:
           - name: Windows x64 CUDA
             runner: windows-latest
             artifact: clpeak-windows-x86_64-cuda
+            binary: build/Release/clpeak.exe
+            suffix: cuda
+            cuda: true
+
+          - name: Windows arm64 CUDA
+            runner: windows-11-arm
+            artifact: clpeak-windows-arm64-cuda
             binary: build/Release/clpeak.exe
             suffix: cuda
             cuda: true
@@ -166,7 +173,7 @@ jobs:
 
       - name: Install CUDA Toolkit
         if: matrix.cuda
-        uses: Jimver/cuda-toolkit@master
+        uses: vhrabar/cuda-toolkit@master
 
       - name: Install ROCm
         if: matrix.rocm
