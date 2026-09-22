@@ -198,7 +198,7 @@ jobs:
         if: ${{ !matrix.oneapi }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
-          cmake --build build --config Release -j4
+          cmake --build build --config Release -j4 --verbose
 
       # setup-oneapi already exported what setvars produces into the job
       # environment, so this is plain shell on both platforms and the per-OS
@@ -209,7 +209,7 @@ jobs:
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }} \
             -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
-          cmake --build build --config Release -j4
+          cmake --build build --config Release -j4 --verbose
 
       # Assert the backend actually got enabled before anything is run or
       # packaged -- see .github/actions/verify-backend for why a green build is
