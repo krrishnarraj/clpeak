@@ -332,9 +332,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     }
     // And the fence, for the same reason: this graph is the probe's in
     // another shape, and a provider that crashes on it must not be handed
-    // it whatever the cache says.  The accuracy rows have no blocked-weight
-    // form, so the block size is zero.
-    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq, 0); !why.empty())
+    // it whatever the cache says.
+    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq); !why.empty())
     {
       test.skip(v.label, ResultStatus::Unsupported, why, o.description);
       continue;

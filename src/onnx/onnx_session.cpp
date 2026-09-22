@@ -49,7 +49,7 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
 }
 
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq, int64_t blockSize)
+                                    bool qdq)
 {
   // TensorRT for RTX on a per-tensor float4 QDQ matmul: GetCapability takes
   // the whole graph and the engine build that follows dies with an access
@@ -68,39 +68,6 @@ std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
            "declining it as TensorRT does -- its float4 path wants a block "
            "scale, which the nvfp4 row has -- so this graph is not sent to it";
 
-  // DirectML on blocked int8 weights: the transformer block's int8_weight
-  // session -- seven DequantizeLinear(int8, one fp16 scale per 32 rows:
-  // block_size=32, axis=0) feeding 2048-wide MatMuls -- ended the process
-  // with an integer divide by zero (exit 0xC0000094) inside session
-  // creation, after ORT's own transformers had finished with the graph (the
-  // last line logged is its attention scale being folded away) and before
-  // the allocation planner spoke: the window in which the DML provider
-  // compiles its fused partitions.  ONNX Runtime 1.24.4 with its DirectML
-  // provider on adapter 0, an RTX 4060 by the runtime's own device listing,
-  // 2026-09-21; the fp16 and int4_weight forms of the same block had built
-  // and run first.  Nothing after it ran.
-  //
-  // int4 survives because ORT rewrites it first: DQMatMulToMatMulNBits takes
-  // only 4-bit weights (Is4BitIntType, qdq_selectors.cc), so the int4 block
-  // reaches DirectML as MatMulNBits and the int8 one as a raw opset-21
-  // DequantizeLinear, which the DML provider registers with no support
-  // query and hands straight to DML_DEQUANTIZE_OPERATOR_DESC
-  // (DmlOperatorQuantization21).  The 32-cube probe of the same graph
-  // built and ran, but its scale is one row -- a layout DirectML can read
-  // as a plain per-column broadcast -- and every rung the gemm ladder times
-  // (1024 and up) has the block layout the block had.  A crash inside a
-  // system DLL cannot be caught, so the format is not sent to this provider
-  // at any size rather than only in the graph seen to die; a run that
-  // proves the ladder survives its own layout is what narrows this to the
-  // block.  int8_qdq is per-tensor and unaffected; int4_weight is fused
-  // away before DirectML sees it.
-  if (ep.providerKey == "DmlExecutionProvider" && dtype == ONNX_DT_INT8 &&
-      !qdq && blockSize > 0)
-    return "DirectML takes the process down (an integer divide by zero while "
-           "the session is created, seen on ONNX Runtime 1.24.4) on blocked int8 "
-           "weights -- a DequantizeLinear with one scale per 32 rows, which "
-           "ORT hands it unfused because only 4-bit weights become "
-           "MatMulNBits -- so this format is not sent to it";
   return std::string();
 }
 

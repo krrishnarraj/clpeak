@@ -65,7 +65,7 @@ run and the result document all share.
 | `tools/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_litert_npu.sh` — stage LiteRT's NPU dispatch shims for the Android app) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
-| `NOTES.md` | Every row a backend withholds from a runtime that crashes rather than declines (the fences), with the fault, where each lives and what lifting it takes — the list to work through when a vendor ships a fix |
+| `NOTES.md` | Every gate that exists because a runtime crashes rather than declines — the fault, where the gate lives, and the command that proves it can go.  Nothing else belongs there, and each entry is deleted when that release is fixed |
 | `snap/` | Snap packaging (`snapcraft.yaml`, classic confinement) |
 | `packaging/flatpak/` | Flathub packaging — manifest + AppStream MetaInfo (Vulkan+OpenCL+CPU only) |
 | `packaging/homebrew/` | Homebrew formula (`clpeak.rb`) for macOS + Linuxbrew, targeting homebrew-core |
@@ -96,7 +96,7 @@ run and the result document all share.
 - **Emitting a diagnostic, or reading one back?** → `CLPEAK_LOG` / `CLPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
-- **Withholding a graph a runtime crashes on rather than declines?** → the backend's existing fence (`onnxProviderFenceReason()`, Core ML's and LiteRT's `decodeFence`, `litertPlanFor()`), the fault in the row's reason, and an entry in `NOTES.md` saying what lifting it takes
+- **Withholding a graph a runtime crashes on rather than declines?** → the narrowest existing fence that covers it (a format everywhere: `onnxProviderFenceReason()`, `litertPlanFor()`; one test's graph: `variantFence` / `decodeFence` in that test), the fault in the row's reason, and an entry in `NOTES.md` saying what lifting it takes
 
 ## AGENTS.md System
 

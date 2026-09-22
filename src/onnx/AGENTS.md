@@ -45,7 +45,7 @@ backend.
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
+| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder).  `variantFence` — the graphs only this test provokes a crash with, never built |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — per-submission overhead and session-creation cost (s) |
 
@@ -800,22 +800,27 @@ the one graph proven fatal; the block-scaled float4 rows (`nvfp4`,
 `fp4_weight`) are the shape TensorRT's check asks for and are still put to
 the RTX provider — the next Windows run decides them.
 
-**DirectML is the second entry, and it fences a format rather than a graph.**
-The transformer block's `int8_weight` session — seven blocked int8
+**DirectML's fence is the second, and it lives in the block, not here.** The
+transformer block's `int8_weight` session — seven blocked int8
 `DequantizeLinear`s (opset 21, `block_size=32`, `axis=0`) into 2048-wide
-MatMuls — ended the process with an integer divide by zero (0xC0000094)
-inside session creation on ONNX Runtime 1.24.4's DirectML provider (RTX 4060,
-2026-09-21), after the same block's fp16 and int4_weight forms had run. int4
-survives because ORT's `DQMatMulToMatMulNBits` rewrites it first and that
-transformer takes 4-bit weights only, so the int8 graph reaches DirectML as a
-raw `DequantizeLinear`, which the provider registers with no support query.
-The 32³ probe of that graph built and ran, but with a single scale row — a
-per-column broadcast as far as DirectML is concerned — and every gemm rung
-carries the block's real layout, so `int8_weight` is not sent to DirectML at
-any size. `int8_qdq` (per-tensor) and `int4_weight` (fused away) are
-untouched. A DirectML run that builds the 1024³ `int8_weight` rung with the
-entry removed is what would narrow the fence to the block; every fence in the
-tree, and what lifting it takes, is listed in `NOTES.md` at the root.
+MatMuls — ends the process with an integer divide by zero (0xC0000094) inside
+session creation on ONNX Runtime 1.24.4's DirectML provider, in the window
+where that provider compiles its fused partitions. int4 escapes because ORT's
+`DQMatMulToMatMulNBits` rewrites it first and that transformer takes 4-bit
+weights only, so the int8 graph reaches DirectML as a raw `DequantizeLinear`,
+which the provider registers with no support query.
+
+**Three things have to be true together for it to fire, and only two can be
+keyed on.** The `int8_weight` matmul ladder runs on the same Arc A380 that
+dies on the block, so the format is fatal only in this graph; and an RTX
+4060, a UHD 630, an Adreno X1-45 and the DirectML CPU all run this graph, so
+it wants that GPU too. But clpeak registers DirectML with no device id, ORT
+picks the adapter, and nothing in `onnx_ep_info_t` says which GPU answered —
+so `variantFence` in `block.cpp` withholds the row on every DirectML device
+and says why, while gemm, conv and the accuracy rows go on measuring the
+format where it runs. Guessing the adapter would be worse than withholding:
+a guess that is wrong on a two-GPU box takes the whole run down. `NOTES.md`
+at the root records what identifying it would take.
 
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph
