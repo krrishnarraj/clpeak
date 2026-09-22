@@ -177,6 +177,7 @@ jobs:
         with:
           cuda: '13.4.2'
           sub-packages: '["nvcc", "cublas"]'
+          method: 'network'
           log-file-suffix: '${{matrix.os}}.log'
 
       - name: Install ROCm
