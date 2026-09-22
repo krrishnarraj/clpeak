@@ -171,12 +171,20 @@ jobs:
           install_runtime: true
           cache: true
 
-      - name: Install CUDA Toolkit
-        if: matrix.cuda
+      - name: Install CUDA Toolkit (Windows)
+        if: matrix.cuda && runner.os == 'Windows'
         uses: krrishnarraj/cuda-toolkit@master
         with:
-          sub-packages: '["nvcc", "cudart", "cublas"]'
           method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "crt"]'
+
+      - name: Install CUDA Toolkit (Linux)
+        if: matrix.cuda && runner.os == 'Linux'
+        uses: krrishnarraj/cuda-toolkit@master
+        with:
+          method: 'network'
+          sub-packages: '["nvcc", "cudart"]'
+          non-cuda-sub-packages: '["libcublas", "libcublas-dev"]'
 
       - name: Install ROCm
         if: matrix.rocm
