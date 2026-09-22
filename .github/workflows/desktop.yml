@@ -174,6 +174,8 @@ jobs:
       - name: Install CUDA Toolkit
         if: matrix.cuda
         uses: vhrabar/cuda-toolkit@master
+        with:
+          cuda: '13.4.2'
 
       - name: Install ROCm
         if: matrix.rocm
