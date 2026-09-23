@@ -216,6 +216,13 @@ jobs:
         run: |
           Write-Host "hasCRLF=$((Get-Content -Raw build/src/cuda/nvccw.bat) -match '\r\n')"
           Get-Content build/src/cuda/nvccw.bat
+          Write-Host "--- toolkit bins ---"
+          Get-ChildItem "$env:CUDA_PATH/bin" | Select-Object Name
+          Get-ChildItem "$env:CUDA_PATH/nvvm/bin" | Select-Object Name
+          Write-Host "--- tool lookup ---"
+          where.exe ptxas
+          where.exe fatbinary
+          Write-Host "--- manual wrapper run ---"
           & "build/src/cuda/nvccw.bat" -fatbin -gencode arch=compute_80,code=sm_80 -o "$env:RUNNER_TEMP/pw.fatbin" "src/cuda/cuda_kernels/compute_sp.cu"
           Write-Host "exit=$LASTEXITCODE"
 
