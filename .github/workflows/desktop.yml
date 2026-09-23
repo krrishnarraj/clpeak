@@ -176,7 +176,7 @@ jobs:
         uses: krrishnarraj/cuda-toolkit@master
         with:
           method: 'network'
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "crt"]'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "crt", "nvvm"]'
 
       - name: Install CUDA Toolkit (Linux)
         if: matrix.cuda && runner.os == 'Linux'
