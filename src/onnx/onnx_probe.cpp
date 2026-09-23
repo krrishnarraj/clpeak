@@ -625,6 +625,13 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // Creation only, no runs: the failures this filters all happen at
   // creation -- an absent device or a graph no EP backend takes under the
   // fallback guard -- fast, with nothing compiled on the failure paths.
+  //
+  // The refusals are expected, but ORT reports some at ERROR severity
+  // (OpenVINO's missing NPU target), which with no LogSink installed
+  // (--list-devices, the GUI catalog) would reach the terminal past the
+  // console mute.  Demote the relay while probing; the reason is kept
+  // from the returned statuses and the verbose lines below.
+  const OnnxOrtRelayGuard relayGuard;
   const std::string tag =
       ep.providerKey + (ep.epDevice.empty() ? "" : "/" + ep.epDevice);
   std::string firstErr;

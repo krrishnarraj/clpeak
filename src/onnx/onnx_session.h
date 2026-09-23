@@ -163,6 +163,21 @@ std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
 // building any graph.
 std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
+// Demote the ORT logger's relay to debug while held.  The viability probe
+// expects refusals -- a missing NPU target reports them at ERROR severity,
+// which with no LogSink installed (--list-devices, the GUI catalog) would
+// otherwise reach the terminal past ScopedConsoleMute.  The probe keeps the
+// reason from the returned status, so the relayed lines add nothing.
+// Nesting-safe; the device-loss latch still runs first.
+void onnxSuppressOrtRelay(bool on);
+struct OnnxOrtRelayGuard
+{
+  OnnxOrtRelayGuard() { onnxSuppressOrtRelay(true); }
+  ~OnnxOrtRelayGuard() { onnxSuppressOrtRelay(false); }
+  OnnxOrtRelayGuard(const OnnxOrtRelayGuard &) = delete;
+  OnnxOrtRelayGuard &operator=(const OnnxOrtRelayGuard &) = delete;
+};
+
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);
 

@@ -137,6 +137,16 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 namespace
 {
 
+// While the viability probe runs, the ORT logger's relay is demoted to
+// debug: a target with no hardware behind it (OpenVINO NPU with no NPU)
+// reports the refusal at ERROR severity, and with no LogSink installed
+// (--list-devices, the GUI catalog) every Error reaches the terminal --
+// past ScopedConsoleMute, which deliberately lets clpeak's own diagnostics
+// through.  The probe already keeps the refusal reason from the returned
+// status, so nothing is lost.  Nesting-safe; the latch in ortLogMessage
+// stays first so a loss announced mid-probe is still caught.
+std::atomic<int> g_relaySuppressDepth{0};
+
 // OrtLoggingFunction: ORT's severities onto the run log's levels.  INFO is
 // the session-creation narration -- providers registered, transformers
 // applied -- which is debug material and dropped unless --verbose; ERROR
@@ -162,6 +172,9 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   case ORT_LOGGING_LEVEL_WARNING: level = clpeak::LogLevel::Warning; break;
   default:                        level = clpeak::LogLevel::Debug;   break;
   }
+  if (level != clpeak::LogLevel::Debug &&
+      g_relaySuppressDepth.load(std::memory_order_relaxed) > 0)
+    level = clpeak::LogLevel::Debug;
   if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
     return;
   // The optimizer narrates every pass over every session -- forty
@@ -189,6 +202,14 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
 }
 
 } // namespace
+
+void onnxSuppressOrtRelay(bool on)
+{
+  int d = g_relaySuppressDepth.load(std::memory_order_relaxed) + (on ? 1 : -1);
+  if (d < 0)
+    d = 0;
+  g_relaySuppressDepth.store(d, std::memory_order_relaxed);
+}
 
 // Why the last onnxEnv() refused, for the rows that report it.  Written
 // and read under onnxEnv()'s lock or on the same thread after it returned
