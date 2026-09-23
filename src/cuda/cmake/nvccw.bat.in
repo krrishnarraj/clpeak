@@ -15,19 +15,27 @@ rem No parenthesized blocks below: INCLUDE entries contain parentheses
 rem ("Program Files (x86)"), which would close a block early. The :keep
 rem subroutine plus goto keeps every set/echo on plain lines, where
 rem parentheses in values are harmless.
+rem
+rem The match is cmd's own (case-insensitive) substring substitution, not
+rem findstr: findstr reads \" as an escaped quote, so /C:"\clang\" never
+rem closes and silently matches nothing.
 
 setlocal
+set "_inc="
+if not defined INCLUDE goto :run
 for %%D in ("%INCLUDE:;=" "%") do call :keep "%%~D"
 goto :run
 
 :keep
-if "%~1"=="" goto :eof
-echo(%~1| >nul findstr /I /C:"\clang\" /C:"/clang/" && goto :eof
+set "_d=%~1"
+if not defined _d goto :eof
+if not "%_d:\clang\=%"=="%_d%" goto :eof
+if not "%_d:/clang/=%"=="%_d%" goto :eof
 if defined _inc goto :append
-set "_inc=%~1"
+set "_inc=%_d%"
 goto :eof
 :append
-set "_inc=%_inc%;%~1"
+set "_inc=%_inc%;%_d%"
 goto :eof
 
 :run

@@ -106,8 +106,10 @@ function(embed_cuda_kernels)
   if(CMAKE_HOST_WIN32)
     file(TO_NATIVE_PATH "${CUDAToolkit_NVCC_EXECUTABLE}" _nvcc_native)
     set(NVCC_EXE "${_nvcc_native}")
+    # CRLF regardless of checkout: cmd can miss goto/call :label targets in
+    # an LF-only batch file.
     configure_file("${_CLPEAK_EMBED_CUDA_DIR}/nvccw.bat.in"
-                   "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat" @ONLY)
+                   "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat" @ONLY NEWLINE_STYLE CRLF)
     set(_nvcc_cmd "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat")
     set(_nvcc_depends "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat")
   endif()
