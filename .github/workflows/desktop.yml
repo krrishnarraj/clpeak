@@ -214,7 +214,7 @@ jobs:
         if: matrix.cuda && runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Host "hasCRLF=$((Get-Content -Raw build/src/cuda/nvccw.bat) -match \"\r\n\")"
+          Write-Host "hasCRLF=$((Get-Content -Raw build/src/cuda/nvccw.bat) -match '\r\n')"
           Get-Content build/src/cuda/nvccw.bat
           & "build/src/cuda/nvccw.bat" -fatbin -gencode arch=compute_80,code=sm_80 -o "$env:RUNNER_TEMP/pw.fatbin" "src/cuda/cuda_kernels/compute_sp.cu"
           Write-Host "exit=$LASTEXITCODE"
