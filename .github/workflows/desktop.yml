@@ -202,33 +202,10 @@ jobs:
         if: matrix.oneapi
         uses: ./.github/actions/setup-oneapi
 
-      - name: Configure CMake
+      - name: Configure CMake & Build
         if: ${{ !matrix.oneapi }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
-
-      # Temporary: run the generated wrapper by hand to isolate a wrapper bug
-      # (stderr visible here) from an MSBuild-invocation problem (manual run
-      # green, build still red).
-      - name: Probe nvcc wrapper (Windows CUDA)
-        if: matrix.cuda && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Host "hasCRLF=$((Get-Content -Raw build/src/cuda/nvccw.bat) -match '\r\n')"
-          Get-Content build/src/cuda/nvccw.bat
-          Write-Host "--- toolkit bins ---"
-          Get-ChildItem "$env:CUDA_PATH/bin" | Select-Object Name
-          Get-ChildItem "$env:CUDA_PATH/nvvm/bin" | Select-Object Name
-          Write-Host "--- tool lookup ---"
-          where.exe ptxas
-          where.exe fatbinary
-          Write-Host "--- manual wrapper run ---"
-          & "build/src/cuda/nvccw.bat" -fatbin -gencode arch=compute_80,code=sm_80 -o "$env:RUNNER_TEMP/pw.fatbin" "src/cuda/cuda_kernels/compute_sp.cu"
-          Write-Host "exit=$LASTEXITCODE"
-
-      - name: Build
-        if: ${{ !matrix.oneapi }}
-        run: |
           cmake --build build --config Release -j4
 
       # setup-oneapi already exported what setvars produces into the job
