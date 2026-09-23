@@ -1,0 +1,34 @@
+@echo off
+rem Generated from nvccw.bat.in -- do not edit.
+rem
+rem Runs nvcc with clang resource include dirs stripped from INCLUDE.
+rem
+rem Why: under the ClangCL platform toolset MSBuild leads INCLUDE with
+rem clang's resource dir (.../lib/clang/<ver>/include) so clang-cl's
+rem #include_next shims resolve. nvcc inherits that environment for the real
+rem cl.exe it spawns for host preprocessing, and cl.exe does not implement
+rem #include_next -- it dies with C1021 in clang's vadefs.h. The filter below
+rem restores plain-MSVC include order for the nvcc child only; the rest of
+rem the build keeps the ClangCL environment untouched.
+rem
+rem No parenthesized blocks below: INCLUDE entries contain parentheses
+rem ("Program Files (x86)"), which would close a block early. The :keep
+rem subroutine plus goto keeps every set/echo on plain lines, where
+rem parentheses in values are harmless.
+
+setlocal
+for %%D in ("%INCLUDE:;=" "%") do call :keep "%%~D"
+goto :run
+
+:keep
+if "%~1"=="" goto :eof
+echo(%~1| >nul findstr /I /C:"\clang\" /C:"/clang/" && goto :eof
+if defined _inc goto :append
+set "_inc=%~1"
+goto :eof
+:append
+set "_inc=%_inc%;%~1"
+goto :eof
+
+:run
+endlocal & set "INCLUDE=%_inc%" & "@NVCC_EXE@" %*
