@@ -4,6 +4,7 @@
 #include "cpu_tu_registry.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -28,7 +29,8 @@
 #if defined(__linux__) && defined(CLPEAK_X86)
 #include <unistd.h>
 #include <sys/syscall.h>
-#include <sys/utsname.h>
+#elif defined(__APPLE__) && defined(CLPEAK_X86)
+#include <sys/sysctl.h>   // sysctl.proc_translated (Rosetta 2)
 #elif defined(_WIN32) && defined(CLPEAK_X86)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -60,33 +62,42 @@ static inline uint64_t xgetbv0()
 }
 
 // x86 binary translated on an ARM64 host (Windows Prism, Apple Rosetta 2,
-// Linux qemu-user/binfmt).  Guest CPUID still advertises AVX2/AVX-512, but the
-// host executes 128-bit NEON: counting guest lanes inflates wider divider
-// rows (AVX2 cracked to 2x128b takes ~2x time for 2x ops, and Prism's div
-// cracking is uneven enough to read above native).  kernelMenu() uses this to
-// suppress wider-than-128b div/sqrt rows.
+// Linux qemu-user/binfmt).  Guest CPUID describes the translator's virtual CPU
+// ("Virtual CPU", AuthenticAMD under Prism), so the device header names the
+// translation: every x86 row is then a reading of translated code on an ARM
+// core, not of the x86 part CPUID claims.  This file only builds it for x86,
+// so an ARM64 host is by itself proof of translation.
 //
-// Detection coverage:
-//   - Windows Prism: IsWow64Process2 returns procMachine=x64, nativeMachine=ARM64.
+//   - Windows Prism: x64 emulation is NOT WOW64 -- IsWow64Process2 reports the
+//     process machine as IMAGE_FILE_MACHINE_UNKNOWN for an x64 process (only
+//     32-bit x86 is a WOW64 guest), so only the native machine is tested.
+//     GetMachineTypeAttributes(ARM64) is the fallback: ARM64 user-mode code
+//     runs only on an ARM64 host.  (GetNativeSystemInfo lies: it says AMD64.)
 //   - Apple Rosetta 2: sysctl.proc_translated is set.
-//   - Linux qemu-user/binfmt: uname().machine reports the host arch (aarch64*).
-// Does NOT catch system-VM emulation (qemu-system-x86_64 on ARM host) because
-// the guest kernel reports x86_64 in uname; those runs still show inflated
-// AVX2/AVX-512 div rows.  That is a known, documented limitation.
+//   - Linux qemu-user/binfmt: uname() reports the GUEST arch there, so read
+//     /proc/cpuinfo instead: an ARM kernel's has "CPU implementer" lines, an
+//     x86 kernel's never does.  Unverified under qemu-user.
+// Not caught: system-VM emulation (the whole guest kernel is x86) and any
+// translator that synthesises an x86 /proc/cpuinfo.
 static bool isX86EmulatedOnArm()
 {
 #if defined(_WIN32)
+  const USHORT kArm64 = 0xaa64;   // IMAGE_FILE_MACHINE_ARM64
   HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
   if (!k32) return false;
   using IsWow64Process2Fn = BOOL(WINAPI *)(HANDLE, USHORT *, USHORT *);
-  auto fn = reinterpret_cast<IsWow64Process2Fn>(
+  auto wow = reinterpret_cast<IsWow64Process2Fn>(
       GetProcAddress(k32, "IsWow64Process2"));
-  if (!fn) return false;
   USHORT procMachine = 0, nativeMachine = 0;
-  if (!fn(GetCurrentProcess(), &procMachine, &nativeMachine)) return false;
-  const USHORT kAmd64 = 0x8664, kI386 = 0x014c, kArm64 = 0xaa64;
-  return (procMachine == kAmd64 || procMachine == kI386) &&
-         nativeMachine == kArm64;
+  if (wow && wow(GetCurrentProcess(), &procMachine, &nativeMachine) &&
+      nativeMachine == kArm64)
+    return true;
+  // MACHINE_ATTRIBUTES is an int-sized flag enum; UserEnabled = 0x1.
+  using GetMachineTypeAttributesFn = HRESULT(WINAPI *)(USHORT, int *);
+  auto attrsFn = reinterpret_cast<GetMachineTypeAttributesFn>(
+      GetProcAddress(k32, "GetMachineTypeAttributes"));
+  int attrs = 0;
+  return attrsFn && SUCCEEDED(attrsFn(kArm64, &attrs)) && (attrs & 0x1);
 #elif defined(__APPLE__)
   int translated = 0;
   size_t s = sizeof(translated);
@@ -94,10 +105,14 @@ static bool isX86EmulatedOnArm()
     return translated != 0;
   return false;
 #elif defined(__linux__)
-  struct utsname u;
-  if (uname(&u) != 0) return false;
-  return std::strcmp(u.machine, "aarch64") == 0 ||
-         std::strncmp(u.machine, "arm", 3) == 0;
+  FILE *fp = std::fopen("/proc/cpuinfo", "r");
+  if (!fp) return false;
+  char line[256];
+  bool arm = false;
+  while (!arm && std::fgets(line, sizeof(line), fp))
+    arm = std::strncmp(line, "CPU implementer", 15) == 0;
+  std::fclose(fp);
+  return arm;
 #else
   return false;
 #endif
@@ -577,12 +592,7 @@ const CpuKernelMenu &kernelMenu()
     if (f.avx2 && f.fma)
     {
       addBase(clpeak_table_avx2(), "AVX2+FMA");
-      // No FMA in a div/sqrt chain.  Suppressed when this x86 binary is
-      // translated on ARM64 (Prism/Rosetta/qemu-user): the 256-bit op is
-      // cracked to 2x128-bit NEON, so counting 2x lanes inflates the row past
-      // native (Snapdragon X: AVX2 fdiv read 1.4-1.6x NEON for the same unit).
-      if (!f.emulatedX86OnArm)
-        addDivSqrt(clpeak_table_avx2(), "AVX2");
+      addDivSqrt(clpeak_table_avx2(), "AVX2");   // no FMA in a div/sqrt chain
       add(m.strscan, clpeak_table_avx2()->strscan, "AVX2");
       add(m.utf8, clpeak_table_avx2()->utf8, "AVX2");
     }
@@ -591,9 +601,7 @@ const CpuKernelMenu &kernelMenu()
     if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq)
     {
       addBase(clpeak_table_avx512(), "AVX-512");
-      // Same emulation cap as AVX2 above (512-bit would inflate 4x).
-      if (!f.emulatedX86OnArm)
-        addDivSqrt(clpeak_table_avx512(), "AVX-512");
+      addDivSqrt(clpeak_table_avx512(), "AVX-512");
       add(m.strscan, clpeak_table_avx512()->strscan, "AVX-512");   // VPCMPB+KOR
       add(m.utf8, clpeak_table_avx512()->utf8, "AVX-512");         // 512-bit VPSHUFB
     }

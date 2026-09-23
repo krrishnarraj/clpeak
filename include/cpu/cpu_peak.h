@@ -62,9 +62,7 @@ struct cpu_device_info_t {
   bool hasSME2   = false;           // ARM SME2
   int  smeSVLBytes = 0;             // active SME streaming vector length in bytes (0 if no SME)
   bool emulatedX86OnArm = false;    // x86 binary translated on ARM64 (Prism/Rosetta/qemu-user):
-                                    // guest CPUID claims AVX2/AVX-512, but ops/lane scaling does
-                                    // not match the emulated execution width, so wider div/sqrt
-                                    // rows are suppressed.
+                                    // CPUID describes the translator's virtual CPU, not the host
 };
 
 // Populate `info` from the host (cpu_device.cpp).
