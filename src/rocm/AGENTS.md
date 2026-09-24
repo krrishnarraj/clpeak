@@ -31,7 +31,7 @@ ROCm headers. Built as `peak_rocm` static library.
 | File | Purpose |
 |------|---------|
 | `rocm_peak.cpp` | `RocmPeak` class: ctor, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()` |
-| `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (code-object `hipModuleLoadData` + module caching) |
+| `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (code-object `hipModuleLoadData` + module caching; reads the bundle header to tell a GPU the build has no code for (Error) from one a kernel's arch group leaves out (Unsupported)) |
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
 | `compute_int.cpp` | `runComputeInt32`, `runComputeInt8DP` |
@@ -47,7 +47,7 @@ ROCm headers. Built as `peak_rocm` static library.
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `rocm_kernels/` | HIP kernel sources (`.hip`), AOT-compiled to code objects and embedded as byte arrays |
-| `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed |
+| `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed; probes (and caches) which archs hipcc and rocWMMA can build |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
 
 ## Test documentation
@@ -81,5 +81,6 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
 - If you add a new `.hip` kernel → add it to the appropriate `embed_rocm_kernels()` gfx group in `CMakeLists.txt`, and declare its `Blob` extern in `include/rocm/rocm_peak.h`.
-- If a kernel uses a builtin valid only on certain gfx families → put it in (or create) the matching `ARCHS` group so hipcc never targets an unsupported arch (the genco compile would fail the build).
+- If a kernel uses a builtin valid only on certain gfx families → put it in (or create) the matching `ARCHS` group so hipcc never targets an unsupported arch (the genco compile would fail the build), and pass `getKernel()` the reason a GPU the group leaves out reads Unsupported.
+- A new GPU → add it to its family list (`CLPEAK_ROCM_GCN5` … `CLPEAK_ROCM_RDNA4`) in `CMakeLists.txt`; that list is the build's coverage, which the runtime reads back out of the bundles.  gfx11 kernels select by clang's `__GFX11__` family macro, so a new gfx11 part needs nothing else; gfx12 kernels name their parts (gfx1250 is `__GFX12__` too, with a different matrix ISA).
 - If you change `RocmPeak` interface → update `include/rocm/rocm_peak.h`.

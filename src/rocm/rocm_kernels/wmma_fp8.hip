@@ -3,8 +3,8 @@
 // Raw WMMA (RDNA matrix-core) peak microbenchmarks: fp8 x fp8 + fp32,
 // 16x16x16, wave32. RDNA analogue of the Vulkan cooperative-matrix fp8 paths.
 // AMD naming: fp8 == E4M3, bf8 == E5M2 -- two kernels, one per format. fp8 WMMA
-// is RDNA4 (gfx12) only; RDNA3 (gfx11) has no fp8 matrix path, so the #error
-// makes the HIPRTC compile fail there and the host reports Unsupported.
+// is RDNA4 (gfx12) only; RDNA3 (gfx11) has no fp8 matrix path, so CMakeLists.txt
+// builds this for gfx12 alone and the host reports Unsupported elsewhere.
 //
 // Operands are packed as 8 fp8 lanes per i32 (2 x i32 = 16, matching K=16); the
 // byte value is irrelevant for throughput (0x38 ~ 1.0 in E4M3, 0x3C ~ 1.0 in

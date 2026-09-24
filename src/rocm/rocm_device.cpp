@@ -2,8 +2,10 @@
 
 #include <rocm/rocm_peak.h>
 #include <cstdio>
+#include <cstring>
 #include <sstream>
 #include <string>
+#include <vector>
 
 static const char *hipErrStr(hipError_t r)
 {
@@ -70,20 +72,97 @@ bool RocmDevice::init(int devIndex)
   // reports the effective HIP-native rate.
   info.fp16Supported = true;
   info.bf16Supported = true;
-  // gcnArchName carries feature flags (e.g. "gfx942:sramecc+:xnack-").
-  // Match against the base ISA only, otherwise the suffix makes every
-  // exact comparison miss and rocWMMA looks "unsupported" on supported GPUs.
-  const std::string archBase = info.archName.substr(0, info.archName.find(':'));
-  info.rocwmmaSupported =
-      archBase == "gfx908" || archBase == "gfx90a" ||
-      archBase == "gfx940" || archBase == "gfx941" ||
-      archBase == "gfx942" || archBase == "gfx950" ||
-      archBase == "gfx1100" || archBase == "gfx1101" ||
-      archBase == "gfx1102" || archBase == "gfx1200" ||
-      archBase == "gfx1201";
+  // gcnArchName carries feature flags (e.g. "gfx942:sramecc+:xnack-"); a
+  // bundle names its slices by processor alone, so compare against that.
+  archBase = info.archName.substr(0, info.archName.find(':'));
+
+  // compute_sp is built for every arch in the build (CLPEAK_ROCM_ALL in
+  // src/rocm/CMakeLists.txt), so its bundle is the build's coverage.
+  archCovered = sliceFor(rocm_kernels::compute_sp) != Slice::Absent;
 
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
   return true;
+}
+
+// The gfx processors an embedded code-object bundle has a slice for, read from
+// its clang offload-bundle header -- the table the HIP runtime itself consults
+// to pick a slice: the magic, an entry count, then per entry its offset, size,
+// triple length and triple, integers little-endian 64-bit.  A device entry's
+// triple reads "hipv4-amdgcn-amd-amdhsa--gfx1150", with ":xnack+"-style
+// suffixes when built for a feature; the host entry has no amdgcn triple.
+// False when the bytes are not an uncompressed bundle: a compressed one
+// ("CCOB") keeps its table behind its codec.
+static bool bundleArchs(const rocm_kernels::Blob &blob, std::vector<std::string> &archs)
+{
+  static const char kMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  static const char kDevice[] = "amdgcn-amd-amdhsa-";
+  const size_t magicLen = sizeof(kMagic) - 1;
+  const unsigned char *p = blob.data;
+  const size_t len = blob.len;
+
+  archs.clear();
+  if (!p || len < magicLen + 8 || std::memcmp(p, kMagic, magicLen) != 0)
+    return false;
+
+  auto u64 = [&](size_t at, uint64_t &v) {
+    if (at > len || len - at < 8)
+      return false;
+    v = 0;
+    for (int i = 7; i >= 0; i--)
+      v = (v << 8) | p[at + i];
+    return true;
+  };
+
+  uint64_t entries = 0;
+  if (!u64(magicLen, entries))
+    return false;
+  size_t at = magicLen + 8;
+  for (uint64_t e = 0; e < entries; e++)
+  {
+    uint64_t tripleLen = 0;
+    if (!u64(at + 16, tripleLen))   // past the entry's offset and size
+      return false;
+    at += 24;
+    if (tripleLen > len - at)
+      return false;
+    const std::string triple(reinterpret_cast<const char *>(p + at), (size_t)tripleLen);
+    at += (size_t)tripleLen;
+
+    // "<kind>-amdgcn-amd-amdhsa-<env>-<target id>": the id follows the dash
+    // that closes the (empty) environment, and may hold dashes of its own
+    // (gfx11-generic).
+    const size_t t = triple.find(kDevice);
+    if (t == std::string::npos)
+      continue;
+    const size_t dash = triple.find('-', t + sizeof(kDevice) - 1);
+    if (dash == std::string::npos)
+      continue;
+    const std::string id = triple.substr(dash + 1);
+    archs.push_back(id.substr(0, id.find(':')));
+  }
+  return true;
+}
+
+RocmDevice::Slice RocmDevice::sliceFor(const rocm_kernels::Blob &blob) const
+{
+  // A stub: the toolkit could target none of the kernel's arch group.
+  if (blob.len == 0 || blob.data == nullptr)
+    return Slice::Absent;
+
+  std::vector<std::string> archs;
+  if (!bundleArchs(blob, archs))
+    return Slice::Unknown;
+
+  bool generic = false;
+  for (const auto &a : archs)
+  {
+    if (a == archBase)
+      return Slice::Present;
+    // A generic slice (gfx11-generic) runs on members of its family where the
+    // runtime supports it, which only the load can say.
+    generic = generic || (a.size() > 8 && a.compare(a.size() - 8, 8, "-generic") == 0);
+  }
+  return generic ? Slice::Unknown : Slice::Absent;
 }
 
 void RocmDevice::cleanup()
@@ -99,9 +178,11 @@ void RocmDevice::cleanup()
   }
 }
 
-bool RocmDevice::getKernel(const rocm_kernels::Blob &blob,
-                           const char *kernelName, hipFunction_t &fn)
+RocmKernel RocmDevice::getKernel(const rocm_kernels::Blob &blob,
+                                 const char *kernelName, const char *notBuilt)
 {
+  RocmKernel k;
+
   // Cache by blob-data pointer: every embedded code object is a distinct array
   // in rocm_kernels_generated, so pointer equality is sufficient.
   auto it = moduleCache.find(blob.data);
@@ -112,10 +193,23 @@ bool RocmDevice::getKernel(const rocm_kernels::Blob &blob,
   }
   else
   {
-    if (blob.len == 0 || blob.data == nullptr)
+    if (sliceFor(blob) == Slice::Absent)
     {
-      CLPEAK_VLOG("kernel %s was not built for any supported gfx arch\n", blob.name);
-      return false;
+      CLPEAK_VLOG("%s has no %s code object\n", blob.name, archBase.c_str());
+      if (!archCovered)
+      {
+        k.reason = "this build has no " + archBase + " code";
+      }
+      else if (notBuilt)
+      {
+        k.status = ResultStatus::Unsupported;
+        k.reason = notBuilt;
+      }
+      else
+      {
+        k.reason = std::string(blob.name) + " was not built for " + archBase;
+      }
+      return k;
     }
     // The blob is a precompiled code-object bundle; the HIP runtime selects the
     // slice matching this device's gfx arch -- no HIPRTC, no ROCm headers.
@@ -123,19 +217,23 @@ bool RocmDevice::getKernel(const rocm_kernels::Blob &blob,
     if (hr != hipSuccess)
     {
       CLPEAK_VLOG("hipModuleLoadData(%s) failed: %s\n", blob.name, hipErrStr(hr));
-      return false;
+      k.reason = std::string("code object failed to load: ") + hipErrStr(hr);
+      return k;
     }
     moduleCache[blob.data] = mod;
   }
 
-  hipError_t r = hipModuleGetFunction(&fn, mod, kernelName);
+  hipError_t r = hipModuleGetFunction(&k.fn, mod, kernelName);
   if (r != hipSuccess)
   {
     CLPEAK_VLOG("hipModuleGetFunction(%s in %s) failed: %s\n",
                 kernelName, blob.name, hipErrStr(r));
-    return false;
+    k.fn = nullptr;
+    k.reason = std::string("kernel missing from its code object: ") + hipErrStr(r);
+    return k;
   }
-  return true;
+  k.status = ResultStatus::Ok;
+  return k;
 }
 
 #endif // ENABLE_ROCM

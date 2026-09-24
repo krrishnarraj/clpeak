@@ -11,14 +11,14 @@
 // instead carry the mixed-sign v_dot4_i32_iu8 (__builtin_amdgcn_sudot4, gated
 // by dot8-insts -- a feature the CDNA line never had, so sudot4 fails to
 // compile on gfx94x and sdot4 fails on gfx12 with the "needs target feature
-// dot1-insts" error). Select per-arch via clang's predefined __gfxNNNN__
-// processor macros; signed*signed maps to sudot4 with both sign flags set.
-// Arches not listed fall back to sdot4 (unchanged behavior); if a part has
-// neither, the compile fails and the test reports compile/load failed.
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||    \
-    defined(__gfx1103__) ||                                                    \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) ||    \
-    defined(__gfx1200__) || defined(__gfx1201__)
+// dot1-insts" error). All of gfx11 is selected by clang's family macro, so
+// RDNA3.5 parts are covered as they appear; gfx12 by name, since gfx1250 is
+// __GFX12__ as well and is not an RDNA4 part. signed*signed maps to sudot4
+// with both sign flags set. Everything else takes sdot4; the parts with
+// neither instruction (Vega 10, the GCN5 APUs, gfx1010, gfx1013) are left out
+// of this kernel's arch group in CMakeLists.txt, and the host reports them
+// Unsupported.
+#if defined(__GFX11__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define DOT4_I8(x, y, a) __builtin_amdgcn_sudot4(true, (x), true, (y), (a), false)
 #else
 #define DOT4_I8(x, y, a) __builtin_amdgcn_sdot4((x), (y), (a), false)

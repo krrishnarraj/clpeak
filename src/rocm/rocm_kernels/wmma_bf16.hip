@@ -19,9 +19,7 @@ typedef short shortN __attribute__((ext_vector_type(8)));
   shortN { (short)0x3F80, (short)0x3F80, (short)0x3F80, (short)0x3F80, \
            (short)0x3F80, (short)0x3F80, (short)0x3F80, (short)0x3F80 }
 #define WMMA_BF16(a, b, c) __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c)
-#elif defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-      defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
-      defined(__gfx1152__)
+#elif defined(__GFX11__)
 typedef short shortN __attribute__((ext_vector_type(16)));
 #define WMMA_AB_ONES \
   shortN { (short)0x3F80, (short)0x3F80, (short)0x3F80, (short)0x3F80, \

@@ -12,9 +12,9 @@
 //
 // Distinct from rocwmma.cpp (the rocWMMA *library* path, which needs headers at
 // configure time) and from mfma.cpp (CDNA-only). Capability is gated on the
-// RDNA-WMMA family (gfx11/gfx12); the exact per-datatype support is then settled
-// by the HIPRTC compile -- a missing builtin fails quietly and is reported
-// Unsupported, never a fabricated number.
+// RDNA-WMMA family (gfx11/gfx12); the exact per-datatype support is then which
+// archs each kernel was built for (fp8 is gfx12 only) -- a GPU a kernel's arch
+// group leaves out is reported Unsupported, never a fabricated number.
 namespace {
 
 constexpr uint64_t kWmmaIters = 512;
@@ -40,7 +40,7 @@ std::string archBaseOf(const std::string &a)
 
 // WMMA lives on RDNA3+ (gfx11) and RDNA4 (gfx12). RDNA1/2 (gfx10) and CDNA
 // (gfx9) are excluded; CDNA uses MFMA (mfma.cpp). The precise per-datatype
-// capability is settled by the HIPRTC compile.
+// capability is which archs each kernel was built for.
 bool isRdnaWmmaFamily(const std::string &base)
 {
   return base.compare(0, 5, "gfx11") == 0 || base.compare(0, 5, "gfx12") == 0;
@@ -137,13 +137,13 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    // Compiler-driven capability check: a missing builtin for this datatype
-    // fails the HIPRTC compile (log is --verbose-only); report Unsupported.
-    hipFunction_t fn;
-    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    // The arch groups in CMakeLists.txt build each data type only where
+    // its instruction exists; a GPU they leave out reads Unsupported.
+    RocmKernel k = dev.getKernel(*me.blob, me.kernelName,
+                                 "WMMA instruction for this datatype not available on this GPU");
+    if (!k)
     {
-      test.skip(me.label, ResultStatus::Unsupported,
-                "WMMA instruction for this datatype not available on this GPU", unitOpts(me));
+      test.skip(me.label, k.status, k.reason, unitOpts(me));
       continue;
     }
 
@@ -164,7 +164,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
@@ -200,11 +200,11 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    hipFunction_t fn;
-    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    RocmKernel k = dev.getKernel(*me.blob, me.kernelName,
+                                 "WMMA instruction for this datatype not available on this GPU");
+    if (!k)
     {
-      test.skip(me.label, ResultStatus::Unsupported,
-                "WMMA instruction for this datatype not available on this GPU", unitOpts(me));
+      test.skip(me.label, k.status, k.reason, unitOpts(me));
       continue;
     }
 
@@ -225,7 +225,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

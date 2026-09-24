@@ -44,7 +44,16 @@ struct rocm_device_info_t {
 
   bool fp16Supported = false;
   bool bf16Supported = false;
-  bool rocwmmaSupported = false;
+};
+
+// A kernel resolved from an embedded code object, or why it could not be:
+// when `fn` is null, `status` and `reason` are what its reading reports.
+struct RocmKernel
+{
+  hipFunction_t fn = nullptr;
+  ResultStatus status = ResultStatus::Error;
+  std::string reason;
+  explicit operator bool() const { return fn != nullptr; }
 };
 
 class RocmDevice
@@ -53,6 +62,11 @@ public:
   int deviceIndex;
   hipStream_t stream;
   rocm_device_info_t info;
+
+  // Whether this build carries code for the device's gfx arch at all.  False
+  // for a GPU missing from the arch list the kernels were compiled for, or
+  // newer than it: none of clpeak's own kernels can run on such a GPU.
+  bool archCovered = true;
 
   RocmDevice();
   ~RocmDevice();
@@ -63,14 +77,24 @@ public:
   // Load a precompiled code-object bundle into a module (the HIP runtime picks
   // the slice matching this device's gfx arch), then resolve a named kernel.
   // Caches by blob-data pointer; needs only the HIP runtime at run time -- no
-  // HIPRTC, no ROCm headers.  A missing slice (kernel not built for this arch)
-  // returns false; the detail is emitted via CLPEAK_VLOG so it only shows under
-  // --verbose and never disturbs the default result output.
-  bool getKernel(const rocm_kernels::Blob &blob,
-                 const char *kernelName, hipFunction_t &fn);
+  // HIPRTC, no ROCm headers.
+  //
+  // A bundle with no slice for this arch is read off its header rather than
+  // learnt from a failed load, which HIP reports no differently from a corrupt
+  // image.  If the build covers the arch, the kernel's arch group left it out
+  // because the GPU lacks the instruction: the reading is `notBuilt`,
+  // Unsupported.  If the build has no code for this GPU at all, it is an Error
+  // naming the arch.  A slice that is present but will not load is an Error
+  // with HIP's reason; details go to CLPEAK_VLOG.
+  RocmKernel getKernel(const rocm_kernels::Blob &blob, const char *kernelName,
+                       const char *notBuilt = nullptr);
 
 private:
+  enum class Slice { Present, Absent, Unknown };
+  Slice sliceFor(const rocm_kernels::Blob &blob) const;
+
   std::unordered_map<const void *, hipModule_t> moduleCache;
+  std::string archBase;   // gcnArchName without its feature flags
 };
 
 // Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
@@ -129,6 +153,11 @@ struct rocm_compute_desc_t
 
   bool        skip;
   const char *skipMsg;
+
+  // Why a GPU the build covers has no slice of this kernel -- its arch group
+  // leaves out parts without the instruction.  nullptr for kernels built for
+  // every covered arch.
+  const char *notBuilt;
 };
 
 class RocmPeak : public Peak
