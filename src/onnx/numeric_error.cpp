@@ -253,8 +253,11 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
      "well above single digits means the provider is not really computing in "
      "fp32, but quietly downgrading internally."},
     {ONNX_DT_FLOAT16, false, "fp16",
-     "What half precision costs: fp16 inputs and fp16 accumulation against "
-     "the fp32 answer."},
+     "What half precision costs: fp16 inputs and an fp16 answer, against the "
+     "fp32 one.  Whether the running total inside the multiply stays at 16 "
+     "bits too is up to the provider -- ONNX Runtime's CUDA provider keeps it "
+     "at 32 by default -- and a 16-bit total adds error of its own on top of "
+     "rounding the answer."},
     {ONNX_DT_BFLOAT16, false, "bf16",
      "The other 16-bit float: three fewer mantissa bits than fp16 in exchange "
      "for fp32's exponent range.  Expect a larger error than fp16 on values "

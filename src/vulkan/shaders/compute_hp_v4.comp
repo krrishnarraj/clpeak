@@ -3,9 +3,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 // Half-precision MAC: fp16 x fp16 + fp16 accumulator.  Distinct from
-// compute_mp (fp16 x fp16 + fp32) -- some hardware (NVIDIA shader-core
-// HFMA2) only reaches the 2x-FP32 rate when the accumulator is also
-// fp16.  Requires VK_KHR_shader_float16_int8 + shaderFloat16.
+// compute_mp (fp16 x fp16 + fp32) -- some hardware only runs fp16 faster
+// than fp32 when the accumulator is also fp16: NVIDIA's packed HFMA2, 2x
+// on Volta and Turing (GeForce from Ampere on runs it at the FP32 rate).
+// Requires VK_KHR_shader_float16_int8 + shaderFloat16.
 
 layout(local_size_x = 256) in;
 
