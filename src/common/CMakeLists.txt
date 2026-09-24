@@ -9,6 +9,7 @@ add_library(peak_common STATIC
     options.cpp
     host_info.cpp
     json.cpp
+    keep_awake.cpp
     run_document.cpp
     run_log.cpp
     units.cpp
@@ -25,6 +26,19 @@ if(APPLE)
     target_link_libraries(peak_common PUBLIC ${COMMON_FOUNDATION_FRAMEWORK})
 else()
     target_sources(peak_common PRIVATE coreml_cache_stub.cpp)
+endif()
+# A run holds the machine out of idle sleep (include/common/keep_awake.h):
+# Windows asks powrprof whether this is a Modern Standby machine; macOS takes
+# an IOKit power assertion, which iOS does not offer (the app holds the screen
+# there instead).  Linux reaches logind and the desktop through a libsystemd
+# loaded at run time, so it links nothing.
+if(WIN32)
+    target_link_libraries(peak_common PUBLIC powrprof)
+elseif(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    find_library(COMMON_IOKIT_FRAMEWORK IOKit)
+    find_library(COMMON_COREFOUNDATION_FRAMEWORK CoreFoundation)
+    target_link_libraries(peak_common PUBLIC
+        ${COMMON_IOKIT_FRAMEWORK} ${COMMON_COREFOUNDATION_FRAMEWORK})
 endif()
 # logger.cpp (base) + logger_text.cpp (shared text formatter, writes to an
 # injectable std::ostream) live here.  Consumers that need a non-text channel

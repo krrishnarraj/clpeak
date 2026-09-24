@@ -157,7 +157,9 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
   (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
   Android/iOS only — a sleeping display stops the frames the run was budgeted
-  for, which moves the scores of everything measured after it)
+  for, which moves the scores of everything measured after it).  A desktop
+  machine sleeping mid-run is the native launch's to prevent, as in the CLI:
+  `include/common/keep_awake.h`
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
 - Colours / type / geometry? → `lib/src/theme/clpeak_theme.dart` (`CP.of(context)`

@@ -8,6 +8,7 @@
 #include <common/run_log.h>
 #include <common/logger_text.h>
 #include <common/host_info.h>
+#include <common/keep_awake.h>
 #include <version.h>
 #include <iostream>
 #include <vector>
@@ -108,6 +109,10 @@ int main(int argc, char **argv)
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
                 combined.inventory.push_back(be.enumerate());
+
+    // Held until main returns: the run is compute with no user input, which
+    // every OS idle timer counts as idle (include/common/keep_awake.h).
+    clpeak::KeepAwake keepAwake;
 
     // Run every enabled backend in order.  No devices is not an error
     // (normal in VM/CI environments).  Only real failures (driver init,
