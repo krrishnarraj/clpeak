@@ -83,11 +83,10 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
 
   for (const auto &v : variants)
   {
-    CUfunction fn;
-    if (!dev.getKernel(*v.blob, v.kernelName, fn))
+    CudaKernel k = dev.getKernel(*v.blob, v.kernelName);
+    if (!k)
     {
-      test.skip(v.label, ResultStatus::Error, "compile/load failed",
-                emitOpts(v.description));
+      test.skip(v.label, k.status, k.reason, emitOpts(v.description));
       continue;
     }
 
@@ -95,7 +94,7 @@ int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,
     args[0] = &outputBuf;
     args[1] = const_cast<void *>(d.scalarArg);
 
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
     float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);

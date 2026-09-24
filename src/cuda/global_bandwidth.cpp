@@ -76,12 +76,10 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
 
-    CUfunction fn;
-    if (!dev.getKernel(cuda_kernels::global_bandwidth,
-                       v.kernelName, fn))
+    CudaKernel k = dev.getKernel(cuda_kernels::global_bandwidth, v.kernelName);
+    if (!k)
     {
-      test.skip(key, ResultStatus::Error, "Kernel compile failed",
-                cudaWidthNote(v.width));
+      test.skip(key, k.status, k.reason, cudaWidthNote(v.width));
       continue;
     }
 
@@ -91,7 +89,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     uint32_t blocksU = (uint32_t)blocks;
 
     void *args[2] = {&inBuf, &outBuf};
-    float us = runKernel(dev, fn, blocksU, blockSize, args,
+    float us = runKernel(dev, k.fn, blocksU, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float bps = (float)(bytes / us * 1e6);
