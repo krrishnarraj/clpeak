@@ -153,8 +153,6 @@ function(embed_cuda_kernels)
     list(APPEND _gen_srcs "${_gen}")
     string(TOUPPER "${_kn}" _ku)
     target_compile_definitions(${EC_TARGET} PRIVATE CLPEAK_CUDA_HAS_${_ku})
-    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-      APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_cu}")
   endforeach()
 
   target_sources(${EC_TARGET} PRIVATE ${_gen_srcs})

@@ -28,9 +28,6 @@ target_include_directories(peak_cuda PUBLIC
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-# Kernels are precompiled to fatbins at build time (see below) and loaded via
-# the CUDA driver at run time -- NVRTC and the toolkit include dir are no longer
-# needed by the shipped binary.
 target_compile_definitions(peak_cuda PRIVATE ENABLE_CUDA)
 target_compile_definitions(peak_common PRIVATE ENABLE_CUDA)
 

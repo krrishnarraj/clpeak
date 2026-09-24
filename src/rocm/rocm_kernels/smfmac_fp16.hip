@@ -8,8 +8,10 @@
 //
 // A is compressed (4 fp16 nonzeros), B is full (8 fp16); the extra operand is
 // the sparsity index (which of the 4 columns are nonzero) -- value irrelevant
-// for throughput. No arch #ifdef: SMFMAC is CDNA3, and HIPRTC compile failure
-// on a part that lacks it is reported Unsupported (see sparse_mfma.cpp).
+// for throughput. No arch #ifdef, as in mfma_fp16.hip: SMFMAC is CDNA3+, so
+// the SMFMAC arch group in CMakeLists.txt lists only parts that have it, and
+// the host reports a CDNA part the group leaves out as Unsupported (see
+// sparse_mfma.cpp).
 // SMFMAC_ITERS * SMFMAC_ACC must match the host-side op count.
 #define SMFMAC_ITERS 512
 #define SMFMAC_ACC   8

@@ -70,8 +70,7 @@ bool CudaDevice::init(int devIndex)
   }
   {
     // The kernels are precompiled fatbins; report the CUDA toolkit the build
-    // was compiled against (CUDA_VERSION from <cuda.h>) rather than an NVRTC
-    // version, since NVRTC is no longer used at runtime.
+    // was compiled against (CUDA_VERSION from <cuda.h>).
     std::stringstream ss;
     ss << (CUDA_VERSION / 1000) << "." << (CUDA_VERSION % 1000) / 10;
     info.runtimeVersion = ss.str();

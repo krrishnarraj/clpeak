@@ -7,8 +7,8 @@
 
 // ---------------------------------------------------------------------------
 // Shared compute-peak driver.  Mirrors vkPeak::runComputeKernel in spirit:
-// allocate a single device-local output buffer, dispatch each variant of
-// the same kernel against it with NVRTC-compiled kernels.
+// allocate a single device-local output buffer and dispatch each variant of
+// the same kernel against it, loading each from its embedded fatbin.
 // ---------------------------------------------------------------------------
 
 int CudaPeak::runComputeKernel(CudaDevice &dev, benchmark_config_t &cfg,

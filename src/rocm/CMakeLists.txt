@@ -57,9 +57,6 @@ endif()
 
 target_compile_definitions(peak_rocm PRIVATE ENABLE_ROCM)
 
-# _clpeak_rocm_inc above is used only for the configure-time hipBLASLt header
-# probe below; it is no longer baked into the binary (kernels are AOT-compiled).
-
 # Probe whether the installed hipBLASLt exposes the block-scaled FP4 GEMM API
 # (gfx950 / MI350, recent ROCm).  Feature-test by compilation so the build stays
 # green on ROCm versions without it and auto-enables the mxfp4 path where present.

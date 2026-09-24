@@ -34,7 +34,7 @@
 // 8 independent accumulator chains in one asm block (same ILP pattern as the
 // dense NVFP4 kernel and wmma_int8_sparse.cu).
 //
-// Operand order (confirmed compiling + running on sm_120a, NVRTC 13.2):
+// Operand order (confirmed compiling + running on sm_120a, CUDA 13.2):
 //   D, A{4}, B{4}, C, metadata, sparsity-selector(0x0),
 //   scaleA-reg, {byte,thread}, scaleB-reg, {byte,thread}.
 // scale_vec::4X tracks the COMPRESSED K=64 (nvf4 block16 -> 64/16 = 4), not the
