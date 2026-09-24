@@ -6,6 +6,7 @@
 #include <common/common.h>
 #include <common/dynlib.h>
 
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -24,16 +25,19 @@
 static const uint32_t kMinApiVersion = 17;  // ONNX Runtime 1.17 (2024)
 
 static std::mutex g_mutex;
-static OrtRuntime g_rt;
-static bool       g_loaded    = false;
+// The runtime ortRuntime() hands out, or null: an entry of g_cache (g_static
+// when linked in) and never rewritten, so a caller still holding it when the
+// choice changes keeps reading the runtime it started with.
+static const OrtRuntime *g_rt = nullptr;
 static bool       g_attempted = false;  // a failed search is not retried
 static std::string g_loadError;         // why the last attempt failed
 
 // Every successfully loaded runtime stays mapped for the life of the process
-// (unloading is unsafe) and is remembered under its override key ("" for the
+// (unloading is unsafe) and is remembered under its cache key ("" for the
 // default search).  Switching back to a previously used library then reuses
-// its handle instead of mapping the file a second time.
-static std::map<std::string, OrtRuntime> g_cache;  // key = g_override value
+// its handle instead of mapping the file a second time.  A std::map, so an
+// entry never moves once g_rt points at it.
+static std::map<std::string, OrtRuntime> g_cache;  // key = cacheKey()
 
 #ifdef _WIN32
 // Let a runtime loaded by path find the DLLs it ships with.  A dependency
@@ -137,21 +141,31 @@ static bool adoptApiBase(const OrtApiBase *base, OrtRuntime &out)
 #ifdef CLPEAK_ONNX_STATIC
 
 // Statically linked (iOS): the runtime is already in the binary.
+static OrtRuntime g_static;
+
 static void loadRuntime()
 {
-  g_rt.lib  = nullptr;
-  g_rt.path.clear();
-  g_loaded  = adoptApiBase(OrtGetApiBase(), g_rt);
-  if (!g_loaded)
+  if (adoptApiBase(OrtGetApiBase(), g_static))
+    g_rt = &g_static;
+  else
     g_loadError = "the linked-in ONNX Runtime exposes no usable OrtApi";
 }
 
+// One runtime and nothing to switch to, so nothing to pin or wait for.
 void onnxSetLibraryOverride(const std::string &) {}
 void onnxRuntimeRecheck() {}
+void onnxPinRuntime(const OrtRuntime &, const std::string &, const std::string &) {}
+bool onnxPendingRuntime(std::string &, std::string &) { return false; }
 
 #else
 
 static std::string g_override;  // --onnx-lib / clpeak_set_onnx_library
+
+// The runtime that stays (onnxPinRuntime), the key it was loaded under, and
+// why, one clause per cause.
+static const OrtRuntime *g_pinned = nullptr;
+static std::string g_pinnedKey;
+static std::map<std::string, std::string> g_pinnedWhy;
 
 #ifdef _WIN32
 // The onnxruntime.dll beside the Windows ML catalog DLL, when --onnx-winml
@@ -238,8 +252,7 @@ static void loadRuntime()
   auto cached = g_cache.find(key);
   if (cached != g_cache.end())
   {
-    g_rt     = cached->second;
-    g_loaded = true;
+    g_rt = &cached->second;
     return;
   }
 
@@ -373,9 +386,7 @@ static void loadRuntime()
     if (cur.path.empty())
       cur.path = steered;
   }
-  g_rt     = cur;
-  g_cache[key] = cur;
-  g_loaded = true;
+  g_rt = &g_cache.emplace(key, std::move(cur)).first->second;
 }
 
 void onnxSetLibraryOverride(const std::string &path)
@@ -384,23 +395,86 @@ void onnxSetLibraryOverride(const std::string &path)
   if (path == g_override)
     return;
   g_override = path;
+  // A pinned runtime stays loaded; the choice is kept for the next start,
+  // and onnxPendingRuntime() says so.
+  if (g_pinned)
+    return;
   // Force the next ortRuntime() to search again.  The previously loaded
-  // handle stays mapped; g_rt is simply repointed once the new one loads.
-  g_loaded    = false;
+  // runtime stays mapped and its record intact; g_rt simply points at the
+  // new one once it loads.
+  g_rt        = nullptr;
   g_attempted = false;
-  g_rt        = OrtRuntime{};
   g_loadError.clear();
 }
 
 void onnxRuntimeRecheck()
 {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (!g_override.empty())
-    return;   // a named library is not steered by anything else
-  g_loaded    = false;
+  if (!g_override.empty() || g_pinned)
+    return;   // a named library is not steered by anything else; a pinned one stays
+  g_rt        = nullptr;
   g_attempted = false;
-  g_rt        = OrtRuntime{};
   g_loadError.clear();
+}
+
+void onnxPinRuntime(const OrtRuntime &rt, const std::string &key,
+                    const std::string &why)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_pinned)
+  {
+    for (const auto &kv : g_cache)
+      if (kv.second.base == rt.base)
+      {
+        g_pinned    = &kv.second;
+        g_pinnedKey = kv.first;
+        break;
+      }
+    if (!g_pinned)
+      return;
+  }
+  else if (g_pinned->base != rt.base)
+  {
+    return;   // the first pin holds; nothing may switch past it
+  }
+  // What pinned it is in this runtime now, so this is the current runtime
+  // whatever was chosen in the meantime.
+  g_rt        = g_pinned;
+  g_attempted = true;
+  g_loadError.clear();
+  g_pinnedWhy[key] = why;
+}
+
+// Whether two module paths name one file, as far as spelling goes: Windows
+// paths compare without case and with either slash.
+static bool samePath(std::string a, std::string b)
+{
+#ifdef _WIN32
+  for (std::string *s : {&a, &b})
+    for (char &c : *s)
+      c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+#endif
+  return a == b;
+}
+
+bool onnxPendingRuntime(std::string &path, std::string &reason)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_pinned || cacheKey() == g_pinnedKey)
+    return false;
+  // The pinned file named by another spelling is no change at all.
+  if (!g_override.empty() &&
+      samePath(clpeak::absoluteModulePath(g_override.c_str()), g_pinned->path))
+    return false;
+  path = g_override;
+#ifdef _WIN32
+  if (path.empty())
+    path = winmlDefaultRuntime();
+#endif
+  reason.clear();
+  for (const auto &kv : g_pinnedWhy)
+    reason += (reason.empty() ? "" : "; ") + kv.second;
+  return true;
 }
 
 #endif // CLPEAK_ONNX_STATIC
@@ -413,7 +487,7 @@ const OrtRuntime *ortRuntime()
     g_attempted = true;
     loadRuntime();
   }
-  return g_loaded ? &g_rt : nullptr;
+  return g_rt;
 }
 
 std::string onnxLoadDiagnostic()

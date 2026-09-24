@@ -33,7 +33,7 @@ backend.
 | File | Purpose |
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
-| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
+| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `onnxPinRuntime()` / `onnxPendingRuntime()` — a runtime that must not be switched away from stays, and a later choice waits for the next start; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`, `onnxSetWinml`), `onnxRegisterEpLibraries()` (called by `onnxEnv()` on every fresh environment), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
@@ -66,7 +66,8 @@ another is the mistake the setting exists to prevent.  `onnxLoadDiagnostic()`
 carries the reason, and `onnxRuntimeStatus()` packages it for a UI.
 
 Naming a different library after one is loaded takes effect on the next
-`ortRuntime()` call, so the settings screen needs no restart.
+`ortRuntime()` call, so the settings screen needs no restart -- unless the
+loaded runtime is pinned (below).
 
 **Switching runtimes in one process** (the GUI, between runs) works because
 every piece of per-runtime state is keyed by the runtime, not by a name: the
@@ -93,6 +94,42 @@ is already exist` — and every provider row says so.  `onnxEnv()` keeps the
 refusal per runtime (no retry per probe) and `onnxEnvError()` carries the
 runtime's words into the skip reason; switching back to the first works.
 Upstream builds carry their own ONNX and coexist.
+
+**Some runtimes stay until the process exits.**  A switch releases the old
+runtime's environment and hands the next one a clean process, and two
+things make that impossible; either one pins the loaded runtime
+(`onnxPinRuntime()`), after which `onnxSetLibraryOverride()` and
+`onnxRuntimeRecheck()` keep a new choice without loading it and
+`onnxPendingRuntime()` reports it -- in the status (`pendingRuntime`), on a
+listing's info line, in a run's notes, and as the "Restart now" the GUI's
+settings panel offers.  The pin is sticky.  The two causes:
+
+- **A plugin library mapped into the process** -- one the Windows ML
+  catalog resolved, or one `--onnx-ep` or the GUI's plugin list named:
+  `onnxRegisterEpLibraries()` pins for every library that registered, or
+  was refused but left mapped (`libraryMapped()`).  A provider library is
+  the first runtime's for good: it is loaded by full path but resolves its
+  own imports by module name, so one built on ORT's provider bridge binds
+  to whichever `onnxruntime_providers_shared.dll` the process mapped first
+  (and through it to that runtime's internals), and a library still mapped
+  after its environment unregistered it keeps whatever it set up against
+  the runtime that loaded it.  Handed to a second runtime anyway, on
+  Windows with the catalog on (a tester, 2026-09-24): 1.30 → DirectML's
+  1.24.4 left the enumeration that followed running forever, so every later
+  choice queued behind it.  Turning the catalog off unregisters its
+  libraries but does not prove they were unmapped, hence sticky.
+- **An environment its runtime cannot release** (`g_envUnreleasable`,
+  `onnx_session.cpp`, which has the mechanics): the built-in WebGPU
+  provider before 1.25 crashes `ReleaseEnv` once it has made a device
+  (ORT 1.24.4 for macOS, reproduced through the C ABI), and before 1.29 a
+  plugin provider's teardown could read freed memory -- the likeliest cause
+  of the GUI dying as it left DirectML's 1.24.4 for 1.30 with the catalog's
+  providers registered.  Such an environment is never released at all: a
+  new plugin set is swapped onto it (`onnxUnregisterEpLibraries()`, then
+  registration) instead of onto a fresh one.
+
+Every switch worked with the catalog off, and so did turning it on under
+either runtime.  Neither Windows failure has been re-tested since.
 
 **iOS is the exception** (`CLPEAK_ONNX_STATIC`): Apple's official pod ships
 `onnxruntime.xcframework` as a *static* framework, and iOS will not dlopen a
@@ -166,8 +203,9 @@ place:
   of the environment's identity: a change between runs (the GUI's
   Settings) bumps `onnxEpConfigGeneration()`, the next `onnxEnv()` releases
   the old environment (taking its plugin libraries with it) and builds a
-  fresh one.  Every session must be gone by then -- the same
-  between-runs-only contract the runtime override has.  The status a
+  fresh one -- or, for one its runtime cannot release (above), unregisters
+  the old set and registers the new one on it.  Every session must be gone
+  by then -- the same between-runs-only contract the runtime override has.  The status a
   settings screen reads (`onnxEpLibraryStatus()`) is what the *current*
   environment registered and is empty after a change until the next
   enumeration; and a set that became empty rebuilds the environment on the

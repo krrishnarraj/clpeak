@@ -49,8 +49,14 @@ CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 // catalog is asked for.
 //
 // Naming a different library than the one already loaded takes effect on the
-// next enumeration or run.  Call it between runs only.  A no-op on builds
-// that link ONNX Runtime statically (iOS) or omit the backend entirely.
+// next enumeration or run -- unless the current runtime is pinned: a plugin
+// execution-provider library (one Windows ML resolved, or one
+// clpeak_set_onnx_ep_libraries() named) has been loaded into it, or it
+// cannot release its environment without crashing.  That runtime then stays
+// for the life of the process, and the choice waits for the next start
+// (clpeak_copy_onnx_status_json's `pendingRuntime`).  Call it between runs
+// only.  A no-op on builds that link ONNX Runtime statically (iOS) or omit
+// the backend entirely.
 CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 
 // Plugin execution-provider libraries to register on the ONNX Runtime
@@ -81,7 +87,8 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 //   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str,
 //    "epLibraries":[{"name":str,"path":str,"named":bool,"registered":bool,
 //                    "error":str}],
-//    "winml":{"enabled":bool,"path":str,"error":str}}
+//    "winml":{"enabled":bool,"path":str,"error":str},
+//    "pendingRuntime"?:{"path":str,"reason":str}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
 // clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
 // the resolved file even when it was found by name (empty only when
@@ -92,6 +99,10 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // the catalog DLL that answered and `winml.error` why it did not.  When
 // enabled but nothing has resolved the catalog yet both are empty --
 // pending until the next enumeration or run, like `epLibraries`.
+// `pendingRuntime`, present only then, is a library chosen after the loaded
+// runtime was pinned (see clpeak_set_onnx_library): `path` loads at the next
+// start (empty = the default search), and `reason` is the clause saying why
+// not now.
 // {"available":false,"error":"ONNX backend not built in"} without one.
 CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 

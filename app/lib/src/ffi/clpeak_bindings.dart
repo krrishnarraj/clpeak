@@ -242,6 +242,21 @@ class OnnxEpLibraryStatus {
       );
 }
 
+/// A runtime chosen after the loaded one was pinned: it loads at the next
+/// start (see [OnnxStatus.pendingRuntime]).
+class OnnxPendingRuntime {
+  const OnnxPendingRuntime({required this.path, required this.reason});
+
+  final String path; // empty = the default search
+  final String reason; // why it is not loaded now, as one sentence
+
+  factory OnnxPendingRuntime.fromJson(Map<String, dynamic> m) =>
+      OnnxPendingRuntime(
+        path: m['path'] as String? ?? '',
+        reason: m['reason'] as String? ?? '',
+      );
+}
+
 /// State of the ONNX Runtime, as clpeak_copy_onnx_status_json() reports it.
 class OnnxStatus {
   const OnnxStatus({
@@ -254,6 +269,7 @@ class OnnxStatus {
     this.winmlEnabled = false,
     this.winmlPath = '',
     this.winmlError = '',
+    this.pendingRuntime,
   });
 
   const OnnxStatus.unavailable(this.error)
@@ -264,7 +280,8 @@ class OnnxStatus {
         epLibraries = const [],
         winmlEnabled = false,
         winmlPath = '',
-        winmlError = '';
+        winmlError = '',
+        pendingRuntime = null;
 
   final bool available;
 
@@ -290,8 +307,17 @@ class OnnxStatus {
   final String winmlPath;
   final String winmlError;
 
+  /// A different runtime chosen while this one is pinned: a plugin library
+  /// (a Windows ML provider, or one from the plugin list) is loaded into it,
+  /// which cannot move to another runtime inside a running process, or it
+  /// cannot release its environment without crashing.  The native side
+  /// keeps this runtime and loads the choice at the next start.  Null when
+  /// nothing waits.
+  final OnnxPendingRuntime? pendingRuntime;
+
   factory OnnxStatus.fromJson(Map<String, dynamic> m) {
     final winml = m['winml'] as Map<String, dynamic>? ?? const {};
+    final pending = m['pendingRuntime'] as Map<String, dynamic>?;
     return OnnxStatus(
       available: m['available'] as bool? ?? false,
       linkedIn: m['linkedIn'] as bool? ?? false,
@@ -305,6 +331,8 @@ class OnnxStatus {
       winmlEnabled: winml['enabled'] as bool? ?? false,
       winmlPath: winml['path'] as String? ?? '',
       winmlError: winml['error'] as String? ?? '',
+      pendingRuntime:
+          pending == null ? null : OnnxPendingRuntime.fromJson(pending),
     );
   }
 }

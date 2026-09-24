@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:ui' show AppExitType;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -162,6 +164,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// any, is bundled with the app and registered without asking.
   static bool get _desktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  /// Start a fresh copy of the app and quit this one: how an ONNX Runtime
+  /// the native side is holding for the next start
+  /// ([OnnxStatus.pendingRuntime]) gets loaded.  The choice is already
+  /// saved and nothing is running (the panel locks during a run), so there
+  /// is nothing to wind down.  Desktop only: a phone app cannot relaunch
+  /// itself, and the panel says "Next start" instead.
+  Future<void> _restart() async {
+    try {
+      await Process.start(Platform.resolvedExecutable, const [],
+          mode: ProcessStartMode.detached);
+    } on ProcessException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not restart: ${e.message}')));
+      return;
+    }
+    await ServicesBinding.instance.exitApplication(AppExitType.required);
+  }
 
   /// Persist the plugin library set, hand it to the native side and
   /// re-enumerate, then read back how each registered.
@@ -349,6 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     locked: running,
                     onPick: () => _pickLibrary(_Runtime.onnx),
                     onReset: () => _resetLibrary(_Runtime.onnx),
+                    onRestart: _desktop ? _restart : null,
                   ),
                   if (_desktop) ...[
                     const SizedBox(height: 22),
@@ -427,6 +449,7 @@ class _RuntimeView {
     required this.error,
     required this.hint,
     required this.fixedHint,
+    this.pending,
   });
 
   /// A status has been read at all (false while "Checking…").
@@ -440,6 +463,10 @@ class _RuntimeView {
   final String error;
   final String hint;
   final String fixedHint;
+
+  /// A choice that loads at the next start rather than now: ONNX only, see
+  /// [OnnxStatus.pendingRuntime].
+  final OnnxPendingRuntime? pending;
 
   factory _RuntimeView.onnx(OnnxStatus? s) => _RuntimeView(
         known: s != null,
@@ -457,6 +484,7 @@ class _RuntimeView {
         error: s?.error ?? '',
         hint: _onnxRuntimeHint,
         fixedHint: 'Linked into the app; there is nothing else to choose.',
+        pending: s?.pendingRuntime,
       );
 
   /// The engine's own hint text, worded to what actually follows it on this
@@ -503,6 +531,7 @@ class _RuntimePanel extends StatelessWidget {
     required this.locked,
     required this.onPick,
     required this.onReset,
+    this.onRestart,
   });
 
   final _RuntimeView view;
@@ -515,6 +544,15 @@ class _RuntimePanel extends StatelessWidget {
   final VoidCallback onPick;
   final VoidCallback onReset;
 
+  /// Relaunches the app, offered while a choice waits for the next start
+  /// ([_RuntimeView.pending]); null where the app cannot restart itself.
+  final VoidCallback? onRestart;
+
+  /// The native reason is a clause; the panel prints it as a sentence.
+  static String _sentence(String clause) => clause.isEmpty
+      ? clause
+      : '${clause[0].toUpperCase()}${clause.substring(1)}.';
+
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
@@ -522,6 +560,7 @@ class _RuntimePanel extends StatelessWidget {
     final tint = ClpeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
     final fixed = s.fixed;
+    final pending = s.pending;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -544,7 +583,7 @@ class _RuntimePanel extends StatelessWidget {
                 ),
               ),
               CRow(
-                rule: s.error.isNotEmpty,
+                rule: s.error.isNotEmpty || pending != null,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -567,7 +606,7 @@ class _RuntimePanel extends StatelessWidget {
               ),
               if (s.error.isNotEmpty)
                 CRow(
-                  rule: false,
+                  rule: pending != null,
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -576,6 +615,31 @@ class _RuntimePanel extends StatelessWidget {
                       Expanded(
                         child: Text(s.error,
                             style: t.monoSmallDim.copyWith(color: t.danger)),
+                      ),
+                    ],
+                  ),
+                ),
+              if (pending != null)
+                CRow(
+                  rule: false,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.restart_alt, size: 15, color: t.dim),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Next start: ${pending.path.isNotEmpty ? pending.path : 'found by name on the system paths'}',
+                              style: t.monoSmallDim.copyWith(color: t.text),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(_sentence(pending.reason),
+                                style: t.monoSmallDim),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -590,18 +654,28 @@ class _RuntimePanel extends StatelessWidget {
         ),
         if (!fixed) ...[
           const SizedBox(height: 12),
-          Row(
+          // A Wrap: with the restart button there are three, which a
+          // narrow window cannot always fit on one line.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               CButton(
                 label: 'Choose library…',
                 icon: Icons.folder_open,
                 onPressed: locked ? null : onPick,
               ),
-              const SizedBox(width: 8),
               CButton(
                 label: 'Use default',
                 onPressed: locked || savedPath.isEmpty ? null : onReset,
               ),
+              if (pending != null && onRestart != null)
+                CButton(
+                  label: 'Restart now',
+                  icon: Icons.restart_alt,
+                  kind: CButtonKind.primary,
+                  onPressed: locked ? null : onRestart,
+                ),
             ],
           ),
           if (locked) ...[

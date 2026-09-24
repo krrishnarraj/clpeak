@@ -42,11 +42,19 @@ uint64_t onnxEpConfigGeneration();
 // so asking twice costs nothing and downloads nothing.
 std::vector<OnnxEpLibrary> onnxEffectiveEpLibraries(const OrtRuntime &rt);
 
-// Register the effective libraries on `env`, just created for `rt`, and
-// record how each fared (onnxEpLibraryStatus()).  Also remembers which
-// provider names the environment listed *before* registering, so that
-// onnxPluginDevices can tell a plugin's devices from the built-in ones.
-void onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env);
+// Register the effective libraries on `env`, just created for `rt` (or
+// emptied by onnxUnregisterEpLibraries), and record how each fared
+// (onnxEpLibraryStatus()).  Also remembers which provider names the
+// environment listed *before* registering, so that onnxPluginDevices can
+// tell a plugin's devices from the built-in ones.  True when a plugin
+// library is mapped into the process afterwards -- registered, or refused
+// after loading -- which pins `rt` for the rest of it (onnxPinRuntime).
+bool onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env);
+
+// Unregister from `env` every library onnxRegisterEpLibraries registered
+// on it: how a new plugin set reaches an environment that must not be
+// released (onnx_session.cpp, g_envUnreleasable).  Between runs only.
+void onnxUnregisterEpLibraries(const OrtRuntime &rt, OrtEnv *env);
 
 // One entry per (plugin provider, hardware device) the environment
 // enumerates, accelerators first, CPU-class devices last, named from what

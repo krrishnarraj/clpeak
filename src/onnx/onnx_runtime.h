@@ -34,14 +34,17 @@ struct OrtRuntime
 // between installed runtimes.  An empty path clears the override.
 //
 // Naming a different library after one is already loaded takes effect: the
-// next ortRuntime() call loads the new one.  The old handle is deliberately
+// next ortRuntime() call loads the new one -- unless a plugin library has
+// been loaded into the current runtime (onnxPinRuntime), in which case the
+// choice waits for the next start.  The old handle is deliberately
 // leaked rather than dlclosed -- ONNX Runtime keeps worker threads alive past
 // the last session, so unloading it is not safe (nor is unloading a file
 // that turned out not to be an ONNX Runtime at all; common/dynlib.h has the
 // crash that proved it).  No-op when statically linked.
 //
-// Call it between runs only: ortRuntime() hands out a pointer to the loader's
-// own record, and changing the library repoints that record.
+// Call it between runs only.  The record ortRuntime() handed out stays valid
+// and unchanged (every runtime loaded is kept for the life of the process),
+// but a run's environment and devices belong to the runtime it started on.
 void onnxSetLibraryOverride(const std::string &path);
 
 // Load on first use; returns nullptr when no runtime library is found or it
@@ -52,8 +55,28 @@ const OrtRuntime *ortRuntime();
 // Ask the loader to run its default search again on the next ortRuntime():
 // the plugin configuration steers that search (an --onnx-winml directory's
 // own runtime comes first), so a change to it is a reason to look again.
-// A named library is unaffected.  Between runs only, like the override.
+// A named library is unaffected, and so is a pinned runtime.  Between runs
+// only, like the override.
 void onnxRuntimeRecheck();
+
+// `rt` stays the runtime until the process exits, for `why` -- a clause
+// naming the runtime, filed under `key` so a later pin for the same cause
+// replaces its sentence rather than adding one.  Two causes pin: a plugin
+// library mapped into the process on `rt`'s behalf (onnxRegisterEpLibraries;
+// handed to a second runtime, one left the GUI's enumeration running
+// forever on Windows), and an environment `rt` cannot release without
+// crashing (onnx_session.cpp, g_envUnreleasable), since a switch releases
+// it.  src/onnx/AGENTS.md, "Some runtimes stay until the process exits", has
+// the account.  A later choice of runtime is kept and reported by
+// onnxPendingRuntime() instead of loaded.  Sticky: a library the runtime has
+// since unregistered can still be mapped.
+void onnxPinRuntime(const OrtRuntime &rt, const std::string &key,
+                    const std::string &why);
+
+// A runtime chosen after the loaded one was pinned: `path` is the library
+// that loads at the next start (empty for the default search) and `reason`
+// the sentence saying why it is not loaded now.  False when nothing waits.
+bool onnxPendingRuntime(std::string &path, std::string &reason);
 
 // Why the last load attempt failed, ready to show a user; empty when the
 // runtime loaded or has not been asked for yet.  A refusal is only as useful

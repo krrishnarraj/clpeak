@@ -247,6 +247,12 @@ struct OnnxRuntimeStatus
   std::string winmlPath;  // the catalog DLL that answered; empty when none
   std::string winmlError; // why the catalog gave nothing, when enabled;
                           // both empty while nothing has resolved it yet
+  // A runtime chosen after the loaded one was pinned (src/onnx/
+  // onnx_runtime.h, onnxPinRuntime): it loads at the next start, from
+  // `pendingPath` (empty = the default search), for `pendingReason`.
+  bool pending = false;
+  std::string pendingPath;
+  std::string pendingReason;
 };
 OnnxRuntimeStatus onnxRuntimeStatus();
 

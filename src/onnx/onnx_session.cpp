@@ -216,49 +216,113 @@ void onnxSuppressOrtRelay(bool on)
 // null, so a plain string will do.
 static std::string g_envError;
 
+// Runtimes that crash releasing an environment -- on their own teardown
+// path, not on anything clpeak does after it -- and the release that fixed
+// each.  Before 1.25 the WebGPU provider's device-lost callback logs
+// through the environment's logger after the environment has destroyed it:
+// ReleaseEnv -> WebGpuContextFactory::Cleanup -> the Dawn device's
+// DeviceLostEvent -> LOGS_DEFAULT, "Attempt to use DefaultLogger but none
+// has been registered", thrown out of a destructor and so std::terminate
+// (ORT 1.24.4 for macOS, reproduced; fixed by microsoft/onnxruntime#27569).
+// Before 1.29 a plugin provider's allocators kept references that tear-down
+// could outlive (an access violation AppVerifier caught in plugin-provider
+// shutdown; fixed by microsoft/onnxruntime#29770) -- the likeliest reading
+// of the GUI dying as it left DirectML's 1.24.4 with Windows ML providers
+// registered.
+static const uint32_t kWebGpuReleaseFixedApi = 25;
+static const uint32_t kPluginReleaseFixedApi = 29;
+
+// One OrtEnv per loaded runtime.  The GUI can hot-swap the ONNX Runtime
+// library in-process (Settings → Choose library…); enumeration is what
+// loads the runtime and needs no Env, so it succeeds, but the old Env
+// belongs to the old shared object's LoggingManager singleton.  Reusing
+// it with the new OrtApi triggers
+//   "Attempt to use DefaultLogger but none has been registered."
+// So onnxEnv() tracks which runtime the cached Env was created from and
+// recreates it when the runtime changes.  Works on Windows/Linux/macOS/
+// Android; on iOS (CLPEAK_ONNX_STATIC) the runtime never changes so the
+// Env is still created once.
+static std::mutex g_envLock;
+static OrtEnv *g_env = nullptr;
+static const OrtApi *g_envApi = nullptr;
+static const OrtApiBase *g_envBase = nullptr;
+// The plugin libraries an Env registers are part of its identity too
+// (onnx_plugin.h): a different set between runs means a fresh Env, on which
+// the new set is registered and the old one is unloaded with it.
+static uint64_t g_envGeneration = 0;
+// Releasing g_env would crash its runtime (kWebGpuReleaseFixedApi,
+// kPluginReleaseFixedApi).  Such an Env is never released: its runtime is
+// pinned (onnxPinRuntime) so no switch asks, and a new plugin set is swapped
+// on the Env itself.
+static bool g_envUnreleasable = false;
+// A runtime that refused once refuses again: remembered per runtime, so
+// enumeration does not pay for the same failed attempt at every probe, and
+// a different library gets its own try.
+static const OrtApi *g_failedApi = nullptr;
+static const OrtApiBase *g_failedBase = nullptr;
+
+// Register the plugin set on the fresh or emptied g_env; a library that
+// stayed mapped on a runtime older than the plugin tear-down fix makes the
+// Env one never to release.  Under g_envLock.
+static void registerPlugins(const OrtRuntime &rt)
+{
+  if (onnxRegisterEpLibraries(rt, g_env) && rt.apiVersion < kPluginReleaseFixedApi)
+    g_envUnreleasable = true;
+}
+
+// The Env in use belongs to `rt` and releasing it would crash `rt`
+// (`why`, a clause naming the runtime): keep it for the life of the
+// process, and keep `rt` as the runtime.
+static void keepEnvForever(const OrtRuntime &rt, const std::string &key,
+                           const std::string &why)
+{
+  {
+    std::lock_guard<std::mutex> lock(g_envLock);
+    if (g_env && g_envApi == rt.api && g_envBase == rt.base)
+      g_envUnreleasable = true;
+  }
+  onnxPinRuntime(rt, key, why);
+}
+
 OrtEnv *onnxEnv(const OrtRuntime &rt)
 {
-  // One OrtEnv per loaded runtime.  The GUI can hot-swap the ONNX Runtime
-  // library in-process (Settings → Choose library…); enumeration is what
-  // loads the runtime and needs no Env, so it succeeds, but the old Env
-  // belongs to the old shared object's LoggingManager singleton.
-  // Reusing it with the new OrtApi triggers
-  //   "Attempt to use DefaultLogger but none has been registered."
-  // Track which runtime the cached Env was created from and recreate it
-  // when the runtime changes.  Works on Windows/Linux/macOS/Android;
-  // on iOS (CLPEAK_ONNX_STATIC) the runtime never changes so the Env
-  // is still created once.
-  static std::mutex mutex;
-  static OrtEnv *env = nullptr;
-  static const OrtApi *envApi = nullptr;
-  static const OrtApiBase *envBase = nullptr;
-  // The plugin libraries an Env registers are part of its identity too
-  // (onnx_plugin.h): a different set between runs means a fresh Env, on
-  // which the new set is registered and the old one is unloaded with it.
-  static uint64_t envGeneration = 0;
-  // A runtime that refused once refuses again: remembered per runtime, so
-  // enumeration does not pay for the same failed attempt at every probe,
-  // and a different library gets its own try.
-  static const OrtApi *failedApi = nullptr;
-  static const OrtApiBase *failedBase = nullptr;
-  std::lock_guard<std::mutex> lock(mutex);
+  std::lock_guard<std::mutex> lock(g_envLock);
   const uint64_t generation = onnxEpConfigGeneration();
-  if (env && envApi == rt.api && envBase == rt.base &&
-      envGeneration == generation)
-    return env;
-  if (!env && failedApi == rt.api && failedBase == rt.base)
+  if (g_env && g_envApi == rt.api && g_envBase == rt.base &&
+      g_envGeneration == generation)
+    return g_env;
+  if (!g_env && g_failedApi == rt.api && g_failedBase == rt.base)
     return nullptr;
-  if (env)
+  if (g_env && g_envUnreleasable)
+  {
+    if (g_envApi == rt.api && g_envBase == rt.base)
+    {
+      // A new plugin set on an Env that must not be released: swap the
+      // libraries on the Env itself.
+      onnxUnregisterEpLibraries(rt, g_env);
+      g_envGeneration = generation;
+      registerPlugins(rt);
+      return g_env;
+    }
+    // Another runtime, which the pin only lets through a race: leave this
+    // Env alive -- leaked, like the runtime it belongs to -- rather than
+    // crash releasing it.
+    g_env = nullptr;
+    g_envApi = nullptr;
+    g_envBase = nullptr;
+    g_envUnreleasable = false;
+  }
+  if (g_env)
   {
     // Release with the API that created it; the old shared object is still
-    // mapped (g_rt.lib is leaked on purpose) so its ReleaseEnv remains valid.
-    if (envApi && envApi->ReleaseEnv)
-      envApi->ReleaseEnv(env);
+    // mapped (a runtime is never unloaded) so its ReleaseEnv remains valid.
+    if (g_envApi && g_envApi->ReleaseEnv)
+      g_envApi->ReleaseEnv(g_env);
     else if (rt.api && rt.api->ReleaseEnv)
-      rt.api->ReleaseEnv(env);
-    env = nullptr;
-    envApi = nullptr;
-    envBase = nullptr;
+      rt.api->ReleaseEnv(g_env);
+    g_env = nullptr;
+    g_envApi = nullptr;
+    g_envBase = nullptr;
   }
   // The runtime's own log goes to the run log (ortLogMessage) instead of
   // to stderr: a provider explaining why it declined a graph, or which
@@ -268,8 +332,8 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   // --verbose can differ from run to run in the GUI, so it is opened at
   // INFO and the callback applies the current run's verbosity.
   OrtStatus *st = rt.api->CreateEnvWithCustomLogger(
-      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &env);
-  if (st || !env)
+      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &g_env);
+  if (st || !g_env)
   {
     // Two package-built runtimes (Debian's, Homebrew's) share one system
     // libonnx, whose schema registry is process-wide: the second to create
@@ -278,19 +342,20 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
     g_envError = st ? onnxStatusText(rt, st)
                     : "the runtime returned no environment and no error";
     CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", g_envError.c_str());
-    env = nullptr;
-    failedApi = rt.api;
-    failedBase = rt.base;
+    g_env = nullptr;
+    g_failedApi = rt.api;
+    g_failedBase = rt.base;
     return nullptr;
   }
-  envApi = rt.api;
-  envBase = rt.base;
-  envGeneration = generation;
+  g_envApi = rt.api;
+  g_envBase = rt.base;
+  g_envGeneration = generation;
+  g_envUnreleasable = false;
   g_envError.clear();
   // Plugin providers live on the Env, so this is where they are registered
   // -- once per Env, before anything enumerates or attaches them.
-  onnxRegisterEpLibraries(rt, env);
-  return env;
+  registerPlugins(rt);
+  return g_env;
 }
 
 std::string onnxEnvError()
@@ -492,6 +557,16 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   EpOptions opts;
   if (genericEpOptions(ep, opts, wantPlan))
   {
+    // Appending the built-in WebGPU provider makes its device, and before
+    // 1.25 the runtime cannot release an environment after that
+    // (kWebGpuReleaseFixedApi).
+    if (providerKey == "WebGpuExecutionProvider" &&
+        rt.apiVersion < kWebGpuReleaseFixedApi)
+      keepEnvForever(rt, "webgpu",
+                     "the WebGPU provider of ONNX Runtime " + rt.versionString +
+                         " is in use, and before 1.25 that provider crashes the "
+                         "process when its environment is released, which a "
+                         "switch would do");
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
     {

@@ -134,7 +134,14 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `main()` is async and `SettingsService.load()` reads prefs up front.
   Changing it calls `clpeak_set_onnx_library()` and then
   `BenchmarkService.reloadCatalog()`, so the device list reflects the new
-  runtime's execution providers without a restart.  On iOS the picker is
+  runtime's execution providers without a restart -- unless the loaded
+  runtime is pinned (a plugin library, a Windows ML provider included, is
+  loaded into it, or its environment cannot be released without crashing:
+  `src/onnx/AGENTS.md`, "Some runtimes stay until the process exits").  The
+  native side then keeps it, reports the saved choice as
+  `OnnxStatus.pendingRuntime`, and the panel shows that as the next start's
+  runtime with a "Restart now" button on desktop (`_restart()`: relaunch,
+  then `exitApplication`).  On iOS the picker is
   replaced by "Built into the app": ONNX Runtime is statically linked there
   (Apple's pod is a static framework and iOS will not dlopen another), which
   `OnnxStatus.linkedIn` reports.

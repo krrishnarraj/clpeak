@@ -110,7 +110,13 @@ char *clpeak_copy_onnx_status_json(void)
     json += ",\"winml\":{\"enabled\":";
     json += st.winmlEnabled ? "true" : "false";
     json += ",\"path\":\"" + jsonEscape(st.winmlPath) + "\"";
-    json += ",\"error\":\"" + jsonEscape(st.winmlError) + "\"}}";
+    json += ",\"error\":\"" + jsonEscape(st.winmlError) + "\"}";
+    if (st.pending)
+    {
+        json += ",\"pendingRuntime\":{\"path\":\"" + jsonEscape(st.pendingPath) + "\"";
+        json += ",\"reason\":\"" + jsonEscape(st.pendingReason) + "\"}";
+    }
+    json += "}";
     return copyString(json);
 #else
     return copyString(

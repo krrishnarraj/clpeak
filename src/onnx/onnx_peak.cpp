@@ -123,6 +123,14 @@ static void pluginNotes(const OrtRuntime &rt,
       loud.push_back("Windows ML: the catalog lists no execution provider for "
                      "this machine");
   }
+  // A runtime chosen after this one was pinned (onnxPinRuntime): asked for
+  // and not loaded, which is said out loud like a library that did not
+  // register.
+  std::string pendingPath, pendingReason;
+  if (onnxPendingRuntime(pendingPath, pendingReason))
+    loud.push_back((pendingPath.empty() ? std::string("the runtime the default search finds")
+                                        : pendingPath) +
+                   " loads when clpeak restarts, not now: " + pendingReason);
 }
 
 std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
@@ -269,6 +277,7 @@ OnnxRuntimeStatus onnxRuntimeStatus()
       st.winmlError = res->error;
     }
   }
+  st.pending = onnxPendingRuntime(st.pendingPath, st.pendingReason);
   return st;
 }
 

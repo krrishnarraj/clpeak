@@ -16,6 +16,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 // Plugin execution providers need the OrtApi entries that arrived with
@@ -43,6 +45,7 @@ std::vector<OnnxEpLibraryStatus> g_status;
 std::set<std::string> g_builtinEpNames;   // provider names listed before registering
 const OrtEnv *g_statusEnv = nullptr;
 uint64_t g_statusGeneration = 0;          // the configuration g_status answers for
+std::set<std::string> g_everMapped;       // plugins mapped into this process so far
 
 std::string describeType(OrtHardwareDeviceType t)
 {
@@ -89,6 +92,34 @@ void appendPairs(const OrtRuntime &rt, const OrtKeyValuePairs *kvps,
   for (size_t i = 0; i < n; i++)
     if (keys && keys[i] && vals && vals[i])
       out.emplace_back(keys[i], vals[i]);
+}
+
+// Whether the library the runtime was handed as `path` is mapped into this
+// process -- asked without loading it.  The runtime resolves a bare name
+// beside itself, and a bare name here matches any loaded module of that
+// name, which errs toward "mapped": the safe side for what it decides.
+bool libraryMapped(const std::string &path)
+{
+#ifdef _WIN32
+  std::string p = path;
+  std::replace(p.begin(), p.end(), '/', '\\');
+  std::wstring wide;
+  const int n = MultiByteToWideChar(CP_UTF8, 0, p.c_str(), (int)p.size(), nullptr, 0);
+  if (n <= 0)
+    return false;
+  wide.resize((size_t)n);
+  MultiByteToWideChar(CP_UTF8, 0, p.c_str(), (int)p.size(), &wide[0], n);
+  return GetModuleHandleW(wide.c_str()) != nullptr;
+#else
+  // RTLD_NOLOAD takes a reference only when the library is already there;
+  // giving it straight back leaves the count where the runtime put it, so
+  // this can never be the call that unloads anything (common/dynlib.h).
+  void *h = dlopen(path.c_str(), RTLD_NOW | RTLD_NOLOAD);
+  if (!h)
+    return false;
+  dlclose(h);
+  return true;
+#endif
 }
 
 } // namespace
@@ -193,7 +224,7 @@ std::vector<OnnxEpLibrary> onnxEffectiveEpLibraries(const OrtRuntime &rt)
 // Registration
 // ---------------------------------------------------------------------------
 
-void onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env)
+bool onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env)
 {
   const std::vector<OnnxEpLibrary> libs = onnxEffectiveEpLibraries(rt);
 
@@ -203,7 +234,7 @@ void onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env)
   g_statusEnv = env;
   g_statusGeneration = onnxEpConfigGeneration();
   if (libs.empty())
-    return;
+    return false;
 
   if (rt.apiVersion < kMinPluginApiVersion)
   {
@@ -216,7 +247,7 @@ void onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env)
                  " or newer; this runtime is " + rt.versionString;
       g_status.push_back(std::move(st));
     }
-    return;
+    return false;
   }
 
   // The provider names present before any plugin: the built-in providers
@@ -266,6 +297,45 @@ void onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env)
                 st.registered ? "registered" : st.error.c_str());
     g_status.push_back(std::move(st));
   }
+
+  // A library now mapped into the process belongs to this runtime for the
+  // rest of it (onnxPinRuntime).  A refusal counts too when the file stayed
+  // mapped: the runtime can decline a library after loading it and running
+  // its factory code, and what that left behind is bound to this runtime
+  // just the same.  A file that never loaded pins nothing.
+  bool mapped = false;
+  for (const auto &st : g_status)
+    if (st.registered || libraryMapped(st.lib.path))
+    {
+      mapped = true;
+      g_everMapped.insert(st.lib.name);
+    }
+  if (!mapped)
+    return false;
+  std::string names;
+  for (const auto &n : g_everMapped)
+    names += (names.empty() ? "" : ", ") + n;
+  onnxPinRuntime(rt, "plugins",
+                 "plugin libraries are loaded into ONNX Runtime " + rt.versionString +
+                     " (" + names + "), and a provider library cannot move to "
+                     "another runtime inside a running process");
+  return true;
+}
+
+void onnxUnregisterEpLibraries(const OrtRuntime &rt, OrtEnv *env)
+{
+  std::lock_guard<std::mutex> lock(g_envMutex);
+  if (g_statusEnv != env || rt.apiVersion < kMinPluginApiVersion)
+    return;
+  for (const auto &st : g_status)
+  {
+    if (!st.registered)
+      continue;
+    OrtStatus *status = rt.api->UnregisterExecutionProviderLibrary(env, st.lib.name.c_str());
+    CLPEAK_VLOG("onnx: plugin library %s unregistered%s%s\n", st.lib.name.c_str(),
+                status ? ": " : "", status ? onnxStatusText(rt, status).c_str() : "");
+  }
+  g_status.clear();
 }
 
 std::vector<OnnxEpLibraryStatus> onnxEpLibraryStatus()

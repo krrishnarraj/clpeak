@@ -79,6 +79,61 @@ stay measured.  Lifting either is deleting its `if`.
   a Windows ML plugin (`--onnx-winml`) rather than another `onnxruntime.dll`;
   same provider key, same gate.
 
+Two more gates hold a runtime for the rest of the process instead of
+withholding a graph: `onnxPinRuntime()` (`src/onnx/onnx_runtime.cpp`)
+keeps the loaded runtime and saves a later choice for the next start (the
+GUI's settings panel offers "Restart now"; the CLI never switches runtimes
+in-process).  `src/onnx/AGENTS.md`, "Some runtimes stay until the process
+exits", has the account.
+
+### A plugin library handed to a second runtime
+
+- **Gate**: `onnxRegisterEpLibraries()` (`src/onnx/onnx_plugin.cpp`) pins
+  the runtime for each plugin library still mapped after registering.
+- **Withheld**: switching the ONNX Runtime inside a running GUI once a
+  plugin library -- a Windows ML provider, or one from the plugin list --
+  has been loaded into the current runtime.
+- **Fault**: with the Windows ML catalog on, Microsoft's ONNX Runtime 1.30
+  → DirectML's 1.24.4 starts an enumeration that never returns, so the
+  settings screen stays on 1.24.4 and every later choice waits behind it.
+  Turning the catalog on under either runtime works, and so does every
+  switch with it off.
+- **Seen**: a tester's Windows machine, the GUI, 2026-09-24.  Which
+  providers the catalog registered, and where the enumeration stopped, were
+  not captured.  One candidate is the Windows loader's own module-name
+  binding, which no release would change.
+- **To lift**: only once a hanging library is identified and fixed.  Delete
+  the `onnxPinRuntime()` call in `onnxRegisterEpLibraries()` (its return
+  value stays: the gate below reads it), turn Verbose diagnostics and
+  Windows ML on in the GUI's Settings, choose one runtime and let it
+  enumerate, then another, then back; both switches have to finish
+  enumerating.
+
+### Releasing an environment: WebGPU before 1.25, plugin providers before 1.29
+
+- **Gate**: `g_envUnreleasable` in `onnxEnv()` (`src/onnx/onnx_session.cpp`),
+  set when the built-in WebGPU provider is appended on a runtime older than
+  `kWebGpuReleaseFixedApi` (25), or a plugin library stays mapped on one
+  older than `kPluginReleaseFixedApi` (29).
+- **Withheld**: `ReleaseEnv` on that runtime.  It is pinned, so no switch
+  asks for it, and a new plugin set is swapped onto the live environment
+  with `UnregisterExecutionProviderLibrary` instead of onto a fresh one.
+- **Fault**: WebGPU -- `ReleaseEnv` → `WebGpuContextFactory::Cleanup` → the
+  Dawn device's device-lost callback → `LOGS_DEFAULT` after the environment
+  destroyed its logger: "Attempt to use DefaultLogger but none has been
+  registered", thrown out of a destructor, `std::terminate`
+  (microsoft/onnxruntime#27569 fixed it for 1.25).  Plugins -- the GUI
+  dying as it left DirectML's 1.24.4 for 1.30 with the catalog's providers
+  registered, the fault microsoft/onnxruntime#29770 fixed for 1.29 (an
+  access violation AppVerifier caught in plugin-provider teardown).
+- **Seen**: WebGPU -- the official ORT 1.24.4 for macOS arm64, M1 Pro,
+  2026-09-24, through the C ABI: a switch to Homebrew's 1.30 after one
+  enumeration aborted, and so did a plugin-list change on 1.24.4 alone.
+  Plugins -- the tester's Windows report above, not captured beyond "crash
+  to desktop".
+- **To lift**: nothing to wait for upstream; delete both constants and the
+  flag once `kMinApiVersion` (`src/onnx/onnx_runtime.cpp`) reaches 29.
+
 ## Core ML backend
 
 ### macOS 27: the block's decode form on the CPU and GPU compute units
