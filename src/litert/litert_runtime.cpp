@@ -6,7 +6,6 @@
 #include <common/dynlib.h>
 
 #include <filesystem>
-#include <map>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -23,19 +22,20 @@
 #endif
 
 static std::mutex g_mutex;
+// The runtime litertRuntime() hands out: written by the first successful
+// load and never again, since the library is fixed for the process from
+// then on (litert_runtime.h).
 static LitertRuntime g_rt;
 static bool g_loaded = false;
 static bool g_attempted = false;
 static std::string g_loadError;
-static std::string g_override;   // --litert-lib / clpeak_set_litert_library
+// --litert-lib / clpeak_set_litert_library: what was last asked for, and
+// what is in effect -- the same until a runtime has loaded, fixed after.
+static std::string g_requested;
+static std::string g_override;
 static std::string g_npuDir;     // --litert-npu-dir
 static std::string g_npuStage;   // clpeak_set_litert_npu_stage_dir (Android)
 static std::string g_npuResolved; // the vendor directory staged there, if any
-
-// Every loaded runtime stays mapped for the life of the process and is
-// remembered under its override key ("" for the default search), so a
-// settings screen that switches back reuses the handle.
-static std::map<std::string, LitertRuntime> g_cache;
 
 // The file a loaded handle came from, when the platform can say.  A bare
 // soname resolves out of the APK's lib dir on Android and out of the pip
@@ -92,14 +92,6 @@ static bool resolveApi(void *lib, LitertApi &api, const char *what)
 
 static void loadRuntime()
 {
-  auto cached = g_cache.find(g_override);
-  if (cached != g_cache.end())
-  {
-    g_rt = cached->second;
-    g_loaded = true;
-    return;
-  }
-
   // A library the user named is the library to measure, and nothing else
   // will do: falling through to whatever else is installed would report one
   // runtime's numbers under another's name.  Absolute before the loader
@@ -163,22 +155,37 @@ static void loadRuntime()
   cur.libraryDir = dirOf(cur.path);
   cur.abiVersion = LITERT_RUNTIME_ABI_VERSION;
 
-  // Deliberately never dlclosed: see the header.
+  // Deliberately never dlclosed: see the header.  The library is fixed from
+  // here on.
   g_rt = cur;
-  g_cache[g_override] = cur;
   g_loaded = true;
 }
 
 void litertSetLibraryOverride(const std::string &path)
 {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (path == g_override)
+  g_requested = path;
+  // Once a runtime has loaded, the choice waits for the next start
+  // (litertPendingLibrary); until then it applies at the next
+  // litertRuntime(), however many attempts that takes.
+  if (g_loaded || path == g_override)
     return;
   g_override = path;
-  g_loaded = false;
   g_attempted = false;
-  g_rt = LitertRuntime{};
   g_loadError.clear();
+}
+
+bool litertPendingLibrary(std::string &path)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_loaded || g_requested == g_override)
+    return false;
+  // The loaded file named by another spelling -- or named now, where the
+  // default search found it -- is no change.
+  if (!g_requested.empty() && clpeak::sameModulePath(g_requested, g_rt.path))
+    return false;
+  path = g_requested;
+  return true;
 }
 
 void litertSetNpuDirOverride(const std::string &dir)

@@ -21,7 +21,7 @@ namespace
 
 std::mutex g_mutex;
 OnnxWinmlResolution g_res;
-uint64_t g_resGeneration = 0;     // config generation the memo answers for
+uint64_t g_resGeneration = 0;     // Windows ML setup the memo answers for
 const void *g_resRuntime = nullptr;
 
 } // namespace
@@ -353,7 +353,7 @@ const OnnxWinmlResolution *onnxWinmlResolved(const OrtRuntime *rt)
 {
   std::lock_guard<std::mutex> lock(g_mutex);
   const void *rtKey = rt ? rt->lib : nullptr;
-  if (g_resGeneration == onnxEpConfigGeneration() && g_resRuntime == rtKey)
+  if (g_resGeneration == onnxWinmlGeneration() && g_resRuntime == rtKey)
     return &g_res;
   return nullptr;
 }
@@ -362,7 +362,7 @@ const OnnxWinmlResolution &onnxWinmlResolve(const OrtRuntime *rt,
                                             const std::string &hint)
 {
   std::lock_guard<std::mutex> lock(g_mutex);
-  const uint64_t gen = onnxEpConfigGeneration();
+  const uint64_t gen = onnxWinmlGeneration();
   const void *rtKey = rt ? rt->lib : nullptr;
   if (g_resGeneration == gen && g_resRuntime == rtKey)
     return g_res;

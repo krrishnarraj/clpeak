@@ -102,9 +102,9 @@ constexpr int kOnnxOffDevicePatience = 4;
 // naming the OrtEpDevice a session is appended for, `library` the
 // registration it came from and `vendor` / `hardware` what the runtime
 // says about the silicon.  The pointer belongs to the runtime's
-// environment and is valid until that environment is recreated -- a
-// runtime switch or a change of plugin libraries between runs -- which is
-// also when enumeration runs again.
+// environment and is valid until its library is unregistered -- a change
+// of plugin libraries between runs -- which is also when enumeration runs
+// again.
 struct onnx_ep_info_t
 {
   std::string providerKey; // ORT registration name, e.g. "CoreMLExecutionProvider"
@@ -137,9 +137,10 @@ struct OnnxEpLibrary
   bool named = true;
 };
 
-// Replace the set of plugin libraries to register.  Between runs only, like
-// onnxSetLibraryOverride: the environment they are registered on is rebuilt
-// on the next use, and every session on it must be gone by then.
+// Replace the set of plugin libraries to register.  Unlike the runtime
+// setup, this stays live for the whole process: the next use syncs the set
+// onto the environment (what went is unregistered, what came registered),
+// so it is between runs only -- no session may be using a library then.
 void onnxSetEpLibraries(std::vector<OnnxEpLibrary> libs);
 const std::vector<OnnxEpLibrary> &onnxEpLibraries();
 
@@ -150,12 +151,13 @@ const std::vector<OnnxEpLibrary> &onnxEpLibraries();
 // plugin libraries.  `path` names that DLL or its directory, or is empty
 // to search beside the loaded runtime and the executable.  Installing a
 // provider is a download, so this is opt-in.  A no-op off Windows, where
-// the status simply says so.
+// the status simply says so.  Part of the runtime setup, which the first
+// runtime to load fixes for the process: src/onnx/onnx_runtime.h.
 void onnxSetWinml(bool enabled, const std::string &path);
 
 // How each requested plugin library fared on the environment: registered,
-// or the runtime's reason.  Filled when the environment is created; empty
-// until then.  Both the run's notes and a settings screen read it.
+// or the runtime's reason.  Filled when the set is synced onto the
+// environment; empty until then.  Both the run's notes and a settings screen read it.
 struct OnnxEpLibraryStatus
 {
   OnnxEpLibrary lib;
@@ -219,8 +221,9 @@ std::vector<onnx_ep_info_t> onnxUsableEps(
 // conventional names; empty clears the choice.  Backs
 // `--onnx-lib` and the FFI's clpeak_set_onnx_library().  Re-declared here so
 // the CLI and the FFI can set it without reaching into the backend's private
-// loader header (and its ONNX Runtime include).  Details, including the
-// between-runs-only contract: src/onnx/onnx_runtime.h.
+// loader header (and its ONNX Runtime include).  Details, including why a
+// choice made after a runtime has loaded waits for the next start:
+// src/onnx/onnx_runtime.h.
 void onnxSetLibraryOverride(const std::string &path);
 
 // Why the runtime failed to load, ready to show a user; empty when it loaded.
@@ -247,12 +250,13 @@ struct OnnxRuntimeStatus
   std::string winmlPath;  // the catalog DLL that answered; empty when none
   std::string winmlError; // why the catalog gave nothing, when enabled;
                           // both empty while nothing has resolved it yet
-  // A runtime chosen after the loaded one was pinned (src/onnx/
-  // onnx_runtime.h, onnxPinRuntime): it loads at the next start, from
-  // `pendingPath` (empty = the default search), for `pendingReason`.
+  // A runtime setup chosen after the runtime loaded, which takes effect at
+  // the next start (src/onnx/onnx_runtime.h): the library (empty = the
+  // default search) and the Windows ML catalog.
   bool pending = false;
-  std::string pendingPath;
-  std::string pendingReason;
+  std::string pendingLibrary;
+  bool pendingWinml = false;
+  std::string pendingWinmlPath;
 };
 OnnxRuntimeStatus onnxRuntimeStatus();
 

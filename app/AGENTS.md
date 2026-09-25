@@ -132,28 +132,34 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   because that constructor enumerates and enumeration is what loads the
   runtime — applied any later it would be a launch too late, which is why
   `main()` is async and `SettingsService.load()` reads prefs up front.
-  Changing it calls `clpeak_set_onnx_library()` and then
-  `BenchmarkService.reloadCatalog()`, so the device list reflects the new
-  runtime's execution providers without a restart -- unless the loaded
-  runtime is pinned (a plugin library, a Windows ML provider included, is
-  loaded into it, or its environment cannot be released without crashing:
-  `src/onnx/AGENTS.md`, "Some runtimes stay until the process exits").  The
-  native side then keeps it, reports the saved choice as
-  `OnnxStatus.pendingRuntime`, and the panel shows that as the next start's
-  runtime with a "Restart now" button on desktop (`_restart()`: relaunch,
-  then `exitApplication`).  On iOS the picker is
+  The runtime setup -- library, Windows ML switch and folder -- is set
+  once per launch: the first runtime that loads fixes it
+  (`src/onnx/AGENTS.md`, "One runtime setup per process"), and since the
+  saved one loads at startup, a change is normally saved for the next
+  launch.  It always reaches `clpeak_set_onnx_library()` /
+  `clpeak_set_onnx_winml()`: while no runtime has loaded it takes effect and
+  `BenchmarkService` re-enumerates; otherwise the native side keeps it and
+  reports it as `OnnxStatus.pendingRuntime`, and the panel shows the active
+  setup and, dimmed beneath it, the inactive "Next launch" one with the
+  note that it takes effect then.
+  There is no in-app relaunch: the old process's exit, with everything the
+  backends had loaded, was slow and visible.  LiteRT's library works the
+  same way (`LitertStatus.pendingPath`).  On iOS the picker is
   replaced by "Built into the app": ONNX Runtime is statically linked there
   (Apple's pod is a static framework and iOS will not dlopen another), which
   `OnnxStatus.linkedIn` reports.
 - Plugin execution providers and Windows ML? → the same screen, desktop
   only: `SettingsService.onnxEpLibraries` (name + path per library, the
   registration name guessed from the file name and confirmed in a dialog)
-  and `onnxWinml` / `onnxWinmlPath` (Windows), applied in `main()` beside
-  the library path and, on change, through `BenchmarkService.setOnnxEpLibraries`
-  / `setOnnxWinml` + a re-enumeration.  `OnnxStatus.epLibraries` says how
-  each registered on the last enumeration (empty = pending), and the panel
-  shows it per row.  Enabling Windows ML makes the next enumeration install
-  the Store providers, so it can take minutes the first time.
+  and `onnxWinml` / `onnxWinmlPath` (Windows, in its own panel directly
+  under the runtime it belongs with), applied in `main()` beside the
+  library path.  The plugin list stays live -- a change goes through
+  `BenchmarkService.setOnnxEpLibraries` and a re-enumeration -- while
+  Windows ML is part of the runtime setup above.  `OnnxStatus.epLibraries`
+  says how each registered on the last enumeration (empty = pending), and
+  the panel shows it per row.  Enabling Windows ML makes the first
+  enumeration of the launch install the Store providers, so it can take
+  minutes the first time.
 - Phone screen sleeping mid-run? → `lib/src/services/screen_wake.dart`
   (`wakelock_plus`, held from `BenchmarkService.start()` to `_finalize()`;
   Android/iOS only — a sleeping display stops the frames the run was budgeted

@@ -1,11 +1,10 @@
-// A runtime chosen while plugin providers (Windows ML's among them) are
-// loaded into the current one cannot be loaded in the same process: the
-// native side keeps the loaded runtime and reports the choice as
-// `pendingRuntime`.  The settings panel has to say so -- before this, the
-// GUI either crashed or sat on the old runtime with no explanation.
+// The runtime setup is fixed for a launch by the first runtime that loads:
+// a change made after that is saved for the next launch.  The native status
+// reports it as `pendingRuntime`, and the settings panel shows both setups --
+// the one active now, and the inactive one the next launch loads.
 //
 // Pure Dart, no native bridge: the status JSON is decoded directly, and the
-// settings screen is pumped over stub bindings that report a pending choice.
+// settings screen is pumped over stub bindings that report a pending setup.
 import 'dart:ffi' hide Size;
 import 'dart:io';
 
@@ -21,25 +20,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _reason = 'plugin libraries are loaded into ONNX Runtime 1.24.4 '
-    '(OpenVINOExecutionProvider), and a provider library cannot move to '
-    'another runtime inside a running process';
+const _active = r'C:\ort\dml-1.24.4\onnxruntime.dll';
+const _next = r'C:\ort\ms-1.30\onnxruntime.dll';
 
-Map<String, dynamic> _statusJson({Map<String, dynamic>? pending}) => {
+Map<String, dynamic> _onnxJson({Map<String, dynamic>? pending}) => {
       'available': true,
       'linkedIn': false,
       'version': '1.24.4',
-      'path': r'C:\ort\dml-1.24.4\onnxruntime.dll',
+      'path': _active,
       'error': '',
       'epLibraries': [],
-      'winml': {'enabled': true, 'path': '', 'error': ''},
+      'winml': {'enabled': false, 'path': '', 'error': ''},
       'pendingRuntime': ?pending,
     };
 
-class _StubBindings implements ClpeakBindings {
-  _StubBindings(this.status);
+Map<String, dynamic> _litertJson({String? pendingPath}) => {
+      'available': true,
+      'version': 'ABI 1.0.0',
+      'path': '/opt/litert/libLiteRt.dylib',
+      'error': '',
+      if (pendingPath != null) 'pendingRuntime': {'path': pendingPath},
+    };
 
-  final OnnxStatus status;
+class _StubBindings implements ClpeakBindings {
+  _StubBindings(this.onnx, this.litert);
+
+  final OnnxStatus onnx;
+  final LitertStatus litert;
 
   @override
   ClpeakLaunch get launch => (_, _, _, _) => 0;
@@ -66,7 +73,7 @@ class _StubBindings implements ClpeakBindings {
   void setOnnxWinml({required bool enabled, required String path}) {}
 
   @override
-  OnnxStatus onnxStatus() => status;
+  OnnxStatus onnxStatus() => onnx;
 
   @override
   void setLitertLibrary(String path) {}
@@ -75,97 +82,93 @@ class _StubBindings implements ClpeakBindings {
   void setLitertNpuStageDir(String dir) {}
 
   @override
-  LitertStatus litertStatus() => const LitertStatus.unavailable('test');
+  LitertStatus litertStatus() => litert;
+}
+
+Future<void> _pumpSettings(
+    WidgetTester tester, OnnxStatus onnx, LitertStatus litert) async {
+  SharedPreferences.setMockInitialValues({'onnxLibraryPath': _next});
+  final settings = await SettingsService.load();
+  final service = BenchmarkService(_StubBindings(onnx, litert),
+      RunHistoryStore(directoryOverride: Directory.systemTemp));
+  await tester.pumpWidget(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: settings),
+        ChangeNotifierProvider.value(value: service),
+      ],
+      child: MaterialApp(
+        theme: ClpeakTheme.dark(),
+        home: const SettingsScreen(),
+      ),
+    ),
+  );
+  await tester.pump();
 }
 
 void main() {
   test('pendingRuntime decodes, and its absence means nothing waits', () {
-    expect(OnnxStatus.fromJson(_statusJson()).pendingRuntime, isNull);
+    expect(OnnxStatus.fromJson(_onnxJson()).pendingRuntime, isNull);
 
-    final s = OnnxStatus.fromJson(_statusJson(pending: {
-      'path': r'C:\ort\ms-1.30\onnxruntime.dll',
-      'reason': _reason,
+    final s = OnnxStatus.fromJson(_onnxJson(pending: {
+      'path': _next,
+      'winml': {'enabled': true, 'path': r'C:\winml\x64'},
     }));
     expect(s.pendingRuntime, isNotNull);
-    expect(s.pendingRuntime!.path, r'C:\ort\ms-1.30\onnxruntime.dll');
-    expect(s.pendingRuntime!.reason, _reason);
+    expect(s.pendingRuntime!.path, _next);
+    expect(s.pendingRuntime!.winml, isTrue);
+    expect(s.pendingRuntime!.winmlPath, r'C:\winml\x64');
     // The loaded runtime is still the one reported.
     expect(s.version, '1.24.4');
+    expect(s.path, _active);
+
+    expect(LitertStatus.fromJson(_litertJson()).pendingPath, isNull);
+    // '' is a real answer: the default search, at the next launch.
+    expect(LitertStatus.fromJson(_litertJson(pendingPath: '')).pendingPath, '');
   });
 
-  testWidgets('the settings panel names the next start and why',
+  testWidgets('the panel shows the active setup and the next launch\'s',
       (tester) async {
-    // A narrow window: the long path and reason must wrap, and so must the
-    // three buttons under the panel.
-    tester.view.physicalSize = const Size(420, 1600);
+    // A narrow window: the long paths must wrap.
+    tester.view.physicalSize = const Size(420, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    SharedPreferences.setMockInitialValues(
-        {'onnxLibraryPath': r'C:\ort\ms-1.30\onnxruntime.dll'});
-    final settings = await SettingsService.load();
-    final status = OnnxStatus.fromJson(_statusJson(pending: {
-      'path': r'C:\ort\ms-1.30\onnxruntime.dll',
-      'reason': _reason,
-    }));
-    final service = BenchmarkService(_StubBindings(status),
-        RunHistoryStore(directoryOverride: Directory.systemTemp));
-
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider.value(value: settings),
-          ChangeNotifierProvider.value(value: service),
-        ],
-        child: MaterialApp(
-          theme: ClpeakTheme.dark(),
-          home: const SettingsScreen(),
-        ),
-      ),
+    await _pumpSettings(
+      tester,
+      OnnxStatus.fromJson(_onnxJson(pending: {
+        'path': _next,
+        'winml': {'enabled': true, 'path': r'C:\winml\x64'},
+      })),
+      LitertStatus.fromJson(_litertJson(pendingPath: '')),
     );
-    await tester.pump();
 
-    // The runtime in use stays on top; the choice is the next start's.
+    // Active: the runtime that loaded, from the file it loaded.
     expect(find.text('ONNX Runtime 1.24.4'), findsOneWidget);
-    expect(find.text(r'Next start: C:\ort\ms-1.30\onnxruntime.dll'),
-        findsOneWidget);
-    // The native clause, printed as a sentence.
-    expect(find.text('Plugin libraries are loaded into ONNX Runtime 1.24.4 '
-            '(OpenVINOExecutionProvider), and a provider library cannot move '
-            'to another runtime inside a running process.'),
-        findsOneWidget);
-    // Desktop hosts (where the tests run) can relaunch themselves.
-    expect(find.text('RESTART NOW'), findsOneWidget);
+    expect(find.text(_active), findsOneWidget);
+    // Inactive: what the next launch loads, ONNX and LiteRT both.
+    expect(find.text('Next launch'), findsNWidgets(2));
+    expect(find.text(_next), findsOneWidget);
+    expect(find.text(r'Windows ML on · C:\winml\x64'), findsOneWidget);
+    expect(find.text('Found by name on the system paths'), findsOneWidget);
+    expect(find.text('Takes effect the next time clpeak starts.'),
+        findsNWidgets(2));
+    // No relaunch from inside the app: the note is the whole story.
+    expect(find.textContaining('RESTART'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('no pending row when nothing waits', (tester) async {
-    tester.view.physicalSize = const Size(1280, 1600);
+  testWidgets('no next-launch block when nothing waits', (tester) async {
+    tester.view.physicalSize = const Size(1280, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    SharedPreferences.setMockInitialValues({});
-    final settings = await SettingsService.load();
-    final service = BenchmarkService(
-        _StubBindings(OnnxStatus.fromJson(_statusJson())),
-        RunHistoryStore(directoryOverride: Directory.systemTemp));
+    await _pumpSettings(tester, OnnxStatus.fromJson(_onnxJson()),
+        LitertStatus.fromJson(_litertJson()));
 
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider.value(value: settings),
-          ChangeNotifierProvider.value(value: service),
-        ],
-        child: MaterialApp(
-          theme: ClpeakTheme.dark(),
-          home: const SettingsScreen(),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    expect(find.textContaining('Next start'), findsNothing);
-    expect(find.text('RESTART NOW'), findsNothing);
+    expect(find.text('ONNX Runtime 1.24.4'), findsOneWidget);
+    expect(find.text('Next launch'), findsNothing);
+    expect(find.textContaining('Takes effect'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

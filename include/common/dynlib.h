@@ -38,6 +38,13 @@ void *dynOpen(std::initializer_list<const char *> names);
 // through untouched, as does empty.
 std::string absoluteModulePath(const char *name);
 
+// Whether two module paths name one file: their absolute forms compared (on
+// Windows without case and with either slash), then the filesystem asked
+// whether they are the same file (a symlink, a hard link).  A loader that
+// fixes its runtime for the process uses it to tell a real change of
+// library from the same file named again.
+bool sameModulePath(const std::string &a, const std::string &b);
+
 // Resolve a symbol; nullptr if missing.
 void *dynSym(void *lib, const char *name);
 

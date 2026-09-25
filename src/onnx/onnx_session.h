@@ -13,9 +13,10 @@
 #include "onnx_runtime.h"
 #include <onnx/onnx_peak.h>
 
-// Process-wide OrtEnv (created on first use; log level follows --verbose).
-// Null when the runtime refuses to create one, with the reason in
-// onnxEnvError(); a refusal is remembered per runtime rather than retried.
+// Process-wide OrtEnv (created on first use; log level follows --verbose),
+// never released: a change of plugin libraries is synced onto it.  Null
+// when the runtime refuses to create one, with the reason in
+// onnxEnvError(); a refusal is remembered rather than retried.
 OrtEnv *onnxEnv(const OrtRuntime &rt);
 std::string onnxEnvError();
 

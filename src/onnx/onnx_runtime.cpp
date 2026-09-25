@@ -1,17 +1,16 @@
 #ifdef ENABLE_ONNX
 
 #include "onnx_runtime.h"
-#include "onnx_plugin.h"   // onnxWinmlEnabled / onnxWinmlPathHint
 
 #include <common/common.h>
 #include <common/dynlib.h>
 
-#include <cctype>
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
-#include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -25,19 +24,62 @@
 static const uint32_t kMinApiVersion = 17;  // ONNX Runtime 1.17 (2024)
 
 static std::mutex g_mutex;
-// The runtime ortRuntime() hands out, or null: an entry of g_cache (g_static
-// when linked in) and never rewritten, so a caller still holding it when the
-// choice changes keeps reading the runtime it started with.
-static const OrtRuntime *g_rt = nullptr;
 static bool       g_attempted = false;  // a failed search is not retried
 static std::string g_loadError;         // why the last attempt failed
 
-// Every successfully loaded runtime stays mapped for the life of the process
-// (unloading is unsafe) and is remembered under its cache key ("" for the
-// default search).  Switching back to a previously used library then reuses
-// its handle instead of mapping the file a second time.  A std::map, so an
-// entry never moves once g_rt points at it.
-static std::map<std::string, OrtRuntime> g_cache;  // key = cacheKey()
+// The runtime ortRuntime() hands out, once one has loaded.  Written by the
+// first successful load and never again: from then on the setup is fixed
+// (onnx_runtime.h), so a pointer to it stays valid and unchanged for the
+// life of the process.
+static OrtRuntime g_loaded;
+static const OrtRuntime *g_rt = nullptr;
+
+// The runtime setup (onnx_runtime.h): what was last asked for, and what is
+// in effect -- the same until a runtime has loaded (g_rt), `active` frozen
+// after.  The library is ignored on a statically linked build.
+struct Setup
+{
+  std::string library;
+  bool winml = false;
+  std::string winmlPath;
+};
+static Setup g_requested;
+static Setup g_active;
+static uint64_t g_winmlGeneration = 1;
+
+void onnxSetWinml(bool enabled, const std::string &path)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_requested.winml     = enabled;
+  g_requested.winmlPath = path;
+  if (g_rt || (g_active.winml == enabled && g_active.winmlPath == path))
+    return;
+  g_active.winml     = enabled;
+  g_active.winmlPath = path;
+  g_winmlGeneration++;
+  // The catalog's directory steers the default search (winmlDefaultRuntime),
+  // so a runtime that did not load may load now: look again.
+  g_attempted = false;
+  g_loadError.clear();
+}
+
+bool onnxWinmlEnabled()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_active.winml;
+}
+
+std::string onnxWinmlPathHint()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_active.winmlPath;
+}
+
+uint64_t onnxWinmlGeneration()
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_winmlGeneration;
+}
 
 #ifdef _WIN32
 // Let a runtime loaded by path find the DLLs it ships with.  A dependency
@@ -140,46 +182,37 @@ static bool adoptApiBase(const OrtApiBase *base, OrtRuntime &out)
 
 #ifdef CLPEAK_ONNX_STATIC
 
-// Statically linked (iOS): the runtime is already in the binary.
-static OrtRuntime g_static;
-
+// Statically linked (iOS): the runtime is already in the binary, and there
+// is no library to name.
 static void loadRuntime()
 {
-  if (adoptApiBase(OrtGetApiBase(), g_static))
-    g_rt = &g_static;
+  if (adoptApiBase(OrtGetApiBase(), g_loaded))
+    g_rt = &g_loaded;
   else
     g_loadError = "the linked-in ONNX Runtime exposes no usable OrtApi";
 }
 
-// One runtime and nothing to switch to, so nothing to pin or wait for.
 void onnxSetLibraryOverride(const std::string &) {}
-void onnxRuntimeRecheck() {}
-void onnxPinRuntime(const OrtRuntime &, const std::string &, const std::string &) {}
-bool onnxPendingRuntime(std::string &, std::string &) { return false; }
 
 #else
 
-static std::string g_override;  // --onnx-lib / clpeak_set_onnx_library
-
-// The runtime that stays (onnxPinRuntime), the key it was loaded under, and
-// why, one clause per cause.
-static const OrtRuntime *g_pinned = nullptr;
-static std::string g_pinnedKey;
-static std::map<std::string, std::string> g_pinnedWhy;
+// Every handle a load attempt opened, usable runtime or not: none is ever
+// closed (common/dynlib.h), and on Windows a bare-name load can hand one of
+// them back (loadRuntime).
+static std::vector<void *> g_opened;
 
 #ifdef _WIN32
-// The onnxruntime.dll beside the Windows ML catalog DLL, when --onnx-winml
-// named that DLL or its directory and nobody named a runtime.  Microsoft's
+// The onnxruntime.dll beside the Windows ML catalog DLL, when the catalog is
+// on, was given its DLL or directory, and nobody named a runtime.  Microsoft's
 // package puts the two side by side, and that runtime is the one its
 // providers were built and tested against -- so it is the default
 // candidate then, ahead of whatever else the search path holds.  Empty
-// when the catalog is off, was not given a path, or has no runtime beside
-// it.
-static std::string winmlDefaultRuntime()
+// otherwise, or when there is no runtime beside the catalog.
+static std::string winmlDefaultRuntime(const Setup &setup)
 {
-  if (!onnxWinmlEnabled())
+  if (!setup.winml)
     return "";
-  std::string hint = onnxWinmlPathHint();
+  std::string hint = setup.winmlPath;
   if (hint.empty())
     return "";
   const DWORD attrs = GetFileAttributesA(hint.c_str());
@@ -205,22 +238,6 @@ static std::string winmlDefaultRuntime()
 }
 #endif
 
-// The cache key of the current choice: the named library, or -- for the
-// default search -- what steered it, so that a default that followed the
-// Windows ML catalog is not confused with the plain one when the catalog
-// is later switched off.
-static std::string cacheKey()
-{
-  if (!g_override.empty())
-    return g_override;
-#ifdef _WIN32
-  const std::string winml = winmlDefaultRuntime();
-  if (!winml.empty())
-    return "\x1fwinml:" + winml;
-#endif
-  return "";
-}
-
 // The file a loaded handle came from, when the platform can say.  A bare
 // soname resolves out of the APK's lib dir on Android and out of a wheel or
 // Homebrew prefix on desktops; reporting it is what lets a settings screen
@@ -243,26 +260,20 @@ static std::string resolveLoadedPath(void *lib, void *anySymbol)
 #endif
 }
 
+static bool opened(void *lib)
+{
+  return std::find(g_opened.begin(), g_opened.end(), lib) != g_opened.end();
+}
+
 static void loadRuntime()
 {
-  // A repeat pick reuses the still-mapped handle: no second mapping of the
-  // same file, and (on Windows) no chance for a bare-name search to alias a
-  // different file of the same basename.
-  const std::string key = cacheKey();
-  auto cached = g_cache.find(key);
-  if (cached != g_cache.end())
-  {
-    g_rt = &cached->second;
-    return;
-  }
-
   // A library the user named -- by --onnx-lib or by the FFI setter -- is the
   // library to measure, and nothing else will do.  The conventional names are
   // searched only when nobody named one: quietly falling back would report a
   // different runtime's version and a different runtime's numbers under the
   // name of the one that was asked for, which is the one mistake this setting
   // exists to prevent.
-  const char *named = g_override.empty() ? nullptr : g_override.c_str();
+  const char *named = g_active.library.empty() ? nullptr : g_active.library.c_str();
   // Absolute before the loader sees it: a relative module path finds the
   // file itself but not the sibling libraries beside it, so the same file
   // fails by relative path and loads by absolute one (see
@@ -294,7 +305,7 @@ static void loadRuntime()
 #ifdef _WIN32
     // The runtime beside the Windows ML catalog first (see
     // winmlDefaultRuntime), then the system's.
-    std::string absDefault = winmlDefaultRuntime();
+    std::string absDefault = winmlDefaultRuntime(g_active);
     steered = absDefault;
     if (absDefault.empty())
       absDefault = resolveWindowsDefaultAbsolute();
@@ -302,9 +313,9 @@ static void loadRuntime()
       searchBesideRuntime(absDefault);
     if (!absDefault.empty())
     {
-      // Absolute path: loads the file it names even when custom DLLs of the
-      // same basename are already mapped.  A bare "onnxruntime.dll" here
-      // would hand back the first-loaded custom build instead.
+      // Absolute path: loads the file it names even when a DLL of the same
+      // basename is already mapped.  A bare "onnxruntime.dll" here would
+      // hand back that DLL instead.
       lib = clpeak::dynOpen({absDefault.c_str()});
       if (!lib)
         g_loadError = std::string("could not load onnxruntime from '") +
@@ -317,23 +328,15 @@ static void loadRuntime()
       {
         g_loadError = "onnxruntime library not found";
       }
-      else
+      else if (opened(lib))
       {
         // No system runtime on the filesystem search path, yet a bare load
-        // succeeded: that is an already-mapped custom DLL shining through
-        // (see resolveWindowsDefaultAbsolute), not a default.  Adopting it
-        // would report the previous pick's version under the default's name.
-        // This call's extra reference on it is simply kept: the module is
-        // leaked for the life of the process anyway.
-        for (const auto &kv : g_cache)
-        {
-          if (kv.second.lib == lib)
-          {
-            g_loadError = "onnxruntime library not found";
-            lib = nullptr;
-            break;
-          }
-        }
+        // succeeded: a DLL of that name an earlier attempt mapped, shining
+        // through (see resolveWindowsDefaultAbsolute), not a default.  This
+        // call's extra reference on it is simply kept: the module stays
+        // mapped for the life of the process anyway.
+        g_loadError = "onnxruntime library not found";
+        lib = nullptr;
       }
     }
 #else
@@ -353,6 +356,8 @@ static void loadRuntime()
   }
   if (!lib)
     return;
+  if (!opened(lib))
+    g_opened.push_back(lib);
 
   // A file that turns out not to be a usable ONNX Runtime stays mapped like
   // any other handle: unloading a library whose constructors have run is
@@ -386,98 +391,48 @@ static void loadRuntime()
     if (cur.path.empty())
       cur.path = steered;
   }
-  g_rt = &g_cache.emplace(key, std::move(cur)).first->second;
+  // The setup is fixed from here on (onnx_runtime.h).
+  g_loaded = std::move(cur);
+  g_rt = &g_loaded;
 }
 
 void onnxSetLibraryOverride(const std::string &path)
 {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (path == g_override)
+  g_requested.library = path;
+  // Once a runtime has loaded, the choice waits for the next start
+  // (onnxPendingSetup); until then it applies at the next ortRuntime().
+  if (g_rt || g_active.library == path)
     return;
-  g_override = path;
-  // A pinned runtime stays loaded; the choice is kept for the next start,
-  // and onnxPendingRuntime() says so.
-  if (g_pinned)
-    return;
-  // Force the next ortRuntime() to search again.  The previously loaded
-  // runtime stays mapped and its record intact; g_rt simply points at the
-  // new one once it loads.
-  g_rt        = nullptr;
+  g_active.library = path;
   g_attempted = false;
   g_loadError.clear();
-}
-
-void onnxRuntimeRecheck()
-{
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (!g_override.empty() || g_pinned)
-    return;   // a named library is not steered by anything else; a pinned one stays
-  g_rt        = nullptr;
-  g_attempted = false;
-  g_loadError.clear();
-}
-
-void onnxPinRuntime(const OrtRuntime &rt, const std::string &key,
-                    const std::string &why)
-{
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (!g_pinned)
-  {
-    for (const auto &kv : g_cache)
-      if (kv.second.base == rt.base)
-      {
-        g_pinned    = &kv.second;
-        g_pinnedKey = kv.first;
-        break;
-      }
-    if (!g_pinned)
-      return;
-  }
-  else if (g_pinned->base != rt.base)
-  {
-    return;   // the first pin holds; nothing may switch past it
-  }
-  // What pinned it is in this runtime now, so this is the current runtime
-  // whatever was chosen in the meantime.
-  g_rt        = g_pinned;
-  g_attempted = true;
-  g_loadError.clear();
-  g_pinnedWhy[key] = why;
-}
-
-// Whether two module paths name one file, as far as spelling goes: Windows
-// paths compare without case and with either slash.
-static bool samePath(std::string a, std::string b)
-{
-#ifdef _WIN32
-  for (std::string *s : {&a, &b})
-    for (char &c : *s)
-      c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-#endif
-  return a == b;
-}
-
-bool onnxPendingRuntime(std::string &path, std::string &reason)
-{
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (!g_pinned || cacheKey() == g_pinnedKey)
-    return false;
-  // The pinned file named by another spelling is no change at all.
-  if (!g_override.empty() &&
-      samePath(clpeak::absoluteModulePath(g_override.c_str()), g_pinned->path))
-    return false;
-  path = g_override;
-#ifdef _WIN32
-  if (path.empty())
-    path = winmlDefaultRuntime();
-#endif
-  reason.clear();
-  for (const auto &kv : g_pinnedWhy)
-    reason += (reason.empty() ? "" : "; ") + kv.second;
-  return true;
 }
 
 #endif // CLPEAK_ONNX_STATIC
+
+bool onnxPendingSetup(OnnxPendingSetup &out)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_rt)
+    return false;   // nothing loaded: a choice applies as soon as it is made
+  // The loaded file named by another spelling -- or named now, where the
+  // default search found it -- is no change.
+  bool library = g_requested.library != g_active.library;
+  if (library && !g_requested.library.empty() &&
+      clpeak::sameModulePath(g_requested.library, g_loaded.path))
+    library = false;
+  // A catalog that is off has no folder that matters.
+  const bool winml =
+      g_requested.winml != g_active.winml ||
+      (g_requested.winml && !clpeak::sameModulePath(g_requested.winmlPath, g_active.winmlPath));
+  if (!library && !winml)
+    return false;
+  out.library   = g_requested.library;
+  out.winml     = g_requested.winml;
+  out.winmlPath = g_requested.winmlPath;
+  return true;
+}
 
 const OrtRuntime *ortRuntime()
 {

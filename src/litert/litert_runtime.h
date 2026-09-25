@@ -129,11 +129,20 @@ struct LitertRuntime
 
 // Point the loader at a specific library, ahead of the platform's conventional
 // names; empty clears the choice.  Backs `--litert-lib` and the FFI's
-// clpeak_set_litert_library().  Takes effect on the next litertRuntime()
-// call; the previously loaded library stays mapped for the process's life
-// (LiteRT starts worker threads and accelerator contexts that are not safe
-// to unload).  Call it between runs only.
+// clpeak_set_litert_library().  The first library that loads is the one
+// for the process: until one has, a choice takes effect on the next
+// litertRuntime() call (a library that fails to load sets nothing up); from
+// then on it is kept, reported by litertPendingLibrary(), and loads the next
+// time the process starts.  One process never holds a second LiteRT -- it
+// starts worker threads and accelerator contexts that are not safe to
+// unload, and the ONNX Runtime backend showed what two runtimes in one
+// process cost (src/onnx/AGENTS.md).  The CLI sets it once, before
+// anything loads.  Call it between runs only.
 void litertSetLibraryOverride(const std::string &path);
+
+// A library chosen after the runtime loaded, which loads at the next start
+// (empty for the default search).  False when nothing waits.
+bool litertPendingLibrary(std::string &path);
 
 // Where the NPU dispatch and compiler-plugin libraries are
 // (libLiteRtDispatch_<Vendor>.so, libLiteRtCompilerPlugin_<Vendor>.so, and

@@ -114,8 +114,10 @@ char *clpeak_copy_onnx_status_json(void)
     json += ",\"error\":\"" + jsonEscape(st.winmlError) + "\"}";
     if (st.pending)
     {
-        json += ",\"pendingRuntime\":{\"path\":\"" + jsonEscape(st.pendingPath) + "\"";
-        json += ",\"reason\":\"" + jsonEscape(st.pendingReason) + "\"}";
+        json += ",\"pendingRuntime\":{\"path\":\"" + jsonEscape(st.pendingLibrary) + "\"";
+        json += ",\"winml\":{\"enabled\":";
+        json += st.pendingWinml ? "true" : "false";
+        json += ",\"path\":\"" + jsonEscape(st.pendingWinmlPath) + "\"}}";
     }
     json += "}";
     return copyString(json);
@@ -190,7 +192,10 @@ char *clpeak_copy_litert_status_json(void)
     json += st.available ? "true" : "false";
     json += ",\"version\":\"" + jsonEscape(st.version) + "\"";
     json += ",\"path\":\"" + jsonEscape(st.path) + "\"";
-    json += ",\"error\":\"" + jsonEscape(st.error) + "\"}";
+    json += ",\"error\":\"" + jsonEscape(st.error) + "\"";
+    if (st.pending)
+        json += ",\"pendingRuntime\":{\"path\":\"" + jsonEscape(st.pendingPath) + "\"}";
+    json += "}";
     return copyString(json);
 #else
     return copyString(

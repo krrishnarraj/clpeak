@@ -34,7 +34,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | File | Purpose |
 |------|---------|
 | `litert_peak.cpp` | `LitertPeak`: `runAll()`, `enumerate()`; `litertUsableDevices()` probes each accelerator with one tiny model; the NPU vendor table (dispatch-library name → display name) |
-| `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists); `litertSetLibraryOverride()`, `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
+| `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists); `litertSetLibraryOverride()` (fixed for the process by the first library that loads; `litertPendingLibrary()` reports a later choice), `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
@@ -82,20 +82,21 @@ libonnxruntime.so's exit handler).  That wheel also lacks
 `LiteRtGetStatusString` -- the Android AAR and macOS wheel of the same
 version export it -- which is why that symbol is OPTIONAL.
 
-**Switching runtimes in one process** (the GUI's Settings, between runs)
-is keyed by the library handle, `LitertRuntime::lib` -- never by the address
-of the record `litertRuntime()` returns, which is the loader's one static and
-so the same whichever library sits in it (the device-list memo in
-`litert_peak.cpp` once compared exactly that and never re-probed).  A handle
-is unique per mapped file and never unmapped.  The environments in
-`litert_session.cpp` record the runtime that created them and are destroyed,
-with that runtime's own `LiteRtDestroyEnvironment`, the first time another
-runtime asks for that accelerator; a remembered creation failure goes with
-them (the library with no GPU accelerator beside it was the old one).
-Verified with the C ABI: wheel → a copy in another directory → wheel, on
-macOS (Metal) and Linux (WebGPU), each run on the library it named and the
-copy loading its own accelerator.  The runtime left behind costs its mapping
-(~8 MB resident on macOS, ~30 MB with the WebGPU accelerator on Linux).
+**One LiteRT per process.**  The first library that loads is the one for
+the process (`litertSetLibraryOverride()`): until one has, a choice applies
+at the next `litertRuntime()`, however many attempts that takes; from then
+on it is kept, reported by `litertPendingLibrary()` -- the status's
+`pendingRuntime`, a listing's info line, a run's notes, the GUI settings
+panel's inactive "Next launch" block -- and loads the next time the process
+starts.  The same rule as the ONNX Runtime backend's, for the same reasons:
+a runtime keeps worker threads and accelerator contexts that cannot be
+unloaded, and two runtimes in one process is where that backend crashed
+and hung (`src/onnx/AGENTS.md`, "One runtime setup per process").  The
+record `litertRuntime()` returns is written once and never again.  The
+device-list memo in `litert_peak.cpp` and the environments in
+`litert_session.cpp` are still keyed by the library handle,
+`LitertRuntime::lib` (unique per mapped file, never unmapped), and the
+NPU directory -- which, unlike the library, may change between runs.
 
 **Accelerator and vendor options are TOML strings, not linked helpers.**
 The `Lrt*Options` builders in `litert/c/options/*.h` are client-side

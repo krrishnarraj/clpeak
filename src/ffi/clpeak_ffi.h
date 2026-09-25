@@ -48,12 +48,11 @@ CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
 // what loads the runtime -- so the choice has to be in place before the
 // catalog is asked for.
 //
-// Naming a different library than the one already loaded takes effect on the
-// next enumeration or run -- unless the current runtime is pinned: a plugin
-// execution-provider library (one Windows ML resolved, or one
-// clpeak_set_onnx_ep_libraries() named) has been loaded into it, or it
-// cannot release its environment without crashing.  That runtime then stays
-// for the life of the process, and the choice waits for the next start
+// The library and the Windows ML catalog (clpeak_set_onnx_winml) are one
+// runtime setup, fixed for the process by the first runtime that loads
+// (src/onnx/onnx_runtime.h).  Until one has, a choice takes effect on the
+// next enumeration or run, however many attempts that takes; after, it is
+// kept and loads the next time the process starts
 // (clpeak_copy_onnx_status_json's `pendingRuntime`).  Call it between runs
 // only.  A no-op on builds that link ONNX Runtime statically (iOS) or omit
 // the backend entirely.
@@ -67,8 +66,9 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 // dir resolves.  Lines starting with '!' name an implicit library: one the
 // app bundles on the off-chance the hardware is there, whose failure to
 // register goes to the verbose log rather than the run's notes.  NULL/""
-// clears the set.  Between runs only, like clpeak_set_onnx_library(): the
-// environment is rebuilt on the next enumeration or run.
+// clears the set.  Unlike the runtime setup this stays live: the next
+// enumeration or run unregisters what went and registers what came, so it
+// is between runs only -- no session may be using a library then.
 CLPEAK_FFI_EXPORT void clpeak_set_onnx_ep_libraries(const char *spec);
 
 // Windows ML's execution-provider catalog (Windows 11 24H2+): when
@@ -79,8 +79,9 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_ep_libraries(const char *spec);
 // a path and no library chosen through clpeak_set_onnx_library(), the
 // onnxruntime.dll beside the catalog becomes the runtime.  Installing a
 // provider is a download, which is why this is a switch and not a default.
-// Accepted everywhere; off Windows the status reports the catalog as
-// unavailable.
+// Part of the runtime setup, so a change after a runtime has loaded waits
+// for the next start, as clpeak_set_onnx_library()'s does.  Accepted
+// everywhere; off Windows the status reports the catalog as unavailable.
 CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 
 // State of the ONNX Runtime, for a settings screen to report back with:
@@ -88,21 +89,21 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 //    "epLibraries":[{"name":str,"path":str,"named":bool,"registered":bool,
 //                    "error":str}],
 //    "winml":{"enabled":bool,"path":str,"error":str},
-//    "pendingRuntime"?:{"path":str,"reason":str}}
+//    "pendingRuntime"?:{"path":str,"winml":{"enabled":bool,"path":str}}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
 // clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
 // the resolved file even when it was found by name (empty only when
 // statically linked).  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
-// `epLibraries` is what the last environment registered, so a library set
-// since the last enumeration is absent until the next one; `winml.path` is
+// `epLibraries` is what the environment registered, so a library set since
+// the last enumeration is absent until the next one; `winml.path` is
 // the catalog DLL that answered and `winml.error` why it did not.  When
 // enabled but nothing has resolved the catalog yet both are empty --
 // pending until the next enumeration or run, like `epLibraries`.
-// `pendingRuntime`, present only then, is a library chosen after the loaded
-// runtime was pinned (see clpeak_set_onnx_library): `path` loads at the next
-// start (empty = the default search), and `reason` is the clause saying why
-// not now.
+// `winml` is the catalog as the runtime was set up with it.
+// `pendingRuntime`, present only then, is a setup chosen after the runtime
+// loaded (see clpeak_set_onnx_library), which loads at the next start: the
+// library (`path`, empty = the default search) and the catalog.
 // {"available":false,"error":"ONNX backend not built in"} without one.
 CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 
@@ -110,10 +111,13 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // path, or NULL/"" to search the conventional names) and, separately, the
 // directory holding the NPU dispatch / compiler-plugin libraries and the
 // vendor runtime (NULL/"" = beside the LiteRT library).  Between runs only;
-// no-ops on a build without the backend.  On iOS the runtime is dlopen'd
-// from the app bundle's own Frameworks directory, the one place the platform
-// loads a library from, so a path named here could never be loaded there
-// and the settings screen does not offer one.
+// no-ops on a build without the backend.  The library, like ONNX Runtime's,
+// is fixed for the process by the first one that loads: a later choice
+// loads at the next start (clpeak_copy_litert_status_json's
+// `pendingRuntime`).  The NPU directory stays live.  On iOS the runtime is
+// dlopen'd from the app bundle's own Frameworks directory, the one place
+// the platform loads a library from, so a path named here could never be
+// loaded there and the settings screen does not offer one.
 CLPEAK_FFI_EXPORT void clpeak_set_litert_library(const char *path);
 CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
 
@@ -126,9 +130,12 @@ CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
 CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_stage_dir(const char *dir);
 
 // State of the LiteRT runtime, for a settings screen:
-//   {"available":bool,"version":str,"path":str,"error":str}
+//   {"available":bool,"version":str,"path":str,"error":str,
+//    "pendingRuntime"?:{"path":str}}
 // `version` is the ABI version this build was compiled against -- LiteRT
-// exposes no runtime version string.  {"available":false,"error":"LiteRT
+// exposes no runtime version string.  `pendingRuntime`, present only then,
+// is a library chosen after one loaded, which loads at the next start
+// (`path` empty = the default search).  {"available":false,"error":"LiteRT
 // backend not built in"} without the backend.
 CLPEAK_FFI_EXPORT char *clpeak_copy_litert_status_json(void);
 
