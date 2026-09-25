@@ -152,8 +152,3 @@ conventions for adding a benchmark or a backend; a subdirectory's own
 `AGENTS.md` covers the code in it. Saved runs in [`results/`](results/) are
 the baselines to check a suspicious number against, and [`NOTES.md`](NOTES.md)
 lists the workarounds for runtime bugs that are waiting on an upstream fix.
-
-## Contributing
-
-Issues and pull requests are welcome. clpeak is licensed under the
-[Apache License 2.0](LICENSE).
