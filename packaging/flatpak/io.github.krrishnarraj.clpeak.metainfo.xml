@@ -4,20 +4,20 @@
   <metadata_license>FSFAP</metadata_license>
   <project_license>Apache-2.0</project_license>
   <name>clpeak</name>
-  <summary>Measure peak compute, bandwidth and latency of GPU and CPU devices</summary>
+  <summary>Measure peak compute, bandwidth and latency of GPUs and CPUs</summary>
 
   <description>
     <p>
-      clpeak is a synthetic micro-benchmark that measures the peak achievable
-      performance of GPU and CPU compute devices. It exercises tight
-      vector / MAD / MMA loops and vendor-SDK GEMM libraries to expose what the
-      hardware is actually capable of, from raw ALU peaks to near-vendor-advertised
-      matrix throughput.
+      clpeak (compute latency peak) measures the peak compute throughput,
+      memory bandwidth and latency that a machine's GPUs and CPUs actually
+      reach. It uses small, tight kernels alongside each vendor's own tuned
+      libraries, and runs the same tests through every API that exposes a
+      device, so the results line up side by side.
     </p>
     <p>
-      It ships two front-ends over the same benchmark engine: a desktop app for
-      picking devices and tests and watching results come in, and a command-line
-      tool for scripted runs and machine-readable output.
+      It has two front-ends over the same benchmark engine: a desktop app for
+      picking devices and tests and watching results come in, and a
+      command-line tool for scripted runs.
     </p>
     <p>This Flatpak enables the backends that work inside the sandbox:</p>
     <ul>
@@ -26,15 +26,17 @@
       <li>Native CPU — SIMD compute, cache/DRAM bandwidth and memory latency</li>
     </ul>
     <p>
-      Benchmarks include global/local/image memory bandwidth, single/half/double
-      precision compute, integer throughput, tensor / cooperative-matrix
-      operations, and kernel launch latency. Results can be written as plain
-      text, XML, JSON or CSV, and compared against a saved baseline.
+      Benchmarks include device, local and image memory bandwidth, CPU cache
+      and DRAM bandwidth, single, half, double and mixed precision compute,
+      integer and dot-product throughput, cooperative-matrix operations, and
+      kernel launch and memory latency. Runs are saved as JSON and can be
+      compared against a saved run.
     </p>
     <p>
-      The CUDA, ROCm, oneAPI and Metal backends are not available in this Flatpak
-      because they require vendor toolkits or proprietary drivers that cannot be
-      shipped through Flathub; use the upstream binary releases for those.
+      The CUDA, ROCm and oneAPI backends, and the ONNX Runtime and LiteRT
+      backends that reach NPUs, are not available in this Flatpak because they
+      need vendor toolkits, drivers or runtimes that cannot be shipped through
+      Flathub; use the upstream binary releases for those.
     </p>
   </description>
 
@@ -49,16 +51,12 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-dark.png</image>
-      <caption>GPU benchmark results grouped by category</caption>
+      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-cpu-light.png</image>
+      <caption>Native CPU results: detected ISA and caches, then compute rates per instruction set</caption>
     </screenshot>
-    <screenshot>
+    <screenshot environment="gnome:dark">
       <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-cpu-dark.png</image>
-      <caption>Native CPU results — SIMD compute, cache bandwidth and memory latency</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/custom-run-dark.png</image>
-      <caption>Choosing devices and tests for a custom run</caption>
+      <caption>Native CPU results: detected ISA and caches, then compute rates per instruction set</caption>
     </screenshot>
   </screenshots>
 

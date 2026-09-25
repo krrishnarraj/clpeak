@@ -1,5 +1,5 @@
 name: clpeak
-description: "clpeak — cross-API compute benchmark (OpenCL, Vulkan, CUDA, ROCm, Metal, oneAPI, CPU)."
+description: "clpeak (compute latency peak): peak compute, memory bandwidth and latency of CPUs, GPUs and NPUs."
 publish_to: 'none'
 
 # versionName / versionCode
@@ -23,6 +23,8 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 

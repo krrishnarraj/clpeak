@@ -52,6 +52,11 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `src/litert/AGENTS.md`, Packaging.
 - Tests: `flutter test` (pure Dart) or
   `CLPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
+- Screenshots: `integration_test/screenshots_test.dart` is not a test but the
+  renderer behind `tools/screenshots.sh` -- the real shell over stub bindings,
+  fed `results/` runs.  It runs on the desktop engine because flutter_tester's
+  font manager answers every family with its test font, which defeats
+  `CP.monoStack` on any span that sets no family of its own.
 
 ## Quick Lookups
 

@@ -1,122 +1,159 @@
 # clpeak
 
-<a href="https://play.google.com/store/apps/details?id=kr.clpeak"><img alt="Get clpeak on Google Play" height="52" src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg"></a>
-<a href="https://snapcraft.io/clpeak"><img alt="Get clpeak from the Snap Store" height="52" src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg"></a>
+<a href="https://play.google.com/store/apps/details?id=kr.clpeak"><img alt="Get it on Google Play" height="48" src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg"></a>
+<a href="https://snapcraft.io/clpeak"><img alt="Get it from the Snap Store" height="48" src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg"></a>
 
+[![Latest release](https://img.shields.io/github/v/release/krrishnarraj/clpeak?label=release)](https://github.com/krrishnarraj/clpeak/releases/latest)
 [![Build](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/krrishnarraj/clpeak/actions/workflows/build.yml)
+[![License](https://img.shields.io/github/license/krrishnarraj/clpeak)](LICENSE)
 
-**clpeak &mdash; "Compute Latency PEAK".** A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs, GPUs and NPUs. It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.
+**clpeak — compute latency peak.** It measures the peak compute throughput,
+memory bandwidth and latency that CPUs, GPUs and NPUs actually reach, using
+small, tight kernels alongside each vendor's own tuned libraries. It reaches a
+device through every API that exposes it and runs the same tests on each, so
+the numbers from one machine can be compared side by side.
 
-Originally an OpenCL benchmark, clpeak now supports OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL, ONNX, Core ML, LiteRT and native CPU execution, enabling direct cross-backend comparisons on the same hardware.
+- **GPU compute APIs:** CUDA, ROCm/HIP, Metal, oneAPI/SYCL, Vulkan, OpenCL
+- **AI runtimes (NPU, GPU and CPU):** ONNX Runtime, Core ML, LiteRT
+- **CPU:** native kernels, picked per instruction set at run time (x86-64, AArch64)
 
-[![clpeak desktop app showing Metal results on an Apple M1 Pro](docs/assets/img/results-dark.png)](https://krrishnarraj.github.io/clpeak/)
+The same engine ships as a command-line tool and as an app for Windows, macOS,
+Linux and Android.
+
+<a href="https://krrishnarraj.github.io/clpeak/">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/results-npu-dark.png">
+  <img alt="clpeak app showing Apple M1 Pro results: eleven devices across seven backends, with the Neural Engine selected and its matmul and convolution rates per weight format." src="docs/assets/img/results-npu-light.png">
+</picture>
+</a>
 
 ## Sample output
 
-Peak lines from real runs, condensed (see `results/` for full baselines).
-
-NVIDIA RTX 5060, CUDA backend:
+Condensed from the saved runs in [`results/`](results/).
 
 ```text
+$ clpeak --cuda
 Backend: CUDA
   Device 0: NVIDIA GeForce RTX 5060
-    FP16 mma.sync m16n8k16+fp16
-      fp16_f16acc : 83.4 TFLOPS
-    NVFP4 mma.sync m16n8k64+fp32
-      nvf4_e2m1 : 327 TFLOPS
+    Tensor cores (WMMA / mma.sync)
+      fp16     : 42.6 TFLOPS
+      fp8_e4m3 : 85.2 TFLOPS
+      nvf4_e2m1 : 328 TFLOPS
+      int8     : 84.7 TOPS
     cuBLASLt GEMM peak
-      fp16     : 77.5 TFLOPS
-      nvf4_e2m1 : 299 TFLOPS
+      fp16     : 79.1 TFLOPS
+      nvf4_e2m1 : 301 TFLOPS
     Global memory bandwidth
-      float4   : 419 GB/s
+      float4   : 420 GB/s
     Kernel launch latency
-      roundtrip : 6.24 µs
+      roundtrip : 6.68 us
 ```
-
-Apple M1 Pro and RTX 5060, ONNX backend (one execution provider = one device):
 
 ```text
-Backend: ONNX
-  Device 0: Apple CoreML (Neural Engine) [NPU]
-    ONNX MatMul peak
-      fp32     : 2.37 TFLOPS
-      fp16     : 8.80 TFLOPS
-    ONNX convolution peak
-      fp16_conv3x3 : 9.30 TFLOPS
+$ clpeak --devices coreml:0
+Backend: CoreML
+  Device 0: Apple Neural Engine
+    Core ML matmul peak
+      fp16     : 8.58 TFLOPS
+      int4_lut : 7.70 TFLOPS
+      int8_qdq : 9.43 TOPS
     Transformer block, prefill
-      fp16_s512 : 4.86 TFLOPS
+      fp16_s512 : 4.95 TFLOPS
     Transformer block, decode
-      fp16_kv2048 : 49.6 GB/s
-
-  Device 0: NVIDIA TensorRT [GPU]
-    ONNX MatMul peak
-      fp16     : 63.3 TFLOPS
-      int8_qdq : 112 TOPS
-      nvfp4    : 217 TFLOPS
-    ONNX MatMul numeric error
-      fp16     : 1185 ppm
+      fp16_kv2048 : 43.3 GB/s
+    Core ML dispatch latency
+      trivial_op : 769 us
 ```
 
-## Desktop app
+More screenshots are on the [project page](https://krrishnarraj.github.io/clpeak/).
 
-Same engine as the CLI, with device detection, live results and run history — one Flutter app for **macOS, Linux and Windows** (plus Android/iOS from the same codebase, over the `clpeak_ffi` C ABI). Grab it from the [latest release](https://github.com/krrishnarraj/clpeak/releases/latest), press **Run**, and export from History as JSON.
+## Build
 
-## Building
-
-```console
-git submodule update --init --recursive --remote
+```sh
+git clone --recursive https://github.com/krrishnarraj/clpeak
+cd clpeak
 cmake -S . -B build
 cmake --build build -j
 ./build/clpeak
 ```
 
-Backends auto-enable when their SDK is found; opt out with `-DCLPEAK_ENABLE_<X>=OFF`. The ONNX backend needs no SDK (vendored header only). oneAPI needs `-DCMAKE_CXX_COMPILER=icpx`.
+A backend is built when its SDK is found, and `-DCLPEAK_ENABLE_<BACKEND>=OFF`
+leaves it out. The ONNX Runtime and LiteRT backends need no SDK: their
+runtimes are loaded when clpeak runs. The desktop app is built alongside the
+CLI when the Flutter SDK is on `PATH`, into `build/clpeak-gui/`. The
+[project page](https://krrishnarraj.github.io/clpeak/#build) lists every
+option; Android and iOS builds are in [`app/AGENTS.md`](app/AGENTS.md).
 
-| CMake option | Default | Effect when `OFF` |
-|---|---|---|
-| `CLPEAK_ENABLE_OPENCL` | `ON` | Skip OpenCL backend |
-| `CLPEAK_ENABLE_VULKAN` | `ON` | Skip Vulkan even if SDK present |
-| `CLPEAK_ENABLE_CUDA` | `ON` | Skip CUDA even if Toolkit present |
-| `CLPEAK_ENABLE_ROCM` | `ON` | Skip ROCm/HIP even if SDK present |
-| `CLPEAK_ENABLE_METAL` | `ON` | Skip Metal/MPS even on Apple silicon |
-| `CLPEAK_ENABLE_ONEAPI` | `ON` | Skip oneAPI/SYCL |
-| `CLPEAK_ENABLE_CPU` | `ON` | Skip native CPU backend (otherwise always available) |
-| `CLPEAK_ENABLE_ONNX` | `ON` | Skip ONNX Runtime backend (otherwise always built; runtime loaded at run time) |
-| `CLPEAK_ENABLE_COREML` | `ON` | Skip Core ML backend (Apple only; Neural Engine / GPU / CPU through the system framework) |
-| `CLPEAK_ENABLE_LITERT` | `ON` | Skip LiteRT backend (otherwise always built; libLiteRt loaded at run time — NPU / GPU / CPU accelerators) |
-| `CLPEAK_ENABLE_GUI` | `ON` | Skip the `clpeak-gui` desktop app (also skipped when no Flutter SDK is found) |
+## Usage
 
-The app bundle lands in `build/clpeak-gui/` whenever Flutter is on `PATH` (`cmake --build build --target clpeak-gui`).
-
-## CLI
-
-`./clpeak --help` prints all flags. Selection is uniform: `--<backend>` runs only that backend, `--<category>` or `--<test>` runs only that test, `--no-<x>` always subtracts. Backends say where and tests say what: a test flag applies to every backend that runs, so there are no backend-specific test flags.
-
-```console
-./clpeak                              # everything, everywhere
-./clpeak --cuda --vulkan              # one or more backends (--onnx, --coreml, --metal, --rocm, --oneapi, --cpu, …)
-./clpeak --single-precision-compute   # one test, on every backend
-./clpeak --gemm                       # the vendor's tuned matmul on every backend: cuBLASLt, MPS, Accelerate, ONNX, Core ML, …
-./clpeak --onnx --transformer-block   # the AI composite on every ONNX provider (--convolution, --numeric-error, --tensor-bandwidth, …)
-./clpeak --devices coreml:0           # one device, as --list-devices names it (here: the Neural Engine)
-./clpeak --devices cuda:0,vulkan:1    # a few devices across backends; nothing else runs
-./clpeak --onnx --onnx-lib PATH       # pick the ONNX Runtime library to load
-./clpeak --onnx --onnx-ep QNNExecutionProvider=DIR/onnxruntime_providers_qnn.dll   # register a plugin provider (ORT 1.22+; Qualcomm's QNN ships as one)
-./clpeak --onnx --onnx-winml DIR      # Windows 11: the vendor providers Windows ML installs from the Store (tools/fetch_winml.ps1 stages Microsoft's runtime in DIR)
-./clpeak --litert --litert-lib PATH   # pick the LiteRT library (a pip ai-edge-litert wheel has one); --litert-npu-dir for the vendor NPU runtime (Android app: tools/fetch_litert_npu.sh, app/AGENTS.md)
-./clpeak --describe                   # what each test and reading measures
-./clpeak -o out.clpeak.json           # save results (one JSON document)
-./clpeak --verbose -o out.clpeak.json # …with every diagnostic and the device inventory: attach this to a bug report
-./clpeak --compare baseline.clpeak.json   # diff against a saved baseline
-./clpeak --list-devices               # enumerate devices, no benchmarks
+```sh
+clpeak                            # every test on every device
+clpeak --list-devices             # what clpeak can see, named as --devices takes them
+clpeak --devices cuda:0,vulkan:1  # only these devices
+clpeak --vulkan --opencl          # only these backends
+clpeak --bandwidth                # one category: --compute, --bandwidth, --latency, --ai, …
+clpeak --gemm                     # one test, on every backend that has it
+clpeak --describe                 # what each test and each reading measures
+clpeak -o run.clpeak.json         # save the run as JSON
+clpeak --compare run.clpeak.json  # run again and compare with a saved run
 ```
 
-`--compare` re-runs and prints each result beside the saved value, flagging regressions as regressions. `--list-devices` prints one line per device that starts with its `backend:index` name; `--devices` takes a comma-separated list of exactly those and runs only them. Every flag parses in every build, so a script can say `--no-cuda` on a Mac.
+`clpeak --help` lists every flag. `--onnx-lib` and `--litert-lib` choose
+which ONNX Runtime or LiteRT library to load.
+
+## Running the release binaries
+
+Each [release](https://github.com/krrishnarraj/clpeak/releases/latest) has a
+zip per platform with the CLI and the app, plus `cuda`, `rocm` and `oneapi`
+variants that add those backends, and a `.dmg` of the macOS app. The binaries
+aren't signed with a developer certificate, so the OS asks before running them
+the first time.
+
+**Windows:** before extracting, right-click the zip → **Properties** → tick
+**Unblock** → **OK**. If SmartScreen still says "Windows protected your PC",
+choose **More info** → **Run anyway**.
+
+**macOS:** open the `.dmg` and drag clpeak to Applications. The first launch
+is refused; open **System Settings** → **Privacy & Security** and click
+**Open Anyway** next to clpeak. Or clear the quarantine flag from a terminal,
+which also works for the CLI from the zip:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/clpeak-gui.app
+xattr -dr com.apple.quarantine ~/Downloads/clpeak-*-macos-arm64
+```
+
+**Linux:** `sudo snap install clpeak --classic`, or use the zip as it is.
+
+**Android:** [Google Play](https://play.google.com/store/apps/details?id=kr.clpeak).
+
+## Reporting a bug
+
+Numbers that look wrong, missing devices and crashes are all worth reporting.
+Attach a verbose run so the report can be debugged without your machine.
+
+- **CLI:** run `clpeak --verbose -o report.clpeak.json` and attach
+  `report.clpeak.json`. If clpeak crashed before finishing, attach
+  `report.clpeak.log` from the same folder instead: it is written as the run
+  goes.
+- **App:** turn on **Settings** → **Diagnostics** → **Verbose diagnostics**,
+  run again, then use **Export JSON** on the results page. A run the app did
+  not survive is listed in **History** under "Runs that did not finish", with
+  its own export.
+
+Then [open an issue](https://github.com/krrishnarraj/clpeak/issues/new/choose)
+and add the file to it.
 
 ## For AI agents
 
-This tree is documented with `AGENTS.md` files. Start at the
-[root `AGENTS.md`](AGENTS.md) for architecture, directory map, build
-instructions, and the self-maintaining documentation conventions.
-Every subdirectory has its own `AGENTS.md` with local details — open
-the one closest to the code you're touching.
+The tree is documented for coding agents with `AGENTS.md` files. Start at the
+[root `AGENTS.md`](AGENTS.md) for the architecture, the directory map and the
+conventions for adding a benchmark or a backend; a subdirectory's own
+`AGENTS.md` covers the code in it. Saved runs in [`results/`](results/) are
+the baselines to check a suspicious number against, and [`NOTES.md`](NOTES.md)
+lists the workarounds for runtime bugs that are waiting on an upstream fix.
+
+## Contributing
+
+Issues and pull requests are welcome. clpeak is licensed under the
+[Apache License 2.0](LICENSE).

@@ -1,14 +1,15 @@
 # Reference runs
 
-Saved clpeak runs, one file per device, used as the sanity check when a number
-looks wrong — see the root `AGENTS.md` ("Is this number plausible?").
+Saved clpeak runs, one file per machine, named by vendor and device. They are
+the baselines to check a number against when it looks wrong -- see the root
+`AGENTS.md` ("Is this number plausible?") -- and the data behind the README's
+sample output and the screenshots (`tools/screenshots.sh`).
 
 Produced by:
 
 ```
-clpeak -o results/<vendor>/<Device_Name>.clpeak.json
+clpeak -o results/<vendor>/<Device_Name>.json
 ```
 
-The v2 XML files that lived here were removed with the format-v3 change; they
-are being regenerated on real hardware, so the directory is sparse until they
-land. Format schema: `docs/format-v3.md`.
+Format: `docs/format-v3.md`. A run from hardware not listed here is welcome as
+a pull request.

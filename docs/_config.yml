@@ -3,9 +3,8 @@
 # allowlist: no theme gem, no plugins, just a layout and a stylesheet.
 title: clpeak
 description: >-
-  A synthetic micro-benchmark for the peak achievable compute performance of
-  CPUs and GPUs — OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, oneAPI/SYCL and native
-  CPU, from one binary.
+  Measures the peak compute throughput, memory bandwidth and latency that
+  CPUs, GPUs and NPUs actually reach, through each API that exposes them.
 url: https://krrishnarraj.github.io
 baseurl: /clpeak
 
@@ -15,3 +14,10 @@ repo: krrishnarraj/clpeak
 exclude:
   - README.md
 plugins: []
+
+# Every page gets the site chrome (format-v3.md sets no layout of its own).
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

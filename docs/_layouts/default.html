@@ -10,7 +10,9 @@
 <meta property="og:title" content="{{ page.title | default: site.title }}">
 <meta property="og:description" content="{{ site.description }}">
 <meta property="og:type" content="website">
-<meta property="og:image" content="{{ '/assets/img/results-dark.png' | absolute_url }}">
+<meta property="og:image" content="{{ '/assets/img/og.png' | absolute_url }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
@@ -25,9 +27,10 @@
       </div>
     </div>
     <nav>
-      <a href="#what">What it measures</a>
-      <a href="#download">Download</a>
-      <a href="#build">Build</a>
+      <a href="{{ '/#what' | relative_url }}">What it measures</a>
+      <a href="{{ '/#download' | relative_url }}">Download</a>
+      <a href="{{ '/#build' | relative_url }}">Build</a>
+      <a href="{{ '/#bugs' | relative_url }}">Report a bug</a>
       <a href="https://github.com/{{ site.repo }}">GitHub</a>
     </nav>
   </div>
