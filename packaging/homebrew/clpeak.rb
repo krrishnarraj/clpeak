@@ -3,7 +3,7 @@
 # no .git, so the build would report its version as "unknown".  Passing
 # `tag:` makes Homebrew fetch that tag, so git-describe reports the real version.
 class Clpeak < Formula
-  desc "Benchmark to measure peak compute, bandwidth, and latency of GPU/CPU devices"
+  desc "Peak compute, bandwidth and latency benchmark for CPUs, GPUs and NPUs"
   homepage "https://github.com/krrishnarraj/clpeak"
   # TODO: add `revision:` with 2.1.0's commit sha once the tag is pushed —
   # homebrew-core requires it alongside `tag:`.

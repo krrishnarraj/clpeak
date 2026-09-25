@@ -88,17 +88,19 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     return -1;
   }
 
-  hipFunction_t fn;
-  if (!dev.getKernel(rocm_kernels::image_bandwidth,
-                     "image_bandwidth", fn))
+  // Built for GCN5 and RDNA only: the compute-only CDNA dies have no texture
+  // sampling.
+  RocmKernel k = dev.getKernel(rocm_kernels::image_bandwidth, "image_bandwidth",
+                               "Device has no image/texture support");
+  if (!k)
   {
     (void)hipFree(outBuf);
     (void)hipDestroyTextureObject(tex);
     (void)hipFreeArray(arr);
-    test.skip("float4", ResultStatus::Error,
-               "Kernel compile failed", fetchNote);
-    return -1;
+    test.skip("float4", k.status, k.reason, fetchNote);
+    return k.status == ResultStatus::Unsupported ? 0 : -1;
   }
+  hipFunction_t fn = k.fn;
 
   int w = imgW, h = imgH;
   int walk = 0;

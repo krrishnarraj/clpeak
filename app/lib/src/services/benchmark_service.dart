@@ -147,19 +147,24 @@ class BenchmarkService extends ChangeNotifier {
   /// Which LiteRT the backend has loaded, or why none is.
   LitertStatus litertStatus() => _bindings.litertStatus();
 
-  /// Point the LiteRT backend at a library and re-enumerate; see
-  /// [setOnnxLibrary] for the single-flight reasoning.
+  /// Point the LiteRT backend at a library; see [setOnnxLibrary] for when
+  /// that re-enumerates and why the startup load is awaited first.
   Future<void> setLitertLibrary(String path) async {
     if (isRunning) return;
     await _catalogFlight;
     if (isRunning) return;
+    final fixed = _bindings.litertStatus().available;
     _bindings.setLitertLibrary(path);
-    await reloadCatalog();
+    if (!fixed) await reloadCatalog();
   }
 
-  /// Point the ONNX backend at a library and re-enumerate, so the device
-  /// list reflects the providers the new runtime brings.  Empty path = back
-  /// to searching the conventional names.
+  /// Point the ONNX backend at a library.  The runtime setup is fixed for
+  /// the launch by the first runtime that loads (src/onnx/onnx_runtime.h):
+  /// while none has, the choice applies now and the catalog is re-enumerated
+  /// so the device list shows its providers; once one has, the native side
+  /// keeps the choice for the next launch ([OnnxStatus.pendingRuntime]) and
+  /// there is nothing to re-enumerate.  Empty path = back to searching the
+  /// conventional names.
   Future<void> setOnnxLibrary(String path) async {
     if (isRunning) return;
     // A startup load may still be in flight; re-enumerating under it would
@@ -167,12 +172,15 @@ class BenchmarkService extends ChangeNotifier {
     // Awaiting a null future is a no-op, so this is free when idle.
     await _catalogFlight;
     if (isRunning) return;
+    final fixed = _bindings.onnxStatus().available;
     _bindings.setOnnxLibrary(path);
-    await reloadCatalog();
+    if (!fixed) await reloadCatalog();
   }
 
   /// Replace the ONNX backend's plugin execution-provider libraries and
-  /// re-enumerate; same single-flight contract as [setOnnxLibrary].
+  /// re-enumerate: unlike the runtime setup they stay live, the enumeration
+  /// registering what was added and unregistering what was removed.  Same
+  /// single-flight contract as [setOnnxLibrary].
   Future<void> setOnnxEpLibraries(List<OnnxEpLibrary> libs) async {
     if (isRunning) return;
     await _catalogFlight;
@@ -181,20 +189,22 @@ class BenchmarkService extends ChangeNotifier {
     await reloadCatalog();
   }
 
-  /// Switch the Windows ML execution-provider catalog and re-enumerate.
-  /// Enumeration is what installs and registers the catalog's providers,
-  /// so the first enumeration after enabling can take as long as the
-  /// download does.
+  /// Switch the Windows ML execution-provider catalog: part of the runtime
+  /// setup, so the same contract as [setOnnxLibrary].  Enumeration is what
+  /// installs and registers the catalog's providers, so the first one after
+  /// enabling can take as long as the download does.
   Future<void> setOnnxWinml({required bool enabled, required String path}) async {
     if (isRunning) return;
     await _catalogFlight;
     if (isRunning) return;
+    final fixed = _bindings.onnxStatus().available;
     _bindings.setOnnxWinml(enabled: enabled, path: path);
-    await reloadCatalog();
+    if (!fixed) await reloadCatalog();
   }
 
   /// Re-enumerate after something changed what the native side can see —
-  /// the ONNX Runtime or LiteRT library the settings screen chose.
+  /// a runtime the settings screen chose before any had loaded, or the
+  /// plugin libraries.
   ///
   /// Selections survive where they still mean something: a device the user
   /// had turned off stays off, one that has gone away is dropped, and a

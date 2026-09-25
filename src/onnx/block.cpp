@@ -170,6 +170,55 @@ namespace
        /*kvDtype=*/ONNX_DT_INT8, /*decodeOnly=*/true},
   };
 
+  // Why a variant cannot be sent to this provider at all, or empty.
+  //
+  // Not a statement about the format -- `onnxProviderFenceReason` is where
+  // those live, and it is consulted through the gemm probe by every test
+  // here.  This is for a fault only this test's graph provokes, where
+  // fencing the format everywhere would withhold rows that demonstrably
+  // run.
+  //
+  // DirectML on this block's blocked int8 weights: session creation ends the
+  // process with an integer divide by zero (exit 0xC0000094), after ORT's
+  // own transformers have finished with the graph -- the last line logged is
+  // the attention scale being folded away -- and before the allocation
+  // planner speaks, which is where the DML provider compiles its fused
+  // partitions.  Seven DequantizeLinear(int8, one fp16 scale per 32 rows:
+  // opset 21, block_size=32, axis=0) feeding 2048-wide MatMuls.  ONNX
+  // Runtime 1.24.4, an Intel Arc A380, 2026-09-21, after the same block's
+  // fp16 and int4_weight forms had built and run; nothing after it ran.
+  //
+  // int4 escapes because ORT rewrites it first: DQMatMulToMatMulNBits takes
+  // 4-bit weights only (Is4BitIntType, qdq_selectors.cc), so the int4 block
+  // reaches DirectML as MatMulNBits and the int8 one as a raw opset-21
+  // DequantizeLinear, which the DML provider registers with no support query
+  // and hands to DML_DEQUANTIZE_OPERATOR_DESC (DmlOperatorQuantization21).
+  //
+  // The same format at matmul sizes is fine on the same card, and other
+  // DirectML devices (an RTX 4060, a UHD 630, an Adreno X1-45, the DirectML
+  // CPU) run this block, so the fault wants that provider *and* this graph
+  // *and* -- as far as anyone has seen -- that GPU.  Only the first two can
+  // be keyed on: clpeak registers DirectML with no device id and ORT picks
+  // the adapter, so which GPU is behind this device is not something the
+  // backend can ask.  Naming one would be a guess, and a guess that is
+  // wrong on a two-GPU box takes the run down.  So the row is withheld on
+  // every DirectML device and says so; the gemm, conv and accuracy rows,
+  // which is where the format is otherwise measured, are untouched.
+  std::string variantFence(const Variant &v, const onnx_ep_info_t &ep)
+  {
+    if (ep.providerKey == "DmlExecutionProvider" && v.wDtype == ONNX_DT_INT8 &&
+        !v.qdq && v.wBlock > 0)
+      return "DirectML takes the process down (an integer divide by zero "
+             "while the session is created, ONNX Runtime 1.24.4) on this "
+             "block's blocked int8 weights, which ORT hands it unfused "
+             "because only 4-bit weights become MatMulNBits.  Seen on an "
+             "Intel Arc A380 and not on other DirectML devices, but a "
+             "session picks its adapter inside the runtime, so no DirectML "
+             "device is sent this graph; the same format is still measured "
+             "by the matmul rows, where it runs";
+    return std::string();
+  }
+
   int64_t weightParams()
   {
     return 4 * kDModel * kDModel      // Wq, Wk, Wv, Wo
@@ -649,6 +698,16 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     if (vr.usable || !vr.skipReason.empty())
       return vr.usable; // already decided by an earlier scope
+
+    // A graph this provider crashes on rather than declines: asked first,
+    // because the fusion probe below is the session that dies.
+    if (std::string why = variantFence(v, ep); !why.empty())
+    {
+      CLPEAK_VLOG("onnx-block[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
+                  v.label, why.c_str());
+      vr.skipReason = why;
+      return false;
+    }
 
     // Gemm's 32^3 probe already knows if this dtype is unsupported here, and
     // answering from it costs nothing where the block's 50M-weight model

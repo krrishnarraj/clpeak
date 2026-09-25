@@ -435,7 +435,20 @@ LitertRuntimeStatus litertRuntimeStatus()
     if (st.error.empty())
       st.error = "LiteRT library not found";
   }
+  st.pending = litertPendingLibrary(st.pendingPath);
   return st;
+}
+
+// A library chosen after this one loaded: asked for and not loaded, which
+// a listing and a run say out loud.
+static std::string pendingNote()
+{
+  std::string path;
+  if (!litertPendingLibrary(path))
+    return std::string();
+  return (path.empty() ? std::string("the library the default search finds") : path) +
+         " takes effect the next time clpeak starts: one process keeps the "
+         "LiteRT it loaded first";
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +467,10 @@ int LitertPeak::runAll()
     log->note("LiteRT: " + (why.empty() ? std::string("LiteRT library (libLiteRt) not found") : why) + "\n");
     return 0;   // absent runtime is not an error, like a missing GPU driver
   }
+
+  const std::string pending = pendingNote();
+  if (!pending.empty())
+    log->note("LiteRT: " + pending + "\n");
 
   std::vector<std::pair<litert_device_info_t, std::string>> skipped;
   auto devs = litertUsableDevices(*rt, &skipped);
@@ -504,6 +521,7 @@ int LitertPeak::runAll()
         details,
         -1,
         idx,
+        dev.deviceType,
     });
     currentDeviceScope = &deviceScope;
 
@@ -627,6 +645,9 @@ BackendInventory LitertPeak::enumerate()
   }
   inv.info = "LiteRT ABI " + rt->abiVersion;
   inv.available = true;
+  const std::string pending = pendingNote();
+  if (!pending.empty())
+    inv.info += "; " + pending;
 
   std::vector<std::pair<litert_device_info_t, std::string>> skipped;
   auto devs = litertUsableDevices(*rt, &skipped);

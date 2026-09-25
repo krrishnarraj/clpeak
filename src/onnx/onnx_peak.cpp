@@ -123,6 +123,24 @@ static void pluginNotes(const OrtRuntime &rt,
       loud.push_back("Windows ML: the catalog lists no execution provider for "
                      "this machine");
   }
+  // A setup chosen after this runtime loaded: asked for and not in effect,
+  // which is said out loud like a library that did not register.
+  OnnxPendingSetup pending;
+  if (onnxPendingSetup(pending))
+  {
+    std::string setup =
+        pending.library.empty() ? std::string("the default search") : pending.library;
+    // Windows ML only where it is part of the difference.
+    if (pending.winml || onnxWinmlEnabled())
+      setup += pending.winml ? ", Windows ML on" + (pending.winmlPath.empty()
+                                                        ? std::string()
+                                                        : " at " + pending.winmlPath)
+                             : std::string(", Windows ML off");
+    loud.push_back("the runtime setup chosen since ONNX Runtime " + rt.versionString +
+                   " loaded (" + setup +
+                   ") takes effect the next time clpeak starts: one process keeps "
+                   "the runtime it loaded first");
+  }
 }
 
 std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
@@ -252,9 +270,9 @@ OnnxRuntimeStatus onnxRuntimeStatus()
     if (st.error.empty())
       st.error = "onnxruntime library not found";
   }
-  // What the last environment registered; a library configured since is
-  // not in it until the next enumeration or run creates the environment
-  // it registers on (settings screens refresh after enumerating).
+  // What the environment registered; a library configured since is not in
+  // it until the next enumeration or run syncs the set onto it (settings
+  // screens refresh after enumerating).
   st.epLibraries  = onnxEpLibraryStatus();
   st.winmlEnabled = onnxWinmlEnabled();
   if (st.winmlEnabled && st.available)
@@ -268,6 +286,14 @@ OnnxRuntimeStatus onnxRuntimeStatus()
       st.winmlPath  = res->dllPath;
       st.winmlError = res->error;
     }
+  }
+  OnnxPendingSetup pending;
+  st.pending = onnxPendingSetup(pending);
+  if (st.pending)
+  {
+    st.pendingLibrary   = pending.library;
+    st.pendingWinml     = pending.winml;
+    st.pendingWinmlPath = pending.winmlPath;
   }
   return st;
 }
@@ -391,6 +417,7 @@ int OnnxPeak::runAll()
         details,
         -1,
         idx,
+        ep.deviceType,
     });
     currentDeviceScope = &deviceScope;
 

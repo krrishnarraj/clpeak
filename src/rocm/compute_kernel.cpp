@@ -62,11 +62,10 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
 
   for (const auto &v : variants)
   {
-    hipFunction_t fn;
-    if (!dev.getKernel(*v.blob, v.kernelName, fn))
+    RocmKernel k = dev.getKernel(*v.blob, v.kernelName, d.notBuilt);
+    if (!k)
     {
-      test.skip(v.label, ResultStatus::Error, "compile/load failed",
-                note(v.description));
+      test.skip(v.label, k.status, k.reason, note(v.description));
       continue;
     }
 
@@ -74,7 +73,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     args[0] = &outputBuf;
     args[1] = const_cast<void *>(d.scalarArg);
 
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

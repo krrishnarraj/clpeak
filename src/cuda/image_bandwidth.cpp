@@ -78,11 +78,10 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUdeviceptr outBuf = 0;
   cuMemAlloc(&outBuf, globalThreads * sizeof(float));
 
-  CUfunction fn;
-  if (!dev.getKernel(cuda_kernels::image_bandwidth,
-                     "image_bandwidth", fn))
+  CudaKernel k = dev.getKernel(cuda_kernels::image_bandwidth, "image_bandwidth");
+  if (!k)
   {
-    test.skip("float4", ResultStatus::Error, "Kernel compile failed", fetchNote);
+    test.skip("float4", k.status, k.reason, fetchNote);
     cuTexObjectDestroy(tex);
     cuArrayDestroy(arr);
     cuMemFree(outBuf);
@@ -99,7 +98,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   // include/common/common.h.
   auto timeWalk = [&](int w_) {
     walk = w_;
-    return runKernel(dev, fn, numBlocks, blockSize, args,
+    return runKernel(dev, k.fn, numBlocks, blockSize, args,
                      cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   };
   float rowUs = timeWalk(0);

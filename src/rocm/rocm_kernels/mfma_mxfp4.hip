@@ -1,9 +1,10 @@
 #include <hip/hip_runtime.h>
 
 // Raw scaled-MFMA (matrix-core) peak microbenchmark: mxfp4(e2m1) x mxfp4 + fp32,
-// 16x16x128 with a block scale.  This is the CDNA4 (gfx950 / MI350) FP4 path; on
-// a part that lacks the scaled-MFMA instruction the HIPRTC compile fails and the
-// host reports Unsupported (no arch list, see mfma_fp8.hip / mfma.cpp).
+// 16x16x128 with a block scale.  This is the CDNA4 (gfx950 / MI350) FP4 path; a
+// part that lacks the scaled-MFMA instruction is left out of this kernel's arch
+// group in CMakeLists.txt and reported Unsupported by the host (see
+// mfma_fp16.hip / mfma.cpp).
 //
 // The f8f6f4 family selects the operand datatype via the cbsz/blgp format ids:
 //   0=e4m3 1=e5m2 2=e3m2 3=e2m3 4=e2m1(fp4).  We use 4/4 for E2M1 x E2M1.

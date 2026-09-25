@@ -165,9 +165,20 @@ static double runInt32Chain(uint64_t outer)
 // The sqrt chain acc = sqrt(acc + c) converges to the fixed point x^2 = x+c
 // (x=1.5 for c=0.75): nonlinear, no closed form, values stay normal.
 // opsPerIter counts one divide (or sqrt) per lane per step -- the adds are
-// pipeline filler on other ports and are not counted.  DIV_NACC=8: dividers
-// are one/two per core with partial pipelining, so a few chains saturate.
+// pipeline filler on other ports and are not counted.
+// DIV_NACC must cover the chain latency (fadd + fdiv), not just the divider's
+// issue interval.  AArch64 cores issue a pipelined 128-bit fdiv every cycle, so
+// 8 chains stall behind an ~11-cycle add+divide: M1 Pro and Snapdragon X both
+// read exactly 0.72 fdiv/cycle at 8, and x64 AVX2 translated onto the same
+// Oryon core read 1.4x "above native" only because each 256-bit guest divide
+// put 2 host fdivs in flight.  16 reaches 1 fdiv/cycle on M1 Pro (fp32 ST 9.2
+// -> 12.6 GFLOPS, fp64 3.9 -> 6.3); 24 adds nothing.  x86 keeps 8: its
+// dividers issue every 3-5 cycles, and 16 YMM registers leave no room for 16.
+#if defined(__aarch64__) || defined(_M_ARM64)
+static constexpr int DIV_NACC = 16;
+#else
 static constexpr int DIV_NACC = 8;
+#endif
 // Precise FP for the divide/sqrt kernels only: clang via a float_control
 // push/pop region (ends after runFp64SqrtChain), GCC via a per-function
 // attribute.  cl.exe takes neither path but doesn't substitute intrinsics.

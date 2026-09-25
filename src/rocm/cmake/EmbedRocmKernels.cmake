@@ -18,10 +18,34 @@
 #   )
 #
 # Candidate arches are intersected with what the installed hipcc can target
-# (probed by trial compile); a kernel with no buildable arch gets an empty stub
-# Blob so the symbol still links (it is capability-gated off at run time).
+# (probed by trial compile) -- and, for ROCWMMA, with what the installed
+# rocWMMA headers accept, since they static_assert on any arch their version
+# does not know.  A kernel with no buildable arch gets an empty stub Blob so
+# the symbol still links; at run time a Blob without the device's slice is
+# reported from its bundle header (RocmDevice::getKernel).
 
 set(_CLPEAK_EMBED_ROCM_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
+# -parallel-jobs runs one hipcc call's per-arch device compiles side by side;
+# without it they run one after another, and with ~30 targets in a group that
+# is most of the ROCm build -- all of it on a generator that runs custom
+# commands serially.  Each of those compiles holds ~150 MB, and make -j or
+# ninja runs several kernels' calls at once on top of this, so it is capped;
+# under Ninja the calls also share a pool sized so calls x jobs ~= cores.
+cmake_host_system_information(RESULT _clpeak_cores QUERY NUMBER_OF_LOGICAL_CORES)
+if(NOT _clpeak_cores OR _clpeak_cores LESS 1)
+  set(_clpeak_cores 1)
+endif()
+set(_clpeak_jobs ${_clpeak_cores})
+if(_clpeak_jobs GREATER 8)
+  set(_clpeak_jobs 8)
+endif()
+set(_CLPEAK_HIPCC_JOBS "-parallel-jobs=${_clpeak_jobs}")
+math(EXPR _clpeak_pool "${_clpeak_cores} / ${_clpeak_jobs}")
+get_property(_clpeak_pools GLOBAL PROPERTY JOB_POOLS)
+if(NOT "${_clpeak_pools}" MATCHES "clpeak_hipcc=")
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS clpeak_hipcc=${_clpeak_pool})
+endif()
 
 # Windows-only command prefix that runs hipcc with the MSVC environment's
 # include paths scrubbed; empty everywhere else.
@@ -56,56 +80,133 @@ function(_clpeak_hipcc_env_wrap out)
   endif()
 endfunction()
 
-# Probe once which gfx targets the installed hipcc accepts.  Result cached in a
-# global property so repeated embed calls don't re-run the trial compiles.
-function(_clpeak_rocm_supported_archs out)
-  get_property(_cached GLOBAL PROPERTY CLPEAK_ROCM_SUPPORTED_ARCHS SET)
-  if(_cached)
-    get_property(_v GLOBAL PROPERTY CLPEAK_ROCM_SUPPORTED_ARCHS)
-    set(${out} "${_v}" PARENT_SCOPE)
-    return()
-  endif()
-
-  set(_candidates
-      gfx906 gfx908 gfx90a gfx942 gfx950
-      gfx1030 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201)
-  set(_probe "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe.hip")
-  file(WRITE "${_probe}" "#include <hip/hip_runtime.h>\nextern \"C\" __global__ void p(){}\n")
+# Which of `archs` hipcc can build `source` for.  All of them go into one call,
+# so a toolkit that takes every arch answers in a single compile; a call that
+# fails is split in half and each half retried, so an arch the toolkit lacks
+# costs a few quick failures instead of a compile per candidate.
+function(_clpeak_rocm_probe_split source flags archs out)
+  set(_args "")
+  foreach(_a ${archs})
+    list(APPEND _args "--offload-arch=${_a}")
+  endforeach()
 
   # Same env scrubbing as the real compiles: without it, configuring from a
   # Visual Studio developer prompt (where INCLUDE *is* set) would fail every
   # probe and silently fall through to stub kernels for the whole backend.
+  # -Wfatal-errors: an arch rocWMMA rejects fails in its config header, and
+  # without it clang goes on to parse the whole library before giving up.
   _clpeak_hipcc_env_wrap(_wrap)
+  execute_process(
+    COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco ${_args} ${flags} ${_CLPEAK_HIPCC_JOBS}
+            -Wfatal-errors -o "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe.co" "${source}"
+    RESULT_VARIABLE _r OUTPUT_QUIET ERROR_QUIET)
 
-  set(_ok "")
-  foreach(_a ${_candidates})
-    execute_process(
-      COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco --offload-arch=${_a}
-              -o "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe_${_a}.co" "${_probe}"
-      RESULT_VARIABLE _r OUTPUT_QUIET ERROR_QUIET)
-    if(_r EQUAL 0)
-      list(APPEND _ok "${_a}")
+  list(LENGTH archs _n)
+  if(_r EQUAL 0)
+    set(${out} "${archs}" PARENT_SCOPE)
+  elseif(_n LESS 2)
+    set(${out} "" PARENT_SCOPE)
+  else()
+    math(EXPR _half "${_n} / 2")
+    list(SUBLIST archs 0 ${_half} _lo)
+    list(SUBLIST archs ${_half} -1 _hi)
+    _clpeak_rocm_probe_split("${source}" "${flags}" "${_lo}" _lo_ok)
+    _clpeak_rocm_probe_split("${source}" "${flags}" "${_hi}" _hi_ok)
+    set(_ok ${_lo_ok} ${_hi_ok})
+    set(${out} "${_ok}" PARENT_SCOPE)
+  endif()
+endfunction()
+
+# Which of `archs` a kernel of `kind` can be built for: "hip" is a bare kernel
+# (can the installed hipcc target the arch at all), "rocwmma" one that includes
+# the rocWMMA headers.  Probing rocWMMA parses the whole library once per arch
+# -- about 20 s -- so verdicts are kept in the cache, keyed by the toolkit they
+# were taken against (hipcc's --version and, for rocWMMA, its header), and only
+# an arch with no verdict yet is compiled; a different toolkit starts over.
+function(_clpeak_rocm_supported_archs kind archs out)
+  get_property(_version GLOBAL PROPERTY _CLPEAK_HIPCC_VERSION)
+  if(NOT _version)
+    execute_process(COMMAND "${CLPEAK_HIPCC}" --version
+                    OUTPUT_VARIABLE _version ERROR_QUIET)
+    set_property(GLOBAL PROPERTY _CLPEAK_HIPCC_VERSION "${_version}")
+  endif()
+  set(_key "${CLPEAK_HIPCC}|${_version}")
+  if(kind STREQUAL "rocwmma")
+    file(TIMESTAMP "${CLPEAK_ROCWMMA_INCLUDE_DIR}/rocwmma/rocwmma.hpp" _stamp)
+    string(APPEND _key "|${CLPEAK_ROCWMMA_INCLUDE_DIR}|${_stamp}")
+  endif()
+  string(MD5 _key "${_key}")
+  if(NOT "${_CLPEAK_ROCM_PROBE_${kind}_KEY}" STREQUAL "${_key}")
+    set(_CLPEAK_ROCM_PROBE_${kind}_KEY "${_key}" CACHE INTERNAL "")
+    set(_CLPEAK_ROCM_PROBE_${kind}_OK "" CACHE INTERNAL "")
+    set(_CLPEAK_ROCM_PROBE_${kind}_NO "" CACHE INTERNAL "")
+  endif()
+  set(_ok "${_CLPEAK_ROCM_PROBE_${kind}_OK}")
+  set(_no "${_CLPEAK_ROCM_PROBE_${kind}_NO}")
+
+  set(_unknown "")
+  foreach(_a ${archs})
+    if(NOT _a IN_LIST _ok AND NOT _a IN_LIST _no)
+      list(APPEND _unknown "${_a}")
     endif()
   endforeach()
 
-  set_property(GLOBAL PROPERTY CLPEAK_ROCM_SUPPORTED_ARCHS "${_ok}")
-  message(STATUS "clpeak ROCm: hipcc can target: ${_ok}")
-  set(${out} "${_ok}" PARENT_SCOPE)
+  if(_unknown)
+    set(_probe "${CMAKE_CURRENT_BINARY_DIR}/_clpeak_archprobe_${kind}.hip")
+    set(_flags "")
+    if(kind STREQUAL "rocwmma")
+      file(WRITE "${_probe}" "#include <rocwmma/rocwmma.hpp>\nextern \"C\" __global__ void p(){}\n")
+      set(_flags -std=c++17 "-I${CLPEAK_ROCWMMA_INCLUDE_DIR}")
+    else()
+      file(WRITE "${_probe}" "#include <hip/hip_runtime.h>\nextern \"C\" __global__ void p(){}\n")
+    endif()
+    _clpeak_rocm_probe_split("${_probe}" "${_flags}" "${_unknown}" _built)
+    foreach(_a ${_unknown})
+      if(_a IN_LIST _built)
+        list(APPEND _ok "${_a}")
+      else()
+        list(APPEND _no "${_a}")
+      endif()
+    endforeach()
+    set(_CLPEAK_ROCM_PROBE_${kind}_OK "${_ok}" CACHE INTERNAL "")
+    set(_CLPEAK_ROCM_PROBE_${kind}_NO "${_no}" CACHE INTERNAL "")
+  endif()
+
+  # Said once per configure: the first call of a kind is the widest group.
+  get_property(_said GLOBAL PROPERTY _CLPEAK_ROCM_PROBE_${kind}_SAID)
+  if(NOT _said)
+    set_property(GLOBAL PROPERTY _CLPEAK_ROCM_PROBE_${kind}_SAID TRUE)
+    if(kind STREQUAL "rocwmma")
+      message(STATUS "clpeak ROCm: rocWMMA supports: ${_ok}")
+    elseif(NOT _ok)
+      message(WARNING "clpeak ROCm: hipcc (${CLPEAK_HIPCC}) could not build a "
+                      "trivial kernel for any gfx target, so every ROCm kernel in "
+                      "this build is an empty stub")
+    else()
+      message(STATUS "clpeak ROCm: hipcc can target: ${_ok}")
+      if(_no)
+        message(STATUS "clpeak ROCm: hipcc cannot target: ${_no} -- no kernels for them in this build")
+      endif()
+    endif()
+  endif()
+
+  set(_result "")
+  foreach(_a ${archs})
+    if(_a IN_LIST _ok)
+      list(APPEND _result "${_a}")
+    endif()
+  endforeach()
+  set(${out} "${_result}" PARENT_SCOPE)
 endfunction()
 
 function(embed_rocm_kernels)
   cmake_parse_arguments(ER "CXX17;ROCWMMA" "TARGET" "ARCHS;KERNELS" ${ARGN})
 
-  _clpeak_rocm_supported_archs(_supported)
-
-  # Intersect requested arches with what hipcc supports.
-  set(_final "")
-  foreach(_a ${ER_ARCHS})
-    list(FIND _supported "${_a}" _idx)
-    if(_idx GREATER -1)
-      list(APPEND _final "${_a}")
-    endif()
-  endforeach()
+  # Keep the requested arches the installed toolkit can build this group for.
+  _clpeak_rocm_supported_archs(hip "${ER_ARCHS}" _final)
+  if(ER_ROCWMMA)
+    _clpeak_rocm_supported_archs(rocwmma "${_final}" _final)
+  endif()
 
   # genco flags.
   set(_flags "")
@@ -138,8 +239,10 @@ function(embed_rocm_kernels)
       set(_co "${_codir}/${_kn}.co")
       add_custom_command(
         OUTPUT  "${_co}"
-        COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco ${_flags} -O3 -o "${_co}" "${_hip}"
+        COMMAND ${_wrap} "${CLPEAK_HIPCC}" --genco ${_flags} ${_CLPEAK_HIPCC_JOBS}
+                -O3 -o "${_co}" "${_hip}"
         DEPENDS "${_hip}"
+        JOB_POOL clpeak_hipcc
         COMMENT "hipcc --genco ${_kn}.hip"
         VERBATIM)
       add_custom_command(
@@ -165,8 +268,6 @@ function(embed_rocm_kernels)
     list(APPEND _gen_srcs "${_gen}")
     string(TOUPPER "${_kn}" _ku)
     target_compile_definitions(${ER_TARGET} PRIVATE CLPEAK_ROCM_HAS_${_ku})
-    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-      APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hip}")
   endforeach()
 
   target_sources(${ER_TARGET} PRIVATE ${_gen_srcs})

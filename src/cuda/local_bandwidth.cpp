@@ -39,18 +39,17 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   };
   for (const auto &v : vs)
   {
-    CUfunction fn;
-    if (!dev.getKernel(cuda_kernels::local_bandwidth, v.kname, fn))
+    CudaKernel k = dev.getKernel(cuda_kernels::local_bandwidth, v.kname);
+    if (!k)
     {
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ')
         key.pop_back();
-      test.skip(key, ResultStatus::Error, "Kernel compile failed",
-                cudaWidthNote(v.width));
+      test.skip(key, k.status, k.reason, cudaWidthNote(v.width));
       continue;
     }
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
     float bps = (float)bytes / us * 1e6f;

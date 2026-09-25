@@ -1,0 +1,165 @@
+{
+ "backends": [
+  {
+   "name": "Metal",
+   "flag": "metal",
+   "available": true,
+   "platforms": [
+    {
+     "index": 0,
+     "name": "Metal",
+     "devices": [
+      {
+       "index": 0,
+       "name": "Apple M1 Pro",
+       "type": "GPU"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Vulkan",
+   "flag": "vulkan",
+   "available": true,
+   "platforms": [
+    {
+     "index": 0,
+     "name": "Vulkan",
+     "devices": [
+      {
+       "index": 0,
+       "name": "Apple M1 Pro",
+       "type": "Integrated GPU",
+       "api": "1.4.359"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "OpenCL",
+   "flag": "opencl",
+   "available": true,
+   "platforms": [
+    {
+     "index": 0,
+     "name": "Apple",
+     "devices": [
+      {
+       "index": 0,
+       "name": "Apple M1 Pro",
+       "type": "GPU",
+       "driver": "1.2 1.0",
+       "compute_units": 16,
+       "clock_mhz": 1000,
+       "global_mem_bytes": 26800603136,
+       "max_alloc_bytes": 5025112064
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "CPU",
+   "flag": "cpu",
+   "available": true,
+   "platforms": [
+    {
+     "index": 0,
+     "name": "Native CPU",
+     "devices": [
+      {
+       "index": 0,
+       "name": "Apple M1 Pro",
+       "type": "CPU",
+       "compute_units": 10,
+       "global_mem_bytes": 34359738368
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "CoreML",
+   "flag": "coreml",
+   "available": true,
+   "info": "macOS 27.0",
+   "platforms": [
+    {
+     "index": 0,
+     "name": "Core ML",
+     "devices": [
+      {
+       "index": 0,
+       "name": "Apple Neural Engine",
+       "type": "NPU",
+       "compute_units": 16
+      },
+      {
+       "index": 1,
+       "name": "GPU via Core ML (Apple M1 Pro)",
+       "type": "GPU"
+      },
+      {
+       "index": 2,
+       "name": "CPU via Core ML",
+       "type": "CPU"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LiteRT",
+   "flag": "litert",
+   "available": true,
+   "info": "LiteRT ABI 1.0.0",
+   "notes": [
+    "NPU via LiteRT: no libLiteRtDispatch_<vendor> library in /Users/kr/.cache/uv/archive-v0/NwrV7eNvWCIAF3CxobJpF/ai_edge_litert; --litert-npu-dir names where the vendor runtime is"
+   ],
+   "platforms": [
+    {
+     "index": 0,
+     "name": "LiteRT",
+     "devices": [
+      {
+       "index": 0,
+       "name": "GPU via LiteRT (Metal)",
+       "type": "GPU"
+      },
+      {
+       "index": 1,
+       "name": "CPU via LiteRT (XNNPACK)",
+       "type": "CPU"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ONNX",
+   "flag": "onnx",
+   "available": true,
+   "info": "ONNX Runtime 1.30.0",
+   "platforms": [
+    {
+     "index": 0,
+     "name": "ONNX Runtime",
+     "devices": [
+      {
+       "index": 0,
+       "name": "Apple CoreML (Neural Engine)",
+       "type": "NPU"
+      },
+      {
+       "index": 1,
+       "name": "ONNX Runtime CPU",
+       "type": "CPU"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

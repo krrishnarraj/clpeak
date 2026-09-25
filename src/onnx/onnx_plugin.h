@@ -13,13 +13,14 @@
 // laptop reaches the CPU and DirectML and nothing else.
 //
 // Two things differ from a built-in provider, and both are kept in this
-// file rather than spread through the session code: the registration
-// happens once per environment (onnxEnv() calls onnxRegisterEpLibraries
-// right after creating one, and rebuilds the environment when the set of
-// libraries changes), and a session is attached through the
-// OrtEpDevice-based append (SessionOptionsAppendExecutionProvider_V2) --
-// the string-keyed append knows only the built-in names and answers "not
-// supported in this build" for a plugin, whatever was registered.
+// file rather than spread through the session code: the libraries are
+// registered on the environment (onnxEnv() syncs them when it creates the
+// launch's one environment, and again whenever the configured set changes:
+// what went is unregistered, what came is registered), and a session is
+// attached through the OrtEpDevice-based append
+// (SessionOptionsAppendExecutionProvider_V2) -- the string-keyed append
+// knows only the built-in names and answers "not supported in this build"
+// for a plugin, whatever was registered.
 
 #ifdef ENABLE_ONNX
 
@@ -31,22 +32,28 @@
 #include <utility>
 #include <vector>
 
-// Bumped by every change to the plugin configuration (onnxSetEpLibraries,
-// onnxSetWinml).  onnxEnv() compares it with the generation its environment
-// was registered under and recreates the environment when they differ.
+// Bumped by every change to the configured plugin libraries
+// (onnxSetEpLibraries).  onnxEnv() compares it with the generation its
+// environment was synced to and syncs it again when they differ.
 uint64_t onnxEpConfigGeneration();
 
-// The libraries a fresh environment registers: the configured set plus,
-// when the Windows ML catalog is enabled, the providers it resolved (which
-// may install them first -- see onnx_winml.h).  Memoized per configuration,
-// so asking twice costs nothing and downloads nothing.
+// The libraries the environment should have registered: the configured set
+// plus, when the Windows ML catalog is on, the providers it resolved (which
+// may install them first -- see onnx_winml.h).  The catalog's part is
+// memoized per runtime and fixed for the process with the rest of the
+// runtime setup (onnx_runtime.h), so asking again costs nothing and
+// downloads nothing.
 std::vector<OnnxEpLibrary> onnxEffectiveEpLibraries(const OrtRuntime &rt);
 
-// Register the effective libraries on `env`, just created for `rt`, and
-// record how each fared (onnxEpLibraryStatus()).  Also remembers which
-// provider names the environment listed *before* registering, so that
-// onnxPluginDevices can tell a plugin's devices from the built-in ones.
-void onnxRegisterEpLibraries(const OrtRuntime &rt, OrtEnv *env);
+// Bring `env`'s plugin libraries in line with the effective set, and
+// record how each fared (onnxEpLibraryStatus()): a library no longer wanted
+// is unregistered (and unloaded), a new one registered, and one that stays
+// keeps its answer.  The environment is never rebuilt for this -- it lives
+// for the process (onnx_session.cpp).  Also remembers which provider names
+// the environment listed before its first plugin, so that onnxPluginDevices
+// can tell a plugin's devices from the built-in ones.  Between runs only:
+// a library in use by a session cannot be unregistered.
+void onnxSyncEpLibraries(const OrtRuntime &rt, OrtEnv *env);
 
 // One entry per (plugin provider, hardware device) the environment
 // enumerates, accelerators first, CPU-class devices last, named from what
@@ -70,10 +77,6 @@ std::string onnxEpLibraryPath(const std::string &registrationName);
 // class clpeak gives a provider it knows.  False for a provider it does not.
 bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
                       std::string &typeStr, DeviceType &deviceType);
-
-// The Windows ML configuration as set by onnxSetWinml.
-bool onnxWinmlEnabled();
-std::string onnxWinmlPathHint();
 
 #endif // ENABLE_ONNX
 #endif // CLPEAK_ONNX_PLUGIN_H

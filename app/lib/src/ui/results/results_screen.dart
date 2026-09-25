@@ -21,33 +21,42 @@ class LiveResultsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final summary = service.lastSummary;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            CHeader(
-              title: service.cancelled ? 'Run cancelled' : 'Results',
-              subtitle: summary?.id,
-              onBack: service.reset,
-              actions: [
-                if (summary != null) _ExportButton(summary: summary),
-              ],
-            ),
-            if (service.cancelled)
-              const _Notice(
-                icon: Icons.info_outline,
-                text: 'The run was cancelled — partial results were saved.',
-              )
-            else if (service.exitCode > 0)
-              _Notice(
-                icon: Icons.warning_amber,
-                danger: true,
-                text:
-                    'Some backends reported errors (status ${service.exitCode}). '
-                    'Results below may be incomplete.',
+    // The finished run lives inside the Benchmark tab, not on a pushed
+    // route, so a system back button or swipe gesture would pop the app
+    // itself.  Intercept it and do what the header's back arrow does.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) service.reset();
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              CHeader(
+                title: service.cancelled ? 'Run cancelled' : 'Results',
+                subtitle: summary?.id,
+                onBack: service.reset,
+                actions: [
+                  if (summary != null) _ExportButton(summary: summary),
+                ],
               ),
-            Expanded(child: ResultsBody(document: service.document)),
-          ],
+              if (service.cancelled)
+                const _Notice(
+                  icon: Icons.info_outline,
+                  text: 'The run was cancelled — partial results were saved.',
+                )
+              else if (service.exitCode > 0)
+                _Notice(
+                  icon: Icons.warning_amber,
+                  danger: true,
+                  text:
+                      'Some backends reported errors (status ${service.exitCode}). '
+                      'Results below may be incomplete.',
+                ),
+              Expanded(child: ResultsBody(document: service.document)),
+            ],
+          ),
         ),
       ),
     );

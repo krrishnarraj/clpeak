@@ -1,9 +1,9 @@
 #include <hip/hip_runtime.h>
 
 // Raw MFMA (matrix-core) peak microbenchmark: fp8(e4m3) x fp8 + fp32, 16x16x32.
-// CDNA3 fp8 MFMA (gfx94x / gfx950+); on a part that lacks it the HIPRTC compile
-// fails and the host reports Unsupported (no arch list, see mfma_fp16.hip).
-// Each operand packs 8 fp8 lanes into a 64-bit value.
+// CDNA3 fp8 MFMA (gfx94x / gfx950+); a part that lacks it is left out of this
+// kernel's arch group in CMakeLists.txt and reported Unsupported by the host
+// (see mfma_fp16.hip). Each operand packs 8 fp8 lanes into a 64-bit value.
 // MFMA_ITERS * MFMA_ACC must match the host-side op count.
 #define MFMA_ITERS 512
 #define MFMA_ACC   8

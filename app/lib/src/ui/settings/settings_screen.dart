@@ -21,8 +21,11 @@ import '../common/kit.dart';
 /// backend, ONNX has no single driver on a machine: NPU vendors ship their own
 /// builds, and which one is loaded decides which execution providers appear at
 /// all — a stock build offers CPU and nothing else.  So the library is a
-/// setting, and changing it re-enumerates immediately rather than asking for a
-/// restart.
+/// setting.  It is set once per launch: the first runtime that loads fixes it
+/// (with Windows ML, which can choose the runtime and adds providers to it),
+/// so a change made after that is saved for the next launch, and the panel
+/// shows both — the runtime active now, and the one the next launch loads.
+/// LiteRT's library works the same way.  Plugin libraries stay live.
 ///
 /// The verbose switch is how a problem on a phone reaches a maintainer: with
 /// it on, the saved document carries the backends' debug output, the device
@@ -86,9 +89,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  /// Apply a library choice: persist it, hand it to the native loader, then
-  /// re-enumerate so the provider list on the run screen matches what was
-  /// just chosen.
+  /// Apply a library choice: persist it and hand it to the native loader,
+  /// which loads it now if no runtime has loaded yet (and the service
+  /// re-enumerates) or keeps it for the next launch.  Either way the status
+  /// read afterwards says which.
   Future<void> _applyLibrary(_Runtime which, String path) async {
     final settings = context.read<SettingsService>();
     final service = context.read<BenchmarkService>();
@@ -286,8 +290,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Switch the Windows ML catalog; enabling it re-enumerates, which installs
-  /// whatever certified providers fit the machine.
+  /// Switch the Windows ML catalog, part of the runtime setup: before a
+  /// runtime has loaded this re-enumerates, which installs whatever certified
+  /// providers fit the machine; after, it is saved for the next launch.
   Future<void> _applyWinml({required bool enabled, required String path}) async {
     final settings = context.read<SettingsService>();
     final service = context.read<BenchmarkService>();
@@ -344,12 +349,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const CSection(label: 'ONNX Runtime'),
                   const SizedBox(height: 10),
                   _RuntimePanel(
-                    view: _RuntimeView.onnx(_onnx),
+                    view: _RuntimeView.onnx(_onnx,
+                        winml: Platform.isWindows),
                     savedPath: settings.onnxLibraryPath,
                     locked: running,
                     onPick: () => _pickLibrary(_Runtime.onnx),
                     onReset: () => _resetLibrary(_Runtime.onnx),
                   ),
+                  // Windows ML beside the library it belongs with: together
+                  // they are the runtime setup, fixed per launch.
+                  if (Platform.isWindows) ...[
+                    const SizedBox(height: 22),
+                    const CSection(label: 'Windows ML'),
+                    const SizedBox(height: 10),
+                    _WinmlPanel(
+                      enabled: settings.onnxWinml,
+                      path: settings.onnxWinmlPath,
+                      locked: running,
+                      onToggle: (on) =>
+                          _applyWinml(enabled: on, path: settings.onnxWinmlPath),
+                      onPickDir: _pickWinmlDir,
+                      onClearDir: () =>
+                          _applyWinml(enabled: settings.onnxWinml, path: ''),
+                    ),
+                  ],
                   if (_desktop) ...[
                     const SizedBox(height: 22),
                     const CSection(label: 'Plugin execution providers'),
@@ -360,22 +383,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       locked: running,
                       onAdd: _addEpLibrary,
                       onRemove: _removeEpLibrary,
-                    ),
-                  ],
-                  if (Platform.isWindows) ...[
-                    const SizedBox(height: 22),
-                    const CSection(label: 'Windows ML'),
-                    const SizedBox(height: 10),
-                    _WinmlPanel(
-                      enabled: settings.onnxWinml,
-                      path: settings.onnxWinmlPath,
-                      status: _onnx,
-                      locked: running,
-                      onToggle: (on) =>
-                          _applyWinml(enabled: on, path: settings.onnxWinmlPath),
-                      onPickDir: _pickWinmlDir,
-                      onClearDir: () =>
-                          _applyWinml(enabled: settings.onnxWinml, path: ''),
                     ),
                   ],
                   const SizedBox(height: 22),
@@ -416,6 +423,24 @@ enum _Runtime {
   final String dirName;
 }
 
+/// One line of a runtime setup under its path: Windows ML's state, say.
+class _SetupLine {
+  const _SetupLine(this.icon, this.text, {this.danger = false});
+
+  final IconData icon;
+  final String text;
+  final bool danger;
+}
+
+/// A runtime setup saved since the runtime loaded, which the next launch
+/// loads: its library path (empty = found by name) and further lines.
+class _NextLaunch {
+  const _NextLaunch({required this.path, this.lines = const []});
+
+  final String path;
+  final List<_SetupLine> lines;
+}
+
 /// What the panel shows for one runtime, whichever backend reported it.
 class _RuntimeView {
   const _RuntimeView({
@@ -427,6 +452,8 @@ class _RuntimeView {
     required this.error,
     required this.hint,
     required this.fixedHint,
+    this.lines = const [],
+    this.next,
   });
 
   /// A status has been read at all (false while "Checking…").
@@ -441,39 +468,87 @@ class _RuntimeView {
   final String hint;
   final String fixedHint;
 
-  factory _RuntimeView.onnx(OnnxStatus? s) => _RuntimeView(
-        known: s != null,
-        available: s?.available ?? false,
-        // iOS links ONNX Runtime into the app — Apple's pod is a static
-        // framework and iOS will not dlopen another one — so there is
-        // nothing to choose.
-        fixed: s?.linkedIn ?? Platform.isIOS,
-        title: s == null
-            ? 'Checking…'
-            : s.available
-                ? 'ONNX Runtime ${s.version}'
-                : 'No runtime loaded',
-        path: s?.path ?? '',
-        error: s?.error ?? '',
-        hint: _onnxRuntimeHint,
-        fixedHint: 'Linked into the app; there is nothing else to choose.',
-      );
+  /// The rest of the active setup, under its path (ONNX: Windows ML).
+  final List<_SetupLine> lines;
+
+  /// The setup the next launch loads, when it differs from the active one.
+  final _NextLaunch? next;
+
+  /// What older native builds reported while nothing had resolved the
+  /// Windows ML catalog yet; current ones leave the error empty instead.
+  /// Both mean pending, never a failure.
+  static const _winmlPendingError = 'not resolved yet; enumerate or run first';
+
+  /// Windows ML as the active runtime was set up with it.
+  static _SetupLine _activeWinml(OnnxStatus s) {
+    if (!s.winmlEnabled) {
+      return const _SetupLine(Icons.storefront_outlined, 'Windows ML off');
+    }
+    if (s.winmlPath.isNotEmpty) {
+      return _SetupLine(
+          Icons.storefront_outlined, 'Windows ML on · ${s.winmlPath}');
+    }
+    if (s.winmlError.isNotEmpty && s.winmlError != _winmlPendingError) {
+      return _SetupLine(
+          Icons.storefront_outlined, 'Windows ML on · ${s.winmlError}',
+          danger: true);
+    }
+    return const _SetupLine(Icons.storefront_outlined,
+        'Windows ML on · waiting for enumeration…');
+  }
+
+  /// [winml]: this platform has the Windows ML catalog, so its state is part
+  /// of the setup shown.
+  factory _RuntimeView.onnx(OnnxStatus? s, {required bool winml}) {
+    final pending = s?.pendingRuntime;
+    return _RuntimeView(
+      known: s != null,
+      available: s?.available ?? false,
+      // iOS links ONNX Runtime into the app — Apple's pod is a static
+      // framework and iOS will not dlopen another one — so there is
+      // nothing to choose.
+      fixed: s?.linkedIn ?? Platform.isIOS,
+      title: s == null
+          ? 'Checking…'
+          : s.available
+              ? 'ONNX Runtime ${s.version}'
+              : 'No runtime loaded',
+      path: s?.path ?? '',
+      error: s?.error ?? '',
+      hint: _onnxRuntimeHint,
+      fixedHint: 'Linked into the app; there is nothing else to choose.',
+      lines: [if (winml && s != null && s.available) _activeWinml(s)],
+      next: pending == null
+          ? null
+          : _NextLaunch(path: pending.path, lines: [
+              if (winml || pending.winml)
+                _SetupLine(
+                    Icons.storefront_outlined,
+                    pending.winml
+                        ? 'Windows ML on · '
+                            '${pending.winmlPath.isNotEmpty ? pending.winmlPath : 'catalog beside the runtime or the app'}'
+                        : 'Windows ML off'),
+            ]),
+    );
+  }
 
   /// The engine's own hint text, worded to what actually follows it on this
-  /// platform: a plugin-library section and (Windows) Windows ML on
-  /// desktop, neither of which the phone build shows — there the app adds
-  /// a vendor NPU's plugin on its own when the device has one.
+  /// platform: Windows ML right below and a plugin-library section on
+  /// desktop, neither of which the phone build shows — there the app adds a
+  /// vendor NPU's plugin on its own when the device has one.
   static String get _onnxRuntimeHint {
+    const once = 'Set once per launch: after a runtime has loaded, a change '
+        'takes effect the next time clpeak starts.';
     if (Platform.isAndroid) {
       return 'The engine ONNX runs on. A vendor NPU plugin (Qualcomm\'s QNN) '
-          'is added automatically when this device has one.';
+          'is added automatically when this device has one. $once';
     }
     final more = Platform.isWindows
-        ? 'a plugin library below, or Windows ML further down'
+        ? 'Windows ML below, or a plugin library'
         : 'a plugin library below';
     return 'The engine ONNX runs on — its build decides which providers '
         'exist by default (always CPU, plus GPU/NPU if it shipped one). '
-        'Add a vendor NPU it left out with $more.';
+        'Add a vendor NPU it left out with $more. $once';
   }
 
   factory _RuntimeView.litert(LitertStatus? s) => _RuntimeView(
@@ -491,8 +566,10 @@ class _RuntimeView {
         path: s?.path ?? '',
         error: s?.error ?? '',
         hint: 'Bundled on mobile; if none is found, choose a pip '
-            'ai-edge-litert libLiteRt.',
+            'ai-edge-litert libLiteRt. Set once per launch, like ONNX '
+            'Runtime.',
         fixedHint: 'Bundled with the app; iOS loads nothing else.',
+        next: s?.pendingPath == null ? null : _NextLaunch(path: s!.pendingPath!),
       );
 }
 
@@ -515,6 +592,28 @@ class _RuntimePanel extends StatelessWidget {
   final VoidCallback onPick;
   final VoidCallback onReset;
 
+  static const _byName = 'Found by name on the system paths';
+
+  Widget _line(CP t, _SetupLine line, {bool rule = true, bool inactive = false}) {
+    final color = line.danger ? t.danger : (inactive ? t.faint : null);
+    return CRow(
+      rule: rule,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(line.icon, size: 15, color: line.danger ? t.danger : t.dim),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(line.text,
+                style: color == null
+                    ? t.monoSmallDim
+                    : t.monoSmallDim.copyWith(color: color)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
@@ -522,6 +621,7 @@ class _RuntimePanel extends StatelessWidget {
     final tint = ClpeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
     final fixed = s.fixed;
+    final next = s.next;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -537,52 +637,77 @@ class _RuntimePanel extends StatelessWidget {
                     Expanded(child: Text(s.title, style: t.mono)),
                     if (s.known)
                       CTag(
-                        text: s.available ? 'loaded' : 'absent',
+                        text: s.available ? 'active' : 'absent',
                         color: s.available ? tint : t.dim,
                       ),
                   ],
                 ),
               ),
-              CRow(
-                rule: s.error.isNotEmpty,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.folder_outlined, size: 15, color: t.dim),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        fixed
-                            ? 'Built into the app'
-                            : s.path.isNotEmpty
-                                ? s.path
-                                : savedPath.isNotEmpty
-                                    ? savedPath
-                                    : 'Found by name on the system paths',
-                        style: t.monoSmallDim,
-                      ),
-                    ),
-                  ],
-                ),
+              _line(
+                t,
+                _SetupLine(
+                    Icons.folder_outlined,
+                    fixed
+                        ? 'Built into the app'
+                        : s.path.isNotEmpty
+                            ? s.path
+                            : savedPath.isNotEmpty
+                                ? savedPath
+                                : _byName),
+                rule: s.lines.isNotEmpty || s.error.isNotEmpty,
               ),
+              for (var i = 0; i < s.lines.length; i++)
+                _line(t, s.lines[i],
+                    rule: i < s.lines.length - 1 || s.error.isNotEmpty),
               if (s.error.isNotEmpty)
+                _line(t, _SetupLine(Icons.error_outline, s.error, danger: true),
+                    rule: false),
+            ],
+          ),
+        ),
+        // The saved setup the next launch loads, inactive until then.
+        if (next != null) ...[
+          const SizedBox(height: 8),
+          CPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                CRow(
+                  child: Row(
+                    children: [
+                      Expanded(
+                          child: Text('Next launch',
+                              style: t.mono.copyWith(color: t.dim))),
+                      CTag(text: 'inactive', color: t.dim),
+                    ],
+                  ),
+                ),
+                _line(
+                    t,
+                    _SetupLine(Icons.folder_outlined,
+                        next.path.isNotEmpty ? next.path : _byName),
+                    inactive: true),
+                for (final line in next.lines)
+                  _line(t, line, inactive: true),
                 CRow(
                   rule: false,
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.error_outline, size: 15, color: t.danger),
+                      Icon(Icons.schedule, size: 15, color: t.dim),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: Text(s.error,
-                            style: t.monoSmallDim.copyWith(color: t.danger)),
+                        child: Text(
+                            'Takes effect the next time clpeak starts.',
+                            style: t.monoSmallDim),
                       ),
                     ],
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
         const SizedBox(height: 10),
         Text(
           fixed ? s.fixedHint : s.hint,
@@ -590,14 +715,17 @@ class _RuntimePanel extends StatelessWidget {
         ),
         if (!fixed) ...[
           const SizedBox(height: 12),
-          Row(
+          // A Wrap, so a phone-width screen puts the second button under the
+          // first rather than past the edge.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               CButton(
                 label: 'Choose library…',
                 icon: Icons.folder_open,
                 onPressed: locked ? null : onPick,
               ),
-              const SizedBox(width: 8),
               CButton(
                 label: 'Use default',
                 onPressed: locked || savedPath.isEmpty ? null : onReset,
@@ -734,13 +862,15 @@ class _EpLibrariesPanel extends StatelessWidget {
   }
 }
 
-/// Windows ML's execution-provider catalog: the switch, where its DLL is,
-/// and what the last enumeration made of it.
+/// Windows ML's execution-provider catalog, as saved: the switch and where
+/// its DLL is.  What the active runtime was set up with -- and what the
+/// catalog made of it -- is the runtime panel's to say, beside the library
+/// it belongs with; a change here after a runtime has loaded shows up there
+/// as the next launch's setup.
 class _WinmlPanel extends StatelessWidget {
   const _WinmlPanel({
     required this.enabled,
     required this.path,
-    required this.status,
     required this.locked,
     required this.onToggle,
     required this.onPickDir,
@@ -749,32 +879,14 @@ class _WinmlPanel extends StatelessWidget {
 
   final bool enabled;
   final String path;
-  final OnnxStatus? status;
   final bool locked;
   final ValueChanged<bool> onToggle;
   final VoidCallback onPickDir;
   final VoidCallback onClearDir;
 
-  /// What older native builds reported while nothing had resolved the
-  /// catalog yet; current ones leave the error empty instead. Both mean
-  /// pending, never a failure.
-  static const _pendingError = 'not resolved yet; enumerate or run first';
-
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final s = status;
-    final resolved = s != null && s.winmlEnabled && s.winmlPath.isNotEmpty;
-    // Pending until the next enumeration or run resolves the catalog -- the
-    // native status leaves both empty for that (older builds sent the
-    // sentence below as the error, which is still treated as pending here).
-    // Like the plugin list's empty-until-enumerated, it is not a failure.
-    final isPending = enabled &&
-        (s == null ||
-            (s.winmlEnabled &&
-                s.winmlPath.isEmpty &&
-                (s.winmlError.isEmpty || s.winmlError == _pendingError)));
-    final error = s != null && s.winmlEnabled && !isPending ? s.winmlError : '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -798,7 +910,7 @@ class _WinmlPanel extends StatelessWidget {
                 ),
               ),
               CRow(
-                rule: enabled && (error.isNotEmpty || isPending),
+                rule: false,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -806,70 +918,40 @@ class _WinmlPanel extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        resolved
-                            ? s.winmlPath
-                            : path.isNotEmpty
-                                ? path
-                                : 'Microsoft.Windows.AI.MachineLearning.dll '
-                                    'beside the runtime or the app',
+                        path.isNotEmpty
+                            ? path
+                            : 'Microsoft.Windows.AI.MachineLearning.dll '
+                                'beside the runtime or the app',
                         style: t.monoSmallDim,
                       ),
                     ),
                   ],
                 ),
               ),
-              if (enabled && isPending)
-                CRow(
-                  rule: false,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.hourglass_empty, size: 15, color: t.dim),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text('Waiting for enumeration…',
-                            style: t.monoSmallDim),
-                      ),
-                    ],
-                  ),
-                ),
-              if (enabled && error.isNotEmpty)
-                CRow(
-                  rule: false,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.error_outline, size: 15, color: t.danger),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(error,
-                            style: t.monoSmallDim.copyWith(color: t.danger)),
-                      ),
-                    ],
-                  ),
-                ),
             ],
           ),
         ),
         const SizedBox(height: 10),
         Text(
-          'The automatic version of the plugin providers above: turning this '
+          'The automatic version of the plugin providers below: turning this '
           'on installs the vendor providers (Qualcomm QNN, Intel OpenVINO, '
           'AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this machine from '
           'the Microsoft Store on first use — a download — instead of you '
           'naming the library yourself. The catalog DLL comes with the '
-          'Microsoft.Windows.AI.MachineLearning package, not with clpeak.',
+          'Microsoft.Windows.AI.MachineLearning package, not with clpeak. '
+          'Part of the runtime setup above, so it too is set once per launch.',
           style: t.micro.copyWith(color: t.dim),
         ),
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             CButton(
               label: 'Choose folder…',
               icon: Icons.folder_open,
               onPressed: locked ? null : onPickDir,
             ),
-            const SizedBox(width: 8),
             CButton(
               label: 'Use default',
               onPressed: locked || path.isEmpty ? null : onClearDir,

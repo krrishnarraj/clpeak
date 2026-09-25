@@ -49,8 +49,8 @@ class AboutScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'A synthetic micro-benchmark for measuring the peak achievable compute performance of CPUs and GPUs. '
-                          'It exercises tight vector, MAD, and MMA kernels, together with vendor-optimized GEMM libraries, to expose peak hardware throughput.',
+                          'Compute latency peak: the peak compute throughput, memory bandwidth and latency that CPUs, GPUs and NPUs actually reach. '
+                          "Small, tight kernels run alongside each vendor's own tuned libraries, through every API that exposes a device, so the results line up side by side.",
                           style: t.body,
                         ),
                       ],

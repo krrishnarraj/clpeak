@@ -43,15 +43,14 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
 
-    hipFunction_t fn;
-    if (!dev.getKernel(rocm_kernels::local_bandwidth, v.kname, fn))
+    RocmKernel k = dev.getKernel(rocm_kernels::local_bandwidth, v.kname);
+    if (!k)
     {
-      test.skip(key, ResultStatus::Error, "Kernel compile failed",
-                rocmWidthNote(v.width));
+      test.skip(key, k.status, k.reason, rocmWidthNote(v.width));
       continue;
     }
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

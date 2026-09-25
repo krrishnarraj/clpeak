@@ -1,9 +1,10 @@
 #include <hip/hip_runtime.h>
 
 // Raw MFMA (matrix-core) peak microbenchmark: bf16 x bf16 + fp32, 16x16x16.
-// Uses the CDNA "_1k" bf16 MFMA (gfx90a and newer); on a CDNA part that lacks
-// it the HIPRTC compile fails and the host reports Unsupported. See
-// mfma_fp16.hip for the accumulator-chain and no-#ifdef rationale.
+// Uses the CDNA "_1k" bf16 MFMA (gfx90a and newer); a CDNA part that lacks it
+// is left out of this kernel's arch group in CMakeLists.txt and reported
+// Unsupported by the host. See mfma_fp16.hip for the accumulator-chain and
+// no-#ifdef rationale.
 // MFMA_ITERS * MFMA_ACC must match mfma.cpp.
 #define MFMA_ITERS 512
 #define MFMA_ACC   8

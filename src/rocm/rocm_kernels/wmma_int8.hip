@@ -18,9 +18,7 @@ typedef int intN __attribute__((ext_vector_type(2)));
 #define WMMA_AB_ONES intN { 0x01010101, 0x01010101 }
 #define WMMA_I8(a, b, c) \
   __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(true, a, true, b, c, false)
-#elif defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-      defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
-      defined(__gfx1152__)
+#elif defined(__GFX11__)
 typedef int intN __attribute__((ext_vector_type(4)));
 #define WMMA_AB_ONES intN { 0x01010101, 0x01010101, 0x01010101, 0x01010101 }
 #define WMMA_I8(a, b, c) \

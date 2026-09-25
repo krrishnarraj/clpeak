@@ -1,22 +1,40 @@
 name: clpeak
 base: core26
 adopt-info: clpeak
-summary: Benchmarking tool to measure peak capabilities of GPU compute devices
+summary: Peak compute, memory bandwidth and latency of CPUs, GPUs and NPUs
 description: |
-  clpeak is a synthetic micro-benchmark that measures the peak achievable
-  performance of GPU compute devices. It exercises tight vector/MAD/MMA loops
-  and vendor-SDK GEMM libraries across multiple backends.
+  clpeak (compute latency peak) measures the peak compute throughput, memory
+  bandwidth and latency that a machine's CPUs, GPUs and NPUs actually reach.
+  It uses small, tight kernels alongside each vendor's own tuned libraries,
+  and runs the same tests through every API that exposes a device, so the
+  results line up side by side.
 
-  Supported backends: OpenCL, Vulkan, CUDA, ROCm, Metal, oneAPI, CPU
+  What it measures:
 
-  Benchmarks include: global/local/image memory bandwidth, single/half/double
-  precision compute, integer throughput, tensor operations (WMMA, cooperative
-  matrices), vendor GEMM peaks and kernel launch latency.
+  - Compute: fp32, fp16, fp64, mixed-precision, bf16, integer and
+    dot-product rates
+  - Matrix engines: cooperative matrices, tensor cores and CPU matrix units
+  - Bandwidth: device, local and image memory, host transfers, and CPU cache
+    and DRAM bandwidth per level
+  - Latency: kernel launch, memory latency per cache level, atomics and
+    branch mispredicts
+  - AI workloads: matmul, convolution and a transformer block per data
+    type, each with its numeric error against fp32
 
-  Output formats: plain text, XML, JSON, CSV
+  This snap has the Vulkan, OpenCL and native CPU backends, and the ONNX
+  Runtime and LiteRT backends, which use a runtime installed on the host
+  (--onnx-lib, --litert-lib). Builds with the CUDA, ROCm and oneAPI backends
+  are on the GitHub releases page.
 
-  Ships two front-ends: the clpeak CLI and clpeak-gui, the Flutter desktop app
-  (`snap run clpeak.clpeak-gui`, or its launcher entry).
+  It has two front-ends over the same engine: the clpeak command (clpeak
+  --help) and the desktop app, clpeak.clpeak-gui, which is also in the app
+  launcher on x86-64. Runs can be saved as JSON (-o run.clpeak.json) and
+  compared with a later run (--compare).
+
+  Classic confinement lets clpeak reach the GPU drivers and device nodes it
+  benchmarks.
+
+  Source, issues and reference results: https://github.com/krrishnarraj/clpeak
 
 grade: stable
 confinement: classic

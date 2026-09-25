@@ -46,16 +46,17 @@ struct OnnxWinmlResolution
   std::vector<OnnxWinmlProvider> providers;  // what it listed, ready or not
 };
 
-// Resolve the catalog for the current configuration: load the DLL,
+// Resolve the catalog for the Windows ML setup in effect: load the DLL,
 // enumerate the providers that fit this machine, install and prepare the
-// certified ones, and read their library paths.  Memoized per configuration
-// (and per runtime, since the search for the DLL starts beside it): the
-// install step is a download, and it runs once.  `pathHint` is what
+// certified ones, and read their library paths.  Memoized per setup (and per
+// runtime, since the search for the DLL starts beside it) -- which is one
+// memo per process, the setup being fixed once a runtime loads: the install
+// step is a download, and it runs once.  `pathHint` is what
 // --onnx-winml named -- the DLL or its directory -- or empty to search.
 const OnnxWinmlResolution &onnxWinmlResolve(const OrtRuntime *rt,
                                             const std::string &pathHint);
 
-// The memoized answer for the current configuration and `rt`, or null when
+// The memoized answer for the setup in effect and `rt`, or null when
 // nothing has resolved it yet.  For status queries, which must never be the
 // thing that installs a provider.
 const OnnxWinmlResolution *onnxWinmlResolved(const OrtRuntime *rt);

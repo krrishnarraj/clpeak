@@ -8,6 +8,7 @@
 #include <common/options.h>
 #include <common/peak.h>
 #include <common/host_info.h>
+#include <common/keep_awake.h>
 #include <common/run_document.h>
 #include <common/run_log.h>
 #include <version.h>
@@ -110,7 +111,15 @@ char *clpeak_copy_onnx_status_json(void)
     json += ",\"winml\":{\"enabled\":";
     json += st.winmlEnabled ? "true" : "false";
     json += ",\"path\":\"" + jsonEscape(st.winmlPath) + "\"";
-    json += ",\"error\":\"" + jsonEscape(st.winmlError) + "\"}}";
+    json += ",\"error\":\"" + jsonEscape(st.winmlError) + "\"}";
+    if (st.pending)
+    {
+        json += ",\"pendingRuntime\":{\"path\":\"" + jsonEscape(st.pendingLibrary) + "\"";
+        json += ",\"winml\":{\"enabled\":";
+        json += st.pendingWinml ? "true" : "false";
+        json += ",\"path\":\"" + jsonEscape(st.pendingWinmlPath) + "\"}}";
+    }
+    json += "}";
     return copyString(json);
 #else
     return copyString(
@@ -183,7 +192,10 @@ char *clpeak_copy_litert_status_json(void)
     json += st.available ? "true" : "false";
     json += ",\"version\":\"" + jsonEscape(st.version) + "\"";
     json += ",\"path\":\"" + jsonEscape(st.path) + "\"";
-    json += ",\"error\":\"" + jsonEscape(st.error) + "\"}";
+    json += ",\"error\":\"" + jsonEscape(st.error) + "\"";
+    if (st.pending)
+        json += ",\"pendingRuntime\":{\"path\":\"" + jsonEscape(st.pendingPath) + "\"}";
+    json += "}";
     return copyString(json);
 #else
     return copyString(
@@ -308,6 +320,12 @@ int clpeak_launch(int argc, const char **argv,
         for (const auto &be : backendRegistry())
             if (opts.backendEnabled(be.id))
                 combined.inventory.push_back(be.enumerate());
+
+    // Held until the launch returns, as in the CLI.  The desktop app holds
+    // nothing else, and a window being open does not count as activity to
+    // any OS idle timer; on Android and iOS it is a no-op and the app keeps
+    // the screen on itself (include/common/keep_awake.h).
+    clpeak::KeepAwake keepAwake;
 
     for (const auto &be : backendRegistry())
     {

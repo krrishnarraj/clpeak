@@ -533,7 +533,8 @@ int vkPeak::runAll()
       dev.info.driverVersion,
       deviceProps,
       -1,
-      static_cast<int>(d)
+      static_cast<int>(d),
+      dev.info.deviceType
     });
     currentDeviceScope = &deviceScope;
 

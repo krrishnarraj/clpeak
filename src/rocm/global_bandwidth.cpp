@@ -90,12 +90,10 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
 
-    hipFunction_t fn;
-    if (!dev.getKernel(rocm_kernels::global_bandwidth,
-                       v.kernelName, fn))
+    RocmKernel k = dev.getKernel(rocm_kernels::global_bandwidth, v.kernelName);
+    if (!k)
     {
-      test.skip(key, ResultStatus::Error, "Kernel compile failed",
-                rocmWidthNote(v.width));
+      test.skip(key, k.status, k.reason, rocmWidthNote(v.width));
       continue;
     }
 
@@ -105,7 +103,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     uint32_t blocksU = (uint32_t)blocks;
 
     void *args[2] = {&inBuf, &outBuf};
-    float us = runKernel(dev, fn, blocksU, blockSize, args,
+    float us = runKernel(dev, k.fn, blocksU, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

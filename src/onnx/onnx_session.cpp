@@ -49,7 +49,7 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
 }
 
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq, int64_t blockSize)
+                                    bool qdq)
 {
   // TensorRT for RTX on a per-tensor float4 QDQ matmul: GetCapability takes
   // the whole graph and the engine build that follows dies with an access
@@ -68,39 +68,6 @@ std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
            "declining it as TensorRT does -- its float4 path wants a block "
            "scale, which the nvfp4 row has -- so this graph is not sent to it";
 
-  // DirectML on blocked int8 weights: the transformer block's int8_weight
-  // session -- seven DequantizeLinear(int8, one fp16 scale per 32 rows:
-  // block_size=32, axis=0) feeding 2048-wide MatMuls -- ended the process
-  // with an integer divide by zero (exit 0xC0000094) inside session
-  // creation, after ORT's own transformers had finished with the graph (the
-  // last line logged is its attention scale being folded away) and before
-  // the allocation planner spoke: the window in which the DML provider
-  // compiles its fused partitions.  ONNX Runtime 1.24.4 with its DirectML
-  // provider on adapter 0, an RTX 4060 by the runtime's own device listing,
-  // 2026-09-21; the fp16 and int4_weight forms of the same block had built
-  // and run first.  Nothing after it ran.
-  //
-  // int4 survives because ORT rewrites it first: DQMatMulToMatMulNBits takes
-  // only 4-bit weights (Is4BitIntType, qdq_selectors.cc), so the int4 block
-  // reaches DirectML as MatMulNBits and the int8 one as a raw opset-21
-  // DequantizeLinear, which the DML provider registers with no support
-  // query and hands straight to DML_DEQUANTIZE_OPERATOR_DESC
-  // (DmlOperatorQuantization21).  The 32-cube probe of the same graph
-  // built and ran, but its scale is one row -- a layout DirectML can read
-  // as a plain per-column broadcast -- and every rung the gemm ladder times
-  // (1024 and up) has the block layout the block had.  A crash inside a
-  // system DLL cannot be caught, so the format is not sent to this provider
-  // at any size rather than only in the graph seen to die; a run that
-  // proves the ladder survives its own layout is what narrows this to the
-  // block.  int8_qdq is per-tensor and unaffected; int4_weight is fused
-  // away before DirectML sees it.
-  if (ep.providerKey == "DmlExecutionProvider" && dtype == ONNX_DT_INT8 &&
-      !qdq && blockSize > 0)
-    return "DirectML takes the process down (an integer divide by zero while "
-           "the session is created, seen on ONNX Runtime 1.24.4) on blocked int8 "
-           "weights -- a DequantizeLinear with one scale per 32 rows, which "
-           "ORT hands it unfused because only 4-bit weights become "
-           "MatMulNBits -- so this format is not sent to it";
   return std::string();
 }
 
@@ -170,6 +137,16 @@ std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 namespace
 {
 
+// While the viability probe runs, the ORT logger's relay is demoted to
+// debug: a target with no hardware behind it (OpenVINO NPU with no NPU)
+// reports the refusal at ERROR severity, and with no LogSink installed
+// (--list-devices, the GUI catalog) every Error reaches the terminal --
+// past ScopedConsoleMute, which deliberately lets clpeak's own diagnostics
+// through.  The probe already keeps the refusal reason from the returned
+// status, so nothing is lost.  Nesting-safe; the latch in ortLogMessage
+// stays first so a loss announced mid-probe is still caught.
+std::atomic<int> g_relaySuppressDepth{0};
+
 // OrtLoggingFunction: ORT's severities onto the run log's levels.  INFO is
 // the session-creation narration -- providers registered, transformers
 // applied -- which is debug material and dropped unless --verbose; ERROR
@@ -195,6 +172,9 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   case ORT_LOGGING_LEVEL_WARNING: level = clpeak::LogLevel::Warning; break;
   default:                        level = clpeak::LogLevel::Debug;   break;
   }
+  if (level != clpeak::LogLevel::Debug &&
+      g_relaySuppressDepth.load(std::memory_order_relaxed) > 0)
+    level = clpeak::LogLevel::Debug;
   if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
     return;
   // The optimizer narrates every pass over every session -- forty
@@ -223,65 +203,71 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
 
 } // namespace
 
+void onnxSuppressOrtRelay(bool on)
+{
+  int d = g_relaySuppressDepth.load(std::memory_order_relaxed) + (on ? 1 : -1);
+  if (d < 0)
+    d = 0;
+  g_relaySuppressDepth.store(d, std::memory_order_relaxed);
+}
+
 // Why the last onnxEnv() refused, for the rows that report it.  Written
 // and read under onnxEnv()'s lock or on the same thread after it returned
 // null, so a plain string will do.
 static std::string g_envError;
 
+// The process's one OrtEnv, created on first use and never released.  One
+// runtime per process (onnx_runtime.h) means nothing ever needs a second
+// environment, and releasing one is where runtimes have crashed on their own
+// teardown: before 1.25 the WebGPU provider's device-lost callback logs
+// through the logger the environment has just destroyed (ReleaseEnv ->
+// WebGpuContextFactory::Cleanup -> the Dawn device's DeviceLostEvent ->
+// LOGS_DEFAULT, "Attempt to use DefaultLogger but none has been
+// registered", thrown out of a destructor, so std::terminate; ORT 1.24.4
+// for macOS, reproduced; microsoft/onnxruntime#27569), and before 1.29 a
+// plugin provider's allocators held references teardown could outlive (an
+// access violation AppVerifier caught; microsoft/onnxruntime#29770) -- the
+// likeliest reading of the GUI dying as it left DirectML's 1.24.4 with
+// Windows ML providers registered.  A change of plugin libraries is synced
+// onto the live environment instead (onnxSyncEpLibraries).
+static std::mutex g_envLock;
+static OrtEnv *g_env = nullptr;
+static const OrtApiBase *g_envBase = nullptr;   // the runtime it belongs to
+// The plugin configuration the environment was last synced to (onnx_plugin.h).
+static uint64_t g_envGeneration = 0;
+// A runtime that refused once refuses again: remembered, so enumeration
+// does not pay for the same failed attempt at every probe.
+static const OrtApiBase *g_failedBase = nullptr;
+
 OrtEnv *onnxEnv(const OrtRuntime &rt)
 {
-  // One OrtEnv per loaded runtime.  The GUI can hot-swap the ONNX Runtime
-  // library in-process (Settings → Choose library…); enumeration is what
-  // loads the runtime and needs no Env, so it succeeds, but the old Env
-  // belongs to the old shared object's LoggingManager singleton.
-  // Reusing it with the new OrtApi triggers
-  //   "Attempt to use DefaultLogger but none has been registered."
-  // Track which runtime the cached Env was created from and recreate it
-  // when the runtime changes.  Works on Windows/Linux/macOS/Android;
-  // on iOS (CLPEAK_ONNX_STATIC) the runtime never changes so the Env
-  // is still created once.
-  static std::mutex mutex;
-  static OrtEnv *env = nullptr;
-  static const OrtApi *envApi = nullptr;
-  static const OrtApiBase *envBase = nullptr;
-  // The plugin libraries an Env registers are part of its identity too
-  // (onnx_plugin.h): a different set between runs means a fresh Env, on
-  // which the new set is registered and the old one is unloaded with it.
-  static uint64_t envGeneration = 0;
-  // A runtime that refused once refuses again: remembered per runtime, so
-  // enumeration does not pay for the same failed attempt at every probe,
-  // and a different library gets its own try.
-  static const OrtApi *failedApi = nullptr;
-  static const OrtApiBase *failedBase = nullptr;
-  std::lock_guard<std::mutex> lock(mutex);
+  std::lock_guard<std::mutex> lock(g_envLock);
   const uint64_t generation = onnxEpConfigGeneration();
-  if (env && envApi == rt.api && envBase == rt.base &&
-      envGeneration == generation)
-    return env;
-  if (!env && failedApi == rt.api && failedBase == rt.base)
-    return nullptr;
-  if (env)
+  if (g_env && g_envBase == rt.base)
   {
-    // Release with the API that created it; the old shared object is still
-    // mapped (g_rt.lib is leaked on purpose) so its ReleaseEnv remains valid.
-    if (envApi && envApi->ReleaseEnv)
-      envApi->ReleaseEnv(env);
-    else if (rt.api && rt.api->ReleaseEnv)
-      rt.api->ReleaseEnv(env);
-    env = nullptr;
-    envApi = nullptr;
-    envBase = nullptr;
+    if (g_envGeneration != generation)
+    {
+      g_envGeneration = generation;
+      onnxSyncEpLibraries(rt, g_env);
+    }
+    return g_env;
   }
+  if (!g_env && g_failedBase == rt.base)
+    return nullptr;
+  // An environment of another runtime cannot be here -- the runtime is fixed
+  // for the process -- and would not be released if it were: its runtime is
+  // still mapped, so leaving it costs nothing a crash would not.
+  g_env = nullptr;
   // The runtime's own log goes to the run log (ortLogMessage) instead of
   // to stderr: a provider explaining why it declined a graph, or which
   // nodes fell back to the CPU, is the line that explains an Unsupported
   // row or a slow one, and on a phone there is no stderr to read it from.
-  // The Env is created once per runtime and its level is fixed, while
-  // --verbose can differ from run to run in the GUI, so it is opened at
-  // INFO and the callback applies the current run's verbosity.
+  // The Env is created once and its level is fixed, while --verbose can
+  // differ from run to run in the GUI, so it is opened at INFO and the
+  // callback applies the current run's verbosity.
   OrtStatus *st = rt.api->CreateEnvWithCustomLogger(
-      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &env);
-  if (st || !env)
+      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &g_env);
+  if (st || !g_env)
   {
     // Two package-built runtimes (Debian's, Homebrew's) share one system
     // libonnx, whose schema registry is process-wide: the second to create
@@ -290,19 +276,17 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
     g_envError = st ? onnxStatusText(rt, st)
                     : "the runtime returned no environment and no error";
     CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", g_envError.c_str());
-    env = nullptr;
-    failedApi = rt.api;
-    failedBase = rt.base;
+    g_env = nullptr;
+    g_failedBase = rt.base;
     return nullptr;
   }
-  envApi = rt.api;
-  envBase = rt.base;
-  envGeneration = generation;
+  g_envBase = rt.base;
+  g_envGeneration = generation;
   g_envError.clear();
   // Plugin providers live on the Env, so this is where they are registered
-  // -- once per Env, before anything enumerates or attaches them.
-  onnxRegisterEpLibraries(rt, env);
-  return env;
+  // -- before anything enumerates or attaches them.
+  onnxSyncEpLibraries(rt, g_env);
+  return g_env;
 }
 
 std::string onnxEnvError()

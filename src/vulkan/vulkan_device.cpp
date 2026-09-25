@@ -44,10 +44,11 @@ static bool queryBasicInfo(VulkanDevice *self, VkPhysicalDevice physDev)
   if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
       self->info.deviceType = DeviceType::Cpu;
   else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
-           props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+           props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
+           props.deviceType == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU)
       self->info.deviceType = DeviceType::Gpu;
   else
-      self->info.deviceType = DeviceType::Unknown;
+      self->info.deviceType = DeviceType::Unknown;   // _OTHER: the driver won't say
 
   self->info.numCUs = 0;
 

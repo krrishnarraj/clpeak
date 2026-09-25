@@ -16,11 +16,12 @@
 //     ABOVE gfx9xx. So a threshold would wrongly claim MFMA on RDNA.
 //   * Exact arch lists silently exclude future CDNA parts.
 // Instead we gate on the one stable invariant -- MFMA lives on the CDNA family
-// (gfx9xx) -- and let the HIPRTC compile decide the exact per-datatype support.
-// clang hard-gates each mfma builtin per sub-target, so a future CDNA arch is
-// picked up automatically and an unsupported datatype fails to compile and is
-// reported Unsupported. The kernels' op count (MFMA_ITERS * MFMA_ACC) must match
-// the #defines in mfma_*.hip.
+// (gfx9xx) -- and leave the exact per-datatype support to each kernel's arch
+// group in CMakeLists.txt: clang hard-gates each mfma builtin per sub-target, so
+// a datatype is only built where it exists, and a CDNA part its group leaves out
+// is reported Unsupported. A part missing from the build altogether reads as an
+// Error naming its arch, never as a missing instruction. The kernels' op count
+// (MFMA_ITERS * MFMA_ACC) must match the #defines in mfma_*.hip.
 namespace {
 
 constexpr uint64_t kMfmaIters = 512;
@@ -47,7 +48,7 @@ std::string archBaseOf(const std::string &a)
 
 // MFMA exists only on the CDNA / data-center line (gfx9xx). RDNA (gfx10/11/12)
 // has WMMA, not MFMA. This family check is the only hardcoded assumption; the
-// precise per-datatype capability is settled by the HIPRTC compile below.
+// precise per-datatype capability is which archs each kernel was built for.
 bool isCdnaFamily(const std::string &base)
 {
   return base.compare(0, 4, "gfx9") == 0;
@@ -130,16 +131,13 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    // Compiler-driven capability check: if this GPU lacks the instruction the
-    // HIPRTC compile of the builtin fails. Report that as Unsupported rather
-    // than a hard error, since for MFMA it means the datatype isn't available.
-    hipFunction_t fn;
-    // A compile failure here just means the datatype isn't supported on this
-    // arch; the HIPRTC log is --verbose-only so it never breaks result output.
-    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    // The arch groups in CMakeLists.txt build each data type only where
+    // its instruction exists; a GPU they leave out reads Unsupported.
+    RocmKernel k = dev.getKernel(*me.blob, me.kernelName,
+                                 "MFMA instruction for this datatype not available on this GPU");
+    if (!k)
     {
-      test.skip(me.label, ResultStatus::Unsupported,
-                "MFMA instruction for this datatype not available on this GPU", unitOpts(me));
+      test.skip(me.label, k.status, k.reason, unitOpts(me));
       continue;
     }
 
@@ -160,7 +158,7 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
@@ -189,11 +187,11 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    hipFunction_t fn;
-    if (!dev.getKernel(*me.blob, me.kernelName, fn))
+    RocmKernel k = dev.getKernel(*me.blob, me.kernelName,
+                                 "MFMA instruction for this datatype not available on this GPU");
+    if (!k)
     {
-      test.skip(me.label, ResultStatus::Unsupported,
-                "MFMA instruction for this datatype not available on this GPU", unitOpts(me));
+      test.skip(me.label, k.status, k.reason, unitOpts(me));
       continue;
     }
 
@@ -214,7 +212,7 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

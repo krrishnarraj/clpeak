@@ -66,9 +66,9 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   d.elemSize = sizeof(int);
   d.scalarArg = &A;
   d.scalarSize = sizeof(A);
-  // The DP4a builtin is absent on some archs (e.g. gfx12 lacks dot1-insts when
-  // built against the legacy sdot4 path); such a compile failure shows just
-  // "[error] compile/load failed" (the multi-page HIPRTC log is --verbose-only).
+  // Vega 10, the GCN5 APUs, gfx1010 and gfx1013 have no packed int8 dot
+  // instruction; the kernel's arch group leaves them out.
+  d.notBuilt = "No 8-bit dot-product instruction on this GPU";
   return runComputeKernel(dev, cfg, d);
 }
 

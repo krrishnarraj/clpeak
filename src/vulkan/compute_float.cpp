@@ -120,10 +120,9 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef VK_HAS_COMPUTE_MP_V1
 int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  // v1 = scalar fp16 (baseline; no HFMA2 packing).
-  // v2 = f16vec2  (unlocks NVIDIA HFMA2 at 2x FP32 rate on shader cores).
-  // v4 = f16vec4  (wider packing; informs AMD/Intel where issue rate
-  //                exceeds two lanes per slot).
+  // Unlike compute_hp's, these widths never pack fp16 arithmetic: the
+  // accumulators are fp32 at every width (compute_mp_v*.comp), so on NVIDIA
+  // all three are FFMA, bounded by the FP32 rate.
   static const vk_compute_variant_t variants[] = {
     { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size, vkWidthNote(1),
       VK_ALT_SHADER(compute_mp_v1) },

@@ -138,6 +138,10 @@ struct LitertRuntimeStatus
   std::string version;   // the ABI version this build speaks; LiteRT has no runtime version string
   std::string path;      // what was loaded
   std::string error;     // populated only when !available
+  // A library chosen after the runtime loaded, which loads at the next start
+  // (src/litert/litert_runtime.h): `pendingPath` empty for the default search.
+  bool pending = false;
+  std::string pendingPath;
 };
 LitertRuntimeStatus litertRuntimeStatus();
 

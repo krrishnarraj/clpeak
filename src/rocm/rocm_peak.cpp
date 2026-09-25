@@ -163,9 +163,19 @@ int RocmPeak::runAll()
         {"VRAM",  std::to_string(dev.info.totalGlobalMem / (1024 * 1024)) + " MB"},
       },
       -1,
-      idx
+      idx,
+      dev.info.deviceType
     });
     currentDeviceScope = &deviceScope;
+
+    // Said once here, since every test of clpeak's own kernels below will skip
+    // with the same reason.
+    if (!dev.archCovered)
+      CLPEAK_LOG(Warning,
+                 "ROCm %s: this clpeak build has no %s code, so its own kernels "
+                 "cannot run on this GPU; the rocBLAS and hipBLASLt tests still can",
+                 dev.info.deviceName.c_str(),
+                 dev.info.archName.substr(0, dev.info.archName.find(':')).c_str());
 
     // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (isAllowed(Benchmark::ComputeSP))

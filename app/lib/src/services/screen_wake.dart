@@ -13,8 +13,9 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 /// after the blackout are measured under different conditions than the ones
 /// before it.  A run should be uniform end to end, watched or not.
 ///
-/// Mobile only.  Desktop has no idle timer to fight while a window is up, and
-/// a benchmark app has no business overriding a machine's own sleep policy.
+/// Mobile only.  On desktop the native launch holds the machine out of idle
+/// sleep itself, as the CLI does, and leaves the display to its own timeout
+/// except on a Windows Modern Standby machine (include/common/keep_awake.h).
 ///
 /// Every call is best-effort.  The lock is a convenience, not part of the
 /// measurement, so a platform that has no implementation or an OS that

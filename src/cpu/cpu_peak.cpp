@@ -142,11 +142,11 @@ int CpuPeak::runAll()
   std::vector<logger::Prop> props;
   props.push_back({"Vendor", info.vendor.empty() ? "Unknown" : info.vendor});
   props.push_back({"ISA",    info.isaName});
-  // An x86 binary translated on ARM64 (Prism/Rosetta/qemu-user) still reports
-  // guest CPUID widths, so name the translation: otherwise a suppressed AVX2
-  // divider row looks like a missing feature rather than a host-width cap.
+  // An x86 binary translated on ARM64 (Prism/Rosetta/qemu-user) reports the
+  // translator's virtual CPU, so name the translation: every row below is
+  // translated code on an ARM core, not the x86 part the header describes.
   if (info.emulatedX86OnArm)
-    props.push_back({"Emulation", "x64 on ARM64 (wider SIMD rows suppressed)"});
+    props.push_back({"Emulation", "x86 translated on ARM64"});
   {
     std::string cores = std::to_string(info.logicalCores) + " threads / " +
                         std::to_string(info.physicalCores) + " cores";
@@ -191,7 +191,7 @@ int CpuPeak::runAll()
     props.push_back({"RAM", fmtBytes(info.totalMemBytes)});
 
   auto deviceScope = backendScope.beginDevice({
-    info.name, "", "", props, -1, 0});
+    info.name, "", "", props, -1, 0, DeviceType::Cpu});
   currentDeviceScope = &deviceScope;
 
   benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Cpu);

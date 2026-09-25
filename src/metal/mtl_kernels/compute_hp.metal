@@ -2,14 +2,15 @@
 //   compute_hp   -- scalar half FMA
 //   compute_hp2  -- half2 packed FMA
 //
-// Apple silicon note: unlike NVIDIA HFMA2 (2x FP32 rate) or AMD's WMMA-
+// Apple silicon note: unlike NVIDIA HFMA2 on Volta/Turing (2x FP32 rate;
+// GeForce from Ampere on runs it at 1x, as Apple does) or AMD's WMMA-
 // adjacent fp16 path, the Apple silicon shader core does NOT have a fp16
 // throughput advantage over fp32 -- both flavors lower to the same FMA
 // pipe.  Both compute_hp variants therefore plateau near the FP32 peak
 // from compute_sp; the only path to Apple's true fp16 throughput is
 // simdgroup_matrix (the matrix engine), measured separately.  Reporting
 // the shader-core hp number anyway is still useful for cross-backend
-// comparison vs. NVIDIA / AMD where a delta does exist.
+// comparison vs. the parts where a delta does exist.
 //
 // Op accounting matches compute_hp.cu: 4096 fp16 ops/thread either way.
 //

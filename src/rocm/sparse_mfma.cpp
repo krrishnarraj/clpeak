@@ -10,9 +10,9 @@
 // the K depth in the same time, so the *effective* throughput is ~2x the dense
 // MFMA (MI300X: fp16/bf16 2.61 PFLOPS, int8 5.22 POPS, fp8 5.22 PFLOPS).
 //
-// Same capability model as mfma.cpp: gate on the CDNA (gfx9xx) family, then let
-// the HIPRTC compile of __builtin_amdgcn_smfmac_* settle exact per-datatype
-// support so future CDNA parts are picked up with no list edits. FLOPs are
+// Same capability model as mfma.cpp: gate on the CDNA (gfx9xx) family, then
+// let each kernel's arch group in CMakeLists.txt -- the parts that have that
+// __builtin_amdgcn_smfmac_* -- settle exact per-datatype support. FLOPs are
 // counted with the DENSE-equivalent K (the work the instruction actually does),
 // which is what yields the sparse 2x figure. SMFMAC_ITERS * SMFMAC_ACC must
 // match the #defines in smfmac_*.hip.
@@ -40,8 +40,8 @@ std::string archBaseOf(const std::string &a)
 }
 
 // SMFMAC is CDNA3+. The family check (gfx9xx) excludes RDNA cleanly; a CDNA
-// part without a given sparse datatype fails the HIPRTC compile and is reported
-// Unsupported rather than emitting a fabricated number.
+// part without a given sparse datatype has no slice of its kernel and is
+// reported Unsupported rather than emitting a fabricated number.
 bool isCdnaFamily(const std::string &base)
 {
   return base.compare(0, 4, "gfx9") == 0;
@@ -117,13 +117,13 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    hipFunction_t fn;
-    // A compile failure here just means the datatype isn't supported on this
-    // arch; the HIPRTC log is --verbose-only so it never breaks result output.
-    if (!dev.getKernel(*se.blob, se.kernelName, fn))
+    // The arch groups in CMakeLists.txt build each data type only where
+    // its instruction exists; a GPU they leave out reads Unsupported.
+    RocmKernel k = dev.getKernel(*se.blob, se.kernelName,
+                                 "Sparse MFMA instruction for this datatype not available on this GPU");
+    if (!k)
     {
-      test.skip(se.label, ResultStatus::Unsupported,
-                "Sparse MFMA instruction for this datatype not available on this GPU", unitOpts(se));
+      test.skip(se.label, k.status, k.reason, unitOpts(se));
       continue;
     }
 
@@ -144,7 +144,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {
@@ -173,11 +173,11 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    hipFunction_t fn;
-    if (!dev.getKernel(*se.blob, se.kernelName, fn))
+    RocmKernel k = dev.getKernel(*se.blob, se.kernelName,
+                                 "Sparse MFMA instruction for this datatype not available on this GPU");
+    if (!k)
     {
-      test.skip(se.label, ResultStatus::Unsupported,
-                "Sparse MFMA instruction for this datatype not available on this GPU", unitOpts(se));
+      test.skip(se.label, k.status, k.reason, unitOpts(se));
       continue;
     }
 
@@ -198,7 +198,7 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

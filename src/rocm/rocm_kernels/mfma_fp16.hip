@@ -5,10 +5,12 @@
 // unrolled chain with no memory traffic, exposing peak matrix-core throughput.
 // MFMA_ITERS * MFMA_ACC must match the host-side op count in mfma.cpp.
 //
-// No arch #ifdef guard on purpose: HIPRTC compiles this for the real device
-// arch, and clang gates __builtin_amdgcn_mfma_* per sub-target. If the GPU
-// lacks the instruction the compile fails and the host reports it Unsupported,
-// so future CDNA parts are picked up automatically without editing any list.
+// No arch #ifdef guard on purpose: clang gates __builtin_amdgcn_mfma_* per
+// sub-target, so asking hipcc for an arch without the instruction fails the
+// build -- the builtin does the job wmma_fp16.hip's #error does. This kernel's
+// arch group in CMakeLists.txt therefore lists only parts that have the
+// instruction, and RocmDevice::getKernel reads the bundle header and reports a
+// CDNA GPU the group leaves out as Unsupported.
 #define MFMA_ITERS 512
 #define MFMA_ACC   8
 

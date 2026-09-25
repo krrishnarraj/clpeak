@@ -23,15 +23,9 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
   }
   return 0;
 #else
-  if (!dev.info.rocwmmaSupported)
-  {
-    logger::EmitOptions o; o.description = "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
-    test.skip("fp16", ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", o);
-    logger::EmitOptions oi; oi.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; oi.unit = "ops";
-    test.skip("int8", ResultStatus::Unsupported, "rocWMMA does not support this GPU architecture", oi);
-    return 0;
-  }
-
+  // Which archs rocWMMA supports is whatever the installed version's headers
+  // accepted at build time (probed in EmbedRocmKernels.cmake), so the kernels'
+  // bundles are the list -- a GPU without a slice is one rocWMMA lacks.
   // Helper to run one rocWMMA variant
   auto runOne = [&](const char *metric, const char *note, const char *kernelName,
                     const rocm_kernels::Blob &blob, uint32_t K, size_t elemBytes,
@@ -59,16 +53,17 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
       return;
     }
 
-    hipFunction_t fn;
-    if (!dev.getKernel(blob, kernelName, fn))
+    RocmKernel k = dev.getKernel(blob, kernelName,
+                                 "rocWMMA does not support this GPU architecture");
+    if (!k)
     {
       (void)hipFree(outBuf);
-      test.skip(metric, ResultStatus::Error, "Kernel compile failed", opts);
+      test.skip(metric, k.status, k.reason, opts);
       return;
     }
 
     void *args[1] = {&outBuf};
-    float us = runKernel(dev, fn, numBlocks, blockSize, args,
+    float us = runKernel(dev, k.fn, numBlocks, blockSize, args,
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     if (us <= 0.0f)
     {

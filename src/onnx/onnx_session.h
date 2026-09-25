@@ -7,16 +7,16 @@
 // the EP cannot run entirely fails session creation (and the row reports
 // Unsupported) instead of silently measuring the CPU.
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "onnx_runtime.h"
 #include <onnx/onnx_peak.h>
 
-// Process-wide OrtEnv (created on first use; log level follows --verbose).
-// Null when the runtime refuses to create one, with the reason in
-// onnxEnvError(); a refusal is remembered per runtime rather than retried.
+// Process-wide OrtEnv (created on first use; log level follows --verbose),
+// never released: a change of plugin libraries is synced onto it.  Null
+// when the runtime refuses to create one, with the reason in
+// onnxEnvError(); a refusal is remembered rather than retried.
 OrtEnv *onnxEnv(const OrtRuntime &rt);
 std::string onnxEnvError();
 
@@ -138,21 +138,23 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 
 // Empty when `ep` can be handed a `dtype` graph -- quantized in and out with
-// a per-tensor scale when `qdq`, weights blocked one scale per `blockSize`
-// rows when that is positive -- otherwise the reason it must not be, phrased
-// for a skip row.
+// a per-tensor scale when `qdq` -- otherwise the reason it must not be,
+// phrased for a skip row.
 //
 // Every other refusal in this backend is learned by asking: the provider
 // builds the graph or says why not, and the row reports its words.  This is
 // for the graphs a provider does not decline but takes the process down with,
-// where asking is the fault -- the answer arrives as an access violation or
-// a divide by zero, and every row after it, on every provider, is never run.  Checked before the
+// where asking is the fault -- the answer arrives as an access violation, and
+// every row after it, on every provider, is never run.  Checked before the
 // gemm probe builds a variant, which is what every test consults, and again
-// by the accuracy row, which builds the same graph in its own shape.  Every
-// entry is a runtime defect and is listed in NOTES.md at the repository
-// root, with what lifting it takes.
+// by the accuracy row, which builds the same graph in its own shape.
+//
+// A fault only one test provokes belongs to that test instead (block.cpp's
+// `variantFence`), so the rows it does not touch stay measured.  Every fence
+// in the tree is listed in NOTES.md at the repository root, with what
+// lifting it takes.
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq, int64_t blockSize);
+                                    bool qdq);
 
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
@@ -161,6 +163,21 @@ std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
 // otherwise the one-line refusal.  The viability probe tries this before
 // building any graph.
 std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
+// Demote the ORT logger's relay to debug while held.  The viability probe
+// expects refusals -- a missing NPU target reports them at ERROR severity,
+// which with no LogSink installed (--list-devices, the GUI catalog) would
+// otherwise reach the terminal past ScopedConsoleMute.  The probe keeps the
+// reason from the returned status, so the relayed lines add nothing.
+// Nesting-safe; the device-loss latch still runs first.
+void onnxSuppressOrtRelay(bool on);
+struct OnnxOrtRelayGuard
+{
+  OnnxOrtRelayGuard() { onnxSuppressOrtRelay(true); }
+  ~OnnxOrtRelayGuard() { onnxSuppressOrtRelay(false); }
+  OnnxOrtRelayGuard(const OnnxOrtRelayGuard &) = delete;
+  OnnxOrtRelayGuard &operator=(const OnnxOrtRelayGuard &) = delete;
+};
 
 // One-line human-readable form of an OrtStatus (releases the status).
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st);

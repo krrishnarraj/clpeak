@@ -70,8 +70,7 @@ bool CudaDevice::init(int devIndex)
   }
   {
     // The kernels are precompiled fatbins; report the CUDA toolkit the build
-    // was compiled against (CUDA_VERSION from <cuda.h>) rather than an NVRTC
-    // version, since NVRTC is no longer used at runtime.
+    // was compiled against (CUDA_VERSION from <cuda.h>).
     std::stringstream ss;
     ss << (CUDA_VERSION / 1000) << "." << (CUDA_VERSION % 1000) / 10;
     info.runtimeVersion = ss.str();
@@ -149,9 +148,11 @@ void CudaDevice::cleanup()
   }
 }
 
-bool CudaDevice::getKernel(const cuda_kernels::Blob &blob,
-                           const char *kernelName, CUfunction &fn)
+CudaKernel CudaDevice::getKernel(const cuda_kernels::Blob &blob,
+                                 const char *kernelName)
 {
+  CudaKernel k;
+
   // Cache by blob-data pointer: every embedded fatbin is a distinct array in
   // cuda_kernels_generated.cpp, so pointer equality is sufficient.
   auto it = moduleCache.find(blob.data);
@@ -162,6 +163,16 @@ bool CudaDevice::getKernel(const cuda_kernels::Blob &blob,
   }
   else
   {
+    // A stub: nvcc never ran for this kernel, because the build targeted none
+    // of its arch group (the toolkit supports none of it, or CLPEAK_CUDA_ARCHS
+    // leaves it out).
+    if (blob.len == 0 || blob.data == nullptr)
+    {
+      CLPEAK_VLOG("%s is an empty stub: no fatbin was built for it\n", blob.name);
+      k.reason = std::string(blob.name) + " was not built: CUDA " +
+                 info.runtimeVersion + " targeted none of its architectures";
+      return k;
+    }
     // The blob is a precompiled multi-arch fatbin.  cuModuleLoadData selects
     // the cubin matching this device's compute capability, or JITs the
     // embedded PTX via the driver -- no NVRTC, no toolkit headers needed.
@@ -169,19 +180,26 @@ bool CudaDevice::getKernel(const cuda_kernels::Blob &blob,
     if (lr != CUDA_SUCCESS)
     {
       CLPEAK_VLOG("cuModuleLoadData(%s) failed: %s\n", blob.name, cuErrStr(lr));
-      return false;
+      if (lr == CUDA_ERROR_NO_BINARY_FOR_GPU)
+        k.reason = std::string(blob.name) + " was not built for " + info.archName;
+      else
+        k.reason = std::string("fatbin failed to load: ") + cuErrStr(lr);
+      return k;
     }
     moduleCache[blob.data] = mod;
   }
 
-  CUresult r = cuModuleGetFunction(&fn, mod, kernelName);
+  CUresult r = cuModuleGetFunction(&k.fn, mod, kernelName);
   if (r != CUDA_SUCCESS)
   {
     CLPEAK_VLOG("cuModuleGetFunction(%s in %s) failed: %s\n",
                 kernelName, blob.name, cuErrStr(r));
-    return false;
+    k.fn = nullptr;
+    k.reason = std::string("kernel missing from its fatbin: ") + cuErrStr(r);
+    return k;
   }
-  return true;
+  k.status = ResultStatus::Ok;
+  return k;
 }
 
 #endif // ENABLE_CUDA

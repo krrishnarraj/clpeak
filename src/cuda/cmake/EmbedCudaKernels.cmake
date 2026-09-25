@@ -96,6 +96,24 @@ function(embed_cuda_kernels)
   file(MAKE_DIRECTORY "${_fatdir}" "${_gendir}")
   set(_embed "${_CLPEAK_EMBED_CUDA_DIR}/EmbedBin.cmake")
 
+  # Windows: nvcc reuses the build's INCLUDE for the cl.exe it spawns for host
+  # preprocessing. Under the ClangCL toolset that INCLUDE leads with clang's
+  # resource dir (see nvccw.bat.in), which real cl.exe cannot parse -- route
+  # nvcc through a wrapper that strips the clang dirs first. Elsewhere the
+  # nvcc path is used as-is.
+  set(_nvcc_cmd "${CUDAToolkit_NVCC_EXECUTABLE}")
+  set(_nvcc_depends "")
+  if(CMAKE_HOST_WIN32)
+    file(TO_NATIVE_PATH "${CUDAToolkit_NVCC_EXECUTABLE}" _nvcc_native)
+    set(NVCC_EXE "${_nvcc_native}")
+    # CRLF regardless of checkout: cmd can miss goto/call :label targets in
+    # an LF-only batch file.
+    configure_file("${_CLPEAK_EMBED_CUDA_DIR}/nvccw.bat.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat" @ONLY NEWLINE_STYLE CRLF)
+    set(_nvcc_cmd "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat")
+    set(_nvcc_depends "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat")
+  endif()
+
   set(_gen_srcs "")
   foreach(_kn ${EC_KERNELS})
     set(_cu  "${CMAKE_CURRENT_SOURCE_DIR}/cuda_kernels/${_kn}.cu")
@@ -108,8 +126,8 @@ function(embed_cuda_kernels)
       set(_fat "${_fatdir}/${_kn}.fatbin")
       add_custom_command(
         OUTPUT  "${_fat}"
-        COMMAND "${CUDAToolkit_NVCC_EXECUTABLE}" -fatbin ${_gencode} -o "${_fat}" "${_cu}"
-        DEPENDS "${_cu}"
+        COMMAND "${_nvcc_cmd}" -fatbin ${_gencode} -o "${_fat}" "${_cu}"
+        DEPENDS "${_cu}" ${_nvcc_depends}
         COMMENT "nvcc -fatbin ${_kn}.cu"
         VERBATIM)
       add_custom_command(
@@ -135,8 +153,6 @@ function(embed_cuda_kernels)
     list(APPEND _gen_srcs "${_gen}")
     string(TOUPPER "${_kn}" _ku)
     target_compile_definitions(${EC_TARGET} PRIVATE CLPEAK_CUDA_HAS_${_ku})
-    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-      APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_cu}")
   endforeach()
 
   target_sources(${EC_TARGET} PRIVATE ${_gen_srcs})

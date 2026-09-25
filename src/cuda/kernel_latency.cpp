@@ -23,14 +23,14 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
                               "that it finished.  This is what the host waits for "
                               "if it has nothing else to get on with.";
 
-  CUfunction fn;
-  if (!dev.getKernel(cuda_kernels::kernel_latency,
-                     "kernel_latency_noop", fn))
+  CudaKernel k = dev.getKernel(cuda_kernels::kernel_latency, "kernel_latency_noop");
+  if (!k)
   {
-    test.skip("dispatch", ResultStatus::Error, "Kernel compile failed", dispatchNote);
-    test.skip("roundtrip", ResultStatus::Error, "Kernel compile failed", roundtripNote);
+    test.skip("dispatch", k.status, k.reason, dispatchNote);
+    test.skip("roundtrip", k.status, k.reason, roundtripNote);
     return -1;
   }
+  CUfunction fn = k.fn;
 
   void *args[1] = {nullptr};
 

@@ -33,10 +33,10 @@ backend.
 | File | Purpose |
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
-| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter) and `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
+| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
-| `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`, `onnxSetWinml`), `onnxRegisterEpLibraries()` (called by `onnxEnv()` on every fresh environment), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
+| `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
@@ -45,7 +45,7 @@ backend.
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder) |
+| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder).  `variantFence` — the graphs only this test provokes a crash with, never built |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — per-submission overhead and session-creation cost (s) |
 
@@ -65,34 +65,47 @@ whatever else is installed — a run labelled with one runtime and measured on
 another is the mistake the setting exists to prevent.  `onnxLoadDiagnostic()`
 carries the reason, and `onnxRuntimeStatus()` packages it for a UI.
 
-Naming a different library after one is loaded takes effect on the next
-`ortRuntime()` call, so the settings screen needs no restart.
+**One runtime setup per process.**  The library, the Windows ML switch and
+the Windows ML folder are one setup (`onnx_runtime.cpp`): the catalog's
+folder can choose the runtime (the `onnxruntime.dll` beside it, when no
+library is named) and decides which providers join it.  The first runtime
+that loads fixes the setup for the process.  Until then a choice applies at
+the next `ortRuntime()`, however many attempts that takes -- a library that
+fails to load has set nothing up.  From then on `onnxSetLibraryOverride()`
+and `onnxSetWinml()` record a choice without applying it, and
+`onnxPendingSetup()` reports it: the status's `pendingRuntime`, a listing's
+info line and a run's notes, and the GUI settings panel's inactive "Next
+launch" block.  In the GUI the saved runtime loads at startup, so a change
+there waits for the next launch unless nothing could be loaded.  The CLI
+sets its options once, before anything loads, and never notices.
 
-**Switching runtimes in one process** (the GUI, between runs) works because
-every piece of per-runtime state is keyed by the runtime, not by a name: the
-`OrtEnv` is tracked by the `OrtApi`/`OrtApiBase` it came from and recreated
-when they change (the old one released with its own API), and the three probe
-memos in `onnx_probe.cpp` (viability, gemm variants, streaming width) all key
-on `rt.base` beside the provider — what a provider fuses or casts is the
-runtime's answer, and the CPU provider of a 1.17 is not that of a 1.30.  A
-handle is never unmapped (`include/common/dynlib.h`), so the pointer is a
-stable identity and the same path picked again reuses its handle and its
-memos.  Verified with the C ABI on a Threadripper: Debian's 1.23.2 → a 1.30.0
-build with CUDA and TensorRT providers → 1.23.2 → the default search, each run
-on the runtime it named.  The cost of the runtime left behind is its mapping
-(~13–20 MB resident) plus whatever it dragged in: nothing to speak of for a
-CPU-only build, but the CUDA/TensorRT build left ~2 GB in the process
-(libnvinfer/cuBLASLt/cuDNN code, the CUDA context, TensorRT's host state) that
-no `dlclose` of libonnxruntime would have returned either.
+Two runtimes in one process is what went wrong before this rule, each time
+somewhere else:
 
-One limitation is ORT's, not ours: a runtime that links a *shared* libonnx
-(Debian's and Homebrew's both do) registers its schemas into that library's
-process-wide registry, so a second such runtime cannot create an
-environment — `Trying to add a domain to DomainToVersion map, but the domain
-is already exist` — and every provider row says so.  `onnxEnv()` keeps the
-refusal per runtime (no retry per probe) and `onnxEnvError()` carries the
-runtime's words into the skip reason; switching back to the first works.
-Upstream builds carry their own ONNX and coexist.
+- **Handing a provider library to a second runtime.**  On Windows with the
+  catalog on (a tester, 2026-09-24), 1.30 → DirectML's 1.24.4 left the
+  enumeration that followed running forever, so every later choice queued
+  behind it.  A provider library is the first runtime's for good: it is
+  loaded by full path but resolves its own imports by module name, so one
+  built on ORT's provider bridge binds to whichever
+  `onnxruntime_providers_shared.dll` the process mapped first (and through
+  it to that runtime's internals), and one still mapped after its
+  environment unregistered it keeps whatever it set up against the runtime
+  that loaded it.
+- **Releasing the old runtime's environment**, which a switch had to do.
+  Runtimes crash on their own teardown: the built-in WebGPU provider before
+  1.25 aborts `ReleaseEnv` once it has made a device (ORT 1.24.4 for macOS,
+  reproduced through the C ABI), and before 1.29 a plugin provider's
+  teardown could read freed memory -- the likeliest reading of the GUI
+  dying as it left DirectML's 1.24.4 for 1.30 with the catalog's providers
+  registered.  `onnx_session.cpp` has the mechanics.
+
+So `onnxEnv()` creates the process's one environment and never releases it;
+a change of plugin libraries -- which stay live, being registered on the
+runtime rather than chosen instead of it -- is synced onto it
+(`onnxSyncEpLibraries()`: unregister what went, register what came).  Every
+switch had worked with the catalog off, and so had turning it on under
+either runtime.  Neither Windows failure has been re-tested since the rule.
 
 **iOS is the exception** (`CLPEAK_ONNX_STATIC`): Apple's official pod ships
 `onnxruntime.xcframework` as a *static* framework, and iOS will not dlopen a
@@ -161,18 +174,21 @@ the CPU and DirectML, and without this nothing else.
 from a built-in provider, and `onnx_plugin.cpp` keeps all three in one
 place:
 
-- **Registration is per environment.**  `onnxEnv()` registers the
-  configured set right after creating an environment, and the set is part
-  of the environment's identity: a change between runs (the GUI's
-  Settings) bumps `onnxEpConfigGeneration()`, the next `onnxEnv()` releases
-  the old environment (taking its plugin libraries with it) and builds a
-  fresh one.  Every session must be gone by then -- the same
-  between-runs-only contract the runtime override has.  The status a
-  settings screen reads (`onnxEpLibraryStatus()`) is what the *current*
-  environment registered and is empty after a change until the next
-  enumeration; and a set that became empty rebuilds the environment on the
-  next enumeration even though nothing else would ask for one, or the old
-  registrations would stand behind a status that no longer names them.
+- **Registration is on the environment, and stays live.**  The runtime
+  setup is fixed per process, but the configured libraries are not:
+  `onnxEnv()` syncs the set onto the process's one environment when it
+  creates it and again whenever a change between runs (the GUI's Settings)
+  bumps `onnxEpConfigGeneration()` -- `onnxSyncEpLibraries()` unregisters
+  (and so unloads) what went and registers what came, and a library that
+  stays keeps its answer, registered or refused.  The environment itself is
+  never rebuilt (above), so the Windows ML providers, fixed with the
+  runtime setup, are never touched by a change of the manual set.  Every
+  session must be gone by then: a library a session uses cannot be
+  unregistered.  The status a settings screen reads
+  (`onnxEpLibraryStatus()`) is what the environment registered and is empty
+  after a change until the next enumeration; and a set that became empty is
+  synced on the next enumeration even though nothing else would ask, or the
+  old registrations would stand behind a status that no longer names them.
 - **The devices come from the runtime, not from a table.**  A plugin's
   devices are the `OrtEpDevice`s whose provider name was not there before
   registering (names, not pointers: the runtime may rebuild its list).
@@ -229,8 +245,8 @@ downloads Microsoft's NuGet package and stages its `runtimes/win-<arch>/
 native/` DLLs under `build/winml/<arch>/`, and with a directory given to
 `--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll` beside the
 catalog becomes the runtime (`winmlDefaultRuntime()` in
-`onnx_runtime.cpp`, cached under its own key so switching the catalog off
-does not keep it).  `DirectML.dll` is staged too: that runtime delay-loads
+`onnx_runtime.cpp`) -- which is why the catalog is part of the runtime
+setup.  `DirectML.dll` is staged too: that runtime delay-loads
 it the moment its DirectML provider is attached, which the viability probe
 does, and a delay-load with nothing to find is a structured exception,
 not a refusal -- which is also why a runtime loaded by path gets its
@@ -240,8 +256,10 @@ Installing is a download of tens to hundreds of megabytes, so the catalog
 is opt-in, the run says out loud when it is installing, and a status query
 (`onnxRuntimeStatus`) never resolves the catalog -- it reads the memo the
 last enumeration left (`onnxWinmlResolved`) or says nothing has.  The
-resolution is memoized per configuration generation and per runtime
-(the DLL search starts beside the runtime).  The whole thing is a no-op off
+resolution is memoized per Windows ML setup (`onnxWinmlGeneration()`) and
+per runtime (the DLL search starts beside the runtime) -- one resolution
+per process, since the catalog is part of the runtime setup and fixed with
+it: switching it on after a runtime has loaded waits for the next launch.  The whole thing is a no-op off
 Windows, where `--onnx-winml` still parses and the status says why it did
 nothing.  Unverified on Windows at the time of writing: the flat C API was
 transcribed from the 2.3.42 package's header and the DLL's export table,
@@ -800,22 +818,27 @@ the one graph proven fatal; the block-scaled float4 rows (`nvfp4`,
 `fp4_weight`) are the shape TensorRT's check asks for and are still put to
 the RTX provider — the next Windows run decides them.
 
-**DirectML is the second entry, and it fences a format rather than a graph.**
-The transformer block's `int8_weight` session — seven blocked int8
+**DirectML's fence is the second, and it lives in the block, not here.** The
+transformer block's `int8_weight` session — seven blocked int8
 `DequantizeLinear`s (opset 21, `block_size=32`, `axis=0`) into 2048-wide
-MatMuls — ended the process with an integer divide by zero (0xC0000094)
-inside session creation on ONNX Runtime 1.24.4's DirectML provider (RTX 4060,
-2026-09-21), after the same block's fp16 and int4_weight forms had run. int4
-survives because ORT's `DQMatMulToMatMulNBits` rewrites it first and that
-transformer takes 4-bit weights only, so the int8 graph reaches DirectML as a
-raw `DequantizeLinear`, which the provider registers with no support query.
-The 32³ probe of that graph built and ran, but with a single scale row — a
-per-column broadcast as far as DirectML is concerned — and every gemm rung
-carries the block's real layout, so `int8_weight` is not sent to DirectML at
-any size. `int8_qdq` (per-tensor) and `int4_weight` (fused away) are
-untouched. A DirectML run that builds the 1024³ `int8_weight` rung with the
-entry removed is what would narrow the fence to the block; every fence in the
-tree, and what lifting it takes, is listed in `NOTES.md` at the root.
+MatMuls — ends the process with an integer divide by zero (0xC0000094) inside
+session creation on ONNX Runtime 1.24.4's DirectML provider, in the window
+where that provider compiles its fused partitions. int4 escapes because ORT's
+`DQMatMulToMatMulNBits` rewrites it first and that transformer takes 4-bit
+weights only, so the int8 graph reaches DirectML as a raw `DequantizeLinear`,
+which the provider registers with no support query.
+
+**Three things have to be true together for it to fire, and only two can be
+keyed on.** The `int8_weight` matmul ladder runs on the same Arc A380 that
+dies on the block, so the format is fatal only in this graph; and an RTX
+4060, a UHD 630, an Adreno X1-45 and the DirectML CPU all run this graph, so
+it wants that GPU too. But clpeak registers DirectML with no device id, ORT
+picks the adapter, and nothing in `onnx_ep_info_t` says which GPU answered —
+so `variantFence` in `block.cpp` withholds the row on every DirectML device
+and says why, while gemm, conv and the accuracy rows go on measuring the
+format where it runs. Guessing the adapter would be worse than withholding:
+a guess that is wrong on a two-GPU box takes the whole run down. `NOTES.md`
+at the root records what identifying it would take.
 
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph

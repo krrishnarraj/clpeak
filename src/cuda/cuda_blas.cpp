@@ -7,16 +7,26 @@
 // are excluded from timing; we measure only the kernel launch + execution
 // window via cuEvents.
 //
-// Note on consumer Blackwell (RTX 50 series, sm_120):
-// NVIDIA caps several tensor-core dtypes on consumer parts as product
-// segmentation vs the datacenter dies (B100 / B200).  Measured on RTX 5060:
-//   * tf32 ~= fp32 (no tensor-core boost; TF32 runs on the regular ALUs)
-//   * bf16 = 1/2 of fp16
-//   * fp16 = full tensor-core rate
-//   * fp8  = 2x fp16
+// Note on GeForce parts (measured on an RTX 5060, sm_120):
+// NVIDIA runs tensor-core math with an fp32 accumulator at half the rate of
+// an fp16 one, as product segmentation vs the datacenter dies (B100 / B200),
+// which run both alike.  The cap is on the accumulator, not the input type --
+// at equal accumulators fp16 and bf16 match (wmma: 42.6 both) -- and it sets
+// this test's ratios:
+//   * fp16 asks for CUBLAS_COMPUTE_16F, so it runs at the full rate (79).
+//   * bf16 has no fp16-accumulate mode, so it always pays the cap: 1/2 fp16.
+//   * tf32 is tensor-core only (the ALUs have no tf32 op) and accumulates in
+//     fp32: half the capped fp16 rate, 21, which merely coincides with the
+//     FP32 ALU peak.  The fp32 row is the real SGEMM on the ALUs (15).
+//   * fp8 reads 2x fp16 although it asks for CUBLAS_COMPUTE_32F: near the
+//     fp16-accumulate mma.sync ceiling (167), not the fp32-accumulate one
+//     (85, wmma_fp8_e4m3.cu).  How cuBLASLt's fp8 kernels escape the cap is
+//     not established.
 // This is intentional, not a kernel-selection bug -- the numbers are at peak
 // once the dtype/algo combo is correct.  Don't try to "fix" bf16 ~ 1/2 fp16
-// on these cards.
+// on these cards.  It is also why fp16 through a framework that keeps an fp32
+// accumulator -- ONNX Runtime's CUDA provider does by default -- reads at the
+// bf16 row's rate, not the fp16 row's.
 
 #include <cuda/cuda_peak.h>
 #include <cublasLt.h>

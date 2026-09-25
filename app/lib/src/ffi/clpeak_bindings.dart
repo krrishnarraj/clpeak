@@ -112,9 +112,11 @@ class ClpeakBindings {
   /// Choose which onnxruntime library the ONNX backend loads, ahead of the
   /// platform's conventional names; an empty path goes back to searching.
   ///
-  /// Must be called before [backendCatalog], which is what loads the runtime,
-  /// and between runs only.  A no-op where ONNX Runtime is linked in (iOS) or
-  /// the backend is absent.
+  /// Takes effect on the next [backendCatalog] (which is what loads the
+  /// runtime) until a runtime has loaded; from then on a different choice is
+  /// kept for the next launch and reported as [OnnxStatus.pendingRuntime].
+  /// Between runs only.  A no-op where ONNX Runtime is linked in (iOS) or the
+  /// backend is absent.
   void setOnnxLibrary(String path) {
     final ptr = path.toNativeUtf8();
     try {
@@ -129,7 +131,9 @@ class ClpeakBindings {
   /// entry is the registration name the provider expects and the library to
   /// load; an implicit entry is one the app bundled speculatively, whose
   /// failure to register is a verbose-log matter rather than a run note.
-  /// Same contract as [setOnnxLibrary]: before enumeration, between runs.
+  /// Unlike the runtime itself this stays live: the next enumeration or run
+  /// registers what was added and unregisters what was removed.  Between
+  /// runs only.
   void setOnnxEpLibraries(List<OnnxEpLibrary> libs) {
     final spec = libs
         .map((l) => '${l.implicit ? '!' : ''}${l.name}=${l.path}')
@@ -146,7 +150,9 @@ class ClpeakBindings {
   /// providers Windows 11 installs from the Microsoft Store are registered
   /// on the next enumeration or run.  [path] names
   /// Microsoft.Windows.AI.MachineLearning.dll or its directory, or is empty
-  /// to search beside the loaded runtime and the executable.
+  /// to search beside the loaded runtime and the executable.  Part of the
+  /// runtime setup, so the same contract as [setOnnxLibrary]: once a runtime
+  /// has loaded, a change waits for the next launch.
   void setOnnxWinml({required bool enabled, required String path}) {
     final ptr = path.toNativeUtf8();
     try {
@@ -165,7 +171,8 @@ class ClpeakBindings {
 
   /// The same for LiteRT: which libLiteRt the backend loads, ahead of the
   /// platform's conventional names (on Android the one packaged in the app).
-  /// Same contract as [setOnnxLibrary]: before enumeration, between runs.
+  /// Same contract as [setOnnxLibrary]: once a LiteRT has loaded, a different
+  /// choice waits for the next launch ([LitertStatus.pendingPath]).
   void setLitertLibrary(String path) {
     final ptr = path.toNativeUtf8();
     try {
@@ -242,6 +249,26 @@ class OnnxEpLibraryStatus {
       );
 }
 
+/// A runtime setup chosen after the runtime loaded: it loads the next time
+/// clpeak starts (see [OnnxStatus.pendingRuntime]).
+class OnnxPendingRuntime {
+  const OnnxPendingRuntime(
+      {required this.path, required this.winml, required this.winmlPath});
+
+  final String path; // empty = the default search
+  final bool winml; // the Windows ML catalog on
+  final String winmlPath; // its DLL or folder; empty = searched for
+
+  factory OnnxPendingRuntime.fromJson(Map<String, dynamic> m) {
+    final winml = m['winml'] as Map<String, dynamic>? ?? const {};
+    return OnnxPendingRuntime(
+      path: m['path'] as String? ?? '',
+      winml: winml['enabled'] as bool? ?? false,
+      winmlPath: winml['path'] as String? ?? '',
+    );
+  }
+}
+
 /// State of the ONNX Runtime, as clpeak_copy_onnx_status_json() reports it.
 class OnnxStatus {
   const OnnxStatus({
@@ -254,6 +281,7 @@ class OnnxStatus {
     this.winmlEnabled = false,
     this.winmlPath = '',
     this.winmlError = '',
+    this.pendingRuntime,
   });
 
   const OnnxStatus.unavailable(this.error)
@@ -264,7 +292,8 @@ class OnnxStatus {
         epLibraries = const [],
         winmlEnabled = false,
         winmlPath = '',
-        winmlError = '';
+        winmlError = '',
+        pendingRuntime = null;
 
   final bool available;
 
@@ -274,7 +303,8 @@ class OnnxStatus {
   final bool linkedIn;
 
   final String version; // "1.29.0"
-  final String path; // what was loaded; empty when found by name
+  final String path; // what was loaded; the resolved file even when found
+  // by name, empty only when statically linked
   final String error; // populated only when !available
 
   /// What the last environment registered; a library chosen since is absent
@@ -289,8 +319,15 @@ class OnnxStatus {
   final String winmlPath;
   final String winmlError;
 
+  /// The runtime setup -- library and Windows ML -- chosen since this
+  /// runtime loaded.  One process keeps the runtime it loaded first
+  /// (src/onnx/onnx_runtime.h), so the choice loads the next time clpeak
+  /// starts.  Null when nothing waits.
+  final OnnxPendingRuntime? pendingRuntime;
+
   factory OnnxStatus.fromJson(Map<String, dynamic> m) {
     final winml = m['winml'] as Map<String, dynamic>? ?? const {};
+    final pending = m['pendingRuntime'] as Map<String, dynamic>?;
     return OnnxStatus(
       available: m['available'] as bool? ?? false,
       linkedIn: m['linkedIn'] as bool? ?? false,
@@ -304,6 +341,8 @@ class OnnxStatus {
       winmlEnabled: winml['enabled'] as bool? ?? false,
       winmlPath: winml['path'] as String? ?? '',
       winmlError: winml['error'] as String? ?? '',
+      pendingRuntime:
+          pending == null ? null : OnnxPendingRuntime.fromJson(pending),
     );
   }
 }
@@ -317,22 +356,32 @@ class LitertStatus {
     required this.version,
     required this.path,
     required this.error,
+    this.pendingPath,
   });
 
   const LitertStatus.unavailable(this.error)
       : available = false,
         version = '',
-        path = '';
+        path = '',
+        pendingPath = null;
 
   final bool available;
   final String version; // "ABI 1.0.0"
   final String path; // what was loaded
   final String error; // populated only when !available
 
-  factory LitertStatus.fromJson(Map<String, dynamic> m) => LitertStatus(
-        available: m['available'] as bool? ?? false,
-        version: m['version'] as String? ?? '',
-        path: m['path'] as String? ?? '',
-        error: m['error'] as String? ?? '',
-      );
+  /// A library chosen since this one loaded, which loads the next time
+  /// clpeak starts ('' = the default search); null when nothing waits.
+  final String? pendingPath;
+
+  factory LitertStatus.fromJson(Map<String, dynamic> m) {
+    final pending = m['pendingRuntime'] as Map<String, dynamic>?;
+    return LitertStatus(
+      available: m['available'] as bool? ?? false,
+      version: m['version'] as String? ?? '',
+      path: m['path'] as String? ?? '',
+      error: m['error'] as String? ?? '',
+      pendingPath: pending == null ? null : pending['path'] as String? ?? '',
+    );
+  }
 }

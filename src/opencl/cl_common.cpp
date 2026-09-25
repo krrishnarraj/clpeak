@@ -89,6 +89,8 @@ device_info_t getDeviceInfo(cl::Device &d)
         devInfo.deviceType = DeviceType::Cpu;
     else if (devInfo.clDeviceType & CL_DEVICE_TYPE_ACCELERATOR)
         devInfo.deviceType = DeviceType::Accelerator;
+    else
+        devInfo.deviceType = DeviceType::Unknown;   // CL_DEVICE_TYPE_CUSTOM
 
     return devInfo;
 }

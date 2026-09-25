@@ -1,7 +1,11 @@
 // FP16 MAD-chain throughput.  Two variants:
 //   compute_hp   -- scalar __half FMA, 2 parallel chains
-//   compute_hp2  -- __half2 packed HFMA2 (NVIDIA's 2x FP32 fp16 peak from
-//                   sm_53+; one instruction issues two fp16 FMAs/cycle).
+//   compute_hp2  -- __half2 packed HFMA2 (one instruction, two fp16 FMAs).
+//
+// Packed fp16 is 2x the FP32 rate on Volta and Turing, but GeForce from
+// Ampere on doubled FP32 and left packed fp16 where it was, so there hp2
+// lands on compute_sp: 21.2 vs 21.1 TFLOPS on an RTX 5060.  The fp16 rates
+// above FP32 on those cards are the tensor cores' (wmma.cpp).
 //
 // compute_hp uses 2 parallel chains (x0, x1 -- rather than the 1 chain in
 // the SP/MP/BF16 kernels) because RTX 5060 single-chain scalar __hfma

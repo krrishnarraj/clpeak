@@ -116,6 +116,8 @@ static double runSveInt32Chain(uint64_t outer)
 // FP divide / sqrt (same Moebius / sqrt-fixed-point chains as base_compute.h:
 // divisor is loop-carried so -freciprocal-math can't hoist a reciprocal, and
 // the recurrences have no closed form).  One divide or sqrt per lane per step.
+// 16 chains, as for NEON (DIV_NACC in base_compute.h): 8 leave a pipelined
+// divider idle behind the add+divide chain latency.
 // Precise-FP region for the same reason as base_compute.h: fast-math "afn"
 // may substitute estimate+Newton (SVE has frecpe/frsqrte) for the fp32 forms.
 // CLPEAK_PRECISE_FP comes from base_compute.h (always included before this).
@@ -128,19 +130,19 @@ static CLPEAK_PRECISE_FP double runSveFp32DivChain(uint64_t outer)
   volatile float vc1 = 1.5f, vc2 = 0.5f;
   const svfloat32_t c1 = svdup_f32(vc1), c2 = svdup_f32(vc2);
 #define DECL(i) svfloat32_t a##i = svdup_f32(0.5f * (float)((i) + 1));
-  SVE_REP8(DECL)
+  SVE_REP16(DECL)
 #undef DECL
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
 #define STEP(i) a##i = svdiv_f32_x(pg, svadd_f32_x(pg, a##i, c1), svadd_f32_x(pg, a##i, c2));
-      SVE_REP8(STEP)
+      SVE_REP16(STEP)
 #undef STEP
     }
   svfloat32_t s = svdup_f32(0.0f);
 #define RED(i) s = svadd_f32_x(pg, s, a##i);
-  SVE_REP8(RED)
+  SVE_REP16(RED)
 #undef RED
   return (double)svaddv_f32(pg, s);
 }
@@ -151,19 +153,19 @@ static CLPEAK_PRECISE_FP double runSveFp64DivChain(uint64_t outer)
   volatile double vc1 = 1.5, vc2 = 0.5;
   const svfloat64_t c1 = svdup_f64(vc1), c2 = svdup_f64(vc2);
 #define DECL(i) svfloat64_t a##i = svdup_f64(0.5 * (double)((i) + 1));
-  SVE_REP8(DECL)
+  SVE_REP16(DECL)
 #undef DECL
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
 #define STEP(i) a##i = svdiv_f64_x(pg, svadd_f64_x(pg, a##i, c1), svadd_f64_x(pg, a##i, c2));
-      SVE_REP8(STEP)
+      SVE_REP16(STEP)
 #undef STEP
     }
   svfloat64_t s = svdup_f64(0.0);
 #define RED(i) s = svadd_f64_x(pg, s, a##i);
-  SVE_REP8(RED)
+  SVE_REP16(RED)
 #undef RED
   return (double)svaddv_f64(pg, s);
 }
@@ -174,19 +176,19 @@ static CLPEAK_PRECISE_FP double runSveFp32SqrtChain(uint64_t outer)
   volatile float vc = 0.75f;
   const svfloat32_t c = svdup_f32(vc);
 #define DECL(i) svfloat32_t a##i = svdup_f32(0.5f + 0.25f * (float)(i));
-  SVE_REP8(DECL)
+  SVE_REP16(DECL)
 #undef DECL
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
 #define STEP(i) a##i = svsqrt_f32_x(pg, svadd_f32_x(pg, a##i, c));
-      SVE_REP8(STEP)
+      SVE_REP16(STEP)
 #undef STEP
     }
   svfloat32_t s = svdup_f32(0.0f);
 #define RED(i) s = svadd_f32_x(pg, s, a##i);
-  SVE_REP8(RED)
+  SVE_REP16(RED)
 #undef RED
   return (double)svaddv_f32(pg, s);
 }
@@ -197,19 +199,19 @@ static CLPEAK_PRECISE_FP double runSveFp64SqrtChain(uint64_t outer)
   volatile double vc = 0.75;
   const svfloat64_t c = svdup_f64(vc);
 #define DECL(i) svfloat64_t a##i = svdup_f64(0.5 + 0.25 * (double)(i));
-  SVE_REP8(DECL)
+  SVE_REP16(DECL)
 #undef DECL
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
 #define STEP(i) a##i = svsqrt_f64_x(pg, svadd_f64_x(pg, a##i, c));
-      SVE_REP8(STEP)
+      SVE_REP16(STEP)
 #undef STEP
     }
   svfloat64_t s = svdup_f64(0.0);
 #define RED(i) s = svadd_f64_x(pg, s, a##i);
-  SVE_REP8(RED)
+  SVE_REP16(RED)
 #undef RED
   return (double)svaddv_f64(pg, s);
 }

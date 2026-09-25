@@ -72,8 +72,18 @@ struct cuda_device_info_t {
   bool int8MmaSparseSupported;   // cc >= 8.0 (Ampere+) -- mma.sp.s8 2:4 sparsity
 };
 
+// A kernel resolved from an embedded fatbin, or why it could not be: when `fn`
+// is null, `status` and `reason` are what its reading reports.
+struct CudaKernel
+{
+  CUfunction fn = nullptr;
+  ResultStatus status = ResultStatus::Error;
+  std::string reason;
+  explicit operator bool() const { return fn != nullptr; }
+};
+
 // One CUDA device + the bookkeeping needed to launch kernels through the
-// driver API.  Modules are loaded lazily and cached per-source-text.
+// driver API.  Modules are loaded lazily and cached per embedded fatbin.
 class CudaDevice
 {
 public:
@@ -91,10 +101,16 @@ public:
   // Load a precompiled fatbin blob into a module (the driver selects the
   // matching cubin for this device or JITs the embedded PTX), then resolve a
   // named kernel.  Caches by blob-data pointer; needs only the CUDA driver at
-  // runtime -- no NVRTC, no toolkit headers.  Returns true on success; on
-  // failure logs via CLPEAK_VLOG and returns false.
-  bool getKernel(const cuda_kernels::Blob &blob,
-                 const char *kernelName, CUfunction &fn);
+  // runtime -- no NVRTC, no toolkit headers.
+  //
+  // Whether the device has the kernel's instructions is the caller's
+  // capability check, made before this, so every failure is an Error with a
+  // one-line reason.  An empty stub blob was not built at all: the toolkit
+  // targeted none of the kernel's arch group.  CUDA_ERROR_NO_BINARY_FOR_GPU
+  // means the fatbin holds neither a cubin for this sm nor PTX the driver can
+  // JIT for it.  Anything else carries the driver's error; details go to
+  // CLPEAK_VLOG.
+  CudaKernel getKernel(const cuda_kernels::Blob &blob, const char *kernelName);
 
 private:
   // moduleCache key = blob-data pointer (each embedded fatbin is a unique

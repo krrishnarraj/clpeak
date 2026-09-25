@@ -8,10 +8,13 @@
 //
 // RDNA3 (gfx11) and RDNA4 (gfx12) both expose WMMA, but the per-lane A/B
 // fragment width differs (gfx11 replicates the K=16 column as 16 halves/lane;
-// gfx12 packs 8) and the gfx12 builtin carries a _gfx12 suffix. Select by
-// clang's predefined __gfxNNNN__ processor macro. A part without WMMA never
-// reaches here (the host gates on the RDNA family) but if it did, the #error /
-// missing builtin makes HIPRTC fail and the host reports Unsupported -- never a
+// gfx12 packs 8) and the gfx12 builtin carries a _gfx12 suffix. gfx11 is
+// selected by clang's family macro: every gfx11 part -- the RDNA3 dies, Phoenix
+// and the RDNA3.5 APUs alike -- has this one WMMA, so a new member needs only
+// its entry in CMakeLists.txt. gfx12 is named part by part, because gfx1250 is
+// __GFX12__ too and its matrix unit is a different ISA. The #error keeps any
+// other arch from building at all; the arch groups in CMakeLists.txt never ask
+// for one, and the host reports a GPU with no slice as Unsupported -- never a
 // fabricated number. The op count below (2*M*N*K per call) is independent of
 // the fragment layout, so a successful run is physically meaningful.
 //
@@ -27,9 +30,7 @@ typedef __fp16 halfN __attribute__((ext_vector_type(8)));
   halfN { (__fp16)1, (__fp16)1, (__fp16)1, (__fp16)1, \
           (__fp16)1, (__fp16)1, (__fp16)1, (__fp16)1 }
 #define WMMA_F16(a, b, c) __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a, b, c)
-#elif defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-      defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
-      defined(__gfx1152__)
+#elif defined(__GFX11__)
 typedef __fp16 halfN __attribute__((ext_vector_type(16)));
 #define WMMA_AB_ONES \
   halfN { (__fp16)1, (__fp16)1, (__fp16)1, (__fp16)1, \

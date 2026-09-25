@@ -1,0 +1,47 @@
+name: Bug report
+description: A crash, a missing device, or a number that looks wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A verbose run records every diagnostic and the device inventory, which is usually enough to debug a report without access to your machine.
+
+        - **CLI:** `clpeak --verbose -o report.clpeak.json`, then attach `report.clpeak.json`. If clpeak crashed before finishing, attach `report.clpeak.log` from the same folder instead.
+        - **App:** Settings → Diagnostics → **Verbose diagnostics** on, run again, then **Export JSON** on the results page. A run the app did not survive is under History → "Runs that did not finish".
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: frontend
+    attributes:
+      label: How you ran it
+      options:
+        - CLI
+        - Desktop app
+        - Android app
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: clpeak version
+      description: "`clpeak --version`, or the version in the app's sidebar / About page."
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: OS and device
+      placeholder: e.g. Windows 11 24H2, RTX 4070, driver 581.29
+  - type: textarea
+    id: report
+    attributes:
+      label: Verbose run
+      description: Drag `report.clpeak.json` (or the `.log` of a run that crashed) into this box.
+    validations:
+      required: true

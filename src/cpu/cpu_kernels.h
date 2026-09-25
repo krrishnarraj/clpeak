@@ -54,9 +54,7 @@ struct CpuFeatures {
   bool aes = false, sha256 = false, sha512 = false, crc32 = false;
   bool vaes = false;
   // x86 binary translated on an ARM64 host (Windows Prism, Apple Rosetta 2,
-  // Linux qemu-user).  Guest CPUID still reports AVX2/AVX-512, but the
-  // ops/lane scaling of div/sqrt does not match the emulated execution width,
-  // so kernelMenu() suppresses wider-than-128b div/sqrt rows.
+  // Linux qemu-user).  Informational: the device header names the translation.
   bool emulatedX86OnArm = false;
 };
 
