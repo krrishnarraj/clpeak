@@ -1,53 +1,55 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ page.title | default: site.title }}</title>
-<meta name="description" content="{{ site.description }}">
-<link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
-<link rel="icon" href="{{ '/assets/img/icon.png' | relative_url }}">
-<meta property="og:title" content="{{ page.title | default: site.title }}">
-<meta property="og:description" content="{{ site.description }}">
-<meta property="og:type" content="website">
-<meta property="og:image" content="{{ '/assets/img/og.png' | absolute_url }}">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title | default: site.title }}</title>
+  <meta name="description" content="{{ site.description }}">
+  <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
+  <link rel="icon" href="{{ '/assets/img/icon.png' | relative_url }}">
+  <meta property="og:title" content="{{ page.title | default: site.title }}">
+  <meta property="og:description" content="{{ site.description }}">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ '/assets/img/og.png' | absolute_url }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
 </head>
+
 <body>
 
-<header class="masthead">
-  <div class="wrap">
-    <div class="brand">
-      <img src="{{ '/assets/img/icon.png' | relative_url }}" alt="" width="40" height="40">
-      <div>
-        <h1>clpeak</h1>
-        <p class="tagline">&ldquo;compute latency peak&rdquo;</p>
+  <header class="masthead">
+    <div class="wrap">
+      <div class="brand">
+        <img src="{{ '/assets/img/icon.png' | relative_url }}" alt="" width="40" height="40">
+        <div>
+          <h1>clpeak</h1>
+          <p class="tagline">&ldquo;compute latency peak&rdquo;</p>
+        </div>
       </div>
+      <nav>
+        <a href="{{ '/#what' | relative_url }}">What it measures</a>
+        <a href="{{ '/#download' | relative_url }}">Download</a>
+        <a href="{{ '/#build' | relative_url }}">Build</a>
+        <a href="{{ '/#bugs' | relative_url }}">Report a bug</a>
+        <a href="https://github.com/{{ site.repo }}">GitHub</a>
+      </nav>
     </div>
-    <nav>
-      <a href="{{ '/#what' | relative_url }}">What it measures</a>
-      <a href="{{ '/#download' | relative_url }}">Download</a>
-      <a href="{{ '/#build' | relative_url }}">Build</a>
-      <a href="{{ '/#bugs' | relative_url }}">Report a bug</a>
-      <a href="https://github.com/{{ site.repo }}">GitHub</a>
-    </nav>
-  </div>
-</header>
+  </header>
 
-<main class="wrap">
-{{ content }}
-</main>
+  <main class="wrap">
+    {{ content }}
+  </main>
 
-<footer class="wrap">
-  <p>
-    Apache-2.0 licensed. Source at
-    <a href="https://github.com/{{ site.repo }}">github.com/{{ site.repo }}</a> —
-    issues and pull requests welcome.
-  </p>
-</footer>
+  <footer class="wrap">
+    <p>
+      GPL-3.0 licensed. Source at
+      <a href="https://github.com/{{ site.repo }}">github.com/{{ site.repo }}</a>
+    </p>
+  </footer>
 
-<script src="{{ '/assets/js/releases.js' | relative_url }}" data-repo="{{ site.repo }}"></script>
+  <script src="{{ '/assets/js/releases.js' | relative_url }}" data-repo="{{ site.repo }}"></script>
 </body>
+
 </html>
