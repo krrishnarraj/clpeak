@@ -94,7 +94,8 @@ int clPeak::runAll()
             {"Clock frequency", std::to_string(devInfo.maxClockFreq) + " MHz"},
           },
           static_cast<int>(p),
-          deviceIndex
+          deviceIndex,
+          devInfo.deviceType
         });
         currentDeviceScope = &deviceScope;
 

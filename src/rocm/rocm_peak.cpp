@@ -163,7 +163,8 @@ int RocmPeak::runAll()
         {"VRAM",  std::to_string(dev.info.totalGlobalMem / (1024 * 1024)) + " MB"},
       },
       -1,
-      idx
+      idx,
+      dev.info.deviceType
     });
     currentDeviceScope = &deviceScope;
 

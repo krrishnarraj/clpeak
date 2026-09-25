@@ -417,6 +417,7 @@ int OnnxPeak::runAll()
         details,
         -1,
         idx,
+        ep.deviceType,
     });
     currentDeviceScope = &deviceScope;
 

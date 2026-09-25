@@ -191,7 +191,7 @@ int CpuPeak::runAll()
     props.push_back({"RAM", fmtBytes(info.totalMemBytes)});
 
   auto deviceScope = backendScope.beginDevice({
-    info.name, "", "", props, -1, 0});
+    info.name, "", "", props, -1, 0, DeviceType::Cpu});
   currentDeviceScope = &deviceScope;
 
   benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Cpu);

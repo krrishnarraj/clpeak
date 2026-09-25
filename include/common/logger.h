@@ -23,7 +23,8 @@
 //
 //   auto backend = log->beginBackend("OpenCL");
 //   auto device  = backend.beginDevice({"M1 Pro", "Apple", "1.2.3",
-//                                        {{"Compute units", "16"}}});
+//                                        {{"Compute units", "16"}},
+//                                        0, 0, DeviceType::Gpu});
 //   auto test    = device.beginTest({"global_bandwidth",
 //                                    "Global memory bandwidth", "bps"});
 //   test.emit("float",  123.45f);
@@ -143,6 +144,9 @@ public:
     std::vector<Prop> props;      // free-form properties (compute units, VRAM, …)
     int platform_index = -1;      // if >= 0, printed as "Platform N: ..."
     int device_index   = -1;      // if >= 0, printed as "Device N: ..."
+    // What the backend classified the device as -- the file's `type`.  Every
+    // backend knows; Unknown is only for a device its API declines to
+    // classify (Vulkan's OTHER, OpenCL's CUSTOM).
     DeviceType type    = DeviceType::Unknown;
   };
 

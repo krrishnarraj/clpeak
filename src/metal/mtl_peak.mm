@@ -75,7 +75,8 @@ int MetalPeak::runAll()
 #endif
              },
             -1,
-            static_cast<int>(d)
+            static_cast<int>(d),
+            dev.info.deviceType
         });
         currentDeviceScope = &deviceScope;
 

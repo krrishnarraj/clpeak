@@ -165,6 +165,7 @@ int CoreMLPeak::runAll()
         details,
         -1,
         idx,
+        dev.deviceType,
     });
     currentDeviceScope = &deviceScope;
 
