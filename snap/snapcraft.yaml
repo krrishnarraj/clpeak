@@ -60,8 +60,8 @@ parts:
   # https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json
   flutter-sdk:
     plugin: nil
-    source: https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.0-stable.tar.xz
-    source-checksum: sha256/26cd99d3d94b1367e6b50535a18aeef0282c10a535bbe3ec493534dcdab75296
+    source: https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.5-stable.tar.xz
+    source-checksum: sha256/2132e990f236f8d22e7c6314b29a191a95b10d7cbcfec9b4e2e303d996652cbb
     override-pull: |
       # Flutter publishes a linux desktop SDK for x86_64 only, so every other
       # architecture builds CLI-only -- the same outcome as the arm64 CI jobs

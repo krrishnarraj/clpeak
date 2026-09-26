@@ -234,6 +234,37 @@ CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
 // The flag auto-resets at the start of the next clpeak_launch().
 CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
 
+// ---- Engine process (desktop) ----------------------------------------------------
+//
+// The desktop app runs its catalog and its runs in `clpeak-engine`, a process
+// of their own (src/ffi/engine_host.cpp loads this library and calls this),
+// so a vendor runtime never shares a process with the app's GUI toolkit and
+// GL driver (src/ffi/engine.cpp says what that broke).  Mobile calls the
+// functions above in-process.
+//
+//   clpeak-engine <this library> <mode> [setup...] [-- run argv...]
+//
+// argv here starts at <mode>.  Setup options, each the clpeak_set_* call of
+// the same name, applied before anything loads:
+//   --set-onnx-library PATH   --set-onnx-ep [!]NAME=PATH (one per library)
+//   --set-onnx-winml PATH (switches the catalog on; PATH may be "")
+//   --set-litert-library PATH
+// Modes:
+//   catalog  writes one line to stdout,
+//              {"t":"catalog","catalog":<clpeak_copy_backend_catalog_json>,
+//               "onnx":<clpeak_copy_onnx_status_json>,
+//               "litert":<clpeak_copy_litert_status_json>}
+//            the statuses as that enumeration left them.
+//   launch   clpeak_launch() with the argv after `--` (no program name),
+//            each event one line of stdout, ending with `done`.  A "cancel"
+//            line on stdin is clpeak_request_cancel(); stdin closing is too,
+//            since it means the app has gone.
+// Nothing else reaches stdout: what a library prints there goes to stderr.
+// Returns only on a usage error (64); otherwise the process ends when the
+// mode does, without running static destructors -- every result is saved by
+// then, and runtime teardown is where some crash.
+CLPEAK_FFI_EXPORT int clpeak_engine_main(int argc, const char **argv);
+
 // ---- Saved results ------------------------------------------------------------------
 //
 // There is no loader here.  Result files are JSON in exactly the shape a

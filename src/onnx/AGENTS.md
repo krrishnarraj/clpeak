@@ -75,8 +75,10 @@ fails to load has set nothing up.  From then on `onnxSetLibraryOverride()`
 and `onnxSetWinml()` record a choice without applying it, and
 `onnxPendingSetup()` reports it: the status's `pendingRuntime`, a listing's
 info line and a run's notes, and the GUI settings panel's inactive "Next
-launch" block.  In the GUI the saved runtime loads at startup, so a change
-there waits for the next launch unless nothing could be loaded.  The CLI
+launch" block.  The desktop GUI enumerates and runs in a new engine
+process each time (`src/ffi/engine.cpp`), so there a change applies to the
+next enumeration; in the mobile GUI the saved runtime loads at startup, so a
+change waits for the next launch unless nothing could be loaded.  The CLI
 sets its options once, before anything loads, and never notices.
 
 Two runtimes in one process is what went wrong before this rule, each time

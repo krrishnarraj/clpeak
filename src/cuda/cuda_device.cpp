@@ -106,12 +106,12 @@ bool CudaDevice::init(int devIndex)
   info.int8GemmSupported = (info.major > 7) || (info.major == 7 && info.minor >= 5);
   info.int4GemmSupported = (info.major >= 9);
   info.dpTensorSupported = (info.major >= 8);
-  // s4 mma.sync was added on Turing (sm_75), kept on Ampere/Ada, removed on
-  // Hopper and datacenter Blackwell, but re-added on consumer Blackwell GB10
-  // (sm_121).  Allow 7.5..8.9 inclusive, plus 12.1.
+  // s4 mma.sync is native on Turing through Ada only.  Every later part runs
+  // it as nibble unpacking around int8 IMMA (see the wmma_int4 group in
+  // CMakeLists.txt), which would measure int8, not int4.
   {
     int cc = info.major * 10 + info.minor;
-    info.int4MmaSupported = ((cc >= 75) && (cc <= 89)) || (cc == 121);
+    info.int4MmaSupported = (cc >= 75) && (cc <= 89);
   }
   info.int8MmaSparseSupported = (info.major >= 8);
 

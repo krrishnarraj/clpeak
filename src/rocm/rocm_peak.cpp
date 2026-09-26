@@ -138,7 +138,8 @@ int RocmPeak::runAll()
     RocmDevice dev;
     if (!dev.init(idx))
     {
-      log->note("ROCm: failed to init device " + std::to_string(idx) + "\n");
+      log->note("ROCm: failed to init device " + std::to_string(idx) +
+                (dev.initError.empty() ? "" : ": " + dev.initError) + "\n");
       continue;
     }
 

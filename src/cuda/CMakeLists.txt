@@ -57,7 +57,14 @@ endif()
 # Kernels are grouped by the compute capabilities they are valid for so nvcc is
 # never asked to target an arch a kernel cannot build for (e.g. fp8 < sm_89,
 # int4 removed on sm_90+, fp4 only on sm_120a).
-set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;110;120;121" CACHE STRING
+#
+# A GPU with no cubin of its own runs the one with its major and the nearest
+# lower minor, so an arch earns an entry only by changing the code some GPU
+# runs.  Rubin (10.7) would otherwise get sm_103's, which issues one fp64 DMMA
+# per 54 slots (as sm_110/120/121 do) where sm_107 code issues one per 3-4.
+# sm_87/88 are left out: nvcc gives them sm_86's code (plus, on sm_87, an entry
+# prologue).  70 builds only with CUDA 12; nvcc 13 starts at sm_75.
+set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;107;110;120;121" CACHE STRING
     "CUDA compute capabilities to bake into the fatbins (ascending)")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
@@ -72,10 +79,11 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 72
     KERNELS wmma_int8)
 
-# INT4 mma.sync -- sm_75..sm_89, removed on Hopper/datacenter Blackwell, but
-# re-added on consumer Blackwell sm_121 (GB10); hence the explicit EXTRA_ARCHS
-# after the MAX_ARCH 89 cutoff. (sm_120 not yet listed -- needs verification.)
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89 EXTRA_ARCHS "121"
+# INT4 mma.sync -- sm_75..sm_89, the only parts with a native s4 IMMA.  nvcc
+# still assembles it for every later target, consumer Blackwell sm_120/121
+# included, but as nibble unpacking around int8 IMMA.16816: an int8 rate that
+# would be reported as int4.
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89
     KERNELS wmma_int4)
 
 # Ampere+ tensor cores: bf16 / tf32 (native mma.sync m16n8k8) / fp64 / int8
