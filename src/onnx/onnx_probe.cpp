@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -189,11 +190,16 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
     };
     std::vector<Widened> wide;
 
-    for (size_t si = 0; si < nSchemes && !r.ok; si++)
+    // Every scheme is probed, not just the first that works: a provider that
+    // takes both int8 spellings can run one of them much faster, and the
+    // ladder can only race what the probe kept (OnnxProbeResult::moreSchemes).
+    int primary = -1; // the scheme that settled r's own fields
+    for (size_t si = 0; si < nSchemes; si++)
     {
       const QuantScheme &qs = schemes[si];
       if (clpeak::cancelRequested())
         break;
+      OnnxProbeScheme more; // a viable scheme after the primary one
 
       bool reduceInFloat = false;
       for (OnnxLiveShape shape : shapes)
@@ -247,10 +253,33 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
 
         // Viable at the right width.  The first such shape settles the scheme
         // and the reported provenance; later ones only extend the fallback
-        // list.
+        // list.  A later scheme keeps its own record the same way.
+        std::string ranAs;
+        if (needsFusion)
+        {
+          ranAs = onnxQuantizedKernelName(b.ops);
+          if (ranAs.empty())
+            ranAs = "a kernel it compiled itself";
+        }
+        if (primary >= 0 && primary != (int)si)
+        {
+          if (more.shapes.empty())
+          {
+            more.actDtype = qs.actDtype;
+            more.wgtDtype = qs.wDtype;
+            more.name = qs.name;
+            more.ranAs = ranAs;
+            more.castedActs = b.casts > 0;
+            more.createUs = b.createUs;
+            more.probeUs = b.runUs;
+          }
+          more.shapes.push_back(shape);
+          continue;
+        }
         if (!r.ok)
         {
           r.ok = true;
+          primary = (int)si;
           r.reduceInFloat = reduceInFloat;
           r.createUs = b.createUs;
           r.probeUs = b.runUs;
@@ -260,13 +289,13 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
           {
             r.schemeName = qs.name;
             r.castedActs = b.casts > 0;
-            r.ranAs = onnxQuantizedKernelName(b.ops);
-            if (r.ranAs.empty())
-              r.ranAs = "a kernel it compiled itself";
+            r.ranAs = ranAs;
           }
         }
         r.shapes.push_back(shape);
       }
+      if (!more.shapes.empty())
+        r.moreSchemes.push_back(std::move(more));
     }
 
     // Nothing kept the width, but something ran: this provider has no kernel
@@ -292,6 +321,10 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
                   ep.providerKey.c_str(), v.label, r.shapes.size(),
                   shapeName(r.shapes.front()),
                   r.reduceInFloat ? ", product cast to fp32" : "");
+    for (const OnnxProbeScheme &m : r.moreSchemes)
+      CLPEAK_VLOG("onnx-probe[%s/%s]: %s also viable, shapes %zu (first %s)\n",
+                  ep.providerKey.c_str(), v.label, m.name, m.shapes.size(),
+                  shapeName(m.shapes.front()));
 
     if (r.ok && r.createUs > kOnnxTinyMaxCreateUs)
     {
@@ -355,12 +388,24 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
 // Streaming width
 // ---------------------------------------------------------------------------
 
-// Both answers come from one sweep, so they are memoized together.
+// All three answers come from one sweep, so they are memoized together.
 struct StreamProbe
 {
   int dtype = ONNX_DT_FLOAT16;
   double bps = 0.0;
+  bool fp32Narrowed = false;
 };
+
+// An fp32 matrix-vector product at full width lands within a few parts per
+// million of a double-precision reference: 2048 terms of rounding at 2^-24
+// is under 2 ppm on the values used here.  Holding the operands in 16 bits
+// rounds each one at 2^-11 and lands near 300 ppm; bf16 near 2000.  20 ppm
+// sits an order of magnitude from both.
+constexpr double kFp32ExactRelErr = 2.0e-5;
+
+// Narrowed storage streams the same bytes in half the time, so the fp32
+// reading comes out near twice fp16's; full-width fp32 comes out near equal.
+constexpr double kNarrowedRateRatio = 1.5;
 
 static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
@@ -405,10 +450,28 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
   StreamProbe best;
 
   // Time one [1,k]x[k,n] product of `dtype`; negative when it could not run.
-  auto timeGemv = [&](int dtype, int64_t k, int64_t n) -> double {
+  // With `relErr`, an fp32 product is also scored against a double-precision
+  // reference: the relative RMS error of the row it returned, or -1.
+  auto timeGemv = [&](int dtype, int64_t k, int64_t n,
+                      double *relErr = nullptr) -> double {
     const size_t es = dtypeSize(dtype);
     std::string w;
     fillTensor(w, dtype, k * n, 0x243f6a88u);
+    // Every input element is 0.5, so the exact answer is half of each
+    // column's sum -- of the fp32 values the model actually holds.
+    std::vector<double> ref;
+    if (relErr)
+    {
+      *relErr = -1.0;
+      if (dtype == ONNX_DT_FLOAT)
+      {
+        ref.assign((size_t)n, 0.0);
+        const float *wf = reinterpret_cast<const float *>(w.data());
+        for (int64_t i = 0; i < k; i++)
+          for (int64_t j = 0; j < n; j++)
+            ref[(size_t)j] += 0.5 * (double)wf[(size_t)(i * n + j)];
+      }
+    }
     std::string model = onnxMatMulModel(1, k, n, dtype, w);
     std::string().swap(w);
     auto ses = onnxCreateSession(rt, ep, model);
@@ -474,6 +537,20 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     else
       rt.api->ReleaseStatus(st);
 
+    if (us > 0.0 && !ref.empty())
+    {
+      const float *yf = reinterpret_cast<const float *>(y.data());
+      double num = 0.0, den = 0.0;
+      for (int64_t j = 0; j < n; j++)
+      {
+        const double d = (double)yf[j] - ref[(size_t)j];
+        num += d * d;
+        den += ref[(size_t)j] * ref[(size_t)j];
+      }
+      if (den > 0.0)
+        *relErr = std::sqrt(num / den);
+    }
+
     if (xv)
       rt.api->ReleaseValue(xv);
     if (yv)
@@ -482,8 +559,11 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     return us;
   };
 
-  for (int dtype : candidates)
+  double bpsOf[2] = {0.0, 0.0}; // indexed like `candidates`
+  double fp32RelErr = -1.0;
+  for (size_t ci = 0; ci < 2; ci++)
   {
+    const int dtype = candidates[ci];
     if (clpeak::cancelRequested())
       break;
     const size_t es = dtypeSize(dtype);
@@ -492,7 +572,8 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     // measured -- and subtracting a quarter of the transfer reported Core ML
     // at 150 GB/s where onnx-tensor-bw, which subtracts a real floor, says 83.
     const double floorUs = timeGemv(dtype, kFloorDim, kFloorDim);
-    const double us = timeGemv(dtype, kK, (int64_t)(kBytes / (kK * es)));
+    const double us = timeGemv(dtype, kK, (int64_t)(kBytes / (kK * es)),
+                               dtype == ONNX_DT_FLOAT ? &fp32RelErr : nullptr);
     if (us <= 0.0)
       continue;
     const double netUs = us - ((floorUs > 0.0) ? floorUs : 0.0);
@@ -509,11 +590,34 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
                 ep.providerKey.c_str(),
                 dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", bps / 1.0e9,
                 us, floorUs);
-    if (bps > best.bps)
-    {
-      best.bps = bps;
-      best.dtype = dtype;
-    }
+    bpsOf[ci] = bps;
+  }
+
+  // fp32 streamed faster per credited byte *and* came back rounded like a
+  // 16-bit type: the provider holds it at half width, and its reading counts
+  // bytes that never moved (see onnxFp32Narrowed).
+  const double bps16 = bpsOf[0], bps32 = bpsOf[1];
+  if (fp32RelErr >= 0.0)
+    CLPEAK_VLOG("onnx-stream[%s]: fp32 result within %.1f ppm of a double-"
+                "precision reference\n",
+                ep.providerKey.c_str(), fp32RelErr * 1.0e6);
+  best.fp32Narrowed = fp32RelErr > kFp32ExactRelErr && bps16 > 0.0 &&
+                      bps32 > kNarrowedRateRatio * bps16;
+  if (best.fp32Narrowed)
+    CLPEAK_VLOG("onnx-stream[%s]: fp32 is held at half width here (%.0f ppm, "
+                "%.2fx fp16's rate per credited byte); streaming fp16\n",
+                ep.providerKey.c_str(), fp32RelErr * 1.0e6, bps32 / bps16);
+
+  // fp16 on a tie, and fp32 only where it is what it says it is.
+  if (bps16 > 0.0)
+  {
+    best.dtype = ONNX_DT_FLOAT16;
+    best.bps = bps16;
+  }
+  if (bps32 > best.bps && !best.fp32Narrowed)
+  {
+    best.dtype = ONNX_DT_FLOAT;
+    best.bps = bps32;
   }
 
   std::lock_guard<std::mutex> lk(mtx);
@@ -529,6 +633,11 @@ int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
   return onnxStreamProbe(rt, ep).bps;
+}
+
+bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  return onnxStreamProbe(rt, ep).fp32Narrowed;
 }
 
 // ---------------------------------------------------------------------------

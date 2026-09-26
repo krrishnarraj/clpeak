@@ -382,13 +382,33 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
+namespace
+{
+// The last step of every resident GEMM: the [M, N] product down to one row of
+// N, the column maxima, in whichever view `tail` asks for (see OnnxGemmTail).
+void gemmTail(OnnxGraph &g, const std::string &in, const std::string &out,
+              int64_t M, int64_t N, OnnxGemmTail tail)
+{
+  if (tail == OnnxGemmTail::Rank4)
+  {
+    const std::string view = out + "_r4";
+    g.shapeInitializer(view + "_shape", {1, M, 1, N});
+    g.node("Reshape", {in, view + "_shape"}, {view});
+    g.reduceMax(view, out, {0, 1, 2});
+    return;
+  }
+  g.reduceMax(in, out, {0});
+}
+} // namespace
+
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
                                          const std::string &aPacked,
                                          const std::string &aBlockScales,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
-                                         float globalScale)
+                                         float globalScale,
+                                         OnnxGemmTail tail)
 {
   auto f32 = [](float v) {
     std::string s(4, '\0');
@@ -421,7 +441,7 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
          {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
 
   g.node("MatMul", {"A_f", "B_f"}, {"C"});
-  g.reduceMax("C", "R", {0});
+  gemmTail(g, "C", "R", M, N, tail);
   g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
@@ -432,7 +452,8 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               const std::string &aRaw,
                                               const std::string &wPacked,
                                               const std::string &wScalesRaw,
-                                              OnnxLiveShape shape)
+                                              OnnxLiveShape shape,
+                                              OnnxGemmTail tail)
 {
   OnnxGraph g;
   // The blocked DequantizeLinear (block_size) is opset 21 whatever the
@@ -460,7 +481,7 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
   g.node("MatMul", {"A", "B_f"}, {"C"});
   // Output is always Y so every shape is driven identically; only the
   // result-scaled form has a tail multiply to feed it.
-  g.reduceMax("C", live ? "Y" : "R", {0});
+  gemmTail(g, "C", live ? "Y" : "R", M, N, tail);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT16, {N});
@@ -470,7 +491,9 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
                                      OnnxLiveShape shape,
-                                     bool reduceInFloat)
+                                     bool reduceInFloat,
+                                     OnnxGemmTail tail,
+                                     const std::vector<std::string> *chain)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(dtype));
@@ -505,17 +528,26 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // quietly turn this matrix multiply into a matrix-vector one.  Max does not
   // distribute over the product, so the full result has to be computed.
   g.node("MatMul", {"A", "B"}, {"C"});
+  std::string product = "C";
+  if (chain)
+    for (size_t l = 0; l < chain->size(); l++)
+    {
+      const std::string n = std::to_string(l + 1);
+      g.initializer("B" + n, dtype, {N, N}, (*chain)[l]);
+      g.node("MatMul", {product, "B" + n}, {"C" + n});
+      product = "C" + n;
+    }
   // The cast sits after the multiply, so it cannot change the arithmetic being
   // measured -- and the numeric-error row is the independent check on that: a
   // matmul quietly promoted to fp32 would report fp32's rate as well as fp32's
   // error.
-  const char *reduceIn = "C";
+  std::string reduceIn = product;
   if (reduceInFloat)
   {
-    g.node("Cast", {"C"}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
+    g.node("Cast", {product}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
     reduceIn = "Cf";
   }
-  g.reduceMax(reduceIn, live ? "Y" : "R", {0});
+  gemmTail(g, reduceIn, live ? "Y" : "R", M, N, tail);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", tailDtype, {N});
@@ -526,7 +558,10 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
-                                       OnnxLiveShape shape)
+                                       OnnxLiveShape shape,
+                                       OnnxGemmTail tail,
+                                       const std::vector<std::string> *chain,
+                                       float chainWScale)
 {
   // Signed activations are symmetric (zero point 0); unsigned ones centre on
   // 128.  TensorRT accepts only the former, x86 MLAS only fuses the latter.
@@ -631,6 +666,23 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
   g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
+  // Each chained layer is the same node unit fed the last one's codes, so the
+  // DQ -> MatMul adjacency holds for every layer.
+  std::string codes = "C_q";
+  if (chain && !chain->empty())
+  {
+    g.initializer("cw_scale", ONNX_DT_FLOAT, {}, f32(chainWScale));
+    for (size_t l = 0; l < chain->size(); l++)
+    {
+      const std::string n = std::to_string(l + 1);
+      g.initializer("B_q" + n, wDtype, {N, N}, (*chain)[l]);
+      g.node("DequantizeLinear", {codes, "c_scale", "c_zp"}, {"X_f" + n});
+      g.node("DequantizeLinear", {"B_q" + n, "cw_scale", "b_zp"}, {"B_f" + n});
+      g.node("MatMul",           {"X_f" + n, "B_f" + n},       {"C_f" + n});
+      g.node("QuantizeLinear",   {"C_f" + n, "c_scale", "c_zp"}, {"C_q" + n});
+      codes = "C_q" + n;
+    }
+  }
   // Dequantize before reducing, not after.  Reducing the quantized result
   // directly saves a pass over it and ONNX Runtime accepts it, but it is not
   // the shape a quantized graph normally takes -- a QuantizeLinear is
@@ -638,13 +690,13 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // outright: "Node n4 cannot be quantized by n3.  You might want to add a DQ
   // node before n4."  The standard pattern costs one full-width pass, about a
   // fifth of the measured rate, and is what real quantized layers do anyway.
-  g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C_d"});
+  g.node("DequantizeLinear", {codes, "c_scale", "c_zp"}, {"C_d"});
   // The result-scaled form needs the tail multiply to depend on S; the live
   // forms already do (through the operand, or through ZA) and reduce
   // straight into the output.  In the Add forms S is a graph input nothing
   // consumes, which is legal and free, so every form is driven identically.
   const bool resultScaled = (shape == OnnxLiveShape::ResultScaled);
-  g.reduceMax("C_d", resultScaled ? "R" : "Y", {0});
+  gemmTail(g, "C_d", resultScaled ? "R" : "Y", M, N, tail);
   if (resultScaled)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});

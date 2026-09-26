@@ -40,23 +40,29 @@ constexpr unsigned int kOnnxMaxIters = 500;
 
 // Ceiling on session creation (graph compilation) time.  Separate from
 // kMaxIterUs which gates per-iteration execution time: on QNN HTP the
-// compilation dominates (1024^3: 33s, 2048^3: 313s, ~9x per 2x dim) and the
-// execution gate never fires because per-iter stays in ms.  Two guards:
+// compilation dominates (a single 8192^3 matmul: 36-71 s) and the execution
+// gate never fires because per-iter stays in ms.  Guards:
 //
 //  * absolute: one create > kOnnxMaxCreateUs -> stop ladder after this rung
-//    (keep its result, skip larger).  60s for the doubling ladders (gemm,
-//    conv), 60s for the fixed-geometry block whose 8192 context legitimately
-//    needs ~1 min on CoreML/TensorRT AOT toolchains.
+//    (keep its result, skip larger).  The same ceiling bounds the fixed-
+//    geometry block, whose 8192 context legitimately needs ~1 min on
+//    CoreML/TensorRT AOT toolchains.  At 60 s QNN's int8 ladder stopped at
+//    8192 while its rate was still climbing (8.3 -> 13.1 TOPS from 4096),
+//    and compiles of 179-256 s were paid and then thrown away.
+//
+//  * predicted: onnx-gemm skips a rung whose compile its previous rungs
+//    predict over the ceiling, from the growth they showed (gemm.cpp).
 //
 //  * factor: create grew > kOnnxCreateGrowthFactor since previous rung, and
 //    is itself past kOnnxCreateGrowthFloor (memory 4x, flops 8x per 2x dim;
-//    6x tolerates jitter but catches QNN's 9.3x).  Applies only to ladders
-//    where D doubles.
+//    6x tolerates jitter but catches QNN's 9.3x).  The convolution ladder
+//    still stops on it; onnx-gemm folds the observed growth into its
+//    prediction instead.
 //
 // The first rung (kMinDim) is allowed to exceed the absolute once - its time
-// is the seed for the factor gate; truncating it would discard a valid peak.
-constexpr double kOnnxMaxCreateUs = 60.0e6;
-constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
+// is the seed for the prediction; truncating it would discard a valid peak.
+constexpr double kOnnxMaxCreateUs = 240.0e6;
+constexpr double kOnnxMaxBlockCreateUs = 240.0e6;
 constexpr double kOnnxCreateGrowthFactor = 6.0;
 // ...and only once creation is expensive enough for its growth to mean
 // anything.  The factor exists to catch an ahead-of-time compiler's cliff

@@ -134,9 +134,13 @@ std::vector<OnnxLiveShape> liveShapesFor(const Variant &v)
   return {OnnxLiveShape::ResultScaled, OnnxLiveShape::OperandScaled};
 }
 
-uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape)
+uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
+                      int layers)
 {
   const uint64_t elems = (uint64_t)D * (uint64_t)D;
+  if (layers > 1)
+    return operandBytes(v, D, shape) +
+           (uint64_t)(layers - 1) * onnxElemBytes(v.dtype, (int64_t)elems);
   if (v.nvfp4)
     return 2ull * (onnxElemBytes(ONNX_DT_FLOAT4E2M1, (int64_t)elems) +
                    elems / (uint64_t)v.blockSize);
@@ -169,7 +173,8 @@ size_t dtypeSize(int dtype)
   }
 }
 
-void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
+void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed,
+                float floatScale)
 {
   uint32_t s = seed;
   // assign, not resize: the sub-byte types write one nibble at a time over
@@ -186,13 +191,13 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
     switch (dtype)
     {
     case ONNX_DT_FLOAT:
-      f[i] = v;
+      f[i] = v * floatScale;
       break;
     case ONNX_DT_FLOAT16:
-      h[i] = floatToHalf(v);
+      h[i] = floatToHalf(v * floatScale);
       break;
     case ONNX_DT_BFLOAT16:
-      h[i] = floatToBf16(v);
+      h[i] = floatToBf16(v * floatScale);
       break;
     // Quantized types all store a value already spread over [-1, 1], so the
     // dequantized operands match whatever the format's rounding leaves of
@@ -250,7 +255,8 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g)
 static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         GemmSetup &g, const std::string &modelBytes,
                         int sDtype, int ioDtype, int64_t D, bool profile,
-                        bool keepQdqUnfused, int zaDtype, bool verifyPlacement)
+                        bool keepQdqUnfused, int zaDtype, bool verifyPlacement,
+                        const std::string &nativeProfile)
 {
   // Every model here holds its operands as constants and needs ORT's own
   // folding held off: the result-scaled form is otherwise evaluated once at
@@ -258,7 +264,7 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // that would be baked into full-width weights.
   auto ses = onnxCreateSession(rt, ep, modelBytes,
                                /*keepConstantsUnfolded=*/true, profile,
-                               keepQdqUnfused, verifyPlacement);
+                               keepQdqUnfused, verifyPlacement, nativeProfile);
   if (!ses.session)
   {
     g.error = ses.error;
@@ -318,7 +324,9 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
-                    OnnxLiveShape shape, bool verifyPlacement)
+                    OnnxLiveShape shape, bool verifyPlacement,
+                    OnnxGemmTail tail, int layers,
+                    const std::string &nativeProfile)
 {
   GemmSetup g;
   std::string modelBytes;
@@ -332,14 +340,15 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   kNvfp4GlobalScale, 0x243f6a88u);
     modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
                                               aScales, bPacked, bScales,
-                                              kNvfp4GlobalScale);
+                                              kNvfp4GlobalScale, tail);
     // Free the raw operands before the session copies the model.
     std::string().swap(aPacked);
     std::string().swap(aScales);
     std::string().swap(bPacked);
     std::string().swap(bScales);
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT, ONNX_DT_FLOAT, D,
-                profile, /*keepQdqUnfused=*/true, /*zaDtype=*/0, verifyPlacement);
+                profile, /*keepQdqUnfused=*/true, /*zaDtype=*/0, verifyPlacement,
+                nativeProfile);
     return g;
   }
 
@@ -353,12 +362,13 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                            v.dtype);
     modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
                                                    v.blockSize, aRaw, wPacked,
-                                                   wScales, shape);
+                                                   wScales, shape, tail);
     std::string().swap(aRaw);
     std::string().swap(wPacked);
     std::string().swap(wScales);
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, D,
-                profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0, verifyPlacement);
+                profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0, verifyPlacement,
+                nativeProfile);
     return g;
   }
 
@@ -367,20 +377,36 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
   fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
 
+  // A chain's later layers keep the magnitude their input arrives with: a
+  // D-deep product of values whose RMS is 1/sqrt(D) returns what it was
+  // given.  In floats that is the weights themselves, uniform over
+  // +/-sqrt(3/D); in QDQ it is the weights' dequantize scale, so the codes
+  // still spend their whole range and one output scale serves every layer.
+  std::vector<std::string> chain;
+  for (int l = 1; l < layers; l++)
+  {
+    chain.emplace_back();
+    fillTensor(chain.back(), wDtype, D * D, 0x243f6a88u + 0x9e3779b9u * (uint32_t)l,
+               /*floatScale=*/2.0f * std::sqrt(3.0f / (float)D));
+  }
+  const std::vector<std::string> *chainPtr = chain.empty() ? nullptr : &chain;
+
   if (v.qdq)
   {
     modelBytes = onnxResidentQdqMatMulModel(
         D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
         onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
-        actDtype, wDtype, shape);
+        actDtype, wDtype, shape, tail, chainPtr,
+        onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)D));
   }
   else
   {
     modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw, shape,
-                                         reduceInFloat);
+                                         reduceInFloat, tail, chainPtr);
   }
   std::string().swap(aRaw);
   std::string().swap(bRaw);
+  std::vector<std::string>().swap(chain);
 
   // Anything QLinearMatMul cannot carry must not be fused into it.
   const bool unfusable = v.qdq && (!onnxQdqFusionIsLegal(actDtype) ||
@@ -398,7 +424,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                  shape == OnnxLiveShape::QdqAdd0);
   finishSetup(rt, ep, g, modelBytes, sDtype, ioDtype, D, profile,
               /*keepQdqUnfused=*/unfusable, addForm ? actDtype : 0,
-              verifyPlacement);
+              verifyPlacement, nativeProfile);
   return g;
 }
 

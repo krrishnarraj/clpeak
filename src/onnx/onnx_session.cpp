@@ -358,7 +358,8 @@ constexpr const char *kCoremlComputeUnits = "CPUAndNeuralEngine";
 // the compiled model a second time to read MLComputePlan, which is what
 // the native backend pays too and the price of knowing where the work ran.
 // Off for the probes and the attach-only check, which never time a run.
-bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
+bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan,
+                      const std::string &nativeProfile)
 {
   const std::string &providerKey = ep.providerKey;
   if (providerKey == "CoreMLExecutionProvider")
@@ -390,31 +391,35 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
     // would settle for the DSP or the CPU reference backend and the row
     // would not mean what it says.
     if (ep.epDevicePtr && ep.deviceType == DeviceType::Gpu)
-    {
       qnnBackend(ep, "gpu", gpuFile, out);
-      return true;
-    }
-    if (ep.epDevicePtr && ep.deviceType == DeviceType::Cpu)
-    {
+    else if (ep.epDevicePtr && ep.deviceType == DeviceType::Cpu)
       qnnBackend(ep, "cpu", cpuFile, out);
-      return true;
+    else
+    {
+      qnnBackend(ep, "htp", htpFile, out);
+      // Peak clocks.  The HTP's default performance mode is a power
+      // saver; "burst" is what a benchmark -- and Qualcomm's own
+      // profiling tools -- ask for, and the difference is a large
+      // multiple on sustained work.
+      out.kv.emplace_back("htp_performance_mode", "burst");
+      out.kv.emplace_back("qnn_context_priority", "high");
+      // The most optimised graph the finalizer will produce.  Costs
+      // preparation time, which the session-creation budgets bound.
+      out.kv.emplace_back("htp_graph_finalization_optimization_mode", "3");
+      // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
+      // HTP.  The default hands them to the CPU EP, which the fallback
+      // guard then refuses -- and a quantized input arriving through
+      // a dequantize is exactly what the numeric-error and live QDQ
+      // graphs have at their boundary.
+      out.kv.emplace_back("offload_graph_io_quantization", "0");
     }
-    qnnBackend(ep, "htp", htpFile, out);
-    // Peak clocks.  The HTP's default performance mode is a power
-    // saver; "burst" is what a benchmark -- and Qualcomm's own
-    // profiling tools -- ask for, and the difference is a large
-    // multiple on sustained work.
-    out.kv.emplace_back("htp_performance_mode", "burst");
-    out.kv.emplace_back("qnn_context_priority", "high");
-    // The most optimised graph the finalizer will produce.  Costs
-    // preparation time, which the session-creation budgets bound.
-    out.kv.emplace_back("htp_graph_finalization_optimization_mode", "3");
-    // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
-    // HTP.  The default hands them to the CPU EP, which the fallback
-    // guard then refuses -- and a quantized input arriving through
-    // a dequantize is exactly what the numeric-error and live QDQ
-    // graphs have at their boundary.
-    out.kv.emplace_back("offload_graph_io_quantization", "0");
+    // Per-operation device timings, written as CSV.  "detailed" is the
+    // level that breaks a graph down by node; every QNN backend has it.
+    if (!nativeProfile.empty())
+    {
+      out.kv.emplace_back("profiling_level", "detailed");
+      out.kv.emplace_back("profiling_file_path", nativeProfile);
+    }
     return true;
   }
   if (providerKey == "OpenVINOExecutionProvider")
@@ -464,7 +469,8 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
 // one-line reason -- including "no wiring", so an unknown provider is
 // reported as unsupported rather than silently run with defaults.
 std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
-                           const onnx_ep_info_t &ep, bool wantPlan)
+                           const onnx_ep_info_t &ep, bool wantPlan,
+                           const std::string &nativeProfile = std::string())
 {
   const OrtApi *api = rt.api;
   const std::string &providerKey = ep.providerKey;
@@ -480,13 +486,13 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   if (ep.epDevicePtr)
   {
     EpOptions opts;
-    if (!genericEpOptions(ep, opts, wantPlan))
+    if (!genericEpOptions(ep, opts, wantPlan, nativeProfile))
       opts = {"", {}};
     return onnxAppendPluginDevice(rt, so, ep, opts.kv);
   }
 
   EpOptions opts;
-  if (genericEpOptions(ep, opts, wantPlan))
+  if (genericEpOptions(ep, opts, wantPlan, nativeProfile))
   {
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
@@ -716,6 +722,53 @@ static void removeProfileArtifacts(const std::string &prefix)
   }
 }
 
+std::string onnxNativeProfilePath(const onnx_ep_info_t &ep)
+{
+  // The providers whose own profiler genericEpOptions knows how to ask for.
+  if (ep.providerKey == "QNNExecutionProvider")
+    return uniqueProfilePrefixPath() + "_qnn.csv";
+  return std::string();
+}
+
+void onnxLogNativeProfile(const std::string &path, const std::string &tag)
+{
+  if (path.empty())
+    return;
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+  {
+    CLPEAK_VLOG("onnx-native-profile[%s]: the provider wrote nothing to %s\n",
+                tag.c_str(), path.c_str());
+    return;
+  }
+  std::vector<std::string> lines;
+  for (std::string line; std::getline(in, line);)
+  {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    if (!line.empty())
+      lines.push_back(std::move(line));
+  }
+  in.close();
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+
+  // Bounded: the head holds the column names and the one-off setup events,
+  // the tail the last few runs, which is what the timings are read from.
+  constexpr size_t kHead = 40, kTail = 360;
+  CLPEAK_VLOG("onnx-native-profile[%s]: %zu lines\n", tag.c_str(), lines.size());
+  for (size_t i = 0; i < lines.size(); i++)
+  {
+    if (i == kHead && lines.size() > kHead + kTail)
+    {
+      CLPEAK_VLOG("onnx-native-profile[%s]: ... %zu lines skipped ...\n",
+                  tag.c_str(), lines.size() - kHead - kTail);
+      i = lines.size() - kTail;
+    }
+    CLPEAK_VLOG("onnx-native-profile[%s]: %s\n", tag.c_str(), lines[i].c_str());
+  }
+}
+
 const char *onnxProfileTypeName(int dtype)
 {
   switch (dtype)
@@ -893,7 +946,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     bool keepConstantsUnfolded,
                                     bool profile,
                                     bool keepQdqUnfused,
-                                    bool verifyPlacement)
+                                    bool verifyPlacement,
+                                    const std::string &nativeProfile)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -971,7 +1025,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // one provider that needs no registration and keeps its fallback.
   if (ep.providerKey != "CPUExecutionProvider")
   {
-    res.error = appendProvider(rt, so, ep, wantPlan);
+    res.error = appendProvider(rt, so, ep, wantPlan, nativeProfile);
     if (!res.error.empty())
     {
       api->ReleaseSessionOptions(so);

@@ -630,6 +630,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // rather than by a list of provider names -- the point being that a
   // provider nobody here has run gets the same treatment.
   const double streamBps = onnxStreamBps(rt, ep);
+  // The one narrowing the probe can prove rather than suspect: fp32 held at
+  // half width (onnxFp32Narrowed).  Where it is proven the fp32 row is
+  // credited the bytes that move, instead of carrying a note beside a figure
+  // twice what the device streamed.
+  const bool fp32Narrowed = onnxFp32Narrowed(rt, ep);
 
   // What only a run can say: the kernel the provider fused to, the scheme it
   // settled on, and whether it converted the activations first.
@@ -966,11 +971,27 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
-      const uint64_t wBytes = weightBytes(v);
-      const uint64_t kvB = kvBytes(v, kDecodeKv);
+      uint64_t wBytes = weightBytes(v);
+      uint64_t kvB = kvBytes(v, kDecodeKv);
+      // fp32 tensors on a provider proven to hold them at half width move
+      // two bytes an element, and that is what the row is credited with.
+      const bool halfWidth =
+          fp32Narrowed && v.wBlock == 0 &&
+          (v.wDtype == ONNX_DT_FLOAT ||
+           (v.kvDtype ? v.kvDtype : v.actDtype) == ONNX_DT_FLOAT);
+      if (halfWidth && v.wDtype == ONNX_DT_FLOAT)
+        wBytes /= 2;
+      if (halfWidth && (v.kvDtype ? v.kvDtype : v.actDtype) == ONNX_DT_FLOAT)
+        kvB /= 2;
       const double bytes = (double)(wBytes + kvB);
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  One token with 2048 of context: " + std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvB >> 20)) + " MB of cached context, read in full for one token." + provenance(v, vr);
+      if (halfWidth)
+        o.description += "  This provider holds fp32 tensors at 16 bits -- its "
+                         "fp32 results carry half-precision error, and it "
+                         "streams fp32 elements as fast as fp16 ones -- so the "
+                         "count above is the two bytes an element it moves, "
+                         "not the four fp32 declares.";
 
       // Prefill settled most variants already; validateVariant answers from
       // what it recorded and only probes the ones it has not seen -- the

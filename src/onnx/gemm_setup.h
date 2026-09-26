@@ -73,8 +73,10 @@ size_t schemesFor(const Variant &v, QuantScheme out[2]);
 std::vector<OnnxLiveShape> liveShapesFor(const Variant &v);
 
 // Bytes of operands the model for (variant, D, shape) embeds: what the size
-// ladder checks against the memory budget and the protobuf ceiling.
-uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape);
+// ladder checks against the memory budget and the protobuf ceiling.  A chain
+// of `layers` embeds one more weight matrix per layer after the first.
+uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
+                      int layers = 1);
 
 size_t dtypeSize(int dtype);
 
@@ -82,7 +84,10 @@ size_t dtypeSize(int dtype);
 // Floats land in [-0.5, 0.5) and int8 in [-127, 127]: small magnitudes keep
 // fp16 accumulation over a 4096-deep dot product far from overflow, and
 // avoid the NaN/denormal slow paths raw random bit patterns would hit.
-void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed);
+// `floatScale` multiplies the floating-point values only; the quantized types
+// always spend their whole code range.
+void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed,
+                float floatScale = 1.0f);
 
 // Output scale for the QDQ form: four sigma of a K-deep dot product mapped
 // onto the widest code the output type has.
@@ -117,11 +122,16 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 // `actDtype`/`wgtDtype` apply to the QDQ form; `reduceInFloat` to the plain
 // one.  On failure `error` is set and `session` is null.  `verifyPlacement`
 // is onnxCreateSession's: off for the 32-cube probes, on for every rung a
-// ladder times.
+// ladder times.  `tail` is how the product leaves (OnnxGemmTail); `layers`
+// chains that many D x D multiplies in one graph (plain and QDQ rows only);
+// `nativeProfile` asks the provider's own profiler to write there
+// (onnxNativeProfilePath).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
-                    OnnxLiveShape shape, bool verifyPlacement = true);
+                    OnnxLiveShape shape, bool verifyPlacement = true,
+                    OnnxGemmTail tail = OnnxGemmTail::Rows, int layers = 1,
+                    const std::string &nativeProfile = std::string());
 
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n);

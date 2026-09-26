@@ -200,6 +200,26 @@ enum class OnnxLiveShape
   QdqAdd0,
 };
 
+// How a resident GEMM's [M, N] product is reduced to the one row that leaves
+// the device.  Both are the same ReduceMax over the same values -- the maximum
+// down each column -- and differ only in the view of the product the
+// reduction is handed.
+enum class OnnxGemmTail
+{
+  // ReduceMax over axis 0 of the 2-D product.  What every provider has taken
+  // and what every row is measured with, until a provider refuses it.
+  Rows,
+
+  // The product reshaped to [1, M, 1, N] and reduced over axes {0, 1, 2}.
+  // A provider can take a reduction at one rank and refuse it at another: the
+  // QNN Adreno backend ran the 2-D form at [32, 32] and [1, 2048] and refused
+  // it at [1024, 1024] and [64, 2048], while taking the convolution test's
+  // 4-D reduction at [1, 256, 256, 256].  The reshape moves no data, so the
+  // reading is unchanged wherever both forms build; gemm.cpp falls back to
+  // this one only when a size is refused with the other.
+  Rank4,
+};
+
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each
 // run.  With A as a graph input and C returned to the host -- the obvious
@@ -254,20 +274,32 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          const std::string &aBlockScales,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
-                                         float globalScale);
+                                         float globalScale,
+                                         OnnxGemmTail tail = OnnxGemmTail::Rows);
 
 std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
                                               int wDtype, int64_t blockSize,
                                               const std::string &aRaw,
                                               const std::string &wPacked,
                                               const std::string &wScalesRaw,
-                                              OnnxLiveShape shape);
+                                              OnnxLiveShape shape,
+                                              OnnxGemmTail tail = OnnxGemmTail::Rows);
 
+// `chain` (plain and QDQ forms, below): further [N, N] weight matrices the
+// product passes through, in order, before it is reduced -- one dispatch that
+// multiplies 1 + chain->size() times.  Each is distinct, so no layer repeats
+// an operand pair a runtime could cache, and the caller scales them so the
+// activations keep their magnitude from layer to layer: an fp16 chain whose
+// every layer grew the values by sqrt(N) would overflow within a few layers.
+// Only the live shapes may be chained; a chain of constants is one long
+// constant expression.
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
                                      OnnxLiveShape shape,
-                                     bool reduceInFloat = false);
+                                     bool reduceInFloat = false,
+                                     OnnxGemmTail tail = OnnxGemmTail::Rows,
+                                     const std::vector<std::string> *chain = nullptr);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the
@@ -292,12 +324,21 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // activations against int8 weights and will not fuse signed ones, while
 // TensorRT rejects uint8 outright and requires a zero point of zero.  The
 // caller picks by trying, and the fusion check decides.
+//
+// A `chain` layer is the same quantized node unit again -- DQ -> MatMul -> Q,
+// its weight codes dequantized by `chainWScale` -- fed the previous layer's
+// quantized product and requantized with `cScale`.  The caller picks
+// `chainWScale` so each layer keeps the magnitude of its input, which is what
+// lets one output scale serve every layer.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
-                                       OnnxLiveShape shape);
+                                       OnnxLiveShape shape,
+                                       OnnxGemmTail tail = OnnxGemmTail::Rows,
+                                       const std::vector<std::string> *chain = nullptr,
+                                       float chainWScale = 0.0f);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per
