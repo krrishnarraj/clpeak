@@ -9,7 +9,24 @@ import 'clpeak_bindings.dart';
 import '../model/run_document.dart';
 import 'clpeak_events.dart';
 
-/// A single in-flight benchmark run.
+/// One in-flight benchmark run, wherever it executes: in this process
+/// ([ClpeakRun]) or in the engine process (`ChildRun`, clpeak_engine.dart).
+abstract interface class EngineRun {
+  /// Decoded run events, ending with [DoneEvent].
+  Stream<ClpeakEvent> get events;
+
+  /// The clpeak_launch return code (CLPEAK_RUN_* / OR'd backend status).
+  Future<int> get result;
+
+  /// Why the run ended without finishing, when it did not end by itself: the
+  /// engine process crashed or could not start.  Null otherwise.
+  String? get failure;
+
+  /// Request cooperative cancellation; the current test finishes first.
+  void cancel();
+}
+
+/// A single in-flight benchmark run in this process.
 ///
 /// Threading contract: the blocking `clpeak_launch` runs in a short-lived
 /// worker isolate; native events fire on that isolate's thread and are
@@ -17,7 +34,7 @@ import 'clpeak_events.dart';
 /// delivers on the main isolate in emission order.  The final native `done`
 /// event is the drain barrier — the listener is closed only after both the
 /// done event has been consumed and the launch call has returned.
-class ClpeakRun {
+class ClpeakRun implements EngineRun {
   ClpeakRun._(this._bindings, List<String> args) {
     _callable = NativeCallable<ClpeakEventCallbackNative>.listener(_onNative);
     _spawn(_callable.nativeFunction.address, args).then((rc) {
@@ -40,13 +57,17 @@ class ClpeakRun {
   bool _launchReturned = false;
   bool _finished = false;
 
-  /// Decoded run events, ending with [DoneEvent].
+  @override
   Stream<ClpeakEvent> get events => _events.stream;
 
-  /// The clpeak_launch return code (CLPEAK_RUN_* / OR'd backend status).
+  @override
   Future<int> get result => _rc.future;
 
-  /// Request cooperative cancellation; the current test finishes first.
+  /// Always null: a native crash here ends the app along with the run.
+  @override
+  String? get failure => null;
+
+  @override
   void cancel() => _bindings.requestCancel();
 
   void _onNative(Pointer<Void> userData, Pointer<Utf8> eventJson) {

@@ -1,4 +1,5 @@
 #include "clpeak_ffi.h"
+#include "launch.h"
 #include "logger_ffi.h"
 
 #include <common/backend_registry.h>
@@ -239,11 +240,18 @@ void clpeak_request_cancel(void)
 int clpeak_launch(int argc, const char **argv,
                   ClpeakEventCallback on_event, void *user_data)
 {
+    return clpeakLaunch(argc, argv, on_event, user_data, /*resetCancel=*/true);
+}
+
+int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
+                 void *user_data, bool resetCancel)
+{
     bool expected = false;
     if (!g_running.compare_exchange_strong(expected, true))
         return CLPEAK_RUN_BUSY;  // no done event: the in-flight run owns the stream
 
-    clpeak::resetCancel();
+    if (resetCancel)
+        clpeak::resetCancel();
 
     std::vector<char *> mutableArgv;
     mutableArgv.reserve(static_cast<size_t>(argc));

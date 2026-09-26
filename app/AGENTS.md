@@ -15,10 +15,11 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   user-visible name "clpeak" via `CFBundleName`/`CFBundleDisplayName`.
 - macOS disk image: `cmake --build build --target clpeak-gui-dmg`
   (`tools/make_dmg.sh`; ad-hoc signed, so a downloaded copy is quarantined).
-- Desktop dev loop: build `clpeak_ffi` once, then
+- Desktop dev loop: build `clpeak_ffi` and `clpeak-engine` once, then
   `CLPEAK_FFI_PATH=<build>/clpeak_ffi.framework/clpeak_ffi flutter run -d macos`
   (a plain `flutter build macos` does NOT embed the framework — the
-  clpeak-gui target owns final assembly).
+  clpeak-gui target owns final assembly).  The engine host is found beside
+  that library at the build root; `CLPEAK_ENGINE_PATH` names one outright.
 - Android: `flutter build apk --release` / `flutter build appbundle --release`
   (Gradle drives `src/ffi/android/CMakeLists.txt`; needs
   `git submodule update --init`). The bundle includes ONNX Runtime and
@@ -63,6 +64,16 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Native bindings / event decoding? → `lib/src/ffi/` (`clpeak_bindings.dart`,
   `clpeak_events.dart`; threading contract in `clpeak_runner.dart` —
   `NativeCallable.listener` + `Isolate.run`, `done` event = drain barrier)
+- Where do the catalog and runs execute? → `ClpeakEngine`
+  (`lib/src/ffi/clpeak_engine.dart`).  Desktop: a `clpeak-engine` process
+  per catalog and per run (`ChildProcessEngine` / `ChildRun`; one JSON event
+  per stdout line, a "cancel" line on stdin, the runtime setup passed as the
+  host's `--set-*` options).  The app's own process holds the GUI toolkit and
+  a GL driver, and a vendor runtime beside them can break on what they load
+  (`src/ffi/engine.cpp` has the case).  Android and iOS, and a desktop build
+  without the host: in-process (`InProcessEngine`).  `BenchmarkService`
+  takes one; tests pass none and get the in-process engine over their stub
+  bindings
 - Argv construction (device/category/time flags)? → `lib/src/model/run_config.dart`
   (never emits per-test flags — the UI is data-driven so test churn in the
   core needs no app changes). `--verbose` is not run configuration: it is the
@@ -83,7 +94,10 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   document is written, so one left behind is a crashed run's only record.
   History lists it under "Runs that did not finish" (`_CrashLogTile`) with
   export and delete; the in-flight run's own sidecar is excluded by
-  `BenchmarkService.inFlightRunId`
+  `BenchmarkService.inFlightRunId`.  On desktop the engine process dies
+  instead of the app: `ChildRun` ends the run with a synthesized `done`,
+  `BenchmarkService.runFailure` says how, the results screen shows it over
+  the readings that arrived, and nothing is indexed -- there is no document
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
@@ -138,10 +152,13 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   runtime — applied any later it would be a launch too late, which is why
   `main()` is async and `SettingsService.load()` reads prefs up front.
   The runtime setup -- library, Windows ML switch and folder -- is set
-  once per launch: the first runtime that loads fixes it
-  (`src/onnx/AGENTS.md`, "One runtime setup per process"), and since the
-  saved one loads at startup, a change is normally saved for the next
-  launch.  It always reaches `clpeak_set_onnx_library()` /
+  once per process: the first runtime that loads fixes it
+  (`src/onnx/AGENTS.md`, "One runtime setup per process").  On desktop
+  every catalog and run is a new engine process, so a change applies to the
+  next one (`BenchmarkService.runtimeFixedOnceLoaded` is false, and the
+  settings hints say so).  In-process (mobile), since the saved one loads at
+  startup, a change is normally saved for the next launch.  It always
+  reaches `clpeak_set_onnx_library()` /
   `clpeak_set_onnx_winml()`: while no runtime has loaded it takes effect and
   `BenchmarkService` re-enumerates; otherwise the native side keeps it and
   reports it as `OnnxStatus.pendingRuntime`, and the panel shows the active

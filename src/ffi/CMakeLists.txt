@@ -14,6 +14,7 @@ endif()
 
 add_library(clpeak_ffi SHARED
     clpeak_ffi.cpp
+    engine.cpp
     logger_ffi.cpp
 )
 
@@ -73,6 +74,24 @@ if(NOT CLPEAK_FFI_STANDALONE)
     set(CLPEAK_APP_DIR "${CLPEAK_ROOT}/app")
     set(CLPEAK_GUI_OUT "${CMAKE_BINARY_DIR}/clpeak-gui")
 
+    # clpeak-engine: the process the desktop app enumerates and runs in
+    # (clpeak_engine_main in clpeak_ffi.h).  It dlopens the library the app
+    # names, so it links nothing of ours; it sits next to the runner in every
+    # bundle, and at the build root beside clpeak_ffi for the dev loop.
+    add_executable(clpeak-engine engine_host.cpp)
+    set_target_properties(clpeak-engine PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    if(WIN32)
+        # GUI subsystem: no console window each time the app starts one.
+        set_target_properties(clpeak-engine PROPERTIES WIN32_EXECUTABLE TRUE)
+        target_link_libraries(clpeak-engine PRIVATE shell32)
+        if(MINGW)
+            target_link_options(clpeak-engine PRIVATE -municode)
+        endif()
+    else()
+        target_link_libraries(clpeak-engine PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+
     # Flutter lays its desktop output out under an arch directory on Linux and
     # Windows (build/<os>/<arch>/...).  Derive the tag it uses from the host.
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
@@ -83,16 +102,19 @@ if(NOT CLPEAK_FFI_STANDALONE)
 
     if(APPLE)
         # ditto preserves the framework's symlink structure; codesign the
-        # embedded framework first, then re-seal the app bundle.
+        # nested code -- the embedded framework and the engine host beside the
+        # runner in Contents/MacOS -- first, then re-seal the app bundle.
         add_custom_target(clpeak-gui ALL
-            DEPENDS clpeak_ffi
+            DEPENDS clpeak_ffi clpeak-engine
             COMMAND ${FLUTTER_EXECUTABLE} build macos --release
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLPEAK_GUI_OUT}/clpeak-gui.app"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CLPEAK_GUI_OUT}"
             COMMAND ditto "${CLPEAK_APP_DIR}/build/macos/Build/Products/Release/clpeak-gui.app" "${CLPEAK_GUI_OUT}/clpeak-gui.app"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/Frameworks"
             COMMAND ditto "$<TARGET_BUNDLE_DIR:clpeak_ffi>" "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/Frameworks/clpeak_ffi.framework"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak-engine>" "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/MacOS/"
             COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/Frameworks/clpeak_ffi.framework"
+            COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak-gui.app/Contents/MacOS/clpeak-engine"
             COMMAND codesign --force --sign - "${CLPEAK_GUI_OUT}/clpeak-gui.app"
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
             COMMENT "clpeak-gui: flutter build macos + bundle assembly"
@@ -122,21 +144,24 @@ if(NOT CLPEAK_FFI_STANDALONE)
                     -DARCH=${_clpeak_flutter_arch}
                     -P "${CMAKE_CURRENT_LIST_DIR}/cmake/stage_windows_bundle.cmake"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak_ffi>" "${CLPEAK_GUI_OUT}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak-engine>" "${CLPEAK_GUI_OUT}/"
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
             COMMENT "clpeak-gui: bundle assembly"
             VERBATIM)
-        add_dependencies(clpeak-gui clpeak-gui-flutter)
+        add_dependencies(clpeak-gui clpeak-gui-flutter clpeak-engine)
     else()
-        # Linux bundle layout: bundle/{clpeak-gui, data/, lib/*.so}; the Dart
-        # resolver loads <exeDir>/lib/libclpeak_ffi.so, and the runner loads
-        # data/clpeak_icon.png as its window icon (GTK has no .rc-style
-        # resource embedding, see linux/runner/my_application.cc).
+        # Linux bundle layout: bundle/{clpeak-gui, clpeak-engine, data/,
+        # lib/*.so}; the Dart resolver loads <exeDir>/lib/libclpeak_ffi.so,
+        # and the runner loads data/clpeak_icon.png as its window icon (GTK
+        # has no .rc-style resource embedding, see
+        # linux/runner/my_application.cc).
         add_custom_target(clpeak-gui ALL
-            DEPENDS clpeak_ffi
+            DEPENDS clpeak_ffi clpeak-engine
             COMMAND ${CMAKE_COMMAND} -E env DESTDIR= ${FLUTTER_EXECUTABLE} build linux --release
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLPEAK_GUI_OUT}"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CLPEAK_APP_DIR}/build/linux/${_clpeak_flutter_arch}/release/bundle" "${CLPEAK_GUI_OUT}"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak_ffi>" "${CLPEAK_GUI_OUT}/lib/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clpeak-engine>" "${CLPEAK_GUI_OUT}/"
             WORKING_DIRECTORY "${CLPEAK_APP_DIR}"
             COMMENT "clpeak-gui: flutter build linux + bundle assembly"
             VERBATIM)

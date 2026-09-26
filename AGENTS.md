@@ -26,7 +26,9 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
 own `CMakeLists.txt` that builds a static library (`peak_opencl`, etc.).
 The CLI entry point is `src/cli/main.cpp`. The Flutter GUI (`app/`) drives the
-same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`). Both iterate
+same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`) -- on
+desktop from a `clpeak-engine` process per catalog and run, never inside the
+GUI's own process. Both iterate
 the one backend registry (`src/registry/`), which is sorted by the `Backend`
 enum -- the single order that `--help`, `--list-devices`, the GUI catalog, a
 run and the result document all share.
@@ -59,7 +61,7 @@ run and the result document all share.
 | `src/litert/` | LiteRT backend: `LitertPeak` class + per-benchmark `.cpp`. Each accelerator (NPU via a vendor dispatch library / GPU / CPU) is one device; `.tflite` models are emitted as FlatBuffer bytes in memory, the runtime is dlopen'd, and `IsFullyAccelerated` plus the profiler prove what ran where |
 | `src/registry/` | `backend_registry.cpp` — the one list of backends in this build (`backendRegistry()`, `include/common/backend_registry.h`), sorted by the `Backend` enum; compiled into both `clpeak` and `clpeak_ffi` by `src/common/cmake/backends.cmake`, which also links the backend libraries and sets `ENABLE_*` for both |
 | `src/cli/` | Desktop CLI: `main.cpp` |
-| `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); `clpeak-gui` CMake target; Android/iOS build superprojects |
+| `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); the desktop engine process (`clpeak-engine`); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` and `litert/` (C APIs — no library needed to build) |
 | `tools/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_litert_npu.sh` — stage LiteRT's NPU dispatch shims for the Android app; `screenshots.sh` — regenerate the README/site screenshots from `results/`, via `app/integration_test/screenshots_test.dart` and `screenshots/frame.py`) |

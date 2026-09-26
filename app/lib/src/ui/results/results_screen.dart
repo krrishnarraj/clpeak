@@ -41,7 +41,17 @@ class LiveResultsScreen extends StatelessWidget {
                   if (summary != null) _ExportButton(summary: summary),
                 ],
               ),
-              if (service.cancelled)
+              if (service.runFailure != null)
+                _Notice(
+                  icon: Icons.error_outline,
+                  danger: true,
+                  text: '${service.runFailure}.'
+                      '${service.document.isEmpty ? '' : ' The results below '
+                          'are what it measured until then.'}'
+                      '${service.runFailureLogKept ? ' Its log is in History, '
+                          'under "Runs that did not finish".' : ''}',
+                )
+              else if (service.cancelled)
                 const _Notice(
                   icon: Icons.info_outline,
                   text: 'The run was cancelled — partial results were saved.',

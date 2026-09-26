@@ -21,11 +21,14 @@ import '../common/kit.dart';
 /// backend, ONNX has no single driver on a machine: NPU vendors ship their own
 /// builds, and which one is loaded decides which execution providers appear at
 /// all — a stock build offers CPU and nothing else.  So the library is a
-/// setting.  It is set once per launch: the first runtime that loads fixes it
-/// (with Windows ML, which can choose the runtime and adds providers to it),
-/// so a change made after that is saved for the next launch, and the panel
-/// shows both — the runtime active now, and the one the next launch loads.
-/// LiteRT's library works the same way.  Plugin libraries stay live.
+/// setting.  Where the backends run in this process (mobile) it is set once
+/// per launch: the first runtime that loads fixes it (with Windows ML, which
+/// can choose the runtime and adds providers to it), so a change made after
+/// that is saved for the next launch, and the panel shows both — the runtime
+/// active now, and the one the next launch loads.  On desktop every
+/// enumeration and run is a new engine process, so a change applies to the
+/// next one ([BenchmarkService.runtimeFixedOnceLoaded]).  LiteRT's library
+/// works the same way.  Plugin libraries stay live.
 ///
 /// The verbose switch is how a problem on a phone reaches a maintainer: with
 /// it on, the saved document carries the backends' debug output, the device
@@ -315,6 +318,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final t = CP.of(context);
     final settings = context.watch<SettingsService>();
     final running = context.select<BenchmarkService, bool>((s) => s.isRunning);
+    final perLaunch = context.read<BenchmarkService>().runtimeFixedOnceLoaded;
 
     return Scaffold(
       body: SafeArea(
@@ -350,14 +354,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 10),
                   _RuntimePanel(
                     view: _RuntimeView.onnx(_onnx,
-                        winml: Platform.isWindows),
+                        winml: Platform.isWindows, perLaunch: perLaunch),
                     savedPath: settings.onnxLibraryPath,
                     locked: running,
                     onPick: () => _pickLibrary(_Runtime.onnx),
                     onReset: () => _resetLibrary(_Runtime.onnx),
                   ),
                   // Windows ML beside the library it belongs with: together
-                  // they are the runtime setup, fixed per launch.
+                  // they are the runtime setup.
                   if (Platform.isWindows) ...[
                     const SizedBox(height: 22),
                     const CSection(label: 'Windows ML'),
@@ -366,6 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       enabled: settings.onnxWinml,
                       path: settings.onnxWinmlPath,
                       locked: running,
+                      perLaunch: perLaunch,
                       onToggle: (on) =>
                           _applyWinml(enabled: on, path: settings.onnxWinmlPath),
                       onPickDir: _pickWinmlDir,
@@ -389,7 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const CSection(label: 'LiteRT'),
                   const SizedBox(height: 10),
                   _RuntimePanel(
-                    view: _RuntimeView.litert(_litert),
+                    view: _RuntimeView.litert(_litert, perLaunch: perLaunch),
                     savedPath: settings.litertLibraryPath,
                     locked: running,
                     onPick: () => _pickLibrary(_Runtime.litert),
@@ -499,7 +504,11 @@ class _RuntimeView {
 
   /// [winml]: this platform has the Windows ML catalog, so its state is part
   /// of the setup shown.
-  factory _RuntimeView.onnx(OnnxStatus? s, {required bool winml}) {
+  ///
+  /// [perLaunch]: a runtime choice waits for the next launch once one has
+  /// loaded (in-process); otherwise it applies to the next enumeration.
+  factory _RuntimeView.onnx(OnnxStatus? s,
+      {required bool winml, required bool perLaunch}) {
     final pending = s?.pendingRuntime;
     return _RuntimeView(
       known: s != null,
@@ -515,7 +524,7 @@ class _RuntimeView {
               : 'No runtime loaded',
       path: s?.path ?? '',
       error: s?.error ?? '',
-      hint: _onnxRuntimeHint,
+      hint: _onnxRuntimeHint(perLaunch),
       fixedHint: 'Linked into the app; there is nothing else to choose.',
       lines: [if (winml && s != null && s.available) _activeWinml(s)],
       next: pending == null
@@ -536,9 +545,11 @@ class _RuntimeView {
   /// platform: Windows ML right below and a plugin-library section on
   /// desktop, neither of which the phone build shows — there the app adds a
   /// vendor NPU's plugin on its own when the device has one.
-  static String get _onnxRuntimeHint {
-    const once = 'Set once per launch: after a runtime has loaded, a change '
-        'takes effect the next time clpeak starts.';
+  static String _onnxRuntimeHint(bool perLaunch) {
+    final once = perLaunch
+        ? 'Set once per launch: after a runtime has loaded, a change takes '
+            'effect the next time clpeak starts.'
+        : 'A change applies from the next device scan and run.';
     if (Platform.isAndroid) {
       return 'The engine ONNX runs on. A vendor NPU plugin (Qualcomm\'s QNN) '
           'is added automatically when this device has one. $once';
@@ -551,7 +562,8 @@ class _RuntimeView {
         'Add a vendor NPU it left out with $more. $once';
   }
 
-  factory _RuntimeView.litert(LitertStatus? s) => _RuntimeView(
+  factory _RuntimeView.litert(LitertStatus? s, {required bool perLaunch}) =>
+      _RuntimeView(
         known: s != null,
         available: s?.available ?? false,
         // iOS embeds Google's LiteRT dylibs in the app bundle, and loads no
@@ -566,8 +578,8 @@ class _RuntimeView {
         path: s?.path ?? '',
         error: s?.error ?? '',
         hint: 'Bundled on mobile; if none is found, choose a pip '
-            'ai-edge-litert libLiteRt. Set once per launch, like ONNX '
-            'Runtime.',
+            'ai-edge-litert libLiteRt.'
+            '${perLaunch ? ' Set once per launch, like ONNX Runtime.' : ''}',
         fixedHint: 'Bundled with the app; iOS loads nothing else.',
         next: s?.pendingPath == null ? null : _NextLaunch(path: s!.pendingPath!),
       );
@@ -872,6 +884,7 @@ class _WinmlPanel extends StatelessWidget {
     required this.enabled,
     required this.path,
     required this.locked,
+    required this.perLaunch,
     required this.onToggle,
     required this.onPickDir,
     required this.onClearDir,
@@ -880,6 +893,7 @@ class _WinmlPanel extends StatelessWidget {
   final bool enabled;
   final String path;
   final bool locked;
+  final bool perLaunch; // see _RuntimeView.onnx
   final ValueChanged<bool> onToggle;
   final VoidCallback onPickDir;
   final VoidCallback onClearDir;
@@ -938,8 +952,9 @@ class _WinmlPanel extends StatelessWidget {
           'AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this machine from '
           'the Microsoft Store on first use — a download — instead of you '
           'naming the library yourself. The catalog DLL comes with the '
-          'Microsoft.Windows.AI.MachineLearning package, not with clpeak. '
-          'Part of the runtime setup above, so it too is set once per launch.',
+          'Microsoft.Windows.AI.MachineLearning package, not with clpeak.'
+          '${perLaunch ? ' Part of the runtime setup above, so it too is set '
+              'once per launch.' : ''}',
           style: t.micro.copyWith(color: t.dim),
         ),
         const SizedBox(height: 12),

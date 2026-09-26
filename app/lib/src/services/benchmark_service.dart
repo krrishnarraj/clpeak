@@ -1,10 +1,11 @@
 import 'dart:async';
-import 'dart:isolate';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
 import '../ffi/clpeak_bindings.dart';
+import '../ffi/clpeak_engine.dart';
 import '../ffi/clpeak_events.dart';
 import '../ffi/clpeak_runner.dart';
 import '../model/catalog.dart';
@@ -25,14 +26,19 @@ enum BenchmarkState { idle, running, cancelling, finished }
 /// once at startup; [catalogReady] turns true when the first load lands and
 /// [ready] completes for anyone that must wait (run start, AUTORUN).  Runs
 /// never see a partial catalog — [start] refuses while loading.
+///
+/// Enumeration and runs go through [ClpeakEngine]: on desktop a process of
+/// their own, in this one when none is given (tests, and mobile).
 class BenchmarkService extends ChangeNotifier {
-  BenchmarkService(this._bindings, this._history) {
+  BenchmarkService(this._bindings, this._history, {ClpeakEngine? engine})
+      : _engine = engine ?? InProcessEngine(_bindings) {
     _catalog = BackendCatalog(const []);
     _config = RunConfig.allDevices(_catalog);
     version = _bindings.version();
   }
 
   final ClpeakBindings _bindings;
+  final ClpeakEngine _engine;
   final RunHistoryStore _history;
 
   late BackendCatalog _catalog;
@@ -79,11 +85,20 @@ class BenchmarkService extends ChangeNotifier {
   int exitCode = 0;
   bool cancelled = false;
 
+  /// Why the last run ended early without being cancelled -- the engine
+  /// process crashed, say -- or null; see [EngineRun.failure].
+  String? runFailure;
+
+  /// Whether that run's diagnostic sidecar survived it, so History lists it
+  /// under "Runs that did not finish".
+  bool runFailureLogKept = false;
+
   DateTime? _startedAt;
   DateTime? get startedAt => _startedAt;
 
-  ClpeakRun? _run;
+  EngineRun? _run;
   String? _runId;
+  String? _resultPath;
 
   /// Id of the run in flight (its files in history are named by it), or
   /// null.  History uses it to tell a live run-log sidecar from a crashed
@@ -142,10 +157,15 @@ class BenchmarkService extends ChangeNotifier {
   }
 
   /// Which ONNX Runtime the backend has loaded, or why none is.
-  OnnxStatus onnxStatus() => _bindings.onnxStatus();
+  OnnxStatus onnxStatus() => _engine.onnxStatus();
 
   /// Which LiteRT the backend has loaded, or why none is.
-  LitertStatus litertStatus() => _bindings.litertStatus();
+  LitertStatus litertStatus() => _engine.litertStatus();
+
+  /// Whether a runtime choice waits for the next launch once a runtime has
+  /// loaded ([ClpeakEngine.runtimeFixedOnceLoaded]); on desktop it applies
+  /// to the next enumeration and run instead.
+  bool get runtimeFixedOnceLoaded => _engine.runtimeFixedOnceLoaded;
 
   /// Point the LiteRT backend at a library; see [setOnnxLibrary] for when
   /// that re-enumerates and why the startup load is awaited first.
@@ -153,18 +173,19 @@ class BenchmarkService extends ChangeNotifier {
     if (isRunning) return;
     await _catalogFlight;
     if (isRunning) return;
-    final fixed = _bindings.litertStatus().available;
-    _bindings.setLitertLibrary(path);
+    final fixed = _runtimeFixed(_engine.litertStatus().available);
+    _engine.setLitertLibrary(path);
     if (!fixed) await reloadCatalog();
   }
 
-  /// Point the ONNX backend at a library.  The runtime setup is fixed for
-  /// the launch by the first runtime that loads (src/onnx/onnx_runtime.h):
-  /// while none has, the choice applies now and the catalog is re-enumerated
-  /// so the device list shows its providers; once one has, the native side
-  /// keeps the choice for the next launch ([OnnxStatus.pendingRuntime]) and
-  /// there is nothing to re-enumerate.  Empty path = back to searching the
-  /// conventional names.
+  /// Point the ONNX backend at a library.  In-process the runtime setup is
+  /// fixed for the launch by the first runtime that loads
+  /// (src/onnx/onnx_runtime.h): while none has, the choice applies now and
+  /// the catalog is re-enumerated so the device list shows its providers;
+  /// once one has, the native side keeps the choice for the next launch
+  /// ([OnnxStatus.pendingRuntime]) and there is nothing to re-enumerate.  An
+  /// engine process loads the setup fresh, so there it always applies now.
+  /// Empty path = back to searching the conventional names.
   Future<void> setOnnxLibrary(String path) async {
     if (isRunning) return;
     // A startup load may still be in flight; re-enumerating under it would
@@ -172,8 +193,8 @@ class BenchmarkService extends ChangeNotifier {
     // Awaiting a null future is a no-op, so this is free when idle.
     await _catalogFlight;
     if (isRunning) return;
-    final fixed = _bindings.onnxStatus().available;
-    _bindings.setOnnxLibrary(path);
+    final fixed = _runtimeFixed(_engine.onnxStatus().available);
+    _engine.setOnnxLibrary(path);
     if (!fixed) await reloadCatalog();
   }
 
@@ -185,7 +206,7 @@ class BenchmarkService extends ChangeNotifier {
     if (isRunning) return;
     await _catalogFlight;
     if (isRunning) return;
-    _bindings.setOnnxEpLibraries(libs);
+    _engine.setOnnxEpLibraries(libs);
     await reloadCatalog();
   }
 
@@ -197,10 +218,14 @@ class BenchmarkService extends ChangeNotifier {
     if (isRunning) return;
     await _catalogFlight;
     if (isRunning) return;
-    final fixed = _bindings.onnxStatus().available;
-    _bindings.setOnnxWinml(enabled: enabled, path: path);
+    final fixed = _runtimeFixed(_engine.onnxStatus().available);
+    _engine.setOnnxWinml(enabled: enabled, path: path);
     if (!fixed) await reloadCatalog();
   }
+
+  /// Whether a runtime choice made now waits for the next launch: in-process,
+  /// once the runtime it replaces has loaded.
+  bool _runtimeFixed(bool loaded) => _engine.runtimeFixedOnceLoaded && loaded;
 
   /// Re-enumerate after something changed what the native side can see —
   /// a runtime the settings screen chose before any had loaded, or the
@@ -226,16 +251,13 @@ class BenchmarkService extends ChangeNotifier {
   }
 
   /// Single-flight catalog load shared by [init] and [reloadCatalog]: the
-  /// blocking native enumeration runs on a worker isolate while the UI
-  /// stays interactive.  Same process, so the native viability memo the
-  /// probe fills is shared with later runs for free.
+  /// enumeration runs off the UI thread -- in the engine process, or on a
+  /// worker isolate -- while the UI stays interactive.
   Future<void> _loadCatalog() async {
     _loadingCatalog = true;
     notifyListeners();
     try {
-      // Static closure: captures only sendable values, so it can cross to
-      // the worker, which reopens the library there (same pattern as runs).
-      final json = await Isolate.run(_fetchCatalogJson);
+      final json = await _engine.backendCatalog();
       _catalog = BackendCatalog.fromJson(json);
       _catalogError = null;
 
@@ -267,10 +289,6 @@ class BenchmarkService extends ChangeNotifier {
     }
   }
 
-  // Static so the Isolate.run closure captures only sendable values.
-  static Map<String, dynamic> _fetchCatalogJson() =>
-      ClpeakBindings.open().backendCatalog();
-
   void applyPreset(RunPreset preset) {
     _config = RunConfig.preset(preset, _catalog);
     notifyListeners();
@@ -296,6 +314,8 @@ class BenchmarkService extends ChangeNotifier {
     completedTests = 0;
     exitCode = 0;
     cancelled = false;
+    runFailure = null;
+    runFailureLogKept = false;
     _startedAt = DateTime.now();
     _runId = _makeRunId(_startedAt!);
     _state = BenchmarkState.running;
@@ -306,6 +326,7 @@ class BenchmarkService extends ChangeNotifier {
     ScreenWake.acquire();
 
     final resultPath = await _history.filePathFor(_runId!);
+    _resultPath = resultPath;
     final args = [
       ..._config.toArgs(_catalog),
       if (verbose) '--verbose',
@@ -313,11 +334,17 @@ class BenchmarkService extends ChangeNotifier {
       resultPath,
     ];
 
-    final run = ClpeakRunner(_bindings).start(args);
+    final run = _engine.start(args);
     _run = run;
     run.events.listen(_onEvent, onDone: () async {
       exitCode = await run.result.catchError((_) => 1);
       cancelled = exitCode == clpeakRunCancelled;
+      runFailure = run.failure;
+      if (runFailure != null) {
+        // The sidecar the native side derives from -o (.json -> .log).
+        final log = '${resultPath.substring(0, resultPath.length - 5)}.log';
+        runFailureLogKept = await File(log).exists();
+      }
       await _finalize();
     });
   }
@@ -400,7 +427,10 @@ class BenchmarkService extends ChangeNotifier {
     _stopLiveTicker(); // back to immediate notifications
     ScreenWake.release();
     final startedAt = _startedAt ?? DateTime.now();
-    if (!_document.isEmpty) {
+    // Indexed only once written: a run whose engine died has no document,
+    // just the sidecar History lists on its own.
+    final saved = _resultPath != null && await File(_resultPath!).exists();
+    if (!_document.isEmpty && saved) {
       final summary = RunSummary.fromDocument(
         id: _runId!,
         fileName: RunHistoryStore.fileNameFor(_runId!),
