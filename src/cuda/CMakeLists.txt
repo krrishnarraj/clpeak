@@ -79,10 +79,11 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 72
     KERNELS wmma_int8)
 
-# INT4 mma.sync -- sm_75..sm_89, removed on Hopper/datacenter Blackwell, but
-# re-added on consumer Blackwell sm_121 (GB10); hence the explicit EXTRA_ARCHS
-# after the MAX_ARCH 89 cutoff. (sm_120 not yet listed -- needs verification.)
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89 EXTRA_ARCHS "121"
+# INT4 mma.sync -- sm_75..sm_89, the only parts with a native s4 IMMA.  nvcc
+# still assembles it for every later target, consumer Blackwell sm_120/121
+# included, but as nibble unpacking around int8 IMMA.16816: an int8 rate that
+# would be reported as int4.
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89
     KERNELS wmma_int4)
 
 # Ampere+ tensor cores: bf16 / tf32 (native mma.sync m16n8k8) / fp64 / int8
