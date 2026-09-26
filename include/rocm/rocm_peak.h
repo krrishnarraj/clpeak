@@ -68,6 +68,9 @@ public:
   // newer than it: none of clpeak's own kernels can run on such a GPU.
   bool archCovered = true;
 
+  // Why init() returned false: the HIP call and its error.
+  std::string initError;
+
   RocmDevice();
   ~RocmDevice();
 

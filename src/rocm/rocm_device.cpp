@@ -26,13 +26,16 @@ static std::string formatHipVersionLocal(int v)
   return std::to_string(v);
 }
 
-#define HIP_CHECK(call)                                                               \
+// For init() only: also records what failed in initError, which is all a run
+// without --verbose says about a device that would not initialize.
+#define HIP_CHECK(call, what)                                                         \
   do                                                                                  \
   {                                                                                   \
     hipError_t _r = (call);                                                           \
     if (_r != hipSuccess)                                                             \
     {                                                                                 \
       CLPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(_r));      \
+      initError = std::string(what) + ": " + hipErrStr(_r);                           \
       return false;                                                                   \
     }                                                                                 \
   } while (0)
@@ -44,10 +47,10 @@ RocmDevice::~RocmDevice() { cleanup(); }
 bool RocmDevice::init(int devIndex)
 {
   deviceIndex = devIndex;
-  HIP_CHECK(hipSetDevice(devIndex));
+  HIP_CHECK(hipSetDevice(devIndex), "hipSetDevice");
 
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, devIndex));
+  HIP_CHECK(hipGetDeviceProperties(&props, devIndex), "hipGetDeviceProperties");
 
   info.deviceName = props.name;
   info.archName = props.gcnArchName[0] ? props.gcnArchName : "gfx";
@@ -80,7 +83,21 @@ bool RocmDevice::init(int devIndex)
   // src/rocm/CMakeLists.txt), so its bundle is the build's coverage.
   archCovered = sliceFor(rocm_kernels::compute_sp) != Slice::Absent;
 
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  // HIP answers hipErrorOutOfMemory for any failure to set a stream up, not
+  // only memory: the first stream also builds HIP's own blit kernels, and a
+  // failed build reads the same.  On a Radeon 890M that was LLVM's verifier
+  // failing inside a GUI process whose GL driver had loaded another LLVM
+  // (src/ffi/engine.cpp) -- visible only in the HIP runtime's own log, so the
+  // note points there.
+  const hipError_t sr = hipStreamCreateWithFlags(&stream, hipStreamNonBlocking);
+  if (sr != hipSuccess)
+  {
+    CLPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(sr));
+    initError = std::string("hipStreamCreateWithFlags: ") + hipErrStr(sr) +
+                " (HIP reports any failure to set up a stream this way; "
+                "AMD_LOG_LEVEL=1 prints the cause)";
+    return false;
+  }
   return true;
 }
 
