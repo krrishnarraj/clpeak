@@ -2,6 +2,7 @@
 
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
+#include <common/dynlib.h>
 #include <common/inventory.h>
 #include <common/options.h>
 #include <algorithm>
@@ -17,20 +18,68 @@ OneapiPeak::OneapiPeak()
 
 OneapiPeak::~OneapiPeak() {}
 
-// Collect every SYCL device of a given type across all platforms.
-static void collectDevices(sycl::info::device_type type,
-                           std::vector<sycl::device> &out)
+// The OpenCL ICD loader's platforms.  Resolved at run time, not linked: the
+// loader is already in the process wherever SYCL's OpenCL adapter is, and the
+// oneAPI backend then builds without an OpenCL SDK.
+static std::vector<cl_platform_id> openclPlatformIds()
+{
+  static const auto getPlatformIds = [] {
+    void *icd = clpeak::dynOpen({
+#if defined(_WIN32)
+        "OpenCL.dll",
+#else
+        "libOpenCL.so.1", "libOpenCL.so",
+#endif
+    });
+    return reinterpret_cast<decltype(&::clGetPlatformIDs)>(
+        clpeak::dynSym(icd, "clGetPlatformIDs"));
+  }();
+
+  cl_uint count = 0;
+  if (!getPlatformIds || getPlatformIds(0, nullptr, &count) != CL_SUCCESS)
+    return {};
+  std::vector<cl_platform_id> ids(count);
+  if (count && getPlatformIds(count, ids.data(), nullptr) != CL_SUCCESS)
+    ids.clear();
+  return ids;
+}
+
+// Every platform SYCL can drive.  get_platforms() is all or nothing: a backend
+// whose driver fails to come up throws out of the whole call and takes every
+// other backend's platforms with it.  Intel's legacy Windows driver for a UHD
+// 630 (31.0.101.2121, .2141) ships a Level Zero driver that does exactly that,
+// with UR_RESULT_ERROR_UNINITIALIZED -- sycl-ls itself dies on it -- while its
+// OpenCL driver runs SYCL fine, the path Linux takes on the same iGPU.  So on
+// a throw, each OpenCL platform goes to SYCL through interop instead:
+// make_platform reaches the OpenCL adapter alone and never the one that
+// failed.  The adapter rejects the platforms SYCL does not drive (NVIDIA's,
+// AMD's), which is not worth more than a --verbose line.
+static std::vector<sycl::platform> syclPlatforms()
 {
   try
   {
-    for (const auto &p : sycl::platform::get_platforms())
-      for (const auto &d : p.get_devices(type))
-        out.push_back(d);
+    return sycl::platform::get_platforms();
   }
   catch (const sycl::exception &e)
   {
-    CLPEAK_LOG(Error, "oneAPI: sycl::platform::get_platforms failed: %s", e.what());
+    CLPEAK_LOG(Warning, "oneAPI: sycl::platform::get_platforms failed: %s; "
+               "listing the OpenCL platforms instead", e.what());
   }
+
+  std::vector<sycl::platform> out;
+  for (cl_platform_id id : openclPlatformIds())
+  {
+    try
+    {
+      out.push_back(sycl::make_platform<sycl::backend::opencl>(id));
+    }
+    catch (const sycl::exception &e)
+    {
+      CLPEAK_VLOG("oneAPI: an OpenCL platform SYCL does not drive was skipped: %s\n",
+                  e.what());
+    }
+  }
+  return out;
 }
 
 // Pick the SYCL devices to benchmark.  clpeak is primarily a GPU tool, so we
@@ -41,12 +90,28 @@ static void collectDevices(sycl::info::device_type type,
 // the CPU and any accelerator rather than reporting nothing.
 static std::vector<sycl::device> enumerateDevices()
 {
+  const std::vector<sycl::platform> platforms = syclPlatforms();
+  auto collect = [&](sycl::info::device_type type, std::vector<sycl::device> &out) {
+    for (const auto &p : platforms)
+    {
+      try
+      {
+        for (const auto &d : p.get_devices(type))
+          out.push_back(d);
+      }
+      catch (const sycl::exception &e)
+      {
+        CLPEAK_LOG(Error, "oneAPI: sycl::platform::get_devices failed: %s", e.what());
+      }
+    }
+  };
+
   std::vector<sycl::device> out;
-  collectDevices(sycl::info::device_type::gpu, out);
+  collect(sycl::info::device_type::gpu, out);
   if (out.empty())
   {
-    collectDevices(sycl::info::device_type::cpu, out);
-    collectDevices(sycl::info::device_type::accelerator, out);
+    collect(sycl::info::device_type::cpu, out);
+    collect(sycl::info::device_type::accelerator, out);
   }
   return out;
 }

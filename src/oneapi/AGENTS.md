@@ -13,7 +13,7 @@ build time and the SYCL runtime JITs it on first launch.
 
 - Looking for the main class / orchestrator? → `oneapi_peak.cpp`
 - Looking for OneapiDevice class (SYCL device/queue init, info)? → `oneapi_device.cpp`
-- Looking for SYCL device enumeration? → `oneapi_peak.cpp` (`enumerateDevices` — prefers GPUs, falls back to CPU/accelerator when no GPU is visible)
+- Looking for SYCL device enumeration? → `oneapi_peak.cpp` (`enumerateDevices` — prefers GPUs, falls back to CPU/accelerator when no GPU is visible; `syclPlatforms` — when `get_platforms()` throws, hands SYCL the OpenCL platforms through interop)
 - Looking for the shared compute helpers (block sizing, flops math)? → `compute_kernel.cpp`
 - Looking for kernel timing? → `oneapi_peak.cpp` (`OneapiPeak::runKernel`)
 - Looking for FP compute benchmarks? → `compute_float.cpp`
