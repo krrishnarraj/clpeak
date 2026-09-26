@@ -57,7 +57,14 @@ endif()
 # Kernels are grouped by the compute capabilities they are valid for so nvcc is
 # never asked to target an arch a kernel cannot build for (e.g. fp8 < sm_89,
 # int4 removed on sm_90+, fp4 only on sm_120a).
-set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;110;120;121" CACHE STRING
+#
+# A GPU with no cubin of its own runs the one with its major and the nearest
+# lower minor, so an arch earns an entry only by changing the code some GPU
+# runs.  Rubin (10.7) would otherwise get sm_103's, which issues one fp64 DMMA
+# per 54 slots (as sm_110/120/121 do) where sm_107 code issues one per 3-4.
+# sm_87/88 are left out: nvcc gives them sm_86's code (plus, on sm_87, an entry
+# prologue).  70 builds only with CUDA 12; nvcc 13 starts at sm_75.
+set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;107;110;120;121" CACHE STRING
     "CUDA compute capabilities to bake into the fatbins (ascending)")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)

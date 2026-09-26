@@ -2,7 +2,10 @@
 // Each thread reads 16 RGBA float pixels using nearest-neighbour
 // sampling.  This measures the full CUDA texture-unit pipeline
 // (coordinate → address → cache → data), which is architecturally
-// distinct from raw buffer bandwidth.
+// distinct from raw buffer bandwidth.  Except on Rubin: nvcc 13.4 compiles
+// each fetch for sm_107 into a call to the driver's
+// __cuda_syscall_bw_do_2d_tex_level rather than a TEX instruction, so a
+// Rubin reading measures that routine.
 //
 // Bytes = IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads.
 
