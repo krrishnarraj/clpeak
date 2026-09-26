@@ -14,6 +14,7 @@ import 'package:clpeak/src/services/export_service.dart';
 import 'package:clpeak/src/services/run_history_store.dart';
 import 'package:clpeak/src/services/settings_service.dart';
 import 'package:clpeak/src/ui/app.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -75,6 +76,12 @@ void main() {
     await tester.pump();
     expect(find.text('Theme'), findsOneWidget);
     expect(find.text('ONNX RUNTIME'), findsOneWidget);
+    // The list builds lazily and Diagnostics, its last section, sits below
+    // the 800x600 test surface: scroll to its header.  scrollUntilVisible
+    // ends on a jump it does not pump, so pump before looking at the panel.
+    await tester.scrollUntilVisible(find.text('DIAGNOSTICS'), 300,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pump();
     expect(find.text('DIAGNOSTICS'), findsOneWidget);
     expect(find.text('Verbose diagnostics'), findsOneWidget);
 
