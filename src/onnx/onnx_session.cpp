@@ -780,6 +780,111 @@ const char *onnxProfileTypeName(int dtype)
   }
 }
 
+// ONNX Runtime writes its profile as one JSON array of events,
+//
+//   {"cat" : "Node", ..., "name" :"n0_kernel_time","args" : {...}},
+//
+// and a kernel's event carries its op_name and input_type_shape together in
+// its args -- in no fixed order, which differs from one event to the next, so
+// either can come first.  A search that strays past the event's own braces
+// reads a neighbour's field instead, and which neighbour depends on how long
+// the lines in between happened to be: the fp16 probe's MatMul read as
+// float16 on one run and float on the next, the float16 being the input of
+// the Cast that runs before it.  So the events are delimited first, by
+// matching braces outside strings, and every field is read from inside the
+// one it belongs to.  That is all the structure needed; no JSON library.
+
+static size_t profileSkipSpace(const std::string &s, size_t i)
+{
+  while (i < s.size() &&
+         (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r'))
+    i++;
+  return i;
+}
+
+// Just past the string that opens at `i`, or npos when it never closes.
+static size_t profileSkipString(const std::string &s, size_t i)
+{
+  for (i++; i < s.size(); i++)
+  {
+    if (s[i] == '\\')
+      i++;
+    else if (s[i] == '"')
+      return i + 1;
+  }
+  return std::string::npos;
+}
+
+// The next event at or after `from`, which moves past it; empty when there
+// are no more.  A last event the file cuts off runs to the end of the file.
+static std::string profileNextEvent(const std::string &json, size_t &from)
+{
+  const size_t begin = json.find('{', from);
+  from = json.size();
+  if (begin == std::string::npos)
+    return std::string();
+  int depth = 0;
+  for (size_t i = begin; i < json.size();)
+  {
+    const char c = json[i];
+    if (c == '"')
+    {
+      i = profileSkipString(json, i);
+      continue;
+    }
+    if (c == '{' || c == '[')
+      depth++;
+    else if ((c == '}' || c == ']') && --depth == 0)
+    {
+      from = i + 1;
+      break;
+    }
+    i++;
+  }
+  return json.substr(begin, from - begin);
+}
+
+// Where the value of `key` starts in one event, or npos.  ONNX Runtime
+// writes `"op_name" : "QLinearMatMul"`, spaces around the colon included, so
+// the separator is skipped rather than matched literally -- a fixed
+// `"op_name":"` finds nothing.
+static size_t profileValueAt(const std::string &ev, const char *key)
+{
+  const std::string quoted = std::string("\"") + key + "\"";
+  for (size_t at = ev.find(quoted); at != std::string::npos;
+       at = ev.find(quoted, at + 1))
+  {
+    const size_t colon = profileSkipSpace(ev, at + quoted.size());
+    if (colon < ev.size() && ev[colon] == ':')
+      return profileSkipSpace(ev, colon + 1);
+  }
+  return std::string::npos;
+}
+
+// The contents of the string that opens at `i`, or empty when none does.
+static std::string profileStringAt(const std::string &ev, size_t i)
+{
+  if (i >= ev.size() || ev[i] != '"')
+    return std::string();
+  const size_t end = profileSkipString(ev, i);
+  if (end == std::string::npos)
+    return std::string();
+  return ev.substr(i + 1, end - i - 2);
+}
+
+// The element type of the first tensor in one event's input_type_shape --
+// `[{"float16":[32,32]},{"float16":[32,32]}]` -- or empty when it lists none.
+static std::string profileFirstInputType(const std::string &ev)
+{
+  size_t i = profileValueAt(ev, "input_type_shape");
+  if (i >= ev.size() || ev[i] != '[')
+    return std::string();
+  i = profileSkipSpace(ev, i + 1);
+  if (i >= ev.size() || ev[i] != '{')
+    return std::string();
+  return profileStringAt(ev, profileSkipSpace(ev, i + 1));
+}
+
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
                                                 OrtSession *session,
                                                 std::string *opInType,
@@ -812,9 +917,6 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   if (OrtStatus *st = rt.api->AllocatorFree(alloc, path))
     rt.api->ReleaseStatus(st);
 
-  // The profile is JSON, and every executed kernel carries an "op_name".
-  // Scanning for that key beats parsing: no dependency, and the format has
-  // been stable for years.
   std::ifstream in(file, std::ios::binary);
   std::string json((std::istreambuf_iterator<char>(in)),
                    std::istreambuf_iterator<char>());
@@ -822,60 +924,25 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   CLPEAK_VLOG("onnx: profile %s (%zu bytes)\n", file.c_str(), json.size());
   std::remove(file.c_str());
 
-  // ONNX Runtime writes `"op_name" : "QLinearMatMul"`, spaces around the
-  // colon included, so the separator is skipped rather than matched
-  // literally -- a fixed `"op_name":"` finds nothing.
-  const std::string key = "\"op_name\"";
-  size_t pos = 0;
-  while ((pos = json.find(key, pos)) != std::string::npos)
+  // Every executed kernel's event carries an op_name; the session's own
+  // events and each run's carry none.
+  for (size_t at = 0;;)
   {
-    pos += key.size();
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
-      pos++;
-    if (pos >= json.size() || json[pos] != ':')
-      continue;
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
-      pos++;
-    if (pos >= json.size() || json[pos] != '"')
-      continue;
-    pos++;
-    const size_t end = json.find('"', pos);
-    if (end == std::string::npos)
+    const std::string ev = profileNextEvent(json, at);
+    if (ev.empty())
       break;
-    std::string name = json.substr(pos, end - pos);
-    pos = end;
+    std::string name = profileStringAt(ev, profileValueAt(ev, "op_name"));
+    if (name.empty())
+      continue;
 
-    // Capture the element type of the kernel's first input.  ORT writes
-    // `"input_type_shape" : [ { "float16" : [32,32] }, ...` in the same
-    // event's args; find it near this op_name and read the first quoted key
-    // inside the first brace.
+    // The element type of the kernel's first input, from its own event.
     const bool wanted = ofOp ? (name == ofOp)
                              : (name == "MatMul" || name == "FusedMatMul" ||
                                 name == "Gemm");
     if (opInType && opInType->empty() && wanted)
-    {
-      const std::string itsKey = "\"input_type_shape\"";
-      // The args object holds op_name and input_type_shape together; search a
-      // bounded window on either side rather than counting braces.
-      size_t lo = (pos > 800) ? pos - 800 : 0;
-      size_t its = json.find(itsKey, lo);
-      if (its != std::string::npos && its < pos + 800)
-      {
-        size_t br = json.find('{', its); // first tensor's { "<type>": ... }
-        size_t q1 = (br == std::string::npos) ? std::string::npos
-                                              : json.find('"', br);
-        if (q1 != std::string::npos)
-        {
-          size_t q2 = json.find('"', q1 + 1);
-          if (q2 != std::string::npos)
-            *opInType = json.substr(q1 + 1, q2 - q1 - 1);
-        }
-      }
-    }
+      *opInType = profileFirstInputType(ev);
 
-    if (!name.empty())
-      ops.push_back(std::move(name));
+    ops.push_back(std::move(name));
   }
   return ops;
 }
