@@ -957,14 +957,19 @@ namespace
 // [-0.5, 0.5).  A single projection is fine with the full range, but the
 // block chains seven of them and downstream of attention the SwiGLU squares
 // the magnitudes (`G * sigmoid(G) * U`): at [-0.5, 0.5) the 5504-deep down
-// projection reached absmax 174k, which is infinity in fp16 -- every
-// fp16-arithmetic variant (fp16, int4_weight, int8_weight, fp4_weight)
-// ReduceMax'd into inf and stopped doing arithmetic comparable to the fp32
-// control and the saturating int8_qdq row.  The deterministic generator
-// makes the absmax walk exhaustive rather than sampled: at the halved range
-// the walk tops out at ~21.8k against fp16's 65504 ceiling.  Small
-// magnitudes remain the point -- accumulation over thousands of terms stays
-// away from the NaN/denormal slow paths raw random bit patterns would hit.
+// projection overflows fp16 at every prompt length, and every
+// fp16-arithmetic variant (fp16, int4_weight, int8_weight, fp4_weight) would
+// ReduceMax into inf.  The deterministic generator makes the absmax walk
+// exhaustive rather than sampled: at the halved range the largest value
+// anywhere in the block is 1954, at the 64-token prompt (296 at 512 tokens,
+// 22 while decoding), 33x under fp16's 65504.  Small magnitudes remain the
+// point -- accumulation over thousands of terms stays away from the
+// NaN/denormal slow paths raw random bit patterns would hit.  What does land
+// under fp16's smallest normal is the tail of three reads and what they feed:
+// sigmoid(G) at 64 tokens, where the gate runs widest (9%, and 5% and 3% of
+// the SiLU and the SwiGLU product after it), the softmax at 2048 tokens (3%),
+// and the attention average over a long context (3% at 8192).  Nothing else
+// reaches 1%.
 //
 // Position-hashed rather than a running sequence, because onnxFillBlockedWeights
 // has to visit each block twice -- once for its maximum, once to quantize
@@ -978,7 +983,7 @@ std::string blockWeights(int64_t rows, int64_t cols, uint32_t seed, int dtype)
   for (int64_t i = 0; i < rows; i++)
     for (int64_t j = 0; j < cols; j++)
     {
-      const float   v = onnxWeightAt(i, j, seed) * 0.5f;
+      const float   v = onnxMixedWeightAt(i, j, seed) * 0.5f;
       const int64_t k = i * cols + j;
       switch (dtype)
       {
@@ -1016,13 +1021,15 @@ std::string quantBlockWeights(int64_t rows, int64_t cols, uint32_t seed,
   for (int64_t i = 0; i < rows; i++)
     for (int64_t j = 0; j < cols; j++)
       onnxStoreQuantElem(&raw[0], i * cols + j, dtype,
-                         onnxWeightAt(i, j, seed) * 2.0f);
+                         onnxMixedWeightAt(i, j, seed) * 2.0f);
   return raw;
 }
 
 // Quantization scale for a K-deep dot product's result: four sigma of the sum
 // mapped onto the widest 8-bit code, exactly as gemm.cpp's qdqOutputScale
-// does.  Each projection has its own K, so each gets its own.
+// does.  Each projection has its own K, so each gets its own.  Like gemm's,
+// it assumes operands in [-1, 1]; the block's products are far smaller, so
+// their codes are coarse and none saturates.
 float blockQdqScale(int64_t K)
 {
   return (float)(4.0 * std::sqrt((double)K) / 3.0 / 127.0);
@@ -1090,12 +1097,18 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   // onnxResidentQdqMatMulModel, where the same choice cost 6x.
   if (sh.qdq)
   {
-    // One activation scale for all seven projections, sized for the tensors
-    // that actually reach them: a d-deep dot product of [-0.25, 0.25) operands.
-    // The feed-forward's second input runs larger and saturates, which costs
-    // nothing here -- int8 saturation is finite and takes no slow path, and
-    // this row measures rate, not accuracy.  What a real deployment does
-    // instead is calibrate per tensor, which no fixed graph can do.
+    // One activation scale for all seven projections: blockQdqScale(d), which
+    // is four sigma of a d-deep product of [-1, 1] operands.  No one scale
+    // fits every input here -- their rms runs from 0.003 (the attention
+    // average while decoding) to 5.7 (the SwiGLU product at 512 tokens) --
+    // and this one takes the side where nothing saturates: most codes are
+    // zero instead, 95% of the inputs to five of the projections and all of
+    // the attention average.  Sized for the block's own [-0.25, 0.25)
+    // operands, a sixteenth of this, it would saturate a fifth of the SwiGLU
+    // product and still round the decoding attention average to zero.
+    // Neither costs a rate anything on integer units that do not skip zeros,
+    // and this row measures rate, not accuracy; what a real deployment does
+    // instead is calibrate per tensor.
     //
     // **The scales are fp32 and cannot be anything else.**  QuantizeLinear has
     // taken half-precision scales since opset 19, and spelling them that way
@@ -1155,7 +1168,7 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
       for (int64_t i = 0; i < K; i++)
         for (int64_t j = 0; j < N; j++)
           onnxStoreQuantElem(&packed[0], i * N + j, sh.wDtype,
-                             onnxWeightAt(i, j, seed) * 2.0f);
+                             onnxMixedWeightAt(i, j, seed) * 2.0f);
       g.initializer(w + "_q", sh.wDtype, {K, N}, packed);
 
       const std::string cs = out + "_cs";
@@ -1198,10 +1211,11 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
       // compute-bound prefill rows mostly are not.
       std::string packed, scales;
       onnxFillBlockedWeights(packed, scales, K, N, sh.wBlock, seed, sh.wDtype);
-      // onnxFillBlockedWeights quantizes against the raw onnxWeightAt values;
-      // fold the block's magnitude shrink into the per-block fp16 scales so this
-      // row also multiplies the same [-0.25, 0.25) matrix.  Halving is exact in
-      // fp16 (an exponent decrement), so the stored codes are untouched.
+      // onnxFillBlockedWeights quantizes against the raw onnxMixedWeightAt
+      // values; fold the block's magnitude shrink into the per-block fp16
+      // scales so this row also multiplies the same [-0.25, 0.25) matrix.
+      // Halving is exact in fp16 (an exponent decrement), so the stored codes
+      // are untouched.
       {
         uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
         const size_t n = (size_t)(K / sh.wBlock) * (size_t)N;
@@ -1392,13 +1406,6 @@ uint64_t onnxElemBytes(int dtype, int64_t count)
   }
 }
 
-float onnxWeightAt(int64_t i, int64_t j, uint32_t seed)
-{
-  uint32_t s = seed ^ (uint32_t)(i * 0x9E3779B1u) ^ (uint32_t)(j * 0x85EBCA77u);
-  s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-  return (float)(s >> 8) / 16777216.0f - 0.5f;
-}
-
 float onnxMixedWeightAt(int64_t i, int64_t j, uint32_t seed)
 {
   uint64_t z = ((uint64_t)seed << 32) ^ ((uint64_t)i * 0x9E3779B97F4A7C15ull) ^
@@ -1413,8 +1420,7 @@ float onnxMixedWeightAt(int64_t i, int64_t j, uint32_t seed)
 
 void onnxFillBlockedWeights(std::string &packed, std::string &scales,
                             int64_t K, int64_t N, int64_t blockSize,
-                            uint32_t seed, int wDtype,
-                            float (*valueAt)(int64_t, int64_t, uint32_t))
+                            uint32_t seed, int wDtype)
 {
   // Each format spends its block on its own widest magnitude: int4 reaches 7,
   // int8 reaches 127, and float4's largest code is 6.
@@ -1434,7 +1440,7 @@ void onnxFillBlockedWeights(std::string &packed, std::string &scales,
       float maxAbs = 0.0f;
       for (int64_t r = 0; r < blockSize; r++)
       {
-        const float w = valueAt(b * blockSize + r, j, seed);
+        const float w = onnxMixedWeightAt(b * blockSize + r, j, seed);
         const float a = w < 0.0f ? -w : w;
         if (a > maxAbs) maxAbs = a;
       }
@@ -1446,7 +1452,7 @@ void onnxFillBlockedWeights(std::string &packed, std::string &scales,
       for (int64_t r = 0; r < blockSize; r++)
       {
         const int64_t i = b * blockSize + r;
-        const float   w = valueAt(i, j, seed);
+        const float   w = onnxMixedWeightAt(i, j, seed);
         const float   t = w / scale;
         const int     q = (int)(t + (t < 0.0f ? -0.5f : 0.5f));
         if (isFp4)
@@ -1483,7 +1489,7 @@ void onnxFillNvfp4(std::string &packed, std::string &blockScales,
       {
         const int64_t i = (blockAxis == 0) ? i0 + b : i0;
         const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
-        const float   w = onnxWeightAt(i, j, seed) * 2.0f;   // over [-1, 1]
+        const float   w = onnxMixedWeightAt(i, j, seed) * 2.0f;  // over [-1, 1]
         const float   a = w < 0.0f ? -w : w;
         if (a > maxAbs) maxAbs = a;
       }
@@ -1503,7 +1509,7 @@ void onnxFillNvfp4(std::string &packed, std::string &blockScales,
       {
         const int64_t i = (blockAxis == 0) ? i0 + b : i0;
         const int64_t j = (blockAxis == 0) ? j0 : j0 + b;
-        const float   w = onnxWeightAt(i, j, seed) * 2.0f;
+        const float   w = onnxMixedWeightAt(i, j, seed) * 2.0f;
         onnxStoreNibble(&packed[0], i * cols + j, floatToFp4E2M1(w * inv));
       }
     }

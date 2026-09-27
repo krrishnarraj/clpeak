@@ -408,7 +408,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::string aRaw, wPacked, wScales;
     fillTensor(aRaw, ONNX_DT_FLOAT16, M * aCols, 0x9e3779b9u);
     onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
-                           v.dtype, onnxMixedWeightAt);
+                           v.dtype);
     // A chain's later layers: the same blocked format, each block's scale
     // grown by 2*sqrt(3/D) so the dequantized weights -- [-0.5, 0.5) before
     // it -- keep the activations' magnitude from layer to layer, as the float
@@ -426,13 +426,13 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       chain.emplace_back();
       onnxFillBlockedWeights(chain.back().first, chain.back().second, D, D,
                              v.blockSize, 0x243f6a88u + 0x9e3779b9u * (uint32_t)l,
-                             v.dtype, onnxMixedWeightAt);
+                             v.dtype);
       grow(chain.back().second, D);
     }
     if (seeded)
     {
       onnxFillBlockedWeights(seed.proj, seed.projScales, sw, D, v.blockSize,
-                             kSeedProjSeed, v.dtype, onnxMixedWeightAt);
+                             kSeedProjSeed, v.dtype);
       grow(seed.projScales, sw);
     }
     modelBytes = onnxResidentWeightOnlyMatMulModel(

@@ -564,33 +564,25 @@ int  onnxLoadInt4(const void *src, int64_t index);
 // without holding the matrix in floats.  At 16384 square that would be a
 // gigabyte of scratch to produce 128 MB of weights.
 //
-// Its one xorshift round is linear over GF(2), so every value's sign is a row
-// bit XOR a column bit: each matrix it fills has a rank-1 sign pattern.  One
-// multiply does not care, but a chain of such matrices drifts -- sixteen
-// 1024-wide layers took the GEMM chain's activations from an RMS of 2.3 to
-// 0.0004, and sixteen 4096-wide ones from 5.6 up to 26 -- which is why the
-// GEMM's blocked chains fill theirs from onnxMixedWeightAt().  The
-// transformer block still uses this one, and the magnitudes its comments
-// quote were measured with it.
-float onnxWeightAt(int64_t i, int64_t j, uint32_t seed);
-
-// The same contract as onnxWeightAt(), from a hash with no linear structure
-// (splitmix64's finalizer over the whole position): a chain of matrices
-// filled from it keeps its activations' magnitude layer after layer.
+// The hash is splitmix64's finalizer over the whole position, and it has to
+// mix nonlinearly.  One xorshift round over a linear mix of i and j is linear
+// over GF(2): every value's sign is then a row bit XOR a column bit, each
+// matrix has a rank-1 sign pattern, and chained layers drift -- sixteen
+// 1024-wide GEMM layers took their activations from an RMS of 2.3 to 0.0004,
+// and the transformer block's prompt put a fifth to a half of its softmax,
+// SiLU and SwiGLU values under fp16's smallest normal.
 float onnxMixedWeightAt(int64_t i, int64_t j, uint32_t seed);
 
 // Quantize a [K, N] weight matrix into `wDtype` plus one fp16 scale per block
 // of `blockSize` rows per column -- the axis a group-quantized model groups on,
 // because it is the axis the reduction runs along.  Symmetric, so the scale is
 // the block maximum over the format's widest magnitude and there is no zero
-// point.  Values come from `valueAt`, a position hash, so a block can be
-// visited twice -- once to find its maximum, once to quantize against it --
-// without holding the matrix in floats.
+// point.  Values come from onnxMixedWeightAt(), so a block can be visited
+// twice -- once to find its maximum, once to quantize against it -- without
+// holding the matrix in floats.
 void onnxFillBlockedWeights(std::string &packed, std::string &scales,
                             int64_t K, int64_t N, int64_t blockSize,
-                            uint32_t seed, int wDtype,
-                            float (*valueAt)(int64_t, int64_t,
-                                             uint32_t) = onnxWeightAt);
+                            uint32_t seed, int wDtype);
 
 // Quantize a [rows, cols] matrix into NVFP4: packed E2M1 values plus one E4M3
 // scale per block of `blockSize` along the blocked axis, with `globalScale`
