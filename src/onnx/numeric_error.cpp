@@ -336,7 +336,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // And the fence, for the same reason: this graph is the probe's in
     // another shape, and a provider that crashes on it must not be handed
     // it whatever the cache says.
-    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq); !why.empty())
+    if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq, /*blockSize=*/0);
+        !why.empty())
     {
       test.skip(v.label, ResultStatus::Unsupported, why, o.description);
       continue;

@@ -843,6 +843,16 @@ format where it runs. Guessing the adapter would be worse than withholding:
 a guess that is wrong on a two-GPU box takes the whole run down. `NOTES.md`
 at the root records what identifying it would take.
 
+**TensorRT's fence is a wrong answer before it is a crash.** Handed blocked
+int8 weights — a block format its documentation does not list — classic
+TensorRT builds anyway and folds the scales in as a plain broadcast, reading
+past their buffer: every width from 64 computes garbage, NaN from 128, and a
+build whose read runs into unmapped memory segfaults. Nothing in this backend
+checks the values a ladder computes, so a miscompiled graph times like a
+correct one, and the 32³ probe cannot see this one either — a single scale
+row broadcasts correctly. `onnxProviderFenceReason()` withholds the format on
+that provider.
+
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph
 needs nothing newer than float4's own opset 23. MXFP4's scale is `FLOAT8E8M0`,

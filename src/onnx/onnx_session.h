@@ -7,6 +7,7 @@
 // the EP cannot run entirely fails session creation (and the row reports
 // Unsupported) instead of silently measuring the CPU.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -156,8 +157,9 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 
 // Empty when `ep` can be handed a `dtype` graph -- quantized in and out with
-// a per-tensor scale when `qdq` -- otherwise the reason it must not be,
-// phrased for a skip row.
+// a per-tensor scale when `qdq`, weight-only with one scale per `blockSize`
+// rows when that is positive -- otherwise the reason it must not be, phrased
+// for a skip row.
 //
 // Every other refusal in this backend is learned by asking: the provider
 // builds the graph or says why not, and the row reports its words.  This is
@@ -172,7 +174,7 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 // in the tree is listed in NOTES.md at the repository root, with what
 // lifting it takes.
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq);
+                                    bool qdq, int64_t blockSize);
 
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the

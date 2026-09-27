@@ -50,7 +50,7 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
 }
 
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq)
+                                    bool qdq, int64_t blockSize)
 {
   // TensorRT for RTX on a per-tensor float4 QDQ matmul: GetCapability takes
   // the whole graph and the engine build that follows dies with an access
@@ -68,6 +68,33 @@ std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
            "its engine build) on a per-tensor float4 QDQ matmul instead of "
            "declining it as TensorRT does -- its float4 path wants a block "
            "scale, which the nvfp4 row has -- so this graph is not sent to it";
+
+  // TensorRT on blocked int8 weights: DequantizeLinear of int8 codes with one
+  // fp16 scale per 32 rows (opset 21, axis 0) into a MatMul.  TensorRT
+  // documents block dequantize for FP4, FP8 and INT4 inputs only, and given
+  // INT8 it does not decline: the build folds the dequantize as a plain
+  // broadcast multiply, reading the [K/32, N] scales as though they were the
+  // [K, N] weights, so 31 of every 32 scale reads land past the end of the
+  // buffer.  Whatever lies there becomes the weights: every width from 128
+  // comes back all NaN -- against the CPU provider, and through trtexec with
+  // no ONNX Runtime at all -- and 64 comes back NaN, Inf and garbage that
+  // changes from run to run, while 32, the probe's size, has a single scale
+  // row that broadcasts correctly by accident, so the probe passes.  When the
+  // memory past the buffer is unmapped, the fold segfaults inside the engine
+  // build: a Debug build died at the 8192-wide chain after 1024..4096 had
+  // timed NaN at 47-72 TFLOPS, and a Release build ran the same ladder to the
+  // end.  TensorRT 11.2.1, ONNX Runtime 1.30.0, RTX 5060.  The int4 block,
+  // which TensorRT does implement, comes back right (0.15% from the CPU
+  // provider at 1024); int8_qdq, one scale per tensor, is another graph and
+  // runs.
+  if (ep.providerKey == "TensorrtExecutionProvider" &&
+      dtype == ONNX_DT_INT8 && !qdq && blockSize > 0)
+    return "TensorRT has no blocked int8 dequantize -- it documents block "
+           "scales for FP4, FP8 and INT4 only -- and instead of declining it "
+           "folds it at build time, reading the weight scales past the end of "
+           "their buffer: the engine computes NaN, and a build whose read runs "
+           "into unmapped memory takes the process down with a segfault.  So "
+           "blocked int8 weights are not sent to it";
 
   return std::string();
 }
