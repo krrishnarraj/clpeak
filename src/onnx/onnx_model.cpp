@@ -225,6 +225,20 @@ void OnnxGraph::reduceMax(const std::string &in, const std::string &out,
   node("ReduceMax", {in, axesName}, {out}, {OnnxAttr::num("keepdims", 0)});
 }
 
+void OnnxGraph::reduceRows(const std::string &in, const std::string &out,
+                           int64_t rows, int64_t cols, OnnxReduceView view)
+{
+  if (view == OnnxReduceView::Rank4)
+  {
+    const std::string r4 = out + "_r4";
+    shapeInitializer(r4 + "_shape", {1, rows, 1, cols});
+    node("Reshape", {in, r4 + "_shape"}, {r4});
+    reduceMax(r4, out, {0, 1, 2});
+    return;
+  }
+  reduceMax(in, out, {0});
+}
+
 std::string OnnxGraph::build() const
 {
   // A block's initializers run to hundreds of megabytes, so the graph body is
@@ -382,24 +396,6 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
-namespace
-{
-// The last step of every resident GEMM: the [M, N] product down to one row of
-// N, the column maxima, in whichever view `tail` asks for (see OnnxGemmTail).
-void gemmTail(OnnxGraph &g, const std::string &in, const std::string &out,
-              int64_t M, int64_t N, OnnxGemmTail tail)
-{
-  if (tail == OnnxGemmTail::Rank4)
-  {
-    const std::string view = out + "_r4";
-    g.shapeInitializer(view + "_shape", {1, M, 1, N});
-    g.node("Reshape", {in, view + "_shape"}, {view});
-    g.reduceMax(view, out, {0, 1, 2});
-    return;
-  }
-  g.reduceMax(in, out, {0});
-}
-} // namespace
 
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
@@ -408,7 +404,7 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
                                          float globalScale,
-                                         OnnxGemmTail tail)
+                                         OnnxReduceView view)
 {
   auto f32 = [](float v) {
     std::string s(4, '\0');
@@ -441,19 +437,17 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
          {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
 
   g.node("MatMul", {"A_f", "B_f"}, {"C"});
-  gemmTail(g, "C", "R", M, N, tail);
+  g.reduceRows("C", "R", M, N, view);
   g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
   return g.build();
 }
 
-std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
-                                              int wDtype, int64_t blockSize,
-                                              const std::string &aRaw,
-                                              const std::string &wPacked,
-                                              const std::string &wScalesRaw,
-                                              OnnxLiveShape shape,
-                                              OnnxGemmTail tail)
+std::string onnxResidentWeightOnlyMatMulModel(
+    int64_t M, int64_t K, int64_t N, int wDtype, int64_t blockSize,
+    const std::string &aRaw, const std::string &wPacked,
+    const std::string &wScalesRaw, OnnxLiveShape shape, OnnxReduceView view,
+    const std::vector<std::pair<std::string, std::string>> *chain)
 {
   OnnxGraph g;
   // The blocked DequantizeLinear (block_size) is opset 21 whatever the
@@ -479,9 +473,22 @@ std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
   g.node("DequantizeLinear", {"B_q", "b_scale"}, {"B_f"},
          {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
   g.node("MatMul", {"A", "B_f"}, {"C"});
+  std::string product = "C";
+  if (chain)
+    for (size_t l = 0; l < chain->size(); l++)
+    {
+      const std::string n = std::to_string(l + 1);
+      g.initializer("B_q" + n, wDtype, {N, N}, (*chain)[l].first);
+      g.initializer("b_scale" + n, ONNX_DT_FLOAT16, {N / blockSize, N},
+                    (*chain)[l].second);
+      g.node("DequantizeLinear", {"B_q" + n, "b_scale" + n}, {"B_f" + n},
+             {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
+      g.node("MatMul", {product, "B_f" + n}, {"C" + n});
+      product = "C" + n;
+    }
   // Output is always Y so every shape is driven identically; only the
   // result-scaled form has a tail multiply to feed it.
-  gemmTail(g, "C", live ? "Y" : "R", M, N, tail);
+  g.reduceRows(product, live ? "Y" : "R", M, N, view);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT16, {N});
@@ -492,7 +499,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &bRaw,
                                      OnnxLiveShape shape,
                                      bool reduceInFloat,
-                                     OnnxGemmTail tail,
+                                     OnnxReduceView view,
                                      const std::vector<std::string> *chain)
 {
   OnnxGraph g;
@@ -547,7 +554,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
     g.node("Cast", {product}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
     reduceIn = "Cf";
   }
-  gemmTail(g, reduceIn, live ? "Y" : "R", M, N, tail);
+  g.reduceRows(reduceIn, live ? "Y" : "R", M, N, view);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", tailDtype, {N});
@@ -559,7 +566,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
                                        OnnxLiveShape shape,
-                                       OnnxGemmTail tail,
+                                       OnnxReduceView view,
                                        const std::vector<std::string> *chain,
                                        float chainWScale)
 {
@@ -696,7 +703,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // straight into the output.  In the Add forms S is a graph input nothing
   // consumes, which is legal and free, so every form is driven identically.
   const bool resultScaled = (shape == OnnxLiveShape::ResultScaled);
-  gemmTail(g, "C_d", resultScaled ? "R" : "Y", M, N, tail);
+  g.reduceRows("C_d", resultScaled ? "R" : "Y", M, N, view);
   if (resultScaled)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
@@ -735,7 +742,8 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
 
 std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
                                         OnnxActivation act,
-                                        const std::string &xRaw)
+                                        const std::string &xRaw,
+                                        OnnxReduceView view)
 {
   OnnxGraph g;
   // The runtime scalar scales the resident tensor *before* the operation.
@@ -779,7 +787,7 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
   }
   }
 
-  g.reduceMax(out, "Y", {0});
+  g.reduceRows(out, "Y", rows, cols, view);
   g.output("Y", dtype, {cols});
   return g.build();
 }
@@ -1191,7 +1199,7 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   // ReduceMax rather than ReduceSum: summing rows of a product equals
   // multiplying the summed rows, a rewrite that would let an optimiser shrink
   // the work.  See onnxResidentMatMulModel.
-  g.reduceMax("Y", "Yr", {0});
+  g.reduceRows("Y", "Yr", S, d, sh.reduceView);
   g.output("Yr", act, {d});
   if (decode)
   {

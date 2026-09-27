@@ -223,6 +223,13 @@ void onnxClearDeviceLost();
 // saying it has no kernel for this format.
 bool onnxReasonIsDeviceLoss(const std::string &reason);
 
+// True when `reason` says the provider ran out of memory building or running
+// a graph -- a statement about the size, not about any operator in it, so
+// rebuilding the same size another way cannot help.  QNN's HTP answered a
+// 16384-cube fp16 matmul with QNN_COMMON_ERROR_MEM_ALLOC after a six-minute
+// compile, and rebuilding it with a different reduction cost six more.
+bool onnxReasonIsOutOfMemory(const std::string &reason);
+
 // The status a refusal deserves.  ONNX's ordinary refusals *are* capability
 // facts -- a provider declining nodes under the CPU-fallback guard, a missing
 // bf16 kernel, the empty status ORT returns for a float4 graph -- so

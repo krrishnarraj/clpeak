@@ -374,8 +374,11 @@ namespace
     sh.qdq = v.qdq;
     sh.qActDtype = qActDtype;
     sh.kvDtype = v.kvDtype;
+    // The view of the output the provider is known to take (OnnxReduceView).
+    sh.reduceView = onnxPrefersRank4Reduce(rt, ep) ? OnnxReduceView::Rank4
+                                                   : OnnxReduceView::Rows;
 
-    {
+    auto create = [&]() -> OnnxSessionResult {
       std::string model = onnxBlockModel(sh);
       // Constant folding stays off for every variant, and it is the quantized
       // ones that need it: a weight DequantizeLinear has nothing but constants
@@ -406,13 +409,40 @@ namespace
       // anything else is allocated on top of the session's own copy.
       model.clear();
       model.shrink_to_fit();
-      if (!ses.session)
+      return ses;
+    };
+    OnnxSessionResult ses = create();
+    // A provider can refuse the reduction that brings the block's row back
+    // while taking the block: the QNN Adreno backend took the one-token
+    // decode and refused every prompt length.  The fp16 reference row -- the
+    // first built -- tries the rank-4 view once; a provider that takes it
+    // keeps it for every row after (onnxPrefersRank4Reduce), and a row that
+    // fails for any other reason pays no second compile.
+    if (!ses.session && !ses.offDevice && &v == &kVariants[0] &&
+        sh.reduceView == OnnxReduceView::Rows &&
+        onnxFailureStatus(ses.error) == ResultStatus::Unsupported &&
+        !onnxReasonIsOutOfMemory(ses.error) && !clpeak::cancelRequested())
+    {
+      CLPEAK_VLOG("onnx-block[%s/%s]: refused (%s); retrying the reduction "
+                  "through a rank-4 view\n",
+                  ep.providerKey.c_str(), v.label, ses.error.c_str());
+      sh.reduceView = OnnxReduceView::Rank4;
+      OnnxSessionResult r4 = create();
+      if (r4.session)
       {
-        r.error = ses.error;
-        return r;
+        onnxNoteRank4Reduce(rt, ep);
+        ses = r4;
       }
-      r.session = ses.session;
+      else
+        CLPEAK_VLOG("onnx-block[%s/%s]: refused with the rank-4 view too (%s)\n",
+                    ep.providerKey.c_str(), v.label, r4.error.c_str());
     }
+    if (!ses.session)
+    {
+      r.error = ses.error;
+      return r;
+    }
+    r.session = ses.session;
 
     // The only input is the scalar that scales the resident activations.
     const size_t es = (size_t)onnxElemBytes(v.actDtype, 1);

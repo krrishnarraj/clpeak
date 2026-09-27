@@ -341,8 +341,8 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
             continue;
 
         auto peak = be.create();
-        // --verbose with -o: the base logger mirrors a canonical transcript
-        // of backend/device/test headers and metric rows onto the run's log,
+        // --verbose with -o: the base logger mirrors the metric rows onto the
+        // run's log beside the backend/device/test headers it always records,
         // so a GUI-saved file reads as the run looked live.
         const bool mirror = opts.verbose && opts.enableOutput;
         peak->log.reset(new LoggerFfi(on_event, user_data, mirror));

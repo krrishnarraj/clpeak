@@ -122,15 +122,15 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 // `actDtype`/`wgtDtype` apply to the QDQ form; `reduceInFloat` to the plain
 // one.  On failure `error` is set and `session` is null.  `verifyPlacement`
 // is onnxCreateSession's: off for the 32-cube probes, on for every rung a
-// ladder times.  `tail` is how the product leaves (OnnxGemmTail); `layers`
-// chains that many D x D multiplies in one graph (plain and QDQ rows only);
-// `nativeProfile` asks the provider's own profiler to write there
-// (onnxNativeProfilePath).
+// ladder times.  `view` is how the product is reduced to the row that leaves
+// (OnnxReduceView); `layers` chains that many D x D multiplies in one graph
+// (every row but NVFP4, which ignores it); `nativeProfile` asks the provider's
+// own profiler to write there (onnxNativeProfilePath).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
                     OnnxLiveShape shape, bool verifyPlacement = true,
-                    OnnxGemmTail tail = OnnxGemmTail::Rows, int layers = 1,
+                    OnnxReduceView view = OnnxReduceView::Rows, int layers = 1,
                     const std::string &nativeProfile = std::string());
 
 // Mean microseconds per Run() over n runs; negative on failure.

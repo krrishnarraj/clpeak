@@ -138,9 +138,15 @@ uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
                       int layers)
 {
   const uint64_t elems = (uint64_t)D * (uint64_t)D;
-  if (layers > 1)
-    return operandBytes(v, D, shape) +
-           (uint64_t)(layers - 1) * onnxElemBytes(v.dtype, (int64_t)elems);
+  // A chain holds one more weight matrix per layer, scales included; NVFP4
+  // is never chained.
+  if (layers > 1 && !v.nvfp4)
+  {
+    uint64_t perLayer = onnxElemBytes(v.dtype, (int64_t)elems);
+    if (v.blockSize > 0)
+      perLayer += elems / (uint64_t)v.blockSize * 2ull;
+    return operandBytes(v, D, shape) + (uint64_t)(layers - 1) * perLayer;
+  }
   if (v.nvfp4)
     return 2ull * (onnxElemBytes(ONNX_DT_FLOAT4E2M1, (int64_t)elems) +
                    elems / (uint64_t)v.blockSize);
@@ -325,7 +331,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
                     OnnxLiveShape shape, bool verifyPlacement,
-                    OnnxGemmTail tail, int layers,
+                    OnnxReduceView view, int layers,
                     const std::string &nativeProfile)
 {
   GemmSetup g;
@@ -340,7 +346,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   kNvfp4GlobalScale, 0x243f6a88u);
     modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
                                               aScales, bPacked, bScales,
-                                              kNvfp4GlobalScale, tail);
+                                              kNvfp4GlobalScale, view);
     // Free the raw operands before the session copies the model.
     std::string().swap(aPacked);
     std::string().swap(aScales);
@@ -360,12 +366,30 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
     onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
                            v.dtype);
-    modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
-                                                   v.blockSize, aRaw, wPacked,
-                                                   wScales, shape, tail);
+    // A chain's later layers: the same blocked format, each block's scale
+    // grown by 2*sqrt(3/D) so the dequantized weights -- [-0.5, 0.5) before
+    // it -- keep the activations' magnitude from layer to layer, as the float
+    // chains below do.
+    std::vector<std::pair<std::string, std::string>> chain;
+    const float grow = 2.0f * std::sqrt(3.0f / (float)D);
+    for (int l = 1; l < layers; l++)
+    {
+      chain.emplace_back();
+      onnxFillBlockedWeights(chain.back().first, chain.back().second, D, D,
+                             v.blockSize, 0x243f6a88u + 0x9e3779b9u * (uint32_t)l,
+                             v.dtype);
+      uint16_t *sc = reinterpret_cast<uint16_t *>(&chain.back().second[0]);
+      const size_t n = chain.back().second.size() / 2;
+      for (size_t i = 0; i < n; i++)
+        sc[i] = floatToHalf(halfToFloat(sc[i]) * grow);
+    }
+    modelBytes = onnxResidentWeightOnlyMatMulModel(
+        D, D, D, v.dtype, v.blockSize, aRaw, wPacked, wScales, shape, view,
+        chain.empty() ? nullptr : &chain);
     std::string().swap(aRaw);
     std::string().swap(wPacked);
     std::string().swap(wScales);
+    std::vector<std::pair<std::string, std::string>>().swap(chain);
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, D,
                 profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0, verifyPlacement,
                 nativeProfile);
@@ -396,13 +420,13 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     modelBytes = onnxResidentQdqMatMulModel(
         D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
         onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
-        actDtype, wDtype, shape, tail, chainPtr,
+        actDtype, wDtype, shape, view, chainPtr,
         onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)D));
   }
   else
   {
     modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw, shape,
-                                         reduceInFloat, tail, chainPtr);
+                                         reduceInFloat, view, chainPtr);
   }
   std::string().swap(aRaw);
   std::string().swap(bRaw);

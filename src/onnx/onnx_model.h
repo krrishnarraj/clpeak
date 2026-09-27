@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 // ONNX TensorProto.DataType values.  The ONNXTensorElementDataType enum in
@@ -77,6 +78,30 @@ struct OnnxAttr
   }
 };
 
+// How a graph's [rows, cols] result is reduced to the one row that leaves the
+// device (OnnxGraph::reduceRows): the resident GEMMs' product, the transformer
+// block's output, the activation graphs' result.  Both views are the same
+// ReduceMax over the same values -- the maximum down each column -- and
+// differ only in the shape the reduction is handed.
+enum class OnnxReduceView
+{
+  // ReduceMax over axis 0 of the 2-D tensor.  What every provider has taken
+  // and what every row is measured with, until a provider refuses it.
+  Rows,
+
+  // The tensor reshaped to [1, rows, 1, cols] and reduced over axes {0, 1, 2}.
+  // A provider can take a reduction at one rank and refuse it at another: the
+  // QNN Adreno backend ran the 2-D form at [32, 32] and [1, 2048] and refused
+  // it at [1024, 1024] and [64, 2048], while taking the convolution test's
+  // 4-D reduction at [1, 256, 256, 256].  The reshape leaves the values
+  // alone, so where both forms build the reading is the same; the tests fall
+  // back to this one only when a graph is refused with the other, and
+  // remember the refusal for the provider (onnxPrefersRank4Reduce).  It is
+  // not always free: the Adreno backend copies the tensor for the reshape,
+  // 7% of an fp32 4096-cube matmul there.
+  Rank4,
+};
+
 // Builds one GraphProto and wraps it in a ModelProto.  Nodes must be added
 // in topological order (ONNX requires it, and no sort is done here).
 class OnnxGraph
@@ -108,6 +133,12 @@ public:
   // nothing to do with that datatype.  Every reduction here goes through this.
   void reduceMax(const std::string &in, const std::string &out,
                  const OnnxDims &axes);
+
+  // The column maxima of a [rows, cols] tensor, as a [cols] row, in the given
+  // view (OnnxReduceView).  Every graph that hands one row back goes through
+  // this.
+  void reduceRows(const std::string &in, const std::string &out,
+                  int64_t rows, int64_t cols, OnnxReduceView view);
 
   // Convenience for the int64 shape tensors Reshape takes as an input.
   void shapeInitializer(const std::string &name, const OnnxDims &shape);
@@ -200,26 +231,6 @@ enum class OnnxLiveShape
   QdqAdd0,
 };
 
-// How a resident GEMM's [M, N] product is reduced to the one row that leaves
-// the device.  Both are the same ReduceMax over the same values -- the maximum
-// down each column -- and differ only in the view of the product the
-// reduction is handed.
-enum class OnnxGemmTail
-{
-  // ReduceMax over axis 0 of the 2-D product.  What every provider has taken
-  // and what every row is measured with, until a provider refuses it.
-  Rows,
-
-  // The product reshaped to [1, M, 1, N] and reduced over axes {0, 1, 2}.
-  // A provider can take a reduction at one rank and refuse it at another: the
-  // QNN Adreno backend ran the 2-D form at [32, 32] and [1, 2048] and refused
-  // it at [1024, 1024] and [64, 2048], while taking the convolution test's
-  // 4-D reduction at [1, 256, 256, 256].  The reshape moves no data, so the
-  // reading is unchanged wherever both forms build; gemm.cpp falls back to
-  // this one only when a size is refused with the other.
-  Rank4,
-};
-
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each
 // run.  With A as a graph input and C returned to the host -- the obvious
@@ -275,30 +286,33 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
                                          float globalScale,
-                                         OnnxGemmTail tail = OnnxGemmTail::Rows);
+                                         OnnxReduceView view = OnnxReduceView::Rows);
 
-std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
-                                              int wDtype, int64_t blockSize,
-                                              const std::string &aRaw,
-                                              const std::string &wPacked,
-                                              const std::string &wScalesRaw,
-                                              OnnxLiveShape shape,
-                                              OnnxGemmTail tail = OnnxGemmTail::Rows);
+// `chain` holds further [N, N] layers as (packed weights, fp16 block scales)
+// pairs, blocked like the first; see the chain note below.
+std::string onnxResidentWeightOnlyMatMulModel(
+    int64_t M, int64_t K, int64_t N, int wDtype, int64_t blockSize,
+    const std::string &aRaw, const std::string &wPacked,
+    const std::string &wScalesRaw, OnnxLiveShape shape,
+    OnnxReduceView view = OnnxReduceView::Rows,
+    const std::vector<std::pair<std::string, std::string>> *chain = nullptr);
 
-// `chain` (plain and QDQ forms, below): further [N, N] weight matrices the
-// product passes through, in order, before it is reduced -- one dispatch that
-// multiplies 1 + chain->size() times.  Each is distinct, so no layer repeats
-// an operand pair a runtime could cache, and the caller scales them so the
-// activations keep their magnitude from layer to layer: an fp16 chain whose
-// every layer grew the values by sqrt(N) would overflow within a few layers.
-// Only the live shapes may be chained; a chain of constants is one long
-// constant expression.
+// `chain` (the weight-only form above, the plain and QDQ forms below):
+// further [N, N] weight matrices the product passes through, in order, before
+// it is reduced -- one dispatch that multiplies 1 + chain->size() times.  Each
+// is distinct, so no layer repeats an operand pair a runtime could cache, and
+// the caller scales them so the activations keep their magnitude from layer to
+// layer: an fp16 chain whose every layer grew the values by sqrt(N) would
+// overflow within a few layers.  A chain of constants is one long constant
+// expression, so gemm.cpp builds chains on a live shape wherever one exists,
+// and holds a result-scaled one to the same folding checks as a single
+// multiply.
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
                                      OnnxLiveShape shape,
                                      bool reduceInFloat = false,
-                                     OnnxGemmTail tail = OnnxGemmTail::Rows,
+                                     OnnxReduceView view = OnnxReduceView::Rows,
                                      const std::vector<std::string> *chain = nullptr);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
@@ -336,7 +350,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
                                        OnnxLiveShape shape,
-                                       OnnxGemmTail tail = OnnxGemmTail::Rows,
+                                       OnnxReduceView view = OnnxReduceView::Rows,
                                        const std::vector<std::string> *chain = nullptr,
                                        float chainWScale = 0.0f);
 
@@ -368,7 +382,8 @@ enum class OnnxActivation { None, Silu, Softmax, LayerNorm };
 // subtraction removes it along with the read and the reduction.
 std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
                                         OnnxActivation act,
-                                        const std::string &xRaw);
+                                        const std::string &xRaw,
+                                        OnnxReduceView view = OnnxReduceView::Rows);
 
 // Which direction a transfer model exercises.
 enum class OnnxTransfer { ToDevice, RoundTrip, ComputeOnly };
@@ -438,6 +453,9 @@ struct OnnxBlockShape
   // projections: serving stacks quantize the cache separately because at long
   // context it outweighs the weights.
   int     kvDtype = 0;
+
+  // How the output is reduced to the row that leaves the device.
+  OnnxReduceView reduceView = OnnxReduceView::Rows;
 };
 
 // One decoder block: QKV projection, multi-head attention, output projection

@@ -38,40 +38,58 @@ struct OrtEpDevice; // ONNX Runtime's (EP, hardware device) pair; opaque here
 // microseconds, and it passes its own far larger cap.
 constexpr unsigned int kOnnxMaxIters = 500;
 
-// Ceiling on session creation (graph compilation) time.  Separate from
-// kMaxIterUs which gates per-iteration execution time: on QNN HTP the
-// compilation dominates (a single 8192^3 matmul: 36-71 s) and the execution
-// gate never fires because per-iter stays in ms.  Guards:
+// How the doubling ladders (onnx-gemm, onnx-conv) decide to stop.
 //
-//  * absolute: one create > kOnnxMaxCreateUs -> stop ladder after this rung
-//    (keep its result, skip larger).  The same ceiling bounds the fixed-
-//    geometry block, whose 8192 context legitimately needs ~1 min on
-//    CoreML/TensorRT AOT toolchains.  At 60 s QNN's int8 ladder stopped at
-//    8192 while its rate was still climbing (8.3 -> 13.1 TOPS from 4096),
-//    and compiles of 179-256 s were paid and then thrown away.
-//
-//  * predicted: onnx-gemm skips a rung whose compile its previous rungs
-//    predict over the ceiling, from the growth they showed (gemm.cpp).
-//
-//  * factor: create grew > kOnnxCreateGrowthFactor since previous rung, and
-//    is itself past kOnnxCreateGrowthFloor (memory 4x, flops 8x per 2x dim;
-//    6x tolerates jitter but catches QNN's 9.3x).  The convolution ladder
-//    still stops on it; onnx-gemm folds the observed growth into its
-//    prediction instead.
-//
-// The first rung (kMinDim) is allowed to exceed the absolute once - its time
-// is the seed for the prediction; truncating it would discard a valid peak.
+// Every device climbs to a plateau: the rate rises with size while dispatch
+// and the passes around the arithmetic still matter, and levels off -- or
+// falls off a cliff -- once they do not.  Where that happens differs by an
+// order of magnitude between a phone and a workstation, so no fixed size or
+// time budget is right for both.  The ladder climbs while each size beats the
+// best so far by more than kOnnxPlateauGain, and stops once
+// kOnnxPlateauStrikes sizes in a row have not.  The grace of one is not
+// optional: a size that lands badly and the next that recovers is ordinary --
+// QNN's unsigned int8 matmul read 3.98, 3.66, 13.2 TOPS across 2048..8192,
+// and ONNX Runtime's CPU EP 1.01, 1.02, 1.27, 1.49 across 1024..8192 -- and a
+// ladder stopped at the first flat step reports a third of the device.  A
+// slow device plateaus early and pays for fewer compiles.
+constexpr double kOnnxPlateauGain = 1.10;
+constexpr int kOnnxPlateauStrikes = 2;
+
+// Session creation (graph compilation) is capped, not budgeted.  It is a
+// separate axis from the per-iteration gates: on QNN's HTP a single 8192-cube
+// matmul compiles for 16-71 s while running in milliseconds, and TensorRT's
+// best NVFP4 reading (240 TFLOPS on an RTX 5060) needed a compile allowance
+// of three minutes to be reached at all.  A ladder skips a size whose compile the
+// earlier sizes predict past kOnnxMaxCreateUs (onnxPredictCreateUs), and stops
+// after a size whose compile went past it anyway -- keeping that size's
+// reading.  The first size is always built: its time seeds the prediction.
 constexpr double kOnnxMaxCreateUs = 240.0e6;
 constexpr double kOnnxMaxBlockCreateUs = 240.0e6;
-constexpr double kOnnxCreateGrowthFactor = 6.0;
-// ...and only once creation is expensive enough for its growth to mean
-// anything.  The factor exists to catch an ahead-of-time compiler's cliff
-// before the next model is built, but a ratio between two trivial numbers is
-// not a cliff: ONNX Runtime's CPU EP went from 0.1 s to 0.7 s simply
-// serializing a larger model, tripped 7.8x, and lost the rung that gave the
-// same provider on another OS 11% more.  Below this the absolute gate and
-// the predicted-create gate are the ones that matter, and both still apply.
+// A growth ratio means something only once the compile it ends with is this
+// long: ONNX Runtime's CPU EP went from 0.1 s to 0.7 s simply serializing a
+// larger model, and extrapolating that 7x would have cut a ladder short.
 constexpr double kOnnxCreateGrowthFloor = 2.0e6;
+
+// The next doubling's session creation, predicted from the last two.
+// Doubling a dimension is 4x the weights and up to 8x the work, and a
+// compiler's time lands anywhere in that range and past it: QNN's HTP grew
+// 5.5x to its fp16 8192-cube and then 12.5x to a 16384 that ran out of
+// memory, and the runtime before it grew a sixteen-layer chain 11x and then
+// 57x.  So the growth already seen is carried forward -- at least 4x, bounded
+// at 16x so one noisy pair cannot predict a runaway -- once the latest
+// compile is past kOnnxCreateGrowthFloor; before that, 4x.  No ratio sees a
+// cliff coming, but this one follows a climb that is already steep.
+inline double onnxPredictCreateUs(double prevUs, double prevPrevUs)
+{
+  double growth = 4.0;
+  if (prevPrevUs > 0.0 && prevUs > kOnnxCreateGrowthFloor)
+  {
+    growth = prevUs / prevPrevUs;
+    growth = growth < 4.0 ? 4.0 : (growth > 16.0 ? 16.0 : growth);
+  }
+  return prevUs * growth;
+}
+
 // Tiny probe budget: 64^3 model should compile in <10s even on AOT.
 // If it exceeds this, the dtype is emulated/slow and the full 1024
 // ladder will be minutes - skip the variant early.

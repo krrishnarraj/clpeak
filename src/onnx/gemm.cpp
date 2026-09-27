@@ -15,15 +15,24 @@
 // both did, and their timed runs measured dispatch.  So a runtime scalar
 // scales the activation operand *before* the multiply wherever the probe
 // finds that costs nothing but one elementwise pass (see OnnxLiveShape and
-// onnx_probe.cpp); the older result-scaled form survives only where a live
-// operand would drag in a precision cast, and there the fold check below
-// stands guard over it.
+// onnx_probe.cpp); the result-scaled form survives where no live operand
+// builds, and there the fold check below stands guard over it.
 //
-// One test, `onnx_gemm`: the same single-operation model on whichever
-// formats the provider accepts.  The int8 QDQ reading is measured in ops
-// rather than flops and carries that unit itself.
-// int8 is the dtype most NPUs are actually built for, so an NPU whose only
-// measured reading is the int8 one is the expected shape, not a gap.
+// Every row but NVFP4 is a chain: sixteen distinct square layers in one
+// graph, each one's product the next one's activations.  One multiply per
+// dispatch measured what surrounds the multiply as much as the multiply.  On
+// QNN's HTP, whose profiler counts cycles per operation, the pass that keeps
+// a single int8 8192-cube live and the reduction that brings its row back
+// took 48% of the run -- the multiply itself at 26 TOPS inside a row that
+// read 13 -- while sixteen layers per dispatch read 29 TOPS with each layer
+// at 35.  The Neural Engine gained 25% the same way, ONNX Runtime's CPU 13%,
+// the Adreno 6%.  A chain is also how a model runs.
+//
+// One test, `onnx_gemm`: the same chained model on whichever formats the
+// provider accepts.  The int8 QDQ reading is measured in ops rather than
+// flops and carries that unit itself.  int8 is the dtype most NPUs are
+// actually built for, so an NPU whose only measured reading is the int8 one
+// is the expected shape, not a gap.
 
 #include <onnx/onnx_peak.h>
 #include "gemm_setup.h"
@@ -34,10 +43,8 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace onnxgemm;
@@ -45,8 +52,9 @@ using namespace onnxgemm;
 namespace
 {
 
-  // The ladder doubles from 1024 until the rate stops improving, and the peak
-  // is reported along with the size that produced it.
+  // The ladder doubles the layer width from 1024 until the rate plateaus
+  // (kOnnxPlateauGain), and the peak is reported along with the width that
+  // produced it.
   //
   // Reporting a peak rather than "the rate at 4096" is what keeps this number
   // comparable over time.  A fixed size has to be raised as hardware grows --
@@ -66,12 +74,11 @@ namespace
   constexpr int64_t kMinDim = 1024;
   constexpr int64_t kMaxDim = 32768;
 
-  // A size counts as an improvement only if it beats the best so far by this
-  // much; two failures in a row end the search.  The grace of one lets a curve
-  // dip at a single size and recover, which happens when one size lands badly
-  // against a cache but the next tiles better.
-  constexpr double kImproveFactor = 1.03;
-  constexpr int kMaxStrikes = 2;
+  // Layers per chain.  Sixteen spreads the pass that keeps the graph live and
+  // the final reduction thin -- 15% of a 4096-wide int8 chain on QNN's HTP,
+  // against 48% of one multiply -- while a 4096-wide fp16 chain still fits
+  // the protobuf ceiling and compiles in under a minute there.
+  constexpr int kChainLayers = 16;
 
   // A rung has to do at least this much work, as a share of what the provider
   // charges to accept the submission, before it counts as having computed
@@ -91,12 +98,12 @@ namespace
   // the hardware that should try it.
   constexpr double kMaxIterUs = 2.0e6; // one iteration, predicted
 
-  // Both operands together, capped at a quarter of physical memory.  A fixed
-  // ceiling here would be a crash on a phone and a needless limit on a
-  // workstation; see clpeak::memoryBudget.
+  // Every layer's weights together, capped at a quarter of physical memory.
+  // A fixed ceiling here would be a crash on a phone and a needless limit on
+  // a workstation; see clpeak::memoryBudget.
   //
   // And capped again by protobuf.  An ONNX model is a protobuf message, whose
-  // serialized size cannot exceed 2 GiB, and both operands live inside it as
+  // serialized size cannot exceed 2 GiB, and the weights live inside it as
   // initializers -- so a size the machine has memory for can still be
   // unbuildable.  fp32 at 16384 needs exactly 2 GiB of operands and ORT answers
   // "Model data size exceeds maximum supported size (2GB)", which is a property
@@ -112,6 +119,13 @@ namespace
   // would use, since the ladder measures several.
   constexpr unsigned int kSizeBudgetUs = 2000000;
 
+  // A verbose run asks the provider's own profiler (onnxNativeProfilePath) to
+  // watch one more build of the row's best size.  Where that size took longer
+  // than this to compile, the largest measured size that did not is watched
+  // instead: how the time splits between operations barely moves from one
+  // size to the next, and the top rung can cost minutes.
+  constexpr double kNativeProfileCreateCapUs = 90.0e6;
+
   const char *shapeNameFor(OnnxLiveShape s)
   {
     switch (s)
@@ -125,8 +139,9 @@ namespace
   }
 
   // What the description says about where the runtime dependency entered.
-  // Only the live forms need a sentence: they cost a pass over the operand
-  // that is inside the figure, and a reader dividing rows should know it.
+  // Only the live forms need a sentence: they cost a pass over the first
+  // layer's activations that is inside the figure, and a reader dividing rows
+  // should know it.
   const char *shapeNote(const Variant &v, OnnxLiveShape shape)
   {
     switch (shape)
@@ -136,66 +151,21 @@ namespace
     case OnnxLiveShape::OperandScaled:
       return v.qdq
                  ? "  The activations are scaled at run time and quantized on "
-                   "device, so this provider's compiler cannot fold the "
-                   "multiply away; that pass is inside the figure."
-                 : "  The activations are scaled at run time, so this "
-                   "provider's compiler cannot fold the multiply away; that "
+                   "device ahead of the first multiply, so no compiler can fold "
+                   "the multiplies away; that pass is inside the figure."
+                 : "  The activations are scaled at run time ahead of the first "
+                   "multiply, so no compiler can fold the multiplies away; that "
                    "pass is inside the figure.";
     case OnnxLiveShape::Add0:
-      return "  The activations take a runtime zero on the way in, so this "
-             "provider's compiler cannot fold the multiply away; that pass is "
-             "inside the figure.";
+      return "  The activations take a runtime zero ahead of the first "
+             "multiply, so no compiler can fold the multiplies away; that pass "
+             "is inside the figure.";
     case OnnxLiveShape::QdqAdd0:
-      return "  The activations take a runtime zero as a quantized op, so this "
-             "provider's compiler cannot fold the multiply away; that pass is "
-             "inside the figure.";
+      return "  The activations take a runtime zero as a quantized op ahead of "
+             "the first multiply, so no compiler can fold the multiplies away; "
+             "that pass is inside the figure.";
     }
     return "";
-  }
-
-  // The compile gate predicts the next rung's session creation from the growth
-  // it has seen rather than an assumed one.  Doubling D is 4x the weights and
-  // 8x the work, and a compiler's time lands anywhere between: QNN's HTP grew
-  // 5.5x and 6.2x a doubling at the top of its ladders under the plugin
-  // runtime, 7x and 16x under the one before it.  Until two compiles are
-  // large enough for their ratio to mean anything (kOnnxCreateGrowthFloor), 4x
-  // is assumed; after that the ratio is used, bounded so that one noisy pair
-  // cannot predict a runaway.  This replaces stopping on a fixed growth
-  // factor, which ended the older runtime's int8 ladder at 2048 on a 1.2 ->
-  // 8.8 s step whose next rung predicted 35 s.
-  constexpr double kAssumedCreateGrowth = 4.0;
-  constexpr double kMaxCreateGrowth = 16.0;
-
-  // The chained rows.  Experimental: the single-multiply rows put one matmul
-  // in a dispatch with a live-operand pass in front and a reduction behind,
-  // and on a provider whose matrix unit is fast next to its memory and its
-  // dispatch, those can be most of the time.  Sixteen distinct layers in one
-  // graph spread all three over sixteen multiplies, which is also how a model
-  // runs.  The ladder starts smaller because the work per rung is sixteen
-  // times the square's.
-  constexpr int kChainLayers = 16;
-  constexpr int64_t kChainMinDim = 512;
-
-  // A verbose run asks the provider's own profiler (onnxNativeProfilePath) to
-  // watch one more build of the row's best size.  Where that size took longer
-  // than this to compile, the largest measured size that did not is watched
-  // instead: how the time splits between operations barely moves from one
-  // size to the next, and the top rung can cost minutes.
-  constexpr double kNativeProfileCreateCapUs = 90.0e6;
-
-  // Three significant figures: the two int8 spellings can land within a few
-  // percent of each other, and the sentence naming the slower one has to be
-  // able to show that it was slower.
-  std::string opsText(double rate)
-  {
-    const double v = (rate >= 1.0e12) ? rate / 1.0e12 : rate / 1.0e9;
-    const char *unit = (rate >= 1.0e12) ? "TOPS" : "GOPS";
-    char buf[32];
-    std::snprintf(buf, sizeof buf, v >= 100.0 ? "%.0f %s"
-                                   : v >= 10.0 ? "%.1f %s"
-                                               : "%.2f %s",
-                  v, unit);
-    return buf;
   }
 
 } // namespace
@@ -210,10 +180,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "flops",
        Category::Unknown,
        "Matrix-multiply rate through this execution provider, one data type "
-       "per row, swept over square sizes and reported at its best.  The same "
-       "model runs on every provider, and one that cannot run it entirely on "
-       "its own device reports unsupported rather than quietly measuring the "
-       "host.",
+       "per row: sixteen distinct square multiplies chained in one dispatch, "
+       "each layer's product feeding the next, swept over layer widths and "
+       "reported at its best.  A chain is how a model runs, and it spreads "
+       "what surrounds a multiply -- the dispatch, the pass that keeps the "
+       "graph from being computed at build time, the reduction that brings "
+       "one row back -- over sixteen of them.  The same model runs on every "
+       "provider, and one that cannot run it entirely on its own device "
+       "reports unsupported rather than quietly measuring the host.",
        TestShape::Heterogeneous, "data type"});
 
   // runAll also clears per EP before dispatching; this entry clear keeps
@@ -228,33 +202,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // live shape can never be the wrong answer, only a pass slower.
   bool providerFolds = false;
 
-  // The scheme each single-multiply row settled on, by label, so its chained
-  // row runs the same one.
-  std::unordered_map<std::string, size_t> schemeOf;
-
-  // One quantization scheme's slice of a probe result: the primary one lives
-  // in the result's own fields, the others in moreSchemes.
-  struct Scheme
-  {
-    int actDtype;
-    int wgtDtype;
-    const char *name;
-    std::string ranAs;
-    bool castedActs;
-    double probeUs;
-    std::vector<OnnxLiveShape> shapes;
-  };
-  auto schemesOf = [](const OnnxProbeResult &pr) {
-    std::vector<Scheme> out;
-    out.push_back({pr.actDtype, pr.wgtDtype, pr.schemeName, pr.ranAs,
-                   pr.castedActs, pr.probeUs, pr.shapes});
-    for (const OnnxProbeScheme &m : pr.moreSchemes)
-      out.push_back({m.actDtype, m.wgtDtype, m.name, m.ranAs, m.castedActs,
-                     m.probeUs, m.shapes});
-    return out;
-  };
-
-  // What one ladder -- one variant, scheme and shape -- found.
+  // What one ladder -- one variant in one shape -- found.
   struct Ladder
   {
     double best = 0.0;
@@ -277,17 +225,17 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     std::vector<std::pair<int64_t, double>> creates;
   };
 
-  // One doubling ladder.  `tail` is the row's, and sticks: once a provider
+  // One doubling ladder.  `view` is the row's and sticks: once a provider
   // refuses the 2-D reduction at some size it gets the rank-4 view for every
-  // size after, in this ladder and the row's later ones.
-  auto ladder = [&](const Variant &v, const std::string &label,
-                    const OnnxProbeResult &pr, const Scheme &sc,
-                    OnnxLiveShape shape, int layers, int64_t minDim,
-                    OnnxGemmTail &tail) -> Ladder {
+  // size after, and so does every later graph on that provider
+  // (onnxPrefersRank4Reduce).
+  auto ladder = [&](const Variant &v, const OnnxProbeResult &pr,
+                    OnnxLiveShape shape, int layers,
+                    OnnxReduceView &view) -> Ladder {
     Ladder L;
     L.shape = shape;
     const bool foldable = (shape == OnnxLiveShape::ResultScaled);
-    const char *tag = label.c_str();
+    const char *tag = v.label;
 
     int rungs = 0;
     // Why the ladder ended, for the single-rung verdict below.
@@ -303,7 +251,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t prevD = 0;
     int strikes = 0;
 
-    for (int64_t D = minDim; D <= kMaxDim; D *= 2)
+    for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
@@ -337,64 +285,64 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
       }
-      // Predicted compilation gate: skip the next rung before paying its
-      // build when the compiles so far predict it over budget.  The first
-      // rung is always attempted -- its time seeds this prediction.
-      if (D > minDim && prevCreateUs > 0.0)
+      // The compile cap, checked before paying for the build
+      // (onnxPredictCreateUs).  The first rung is always attempted -- its time
+      // seeds the prediction.
+      if (D > kMinDim && prevCreateUs > 0.0)
       {
-        double growth = kAssumedCreateGrowth;
-        if (prevPrevCreateUs > kOnnxCreateGrowthFloor)
-          growth = std::min(std::max(prevCreateUs / prevPrevCreateUs,
-                                     kAssumedCreateGrowth),
-                            kMaxCreateGrowth);
-        if (prevCreateUs * growth > kOnnxMaxCreateUs)
+        const double predictedUs =
+            onnxPredictCreateUs(prevCreateUs, prevPrevCreateUs);
+        if (predictedUs > kOnnxMaxCreateUs)
         {
           CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s "
-                      "(prev %.1f s x%.1f) > %.1f s, stopping\n",
+                      "(prev %.1f s) > %.1f s, stopping\n",
                       ep.providerKey.c_str(), tag, (long long)D,
-                      prevCreateUs * growth / 1.0e6, prevCreateUs / 1.0e6,
-                      growth, kOnnxMaxCreateUs / 1.0e6);
+                      predictedUs / 1.0e6, prevCreateUs / 1.0e6,
+                      kOnnxMaxCreateUs / 1.0e6);
           break;
         }
       }
 
-      auto build = [&](OnnxGemmTail t, double &createUs) {
+      auto build = [&](OnnxReduceView rv, double &createUs) {
         auto createStart = std::chrono::steady_clock::now();
-        GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, sc.actDtype,
-                                pr.reduceInFloat, sc.wgtDtype, shape,
-                                /*verifyPlacement=*/true, t, layers);
+        GemmSetup g = makeSetup(rt, ep, v, D, /*profile=*/false, pr.actDtype,
+                                pr.reduceInFloat, pr.wgtDtype, shape,
+                                /*verifyPlacement=*/true, rv, layers);
         createUs = std::chrono::duration<double, std::micro>(
                        std::chrono::steady_clock::now() - createStart)
                        .count();
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 session create %.1f s%s\n",
-                    ep.providerKey.c_str(), tag, (long long)D,
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d session create %.1f s%s\n",
+                    ep.providerKey.c_str(), tag, (long long)D, layers,
                     createUs / 1.0e6,
-                    t == OnnxGemmTail::Rank4 ? " (rank-4 reduction)" : "");
+                    rv == OnnxReduceView::Rank4 ? " (rank-4 reduction)" : "");
         return g;
       };
       double createUs = 0.0;
-      GemmSetup g = build(tail, createUs);
+      GemmSetup g = build(view, createUs);
 
       // A provider can take the multiply and refuse the reduction behind it
       // at a real size -- the QNN Adreno backend did at every size from 1024,
       // leaving the multiply in a partition fed by constants alone, which it
       // then rejected as "Zero tensor size!".  The same values reduced
-      // through a rank-4 view is the one other spelling worth a compile.
-      if (!g.session && !g.offDevice && tail == OnnxGemmTail::Rows &&
+      // through a rank-4 view is the one other spelling worth a compile.  Not
+      // after running out of memory, which says the size is too big however
+      // it is spelled.
+      if (!g.session && !g.offDevice && view == OnnxReduceView::Rows &&
           onnxFailureStatus(g.error) == ResultStatus::Unsupported &&
-          !clpeak::cancelRequested())
+          !onnxReasonIsOutOfMemory(g.error) && !clpeak::cancelRequested())
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 refused (%s); retrying the "
                     "reduction through a rank-4 view\n",
                     ep.providerKey.c_str(), tag, (long long)D,
                     g.error.c_str());
         double retryUs = 0.0;
-        GemmSetup r4 = build(OnnxGemmTail::Rank4, retryUs);
+        GemmSetup r4 = build(OnnxReduceView::Rank4, retryUs);
         if (r4.session)
         {
           // Every later size builds once, in this view, so this build's time
           // is the one the compile gate should extrapolate from.
-          tail = OnnxGemmTail::Rank4;
+          view = OnnxReduceView::Rank4;
+          onnxNoteRank4Reduce(rt, ep);
           destroySetup(rt, g);
           g = std::move(r4);
           createUs = retryUs;
@@ -439,7 +387,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         // this one can succeed either.
         break;
       }
-      if (tail == OnnxGemmTail::Rank4 && L.rank4From == 0)
+      if (view == OnnxReduceView::Rank4 && L.rank4From == 0)
         L.rank4From = D;
 
       double per_iter_us = -1.0;
@@ -486,8 +434,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // Rate per FLOP-count is what the ladder is searching on; the raw rate
       // in ops/us drives the time prediction for the next rung.
       lastRate = ops / mean_us;
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 -> %.3f\n", ep.providerKey.c_str(),
-                  tag, (long long)D, rate);
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d -> %.3f\n",
+                  ep.providerKey.c_str(), tag, (long long)D, layers, rate);
 
       // Per-doubling fold detector, for the foldable shape only.  A folded
       // graph leaves dispatch plus a reduction over D elements, so its time
@@ -508,7 +456,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // nothing at all, which is a fold by itself (DirectML: 153.6 us at
       // 1024 against a 156 us submission).  The live shapes cannot fold, so
       // their ladders are never second-guessed.
-      const double dispatchUs = (sc.probeUs > 0.0) ? sc.probeUs : 0.0;
+      const double dispatchUs = (pr.probeUs > 0.0) ? pr.probeUs : 0.0;
       const double work = mean_us - dispatchUs;
       const double prevWork = prevUs - dispatchUs;
 
@@ -554,7 +502,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       prevUs = mean_us;
       prevD = D;
 
-      if (rate > L.best * kImproveFactor)
+      // Climb to the plateau (kOnnxPlateauGain, one grace size).
+      if (rate > L.best * kOnnxPlateauGain)
       {
         strikes = 0;
         L.best = rate;
@@ -567,9 +516,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           L.best = rate;
           L.bestDim = D;
         }
-        if (++strikes >= kMaxStrikes)
+        if (++strikes >= kOnnxPlateauStrikes)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: no further gain past %lld^3\n",
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld^3\n",
                       ep.providerKey.c_str(), tag, (long long)L.bestDim);
           break;
         }
@@ -599,11 +548,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
 
-      // A rung that compiled past the budget ends the ladder after it is
-      // measured.  The first rung is allowed to exceed the budget once -- its
-      // time seeds the prediction above; truncating it would discard a valid
-      // peak.
-      if (D != minDim && createUs > kOnnxMaxCreateUs)
+      // A rung that compiled past the cap anyway is kept, and ends the
+      // ladder.  The first rung is allowed past it once -- its time seeds
+      // the prediction above; truncating it would discard a valid peak.
+      if (D != kMinDim && createUs > kOnnxMaxCreateUs)
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 create %.1f s > %.1f s, stopping\n",
                     ep.providerKey.c_str(), tag,
@@ -666,21 +614,21 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return L;
   };
 
-  // One row: every scheme the probe kept, each down its shapes, the fastest
-  // reported.  `layers` > 1 is a chained row under `label`, built from the
-  // variant `v` whose probe result it shares.
-  auto runVariant = [&](const Variant &v, int layers, const std::string &label) {
+  auto runVariant = [&](const Variant &v) {
     const bool isInt = isIntVariant(v);
+    // NVFP4 is the one row measured as a single multiply: chaining it would
+    // mean requantizing every layer's product to NVFP4 with block scales
+    // taken from the data at run time, which this test does not build.
+    const int layers = v.nvfp4 ? 1 : kChainLayers;
     const bool chained = layers > 1;
 
     logger::EmitOptions o;
-    const std::string intro =
-        chained ? "Experimental: " + std::to_string(layers) +
-                      " distinct square multiplies chained in one dispatch, "
-                      "each layer's product feeding the next, swept over "
-                      "layer widths and reported at its best.  "
-                : std::string("Peak over a doubling sweep of square sizes.  ");
-    o.description = intro + v.note;
+    const std::string sweep =
+        chained ? "Peak over a doubling sweep of layer widths, sixteen layers "
+                  "chained per dispatch."
+                : "Peak over a doubling sweep of square sizes, one multiply "
+                  "per dispatch.";
+    o.description = sweep + "  " + v.note;
     if (isInt)
       o.unit = "ops";
 
@@ -692,142 +640,84 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto it = cache.find(v.label);
     if (it == cache.end())
     {
-      test.skip(label, ResultStatus::Unsupported,
+      test.skip(v.label, ResultStatus::Unsupported,
                 "no probe result for " + std::string(v.label), o);
       return;
     }
     const OnnxProbeResult &pr = it->second;
     if (!pr.ok)
     {
-      test.skip(label, onnxFailureStatus(pr.reason), pr.reason, o);
+      test.skip(v.label, onnxFailureStatus(pr.reason), pr.reason, o);
       return;
     }
 
-    std::vector<Scheme> schemes = schemesOf(pr);
+    // The probe left one or more viable shapes, result-scaled first.  A
+    // single multiply takes them in that order: result-scaled is the fastest
+    // shape wherever it does not fold, and the fold check drops to the next
+    // where it does.  A chain takes its live shapes first: result-scaled
+    // would be sixteen constant multiplies for a folding compiler to work
+    // through before the check could catch it -- minutes on QNN -- while the
+    // live pass is spread across the sixteen.  Result-scaled stays in the
+    // list as the last resort, for the rows no live shape builds.
+    std::vector<OnnxLiveShape> shapes = pr.shapes;
     if (chained)
+      std::stable_partition(shapes.begin(), shapes.end(),
+                            [](OnnxLiveShape s) {
+                              return s != OnnxLiveShape::ResultScaled;
+                            });
+    else if (providerFolds && shapes.size() > 1 &&
+             shapes.front() == OnnxLiveShape::ResultScaled)
     {
-      // A chain runs the scheme its single-multiply row settled on.
-      auto s = schemeOf.find(v.label);
-      const size_t keep = (s != schemeOf.end() && s->second < schemes.size())
-                              ? s->second
-                              : 0;
-      schemes = {schemes[keep]};
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: this provider folded an earlier row's "
+                  "resident product; starting at %s\n",
+                  ep.providerKey.c_str(), v.label, shapeNameFor(shapes[1]));
+      shapes.erase(shapes.begin());
     }
 
-    OnnxGemmTail tail = OnnxGemmTail::Rows;
-    Ladder best;
-    size_t bestScheme = 0;
-    bool measured = false;
-    Ladder firstFail;
-    bool haveFail = false;
-    std::vector<std::pair<size_t, double>> schemePeaks;
-    for (size_t si = 0; si < schemes.size(); si++)
+    OnnxReduceView view = onnxPrefersRank4Reduce(rt, ep)
+                              ? OnnxReduceView::Rank4
+                              : OnnxReduceView::Rows;
+    Ladder L;
+    for (size_t shi = 0; shi < shapes.size(); shi++)
     {
-      if (clpeak::cancelRequested())
-        break;
-      const Scheme &sc = schemes[si];
-
-      // The probe left one or more viable shapes, result-scaled first.  Try
-      // them in order: the first that is not caught folding is the
-      // measurement, and a fold drops to the next (a live shape a vendor
-      // compiler cannot evaluate at build time).  A non-folding provider
-      // never leaves the first.  A chain of constants is one long constant
-      // expression, so a chain starts on a live shape; so does any row on a
-      // provider that has already folded one.
-      std::vector<OnnxLiveShape> shapes = sc.shapes;
-      if ((chained || providerFolds) && shapes.size() > 1 &&
-          shapes.front() == OnnxLiveShape::ResultScaled)
+      L = ladder(v, pr, shapes[shi], layers, view);
+      if (L.folded)
+        providerFolds = true;
+      // Caught folding and another shape remains: drop to it (a live shape
+      // the compiler cannot evaluate at build time) rather than reporting an
+      // error.
+      if (L.folded && shi + 1 < shapes.size())
       {
-        if (providerFolds && !chained)
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: this provider folded an earlier "
-                      "row's resident product; starting at %s\n",
-                      ep.providerKey.c_str(), label.c_str(),
-                      shapeNameFor(shapes[1]));
-        shapes.erase(shapes.begin());
-      }
-      if (shapes.empty() ||
-          (chained && shapes.front() == OnnxLiveShape::ResultScaled))
-      {
-        if (!haveFail)
-        {
-          firstFail.err = "no shape that keeps the multiply live builds at "
-                          "this row's width on this provider, and a chain of "
-                          "constants would be evaluated at build time";
-          firstFail.errStatus = ResultStatus::Unsupported;
-          haveFail = true;
-        }
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s folded, retrying %s\n",
+                    ep.providerKey.c_str(), v.label,
+                    shapeNameFor(shapes[shi]), shapeNameFor(shapes[shi + 1]));
         continue;
       }
-
-      Ladder L;
-      for (size_t shi = 0; shi < shapes.size(); shi++)
-      {
-        L = ladder(v, label, pr, sc, shapes[shi], layers,
-                   chained ? kChainMinDim : kMinDim, tail);
-        if (L.folded)
-          providerFolds = true;
-        // Caught folding and another shape remains: drop to it (a live shape
-        // the compiler cannot evaluate at build time) rather than reporting
-        // an error.
-        if (L.folded && shi + 1 < shapes.size())
-        {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s folded, retrying %s\n",
-                      ep.providerKey.c_str(), label.c_str(),
-                      shapeNameFor(shapes[shi]), shapeNameFor(shapes[shi + 1]));
-          continue;
-        }
-        break; // settled: this shape produced the ladder (measurement or error)
-      }
-
-      if (schemes.size() > 1)
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s: %s\n", ep.providerKey.c_str(),
-                    label.c_str(), sc.name,
-                    L.best > 0.0 ? (opsText(L.best) + " at " +
-                                    std::to_string(L.bestDim) + "^3").c_str()
-                                 : L.err.c_str());
-      if (L.best > 0.0)
-      {
-        schemePeaks.push_back({si, L.best});
-        if (!measured || L.best > best.best)
-        {
-          best = L;
-          bestScheme = si;
-          measured = true;
-        }
-      }
-      else if (!haveFail)
-      {
-        firstFail = L;
-        haveFail = true;
-      }
+      break; // settled: this shape produced the row (measurement or error)
     }
 
-    if (!measured)
+    if (L.best <= 0.0)
     {
-      if (firstFail.folded && !chained)
+      if (L.folded)
         onnxNoteGemmFolded(ep, v.label);
-      test.skip(label, onnxFailureStatus(firstFail.err, firstFail.errStatus),
-                firstFail.err.empty() ? "no supported datatype" : firstFail.err,
-                o);
+      test.skip(v.label, onnxFailureStatus(L.err, L.errStatus),
+                L.err.empty() ? "no supported datatype" : L.err, o);
       return;
     }
-    if (!chained)
-      schemeOf[v.label] = bestScheme;
 
-    const Scheme &sc = schemes[bestScheme];
     o.description =
-        chained ? intro + "Fastest at " + std::to_string(best.bestDim) +
-                      "-wide layers.  " + v.note
+        chained ? "Peak over a doubling sweep of layer widths, sixteen layers "
+                  "chained per dispatch; fastest at " +
+                      std::to_string(L.bestDim) + "-wide layers.  " + v.note
                 : "Peak over a doubling sweep of square sizes; fastest at " +
-                      std::to_string(best.bestDim) + " cubed.  " + v.note;
-    if (!sc.ranAs.empty())
-      o.description += "  Ran as " + sc.ranAs + " (" + sc.name + ").";
-    for (const auto &peak : schemePeaks)
-      if (peak.first != bestScheme)
-        o.description += "  It also runs " + std::string(schemes[peak.first].name) +
-                         ", which peaked at " + opsText(peak.second) +
-                         "; this is the faster of the two.";
-    if (sc.castedActs)
+                      std::to_string(L.bestDim) + " cubed.  " + v.note +
+                      "  A single multiply per dispatch: chaining NVFP4 would "
+                      "requantize every layer's product with block scales "
+                      "taken from the data at run time, which this test does "
+                      "not build.";
+    if (!pr.ranAs.empty())
+      o.description += "  Ran as " + pr.ranAs + " (" + pr.schemeName + ").";
+    if (pr.castedActs)
       o.description += "  The provider converts the activations first, a "
                        "full pass inside this figure.";
     if (!pr.ranWider.empty())
@@ -836,22 +726,22 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        ", so this is that width rather than " + v.label + ".";
     if (pr.reduceInFloat)
       o.description += "  The product is cast to fp32 before the reduction; "
-                       "the multiply is unaffected.";
-    o.description += shapeNote(v, best.shape);
-    if (best.rank4From > 0)
-      o.description += "  From " + std::to_string(best.rank4From) +
+                       "the multiplies are unaffected.";
+    o.description += shapeNote(v, L.shape);
+    if (L.rank4From > 0)
+      o.description += "  From " + std::to_string(L.rank4From) +
                        " the product was reduced through a 4-D view of itself, "
                        "because this provider refused the 2-D reduction there; "
                        "the values reduced and the work are the same.";
-    if (best.offDeviceBelow > 0)
-      o.description += "  Sizes below " + std::to_string(best.firstDim) +
-                       " cubed were sent to another compute unit by the "
-                       "provider's runtime and are not in this figure.";
-    if (best.offDeviceAbove > 0)
-      o.description += "  From " + std::to_string(best.offDeviceAbove) +
-                       " cubed the provider's runtime sent the work to "
-                       "another compute unit, which ended the sweep.";
-    test.emit(label, (float)best.best, o);
+    if (L.offDeviceBelow > 0)
+      o.description += "  Sizes below " + std::to_string(L.firstDim) +
+                       " were sent to another compute unit by the provider's "
+                       "runtime and are not in this figure.";
+    if (L.offDeviceAbove > 0)
+      o.description += "  From " + std::to_string(L.offDeviceAbove) +
+                       " the provider's runtime sent the work to another "
+                       "compute unit, which ended the sweep.";
+    test.emit(v.label, (float)L.best, o);
 
     // What the provider's own profiler says the time went to, for the log.
     // One more build, never one that was timed (a profiled session is not
@@ -861,33 +751,33 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (!profilePath.empty() && !clpeak::cancelRequested())
     {
       int64_t pd = 0;
-      for (const auto &c : best.creates)
-        if (c.first <= best.bestDim && c.second <= kNativeProfileCreateCapUs)
+      for (const auto &c : L.creates)
+        if (c.first <= L.bestDim && c.second <= kNativeProfileCreateCapUs)
           pd = c.first;
       if (pd > 0)
       {
-        const OnnxGemmTail pt = (best.rank4From > 0 && pd >= best.rank4From)
-                                    ? OnnxGemmTail::Rank4
-                                    : OnnxGemmTail::Rows;
-        GemmSetup g = makeSetup(rt, ep, v, pd, /*profile=*/false, sc.actDtype,
-                                pr.reduceInFloat, sc.wgtDtype, best.shape,
-                                /*verifyPlacement=*/true, pt, layers,
+        const OnnxReduceView pv = (L.rank4From > 0 && pd >= L.rank4From)
+                                      ? OnnxReduceView::Rank4
+                                      : OnnxReduceView::Rows;
+        GemmSetup g = makeSetup(rt, ep, v, pd, /*profile=*/false, pr.actDtype,
+                                pr.reduceInFloat, pr.wgtDtype, L.shape,
+                                /*verifyPlacement=*/true, pv, layers,
                                 profilePath);
         if (g.session && timeRuns(rt, g, 1 + warmupCount) > 0.0)
           timeRuns(rt, g, 3);
         else
           CLPEAK_VLOG("onnx-gemm[%s/%s]: profiled build at %lld failed: %s\n",
-                      ep.providerKey.c_str(), label.c_str(), (long long)pd,
+                      ep.providerKey.c_str(), v.label, (long long)pd,
                       g.error.c_str());
         destroySetup(rt, g);
-        onnxLogNativeProfile(profilePath, ep.providerKey + "/" + label + " " +
-                                              std::to_string(pd) + "^3" +
-                                              (chained ? " x" + std::to_string(layers) : ""));
+        onnxLogNativeProfile(profilePath, ep.providerKey + "/" + v.label + " " +
+                                              std::to_string(pd) + "^3 x" +
+                                              std::to_string(layers));
       }
       else
         CLPEAK_VLOG("onnx-gemm[%s/%s]: no measured size compiled within %.0f s; "
                     "not profiled\n",
-                    ep.providerKey.c_str(), label.c_str(),
+                    ep.providerKey.c_str(), v.label,
                     kNativeProfileCreateCapUs / 1.0e6);
     }
   };
@@ -895,26 +785,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   for (size_t i = 0; i < kFpVariantCount; i++)
   {
     if (clpeak::cancelRequested()) break;
-    runVariant(kFpVariants[i], 1, kFpVariants[i].label);
+    runVariant(kFpVariants[i]);
   }
   for (size_t i = 0; i < kIntVariantCount; i++)
   {
     if (clpeak::cancelRequested()) break;
-    runVariant(kIntVariants[i], 1, kIntVariants[i].label);
-  }
-  // The chained rows, after every single-multiply row they are read against.
-  for (size_t i = 0; i < kFpVariantCount; i++)
-  {
-    if (clpeak::cancelRequested()) break;
-    if (std::string(kFpVariants[i].label) == "fp16")
-      runVariant(kFpVariants[i], kChainLayers,
-                 std::string(kFpVariants[i].label) + "_chain");
-  }
-  for (size_t i = 0; i < kIntVariantCount; i++)
-  {
-    if (clpeak::cancelRequested()) break;
-    runVariant(kIntVariants[i], kChainLayers,
-               std::string(kIntVariants[i].label) + "_chain");
+    runVariant(kIntVariants[i]);
   }
 
   test.end();

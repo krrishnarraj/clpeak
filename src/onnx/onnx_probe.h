@@ -12,21 +12,6 @@
 struct OrtRuntime;
 struct onnx_ep_info_t;
 
-// A quantization scheme (see gemm_setup.h's QuantScheme) that built and fused
-// at 32^3, with the shapes it did so in.  The primary scheme's copy of these
-// lives in OnnxProbeResult itself; this is for the ones after it.
-struct OnnxProbeScheme
-{
-  int actDtype = 0;
-  int wgtDtype = 0;
-  const char *name = "";
-  std::string ranAs;
-  bool castedActs = false;
-  double createUs = 0.0;
-  double probeUs = 0.0;
-  std::vector<OnnxLiveShape> shapes;
-};
-
 // What one tiny (32^3) build of a gemm variant found out about a provider,
 // and the graph shape the ladder must therefore reproduce.
 struct OnnxProbeResult
@@ -64,12 +49,6 @@ struct OnnxProbeResult
   // be evaluated at build time, so a provider whose compiler folds ends up on
   // one of them, and a provider that does not keeps the fast result-scaled.
   std::vector<OnnxLiveShape> shapes;
-  // Further schemes that also built and fused, in schemesFor() order after
-  // the primary one described by the fields above.  int8 has two spellings
-  // and a provider that takes both is not necessarily as fast in both, so
-  // onnx-gemm measures each and reports the faster; everything else uses the
-  // primary.
-  std::vector<OnnxProbeScheme> moreSchemes;
 };
 
 using OnnxProbeCache = std::unordered_map<std::string, OnnxProbeResult>;
@@ -141,6 +120,14 @@ double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // arithmetic and still reads all four bytes; speed alone would condemn a CPU
 // whose fp16 path converts.  False when either width could not be timed.
 bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
+// Did this provider refuse a row reduction at some size and take the rank-4
+// view of it (OnnxReduceView)?  Learned by whichever test meets the refusal
+// first and kept for the provider, so the others build the view that works
+// instead of paying a refused compile to learn it again.  Memoized like the
+// probes: per runtime and target, for the life of the process.
+void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
 // overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only

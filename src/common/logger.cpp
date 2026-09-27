@@ -169,13 +169,21 @@ void logger::recordTranscriptLine(const LogEvent &e, const std::string &message)
 
 void logger::dispatchEvent(const LogEvent &e)
 {
+    // Recorded before it is shown, like log(): what the sidecar holds when
+    // the next call crashes the process is where the run had got to.
+    mirrorEvent(e);
     onEvent(e);
-    if (mirrorToRunLog)
-        mirrorEvent(e);
 }
 
 void logger::mirrorEvent(const LogEvent &e)
 {
+    // Where the run is -- each backend, device and test as it starts -- goes
+    // on the log of every run.  It is what a sidecar left behind by a crash
+    // is read for, and a run without --verbose used to leave one that ended
+    // at the last warning, minutes before the device that took it down.  The
+    // readings join it under --verbose (mirrorToRunLog), so the log then reads
+    // as the terminal did.
+    const bool transcript = mirrorToRunLog;
     switch (e.kind)
     {
     case LogEvent::Kind::BackendBegin:
@@ -208,6 +216,8 @@ void logger::mirrorEvent(const LogEvent &e)
 
     case LogEvent::Kind::Metric:
     {
+        if (!transcript)
+            break;
         UnitInfo unit;
         if (e.metric.hasUnit)
         {
@@ -271,8 +281,9 @@ void logger::mirrorEvent(const LogEvent &e)
     }
 
     case LogEvent::Kind::TestSkippedAll:
-        recordTranscriptLine(e, std::string("      [") + statusString(e.status) +
-                                  "] " + e.reason);
+        if (transcript)
+            recordTranscriptLine(e, std::string("      [") + statusString(e.status) +
+                                      "] " + e.reason);
         break;
 
     default:

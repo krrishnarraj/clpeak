@@ -126,8 +126,8 @@ int main(int argc, char **argv)
             continue;
 
         auto peak = be.create();
-        // --verbose with -o: the base logger mirrors a canonical transcript
-        // of backend/device/test headers and metric rows onto the run's log,
+        // --verbose with -o: the base logger mirrors the metric rows onto the
+        // run's log beside the backend/device/test headers it always records,
         // so the file's `log` reads as the run looked live.
         const bool mirror = opts.verbose && opts.enableOutput;
         peak->log.reset(

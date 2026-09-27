@@ -14,7 +14,10 @@ sink for one whole run: every `CLPEAK_LOG` / `CLPEAK_VLOG` line, every
 `logger::note()`, and every message relayed from a vendor runtime lands on the
 document's `log` — scoped by whichever backend logger is open, timed from the
 run's start, mirrored line by line to the `-o` sidecar — and is dispatched
-as a `Log` event for the channel to render.
+as a `Log` event for the channel to render.  The loggers add the run's
+structure to it on every run (a line as each backend, device and test
+starts, so a crash's sidecar ends where the run died), and under
+`--verbose -o` the readings as well.
 
 ## Quick Lookups
 

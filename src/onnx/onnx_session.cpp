@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -91,6 +92,27 @@ bool onnxReasonIsDeviceLoss(const std::string &reason)
   };
   for (const char *m : kMarkers)
     if (reason.find(m) != std::string::npos)
+      return true;
+  return false;
+}
+
+bool onnxReasonIsOutOfMemory(const std::string &reason)
+{
+  // How the runtimes seen here say it, lower-cased: QNN's error name and its
+  // text, ORT's own allocator, C++'s bad_alloc, and the CUDA, Vulkan and
+  // Direct3D spellings of the same thing.
+  static const char *kMarkers[] = {
+      "mem_alloc",           "memory allocation",  "out of memory",
+      "outofmemory",         "out_of_memory",      "out_of_device_memory",
+      "out_of_host_memory",  "failed to allocate", "bad_alloc",
+      "not enough memory",   "insufficient memory",
+      "cudaerrormemoryallocation",
+  };
+  std::string lower(reason);
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return (char)std::tolower(c); });
+  for (const char *m : kMarkers)
+    if (lower.find(m) != std::string::npos)
       return true;
   return false;
 }

@@ -46,8 +46,6 @@ namespace
   constexpr int64_t kMaxSpatial = 4096;
   static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
 
-  constexpr double kImproveFactor = 1.03;
-  constexpr int kMaxStrikes = 2;
   constexpr double kMaxIterUs = 2.0e6;
   constexpr unsigned int kSizeBudgetUs = 2000000;
 
@@ -302,7 +300,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       int64_t bestSpatial = 0;
       std::string ranWider; // set when the provider widened the arithmetic
       double lastRate = 0.0;
-      double prevCreateUs = 0.0;
+      double prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
       int strikes = 0;
       int rungs = 0;
       std::string firstErr;
@@ -337,6 +335,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       (long long)sp, (long long)sp);
           break;
         }
+        // The compile cap, checked before paying for the build
+        // (onnxPredictCreateUs); the first size always builds.
+        if (sp > kMinSpatial && prevCreateUs > 0.0 &&
+            onnxPredictCreateUs(prevCreateUs, prevPrevCreateUs) > kOnnxMaxCreateUs)
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld predicted create %.1f s > "
+                      "%.1f s, stopping\n",
+                      ep.providerKey.c_str(), row.c_str(),
+                      (long long)sp, (long long)sp,
+                      onnxPredictCreateUs(prevCreateUs, prevPrevCreateUs) / 1.0e6,
+                      kOnnxMaxCreateUs / 1.0e6);
+          break;
+        }
 
         // The first rung that runs is profiled: one run tells us the width
         // the Conv kernel actually consumed.  A provider without an fp16
@@ -366,6 +377,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               offDeviceAbove = sp;
               break;
             }
+            prevPrevCreateUs = prevCreateUs;
             prevCreateUs = createUs;
             if (++offDeviceBelow < kOnnxOffDevicePatience)
               continue;
@@ -424,7 +436,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     ep.providerKey.c_str(), row.c_str(),
                     (long long)sp, (long long)sp, rate);
 
-        if (rate > best * kImproveFactor)
+        // Climb to the plateau (kOnnxPlateauGain, one grace size).
+        if (rate > best * kOnnxPlateauGain)
         {
           strikes = 0;
           best = rate;
@@ -437,8 +450,13 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             best = rate;
             bestSpatial = sp;
           }
-          if (++strikes >= kMaxStrikes)
+          if (++strikes >= kOnnxPlateauStrikes)
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: plateau past %lldx%lld\n",
+                        ep.providerKey.c_str(), row.c_str(),
+                        (long long)bestSpatial, (long long)bestSpatial);
             break;
+          }
         }
 
         // Measured, not predicted.  The gate at the top of the loop
@@ -455,29 +473,17 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
-        bool createCliff = (prevCreateUs > 0.0 &&
-                            createUs > kOnnxCreateGrowthFloor &&
-                            createUs > prevCreateUs * kOnnxCreateGrowthFactor);
-        if (createCliff)
-        {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create grew %.1fx (%.1f s -> %.1f s) > %.1fx, stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp,
-                      createUs / prevCreateUs,
-                      prevCreateUs / 1.0e6, createUs / 1.0e6,
-                      kOnnxCreateGrowthFactor);
-          prevCreateUs = createUs;
-          break;
-        }
+        // A size that compiled past the cap anyway is kept, and ends the
+        // ladder.
         if (sp != kMinSpatial && createUs > kOnnxMaxCreateUs)
         {
           CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create %.1f s > %.1f s, stopping\n",
                       ep.providerKey.c_str(), row.c_str(),
                       (long long)sp, (long long)sp,
                       createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
-          prevCreateUs = createUs;
           break;
         }
+        prevPrevCreateUs = prevCreateUs;
         prevCreateUs = createUs;
       }
 

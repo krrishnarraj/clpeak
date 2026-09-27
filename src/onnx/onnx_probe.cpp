@@ -190,16 +190,11 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
     };
     std::vector<Widened> wide;
 
-    // Every scheme is probed, not just the first that works: a provider that
-    // takes both int8 spellings can run one of them much faster, and the
-    // ladder can only race what the probe kept (OnnxProbeResult::moreSchemes).
-    int primary = -1; // the scheme that settled r's own fields
-    for (size_t si = 0; si < nSchemes; si++)
+    for (size_t si = 0; si < nSchemes && !r.ok; si++)
     {
       const QuantScheme &qs = schemes[si];
       if (clpeak::cancelRequested())
         break;
-      OnnxProbeScheme more; // a viable scheme after the primary one
 
       bool reduceInFloat = false;
       for (OnnxLiveShape shape : shapes)
@@ -253,33 +248,10 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
 
         // Viable at the right width.  The first such shape settles the scheme
         // and the reported provenance; later ones only extend the fallback
-        // list.  A later scheme keeps its own record the same way.
-        std::string ranAs;
-        if (needsFusion)
-        {
-          ranAs = onnxQuantizedKernelName(b.ops);
-          if (ranAs.empty())
-            ranAs = "a kernel it compiled itself";
-        }
-        if (primary >= 0 && primary != (int)si)
-        {
-          if (more.shapes.empty())
-          {
-            more.actDtype = qs.actDtype;
-            more.wgtDtype = qs.wDtype;
-            more.name = qs.name;
-            more.ranAs = ranAs;
-            more.castedActs = b.casts > 0;
-            more.createUs = b.createUs;
-            more.probeUs = b.runUs;
-          }
-          more.shapes.push_back(shape);
-          continue;
-        }
+        // list.
         if (!r.ok)
         {
           r.ok = true;
-          primary = (int)si;
           r.reduceInFloat = reduceInFloat;
           r.createUs = b.createUs;
           r.probeUs = b.runUs;
@@ -289,13 +261,13 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
           {
             r.schemeName = qs.name;
             r.castedActs = b.casts > 0;
-            r.ranAs = ranAs;
+            r.ranAs = onnxQuantizedKernelName(b.ops);
+            if (r.ranAs.empty())
+              r.ranAs = "a kernel it compiled itself";
           }
         }
         r.shapes.push_back(shape);
       }
-      if (!more.shapes.empty())
-        r.moreSchemes.push_back(std::move(more));
     }
 
     // Nothing kept the width, but something ran: this provider has no kernel
@@ -321,10 +293,6 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
                   ep.providerKey.c_str(), v.label, r.shapes.size(),
                   shapeName(r.shapes.front()),
                   r.reduceInFloat ? ", product cast to fp32" : "");
-    for (const OnnxProbeScheme &m : r.moreSchemes)
-      CLPEAK_VLOG("onnx-probe[%s/%s]: %s also viable, shapes %zu (first %s)\n",
-                  ep.providerKey.c_str(), v.label, m.name, m.shapes.size(),
-                  shapeName(m.shapes.front()));
 
     if (r.ok && r.createUs > kOnnxTinyMaxCreateUs)
     {
@@ -638,6 +606,43 @@ double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
   return onnxStreamProbe(rt, ep).fp32Narrowed;
+}
+
+// ---------------------------------------------------------------------------
+// Row-reduction view
+// ---------------------------------------------------------------------------
+
+namespace
+{
+struct Rank4Store
+{
+  std::mutex mtx;
+  std::unordered_set<std::string> keys;
+};
+Rank4Store &rank4Store()
+{
+  static Rank4Store s;
+  return s;
+}
+std::string rank4Key(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  return std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
+         ep.providerKey + '\x1f' + ep.epDevice;
+}
+} // namespace
+
+void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  Rank4Store &s = rank4Store();
+  std::lock_guard<std::mutex> lk(s.mtx);
+  s.keys.insert(rank4Key(rt, ep));
+}
+
+bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  Rank4Store &s = rank4Store();
+  std::lock_guard<std::mutex> lk(s.mtx);
+  return s.keys.count(rank4Key(rt, ep)) > 0;
 }
 
 // ---------------------------------------------------------------------------

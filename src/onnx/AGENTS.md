@@ -38,10 +38,10 @@ backend.
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
-| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly; `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes, and the resident-GEMM ones, which take an `OnnxGemmTail` (the final reduction's 2-D or rank-4 view) and an optional chain of further layers; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization schemes fuse and which live shapes build; the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or streams no faster per credited byte than fp16 — a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
+| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly, and `reduceRows()`, the one-row reduction every resident graph ends in, in either `OnnxReduceView` (2-D, or a rank-4 view for a provider that refuses the 2-D form); `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes, and the resident-GEMM ones, which take an optional chain of further layers; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
+| `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization scheme fuses and which live shapes build; `onnxPrefersRank4Reduce()` — the providers that refused a 2-D row reduction and took the rank-4 view, learned by whichever test met it first; the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or streams no faster per credited byte than fp16 — a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
-| `gemm.cpp` | `runGemm` (`--gemm`) — single-node MatMul peak. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit.  A size refused with the 2-D reduction is rebuilt with the rank-4 one; int8 measures every scheme the probe kept and reports the faster; the compile gate extrapolates the growth the ladder has shown.  Experimental chained rows (`fp16_chain`, `int8_qdq_chain`): sixteen distinct layers per dispatch, swept over layer width |
+| `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply). One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit.  A size refused with the 2-D reduction is rebuilt with the rank-4 one.  Verbose runs log the provider's own per-operation profile of the best size |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
@@ -315,9 +315,9 @@ only U8S8 and declines the signed form. Switching to U8S8 then broke
 TensorRT, which rejects unsigned activations outright (`Found unsupported
 input type of UINT8`) and requires a zero point of zero.
 
-So the probe tries signed, then unsigned, and keeps every one that actually
-fuses — the fusion check is the filter — and `gemm.cpp` measures each kept
-scheme and reports the faster, naming it and the other's peak. Probing happens *before* the sweep, so a provider that fuses
+So the probe tries signed first, then unsigned, and keeps whichever actually
+fuses — the fusion check is the selector, and the row names the scheme it
+settled on. Probing happens *before* the sweep, so a provider that fuses
 neither costs two small sessions instead of a full ladder. The activation
 scale arrives as a runtime input in both, which keeps the dequantize out of
 reach of constant folding.
@@ -1459,7 +1459,7 @@ and reading the profile rather than by asking which vendor this is, and why
 the fold and resolvability guards are ratios against a measured submission
 cost rather than absolute times. The constants that remain are workload
 shapes (the block's geometry, the conv channel count), search bounds
-(`kImproveFactor`, `kMaxStrikes`), time budgets, and dimensionless thresholds
+(`kOnnxPlateauGain`, `kOnnxPlateauStrikes`), time caps, and dimensionless thresholds
 calibrated across every provider available -- never a rate any particular
 device is expected to reach.
 
@@ -1564,16 +1564,20 @@ measurement under the same name. Three tests here would have hit that. Two
 search for the asymptote; the third publishes its whole ladder and names each
 rung for its working set, which does not expire either:
 
-- **`onnx-gemm`** doubles from 1024 until the rate stops improving, and reports
-  the peak with the size that produced it. "The best this device can do at any
-  size" means the same thing in ten years as it does now; "the rate at 4096"
-  does not. The search is bounded by an operand-memory ceiling and by a
-  per-iteration time, predicted before each rung and re-checked against what
-  the rung actually measured (see above). Both scale themselves — hardware fast
-  enough to make a bigger size cheap is exactly the hardware that should try
-  it. A
-  slow provider stops after two or three rungs; the M1 Pro's fp16 curve peaks
-  at 2048 and collapses to 0.3 TFLOPS by 8192, which the strikes rule catches.
+- **`onnx-gemm`** doubles its layer width from 1024 until the rate plateaus —
+  each size must beat the best so far by more than 10% (`kOnnxPlateauGain`),
+  and two sizes in a row that do not end the climb — and reports the peak with
+  the width that produced it; `onnx-conv` climbs its feature maps the same way.
+  "The best this device can do at any size" means the same thing in ten years
+  as it does now; "the rate at 4096" does not. The search is bounded by an
+  operand-memory ceiling, by a per-iteration time predicted before each rung
+  and re-checked against what the rung measured (see above), and by a
+  session-creation cap (`kOnnxMaxCreateUs`) checked the same two ways —
+  `onnxPredictCreateUs()` before the build, the measured compile after. All
+  of them scale themselves — hardware fast enough to make a bigger size cheap
+  is exactly the hardware that should try it. A slow provider plateaus after
+  two or three rungs; the M1 Pro's fp16 curve peaks at 2048 and collapses to
+  0.3 TFLOPS by 8192, which the strikes rule catches.
 - **`onnx-tensor-bw`** measures three fixed rungs, then climbs while the rate
   is still falling, which is where the working set has left the last level of
   cache. A fixed top rung would have needed raising already: 128 MB fits
@@ -1921,8 +1925,7 @@ A general-purpose CPU shows none of this spread (0.36 / 0.43 / 0.11).
 
 ## Sizes are swept, never chosen by a probe
 
-`gemm.cpp` runs a fixed 1024/2048/4096 ladder and reports each datatype's
-best. Picking one size from a timing probe — the pattern `mps-gemm` uses —
+`gemm.cpp` sweeps doubling sizes and reports each datatype's best. Picking one size from a timing probe — the pattern `mps-gemm` uses —
 was tried first and is unstable: the estimate comes out of a cube root and
 is then bucketed, so a 2% wobble in the probe can push it across a bucket
 edge, and the size changes the answer. On the M1 Pro the fp16 row alternated
