@@ -231,6 +231,27 @@ enum class OnnxLiveShape
   QdqAdd0,
 };
 
+// A chain's narrow way in, for the live shapes.  The pass that makes a graph
+// live is elementwise over whatever it is handed, and handed the first
+// layer's whole [M, K] activations it is a cost that grows with the layer
+// while saying nothing about the multiply: on QNN's HTP it took 13% of a
+// 4096-wide int8 chain, the vector units spending half a nanosecond an
+// element on it.  So a chain applies it to a [M, width] seed instead, and one
+// more multiply -- the seed times `proj`, [width, K], in the chain's own
+// weight encoding -- widens the seed into the first layer's activations.  The
+// pass shrinks by K / width, every value downstream still depends on the
+// runtime input, and the extra multiply is width / (K * layers) of the
+// chain's arithmetic, which the rate does not count.
+struct OnnxLiveSeed
+{
+  int64_t width = 0;
+  std::string proj;       // [width, K], encoded like the chain's weights
+  std::string projScales; // weight-only: fp16 block scales, [width / block, K]
+  float projScale = 0.0f; // QDQ: the projection weights' dequantize scale
+  float outScale = 0.0f;  // QDQ: what the widened activations are quantized
+                          // with, and so what the first layer dequantizes by
+};
+
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each
 // run.  With A as a graph input and C returned to the host -- the obvious
@@ -295,7 +316,8 @@ std::string onnxResidentWeightOnlyMatMulModel(
     const std::string &aRaw, const std::string &wPacked,
     const std::string &wScalesRaw, OnnxLiveShape shape,
     OnnxReduceView view = OnnxReduceView::Rows,
-    const std::vector<std::pair<std::string, std::string>> *chain = nullptr);
+    const std::vector<std::pair<std::string, std::string>> *chain = nullptr,
+    const OnnxLiveSeed *seed = nullptr);
 
 // `chain` (the weight-only form above, the plain and QDQ forms below):
 // further [N, N] weight matrices the product passes through, in order, before
@@ -307,13 +329,24 @@ std::string onnxResidentWeightOnlyMatMulModel(
 // expression, so gemm.cpp builds chains on a live shape wherever one exists,
 // and holds a result-scaled one to the same folding checks as a single
 // multiply.
+//
+// `seed` (all three forms, live shapes only): `aRaw` is then the [M, width]
+// seed rather than A itself; see OnnxLiveSeed.
+//
+// `conv1x1` (the plain and QDQ forms; an experiment for the qnn debugging
+// round): every layer, the seed's included, is a 1x1 Conv over [1, K, H, W]
+// activations with H * W = M against [N, K, 1, 1] weights -- the same
+// arithmetic, spelled as the operator NPUs were first built around -- and the
+// product is reduced over the batch and spatial axes to the same [N] row.
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
                                      OnnxLiveShape shape,
                                      bool reduceInFloat = false,
                                      OnnxReduceView view = OnnxReduceView::Rows,
-                                     const std::vector<std::string> *chain = nullptr);
+                                     const std::vector<std::string> *chain = nullptr,
+                                     const OnnxLiveSeed *seed = nullptr,
+                                     bool conv1x1 = false);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the
@@ -343,7 +376,8 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // its weight codes dequantized by `chainWScale` -- fed the previous layer's
 // quantized product and requantized with `cScale`.  The caller picks
 // `chainWScale` so each layer keeps the magnitude of its input, which is what
-// lets one output scale serve every layer.
+// lets one output scale serve every layer.  A `seed`'s widening multiply is
+// that node unit too, its product quantized by the seed's `outScale`.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
@@ -352,7 +386,9 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        OnnxLiveShape shape,
                                        OnnxReduceView view = OnnxReduceView::Rows,
                                        const std::vector<std::string> *chain = nullptr,
-                                       float chainWScale = 0.0f);
+                                       float chainWScale = 0.0f,
+                                       const OnnxLiveSeed *seed = nullptr,
+                                       bool conv1x1 = false);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per
@@ -527,18 +563,34 @@ int  onnxLoadInt4(const void *src, int64_t index);
 // visited twice -- once to find its maximum, once to quantize against it --
 // without holding the matrix in floats.  At 16384 square that would be a
 // gigabyte of scratch to produce 128 MB of weights.
+//
+// Its one xorshift round is linear over GF(2), so every value's sign is a row
+// bit XOR a column bit: each matrix it fills has a rank-1 sign pattern.  One
+// multiply does not care, but a chain of such matrices drifts -- sixteen
+// 1024-wide layers took the GEMM chain's activations from an RMS of 2.3 to
+// 0.0004, and sixteen 4096-wide ones from 5.6 up to 26 -- which is why the
+// GEMM's blocked chains fill theirs from onnxMixedWeightAt().  The
+// transformer block still uses this one, and the magnitudes its comments
+// quote were measured with it.
 float onnxWeightAt(int64_t i, int64_t j, uint32_t seed);
+
+// The same contract as onnxWeightAt(), from a hash with no linear structure
+// (splitmix64's finalizer over the whole position): a chain of matrices
+// filled from it keeps its activations' magnitude layer after layer.
+float onnxMixedWeightAt(int64_t i, int64_t j, uint32_t seed);
 
 // Quantize a [K, N] weight matrix into `wDtype` plus one fp16 scale per block
 // of `blockSize` rows per column -- the axis a group-quantized model groups on,
 // because it is the axis the reduction runs along.  Symmetric, so the scale is
 // the block maximum over the format's widest magnitude and there is no zero
-// point.  Values come from onnxWeightAt(), so a block can be visited twice --
-// once to find its maximum, once to quantize against it -- without holding the
-// matrix in floats.
+// point.  Values come from `valueAt`, a position hash, so a block can be
+// visited twice -- once to find its maximum, once to quantize against it --
+// without holding the matrix in floats.
 void onnxFillBlockedWeights(std::string &packed, std::string &scales,
                             int64_t K, int64_t N, int64_t blockSize,
-                            uint32_t seed, int wDtype);
+                            uint32_t seed, int wDtype,
+                            float (*valueAt)(int64_t, int64_t,
+                                             uint32_t) = onnxWeightAt);
 
 // Quantize a [rows, cols] matrix into NVFP4: packed E2M1 values plus one E4M3
 // scale per block of `blockSize` along the blocked axis, with `globalScale`

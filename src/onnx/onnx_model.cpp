@@ -396,6 +396,61 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
+// How the resident GEMMs spell a layer.  MatMul over [M, K] rows is the form
+// every row is measured in; `conv` is the qnn round's experiment, a 1x1 Conv
+// over [1, K, H, W] with H * W = M -- the same multiply-accumulates, named as
+// the operator NPUs were first built around.
+namespace
+{
+struct LayerForm
+{
+  bool conv;
+  int64_t M, H, W;
+
+  LayerForm(int64_t m, bool c) : conv(c), M(m), H(1), W(m)
+  {
+    // As square a grid as the row count allows.
+    while (conv && H * H < M && W % 2 == 0)
+    {
+      H *= 2;
+      W /= 2;
+    }
+  }
+  OnnxDims act(int64_t cols) const
+  {
+    return conv ? OnnxDims{1, cols, H, W} : OnnxDims{M, cols};
+  }
+  OnnxDims weight(int64_t in, int64_t out) const
+  {
+    return conv ? OnnxDims{out, in, 1, 1} : OnnxDims{in, out};
+  }
+  void layer(OnnxGraph &g, const std::string &x, const std::string &w,
+             const std::string &y) const
+  {
+    // Every attribute spelled out, defaults included: Core ML's converter
+    // refuses a Conv without explicit pads ("Required param 'pad' is
+    // missing").
+    if (conv)
+      g.node("Conv", {x, w}, {y},
+             {OnnxAttr::list("kernel_shape", {1, 1}),
+              OnnxAttr::list("pads", {0, 0, 0, 0}),
+              OnnxAttr::list("strides", {1, 1}),
+              OnnxAttr::list("dilations", {1, 1}),
+              OnnxAttr::num("group", 1)});
+    else
+      g.node("MatMul", {x, w}, {y});
+  }
+  // The maximum of each output column, as the [cols] row every form returns.
+  void reduce(OnnxGraph &g, const std::string &in, const std::string &out,
+              int64_t cols, OnnxReduceView view) const
+  {
+    if (conv)
+      g.reduceMax(in, out, {0, 2, 3});
+    else
+      g.reduceRows(in, out, M, cols, view);
+  }
+};
+} // namespace
 
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
@@ -447,7 +502,8 @@ std::string onnxResidentWeightOnlyMatMulModel(
     int64_t M, int64_t K, int64_t N, int wDtype, int64_t blockSize,
     const std::string &aRaw, const std::string &wPacked,
     const std::string &wScalesRaw, OnnxLiveShape shape, OnnxReduceView view,
-    const std::vector<std::pair<std::string, std::string>> *chain)
+    const std::vector<std::pair<std::string, std::string>> *chain,
+    const OnnxLiveSeed *seed)
 {
   OnnxGraph g;
   // The blocked DequantizeLinear (block_size) is opset 21 whatever the
@@ -461,11 +517,25 @@ std::string onnxResidentWeightOnlyMatMulModel(
   // prepack -- that is what a deployment does -- so the runtime dependency
   // goes on the activations, where it keeps the multiply itself live.
   const bool live = (shape == OnnxLiveShape::OperandScaled);
+  const bool seeded = live && seed;
   g.input("S", ONNX_DT_FLOAT16, {});
-  g.initializer(live ? "A0" : "A", ONNX_DT_FLOAT16, {M, K}, aRaw);
+  g.initializer(live ? "A0" : "A", ONNX_DT_FLOAT16,
+                {M, seeded ? seed->width : K}, aRaw);
   g.initializer("B_q",     wDtype,          {K, N}, wPacked);
   g.initializer("b_scale", ONNX_DT_FLOAT16, {K / blockSize, N}, wScalesRaw);
-  if (live)
+  if (seeded)
+  {
+    // Widened through blocked weights of its own, the node pair every layer
+    // here is.
+    g.initializer("P_q", wDtype, {seed->width, K}, seed->proj);
+    g.initializer("p_scale", ONNX_DT_FLOAT16, {seed->width / blockSize, K},
+                  seed->projScales);
+    g.node("Mul", {"A0", "S"}, {"X"});
+    g.node("DequantizeLinear", {"P_q", "p_scale"}, {"P_f"},
+           {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
+    g.node("MatMul", {"X", "P_f"}, {"A"});
+  }
+  else if (live)
     g.node("Mul", {"A0", "S"}, {"A"});
   // Blocked dequantize: one scale per `blockSize` rows per column, which is
   // the axis the reduction runs along and therefore the axis a group-quantized
@@ -500,11 +570,14 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      OnnxLiveShape shape,
                                      bool reduceInFloat,
                                      OnnxReduceView view,
-                                     const std::vector<std::string> *chain)
+                                     const std::vector<std::string> *chain,
+                                     const OnnxLiveSeed *seed, bool conv1x1)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(dtype));
   const bool live = (shape == OnnxLiveShape::OperandScaled);
+  const bool seeded = live && seed;
+  const LayerForm form(M, conv1x1);
   // The scalar and the output follow the reduction, not the matmul: casting
   // the product to fp32 means everything downstream of it is fp32 too.
   const int tailDtype = reduceInFloat ? ONNX_DT_FLOAT : dtype;
@@ -525,23 +598,30 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // TOPS spec).  gemm.cpp guards this form by checking the timings scale
   // with the size.
   g.input("S", live ? dtype : tailDtype, {});
-  g.initializer(live ? "A0" : "A", dtype, {M, K}, aRaw);
-  g.initializer("B", dtype, {K, N}, bRaw);
-  if (live)
+  const int64_t aCols = seeded ? seed->width : K;
+  g.initializer(live ? "A0" : "A", dtype, form.act(aCols), aRaw);
+  g.initializer("B", dtype, form.weight(K, N), bRaw);
+  if (seeded)
+  {
+    g.initializer("P", dtype, form.weight(seed->width, K), seed->proj);
+    g.node("Mul", {"A0", "S"}, {"X"});
+    form.layer(g, "X", "P", "A");
+  }
+  else if (live)
     g.node("Mul", {"A0", "S"}, {"A"});
 
   // ReduceMax, not ReduceSum: summing the rows of A*B equals multiplying the
   // summed rows of A, a rewrite an optimiser is free to make and which would
   // quietly turn this matrix multiply into a matrix-vector one.  Max does not
   // distribute over the product, so the full result has to be computed.
-  g.node("MatMul", {"A", "B"}, {"C"});
+  form.layer(g, "A", "B", "C");
   std::string product = "C";
   if (chain)
     for (size_t l = 0; l < chain->size(); l++)
     {
       const std::string n = std::to_string(l + 1);
-      g.initializer("B" + n, dtype, {N, N}, (*chain)[l]);
-      g.node("MatMul", {product, "B" + n}, {"C" + n});
+      g.initializer("B" + n, dtype, form.weight(N, N), (*chain)[l]);
+      form.layer(g, product, "B" + n, "C" + n);
       product = "C" + n;
     }
   // The cast sits after the multiply, so it cannot change the arithmetic being
@@ -554,7 +634,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
     g.node("Cast", {product}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
     reduceIn = "Cf";
   }
-  g.reduceRows(reduceIn, live ? "Y" : "R", M, N, view);
+  form.reduce(g, reduceIn, live ? "Y" : "R", N, view);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", tailDtype, {N});
@@ -568,7 +648,8 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        OnnxLiveShape shape,
                                        OnnxReduceView view,
                                        const std::vector<std::string> *chain,
-                                       float chainWScale)
+                                       float chainWScale,
+                                       const OnnxLiveSeed *seed, bool conv1x1)
 {
   // Signed activations are symmetric (zero point 0); unsigned ones centre on
   // 128.  TensorRT accepts only the former, x86 MLAS only fuses the latter.
@@ -592,10 +673,16 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // With constant scales the same test reads 125 TOPS, 1.9x the fp16 rate,
   // which is what int8 tensor cores are supposed to do.
   g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
+  const LayerForm form(M, conv1x1);
+  const bool resultScaled = (shape == OnnxLiveShape::ResultScaled);
+  const bool seeded = !resultScaled && seed;
+  // The live pass writes the codes the first layer reads, or the seed's.
+  const int64_t aCols = seeded ? seed->width : K;
+  const std::string liveCodes = seeded ? "X_q" : "A_q";
   g.input("S", ONNX_DT_FLOAT, {});
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
-  g.initializer("B_q",     wDtype,   {K, N}, bRaw);
+  g.initializer("B_q",     wDtype,   form.weight(K, N), bRaw);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
   g.initializer("b_zp",    wDtype,   {}, wZp);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
@@ -605,13 +692,14 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // DQ -> MatMul -> Q adjacency ORT matches on untouched and every scale a
   // build-time constant, which is what TensorRT needs to commit to integer
   // arithmetic; they differ in what sits in front of the activations'
-  // dequantize and what that costs per run.
+  // dequantize and what that costs per run.  With a seed, each live form
+  // runs over the seed's `width` columns instead of all K of A's.
   switch (shape)
   {
   case OnnxLiveShape::ResultScaled:
     // Nothing in front: the multiply is a product of constants and the
     // scalar scales the reduced result.  Foldable, guarded by timing.
-    g.initializer("A_q", actDtype, {M, K}, aRaw);
+    g.initializer("A_q", actDtype, form.act(K), aRaw);
     break;
 
   case OnnxLiveShape::Add0:
@@ -621,9 +709,9 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
     // impossible.  One int8 pass over A.  Not a quantized node unit, so a
     // provider that takes int8 only inside QDQ patterns refuses it -- QNN
     // HTP fails the bare ElementWiseAdd at backend validation.
-    g.initializer("A_q0", actDtype, {M, K}, aRaw);
+    g.initializer("A_q0", actDtype, form.act(aCols), aRaw);
     g.input("ZA", actDtype, {});
-    g.node("Add", {"A_q0", "ZA"}, {"A_q"});
+    g.node("Add", {"A_q0", "ZA"}, {liveCodes});
     break;
 
   case OnnxLiveShape::QdqAdd0:
@@ -633,12 +721,12 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
     // are still bit-identical, and this is the shape a quantized model uses
     // for an elementwise op -- ORT fuses it to QLinearAdd on the CPU and a
     // QDQ-only backend compiles it as a quantized add.
-    g.initializer("A_q0", actDtype, {M, K}, aRaw);
+    g.initializer("A_q0", actDtype, form.act(aCols), aRaw);
     g.input("ZA", actDtype, {});
     g.node("DequantizeLinear", {"A_q0", "a_scale", "a_zp"}, {"A_f0"});
     g.node("DequantizeLinear", {"ZA",   "a_scale", "a_zp"}, {"ZA_f"});
     g.node("Add",              {"A_f0", "ZA_f"},            {"A_fs"});
-    g.node("QuantizeLinear",   {"A_fs", "a_scale", "a_zp"}, {"A_q"});
+    g.node("QuantizeLinear",   {"A_fs", "a_scale", "a_zp"}, {liveCodes});
     break;
 
   case OnnxLiveShape::OperandScaled:
@@ -650,7 +738,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
     // multiply sees the same operands as every other form.  Costs an fp32
     // pass and a quantize over A per run, and four bytes per element of
     // model -- the price of a form that any QDQ-capable provider accepts.
-    const int64_t count = M * K;
+    const int64_t count = M * aCols;
     std::string af((size_t)count * 4, '\0');
     float *f = reinterpret_cast<float *>(&af[0]);
     const bool unsigned8 = (actDtype == ONNX_DT_UINT8);
@@ -661,17 +749,31 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
           : (int)(signed char)aRaw[(size_t)i];
       f[i] = (float)code * aScale;
     }
-    g.initializer("A_f0", ONNX_DT_FLOAT, {M, K}, af);
+    g.initializer("A_f0", ONNX_DT_FLOAT, form.act(aCols), af);
     g.node("Mul",            {"A_f0", "S"},               {"A_fs"});
-    g.node("QuantizeLinear", {"A_fs", "a_scale", "a_zp"}, {"A_q"});
+    g.node("QuantizeLinear", {"A_fs", "a_scale", "a_zp"}, {liveCodes});
     break;
   }
   }
 
+  // The seed widened into the first layer's codes by one more quantized node
+  // unit, its product quantized by a scale of its own.
+  if (seeded)
+  {
+    g.initializer("P_q",     wDtype, form.weight(seed->width, K), seed->proj);
+    g.initializer("p_scale", ONNX_DT_FLOAT, {}, f32(seed->projScale));
+    g.initializer("h_scale", ONNX_DT_FLOAT, {}, f32(seed->outScale));
+    g.node("DequantizeLinear", {"X_q", "a_scale", "a_zp"}, {"X_f"});
+    g.node("DequantizeLinear", {"P_q", "p_scale", "b_zp"}, {"P_f"});
+    form.layer(g, "X_f", "P_f", "H_f");
+    g.node("QuantizeLinear",   {"H_f", "h_scale", "a_zp"}, {"A_q"});
+  }
+
   // Untouched DQ -> MatMul -> Q; the reduction hangs off the far side.
-  g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
+  g.node("DequantizeLinear", {"A_q", seeded ? "h_scale" : "a_scale", "a_zp"},
+         {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
-  g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
+  form.layer(g, "A_f", "B_f", "C_f");
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
   // Each chained layer is the same node unit fed the last one's codes, so the
   // DQ -> MatMul adjacency holds for every layer.
@@ -682,10 +784,10 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
     for (size_t l = 0; l < chain->size(); l++)
     {
       const std::string n = std::to_string(l + 1);
-      g.initializer("B_q" + n, wDtype, {N, N}, (*chain)[l]);
+      g.initializer("B_q" + n, wDtype, form.weight(N, N), (*chain)[l]);
       g.node("DequantizeLinear", {codes, "c_scale", "c_zp"}, {"X_f" + n});
       g.node("DequantizeLinear", {"B_q" + n, "cw_scale", "b_zp"}, {"B_f" + n});
-      g.node("MatMul",           {"X_f" + n, "B_f" + n},       {"C_f" + n});
+      form.layer(g, "X_f" + n, "B_f" + n, "C_f" + n);
       g.node("QuantizeLinear",   {"C_f" + n, "c_scale", "c_zp"}, {"C_q" + n});
       codes = "C_q" + n;
     }
@@ -702,8 +804,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   // forms already do (through the operand, or through ZA) and reduce
   // straight into the output.  In the Add forms S is a graph input nothing
   // consumes, which is legal and free, so every form is driven identically.
-  const bool resultScaled = (shape == OnnxLiveShape::ResultScaled);
-  g.reduceRows("C_d", resultScaled ? "R" : "Y", M, N, view);
+  form.reduce(g, "C_d", resultScaled ? "R" : "Y", N, view);
   if (resultScaled)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});
@@ -1298,9 +1399,22 @@ float onnxWeightAt(int64_t i, int64_t j, uint32_t seed)
   return (float)(s >> 8) / 16777216.0f - 0.5f;
 }
 
+float onnxMixedWeightAt(int64_t i, int64_t j, uint32_t seed)
+{
+  uint64_t z = ((uint64_t)seed << 32) ^ ((uint64_t)i * 0x9E3779B97F4A7C15ull) ^
+               ((uint64_t)j * 0xC2B2AE3D27D4EB4Full);
+  z ^= z >> 30;
+  z *= 0xBF58476D1CE4E5B9ull;
+  z ^= z >> 27;
+  z *= 0x94D049BB133111EBull;
+  z ^= z >> 31;
+  return (float)(z >> 40) / 16777216.0f - 0.5f;
+}
+
 void onnxFillBlockedWeights(std::string &packed, std::string &scales,
                             int64_t K, int64_t N, int64_t blockSize,
-                            uint32_t seed, int wDtype)
+                            uint32_t seed, int wDtype,
+                            float (*valueAt)(int64_t, int64_t, uint32_t))
 {
   // Each format spends its block on its own widest magnitude: int4 reaches 7,
   // int8 reaches 127, and float4's largest code is 6.
@@ -1320,7 +1434,7 @@ void onnxFillBlockedWeights(std::string &packed, std::string &scales,
       float maxAbs = 0.0f;
       for (int64_t r = 0; r < blockSize; r++)
       {
-        const float w = onnxWeightAt(b * blockSize + r, j, seed);
+        const float w = valueAt(b * blockSize + r, j, seed);
         const float a = w < 0.0f ? -w : w;
         if (a > maxAbs) maxAbs = a;
       }
@@ -1332,7 +1446,7 @@ void onnxFillBlockedWeights(std::string &packed, std::string &scales,
       for (int64_t r = 0; r < blockSize; r++)
       {
         const int64_t i = b * blockSize + r;
-        const float   w = onnxWeightAt(i, j, seed);
+        const float   w = valueAt(i, j, seed);
         const float   t = w / scale;
         const int     q = (int)(t + (t < 0.0f ? -0.5f : 0.5f));
         if (isFp4)

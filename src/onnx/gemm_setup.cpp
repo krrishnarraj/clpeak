@@ -4,6 +4,7 @@
 
 #include <onnx/onnx_peak.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -73,6 +74,33 @@ const Variant kIntVariants[] = {
 };
 const size_t kIntVariantCount = sizeof(kIntVariants) / sizeof(kIntVariants[0]);
 
+// Two ways a chain could suit a matrix unit better than square MatMul layers,
+// neither tried before.  At a 4096-wide layer neither the activations nor the
+// weights fit an 8 MB on-chip memory like the Hexagon's, while weights small
+// enough to stay there against taller activations is the shape NPU kernels
+// are usually tuned for; and a 1x1 convolution is the same arithmetic in the
+// operator those kernels were first written for.
+const Variant kExperimentVariants[] = {
+    {ONNX_DT_FLOAT16, false, "fp16_tall",
+     "Experimental: the fp16 chain with activations four times taller than "
+     "the layers are wide.",
+     0, false, /*tall=*/4, /*conv1x1=*/false, /*probeAs=*/"fp16"},
+    {ONNX_DT_INT8, true, "int8_qdq_tall",
+     "Experimental: the int8 chain with activations four times taller than "
+     "the layers are wide.",
+     0, false, /*tall=*/4, /*conv1x1=*/false, /*probeAs=*/"int8_qdq"},
+    {ONNX_DT_FLOAT16, false, "fp16_conv",
+     "Experimental: the fp16 chain with every layer a 1x1 convolution over a "
+     "grid of as many positions as the layer is wide.",
+     0, false, /*tall=*/1, /*conv1x1=*/true, /*probeAs=*/"fp16"},
+    {ONNX_DT_INT8, true, "int8_qdq_conv",
+     "Experimental: the int8 chain with every layer a quantized 1x1 "
+     "convolution over a grid of as many positions as the layer is wide.",
+     0, false, /*tall=*/1, /*conv1x1=*/true, /*probeAs=*/"int8_qdq"},
+};
+const size_t kExperimentVariantCount =
+    sizeof(kExperimentVariants) / sizeof(kExperimentVariants[0]);
+
 // int8 has two spellings and no provider takes both.  The float8 formats have
 // one: activations and weights share the type, and there is no signed/unsigned
 // question because they are signed floats.
@@ -137,32 +165,35 @@ std::vector<OnnxLiveShape> liveShapesFor(const Variant &v)
 uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
                       int layers)
 {
-  const uint64_t elems = (uint64_t)D * (uint64_t)D;
-  // A chain holds one more weight matrix per layer, scales included; NVFP4
-  // is never chained.
-  if (layers > 1 && !v.nvfp4)
-  {
-    uint64_t perLayer = onnxElemBytes(v.dtype, (int64_t)elems);
-    if (v.blockSize > 0)
-      perLayer += elems / (uint64_t)v.blockSize * 2ull;
-    return operandBytes(v, D, shape) + (uint64_t)(layers - 1) * perLayer;
-  }
   if (v.nvfp4)
+  {
+    const uint64_t elems = (uint64_t)D * (uint64_t)D;
     return 2ull * (onnxElemBytes(ONNX_DT_FLOAT4E2M1, (int64_t)elems) +
                    elems / (uint64_t)v.blockSize);
-  if (v.blockSize > 0)
-    return elems * 2ull                              // fp16 A
-           + onnxElemBytes(v.dtype, (int64_t)elems)  // packed weights
-           + elems / (uint64_t)v.blockSize * 2ull;   // fp16 scales
-  if (v.qdq)
-  {
-    // The float-scaled form holds A as fp32 values rather than codes.
-    const uint64_t aBytes = (shape == OnnxLiveShape::OperandScaled)
-                                ? elems * 4ull
-                                : onnxElemBytes(v.dtype, (int64_t)elems);
-    return aBytes + onnxElemBytes(v.dtype, (int64_t)elems);
   }
-  return 2ull * onnxElemBytes(v.dtype, (int64_t)elems);
+  // One weight matrix of `rows` x D in the row's weight encoding, scales
+  // included.
+  auto weights = [&](int64_t rows) {
+    const uint64_t elems = (uint64_t)rows * (uint64_t)D;
+    uint64_t bytes = onnxElemBytes(v.dtype, (int64_t)elems);
+    if (v.blockSize > 0)
+      bytes += elems / (uint64_t)v.blockSize * 2ull;
+    return bytes;
+  };
+  // The activations the graph holds: the first layer's whole, or a seed plus
+  // the weights that widen it.  Weight-only rows hold them in fp16, and the
+  // float-scaled QDQ form as fp32 values rather than codes.
+  const bool seeded = usesSeed(shape, layers);
+  const int64_t cols = seeded ? std::min(kSeedWidth, D) : D;
+  const int64_t actElems = v.tall * D * cols;
+  uint64_t act = onnxElemBytes(v.dtype, actElems);
+  if (v.blockSize > 0)
+    act = (uint64_t)actElems * 2ull;
+  else if (v.qdq && shape == OnnxLiveShape::OperandScaled)
+    act = (uint64_t)actElems * 4ull;
+  if (seeded)
+    act += weights(cols);
+  return act + (uint64_t)layers * weights(D);
 }
 
 size_t dtypeSize(int dtype)
@@ -358,38 +389,60 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return g;
   }
 
+  // The activations: M rows, and on a live chain the seed's `sw` columns in
+  // place of the layer's D (OnnxLiveSeed).  Its widening weights keep the
+  // magnitude the whole activations would have had, as every chain layer
+  // keeps its input's -- uniform over +/-sqrt(3/sw) for sw-deep products.
+  const int64_t M = v.tall * D;
+  const bool seeded = usesSeed(shape, layers);
+  const int64_t sw = std::min(kSeedWidth, D);
+  const int64_t aCols = seeded ? sw : D;
+  OnnxLiveSeed seed;
+  seed.width = sw;
+  const uint32_t kSeedProjSeed = 0x3c6ef372u;
+
   if (v.blockSize > 0)
   {
     // Weight-only: fp16 activations, blocked-quantized weights, no quantized
     // tensor anywhere near the graph boundary.
     std::string aRaw, wPacked, wScales;
-    fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
+    fillTensor(aRaw, ONNX_DT_FLOAT16, M * aCols, 0x9e3779b9u);
     onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
-                           v.dtype);
+                           v.dtype, onnxMixedWeightAt);
     // A chain's later layers: the same blocked format, each block's scale
     // grown by 2*sqrt(3/D) so the dequantized weights -- [-0.5, 0.5) before
     // it -- keep the activations' magnitude from layer to layer, as the float
-    // chains below do.
+    // chains below do.  The seed's weights likewise, for their depth.
+    auto grow = [](std::string &scales, int64_t depth) {
+      const float by = 2.0f * std::sqrt(3.0f / (float)depth);
+      uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
+      const size_t n = scales.size() / 2;
+      for (size_t i = 0; i < n; i++)
+        sc[i] = floatToHalf(halfToFloat(sc[i]) * by);
+    };
     std::vector<std::pair<std::string, std::string>> chain;
-    const float grow = 2.0f * std::sqrt(3.0f / (float)D);
     for (int l = 1; l < layers; l++)
     {
       chain.emplace_back();
       onnxFillBlockedWeights(chain.back().first, chain.back().second, D, D,
                              v.blockSize, 0x243f6a88u + 0x9e3779b9u * (uint32_t)l,
-                             v.dtype);
-      uint16_t *sc = reinterpret_cast<uint16_t *>(&chain.back().second[0]);
-      const size_t n = chain.back().second.size() / 2;
-      for (size_t i = 0; i < n; i++)
-        sc[i] = floatToHalf(halfToFloat(sc[i]) * grow);
+                             v.dtype, onnxMixedWeightAt);
+      grow(chain.back().second, D);
+    }
+    if (seeded)
+    {
+      onnxFillBlockedWeights(seed.proj, seed.projScales, sw, D, v.blockSize,
+                             kSeedProjSeed, v.dtype, onnxMixedWeightAt);
+      grow(seed.projScales, sw);
     }
     modelBytes = onnxResidentWeightOnlyMatMulModel(
-        D, D, D, v.dtype, v.blockSize, aRaw, wPacked, wScales, shape, view,
-        chain.empty() ? nullptr : &chain);
+        M, D, D, v.dtype, v.blockSize, aRaw, wPacked, wScales, shape, view,
+        chain.empty() ? nullptr : &chain, seeded ? &seed : nullptr);
     std::string().swap(aRaw);
     std::string().swap(wPacked);
     std::string().swap(wScales);
     std::vector<std::pair<std::string, std::string>>().swap(chain);
+    seed = OnnxLiveSeed();
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, D,
                 profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0, verifyPlacement,
                 nativeProfile);
@@ -398,7 +451,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   std::string aRaw, bRaw;
   const int wDtype = v.qdq ? wgtDtype : v.dtype;
-  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
+  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, M * aCols, 0x9e3779b9u);
   fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
 
   // A chain's later layers keep the magnitude their input arrives with: a
@@ -414,23 +467,39 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                /*floatScale=*/2.0f * std::sqrt(3.0f / (float)D));
   }
   const std::vector<std::string> *chainPtr = chain.empty() ? nullptr : &chain;
+  if (seeded)
+  {
+    fillTensor(seed.proj, wDtype, sw * D, kSeedProjSeed,
+               /*floatScale=*/2.0f * std::sqrt(3.0f / (float)sw));
+    // QDQ: the seed dequantizes to values uniform over [-1, 1], variance 1/3,
+    // and widening keeps that variance, so the first layer's operands -- and
+    // every output scale after them -- match what whole activations held as
+    // codes would have given.  Four sigma of it on the widest code, as
+    // qdqOutputScale() does for a product.
+    seed.projScale = onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)sw);
+    seed.outScale = (float)(4.0 / std::sqrt(3.0) / 127.0);
+  }
+  const OnnxLiveSeed *seedPtr = seeded ? &seed : nullptr;
 
   if (v.qdq)
   {
     modelBytes = onnxResidentQdqMatMulModel(
-        D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
+        M, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
         onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
         actDtype, wDtype, shape, view, chainPtr,
-        onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)D));
+        onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)D), seedPtr,
+        v.conv1x1);
   }
   else
   {
-    modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw, shape,
-                                         reduceInFloat, view, chainPtr);
+    modelBytes = onnxResidentMatMulModel(M, D, D, v.dtype, aRaw, bRaw, shape,
+                                         reduceInFloat, view, chainPtr,
+                                         seedPtr, v.conv1x1);
   }
   std::string().swap(aRaw);
   std::string().swap(bRaw);
   std::vector<std::string>().swap(chain);
+  seed = OnnxLiveSeed();
 
   // Anything QLinearMatMul cannot carry must not be fused into it.
   const bool unfusable = v.qdq && (!onnxQdqFusionIsLegal(actDtype) ||

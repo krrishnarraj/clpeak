@@ -41,7 +41,7 @@ backend.
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly, and `reduceRows()`, the one-row reduction every resident graph ends in, in either `OnnxReduceView` (2-D, or a rank-4 view for a provider that refuses the 2-D form); `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes, and the resident-GEMM ones, which take an optional chain of further layers; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
 | `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization scheme fuses and which live shapes build; `onnxPrefersRank4Reduce()` — the providers that refused a 2-D row reduction and took the rank-4 view, learned by whichever test met it first; the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or streams no faster per credited byte than fp16 — a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
-| `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply). One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit.  A size refused with the 2-D reduction is rebuilt with the rank-4 one.  Verbose runs log the provider's own per-operation profile of the best size |
+| `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply). One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit.  A size refused with the 2-D reduction is rebuilt with the rank-4 one.  Verbose runs log the provider's own per-operation profile of the best size.  For one tester round, four experiment rows (`kExperimentVariants`): the fp16 and int8 chains with 4x taller activations, and spelled as 1x1 convolutions |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
@@ -1492,10 +1492,16 @@ HTP refuses a bare `ElementWiseAdd` on quantized codes, which is what
 So `liveShapesFor()` (`gemm_setup.cpp`) returns them most-preferred-first,
 `ResultScaled` always leading, and the 32^3 probe keeps every one that
 **builds**, **fuses** where the row requires fusion, and **runs the multiply
-at the row's own width**. `gemm.cpp` then walks the kept list: it uses the
-first, and drops to the next only when it catches that one folding. A
+at the row's own width**. A single multiply (NVFP4, now) walks the kept list
+in that order and drops to the next only when it catches one folding: a
 provider that does not fold never leaves the head of the list and pays
-nothing; one that does ends up on a shape it cannot fold.
+nothing. A chain walks it live-first instead -- a folding compiler would
+grind through sixteen constant multiplies before the check could catch it --
+with `ResultScaled` as the last resort, and applies the live shape to a
+64-wide seed that one uncounted multiply widens into the first layer
+(`OnnxLiveSeed`), so the cost column above is paid on 1/64 of a 4096-wide
+layer's activations. Over the whole width that pass was 13% of QNN's int8
+chain.
 
 **The width check is the part that is easy to get wrong.** A cast *count*
 cannot see the widening: the widened graph carries *fewer* `Cast` nodes than

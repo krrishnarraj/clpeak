@@ -26,7 +26,9 @@
 // took 48% of the run -- the multiply itself at 26 TOPS inside a row that
 // read 13 -- while sixteen layers per dispatch read 29 TOPS with each layer
 // at 35.  The Neural Engine gained 25% the same way, ONNX Runtime's CPU 13%,
-// the Adreno 6%.  A chain is also how a model runs.
+// the Adreno 6%.  A chain is also how a model runs.  Most of what still
+// separated the 29 from the 35 was that same live pass, 13% of the chain,
+// which is why a live chain now runs it over a narrow seed (OnnxLiveSeed).
 //
 // One test, `onnx_gemm`: the same chained model on whichever formats the
 // provider accepts.  The int8 QDQ reading is measured in ops rather than
@@ -74,10 +76,11 @@ namespace
   constexpr int64_t kMinDim = 1024;
   constexpr int64_t kMaxDim = 32768;
 
-  // Layers per chain.  Sixteen spreads the pass that keeps the graph live and
-  // the final reduction thin -- 15% of a 4096-wide int8 chain on QNN's HTP,
-  // against 48% of one multiply -- while a 4096-wide fp16 chain still fits
-  // the protobuf ceiling and compiles in under a minute there.
+  // Layers per chain.  Sixteen spreads what a dispatch costs besides its
+  // multiplies thin -- the reduction and the submission were 3% of a
+  // 4096-wide int8 chain on QNN's HTP, where they and the live pass were 48%
+  // of one multiply -- while a 4096-wide fp16 chain still fits the protobuf
+  // ceiling and compiles in under a minute there.
   constexpr int kChainLayers = 16;
 
   // A rung has to do at least this much work, as a share of what the provider
@@ -139,32 +142,22 @@ namespace
   }
 
   // What the description says about where the runtime dependency entered.
-  // Only the live forms need a sentence: they cost a pass over the first
-  // layer's activations that is inside the figure, and a reader dividing rows
-  // should know it.
-  const char *shapeNote(const Variant &v, OnnxLiveShape shape)
+  // Only the live shapes need a sentence: they cost something that is inside
+  // the figure, and a reader dividing rows should know it.  A chain pays a
+  // pass over a narrow seed and the multiply that widens it (OnnxLiveSeed); a
+  // single multiply, a pass over the whole of its activations.
+  std::string shapeNote(OnnxLiveShape shape, int layers)
   {
-    switch (shape)
-    {
-    case OnnxLiveShape::ResultScaled:
-      return "";
-    case OnnxLiveShape::OperandScaled:
-      return v.qdq
-                 ? "  The activations are scaled at run time and quantized on "
-                   "device ahead of the first multiply, so no compiler can fold "
-                   "the multiplies away; that pass is inside the figure."
-                 : "  The activations are scaled at run time ahead of the first "
-                   "multiply, so no compiler can fold the multiplies away; that "
-                   "pass is inside the figure.";
-    case OnnxLiveShape::Add0:
-      return "  The activations take a runtime zero ahead of the first "
-             "multiply, so no compiler can fold the multiplies away; that pass "
-             "is inside the figure.";
-    case OnnxLiveShape::QdqAdd0:
-      return "  The activations take a runtime zero as a quantized op ahead of "
-             "the first multiply, so no compiler can fold the multiplies away; "
-             "that pass is inside the figure.";
-    }
+    if (usesSeed(shape, layers))
+      return "  The chain starts from a " + std::to_string(kSeedWidth) +
+             "-wide seed that takes a runtime value, and one more multiply, "
+             "not counted, widens it into the first layer's activations -- so "
+             "no compiler can fold the multiplies away, and the seed's pass "
+             "and that multiply are inside the figure.";
+    if (shape != OnnxLiveShape::ResultScaled)
+      return "  The activations take a runtime value ahead of the multiply, "
+             "so no compiler can fold it away; that pass is inside the "
+             "figure.";
     return "";
   }
 
@@ -183,9 +176,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "per row: sixteen distinct square multiplies chained in one dispatch, "
        "each layer's product feeding the next, swept over layer widths and "
        "reported at its best.  A chain is how a model runs, and it spreads "
-       "what surrounds a multiply -- the dispatch, the pass that keeps the "
-       "graph from being computed at build time, the reduction that brings "
-       "one row back -- over sixteen of them.  The same model runs on every "
+       "what surrounds a multiply -- the dispatch, the reduction that brings "
+       "one row back -- over sixteen of them, while the pass that keeps the "
+       "graph from being computed at build time runs over a narrow seed "
+       "rather than the first layer's whole input.  The same model runs on every "
        "provider, and one that cannot run it entirely on its own device "
        "reports unsupported rather than quietly measuring the host.",
        TestShape::Heterogeneous, "data type"});
@@ -271,7 +265,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         endedOnWork = true;
         break;
       }
-      const double ops = 2.0 * (double)D * (double)D * (double)D * layers;
+      const double ops =
+          2.0 * (double)(v.tall * D) * (double)D * (double)D * layers;
       if (lastRate > 0.0)
       {
         const double predictedUs = ops / lastRate;
@@ -327,7 +322,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // through a rank-4 view is the one other spelling worth a compile.  Not
       // after running out of memory, which says the size is too big however
       // it is spelled.
+      // A convolution row reduces its 4-D product directly, so the view
+      // changes nothing there and a retry would only rebuild the same graph.
       if (!g.session && !g.offDevice && view == OnnxReduceView::Rows &&
+          !v.conv1x1 &&
           onnxFailureStatus(g.error) == ResultStatus::Unsupported &&
           !onnxReasonIsOutOfMemory(g.error) && !clpeak::cancelRequested())
       {
@@ -637,11 +635,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // keeps the multiply live without changing its arithmetic.  The ladder
     // reproduces exactly that.
     const auto &cache = onnxProbeGemmCache(rt, ep);
-    auto it = cache.find(v.label);
+    const char *probed = v.probeAs ? v.probeAs : v.label;
+    auto it = cache.find(probed);
     if (it == cache.end())
     {
       test.skip(v.label, ResultStatus::Unsupported,
-                "no probe result for " + std::string(v.label), o);
+                "no probe result for " + std::string(probed), o);
       return;
     }
     const OnnxProbeResult &pr = it->second;
@@ -715,19 +714,21 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       "requantize every layer's product with block scales "
                       "taken from the data at run time, which this test does "
                       "not build.";
-    if (!pr.ranAs.empty())
+    // What the probe saw its MatMul become; a convolution row was never
+    // probed as one, so these would describe a different graph.
+    if (!pr.ranAs.empty() && !v.conv1x1)
       o.description += "  Ran as " + pr.ranAs + " (" + pr.schemeName + ").";
-    if (pr.castedActs)
+    if (pr.castedActs && !v.conv1x1)
       o.description += "  The provider converts the activations first, a "
                        "full pass inside this figure.";
-    if (!pr.ranWider.empty())
+    if (!pr.ranWider.empty() && !v.conv1x1)
       o.description += "  This provider has no " + std::string(v.label) +
                        " matmul kernel and ran it in " + pr.ranWider +
                        ", so this is that width rather than " + v.label + ".";
     if (pr.reduceInFloat)
       o.description += "  The product is cast to fp32 before the reduction; "
                        "the multiplies are unaffected.";
-    o.description += shapeNote(v, L.shape);
+    o.description += shapeNote(L.shape, layers);
     if (L.rank4From > 0)
       o.description += "  From " + std::to_string(L.rank4From) +
                        " the product was reduced through a 4-D view of itself, "
@@ -791,6 +792,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     if (clpeak::cancelRequested()) break;
     runVariant(kIntVariants[i]);
+  }
+  for (size_t i = 0; i < kExperimentVariantCount; i++)
+  {
+    if (clpeak::cancelRequested()) break;
+    runVariant(kExperimentVariants[i]);
   }
 
   test.end();

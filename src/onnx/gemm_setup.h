@@ -30,6 +30,10 @@ constexpr int64_t kProbeDim = 32;
 // accident.
 constexpr float kNvfp4GlobalScale = 0.125f;
 
+// Width of the seed a chain's live pass runs over (OnnxLiveSeed): wide
+// enough for every matrix unit's tile, and 1/64 of a 4096-wide layer.
+constexpr int64_t kSeedWidth = 64;
+
 struct Variant
 {
   int dtype;         // element type of the graph's input/output
@@ -38,6 +42,12 @@ struct Variant
   const char *note;  // the row's description, after the sweep sentence
   int64_t blockSize; // >0: blocked, one scale per this many elements
   bool nvfp4;        // blocked on *both* operands, with a second scale
+  // The qnn round's experiment rows (kExperimentVariants) only: activation
+  // rows per unit of layer width, each layer spelled as a 1x1 Conv, and the
+  // row whose probe result they reuse.
+  int64_t tall = 1;
+  bool conv1x1 = false;
+  const char *probeAs = nullptr;
 };
 
 // The rows, in the order they are measured and reported.  int8 QDQ is the
@@ -46,6 +56,13 @@ extern const Variant kFpVariants[];
 extern const size_t  kFpVariantCount;
 extern const Variant kIntVariants[];
 extern const size_t  kIntVariantCount;
+
+// Temporary, for one tester round on the qnn branch: the fp16 and int8 chains
+// with activations four times taller than the layers are wide, and spelled as
+// 1x1 convolutions.  Each is kept only if it beats its row on more providers
+// than QNN, and this table goes.
+extern const Variant kExperimentVariants[];
+extern const size_t  kExperimentVariantCount;
 
 inline bool isIntVariant(const Variant &v)
 {
@@ -74,9 +91,18 @@ std::vector<OnnxLiveShape> liveShapesFor(const Variant &v);
 
 // Bytes of operands the model for (variant, D, shape) embeds: what the size
 // ladder checks against the memory budget and the protobuf ceiling.  A chain
-// of `layers` embeds one more weight matrix per layer after the first.
+// of `layers` embeds one more weight matrix per layer after the first, and on
+// a live shape a seed and its widening weights in place of the activations.
 uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
                       int layers = 1);
+
+// Whether a (shape, layers) build enters through a seed (OnnxLiveSeed): chains
+// on the live shapes do; a single multiply and a result-scaled chain hold the
+// activations whole.
+inline bool usesSeed(OnnxLiveShape shape, int layers)
+{
+  return layers > 1 && shape != OnnxLiveShape::ResultScaled;
+}
 
 size_t dtypeSize(int dtype);
 
@@ -124,8 +150,9 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 // is onnxCreateSession's: off for the 32-cube probes, on for every rung a
 // ladder times.  `view` is how the product is reduced to the row that leaves
 // (OnnxReduceView); `layers` chains that many D x D multiplies in one graph
-// (every row but NVFP4, which ignores it); `nativeProfile` asks the provider's
-// own profiler to write there (onnxNativeProfilePath).
+// (every row but NVFP4, which ignores it), each over `v.tall` * D rows of
+// activations; `nativeProfile` asks the provider's own profiler to write
+// there (onnxNativeProfilePath).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
