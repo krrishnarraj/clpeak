@@ -517,6 +517,32 @@ namespace
     return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
   }
 
+  // onnxNonFiniteReason over the row a run returned.  `yr` is ORT's own
+  // allocation, in host memory, so its size is read from it rather than
+  // assumed; empty when it cannot be read.
+  std::string nonFiniteRow(const OrtRuntime &rt, OrtValue *yr, int dtype,
+                           const std::string &where)
+  {
+    if (!yr)
+      return std::string();
+    OrtTensorTypeAndShapeInfo *info = nullptr;
+    size_t count = 0;
+    void *data = nullptr;
+    OrtStatus *st = rt.api->GetTensorTypeAndShape(yr, &info);
+    if (!st)
+      st = rt.api->GetTensorShapeElementCount(info, &count);
+    if (info)
+      rt.api->ReleaseTensorTypeAndShapeInfo(info);
+    if (!st)
+      st = rt.api->GetTensorMutableData(yr, &data);
+    if (st)
+    {
+      rt.api->ReleaseStatus(st);
+      return std::string();
+    }
+    return onnxNonFiniteReason(data, (int64_t)count, dtype, where);
+  }
+
   // Time one regime end to end.  Returns mean us/block, or negative with
   // `error` set.
   double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
@@ -577,6 +603,25 @@ namespace
     {
       error = r.error.empty() ? "run failed" : r.error;
       status = ResultStatus::Error;
+    }
+    else
+    {
+      // What the timed runs computed, read once they are over.  A wrong
+      // answer withholds this point alone: each point is its own graph and
+      // its own row.
+      const std::string wrong = nonFiniteRow(
+          rt, r.outVals[0], v.actDtype,
+          decode ? "for one token against " + std::to_string(kvLen) +
+                       " of context"
+                 : "for a " + std::to_string(prefillSeq) + "-token prompt");
+      if (!wrong.empty())
+      {
+        CLPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(),
+                    v.label, wrong.c_str());
+        error = wrong;
+        status = ResultStatus::Error;
+        mean_us = -1.0;
+      }
     }
     destroyRun(rt, r);
     return mean_us;

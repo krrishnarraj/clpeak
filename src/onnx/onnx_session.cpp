@@ -161,6 +161,44 @@ ResultStatus onnxFailureStatus(const std::string &reason, ResultStatus current)
   return onnxReasonIsDeviceLoss(reason) ? ResultStatus::Error : ResultStatus::Unsupported;
 }
 
+std::string onnxNonFiniteReason(const void *data, int64_t count, int dtype,
+                                const std::string &where)
+{
+  // Every exponent bit set is an infinity or a NaN in all three widths.  Read
+  // as bits, so no floating-point mode can compile the test away.
+  const unsigned char *p = static_cast<const unsigned char *>(data);
+  int64_t bad = 0;
+  if (dtype == ONNX_DT_FLOAT)
+  {
+    for (int64_t i = 0; i < count; i++)
+    {
+      uint32_t x;
+      std::memcpy(&x, p + 4 * i, 4);
+      bad += (x & 0x7f800000u) == 0x7f800000u;
+    }
+  }
+  else if (dtype == ONNX_DT_FLOAT16 || dtype == ONNX_DT_BFLOAT16)
+  {
+    const uint16_t exp = (dtype == ONNX_DT_FLOAT16) ? 0x7c00u : 0x7f80u;
+    for (int64_t i = 0; i < count; i++)
+    {
+      uint16_t h;
+      std::memcpy(&h, p + 2 * i, 2);
+      bad += (h & exp) == exp;
+    }
+  }
+  if (bad == 0)
+    return std::string();
+
+  const std::string n = std::to_string((long long)count);
+  return "this provider returned NaN or infinity " + where + " (" +
+         (bad == count ? "all " + n
+                       : std::to_string((long long)bad) + " of the " + n) +
+         " values of the row the graph reduces to), and every value in this "
+         "graph stays far inside its type's range: it computed something "
+         "other than this graph, so its timing is withheld";
+}
+
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
 {
   if (!st)

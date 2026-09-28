@@ -128,6 +128,7 @@ struct GemmSetup
   OrtValue *zaVal = nullptr;  // Add forms only: the literal zero ZA
   OrtValue *outVal = nullptr; // reduced row
   std::vector<uint8_t> inBuf, zaBuf, outBuf;
+  int outDtype = 0;           // outBuf's element type: fp32, fp16 or bf16
   std::string error;
 
   // Not copyable, and the compiler has to enforce it: inVal and outVal are

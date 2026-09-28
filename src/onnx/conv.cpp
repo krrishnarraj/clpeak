@@ -422,9 +422,26 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           firstErr = c.error.empty() ? "run failed" : c.error;
           errStatus = ResultStatus::Error;
         }
+        // What the timed runs computed (onnxNonFiniteReason), read once they
+        // are over.  A wrong answer withholds the whole row, as in gemm.cpp.
+        const std::string wrong =
+            (mean_us > 0.0)
+                ? onnxNonFiniteReason(c.outBuf.data(), kChannels, dt.dtype,
+                                      "on a " + std::to_string(sp) + "x" +
+                                          std::to_string(sp) + " feature map")
+                : std::string();
         destroySetup(rt, c);
         if (mean_us <= 0.0)
           break;
+        if (!wrong.empty())
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(),
+                      row.c_str(), wrong.c_str());
+          best = 0.0;
+          firstErr = wrong;
+          errStatus = ResultStatus::Error;
+          break;
+        }
 
         rungs++;
         if (firstSpatial == 0)

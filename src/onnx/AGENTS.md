@@ -34,7 +34,7 @@ backend.
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
-| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNativeProfilePath()` / `onnxLogNativeProfile()` — a provider's own per-operation profiler (wired: QNN), which verbose `onnx-gemm` runs copy into the log |
+| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned; `onnxNativeProfilePath()` / `onnxLogNativeProfile()` — a provider's own per-operation profiler (wired: QNN), which verbose `onnx-gemm` runs copy into the log |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
@@ -847,11 +847,11 @@ at the root records what identifying it would take.
 int8 weights — a block format its documentation does not list — classic
 TensorRT builds anyway and folds the scales in as a plain broadcast, reading
 past their buffer: every width from 64 computes garbage, NaN from 128, and a
-build whose read runs into unmapped memory segfaults. Nothing in this backend
-checks the values a ladder computes, so a miscompiled graph times like a
-correct one, and the 32³ probe cannot see this one either — a single scale
-row broadcasts correctly. `onnxProviderFenceReason()` withholds the format on
-that provider.
+build whose read runs into unmapped memory segfaults. The ladders' read-back
+turns the NaN rows into errors (see "A ladder reads back what it timed") but
+cannot stop the segfault, and the 32³ probe cannot see this one either — a
+single scale row broadcasts correctly. `onnxProviderFenceReason()` withholds
+the format on that provider.
 
 **And NVFP4 is closer than MXFP4 for a reason worth recording.** Its block scale
 is `FLOAT8E4M3FN`, which is opset 19 and already implemented here, so the graph
@@ -1404,6 +1404,29 @@ the provider, the more of its ladder lands in that regime.
 says why: there the per-submission overhead is the measurement rather than a
 thing to divide out, so it probes with five and carries a far larger cap.
 
+## A ladder reads back what it timed
+
+A timing says nothing about what was computed, and a provider that
+miscompiles a graph times it like a correct one: TensorRT's blocked-int8 fold
+timed all-NaN chains at 47-75 TFLOPS. So once a rung's timed phase is over,
+`gemm.cpp`, `conv.cpp` and `block.cpp` hand the reduced row the last run
+returned to `onnxNonFiniteReason()` (`onnx_session.cpp`), and a NaN or an
+infinity in it withholds the timing as `Error`. In gemm and conv that is the
+whole row, not the rungs above it, and the ladder does not drop to another
+live shape; in the block it is the one point, which is its own row.
+
+The check rests on a property every graph here keeps: **nothing in it can
+overflow.** The chains keep each layer's magnitude: on ONNX Runtime's CPU
+provider the reduced row's largest value measured 13 at 1024-wide fp16 layers
+and 22 at 2048, growing less than 2x a doubling, which leaves about a
+thousandfold at the widest fp16 rung (8192, the weight-only rows). The
+convolutions stay under 21, and the block's largest value sits 33x under
+fp16's (see "The block's operand range is not the GEMM range"). A graph that
+could reach infinity legitimately would make the check a false alarm, so a
+new one has to keep that margin. The check is also a tripwire rather than an
+accuracy test: it sees only the reduced row, so an answer that is wrong but
+finite passes, and its comment says what survives the reduction.
+
 ## The decode rows declare bytes; two providers do not move them
 
 `onnx-block-decode`'s numerator is what the *model declares* -- that is all
@@ -1689,8 +1712,8 @@ a non-resident graph that cannot fold, so it would still produce a number — bu
 an accuracy without its rate is one half of a pair, and publishing it alone
 would look like a contradiction. It is therefore suppressed for the same label,
 with the reason noting that the paired gemm row folded. Other failure modes
-(session refused, no fused quantized matmul, dtype unsupported) remain
-independent: each test reports its own gate faithfully.
+(session refused, no fused quantized matmul, dtype unsupported, a non-finite
+result) remain independent: each test reports its own gate faithfully.
 
 ## Measuring the cable, and what it cost to try
 

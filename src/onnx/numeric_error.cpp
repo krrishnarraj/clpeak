@@ -559,6 +559,20 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                 o.description);
       continue;
     }
+    // A NaN or an infinity anywhere in the provider's answer makes the figure
+    // one too.  That is no error figure, and it cannot be recorded either:
+    // the document spells it `nan`, which no JSON reader -- clpeak's own
+    // included -- will load.  The reference multiplies values in [-1, 1] in
+    // fp32, so the non-finite side is the provider's.
+    if (!std::isfinite(ppm))
+    {
+      test.skip(v.label, ResultStatus::Error,
+                "this provider's answer holds NaN or infinity where the fp32 "
+                "reference is finite everywhere: it computed something other "
+                "than this matmul, so there is no error figure to report",
+                o.description);
+      continue;
+    }
     test.emit(v.label, (float)ppm, o);
   }
 

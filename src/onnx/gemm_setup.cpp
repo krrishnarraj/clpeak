@@ -320,6 +320,7 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     g.inBuf.assign(one.begin(), one.end());
   }
   g.outBuf.assign((size_t)D * dtypeSize(ioDtype), 0);
+  g.outDtype = ioDtype;
 
   OrtMemoryInfo *mi = nullptr;
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,

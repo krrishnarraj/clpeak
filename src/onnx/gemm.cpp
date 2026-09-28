@@ -414,9 +414,34 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         L.err = g.error.empty() ? "run failed" : g.error;
         L.errStatus = ResultStatus::Error;
       }
+      // What the timed runs computed (onnxNonFiniteReason), read once they
+      // are over.
+      const std::string wrong =
+          (mean_us > 0.0)
+              ? onnxNonFiniteReason(g.outBuf.data(), D, g.outDtype,
+                                    layers > 1 ? "at " + std::to_string(D) +
+                                                     "-wide layers"
+                                               : "at " + std::to_string(D) +
+                                                     " cubed")
+              : std::string();
       destroySetup(rt, g);
       if (mean_us <= 0.0)
         break;
+      // A wrong answer withholds the whole row, not just the rungs from here
+      // up: TensorRT's blocked-int8 fold returned finite garbage beside its
+      // NaNs at one width, so a rung that came back finite is no alibi.  Nor
+      // does the ladder drop to another live shape, which spells the same
+      // arithmetic differently and is no way around a wrong answer.
+      if (!wrong.empty())
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d, %s: %s\n",
+                    ep.providerKey.c_str(), tag, (long long)D, layers,
+                    shapeNameFor(shape), wrong.c_str());
+        L.best = 0.0;
+        L.err = wrong;
+        L.errStatus = ResultStatus::Error;
+        break;
+      }
 
       rungs++;
       L.creates.push_back({D, createUs});

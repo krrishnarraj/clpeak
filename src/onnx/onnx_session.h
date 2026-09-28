@@ -245,4 +245,27 @@ bool onnxReasonIsOutOfMemory(const std::string &reason);
 ResultStatus onnxFailureStatus(const std::string &reason,
                                ResultStatus current = ResultStatus::Unsupported);
 
+// Why a ladder's timing is not a measurement of its graph, or empty when it
+// may be: the reason, when any of the `count` values of `dtype` (fp32, fp16
+// or bf16) at `data` -- the reduced row the timed runs returned, read once
+// they are over -- is NaN or infinite.  `where` names the size, with its
+// preposition ("at 1024-wide layers").
+//
+// Nothing in these graphs can overflow: the GEMM chains keep each layer's
+// magnitude (makeSetup, gemm_setup.cpp), a convolution is a single layer,
+// and the block's weights are halved so that its largest value sits 33x
+// under fp16's (blockWeights, onnx_model.cpp).  A NaN or an infinity coming
+// back is therefore a provider computing some other graph -- TensorRT
+// folding blocked int8 weights timed all-NaN chains at 47-75 TFLOPS -- and
+// the caller withholds the timing as Error, not Unsupported: the provider
+// took the graph rather than declining it, so this says nothing about
+// whether it has the format.
+//
+// It sees only the reduced row.  A column that is NaN throughout survives
+// the ReduceMax, and so does +inf, but a scattered NaN survives only where
+// the provider's max propagates it -- IEEE maxNum, which CUDA's fmaxf
+// follows, drops it -- and a wrong answer that stays finite passes.
+std::string onnxNonFiniteReason(const void *data, int64_t count, int dtype,
+                                const std::string &where);
+
 #endif // CLPEAK_ONNX_SESSION_H

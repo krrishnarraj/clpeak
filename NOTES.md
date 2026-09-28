@@ -74,7 +74,9 @@ stay measured.  Lifting either is deleting its `if`.
   `block_size=32`, `axis=0`, fp16 activations) through `trtexec
   --exportOutput` must come back finite and agree with the CPU provider;
   11.2.1 returns 128 NaNs.  Then run `clpeak --onnx --gemm --verbose` on the
-  TensorRT device.
+  TensorRT device: a release that still returns NaN fails the row as an
+  error there instead of publishing a rate, but only the comparison above
+  catches an answer that is finite and wrong.
 
 ### DirectML: the transformer block's `int8_weight`
 
