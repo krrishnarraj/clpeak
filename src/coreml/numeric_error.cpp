@@ -241,6 +241,20 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
       test.skip(label, ResultStatus::Error, "reference result was all zero", v.note);
       continue;
     }
+    // A NaN or an infinity anywhere in the compute unit's answer makes the
+    // figure one too.  That is no error figure, and it cannot be recorded
+    // either: the document spells it `nan`, which no JSON reader -- clpeak's
+    // own included -- will load.  The reference multiplies values under 1 in
+    // magnitude, in double, so the non-finite side is the compute unit's.
+    if (!std::isfinite(ppm))
+    {
+      test.skip(label, ResultStatus::Error,
+                "this compute unit's answer holds NaN or infinity where the host's "
+                "double-precision reference is finite everywhere: it computed something "
+                "other than this matmul, so there is no error figure to report",
+                v.note);
+      continue;
+    }
     test.emit(label, (float)ppm, v.note);
   }
 

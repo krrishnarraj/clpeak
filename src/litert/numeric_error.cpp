@@ -293,10 +293,25 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
   std::vector<double> ref;
   referenceGemm(a, weights, kDim, kDim, kDim, ref);
   const double ppm = relativeRmsPpm(got, ref);
-  if (ppm < 0.0 || !std::isfinite(ppm))
+  if (ppm < 0.0)
   {
     c.status = ResultStatus::Error;
-    c.error = "the result was not finite";
+    c.error = "reference result was all zero";
+    return c;
+  }
+  // A NaN or an infinity anywhere in the answer makes the figure one too.
+  // The reference multiplies values under 1 in magnitude, in double, so the
+  // non-finite side is the accelerator's; and no sum here can pass 256, which
+  // overflows no width a kernel accumulates in.  It is a wrong answer, not
+  // lost precision, and wrongAnswer() refuses the format's rates for it as it
+  // does for one past 10%.
+  if (!std::isfinite(ppm))
+  {
+    c.nonFinite = true;
+    c.status = ResultStatus::Error;
+    c.error = "this accelerator's answer holds NaN or infinity where the host's "
+              "double-precision reference is finite everywhere: it computed something "
+              "other than this matmul, so there is no error figure to report";
     return c;
   }
   c.ppm = ppm;
@@ -307,6 +322,11 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
 std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f)
 {
   const AnswerCheck &c = answerCheck(rt, dev, f);
+  if (c.nonFinite)
+    return std::string("this accelerator's answer for ") + litertFormatLabel(f) +
+           " holds NaN or infinity where the host's reference is finite everywhere "
+           "(litert_numeric_error) -- a kernel that does not compute the format, not one that "
+           "loses precision -- so its rate is not reported";
   if (c.ppm < kLitertWrongAnswerPpm)
     return std::string();
   char pct[32];
@@ -337,15 +357,15 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
       break;
     const char *label = litertFormatLabel(v.f);
     const AnswerCheck &c = answerCheck(rt, dev, v.f);
-    if (c.ppm < 0.0)
-    {
-      test.skip(label, c.status, c.error, v.note);
-      continue;
-    }
     std::string note = v.note;
-    if (c.ppm >= kLitertWrongAnswerPpm)
+    if (c.nonFinite || c.ppm >= kLitertWrongAnswerPpm)
       note += "  A wrong answer, not a loss of precision: the accelerator's kernel does not "
               "compute this format, and its rate rows are withheld.";
+    if (c.ppm < 0.0)
+    {
+      test.skip(label, c.status, c.error, note);
+      continue;
+    }
     test.emit(label, (float)c.ppm, note.c_str());
   }
 

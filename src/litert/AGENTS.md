@@ -203,8 +203,10 @@ kernel name from one profiled run says which kernel it was.
   answer, not precision.  So the accuracy measurement is memoised per
   device and format (`LitertPeak::answerCheck`) and every rate test asks
   `wrongAnswer()` before publishing a format: past `kLitertWrongAnswerPpm`
-  (10% RMS) the gemm, conv and block rows for that format are refused with
-  the figure in the reason, and the accuracy row says it is a wrong answer.
+  (10% RMS), or with NaN or infinity anywhere in the answer, the gemm, conv
+  and block rows for that format are refused with the figure, or the
+  non-finite answer, in the reason, and the accuracy row says it is a wrong
+  answer.
   The full-integer FULLY_CONNECTED graphs now carry the int32 zero bias a
   converted model always has (version 5 with keep_num_dims), since a kernel
   written for the converter's form may be reading a bias that is not there;

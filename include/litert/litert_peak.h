@@ -84,6 +84,9 @@ public:
   struct AnswerCheck
   {
     double ppm = -1.0;
+    // The answer held NaN or infinity where the reference is finite
+    // everywhere: no figure, and the most wrong answer there is.
+    bool nonFinite = false;
     ResultStatus status = ResultStatus::Ok;
     std::string error;
   };
