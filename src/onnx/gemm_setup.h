@@ -42,27 +42,15 @@ struct Variant
   const char *note;  // the row's description, after the sweep sentence
   int64_t blockSize; // >0: blocked, one scale per this many elements
   bool nvfp4;        // blocked on *both* operands, with a second scale
-  // The qnn round's experiment rows (kExperimentVariants) only: activation
-  // rows per unit of layer width, each layer spelled as a 1x1 Conv, and the
-  // row whose probe result they reuse.
-  int64_t tall = 1;
-  bool conv1x1 = false;
-  const char *probeAs = nullptr;
+  bool conv1x1 = false; // every layer a 1x1 Conv rather than a MatMul
 };
 
-// The rows, in the order they are measured and reported.  int8 QDQ is the
-// one integer row and carries its own unit (ops); everything else is flops.
+// The rows, in the order they are measured and reported.  The int8 QDQ rows
+// carry their own unit (ops); everything else is flops.
 extern const Variant kFpVariants[];
 extern const size_t  kFpVariantCount;
 extern const Variant kIntVariants[];
 extern const size_t  kIntVariantCount;
-
-// Temporary, for one tester round on the qnn branch: the fp16 and int8 chains
-// with activations four times taller than the layers are wide, and spelled as
-// 1x1 convolutions.  Each is kept only if it beats its row on more providers
-// than QNN, and this table goes.
-extern const Variant kExperimentVariants[];
-extern const size_t  kExperimentVariantCount;
 
 inline bool isIntVariant(const Variant &v)
 {
@@ -151,15 +139,12 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 // is onnxCreateSession's: off for the 32-cube probes, on for every rung a
 // ladder times.  `view` is how the product is reduced to the row that leaves
 // (OnnxReduceView); `layers` chains that many D x D multiplies in one graph
-// (every row but NVFP4, which ignores it), each over `v.tall` * D rows of
-// activations; `nativeProfile` asks the provider's own profiler to write
-// there (onnxNativeProfilePath).
+// (every row but NVFP4, which ignores it).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
                     OnnxLiveShape shape, bool verifyPlacement = true,
-                    OnnxReduceView view = OnnxReduceView::Rows, int layers = 1,
-                    const std::string &nativeProfile = std::string());
+                    OnnxReduceView view = OnnxReduceView::Rows, int layers = 1);
 
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n);

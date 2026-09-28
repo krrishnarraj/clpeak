@@ -396,10 +396,10 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   return g.build();
 }
 
-// How the resident GEMMs spell a layer.  MatMul over [M, K] rows is the form
-// every row is measured in; `conv` is the qnn round's experiment, a 1x1 Conv
-// over [1, K, H, W] with H * W = M -- the same multiply-accumulates, named as
-// the operator NPUs were first built around.
+// How the QDQ resident GEMM spells a layer: MatMul over [M, K] rows, or with
+// `conv` a 1x1 Conv over [1, K, H, W] with H * W = M -- the same
+// multiply-accumulates, named as the operator NPU compilers were first tuned
+// for (onnxResidentQdqMatMulModel's `conv1x1`).
 namespace
 {
 struct LayerForm
@@ -571,13 +571,12 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      bool reduceInFloat,
                                      OnnxReduceView view,
                                      const std::vector<std::string> *chain,
-                                     const OnnxLiveSeed *seed, bool conv1x1)
+                                     const OnnxLiveSeed *seed)
 {
   OnnxGraph g;
   g.setOpset(onnxOpsetForDtype(dtype));
   const bool live = (shape == OnnxLiveShape::OperandScaled);
   const bool seeded = live && seed;
-  const LayerForm form(M, conv1x1);
   // The scalar and the output follow the reduction, not the matmul: casting
   // the product to fp32 means everything downstream of it is fp32 too.
   const int tailDtype = reduceInFloat ? ONNX_DT_FLOAT : dtype;
@@ -598,14 +597,14 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // TOPS spec).  gemm.cpp guards this form by checking the timings scale
   // with the size.
   g.input("S", live ? dtype : tailDtype, {});
-  const int64_t aCols = seeded ? seed->width : K;
-  g.initializer(live ? "A0" : "A", dtype, form.act(aCols), aRaw);
-  g.initializer("B", dtype, form.weight(K, N), bRaw);
+  g.initializer(live ? "A0" : "A", dtype, {M, seeded ? seed->width : K},
+                aRaw);
+  g.initializer("B", dtype, {K, N}, bRaw);
   if (seeded)
   {
-    g.initializer("P", dtype, form.weight(seed->width, K), seed->proj);
+    g.initializer("P", dtype, {seed->width, K}, seed->proj);
     g.node("Mul", {"A0", "S"}, {"X"});
-    form.layer(g, "X", "P", "A");
+    g.node("MatMul", {"X", "P"}, {"A"});
   }
   else if (live)
     g.node("Mul", {"A0", "S"}, {"A"});
@@ -614,14 +613,14 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   // summed rows of A, a rewrite an optimiser is free to make and which would
   // quietly turn this matrix multiply into a matrix-vector one.  Max does not
   // distribute over the product, so the full result has to be computed.
-  form.layer(g, "A", "B", "C");
+  g.node("MatMul", {"A", "B"}, {"C"});
   std::string product = "C";
   if (chain)
     for (size_t l = 0; l < chain->size(); l++)
     {
       const std::string n = std::to_string(l + 1);
-      g.initializer("B" + n, dtype, form.weight(N, N), (*chain)[l]);
-      form.layer(g, product, "B" + n, "C" + n);
+      g.initializer("B" + n, dtype, {N, N}, (*chain)[l]);
+      g.node("MatMul", {product, "B" + n}, {"C" + n});
       product = "C" + n;
     }
   // The cast sits after the multiply, so it cannot change the arithmetic being
@@ -634,7 +633,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
     g.node("Cast", {product}, {"Cf"}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});
     reduceIn = "Cf";
   }
-  form.reduce(g, reduceIn, live ? "Y" : "R", N, view);
+  g.reduceRows(reduceIn, live ? "Y" : "R", M, N, view);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", tailDtype, {N});

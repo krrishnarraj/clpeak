@@ -28,13 +28,16 @@
 // at 35.  The Neural Engine gained 25% the same way, ONNX Runtime's CPU 13%,
 // the Adreno 6%.  A chain is also how a model runs.  Most of what still
 // separated the 29 from the 35 was that same live pass, 13% of the chain,
-// which is why a live chain now runs it over a narrow seed (OnnxLiveSeed).
+// which is why a live chain now runs it over a narrow seed (OnnxLiveSeed):
+// the same HTP then read 35 TOPS int8 and 10.2 TFLOPS fp16, from 29.4 and
+// 9.05.
 //
 // One test, `onnx_gemm`: the same chained model on whichever formats the
-// provider accepts.  The int8 QDQ reading is measured in ops rather than
-// flops and carries that unit itself.  int8 is the dtype most NPUs are
-// actually built for, so an NPU whose only measured reading is the int8 one
-// is the expected shape, not a gap.
+// provider accepts, and the int8 one once more with its layers spelled as
+// 1x1 convolutions (kIntVariants says why).  The int8 QDQ readings are
+// measured in ops rather than flops and carry that unit themselves.  int8 is
+// the dtype most NPUs are actually built for, so an NPU whose only measured
+// readings are the int8 ones is the expected shape, not a gap.
 
 #include <onnx/onnx_peak.h>
 #include "gemm_setup.h"
@@ -122,13 +125,6 @@ namespace
   // would use, since the ladder measures several.
   constexpr unsigned int kSizeBudgetUs = 2000000;
 
-  // A verbose run asks the provider's own profiler (onnxNativeProfilePath) to
-  // watch one more build of the row's best size.  Where that size took longer
-  // than this to compile, the largest measured size that did not is watched
-  // instead: how the time splits between operations barely moves from one
-  // size to the next, and the top rung can cost minutes.
-  constexpr double kNativeProfileCreateCapUs = 90.0e6;
-
   const char *shapeNameFor(OnnxLiveShape s)
   {
     switch (s)
@@ -173,14 +169,15 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "flops",
        Category::Unknown,
        "Matrix-multiply rate through this execution provider, one data type "
-       "per row: sixteen distinct square multiplies chained in one dispatch, "
-       "each layer's product feeding the next, swept over layer widths and "
-       "reported at its best.  A chain is how a model runs, and it spreads "
-       "what surrounds a multiply -- the dispatch, the reduction that brings "
-       "one row back -- over sixteen of them, while the pass that keeps the "
-       "graph from being computed at build time runs over a narrow seed "
-       "rather than the first layer's whole input.  The same model runs on every "
-       "provider, and one that cannot run it entirely on its own device "
+       "per row, and int8 a second time with its layers spelled as 1x1 "
+       "convolutions: sixteen distinct square multiplies chained in one "
+       "dispatch, each layer's product feeding the next, swept over layer "
+       "widths and reported at its best.  A chain is how a model runs, and it "
+       "spreads what surrounds a multiply -- the dispatch, the reduction that "
+       "brings one row back -- over sixteen of them, while the pass that keeps "
+       "the graph from being computed at build time runs over a narrow seed "
+       "rather than the first layer's whole input.  The same model runs on "
+       "every provider, and one that cannot run it entirely on its own device "
        "reports unsupported rather than quietly measuring the host.",
        TestShape::Heterogeneous, "data type"});
 
@@ -215,8 +212,6 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     int64_t offDeviceAbove = 0;
     // The first measured size reduced through the rank-4 view, or 0.
     int64_t rank4From = 0;
-    // Session-creation time of every measured size, ascending.
-    std::vector<std::pair<int64_t, double>> creates;
   };
 
   // One doubling ladder.  `view` is the row's and sticks: once a provider
@@ -266,7 +261,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
       const double ops =
-          2.0 * (double)(v.tall * D) * (double)D * (double)D * layers;
+          2.0 * (double)D * (double)D * (double)D * layers;
       if (lastRate > 0.0)
       {
         const double predictedUs = ops / lastRate;
@@ -444,7 +439,6 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
 
       rungs++;
-      L.creates.push_back({D, createUs});
       if (firstUs == 0.0)
       {
         firstUs = mean_us;
@@ -660,12 +654,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // keeps the multiply live without changing its arithmetic.  The ladder
     // reproduces exactly that.
     const auto &cache = onnxProbeGemmCache(rt, ep);
-    const char *probed = v.probeAs ? v.probeAs : v.label;
-    auto it = cache.find(probed);
+    auto it = cache.find(v.label);
     if (it == cache.end())
     {
       test.skip(v.label, ResultStatus::Unsupported,
-                "no probe result for " + std::string(probed), o);
+                "no probe result for " + std::string(v.label), o);
       return;
     }
     const OnnxProbeResult &pr = it->second;
@@ -739,14 +732,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       "requantize every layer's product with block scales "
                       "taken from the data at run time, which this test does "
                       "not build.";
-    // What the probe saw its MatMul become; a convolution row was never
-    // probed as one, so these would describe a different graph.
-    if (!pr.ranAs.empty() && !v.conv1x1)
+    if (!pr.ranAs.empty())
       o.description += "  Ran as " + pr.ranAs + " (" + pr.schemeName + ").";
-    if (pr.castedActs && !v.conv1x1)
+    if (pr.castedActs)
       o.description += "  The provider converts the activations first, a "
                        "full pass inside this figure.";
-    if (!pr.ranWider.empty() && !v.conv1x1)
+    if (!pr.ranWider.empty())
       o.description += "  This provider has no " + std::string(v.label) +
                        " matmul kernel and ran it in " + pr.ranWider +
                        ", so this is that width rather than " + v.label + ".";
@@ -768,44 +759,6 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        " the provider's runtime sent the work to another "
                        "compute unit, which ended the sweep.";
     test.emit(v.label, (float)L.best, o);
-
-    // What the provider's own profiler says the time went to, for the log.
-    // One more build, never one that was timed (a profiled session is not
-    // the session measured), and only when someone asked for the detail.
-    const std::string profilePath =
-        clpeak::verboseEnabled() ? onnxNativeProfilePath(ep) : std::string();
-    if (!profilePath.empty() && !clpeak::cancelRequested())
-    {
-      int64_t pd = 0;
-      for (const auto &c : L.creates)
-        if (c.first <= L.bestDim && c.second <= kNativeProfileCreateCapUs)
-          pd = c.first;
-      if (pd > 0)
-      {
-        const OnnxReduceView pv = (L.rank4From > 0 && pd >= L.rank4From)
-                                      ? OnnxReduceView::Rank4
-                                      : OnnxReduceView::Rows;
-        GemmSetup g = makeSetup(rt, ep, v, pd, /*profile=*/false, pr.actDtype,
-                                pr.reduceInFloat, pr.wgtDtype, L.shape,
-                                /*verifyPlacement=*/true, pv, layers,
-                                profilePath);
-        if (g.session && timeRuns(rt, g, 1 + warmupCount) > 0.0)
-          timeRuns(rt, g, 3);
-        else
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: profiled build at %lld failed: %s\n",
-                      ep.providerKey.c_str(), v.label, (long long)pd,
-                      g.error.c_str());
-        destroySetup(rt, g);
-        onnxLogNativeProfile(profilePath, ep.providerKey + "/" + v.label + " " +
-                                              std::to_string(pd) + "^3 x" +
-                                              std::to_string(layers));
-      }
-      else
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: no measured size compiled within %.0f s; "
-                    "not profiled\n",
-                    ep.providerKey.c_str(), v.label,
-                    kNativeProfileCreateCapUs / 1.0e6);
-    }
   };
 
   for (size_t i = 0; i < kFpVariantCount; i++)
@@ -817,11 +770,6 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     if (clpeak::cancelRequested()) break;
     runVariant(kIntVariants[i]);
-  }
-  for (size_t i = 0; i < kExperimentVariantCount; i++)
-  {
-    if (clpeak::cancelRequested()) break;
-    runVariant(kExperimentVariants[i]);
   }
 
   test.end();

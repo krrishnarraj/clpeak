@@ -58,31 +58,13 @@ struct OnnxSessionResult
 // Core ML sends anything that small to the CPU, and verifying it would
 // declare the provider dead on a machine whose Neural Engine takes every
 // 2048-cube it is offered.
-// `nativeProfile`, when not empty, is a file the provider's *own* profiler
-// writes to (see onnxNativeProfilePath) -- per-operation device timings that
-// ORT's profile cannot show for a provider that runs the whole graph as one
-// kernel of its own.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded = false,
                                     bool profile = false,
                                     bool keepQdqUnfused = false,
-                                    bool verifyPlacement = true,
-                                    const std::string &nativeProfile = std::string());
-
-// A fresh temporary path for `ep`'s own profiler to write to, or empty when
-// clpeak has no wiring for that provider's profiler.  A provider that fuses
-// the whole graph into one kernel (QNN, TensorRT, OpenVINO, Core ML) shows ORT
-// a single opaque node, so only its own profiler can say which operation the
-// time went to -- the multiply, or the pass that keeps the graph live, or the
-// reduction.  Wired: QNN (`profiling_level=detailed`, CSV).
-std::string onnxNativeProfilePath(const onnx_ep_info_t &ep);
-
-// Copy what the provider's profiler wrote at `path` into the verbose log,
-// bounded, under `tag`, and delete the file.  Says so when nothing was
-// written.
-void onnxLogNativeProfile(const std::string &path, const std::string &tag);
+                                    bool verifyPlacement = true);
 
 // Names of the kernels a profiled session executed, one entry per kernel
 // launch in execution order -- so a kernel that ran twice appears twice.
@@ -134,8 +116,9 @@ std::string onnxJoinOps(const std::vector<std::string> &ops);
 // engine and calls it `TRTKernel_graph_clpeak_7216741020808563463_0`.
 //
 // So the test looks for the *failure* rather than the success: a bare
-// floating-point MatMul sitting beside the dequantize nodes, which is exactly
-// what a provider that declined to fuse leaves behind.  Anything else ran as
+// floating-point MatMul (or Conv, for the row spelled as convolutions)
+// sitting beside the dequantize nodes, which is exactly what a provider that
+// declined to fuse leaves behind.  Anything else ran as
 // the provider's own quantized kernel, and it cannot have quietly run on the
 // CPU instead, because the fallback guard would have failed the session.
 bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops);

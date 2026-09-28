@@ -445,8 +445,7 @@ constexpr const char *kCoremlComputeUnits = "CPUAndNeuralEngine";
 // the compiled model a second time to read MLComputePlan, which is what
 // the native backend pays too and the price of knowing where the work ran.
 // Off for the probes and the attach-only check, which never time a run.
-bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan,
-                      const std::string &nativeProfile)
+bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
 {
   const std::string &providerKey = ep.providerKey;
   if (providerKey == "CoreMLExecutionProvider")
@@ -500,13 +499,6 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan,
       // graphs have at their boundary.
       out.kv.emplace_back("offload_graph_io_quantization", "0");
     }
-    // Per-operation device timings, written as CSV.  "detailed" is the
-    // level that breaks a graph down by node; every QNN backend has it.
-    if (!nativeProfile.empty())
-    {
-      out.kv.emplace_back("profiling_level", "detailed");
-      out.kv.emplace_back("profiling_file_path", nativeProfile);
-    }
     return true;
   }
   if (providerKey == "OpenVINOExecutionProvider")
@@ -556,8 +548,7 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan,
 // one-line reason -- including "no wiring", so an unknown provider is
 // reported as unsupported rather than silently run with defaults.
 std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
-                           const onnx_ep_info_t &ep, bool wantPlan,
-                           const std::string &nativeProfile = std::string())
+                           const onnx_ep_info_t &ep, bool wantPlan)
 {
   const OrtApi *api = rt.api;
   const std::string &providerKey = ep.providerKey;
@@ -573,13 +564,13 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   if (ep.epDevicePtr)
   {
     EpOptions opts;
-    if (!genericEpOptions(ep, opts, wantPlan, nativeProfile))
+    if (!genericEpOptions(ep, opts, wantPlan))
       opts = {"", {}};
     return onnxAppendPluginDevice(rt, so, ep, opts.kv);
   }
 
   EpOptions opts;
-  if (genericEpOptions(ep, opts, wantPlan, nativeProfile))
+  if (genericEpOptions(ep, opts, wantPlan))
   {
     std::vector<const char *> keys, vals;
     for (auto &kvp : opts.kv)
@@ -809,53 +800,6 @@ static void removeProfileArtifacts(const std::string &prefix)
   }
 }
 
-std::string onnxNativeProfilePath(const onnx_ep_info_t &ep)
-{
-  // The providers whose own profiler genericEpOptions knows how to ask for.
-  if (ep.providerKey == "QNNExecutionProvider")
-    return uniqueProfilePrefixPath() + "_qnn.csv";
-  return std::string();
-}
-
-void onnxLogNativeProfile(const std::string &path, const std::string &tag)
-{
-  if (path.empty())
-    return;
-  std::ifstream in(path, std::ios::binary);
-  if (!in)
-  {
-    CLPEAK_VLOG("onnx-native-profile[%s]: the provider wrote nothing to %s\n",
-                tag.c_str(), path.c_str());
-    return;
-  }
-  std::vector<std::string> lines;
-  for (std::string line; std::getline(in, line);)
-  {
-    if (!line.empty() && line.back() == '\r')
-      line.pop_back();
-    if (!line.empty())
-      lines.push_back(std::move(line));
-  }
-  in.close();
-  std::error_code ec;
-  std::filesystem::remove(path, ec);
-
-  // Bounded: the head holds the column names and the one-off setup events,
-  // the tail the last few runs, which is what the timings are read from.
-  constexpr size_t kHead = 40, kTail = 360;
-  CLPEAK_VLOG("onnx-native-profile[%s]: %zu lines\n", tag.c_str(), lines.size());
-  for (size_t i = 0; i < lines.size(); i++)
-  {
-    if (i == kHead && lines.size() > kHead + kTail)
-    {
-      CLPEAK_VLOG("onnx-native-profile[%s]: ... %zu lines skipped ...\n",
-                  tag.c_str(), lines.size() - kHead - kTail);
-      i = lines.size() - kTail;
-    }
-    CLPEAK_VLOG("onnx-native-profile[%s]: %s\n", tag.c_str(), lines[i].c_str());
-  }
-}
-
 const char *onnxProfileTypeName(int dtype)
 {
   switch (dtype)
@@ -1062,6 +1006,8 @@ std::string onnxJoinOps(const std::vector<std::string> &ops)
 static const char *kQuantMarkers[] = {
   "QLinearMatMul", "MatMulInteger", "QGemm", "QLinearGemm",
   "MatMulIntegerToFloat", "QuantizeLinearMatMul", "QOrderedMatMul",
+  // The same arithmetic as the int8_qdq_conv1x1 row spells it.
+  "QLinearConv", "ConvInteger",
   // Weight-only: ORT's own kernel for narrow blocked weights against
   // floating-point activations, and what a quantized language model runs on.
   "MatMulNBits",
@@ -1085,8 +1031,11 @@ bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops)
   for (const auto &op : ops)
   {
     // Exact names: "MatMul" is a substring of QLinearMatMul and
-    // MatMulInteger, so a loose match here would reject every success.
-    if (op == "MatMul" || op == "Gemm" || op == "FusedMatMul")
+    // MatMulInteger, so a loose match here would reject every success.  A
+    // float Conv beside the quantize nodes is the int8_qdq_conv1x1 row left
+    // unfused, the same failure spelled the other way.
+    if (op == "MatMul" || op == "Gemm" || op == "FusedMatMul" ||
+        op == "Conv" || op == "FusedConv" || op == "NhwcFusedConv")
       sawPlainMatMul = true;
     if (op == "DequantizeLinear" || op == "QuantizeLinear")
       sawQuantizeNode = true;
@@ -1100,8 +1049,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     bool keepConstantsUnfolded,
                                     bool profile,
                                     bool keepQdqUnfused,
-                                    bool verifyPlacement,
-                                    const std::string &nativeProfile)
+                                    bool verifyPlacement)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -1179,7 +1127,7 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   // one provider that needs no registration and keeps its fallback.
   if (ep.providerKey != "CPUExecutionProvider")
   {
-    res.error = appendProvider(rt, so, ep, wantPlan, nativeProfile);
+    res.error = appendProvider(rt, so, ep, wantPlan);
     if (!res.error.empty())
     {
       api->ReleaseSessionOptions(so);

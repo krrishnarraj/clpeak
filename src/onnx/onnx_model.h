@@ -332,12 +332,6 @@ std::string onnxResidentWeightOnlyMatMulModel(
 //
 // `seed` (all three forms, live shapes only): `aRaw` is then the [M, width]
 // seed rather than A itself; see OnnxLiveSeed.
-//
-// `conv1x1` (the plain and QDQ forms; an experiment for the qnn debugging
-// round): every layer, the seed's included, is a 1x1 Conv over [1, K, H, W]
-// activations with H * W = M against [N, K, 1, 1] weights -- the same
-// arithmetic, spelled as the operator NPUs were first built around -- and the
-// product is reduced over the batch and spatial axes to the same [N] row.
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
@@ -345,8 +339,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      bool reduceInFloat = false,
                                      OnnxReduceView view = OnnxReduceView::Rows,
                                      const std::vector<std::string> *chain = nullptr,
-                                     const OnnxLiveSeed *seed = nullptr,
-                                     bool conv1x1 = false);
+                                     const OnnxLiveSeed *seed = nullptr);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the
@@ -378,6 +371,12 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // `chainWScale` so each layer keeps the magnitude of its input, which is what
 // lets one output scale serve every layer.  A `seed`'s widening multiply is
 // that node unit too, its product quantized by the seed's `outScale`.
+//
+// `conv1x1` spells every one of those multiplies, the seed's included, as a
+// 1x1 Conv over [1, K, H, W] activations with H * W = M against [N, K, 1, 1]
+// weights -- the same arithmetic, in the operator NPU compilers were first
+// tuned for (the int8_qdq_conv1x1 row, gemm_setup.cpp) -- and reduces the
+// product over the batch and spatial axes to the same [N] row.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
