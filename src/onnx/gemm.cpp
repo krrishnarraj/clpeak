@@ -102,7 +102,15 @@ namespace
   // provider stops early instead of spending minutes on one matrix, and it
   // scales itself: hardware fast enough to make a bigger size cheap is exactly
   // the hardware that should try it.
-  constexpr double kMaxIterUs = 2.0e6; // one iteration, predicted
+  //
+  // It bounds one multiply, not one dispatch.  A chain dispatches sixteen,
+  // and bounding their sum stopped slow providers four times narrower than
+  // one multiply would have: ONNX Runtime's CPU provider on a Zen 2
+  // Threadripper, whose kernels are fastest at 8192, stopped at 2048 and
+  // read int4_weight 0.79 TFLOPS against the single multiply's 1.18.  Held to
+  // one multiply it climbs to 4096-8192 and reads 1.37, int8 1.80 TOPS
+  // against 1.47 -- at the price of iterations of up to half a minute there.
+  constexpr double kMaxIterUs = 2.0e6; // one multiply, predicted
 
   // Every layer's weights together, capped at a quarter of physical memory.
   // A fixed ceiling here would be a crash on a phone and a needless limit on
@@ -265,12 +273,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (lastRate > 0.0)
       {
         const double predictedUs = ops / lastRate;
-        if (predictedUs > kMaxIterUs)
+        if (predictedUs / layers > kMaxIterUs)
         {
           CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 would take ~%.1f s per "
-                      "iteration, stopping\n",
+                      "multiply, stopping\n",
                       ep.providerKey.c_str(),
-                      tag, (long long)D, predictedUs / 1.0e6);
+                      tag, (long long)D, predictedUs / layers / 1.0e6);
           endedOnWork = true;
           break;
         }
@@ -551,16 +559,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // runs fp16 at 6.1 TFLOPS at 4096 and 0.34 at 8192, so the prediction
       // for 8192 came out nineteen times short of the truth.
       //
-      // This one is not a prediction.  The rung has been measured, it took
-      // longer than a whole iteration is allowed to take, and the next size
+      // This one is not a prediction.  The rung has been measured, its
+      // multiplies took longer than one is allowed to take, and the next size
       // is eight times the work -- so there is nothing above this worth the
       // wait, whatever the rate did.
-      if (per_iter_us > kMaxIterUs)
+      if (per_iter_us / layers > kMaxIterUs)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 measured %.1f s per iteration, "
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 measured %.1f s per multiply, "
                     "stopping\n",
                     ep.providerKey.c_str(), tag,
-                    (long long)D, per_iter_us / 1.0e6);
+                    (long long)D, per_iter_us / layers / 1.0e6);
         endedOnWork = true;
         break;
       }

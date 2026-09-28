@@ -32,6 +32,7 @@
 #include <chrono>
 #include <map>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -139,8 +140,9 @@ namespace
        /*sweep=*/false, "ops",
        "8-bit weights and 8-bit arithmetic through the projections, quantized "
        "in and out -- what headline TOPS figures are quoted for, measured on a "
-       "whole layer.  Attention and the softmax stay 16-bit, as they do in "
-       "every real deployment."},
+       "whole layer.  Attention and the softmax stay in floating point, as "
+       "they do in every real deployment: 16-bit unless the row says "
+       "otherwise."},
 
       {"fp32", ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
        "Full precision, which nobody serves a language model in, here as a "
@@ -647,6 +649,13 @@ namespace
     bool castedActs = false;
 
     std::map<int64_t, Point> prefill, decode;
+
+    // int8 QDQ only: the prompt ran with the layer's floating-point parts in
+    // fp32, which this provider took faster than fp16 -- what the fp16 form
+    // took, and the fp32 form's provenance (its fused kernel can differ).
+    bool prefillFp32 = false;
+    double prefillFp16Us = 0.0;
+    std::string prefillProv;
   };
 
   // Quantization schemes for the QDQ form, tried in order until one fuses.
@@ -735,12 +744,38 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // is the estimate: precisions differ by a factor of a few, not orders.
   double refPrefillRate = 0.0, refDecodeRate = 0.0;
 
+  // A prompt row's provenance: the fp16 form's, or -- where the layer's
+  // floating-point parts ran in fp32 because that was faster -- the fp32
+  // form's, with a sentence saying so and what each form took.
+  auto prefillProvenance = [&](const Variant &v, const VariantResult &vr,
+                               int64_t seq) -> std::string
+  {
+    if (!vr.prefillFp32 || seq != kPrefillSeq)
+      return provenance(v, vr);
+    const auto it = vr.prefill.find(kPrefillSeq);
+    const double flops = blockFlops(kPrefillSeq, kPrefillSeq);
+    char rates[96];
+    std::snprintf(rates, sizeof rates, "%.3g TOPS against %.3g",
+                  flops / it->second.us / 1.0e6,
+                  flops / vr.prefillFp16Us / 1.0e6);
+    std::string s = vr.prefillProv +
+                    "  Attention, the softmax and the residuals ran in fp32 "
+                    "here rather than fp16, because this provider takes the "
+                    "layer faster that way: " +
+                    std::string(rates) + ".";
+    if (fp32Narrowed)
+      s += "  It holds fp32 at 16 bits anyway, so the two forms do the same "
+           "arithmetic and differ in the conversions around each quantized "
+           "projection.";
+    return s;
+  };
+
   auto emitPrefillTo = [&](logger::TestScope &test, const Variant &vv,
                            const VariantResult &vvr)
   {
-    const std::string prov = provenance(vv, vvr);
     for (int64_t sseq : promptsFor(vv))
     {
+      const std::string prov = prefillProvenance(vv, vvr, sseq);
       const std::string metric = std::string(vv.label) + "_s" + std::to_string(sseq);
       logger::EmitOptions o;
       o.description = std::string(vv.note) + "  A prompt of " +
@@ -1032,6 +1067,59 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         vr.prefill[seq] = pt;
       }
+
+      // The layer's floating-point parts again, in fp32.  On a GPU an int8
+      // layer ships as int8 projections inside fp16 attention, and there that
+      // is the faster form: TensorRT on an RTX 5060 read 93 TOPS against 79
+      // with the float parts in fp32.  Elsewhere the fp16 parts are what cost
+      // the layer.  ONNX Runtime's x86 CPU provider runs the attention through
+      // a slow fp16 matmul (245 GOPS against 441 in fp32), its ARM one is 9%
+      // faster in fp32, and QNN's HTP -- whose fp32 block outran its fp16 one,
+      // 7.0 TFLOPS to 5.1 -- read 2.25 TOPS here against a 35 TOPS int8
+      // matmul, with the fp16 form casting to fp32 and back around every
+      // quantized projection.  No single width is right, so the prompt takes
+      // whichever this provider runs faster, and says which.  Decode stays
+      // fp16: it is memory-bound, and its row counts the bytes the cache
+      // declares.
+      //
+      // The fp32 form is proven fused on its own (validateVariant) before it
+      // is timed: unfused it would be float arithmetic, which on the x86 CPU
+      // provider runs faster than its fused int8 and would win the race
+      // under the int8 label.
+      if (v.qdq && v.wDtype == ONNX_DT_INT8 && v.actDtype != ONNX_DT_FLOAT &&
+          !clpeak::cancelRequested())
+      {
+        auto it = vr.prefill.find(kPrefillSeq);
+        if (it != vr.prefill.end() && it->second.us > 0.0)
+        {
+          Variant v32 = v;
+          v32.actDtype = ONNX_DT_FLOAT;
+          VariantResult vr32;
+          if (validateVariant(v32, vr32))
+          {
+            Point pt32;
+            pt32.us = measure(rt, ep, v32, false, vr32.qActDtype, warmupCount,
+                              forceIters, specifiedIters, pt32.error,
+                              pt32.status, kDecodeKv, kPrefillSeq);
+            CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld %.1f us with fp16 "
+                        "float parts, %.1f us with fp32\n",
+                        ep.providerKey.c_str(), v.label,
+                        (long long)kPrefillSeq, it->second.us, pt32.us);
+            if (pt32.us > 0.0 && pt32.us < it->second.us)
+            {
+              vr.prefillFp32 = true;
+              vr.prefillFp16Us = it->second.us;
+              vr.prefillProv = provenance(v32, vr32);
+              it->second = pt32;
+            }
+          }
+          else
+            CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: "
+                        "%s\n",
+                        ep.providerKey.c_str(), v.label,
+                        vr32.skipReason.c_str());
+        }
+      }
       emitPrefillTo(testOps, v, vr);
     }
     testOps.end();
@@ -1172,7 +1260,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note + prov;
+        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
+                                 prefillProvenance(v, vr, kPrefillSeq);
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
         else
         {

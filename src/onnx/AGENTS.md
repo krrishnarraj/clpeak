@@ -46,7 +46,7 @@ backend.
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
-| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder).  `variantFence` — the graphs only this test provokes a crash with, never built |
+| `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder).  `variantFence` — the graphs only this test provokes a crash with, never built.  The `int8_qdq` prompt runs its float parts at whichever of fp16 and fp32 the provider takes faster |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — per-submission overhead and session-creation cost (s) |
 
@@ -1130,7 +1130,13 @@ has its own row.
 SwiGLU and the KV cache stay at the arithmetic width in every variant, which is
 both what quantized inference does in practice — nobody quantizes a softmax —
 and what makes the rows comparable: whatever separates two of them is the
-projection format, because nothing else moved.
+projection format, because nothing else moved. One exception, measured rather
+than assumed: the `int8_qdq` prompt is also timed with its floating-point parts
+in fp32 and reports whichever width the provider runs faster, naming it. fp16
+wins on TensorRT (93 TOPS against 79); fp32 wins on ONNX Runtime's CPU
+provider (x86 245 GOPS against 441, ARM by 9%) and should on QNN's HTP, whose
+fp32 block outruns its fp16 one. Its decode row stays fp16, because it counts
+the bytes the cache declares.
 
 Labels are `onnx-gemm`'s on purpose. `int4_weight` there and `int4_weight` here
 are the same format under the same name, so a block reading divides by a GEMM
@@ -1167,7 +1173,10 @@ unfused graph is refused by the fusion check anyway. So the scales are fp32 and
 `projection` casts fp16 in and out around each one. The casts sit *outside* the
 Q/DQ pattern, leaving the DequantizeLinear-to-MatMul adjacency ORT matches on
 untouched, and they cost two passes over an activation tensor per projection:
-2 MB against 54 GFLOP at the 512-token prompt, 4 KB while decoding.
+2 MB against 54 GFLOP at the 512-token prompt, 4 KB while decoding. A GPU or
+CPU does not notice them; an NPU whose vector units do every conversion may,
+which is one reason the prompt is also timed with fp32 float parts, where
+there is nothing to cast.
 
 ### The single-op fusion check does not work on a block
 
@@ -1592,7 +1601,9 @@ per-iteration time exceeded `kMaxIterUs`. That one is not a forecast: the rung
 has been timed, it took longer than an iteration is allowed to take, and the
 next size is four or eight times the work. Anything new that sweeps sizes here
 needs the same pair — a cheap predicted gate before the session, and a measured
-one after the timing.
+one after the timing. `gemm.cpp` holds both to one multiply rather than one
+dispatch: a chain's sixteen summed stopped CPU providers at a quarter of the
+width their kernels peak at.
 
 ## Report asymptotes, not readings at a size someone picked
 
