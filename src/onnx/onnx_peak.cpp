@@ -373,6 +373,12 @@ int OnnxPeak::runAll()
         {"Type", ep.typeStr.empty() ? "Unknown" : ep.typeStr},
         {"ONNX Runtime", rt->versionString},
     };
+    // A device a plugin library registered names it, or two rows for the
+    // same silicon read as a duplicated listing -- the same origin the
+    // listing carries (enumerate()), repeated here so live and saved
+    // results say it too.  Built-ins stay plain.
+    if (ep.epDevicePtr && !ep.library.empty())
+      details.push_back({"EP plugin", ep.library});
     if (ep.epDevicePtr)
     {
       // A plugin provider: what the runtime says about the silicon behind
