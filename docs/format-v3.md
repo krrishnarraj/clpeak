@@ -302,7 +302,8 @@ debugging question; in the CLI it costs an enumeration pass, which is why it
 is not on by default.
 
 Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
-`api`, `compute_units`, `clock_mhz`, `global_mem_bytes`, `max_alloc_bytes`,
+`api`, `origin` (ONNX plugin EPs only, e.g. `EP plugin (QNNExecutionProvider)`),
+`compute_units`, `clock_mhz`, `global_mem_bytes`, `max_alloc_bytes`,
 `fp16`, `fp64` the backend could answer. The keys are those of
 `include/common/inventory.h`, which is the one serializer for both uses.
 

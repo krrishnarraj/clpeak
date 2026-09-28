@@ -64,6 +64,8 @@ namespace
       parts.push_back("fp16");
     if (d.hasFp64)
       parts.push_back("fp64");
+    if (!d.origin.empty())
+      parts.push_back(d.origin);
 
     std::string out;
     for (size_t i = 0; i < parts.size(); ++i)
@@ -116,6 +118,7 @@ void writeInventoryBackends(JsonWriter &w, const std::vector<BackendInventory> &
         w.strIf("arch", d.arch);
         w.strIf("driver", d.driverVersion);
         w.strIf("api", d.apiVersion);
+        w.strIf("origin", d.origin);
         if (d.numComputeUnits) w.uint("compute_units", d.numComputeUnits);
         if (d.maxClockMHz)     w.uint("clock_mhz", d.maxClockMHz);
         if (d.globalMemBytes)  w.uint("global_mem_bytes", d.globalMemBytes);

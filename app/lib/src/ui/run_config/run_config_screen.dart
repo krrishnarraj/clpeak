@@ -154,10 +154,21 @@ class _BackendSelector extends StatelessWidget {
     final service = context.watch<BenchmarkService>();
     final config = service.config;
 
-    final refs = <(DeviceRef, CatalogDevice)>[
+    final refs = <(DeviceRef, CatalogDevice, String)>[
       for (final p in backend.platforms)
         for (final d in p.devices)
-          ((platformIndex: p.index, deviceIndex: d.index), d)
+          ((platformIndex: p.index, deviceIndex: d.index), d, p.name)
+    ];
+    // Single synthetic platforms ("CUDA", "ONNX Runtime", …) say nothing;
+    // several real ones (OpenCL) tell same-named devices apart.
+    final multiPlatform = backend.platforms.length > 1;
+    final subtitles = <String>[
+      for (final r in refs)
+        [
+          if (r.$2.type.isNotEmpty) r.$2.type,
+          if (multiPlatform) 'platform ${r.$3}',
+          if (r.$2.origin.isNotEmpty) r.$2.origin,
+        ].join('  ·  '),
     ];
     final selectedCount =
         refs.where((r) => config.isDeviceSelected(backend.name, r.$1)).length;
@@ -173,7 +184,7 @@ class _BackendSelector extends StatelessWidget {
             trailing: CSwitch(
               value: selectedCount > 0,
               onChanged: (on) => service.updateConfig((c) {
-                for (final (ref, _) in refs) {
+                for (final (ref, _, _) in refs) {
                   c.toggleDevice(backend.name, ref, on);
                 }
               }),
@@ -202,9 +213,9 @@ class _BackendSelector extends StatelessWidget {
                           // Wraps: you pick a device by its full name, so
                           // nothing here is allowed to hide the tail of one.
                           Text(refs[i].$2.name, style: t.mono),
-                          if (refs[i].$2.type.isNotEmpty) ...[
+                          if (subtitles[i].isNotEmpty) ...[
                             const SizedBox(height: 3),
-                            Text(refs[i].$2.type, style: t.monoSmallDim),
+                            Text(subtitles[i], style: t.monoSmallDim),
                           ],
                         ],
                       ),

@@ -597,6 +597,12 @@ BackendInventory OnnxPeak::enumerate()
     dev.index         = i;
     dev.name          = eps[i].displayName;
     dev.typeStr       = eps[i].typeStr;
+    // A device the runtime built in needs no qualifier; one a plugin
+    // library registered does, or two rows for the same silicon read
+    // as a duplicated listing.
+    if (eps[i].epDevicePtr)
+      dev.origin = eps[i].library.empty() ? "EP plugin"
+                                          : "EP plugin (" + eps[i].library + ")";
     plat.devices.push_back(std::move(dev));
   }
 
