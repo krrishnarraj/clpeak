@@ -55,6 +55,19 @@ std::vector<OnnxEpLibrary> onnxEffectiveEpLibraries(const OrtRuntime &rt);
 // a library in use by a session cannot be unregistered.
 void onnxSyncEpLibraries(const OrtRuntime &rt, OrtEnv *env);
 
+// What identifies a plugin device's origin: its registration name plus the
+// version it reports, when it reports one.  The listing wraps it as
+// "EP plugin (<here>)" (InventoryDevice::origin); the run reports it as the
+// value of its "EP plugin" prop.  One helper so the two never drift apart.
+inline std::string onnxPluginOrigin(const onnx_ep_info_t &ep)
+{
+  if (ep.library.empty())
+    return std::string();
+  if (ep.pluginVersion.empty())
+    return ep.library;
+  return ep.library + " " + ep.pluginVersion;
+}
+
 // One entry per (plugin provider, hardware device) the environment
 // enumerates, accelerators first, CPU-class devices last, named from what
 // the runtime reports.  Empty when no plugin registered, or the runtime

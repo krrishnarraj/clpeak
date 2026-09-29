@@ -141,6 +141,9 @@ struct onnx_ep_info_t
   // Plugin-provider devices only.
   const OrtEpDevice *epDevicePtr = nullptr;
   std::string library;                                       // registration name of the plugin library
+  std::string pluginVersion;                                 // the version the plugin reports for
+                                                             // itself ("version" metadata); empty when
+                                                             // it reports none
   std::string vendor;                                        // the hardware vendor the runtime reports
   std::vector<std::pair<std::string, std::string>> hardware; // device metadata, as reported
 };

@@ -403,6 +403,33 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
     if (ep.vendor.empty())
       if (const char *v = rt.api->EpDevice_EpVendor(d))
         ep.vendor = v;
+    if (const OrtKeyValuePairs *md = rt.api->EpDevice_EpMetadata(d))
+    {
+      // The version the plugin reports for itself, if any.  Read here, with
+      // provenance, because `hardware` below merges both metadata maps and
+      // a "version" there could equally describe the silicon.
+      const char *const *keys = nullptr;
+      const char *const *vals = nullptr;
+      size_t n = 0;
+      rt.api->GetKeyValuePairs(md, &keys, &vals, &n);
+      for (size_t k = 0; k < n; k++)
+      {
+        if (k == 0)
+          CLPEAK_VLOG("onnx: plugin %s EP metadata (%lu entries):\n",
+                      ep.providerKey.c_str(), (unsigned long)n);
+        CLPEAK_VLOG("onnx: plugin %s metadata %s=%s\n", ep.providerKey.c_str(),
+                    keys && keys[k] ? keys[k] : "?",
+                    vals && vals[k] ? vals[k] : "?");
+        if (ep.pluginVersion.empty() && keys && keys[k] && vals && vals[k] &&
+            std::string(keys[k]) == "version")
+        {
+          const std::string v = vals[k];
+          const size_t b = v.find_first_not_of(" \t");
+          if (b != std::string::npos)
+            ep.pluginVersion = v.substr(b, v.find_last_not_of(" \t") - b + 1);
+        }
+      }
+    }
     appendPairs(rt, rt.api->EpDevice_EpMetadata(d), ep.hardware);
 
     // A plugin serving several devices of one kind (two GPUs) needs the

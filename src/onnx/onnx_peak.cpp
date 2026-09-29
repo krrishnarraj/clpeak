@@ -377,8 +377,12 @@ int OnnxPeak::runAll()
     // same silicon read as a duplicated listing -- the same origin the
     // listing carries (enumerate()), repeated here so live and saved
     // results say it too.  Built-ins stay plain.
-    if (ep.epDevicePtr && !ep.library.empty())
-      details.push_back({"EP plugin", ep.library});
+    if (ep.epDevicePtr)
+    {
+      const std::string origin = onnxPluginOrigin(ep);
+      if (!origin.empty())
+        details.push_back({"EP plugin", origin});
+    }
     if (ep.epDevicePtr)
     {
       // A plugin provider: what the runtime says about the silicon behind
@@ -607,8 +611,10 @@ BackendInventory OnnxPeak::enumerate()
     // library registered does, or two rows for the same silicon read
     // as a duplicated listing.
     if (eps[i].epDevicePtr)
-      dev.origin = eps[i].library.empty() ? "EP plugin"
-                                          : "EP plugin (" + eps[i].library + ")";
+    {
+      const std::string origin = onnxPluginOrigin(eps[i]);
+      dev.origin = origin.empty() ? "EP plugin" : "EP plugin (" + origin + ")";
+    }
     plat.devices.push_back(std::move(dev));
   }
 
