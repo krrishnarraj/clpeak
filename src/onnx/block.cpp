@@ -1347,19 +1347,29 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
         else
         {
-          // Ensure prefill measurement exists; if not, measure inside latency so it streams
+          // The prompt test timed this pass or said why not -- too slow to
+          // measure, or a failure -- and its answer is this row's too.
+          // Timing it again here, as this did, spent passes the prompt test
+          // had judged unaffordable: 57, 343 and 413 s on the x64 QNN plugin,
+          // which ran on a host backend.  Only a pass the prompt ladder never
+          // reached is measured here, under the same budget.
           auto it = vr.prefill.find(kPrefillSeq);
-          if (it == vr.prefill.end() || it->second.us <= 0.0)
+          if (it == vr.prefill.end() && vr.usable)
           {
-            if (vr.usable) // already validated
+            Point pt;
+            const double flops = blockFlops(kPrefillSeq, kPrefillSeq);
+            if (refPrefillRate > 0.0 && flops / refPrefillRate > (double)kBlockBudgetUs)
             {
-              Point pt; std::string err; ResultStatus st = ResultStatus::Ok;
-              double flops = blockFlops(kPrefillSeq, kPrefillSeq);
-              // affordability already seeded
-              pt.us = measure(rt, ep, v, false, vr.qActDtype, warmupCount, forceIters, specifiedIters, err, st, kDecodeKv, kPrefillSeq);
-              pt.error = err; pt.status = st;
-              vr.prefill[kPrefillSeq] = pt; it = vr.prefill.find(kPrefillSeq);
+              pt.status = ResultStatus::Error;
+              pt.error = "one pass would take about " +
+                         std::to_string((long long)(flops / refPrefillRate / 1.0e6)) +
+                         " s on this provider, too slow to measure";
             }
+            else
+              pt.us = measure(rt, ep, v, false, vr.qActDtype, warmupCount, forceIters,
+                              specifiedIters, pt.error, pt.status, kDecodeKv, kPrefillSeq);
+            vr.prefill[kPrefillSeq] = pt;
+            it = vr.prefill.find(kPrefillSeq);
           }
           if (it != vr.prefill.end())
           {
@@ -1375,8 +1385,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
         const std::string note = "One generated token with " + std::to_string(kv) + " tokens of context behind it.  " + v.note + prov;
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); continue; }
+        // As for the prompt: a context the decode test answered keeps its
+        // answer, and only the lengths it does not measure are timed here.
         auto it = vr.decode.find(kv);
-        if (it == vr.decode.end() || it->second.us <= 0.0)
+        if (it == vr.decode.end())
         {
           if (vr.usable)
           {
