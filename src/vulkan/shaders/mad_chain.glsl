@@ -44,21 +44,27 @@
 // Normalising on values instead halves the independent-FMA count on hardware
 // that issues fp16 two per lane, which is the wrong direction: such hardware
 // also retires fp16 twice as fast, so it needs more chains in flight, not
-// fewer.  An Arc A380 (fp16 peak 10.04 TFLOPS) read 4.94 TFLOPS on all three
-// hp widths at 4 values -- flat across the sweep, because cutting MAD_CHAINS
-// in lockstep with the width meant the sweep never varied the ILP at all --
-// against 9.84 from oneAPI and 9.56 from OpenCL, whose sweeps reach half8/
-// half16 and so clear the bar.  Only compute_hp_v* is affected: mp and bf16
-// carry their chains in vec2/vec4 and are already at 4 registers.
+// fewer.  Only compute_hp_v* is affected: mp and bf16 carry their chains in
+// vec2/vec4 and are already at 4 registers.
 //
 // MAD_CHAIN_INTEGER selects a rotating second shape instead of the affine one;
 // integer shaders must set it, because an integer affine recurrence folds
 // legally and one compiler in the fleet does fold it.  See the block below.
 //
 // MAD_OP defaults to the fma() builtin.  Integer shaders redefine it before
-// including this file, since fma() is float-only.  The builtin costs nothing
-// against a contracted expression on any Vulkan driver measured, including
-// Adreno's -- unlike Qualcomm's OpenCL compiler, where it is 26x slower.
+// including this file, since fma() is float-only.  For fp32 the builtin costs
+// nothing against a contracted expression on any Vulkan driver measured,
+// including Adreno's -- unlike Qualcomm's OpenCL compiler, where it is 26x
+// slower.
+//
+// The fp16 shaders (compute_hp_v*) redefine it as the contracted a*b + c,
+// which SPIR-V carries as OpFMul + OpFAdd for the driver to fuse.  On Intel's
+// Windows driver an Arc A380 read both hp shapes at 4.94 TFLOPS -- its fp32
+// rate, half its 10.04 fp16 peak -- at 4 values and at 8 alike, while vkpeak's
+// contracted fp16 chain reads 9.56 on the same driver, and so do this repo's
+// OpenCL hp kernels, which have always been contracted.  vkpeak also runs
+// 32-wide work-groups against our 256, so the builtin is one suspect, not a
+// proven cause -- if the A380 stays at 4.94, the work-group size is next.
 
 #ifndef MAD_CHAIN_GLSL
 #define MAD_CHAIN_GLSL
