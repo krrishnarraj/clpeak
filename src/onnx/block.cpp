@@ -357,9 +357,13 @@ namespace
     // `error` survives: callers tear a failed run down and then report it.
   }
 
+  // `nativeProfile` and `legend` are logPrefillProfile's: the provider's own
+  // profiler's file, and where the graph's node legend goes.
   BlockRun makeRun(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                    const Variant &v, bool decode, int64_t kvLen,
-                   int64_t prefillSeq, int qActDtype, bool profile)
+                   int64_t prefillSeq, int qActDtype, bool profile,
+                   const std::string &nativeProfile = std::string(),
+                   std::vector<std::string> *legend = nullptr)
   {
     BlockRun r;
 
@@ -381,7 +385,7 @@ namespace
                                                    : OnnxReduceView::Rows;
 
     auto create = [&]() -> OnnxSessionResult {
-      std::string model = onnxBlockModel(sh);
+      std::string model = onnxBlockModel(sh, legend);
       // Constant folding stays off for every variant, and it is the quantized
       // ones that need it: a weight DequantizeLinear has nothing but constants
       // on its inputs, so folding it would bake fp16 weights into the model at
@@ -415,7 +419,7 @@ namespace
       auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
                                    profile, keepQdqUnfused,
                                    /*verifyPlacement=*/!profile,
-                                   /*keepQdqInPlace=*/true);
+                                   /*keepQdqInPlace=*/true, nativeProfile);
       // The model is the largest allocation in the process; drop it before
       // anything else is allocated on top of the session's own copy.
       model.clear();
@@ -636,6 +640,37 @@ namespace
     }
     destroyRun(rt, r);
     return mean_us;
+  }
+
+  // What the provider's own profiler (onnxNativeProfilePath) says the
+  // 512-token prompt's time went to, for the log: a build of its own, never
+  // one that was timed, and only when --verbose asked for the detail.  QNN
+  // runs the whole layer as one kernel, so ORT's profile cannot split it, and
+  // its own profile names nodes only -- the legend logged with it turns those
+  // names back into the graph's operations.  `form` is appended to the tag.
+  void logPrefillProfile(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                         const Variant &v, int qActDtype, unsigned int warmup,
+                         const char *form)
+  {
+    const std::string path =
+        clpeak::verboseEnabled() ? onnxNativeProfilePath(ep) : std::string();
+    if (path.empty() || clpeak::cancelRequested())
+      return;
+    const std::string tag = ep.providerKey + "/" + v.label + form + " s" +
+                            std::to_string(kPrefillSeq);
+    std::vector<std::string> legend;
+    BlockRun r = makeRun(rt, ep, v, /*decode=*/false, kDecodeKv, kPrefillSeq,
+                         qActDtype, /*profile=*/false, path, &legend);
+    if (r.session && timeRuns(rt, r, 1 + warmup) > 0.0)
+      timeRuns(rt, r, 3);
+    else
+      CLPEAK_VLOG("onnx-block[%s]: profiled build failed: %s\n", tag.c_str(),
+                  r.error.c_str());
+    destroyRun(rt, r);
+    for (const auto &line : legend)
+      CLPEAK_VLOG("onnx-native-profile[%s]: legend %s\n", tag.c_str(),
+                  line.c_str());
+    onnxLogNativeProfile(path, tag);
   }
 
   struct Point
@@ -1040,7 +1075,13 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // rows skipped as too slow to measure.
       if (auto it = vr.prefill.find(kPrefillSeq);
           it != vr.prefill.end() && it->second.us > 0.0)
+      {
         refDecodeRate = blockFlops(kPrefillSeq, kPrefillSeq) / it->second.us;
+        // The float rows, split by the provider's own profiler where it has
+        // one: what the int8 row's parts cost at full width.
+        if (!v.qdq && v.wBlock == 0 && v.kvDtype == 0)
+          logPrefillProfile(rt, ep, v, vr.qActDtype, warmupCount, "");
+      }
       emitPrefillTo(testFlops, v, vr);
     }
     testFlops.end();
@@ -1118,12 +1159,16 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               vr.prefillProv = provenance(v32, vr32);
               it->second = pt32;
             }
+            logPrefillProfile(rt, ep, v32, vr32.qActDtype, warmupCount,
+                              " fp32 float parts");
           }
           else
             CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: "
                         "%s\n",
                         ep.providerKey.c_str(), v.label,
                         vr32.skipReason.c_str());
+          logPrefillProfile(rt, ep, v, vr.qActDtype, warmupCount,
+                            " fp16 float parts");
         }
       }
       emitPrefillTo(testOps, v, vr);
