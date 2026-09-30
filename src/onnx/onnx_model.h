@@ -145,14 +145,8 @@ public:
 
   std::string build() const;   // ModelProto bytes
 
-  // One line per node, in the order they were added: its name (`n<index>`),
-  // op type, inputs and outputs.  A provider's own profiler reports nodes by
-  // name only, and this is how the log turns those back into operations.
-  const std::vector<std::string> &legend() const { return m_legend; }
-
 private:
   std::string m_nodes, m_inits, m_inputs, m_outputs;
-  std::vector<std::string> m_legend;
   int         m_nodeCount = 0;
   int         m_opset     = 17;
 };
@@ -517,10 +511,8 @@ struct OnnxBlockShape
 //                         dead-code eliminated.
 //
 // Weights and KV cache are initializers, so the EP sees them as constants it
-// may pre-pack, exactly as it would a real model's.  `legend`, when given,
-// receives OnnxGraph::legend() for the graph built.
-std::string onnxBlockModel(const OnnxBlockShape &s,
-                           std::vector<std::string> *legend = nullptr);
+// may pre-pack, exactly as it would a real model's.
+std::string onnxBlockModel(const OnnxBlockShape &s);
 
 // One scalar of `dtype` (fp32, fp16 or bf16) as the raw bytes a tensor holds.
 std::string onnxFloatScalar(float v, int dtype);

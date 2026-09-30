@@ -135,19 +135,10 @@ void OnnxGraph::node(const std::string &opType,
     n.str(1, i);                    // NodeProto.input
   for (const auto &o : outputs)
     n.str(2, o);                    // NodeProto.output
-  const std::string name = "n" + std::to_string(m_nodeCount++);
-  n.str(3, name);                   // name
+  n.str(3, "n" + std::to_string(m_nodeCount++));   // name
   n.str(4, opType);                 // op_type
   for (const auto &a : attrs)
     n.str(5, attribute(a));         // attribute
-
-  std::string line = name + " " + opType;
-  for (size_t i = 0; i < inputs.size(); i++)
-    line += (i ? "," : " ") + inputs[i];
-  line += " ->";
-  for (size_t i = 0; i < outputs.size(); i++)
-    line += (i ? "," : " ") + outputs[i];
-  m_legend.push_back(std::move(line));
 
   Pb g;
   g.str(1, n.b);                    // GraphProto.node
@@ -1049,8 +1040,7 @@ float blockQdqScale(int64_t K)
 
 } // namespace
 
-std::string onnxBlockModel(const OnnxBlockShape &sh,
-                           std::vector<std::string> *legend)
+std::string onnxBlockModel(const OnnxBlockShape &sh)
 {
   const int64_t d    = sh.dModel;
   const int64_t H    = sh.heads;
@@ -1363,8 +1353,6 @@ std::string onnxBlockModel(const OnnxBlockShape &sh,
     g.output("Knew", act, {S, d});
     g.output("Vnew", act, {S, d});
   }
-  if (legend)
-    *legend = g.legend();
   return g.build();
 }
 
