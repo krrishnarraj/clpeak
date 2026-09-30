@@ -52,6 +52,7 @@ static const CpuKernelTable *tuTable()
   static CpuKernelTable t = [] {
     CpuKernelTable t{};
     t.fp32  = {runFp32Chain,  (double)INNER * F32_NACC * F32_LANES * 2.0};
+    t.fp32lat = {runFp32LatChain, (double)INNER * F32_LANES * 2.0};
     t.fp64  = {runFp64Chain,  (double)INNER * F64_NACC * F64_LANES * 2.0};
     t.int32 = {runInt32Chain, (double)INNER * I32_NACC * I32_LANES * 2.0};
     // Divide/sqrt: ops = one divide (or sqrt) per lane per step; the chain's
@@ -136,6 +137,7 @@ static const CpuKernelTable *tuTable()
       [[maybe_unused]] const double bcnt = (double)svcntb();
       t.sveVLBytes = (int)svcntb();
       t.fp32   = {runSveFp32Chain,   (double)INNER * SVE_NACC_FP  * w * 2.0};
+      t.fp32lat = {runSveFp32LatChain, (double)INNER * w * 2.0};
       t.fp64   = {runSveFp64Chain,   (double)INNER * SVE_NACC_FP  * d * 2.0};
       t.int32  = {runSveInt32Chain,  (double)INNER * SVE_NACC_FP  * w * 2.0};
       t.int8dp = {runSveInt8DpChain, (double)INNER * SVE_NACC_DOT * w * 8.0};

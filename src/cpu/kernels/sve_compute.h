@@ -67,6 +67,21 @@ static double runSveFp32Chain(uint64_t outer)
   return (double)svaddv_f32(pg, s);
 }
 
+// runSveFp32Chain with ONE accumulator -- latency-bound, for the SMT scaling
+// test only (see runFp32LatChain in base_compute.h).
+static double runSveFp32LatChain(uint64_t outer)
+{
+  const svbool_t pg = svptrue_b32();
+  volatile float vb = 0.999999f, vc = 0.000001f;
+  const svfloat32_t b = svdup_f32(vb), c = svdup_f32(vc);
+  svfloat32_t a = svdup_f32(0.1f);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+      a = svmad_f32_x(pg, a, b, c);
+  return (double)svaddv_f32(pg, a);
+}
+
 static double runSveFp64Chain(uint64_t outer)
 {
   const svbool_t pg = svptrue_b64();

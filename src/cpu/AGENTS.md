@@ -41,7 +41,7 @@ local memory, DRAM ↔ global memory.
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
 | `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests) |
 | `cpu_kernels_impl.h` | Per-TU aggregator: includes the `kernels/` sub-headers and emits this TU's `tuTable()` from whatever its build flags enabled |
-| `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains, fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
+| `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains (plus `fp32lat`, the one-accumulator fp32 chain only the SMT test runs), fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
 | `kernels/crypto_compute.h` | AES-128, SHA-256, SHA-512, CRC32-C. `opsPerIter` counts BYTES so `emitCompute()` lands in GB/s. SHA-512 is ARM-only: x86 SHA512 is *detected* but has no kernel, so that row is Unsupported there |
 | `kernels/lowp_compute.h` | fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, int16 dot, NEON fp8 dot, AVX10.2 bf16 vector FMA |
 | `kernels/matrix_compute.h` | x86 AMX (int8/bf16/fp16/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA |
@@ -60,7 +60,7 @@ local memory, DRAM ↔ global memory.
 | `apple_blas.cpp` | `runAppleBlas` (`--gemm`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
 | `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width) |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level, plus the `DRAM linear`, MLP (`DRAM x8`/`x32`) and TLB-miss rows |
-| `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (seconds-per-op cost probes) and `runSmtScaling` (flops at 1 thread/core vs all logical threads) |
+| `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (seconds-per-op cost probes) and `runSmtScaling` (flops at 1 thread/core vs all logical threads, for the full fp32 chain and its one-accumulator `fp32lat` twin, paired by ISA label) |
 
 ## Build
 

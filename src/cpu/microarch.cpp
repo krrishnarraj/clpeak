@@ -271,14 +271,23 @@ int CpuPeak::runStoreForward(benchmark_config_t &cfg)
 }
 
 // ---------------------------------------------------------------------------
-// SMT scaling: the widest fp32 FMA chain run MT twice -- once with ONE thread
-// per physical core, once on every logical thread -- and both rates emitted.
-// The ratio is the SMT story: conventional SMT gains ~10-30% on a compute
-// chain; statically partitioned designs (NVIDIA Vera's "spatial multi-
-// threading") sit near 1.0x by construction, and negative scaling exposes
-// resource-starved SMT.  Needs one-thread-per-core placement, so it requires
-// hard affinity (Linux / Windows) plus sibling topology; skipped elsewhere
-// and on CPUs without SMT.
+// SMT scaling: two fp32 FMA kernels from the widest ISA, each run with ONE
+// thread per physical core and then on every logical thread.
+//
+// The first is the fp32 compute chain itself, NACC independent accumulators --
+// enough to fill every FMA pipe from one thread.  A second thread can only
+// share those pipes, so ~1.0x is the expected x86 answer, not a failure: a
+// Zen 3 5700X3D read 1.01 against 1.00 TFLOPS (8 cores x 32 flops/clk x
+// 3.95 GHz is its peak), a Zen 2 3955WX 2.08 against 2.07.  Only a core that
+// will not let a lone thread use every pipe (statically partitioned SMT) can
+// read above 1.0x here; below it exposes resource-starved SMT.
+//
+// The second is the same instruction on ONE accumulator (fp32lat), so every
+// FMA waits on the one before it and a lone thread leaves most issue slots
+// idle.  That is the case SMT exists for, and it should read close to 2x.
+//
+// Needs one-thread-per-core placement, so it requires hard affinity (Linux /
+// Windows) plus sibling topology; skipped elsewhere and on CPUs without SMT.
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -346,9 +355,14 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   logger::TestSpec spec{"smt_scaling", "SMT scaling (fp32 FMA)", "flops",
                         Category::Unknown,
                         "Whether the CPU's extra hardware threads (SMT, or Intel's "
-                        "Hyper-Threading) actually add throughput: the same maths "
-                        "kernel run once with one thread per physical core, then "
-                        "again on every thread the chip offers.",
+                        "Hyper-Threading) add throughput, on two maths kernels each "
+                        "run once with one thread per physical core and again on "
+                        "every thread the chip offers.  The first keeps enough "
+                        "independent calculations in flight to fill a core from "
+                        "one thread, so a second thread usually adds nothing; the "
+                        "second is one long chain where each step waits for the "
+                        "last, which leaves a core mostly idle for a second thread "
+                        "to use.",
                         TestShape::Heterogeneous, "threads"};
   auto test = currentDeviceScope->beginTest(spec);
 
@@ -367,53 +381,82 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   }
 
   // Widest non-streaming fp32 chain (skip the SSVE row: the SME unit is a
-  // shared per-cluster resource, which would measure the wrong thing here).
-  const auto &fp32 = clpeak_cpu::kernelMenu().fp32;
+  // shared per-cluster resource, which would measure the wrong thing here),
+  // and its one-accumulator twin from the same TU, paired by ISA label.
+  const auto &menu = clpeak_cpu::kernelMenu();
   const clpeak_cpu::IsaVariant *chain = nullptr;
-  for (auto it = fp32.rbegin(); it != fp32.rend(); ++it)
+  for (auto it = menu.fp32.rbegin(); it != menu.fp32.rend(); ++it)
     if (std::string(it->isa).rfind("SSVE", 0) != 0) { chain = &*it; break; }
   if (!chain)
   {
     test.skip("1T/core", ResultStatus::Error, "no fp32 kernel available");
     return 0;
   }
+  const clpeak_cpu::IsaVariant *lat = nullptr;
+  for (const auto &v : menu.fp32lat)
+    if (std::string(v.isa) == chain->isa) lat = &v;
 
   const int nPhys = info.physicalCores;
   const int nAll  = pool->maxThreads();
   std::vector<double> sink((size_t)std::max(nPhys, nAll), 0.0);
-  Workload body = [&](int tid, uint64_t iters) {
-    sink[(size_t)tid] += chain->v.fn(iters);
+  auto bodyOf = [&sink](clpeak_cpu::ChainFn fn) -> Workload {
+    return [&sink, fn](int tid, uint64_t iters) { sink[(size_t)tid] += fn(iters); };
   };
+  const Workload body = bodyOf(chain->v.fn);
   unsigned int forced = forceIters ? specifiedIters : 0;
 
   // One worker per physical core, pinned to the primary sibling.  The main
   // pool pins worker i to logical CPU i, which lands sibling pairs on the
   // same core on most enumerations -- hence the dedicated pool.
-  double usPhys;
+  double usPhys, usPhysLat = 0.0;
   {
     CpuThreadPool physPool(nPhys, primaries);
     CpuThreadPool *saved = pool;
     pool = &physPool;                    // runWorkload dispatches via `pool`
     usPhys = runWorkload(nPhys, body, cfg.targetTimeUs, forced);
+    if (lat) usPhysLat = runWorkload(nPhys, bodyOf(lat->v.fn), cfg.targetTimeUs, forced);
     pool = saved;
   }
-  double usAll = runWorkload(nAll, body, cfg.targetTimeUs, forced);
+  double usAll    = runWorkload(nAll, body, cfg.targetTimeUs, forced);
+  double usAllLat = lat ? runWorkload(nAll, bodyOf(lat->v.fn), cfg.targetTimeUs, forced) : 0.0;
 
   volatile double keep = 0.0;
   for (double s : sink) keep += s;
   (void)keep;
 
-  auto rate = [&](int n, double us) {
-    return (float)(chain->v.opsPerIter * (double)n / (us * 1e-6));
+  auto emitRow = [&](const char *id, const clpeak_cpu::ChainVariant &v,
+                     int n, double us, const char *note) {
+    if (us > 0) test.emit(id, (float)(v.opsPerIter * (double)n / (us * 1e-6)), note);
+    else        test.skip(id, ResultStatus::Error, "workload failed", note);
   };
   const char *physNote = "One thread per physical core, with the extra hardware "
-                         "threads left idle.";
+                         "threads left idle.  Each thread keeps enough independent "
+                         "calculations in flight to fill its core on its own.";
   const char *smtNote  = "Every hardware thread busy, including the second thread "
-                         "sharing each core.";
-  if (usPhys > 0) test.emit("1T/core", rate(nPhys, usPhys), physNote);
-  else            test.skip("1T/core", ResultStatus::Error, "workload failed", physNote);
-  if (usAll > 0)  test.emit("SMT MT", rate(nAll, usAll), smtNote);
-  else            test.skip("SMT MT", ResultStatus::Error, "workload failed", smtNote);
+                         "sharing each core.  Matching the one-thread-per-core "
+                         "reading is the usual result: that thread had already "
+                         "filled the core, so the second one can only share it.";
+  const char *physLatNote = "One thread per physical core running a single chain, "
+                            "where each step waits for the one before it -- so "
+                            "the core's maths units sit idle most of the time.";
+  const char *smtLatNote  = "Every hardware thread running a single chain.  The "
+                            "second thread on each core fills the idle time the "
+                            "first leaves, which is the case SMT is built for: "
+                            "expect close to twice the one-thread-per-core chain.";
+  emitRow("1T/core", chain->v, nPhys, usPhys, physNote);
+  emitRow("SMT MT",  chain->v, nAll,  usAll,  smtNote);
+  if (lat)
+  {
+    emitRow("1T/core 1 chain", lat->v, nPhys, usPhysLat, physLatNote);
+    emitRow("SMT MT 1 chain",  lat->v, nAll,  usAllLat,  smtLatNote);
+  }
+  else
+  {
+    test.skip("1T/core 1 chain", ResultStatus::Error,
+              "no single-chain fp32 kernel for this ISA", physLatNote);
+    test.skip("SMT MT 1 chain", ResultStatus::Error,
+              "no single-chain fp32 kernel for this ISA", smtLatNote);
+  }
   return 0;
 }
 

@@ -81,6 +81,9 @@ struct ChainVariant {
 // One feature TU's offered kernels (null entries = not provided by that ISA).
 struct CpuKernelTable {
   ChainVariant fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
+  // fp32 with ONE accumulator: the latency-bound twin of `fp32` (same
+  // instruction, same TU).  Only the SMT scaling test runs it.
+  ChainVariant fp32lat;
   // Newer x86 matrix/vector dtypes: AMX fp16 (Granite Rapids), AMX fp8 (Diamond
   // Rapids), and native bf16 vector FMA (AVX10.2, full-rate, not a dot).
   ChainVariant mat_fp16, mat_fp8, bf16fma;
@@ -131,6 +134,9 @@ struct IsaVariant {
 // compare instruction sets, rather than only the widest one (see kernels()).
 struct CpuKernelMenu {
   std::vector<IsaVariant> fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
+  // Pushed beside each non-streaming fp32 entry under the same ISA label, so
+  // the SMT scaling test can pair them by label.
+  std::vector<IsaVariant> fp32lat;
   std::vector<IsaVariant> mat_fp16, mat_fp8, bf16fma;
   std::vector<IsaVariant> int16dp, fp8dp, mat_fp32, mat_fp64;
   std::vector<IsaVariant> aes, sha256, sha512, crc32c;
