@@ -418,10 +418,15 @@ int OnnxPeak::runAll()
       }
     }
 
+    // The driver slot names the device's own version: a plugin reports
+    // one for itself, while a built-in EP (or a plugin reporting none)
+    // is the runtime's own, which the "ONNX Runtime" prop repeats.
+    const std::string driver = !ep.epDevicePtr || ep.pluginVersion.empty()
+        ? rt->versionString : ep.pluginVersion;
     auto deviceScope = backendScope.beginDevice({
         ep.displayName,
         "",   // platform defaults to "ONNX"
-        rt->versionString,
+        driver,
         details,
         -1,
         idx,
