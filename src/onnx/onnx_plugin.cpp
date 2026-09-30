@@ -5,6 +5,7 @@
 #include "onnx_winml.h"
 
 #include <common/common.h>
+#include <common/console_mute.h>
 #include <common/dynlib.h>
 
 #include <algorithm>
@@ -170,25 +171,29 @@ static OnnxEpLibraryStatus registerLibrary(const OrtRuntime &rt, OrtEnv *env,
   OnnxEpLibraryStatus st;
   st.lib = lib;
   OrtStatus *status = nullptr;
-#ifdef _WIN32
-  // ORTCHAR_T is wchar_t on Windows; the path arrived as UTF-8.
-  std::wstring wide;
   {
-    const int n = MultiByteToWideChar(CP_UTF8, 0, lib.path.c_str(),
-                                      (int)lib.path.size(), nullptr, 0);
-    if (n > 0)
+    // A vendor DLL can print below any log level; the status keeps the reason.
+    clpeak::ScopedConsoleMute mute;
+#ifdef _WIN32
+    // ORTCHAR_T is wchar_t on Windows; the path arrived as UTF-8.
+    std::wstring wide;
     {
-      wide.resize((size_t)n);
-      MultiByteToWideChar(CP_UTF8, 0, lib.path.c_str(), (int)lib.path.size(),
-                          &wide[0], n);
+      const int n = MultiByteToWideChar(CP_UTF8, 0, lib.path.c_str(),
+                                         (int)lib.path.size(), nullptr, 0);
+      if (n > 0)
+      {
+        wide.resize((size_t)n);
+        MultiByteToWideChar(CP_UTF8, 0, lib.path.c_str(), (int)lib.path.size(),
+                             &wide[0], n);
+      }
     }
-  }
-  status = rt.api->RegisterExecutionProviderLibrary(env, lib.name.c_str(),
-                                                    wide.c_str());
+    status = rt.api->RegisterExecutionProviderLibrary(env, lib.name.c_str(),
+                                                       wide.c_str());
 #else
-  status = rt.api->RegisterExecutionProviderLibrary(env, lib.name.c_str(),
-                                                    lib.path.c_str());
+    status = rt.api->RegisterExecutionProviderLibrary(env, lib.name.c_str(),
+                                                       lib.path.c_str());
 #endif
+  }
   st.registered = (status == nullptr);
   if (status)
     st.error = onnxStatusText(rt, status);

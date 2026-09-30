@@ -12,6 +12,7 @@
 #include <common/keep_awake.h>
 #include <common/run_document.h>
 #include <common/run_log.h>
+#include <common/console_mute.h>
 #include <version.h>
 
 #ifdef ENABLE_ONNX
@@ -75,7 +76,12 @@ char *clpeak_copy_backend_catalog_json(void)
 {
     std::vector<BackendInventory> inv;
     for (const auto &be : backendRegistry())
+    {
+        clpeak::ScopedConsoleMute mute(
+            clpeak::ScopedConsoleMute::Capture::Verbose, {},
+            /*stderrOnly=*/true);
         inv.push_back(be.enumerate());
+    }
     return copyString(inventoryToJson(inv));
 }
 
@@ -327,7 +333,12 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     if (opts.verbose && opts.enableOutput)
         for (const auto &be : backendRegistry())
             if (opts.backendEnabled(be.id))
+            {
+                clpeak::ScopedConsoleMute mute(
+                    clpeak::ScopedConsoleMute::Capture::Verbose, {},
+                    /*stderrOnly=*/true);
                 combined.inventory.push_back(be.enumerate());
+            }
 
     // Held until the launch returns, as in the CLI.  The desktop app holds
     // nothing else, and a window being open does not count as activity to
