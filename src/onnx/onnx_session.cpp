@@ -1049,7 +1049,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     bool keepConstantsUnfolded,
                                     bool profile,
                                     bool keepQdqUnfused,
-                                    bool verifyPlacement)
+                                    bool verifyPlacement,
+                                    bool keepQdqInPlace)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -1116,6 +1117,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     // selector fire on a float8 graph turns a valid model into an invalid one.
     if (keepQdqUnfused)
       disabled += ";QDQSelectorActionTransformer";
+    if (keepQdqInPlace)
+      disabled += ";QDQPropagationTransformer";
     st = api->AddSessionConfigEntry(
         so, "optimization.disable_specified_optimizers", disabled.c_str());
     if (st)

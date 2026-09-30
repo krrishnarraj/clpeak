@@ -1132,10 +1132,13 @@ both what quantized inference does in practice â€” nobody quantizes a softmax â€
 and what makes the rows comparable: whatever separates two of them is the
 projection format, because nothing else moved. One exception, measured rather
 than assumed: the `int8_qdq` prompt is also timed with its floating-point parts
-in fp32 and reports whichever width the provider runs faster, naming it. fp16
-wins on TensorRT (93 TOPS against 79); fp32 wins on ONNX Runtime's CPU
-provider (x86 245 GOPS against 441, ARM by 9%) and should on QNN's HTP, whose
-fp32 block outruns its fp16 one. Its decode row stays fp16, because it counts
+in fp32 and reports whichever width the provider runs faster, naming it --
+fp16 on TensorRT, fp32 on ONNX Runtime's CPU provider, which is how W8A8
+models ship for a CPU. Attention stays floating point in both, because every
+block session holds ORT's QDQ propagation off (`keepQdqInPlace`): in the fp32
+form only a Reshape and a Transpose separate a projection's closing dequantize
+from attention, and propagating across them let the CPU provider run the
+scores as `MatMulIntegerToFloat`. Its decode row stays fp16, because it counts
 the bytes the cache declares.
 
 Labels are `onnx-gemm`'s on purpose. `int4_weight` there and `int4_weight` here
@@ -1174,9 +1177,7 @@ unfused graph is refused by the fusion check anyway. So the scales are fp32 and
 Q/DQ pattern, leaving the DequantizeLinear-to-MatMul adjacency ORT matches on
 untouched, and they cost two passes over an activation tensor per projection:
 2 MB against 54 GFLOP at the 512-token prompt, 4 KB while decoding. A GPU or
-CPU does not notice them; an NPU whose vector units do every conversion may,
-which is one reason the prompt is also timed with fp32 float parts, where
-there is nothing to cast.
+CPU does not notice them, and the prompt's fp32 form has none.
 
 ### The single-op fusion check does not work on a block
 

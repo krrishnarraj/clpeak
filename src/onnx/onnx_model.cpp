@@ -1182,11 +1182,9 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
       //
       // They are two passes over an activation tensor per projection, which is
       // 2 MB at the 512-token prompt against 54 GFLOP of layer, and 4 KB while
-      // decoding -- nothing to a GPU or a CPU, and possibly not nothing to an
-      // NPU whose vector units do every conversion, which is one reason
-      // block.cpp also times the prompt with fp32 float parts, where there is
-      // nothing to cast.  Casting the *weights* would cost everywhere, and is
-      // why they are quantized offline into the initializer instead.
+      // decoding -- nothing to a GPU or a CPU, and the prompt's fp32 form in
+      // block.cpp has none.  Casting the *weights* would cost everywhere, and
+      // is why they are quantized offline into the initializer instead.
       const std::string src = (act == ONNX_DT_FLOAT) ? in : out + "_i32";
       if (act != ONNX_DT_FLOAT)
         g.node("Cast", {in}, {src}, {OnnxAttr::num("to", ONNX_DT_FLOAT)});

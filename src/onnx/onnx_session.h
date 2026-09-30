@@ -58,13 +58,20 @@ struct OnnxSessionResult
 // Core ML sends anything that small to the CPU, and verifying it would
 // declare the provider dead on a machine whose Neural Engine takes every
 // 2048-cube it is offered.
+// `keepQdqInPlace` holds off QDQ propagation, which copies a quantize or a
+// dequantize across a Reshape, Transpose, Squeeze, Unsqueeze, Slice or
+// MaxPool, so that the quantized region grows past where the model ended it.
+// A graph whose float parts are meant to stay float needs it: without it,
+// ONNX Runtime's CPU provider ran the fp32 transformer block's attention
+// scores as MatMulIntegerToFloat, int8 arithmetic that no Q/DQ node asked for.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded = false,
                                     bool profile = false,
                                     bool keepQdqUnfused = false,
-                                    bool verifyPlacement = true);
+                                    bool verifyPlacement = true,
+                                    bool keepQdqInPlace = false);
 
 // Names of the kernels a profiled session executed, one entry per kernel
 // launch in execution order -- so a kernel that ran twice appears twice.

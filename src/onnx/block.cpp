@@ -404,9 +404,18 @@ namespace
       // 64-token layer on the CPU and sends the 512-token one to the Neural
       // Engine, and verifying the probe would refuse every point above it
       // (onnx_session.h).  The timed points verify.
+      // QDQ propagation stays off for every variant, and it is the int8 prompt
+      // with fp32 float parts that needs it.  There, nothing but a Reshape and
+      // a Transpose separates a projection's closing dequantize from
+      // attention, the propagation copies it across both, and ONNX Runtime's
+      // CPU provider then fused the scores matmul into MatMulIntegerToFloat --
+      // int8 attention, in a row that says attention stays floating point.
+      // The fp16 form's casts stop it on their own, and no other variant has a
+      // quantize or dequantize beside a node it crosses.
       auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
                                    profile, keepQdqUnfused,
-                                   /*verifyPlacement=*/!profile);
+                                   /*verifyPlacement=*/!profile,
+                                   /*keepQdqInPlace=*/true);
       // The model is the largest allocation in the process; drop it before
       // anything else is allocated on top of the session's own copy.
       model.clear();
@@ -1071,16 +1080,13 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // The layer's floating-point parts again, in fp32.  On a GPU an int8
       // layer ships as int8 projections inside fp16 attention, and there that
       // is the faster form: TensorRT on an RTX 5060 read 93 TOPS against 79
-      // with the float parts in fp32.  Elsewhere the fp16 parts are what cost
-      // the layer.  ONNX Runtime's x86 CPU provider runs the attention through
-      // a slow fp16 matmul (245 GOPS against 441 in fp32), its ARM one is 9%
-      // faster in fp32, and QNN's HTP -- whose fp32 block outran its fp16 one,
-      // 7.0 TFLOPS to 5.1 -- read 2.25 TOPS here against a 35 TOPS int8
-      // matmul, with the fp16 form casting to fp32 and back around every
-      // quantized projection.  No single width is right, so the prompt takes
-      // whichever this provider runs faster, and says which.  Decode stays
-      // fp16: it is memory-bound, and its row counts the bytes the cache
-      // declares.
+      // with the float parts in fp32.  On a CPU, where W8A8 models ship with
+      // fp32 float parts, it is the other way round: ONNX Runtime's CPU
+      // provider read 1.25 TOPS against 1.18 on an M1 Pro.  No single width is
+      // right, so the prompt takes whichever this provider runs faster, and
+      // says which.  Both forms keep attention in floating point, the fp32 one
+      // because `create` holds QDQ propagation off.  Decode stays fp16: it is
+      // memory-bound, and its row counts the bytes the cache declares.
       //
       // The fp32 form is proven fused on its own (validateVariant) before it
       // is timed: unfused it would be float arithmetic, which on the x86 CPU
