@@ -72,19 +72,32 @@ constexpr double kOnnxCreateGrowthFloor = 2.0e6;
 
 // The next doubling's session creation, predicted from the last two.
 // Doubling a dimension is 4x the weights and up to 8x the work, and a
-// compiler's time lands anywhere in that range and past it: QNN's HTP grew
-// 5.5x to its fp16 8192-cube and then 12.5x to a 16384 that ran out of
-// memory, and the runtime before it grew a sixteen-layer chain 11x and then
-// 57x.  So the growth already seen is carried forward -- at least 4x, bounded
-// at 16x so one noisy pair cannot predict a runaway -- once the latest
-// compile is past kOnnxCreateGrowthFloor; before that, 4x.  No ratio sees a
-// cliff coming, but this one follows a climb that is already steep.
-inline double onnxPredictCreateUs(double prevUs, double prevPrevUs)
+// compiler's time lands anywhere in that range and past it.  Once the latest
+// compile is past kOnnxCreateGrowthFloor, the growth already seen is carried
+// forward -- at least 4x, bounded at 16x so one noisy pair cannot predict a
+// runaway; before that, 4x.  No steeper while the ladder is still climbing:
+// TensorRT's NVFP4 multiply on an RTX 5060 compiled in 6.1, 20.4 and then
+// 92 s for its best reading (238 TFLOPS at 32768), and squaring the 3.3x
+// step before it would have predicted that size within 5% of the cap.
+//
+// `confirming` marks the size after one that failed to gain (a plateau
+// strike) -- the size that decides whether the plateau is real -- and squares
+// the growth instead.  That is where compiles ran away.  QNN's HTP grew chains
+// 7.3x and then 49x (to 1262 s), 11.8x and then 67x, 5.3x and then 32x, and
+// 3.65x and then 18x, each time on the size after one that had not gained.
+// All four were predicted under the cap unsquared, for over an hour of
+// compiles in one run and no better reading.  The sizes that did beat a flat
+// step, on QNN, TensorRT, CUDA and CPU providers alike, gained 0-7%, and the
+// square predicted none of them past 71 s.
+inline double onnxPredictCreateUs(double prevUs, double prevPrevUs,
+                                  bool confirming)
 {
   double growth = 4.0;
   if (prevPrevUs > 0.0 && prevUs > kOnnxCreateGrowthFloor)
   {
     growth = prevUs / prevPrevUs;
+    if (confirming)
+      growth *= growth;
     growth = growth < 4.0 ? 4.0 : (growth > 16.0 ? 16.0 : growth);
   }
   return prevUs * growth;

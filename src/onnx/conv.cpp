@@ -337,14 +337,16 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         // The compile cap, checked before paying for the build
         // (onnxPredictCreateUs); the first size always builds.
+        const double predictedCreateUs = onnxPredictCreateUs(
+            prevCreateUs, prevPrevCreateUs, /*confirming=*/strikes > 0);
         if (sp > kMinSpatial && prevCreateUs > 0.0 &&
-            onnxPredictCreateUs(prevCreateUs, prevPrevCreateUs) > kOnnxMaxCreateUs)
+            predictedCreateUs > kOnnxMaxCreateUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld predicted create %.1f s > "
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld predicted create %.1f s%s > "
                       "%.1f s, stopping\n",
                       ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp,
-                      onnxPredictCreateUs(prevCreateUs, prevPrevCreateUs) / 1.0e6,
+                      (long long)sp, (long long)sp, predictedCreateUs / 1.0e6,
+                      strikes > 0 ? " (after a size that did not gain)" : "",
                       kOnnxMaxCreateUs / 1.0e6);
           break;
         }

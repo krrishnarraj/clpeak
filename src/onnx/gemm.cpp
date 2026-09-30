@@ -288,14 +288,15 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // seeds the prediction.
       if (D > kMinDim && prevCreateUs > 0.0)
       {
-        const double predictedUs =
-            onnxPredictCreateUs(prevCreateUs, prevPrevCreateUs);
+        const double predictedUs = onnxPredictCreateUs(
+            prevCreateUs, prevPrevCreateUs, /*confirming=*/strikes > 0);
         if (predictedUs > kOnnxMaxCreateUs)
         {
           CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s "
-                      "(prev %.1f s) > %.1f s, stopping\n",
+                      "(prev %.1f s%s) > %.1f s, stopping\n",
                       ep.providerKey.c_str(), tag, (long long)D,
                       predictedUs / 1.0e6, prevCreateUs / 1.0e6,
+                      strikes > 0 ? ", after a size that did not gain" : "",
                       kOnnxMaxCreateUs / 1.0e6);
           break;
         }
