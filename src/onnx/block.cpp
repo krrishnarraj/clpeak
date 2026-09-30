@@ -67,6 +67,16 @@ namespace
   // its own; the other two are what show where the device saturates.
   const int64_t kPromptLadder[] = {64, 512, 2048};
 
+  // The width of the seed a prompt longer than it enters through
+  // (OnnxBlockShape::seedWidth), the GEMM chains' kSeedWidth.  A prompt no
+  // longer than the seed, and decode's one row, gain nothing from one: the
+  // seed's widening weights would be as large as the input they replace.  The
+  // 64-token prompt keeps the plain input for its magnitudes too -- seeded, its
+  // largest value would grow from 1954 to 2962 (blockWeights).  The fusion
+  // probes run there, without the seed, and the projections they judge are
+  // the same nodes either way.
+  constexpr int64_t kSeedWidth = 64;
+
   // Block size for the weight-only rows: one scale per 32 weights along the
   // reduction axis, the same grouping onnx-gemm's int4_weight row uses and the
   // one AWQ, GPTQ and MatMulNBits all default to.  Sharing it is what makes a
@@ -393,6 +403,7 @@ namespace
     sh.qdq = v.qdq;
     sh.qActDtype = qActDtype;
     sh.kvDtype = v.kvDtype;
+    sh.seedWidth = sh.seq > kSeedWidth ? kSeedWidth : 0;
     // The view of the output the provider is known to take (OnnxReduceView).
     sh.reduceView = onnxPrefersRank4Reduce(rt, ep) ? OnnxReduceView::Rank4
                                                    : OnnxReduceView::Rows;
@@ -829,6 +840,18 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return s;
   };
 
+  // What a prompt row says about its way in, when it has a seed
+  // (kSeedWidth): the gemm rows say the same of theirs.
+  auto seedNote = [](int64_t seq) -> std::string
+  {
+    if (seq <= kSeedWidth)
+      return std::string();
+    return "  The prompt starts from a " + std::to_string(kSeedWidth) +
+           "-wide seed that takes a runtime value, and one more multiply, not "
+           "counted, widens it into the layer's input -- inside the figure, "
+           "a quarter of a percent of its arithmetic.";
+  };
+
   auto emitPrefillTo = [&](logger::TestScope &test, const Variant &vv,
                            const VariantResult &vvr)
   {
@@ -841,7 +864,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       std::to_string(sseq) +
                       " tokens in one pass, counting every multiply in the "
                       "layer." +
-                      prov;
+                      seedNote(sseq) + prov;
       if (vv.unit)
         o.unit = vv.unit;
       if (!vvr.usable)
@@ -1343,6 +1366,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
         const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
+                                 seedNote(kPrefillSeq) +
                                  prefillProvenance(v, vr, kPrefillSeq);
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
         else

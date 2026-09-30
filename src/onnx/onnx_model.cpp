@@ -969,21 +969,25 @@ namespace
 // fp16-arithmetic variant (fp16, int4_weight, int8_weight, fp4_weight) would
 // ReduceMax into inf.  The deterministic generator makes the absmax walk
 // exhaustive rather than sampled: at the halved range the largest value
-// anywhere in the block is 1954, at the 64-token prompt (296 at 512 tokens,
-// 22 while decoding), 33x under fp16's 65504.  Small magnitudes remain the
-// point -- accumulation over thousands of terms stays away from the
-// NaN/denormal slow paths raw random bit patterns would hit.  What does land
-// under fp16's smallest normal is the tail of three reads and what they feed:
-// sigmoid(G) at 64 tokens, where the gate runs widest (9%, and 5% and 3% of
-// the SiLU and the SwiGLU product after it), the softmax at 2048 tokens (3%),
-// and the attention average over a long context (3% at 8192).  Nothing else
-// reaches 1%.
+// anywhere in the block is 1954, at the 64-token prompt (1156 at 512 tokens
+// and 1150 at 2048, whose input is a seed's rank-64 widening, and 22 while
+// decoding), 33x under fp16's 65504.  Small magnitudes remain the point --
+// accumulation over thousands of terms stays away from the NaN/denormal slow
+// paths raw random bit patterns would hit.  What does land under fp16's
+// smallest normal is the tail of three reads and what they feed: sigmoid(G),
+// where the gate runs widest at 64 tokens (9%, and 5% and 3% of the SiLU and
+// the SwiGLU product after it) and 2-3% of it at 512 and 2048, the softmax at
+// 2048 tokens (3%), and the attention average over a long context (3% at
+// 8192).  Nothing else reaches 1%.
 //
 // Position-hashed rather than a running sequence, because onnxFillBlockedWeights
 // has to visit each block twice -- once for its maximum, once to quantize
 // against it -- and drawing from the same generator is what makes every
 // precision row multiply the *same* matrix, differing only in how it is stored.
-std::string blockWeights(int64_t rows, int64_t cols, uint32_t seed, int dtype)
+// `spread` is the width of the range; only the prompt's seed widening asks for
+// another.
+std::string blockWeights(int64_t rows, int64_t cols, uint32_t seed, int dtype,
+                         float spread = 0.5f)
 {
   std::string raw((size_t)onnxElemBytes(dtype, rows * cols), '\0');
   float    *f = reinterpret_cast<float *>(&raw[0]);
@@ -991,7 +995,7 @@ std::string blockWeights(int64_t rows, int64_t cols, uint32_t seed, int dtype)
   for (int64_t i = 0; i < rows; i++)
     for (int64_t j = 0; j < cols; j++)
     {
-      const float   v = onnxMixedWeightAt(i, j, seed) * 0.5f;
+      const float   v = onnxMixedWeightAt(i, j, seed) * spread;
       const int64_t k = i * cols + j;
       switch (dtype)
       {
@@ -1092,9 +1096,34 @@ std::string onnxBlockModel(const OnnxBlockShape &sh,
   // is what the floating-point variants rely on.  The quantized ones need more
   // than that -- a weight dequantize has nothing but constants on its inputs --
   // so block.cpp disables constant folding for all of them alike.
+  //
+  // A long prompt scales a [S, seedWidth] seed rather than its whole input,
+  // and one more multiply widens the seed into the [S, d] activations: the
+  // GEMM chains' narrow way in (OnnxLiveSeed), for the same reason.  Over the
+  // whole input the scaling was the largest single node in QNN's fp16 layer
+  // at 512 tokens -- a quarter of its cycles, 6.4 an element on the vector
+  // units -- and a real layer does not have it.  The widening is
+  // seedWidth / d of one projection, a quarter of a percent of the layer, and
+  // is not counted.  Its weights spread over [-a, a), a = sqrt(3 / seedWidth),
+  // so seedWidth products of the seed's [-0.25, 0.25) values sum to the plain
+  // input's rms of 0.144; the input is rank seedWidth all the same, which is
+  // what moves the magnitudes quoted at blockWeights and blockQdqScale.
   g.input("S", act, {});
-  g.initializer("X0", act, {S, d}, blockWeights(S, d, 0xa5a5a5a5u, act));
-  g.node("Mul", {"X0", "S"}, {"X"});
+  if (sh.seedWidth > 0)
+  {
+    const int64_t w = sh.seedWidth;
+    g.initializer("X0", act, {S, w}, blockWeights(S, w, 0xa5a5a5a5u, act));
+    g.initializer("Xp", act, {w, d},
+                  blockWeights(w, d, 0x5eed5eedu, act,
+                               2.0f * std::sqrt(3.0f / (float)w)));
+    g.node("Mul", {"X0", "S"}, {"Xs"});
+    g.node("MatMul", {"Xs", "Xp"}, {"X"});
+  }
+  else
+  {
+    g.initializer("X0", act, {S, d}, blockWeights(S, d, 0xa5a5a5a5u, act));
+    g.node("Mul", {"X0", "S"}, {"X"});
+  }
 
   // ---- Quantization constants, shared by every projection ----------------
   //
@@ -1109,12 +1138,13 @@ std::string onnxBlockModel(const OnnxBlockShape &sh,
     // One activation scale for all seven projections: blockQdqScale(d), which
     // is four sigma of a d-deep product of [-1, 1] operands.  No one scale
     // fits every input here -- their rms runs from 0.003 (the attention
-    // average while decoding) to 5.7 (the SwiGLU product at 512 tokens) --
-    // and this one takes the side where nothing saturates: most codes are
-    // zero instead, 95% of the inputs to five of the projections and all of
-    // the attention average.  Sized for the block's own [-0.25, 0.25)
-    // operands, a sixteenth of this, it would saturate a fifth of the SwiGLU
-    // product and still round the decoding attention average to zero.
+    // average while decoding) to 18 (the SwiGLU product at 512 tokens) --
+    // and this one takes the side where little saturates, 2% of that SwiGLU
+    // product: most codes are zero instead, 90% of the layer input's and 95%
+    // of the attention average's at 512 tokens.  Sized for the block's own
+    // [-0.25, 0.25) operands, a sixteenth of this, it would saturate a third
+    // of the SwiGLU product and still round the decoding attention average to
+    // zero.
     // Neither costs a rate anything on integer units that do not skip zeros,
     // and this row measures rate, not accuracy; what a real deployment does
     // instead is calibrate per tensor.

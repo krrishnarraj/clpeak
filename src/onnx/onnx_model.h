@@ -497,6 +497,13 @@ struct OnnxBlockShape
 
   // How the output is reduced to the row that leaves the device.
   OnnxReduceView reduceView = OnnxReduceView::Rows;
+
+  // Prefill: >0 enters the prompt through a [seq, seedWidth] seed that takes
+  // the runtime scalar, widened into the [seq, dModel] input by one more
+  // multiply the rate does not count -- the GEMM chains' way in
+  // (OnnxLiveSeed), for the same reason.  0 scales the whole input, which is
+  // all decode's single row needs.
+  int64_t seedWidth = 0;
 };
 
 // One decoder block: QKV projection, multi-head attention, output projection

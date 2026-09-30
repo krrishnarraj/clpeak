@@ -1114,7 +1114,10 @@ cache while still compiling in seconds on NPU toolchains, which build graphs
 ahead of time. A 7B block is 4x the size for no extra insight and minutes of
 AOT compile. Nothing large crosses the host boundary — the activations are an
 initializer scaled by a runtime scalar and the result leaves as one reduced
-row, the arrangement `onnx-gemm` uses and for the same reason.
+row, the arrangement `onnx-gemm` uses and for the same reason. A prompt longer
+than 64 tokens scales a 64-wide seed instead and one uncounted multiply widens
+it, as `onnx-gemm`'s chains do: over the whole input the scaling was the
+largest node in QNN's fp16 layer, a quarter of its cycles.
 
 ### Precision is a pair, not a datatype
 
