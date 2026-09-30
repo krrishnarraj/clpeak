@@ -1099,6 +1099,19 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops)
   return std::string();
 }
 
+size_t onnxCountQuantizedKernels(const std::vector<std::string> &ops)
+{
+  size_t n = 0;
+  for (const auto &op : ops)
+    for (const char *m : kQuantMarkers)
+      if (op.find(m) != std::string::npos)
+      {
+        n++;   // once per launch: MatMulIntegerToFloat also holds MatMulInteger
+        break;
+      }
+  return n;
+}
+
 bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops)
 {
   if (ops.empty())

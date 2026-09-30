@@ -29,6 +29,7 @@
 #include "onnx_probe.h"
 #include "onnx_session.h"
 
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <cmath>
@@ -303,8 +304,16 @@ namespace
     return qkv + attn + proj + ff;
   }
 
-  // Did the projections run as quantized kernels, or did the provider unpack
-  // the weights and multiply in floating point?
+  // The matmuls a quantized block quantizes: the query, key, value and output
+  // projections and the feed-forward's gate, up and down.  A quantized-cache
+  // row quantizes attention's two instead.
+  constexpr size_t kProjections = 7;
+  constexpr size_t kAttentionMatmuls = 2;
+
+  // How many of the graph's `expected` quantized matmuls ran as quantized
+  // kernels, rather than as floating-point multiplies over weights the
+  // provider unpacked -- all of them when it compiled the graph into kernels
+  // of its own, where there is nothing to count.
   //
   // onnx_session.cpp's onnxOpsRanQuantizedMatMul cannot answer this one.  It
   // reads a failed fusion as "a plain MatMul beside the dequantize nodes", and a
@@ -312,22 +321,26 @@ namespace
   // attention is not quantized in any variant here -- so that test would reject
   // every block unconditionally.
   //
-  // The same inverted reasoning still works on this graph.  A provider that
-  // fused either names a quantized kernel (QLinearMatMul, MatMulNBits) or
-  // swallowed the subgraph into one kernel of its own, and in that case no
-  // DequantizeLinear kernel runs at all.  A provider that did not fuse has no
-  // choice but to execute DequantizeLinear as a real kernel -- a full pass over
-  // 101 MB of weights, on every single run -- and that is the reading worth
-  // refusing, because it is not a rate any four-bit deployment would ever see.
-  bool projectionsRanQuantized(const std::vector<std::string> &ops)
+  // So this counts.  A provider that fused names a quantized kernel for every
+  // quantized matmul (QLinearMatMul, MatMulNBits), or swallowed the subgraph
+  // into one kernel of its own, in which case no DequantizeLinear kernel runs
+  // at all.  A matmul it did not fuse has no choice but to execute its
+  // DequantizeLinear as a real kernel -- a full pass over its weights on every
+  // run -- and multiply in floating point, which is not a rate any quantized
+  // deployment would ever see.  Counting is what catches the partial case: on
+  // a Zen 2 without VNNI, signed int8 activations fused two of the seven
+  // projections and multiplied the other five in floating point, and asking
+  // only whether any quantized kernel ran passed that row as int8.
+  size_t quantizedMatmulsFused(const std::vector<std::string> &ops,
+                               size_t expected)
   {
     if (ops.empty())
-      return true; // no profile to judge by; do not reject on silence
+      return expected; // no profile to judge by; do not reject on silence
 
     for (const auto &op : ops)
       if (op == "DequantizeLinear" || op == "QuantizeLinear")
-        return !onnxQuantizedKernelName(ops).empty();
-    return true;
+        return std::min(expected, onnxCountQuantizedKernels(ops));
+    return expected;
   }
 
   struct BlockRun
@@ -705,9 +718,11 @@ namespace
   // Quantization schemes for the QDQ form, tried in order until one fuses.
   //
   // int8 has two spellings and no provider takes both: x86 MLAS without VNNI
-  // implements unsigned activations against signed weights and declines to fuse
-  // the signed form, while TensorRT rejects uint8 outright.  Trying is the only
-  // way to know, exactly as in gemm.cpp -- the fusion check is the selector.
+  // implements unsigned activations against signed weights and fuses the
+  // signed form only in part -- two of the seven projections on a Zen 2 --
+  // while TensorRT rejects uint8 outright.  Trying is the only way to know,
+  // exactly as in gemm.cpp -- the fusion check is the selector, and it asks
+  // for every projection.
   // The float8 formats have one spelling: activations and weights share the
   // type, and there is no signed/unsigned question because they are signed
   // floats.
@@ -926,6 +941,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (v.qdq || v.wBlock > 0 || v.kvDtype)
     {
       std::string tried, firstErr;
+      const size_t expected = v.kvDtype ? kAttentionMatmuls : kProjections;
+      size_t triedFused = 0;
       Scheme schemes[2];
       const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
       for (size_t si = 0; si < nSchemes; si++)
@@ -952,7 +969,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const std::string joined = onnxJoinOps(ops);
         CLPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n",
                     ep.providerKey.c_str(), v.label, what, joined.c_str());
-        if (projectionsRanQuantized(ops))
+        const size_t fused = quantizedMatmulsFused(ops, expected);
+        if (fused < expected)
+          CLPEAK_VLOG("onnx-block[%s/%s]: %s fused %zu of %zu quantized "
+                      "matmuls\n", ep.providerKey.c_str(), v.label, what,
+                      fused, expected);
+        if (fused == expected)
         {
           vr.qActDtype = qAct;
           vr.schemeName = v.qdq ? schemes[si].name : "";
@@ -963,21 +985,30 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
         if (!ops.empty())
+        {
           tried = joined;
+          triedFused = fused;
+        }
       }
       if (vr.ranAs.empty())
       {
+        const std::string what = v.kvDtype ? "cache" : "weights";
+        const std::string how =
+            triedFused == 0
+                ? "provider did not fuse a quantized matmul -- it dequantized "
+                  "the " + what
+                : "provider fused only " + std::to_string(triedFused) +
+                      " of the " + std::to_string(expected) +
+                      " quantized matmuls -- it dequantized the rest of the " +
+                      what;
         vr.skipReason =
             tried.empty()
                 ? (firstErr.empty()
                        ? std::string("this provider accepted no session for ") + v.label
                        : firstErr)
-                : std::string("provider did not fuse a quantized matmul -- it "
-                              "dequantized the ") +
-                      (v.kvDtype ? "cache" : "weights") +
-                      " to full width and multiplied in floating point, a "
-                      "complete pass over them on every run, so this is not a " +
-                      v.label + " rate (ran: " + tried + ")";
+                : how + " to full width and multiplied in floating point, a "
+                        "complete pass over them on every run, so this is not "
+                        "a " + v.label + " rate (ran: " + tried + ")";
         return false;
       }
     }
@@ -1123,9 +1154,9 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // is the faster form: TensorRT on an RTX 5060 read 93 TOPS against 79
       // with the float parts in fp32.  On a CPU, where W8A8 models ship with
       // fp32 float parts, it is the other way round: ONNX Runtime's CPU
-      // provider read 1.25 TOPS against 1.18 on an M1 Pro.  No single width is
-      // right, so the prompt takes whichever this provider runs faster, and
-      // says which.  Both forms keep attention in floating point, the fp32 one
+      // provider read 0.73 TOPS against 0.33 on a Zen 2 Threadripper and 1.25
+      // against 1.18 on an M1 Pro.  No single width is right, so the prompt
+      // takes whichever this provider runs faster, and says which.  Both forms keep attention in floating point, the fp32 one
       // because `create` holds QDQ propagation off.  Decode stays fp16: it is
       // memory-bound, and its row counts the bytes the cache declares.
       //

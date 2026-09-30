@@ -1184,11 +1184,14 @@ CPU does not notice them, and the prompt's fp32 form has none.
 `onnxOpsRanQuantizedMatMul` reads a failed fusion as "a bare floating-point
 MatMul beside the dequantize nodes". A transformer block has two plain MatMuls
 that are *supposed* to be there — attention is not quantized in any variant —
-so that test rejects every block unconditionally. `projectionsRanQuantized` in
-`block.cpp` inverts it the other way instead: a provider that fused either
-names a quantized kernel or swallowed the subgraph whole, in which case no
-`DequantizeLinear` kernel runs at all; a provider that did not fuse has no
-choice but to execute one, a full pass over 101 MB of weights on every run.
+so that test rejects every block unconditionally. `quantizedMatmulsFused` in
+`block.cpp` counts instead: a provider that fused names a quantized kernel for
+each of the seven projections (two attention matmuls for the quantized cache)
+or swallowed the subgraph whole, in which case no `DequantizeLinear` kernel
+runs at all; a matmul it did not fuse has no choice but to execute one, a full
+pass over its weights on every run. Anything short of all of them is refused,
+and the scheme race moves on: x86 MLAS without VNNI fuses two of seven with
+signed activations and all seven with unsigned ones.
 
 ### Two more things the dtype axis forced
 

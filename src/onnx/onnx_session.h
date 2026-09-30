@@ -151,6 +151,10 @@ bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops);
 // The recognisable quantized kernel among `ops`, or an empty string when the
 // provider fused everything into a kernel of its own naming.
 std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
+
+// How many of `ops` are recognisable quantized kernels: one per launch, so a
+// graph of seven quantized matmuls that all fused counts seven.
+size_t onnxCountQuantizedKernels(const std::vector<std::string> &ops);
 // Empty when this runtime can be asked to run `dtype` at all; otherwise the
 // reason it cannot, phrased for a skip row.
 //
